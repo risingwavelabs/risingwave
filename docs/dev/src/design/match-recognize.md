@@ -91,6 +91,21 @@ match:
   (several, for a `SUBSET`), and the input column it reads.
 - The lowered expression is a normal `ExprImpl` whose `InputRef(i)` reads `slots[i]`.
 
+`DEFINE` navigation is **`RUNNING`**, and the candidate row counts as tentatively labeled: while
+`A`'s predicate is being tested, `RunningFirst`/`RunningLast` over any variable set containing `A`
+(directly or through a `SUBSET`) sees the candidate as the newest such row. That is what makes
+`DEFINE A AS LAST(A.v) = A.v` a tautology, matching SQL:2016, where a pattern-variable-qualified
+column reference *is* `RUNNING LAST` of that column — the binder already lowers the bare `A.v` inside
+`A`'s own `DEFINE` straight to the candidate row, so the two spellings must agree. `MEASURES` is
+unaffected: it runs over completed matches whose labels already include the last row.
+
+The corollary is that `DEFINE A AS A.v > LAST(A.v)` is **unsatisfiable** — it compares the candidate
+against itself (`x > x`), so `A` never matches and the view stays empty. It does not mean "greater
+than the previous `A`". The standard spells that with a logical offset, `LAST(A.v, 1)`, which is not
+implemented yet (rejected at bind time). Use the physical `PREV(A.v)` instead, as
+`e2e_test/streaming/match_recognize_define_nav.slt` does for its V-shape:
+`define down as down.price < prev(down.price)`.
+
 This keeps all type checking, coercion, and constant folding in the existing expression machinery:
 the executor materializes the synthetic row per match (or per candidate, for `DEFINE`) and evaluates
 the expression over it. `DEFINE` navigation functions are pulled out of the predicate by an AST

@@ -1248,7 +1248,10 @@ message MatchRecognizeDefine {
 message MatchRecognizeDefineSlot {
   // 0 = SELF: the candidate row's own column.
   // 1 = PREV(col, offset) / 2 = NEXT(col, offset): a physical-offset row's column.
-  // 3 = FIRST(var.col) / 4 = LAST(var.col): the first / last row labeled `vars` in the match so far.
+  // 3 = FIRST(var.col) / 4 = LAST(var.col): RUNNING navigation — the first / last row of the match so
+  //     far that belongs to `vars`. The candidate row belongs to `vars` whenever `vars` contains the
+  //     variable being defined: its label is still tentative, so it is not yet among the match's
+  //     labels, but the standard counts it (a `var.col` reference *is* RUNNING LAST of that column).
   uint32 kind = 1;
   repeated string vars = 2;
   uint32 col_idx = 3;

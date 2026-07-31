@@ -43,6 +43,16 @@ pub trait CandidateMatcher {
     /// `labels[k]` is the variable bound to the match's `k`-th row; the candidate is the row at
     /// `pos = match_start + labels.len()`. The returned future is `Send` so the matcher composes
     /// with the (boxed, `Send`) executor stream.
+    ///
+    /// **Contract for callers:** membership MUST be queried *before* `var` is appended to `labels`,
+    /// so `labels` covers only the already-bound rows and never the candidate. Consequently a matcher
+    /// that resolves running navigation over `var` itself must treat `var` as the implicit trailing
+    /// label. Every caller MUST follow the same rule: [the finder] and [the eviction walker] share one
+    /// matcher, so a caller that pushed first would make the two disagree about which rows satisfy a
+    /// variable — and eviction would then delete rows the matcher still needs.
+    ///
+    /// [the finder]: Nfa::find_matches_dynamic
+    /// [the eviction walker]: Nfa::reaches_boundary_alive
     fn matches(
         &self,
         var: &str,

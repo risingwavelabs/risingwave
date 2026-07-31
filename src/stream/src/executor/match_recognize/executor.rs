@@ -251,9 +251,12 @@ enum DefineSlotKind {
     Prev,
     /// `NEXT(col, offset)`: `offset` positions later.
     Next,
-    /// `FIRST(var.col)`: the first row labeled `vars` in the in-progress match.
+    /// `FIRST(var.col)`: the first row labeled `vars` in the in-progress match. The candidate row
+    /// counts as tentatively labeled when `vars` contains the variable being defined (see
+    /// [`DefineMatcher::slot_value`]).
     RunningFirst,
-    /// `LAST(var.col)` / bare other-variable reference: the last such row (running).
+    /// `LAST(var.col)` / bare other-variable reference: the last such row (running), which is the
+    /// candidate row itself when `vars` contains the variable being defined.
     RunningLast,
 }
 
@@ -333,17 +336,29 @@ struct DefineMatcher<'a> {
 }
 
 impl DefineMatcher<'_> {
-    /// The value a slot reads for a candidate at `pos`, where `match_start` is the match's first row
-    /// and `labels[k]` is the variable bound to `rows[match_start + k]`.
+    /// The value a slot reads for a candidate at `pos` being tested for pattern variable `var`, where
+    /// `match_start` is the match's first row and `labels[k]` is the variable bound to
+    /// `rows[match_start + k]`.
+    ///
+    /// `labels` covers only the rows *already* bound, so for running navigation the candidate is the
+    /// implicit trailing label: while its membership is still tentative, the running set a `DEFINE`
+    /// predicate sees is `labels ++ [var]`. It therefore participates in `RunningFirst`/`RunningLast`
+    /// whenever the slot's variable set contains `var` — including via a `SUBSET` that has `var` as a
+    /// member. This is what makes `DEFINE a AS LAST(a.v) = a.v` a tautology, as SQL:2016 requires: a
+    /// pattern-variable-qualified column reference *is* `RUNNING LAST` of that column, and the binder
+    /// already lowers the bare `a.v` inside `a`'s own `DEFINE` to the candidate row.
     fn slot_value(
         &self,
         slot: &DefineSlot,
+        var: &str,
         pos: usize,
         match_start: usize,
         labels: &[String],
     ) -> Datum {
         let col_at = |i: usize| self.rows[i].row.datum_at(slot.col_idx).to_owned_datum();
-        let in_var = |l: &String| slot.vars.iter().any(|v| v == l);
+        let in_var = |l: &str| slot.vars.iter().any(|v| v == l);
+        // Whether the candidate row itself belongs to the set this slot navigates over.
+        let candidate_in_var = in_var(var);
         match slot.kind {
             DefineSlotKind::SelfCol => col_at(pos),
             DefineSlotKind::Prev => pos.checked_sub(slot.offset).and_then(col_at),
@@ -351,14 +366,23 @@ impl DefineMatcher<'_> {
                 let i = pos + slot.offset;
                 if i < self.safe_len { col_at(i) } else { None }
             }
+            // The candidate is the running first only when no earlier row of the match is in the set.
             DefineSlotKind::RunningFirst => labels
                 .iter()
-                .position(in_var)
-                .and_then(|k| col_at(match_start + k)),
-            DefineSlotKind::RunningLast => labels
-                .iter()
-                .rposition(in_var)
-                .and_then(|k| col_at(match_start + k)),
+                .position(|l| in_var(l))
+                .map(|k| match_start + k)
+                .or_else(|| candidate_in_var.then_some(pos))
+                .and_then(col_at),
+            // The candidate is the newest row, so it is the running last whenever it is in the set.
+            DefineSlotKind::RunningLast => candidate_in_var
+                .then_some(pos)
+                .or_else(|| {
+                    labels
+                        .iter()
+                        .rposition(|l| in_var(l))
+                        .map(|k| match_start + k)
+                })
+                .and_then(col_at),
         }
     }
 }
@@ -376,7 +400,7 @@ impl CandidateMatcher for DefineMatcher<'_> {
             let synthetic: Vec<Datum> = def
                 .slots
                 .iter()
-                .map(|slot| self.slot_value(slot, pos, match_start, labels))
+                .map(|slot| self.slot_value(slot, var, pos, match_start, labels))
                 .collect();
             let value = def
                 .condition
@@ -1177,5 +1201,247 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_expr::expr::LogReport;
+    use risingwave_pb::expr::expr_node::{RexNode, Type as PbExprType};
+    use risingwave_pb::expr::{ExprNode, FunctionCall as PbFunctionCall};
+    use risingwave_pb::stream_plan::MatchRecognizeDefineSlot as PbDefineSlot;
+
+    use super::*;
+    use crate::executor::match_recognize::nfa::{LabeledMatch, Pattern, Quantifier};
+
+    /// Slot kinds as the planner encodes them (see `MatchRecognizeDefineSlot.kind`).
+    const KIND_SELF: u32 = 0;
+    const KIND_PREV: u32 = 1;
+    const KIND_RUNNING_FIRST: u32 = 3;
+    const KIND_RUNNING_LAST: u32 = 4;
+
+    /// One `int` column named `v` at index 0; `order_key` mirrors the physical position (unused
+    /// without `WITHIN`, but kept consistent).
+    fn buffered(vals: &[i32]) -> Vec<BufferedRow> {
+        vals.iter()
+            .enumerate()
+            .map(|(i, v)| BufferedRow {
+                seq: i as i64,
+                order_key: Some(ScalarImpl::Int32(i as i32)),
+                row: OwnedRow::new(vec![Some(ScalarImpl::Int32(*v))]),
+            })
+            .collect()
+    }
+
+    fn input_ref(idx: u32) -> ExprNode {
+        ExprNode {
+            function_type: PbExprType::Unspecified as i32,
+            return_type: Some(DataType::Int32.to_protobuf()),
+            rex_node: Some(RexNode::InputRef(idx)),
+        }
+    }
+
+    /// `slots[0] = slots[1]`, i.e. the navigation slot compared against the candidate's own column.
+    fn nav_eq_self_condition() -> ExprNode {
+        ExprNode {
+            function_type: PbExprType::Equal as i32,
+            return_type: Some(DataType::Boolean.to_protobuf()),
+            rex_node: Some(RexNode::FuncCall(PbFunctionCall {
+                children: vec![input_ref(0), input_ref(1)],
+            })),
+        }
+    }
+
+    /// A navigation slot over column `v`.
+    fn nav_slot(kind: u32, vars: &[&str], offset: u32) -> PbDefineSlot {
+        PbDefineSlot {
+            kind,
+            vars: vars.iter().map(|v| (*v).to_owned()).collect(),
+            col_idx: 0,
+            offset,
+        }
+    }
+
+    /// `DEFINE <symbol> AS <nav> = <symbol>.v`, compiled through the real proto lowering so the slot
+    /// kinds are the planner's.
+    fn nav_eq_self(symbol: &str, nav: PbDefineSlot) -> (String, CompiledDefine) {
+        let pb = PbMatchRecognizeDefine {
+            symbol: symbol.to_owned(),
+            condition: Some(nav_eq_self_condition()),
+            slots: vec![nav, nav_slot(KIND_SELF, &[], 0)],
+        };
+        (
+            symbol.to_owned(),
+            CompiledDefine::from_protobuf(&pb, LogReport).unwrap(),
+        )
+    }
+
+    fn plus(var: &str) -> Pattern {
+        Pattern::Quantified(
+            Box::new(Pattern::Var(var.to_owned())),
+            Quantifier::Plus,
+            false,
+        )
+    }
+
+    fn labels(s: &str) -> Vec<String> {
+        s.chars().map(|c| c.to_string()).collect()
+    }
+
+    /// All matches over `vals`, with the whole buffer safe (no watermark boundary in play).
+    async fn find_all(
+        nfa: &Nfa,
+        defines: &HashMap<String, CompiledDefine>,
+        vals: &[i32],
+    ) -> Vec<LabeledMatch> {
+        let rows = buffered(vals);
+        let matcher = DefineMatcher {
+            rows: &rows,
+            safe_len: rows.len(),
+            defines,
+            within: None,
+        };
+        nfa.find_matches_dynamic(rows.len(), &matcher, &SkipMode::PastLastRow)
+            .await
+            .unwrap()
+    }
+
+    /// `DEFINE a AS LAST(a.v) = a.v` is a tautology: SQL:2016 defines a pattern-variable-qualified
+    /// column reference as `RUNNING LAST` of that column, and the binder already resolves the bare
+    /// `a.v` inside `a`'s own DEFINE to the candidate row. So the running navigation must see the
+    /// candidate too — including on the match's first row, where no earlier `a` exists.
+    #[tokio::test]
+    async fn define_running_last_of_self_sees_candidate() {
+        let defines = HashMap::from([nav_eq_self("a", nav_slot(KIND_RUNNING_LAST, &["a"], 0))]);
+        assert_eq!(
+            find_all(&Nfa::compile(&plus("a")), &defines, &[1, 2, 3]).await,
+            vec![LabeledMatch {
+                start: 0,
+                end: 3,
+                labels: labels("aaa"),
+            }]
+        );
+    }
+
+    /// The eviction walker shares the finder's satisfies-source, so it must reach the same verdict:
+    /// a lone row that satisfies `a AS LAST(a.v) = a.v` is a live partial match of `(a b)` and must
+    /// be retained. Were the two to disagree, eviction would delete rows the matcher still needs.
+    #[tokio::test]
+    async fn define_running_last_of_self_keeps_start_alive() {
+        let rows = buffered(&[1]);
+        let defines = HashMap::from([nav_eq_self("a", nav_slot(KIND_RUNNING_LAST, &["a"], 0))]);
+        let matcher = DefineMatcher {
+            rows: &rows,
+            safe_len: rows.len(),
+            defines: &defines,
+            within: None,
+        };
+        let nfa = Nfa::compile(&Pattern::Concat(vec![
+            Pattern::Var("a".to_owned()),
+            Pattern::Var("b".to_owned()),
+        ]));
+        assert!(
+            nfa.reaches_boundary_alive(0, rows.len(), &matcher)
+                .await
+                .unwrap()
+        );
+    }
+
+    /// `DEFINE a AS FIRST(a.v) = a.v`: the candidate is the *first* `a` only while no earlier `a` is
+    /// bound, so this holds for the match's first row and then pins later rows to that value.
+    #[tokio::test]
+    async fn define_running_first_of_self_sees_candidate() {
+        let defines = HashMap::from([nav_eq_self("a", nav_slot(KIND_RUNNING_FIRST, &["a"], 0))]);
+        assert_eq!(
+            find_all(&Nfa::compile(&plus("a")), &defines, &[5, 5, 7]).await,
+            vec![
+                // 5, 5 share the first value; 7 breaks it and starts its own match.
+                LabeledMatch {
+                    start: 0,
+                    end: 2,
+                    labels: labels("aa"),
+                },
+                LabeledMatch {
+                    start: 2,
+                    end: 3,
+                    labels: labels("a"),
+                },
+            ]
+        );
+    }
+
+    /// Running navigation that falls back on `labels` still indexes from the match's start. Here
+    /// `x AS PREV(x.v) = x.v` cannot hold at position 0 (there is no previous row), so the match
+    /// starts at 1, and `a+` binds two rows, so the third row's `FIRST(a.v)` resolves through
+    /// `labels[1]` — pinning the `match_start + k` arithmetic where neither term is 0.
+    #[tokio::test]
+    async fn define_running_first_indexes_from_match_start() {
+        let defines = HashMap::from([
+            nav_eq_self("x", nav_slot(KIND_PREV, &[], 1)),
+            nav_eq_self("a", nav_slot(KIND_RUNNING_FIRST, &["a"], 0)),
+        ]);
+        let nfa = Nfa::compile(&Pattern::Concat(vec![
+            Pattern::Var("x".to_owned()),
+            plus("a"),
+        ]));
+        assert_eq!(
+            // `x` = the second 9 (its physical predecessor is the first 9); the run of 7s is `a+`,
+            // whose `FIRST` is `rows[2]`, so the trailing 5 ends the match.
+            find_all(&nfa, &defines, &[9, 9, 7, 7, 5]).await,
+            vec![LabeledMatch {
+                start: 1,
+                end: 4,
+                labels: labels("xaa"),
+            }]
+        );
+    }
+
+    /// `SUBSET u = (a, b)` + `DEFINE a AS LAST(u.v) = a.v`: the candidate is tentatively an `a`, and
+    /// `a ∈ u`, so it counts as the running last of `u`. Both spellings lower to this same slot —
+    /// `LAST(u.v)` via the navigation path and the bare `u.v` via the input-ref rewriter (whose
+    /// self-reference exemption is name-exact and therefore misses the subset).
+    #[tokio::test]
+    async fn define_running_last_of_subset_containing_self_sees_candidate() {
+        // The slot's `vars` is `members_of(u)`, which preserves the SUBSET's declaration order, so
+        // both orders must behave identically: membership is a set test, not a look at `vars[0]`.
+        for members in [["a", "b"], ["b", "a"]] {
+            let defines =
+                HashMap::from([nav_eq_self("a", nav_slot(KIND_RUNNING_LAST, &members, 0))]);
+            assert_eq!(
+                find_all(&Nfa::compile(&plus("a")), &defines, &[1, 2, 3]).await,
+                vec![LabeledMatch {
+                    start: 0,
+                    end: 3,
+                    labels: labels("aaa"),
+                }],
+                "SUBSET u = ({}, {})",
+                members[0],
+                members[1]
+            );
+        }
+    }
+
+    /// Navigation over a variable set that does *not* contain the candidate's own variable keeps
+    /// resolving to the earlier row: `DEFINE b AS LAST(a.v) = b.v` compares against the `a`, never
+    /// against the candidate `b`. This is the shape every existing DEFINE test uses.
+    #[tokio::test]
+    async fn define_running_last_of_other_var_excludes_candidate() {
+        let defines = HashMap::from([nav_eq_self("b", nav_slot(KIND_RUNNING_LAST, &["a"], 0))]);
+        let nfa = Nfa::compile(&Pattern::Concat(vec![
+            Pattern::Var("a".to_owned()),
+            Pattern::Var("b".to_owned()),
+        ]));
+        // Equal values: the `b` row equals the running `a`, so `(a b)` matches.
+        assert_eq!(
+            find_all(&nfa, &defines, &[7, 7]).await,
+            vec![LabeledMatch {
+                start: 0,
+                end: 2,
+                labels: labels("ab"),
+            }]
+        );
+        // Different values: had the candidate been treated as the running last of `a`, this would
+        // become a tautology and match.
+        assert_eq!(find_all(&nfa, &defines, &[7, 8]).await, vec![]);
     }
 }
