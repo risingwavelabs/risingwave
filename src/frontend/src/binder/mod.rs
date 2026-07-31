@@ -53,6 +53,7 @@ pub use gap_fill_binder::BoundFillStrategy;
 pub use insert::BoundInsert;
 use pgwire::pg_server::{Session, SessionId};
 pub use query::BoundQuery;
+pub(crate) use relation::reject_oversized_permute;
 pub use relation::{
     BoundBaseTable, BoundGapFill, BoundJoin, BoundMatchRecognize, BoundMeasure, BoundShare,
     BoundShareInput, BoundSource, BoundSymbolDefinition, BoundSystemTable, BoundWatermark,

@@ -162,6 +162,10 @@ impl Binder {
         if matches!(rows_per_match, Some(RowsPerMatch::AllRows)) {
             bail_not_implemented!("ALL ROWS PER MATCH");
         }
+        // The pattern is expanded eagerly into NFA states, on the compute node, when the actor is
+        // built. Validate the bounds here so an unusable pattern is a rejected statement rather than
+        // a committed materialized view whose actors die on creation and on every recovery.
+        validate_pattern(pattern)?;
         self.push_context();
 
         // Bind the input. This registers the input's columns in the current context.
@@ -252,6 +256,11 @@ impl Binder {
             .collect();
 
         let input_col_num = input_columns.len();
+        let pattern_variables = {
+            let mut vars = BTreeSet::new();
+            collect_from_pattern(pattern, &mut vars);
+            vars
+        };
         let variables = collect_pattern_variables(pattern, symbols);
         for var in &variables {
             self.bind_table_to_context(input_columns.clone(), var.clone(), None, None)?;
@@ -284,14 +293,31 @@ impl Binder {
             subset_defs: &subset_defs,
         };
 
-        // AFTER MATCH SKIP TO FIRST/LAST <var> must name a pattern variable.
-        if let Some(AfterMatchSkip::ToFirst(sym) | AfterMatchSkip::ToLast(sym)) = after_match_skip
-            && !variables.contains(&sym.real_value())
-        {
-            bail_not_implemented!(
-                "AFTER MATCH SKIP TO FIRST/LAST references unknown pattern variable {}",
-                sym.real_value()
-            );
+        // AFTER MATCH SKIP TO FIRST/LAST <var> must name a variable that appears in PATTERN: the skip
+        // target is looked up among the labels of a completed match, so a variable that exists only
+        // as a DEFINE symbol can never be found there and the executor would silently fall back to
+        // skipping past the last row on every match. `variables` unions in the DEFINE symbols, so
+        // check against the pattern-only set.
+        if let Some(AfterMatchSkip::ToFirst(sym) | AfterMatchSkip::ToLast(sym)) = after_match_skip {
+            let target = sym.real_value();
+            if !pattern_variables.contains(&target) {
+                if variables.contains(&target) {
+                    // Not `bail_not_implemented!`: nothing is missing, the target is just not a
+                    // variable of the pattern.
+                    return Err(crate::error::ErrorCode::NotSupported(
+                        format!(
+                            "AFTER MATCH SKIP TO FIRST/LAST {target}, which is defined in DEFINE but \
+                             does not appear in PATTERN"
+                        ),
+                        "the skip target must be a variable of the pattern".to_owned(),
+                    )
+                    .into());
+                }
+                bail_not_implemented!(
+                    "AFTER MATCH SKIP TO FIRST/LAST references unknown pattern variable {}",
+                    target
+                );
+            }
         }
 
         // Each pattern variable was registered as an identical alias block over the input columns,
@@ -352,39 +378,6 @@ impl Binder {
         })
     }
 
-    /// Rejects function-call modifiers on the specially-lowered `MEASURES` functions (aggregates,
-    /// `FIRST`/`LAST`, `CLASSIFIER`). The lowering matches these by name and would otherwise drop
-    /// the modifier, evaluating the plain call and silently producing wrong results.
-    fn reject_measure_func_modifiers(func: &Function) -> RwResult<()> {
-        let offending = if func.arg_list.distinct {
-            Some("DISTINCT")
-        } else if !func.arg_list.order_by.is_empty() {
-            Some("ORDER BY")
-        } else if func.arg_list.ignore_nulls {
-            Some("IGNORE NULLS")
-        } else if func.arg_list.variadic {
-            Some("VARIADIC")
-        } else if func.filter.is_some() {
-            Some("FILTER")
-        } else if func.over.is_some() {
-            Some("OVER")
-        } else if func.within_group.is_some() {
-            Some("WITHIN GROUP")
-        } else if func.scalar_as_agg {
-            Some("AGGREGATE:")
-        } else {
-            None
-        };
-        if let Some(modifier) = offending {
-            bail_not_implemented!(
-                "{} on {}() in MATCH_RECOGNIZE MEASURES",
-                modifier,
-                func.name.0[0].real_value().to_uppercase()
-            );
-        }
-        Ok(())
-    }
-
     /// Lowers one `MEASURES` item to an expression over a synthetic per-match row plus the slots
     /// that produce that row. Pattern-variable column references become navigation slots: bare
     /// `var.col` and arithmetic over such references resolve to `LAST(var.col)` (FINAL semantics
@@ -401,7 +394,7 @@ impl Binder {
                 .real_value()
                 .eq_ignore_ascii_case("classifier")
         {
-            Self::reject_measure_func_modifiers(func)?;
+            reject_func_modifiers(func, "MEASURES")?;
             if !func.arg_list.args.is_empty() {
                 bail_not_implemented!("CLASSIFIER() with arguments in MATCH_RECOGNIZE");
             }
@@ -426,7 +419,7 @@ impl Binder {
                 "count" | "min" | "max" | "sum" | "avg"
             )
         {
-            Self::reject_measure_func_modifiers(func)?;
+            reject_func_modifiers(func, "MEASURES")?;
             let agg = func.name.0[0].real_value().to_ascii_lowercase();
             if func.arg_list.args.len() != 1 {
                 bail_not_implemented!("{}() expects exactly one argument", agg.to_uppercase());
@@ -563,7 +556,7 @@ impl Binder {
                 "first" | "last"
             )
         {
-            Self::reject_measure_func_modifiers(func)?;
+            reject_func_modifiers(func, "MEASURES")?;
             let kind = if func.name.0[0].real_value().eq_ignore_ascii_case("first") {
                 MeasureSlotKind::First
             } else {
@@ -666,6 +659,17 @@ impl Binder {
         }
 
         let expr = self.bind_expr(&cond)?;
+        // A DEFINE predicate is evaluated per candidate row by the executor, from a serialized scalar
+        // expression; a subquery has no representation there and would otherwise be carried all the
+        // way to the plan-to-proto conversion before failing, i.e. after the statement looked fine.
+        if expr.has_subquery() {
+            return Err(crate::error::ErrorCode::NotSupported(
+                format!("a subquery in the DEFINE predicate of {symbol}"),
+                "a DEFINE predicate must be a scalar expression over the pattern variables"
+                    .to_owned(),
+            )
+            .into());
+        }
 
         let (definition, slots) = {
             let mut rewriter = DefineSlotRewriter {
@@ -683,6 +687,225 @@ impl Binder {
             definition,
             slots,
         })
+    }
+}
+
+/// Rejects function-call modifiers on the specially-lowered `MATCH_RECOGNIZE` functions: the
+/// `MEASURES` aggregates and `FIRST`/`LAST`/`CLASSIFIER`, and the `DEFINE` navigation functions
+/// `PREV`/`NEXT`/`FIRST`/`LAST`. Both lowerings match these by name and read only the argument list,
+/// so a modifier would be dropped and the plain call evaluated, silently producing wrong results.
+/// `clause` names the clause for the error message (`MEASURES` or `DEFINE`).
+fn reject_func_modifiers(func: &Function, clause: &str) -> RwResult<()> {
+    let offending = if func.arg_list.distinct {
+        Some("DISTINCT")
+    } else if !func.arg_list.order_by.is_empty() {
+        Some("ORDER BY")
+    } else if func.arg_list.ignore_nulls {
+        Some("IGNORE NULLS")
+    } else if func.arg_list.variadic {
+        Some("VARIADIC")
+    } else if func.filter.is_some() {
+        Some("FILTER")
+    } else if func.over.is_some() {
+        Some("OVER")
+    } else if func.within_group.is_some() {
+        Some("WITHIN GROUP")
+    } else if func.scalar_as_agg {
+        Some("AGGREGATE")
+    } else {
+        None
+    };
+    if let Some(modifier) = offending {
+        bail_not_implemented!(
+            "{} on {}() in MATCH_RECOGNIZE {}",
+            modifier,
+            func.name.0[0].real_value().to_uppercase(),
+            clause
+        );
+    }
+    Ok(())
+}
+
+/// Largest bound accepted in a `{n}` / `{n,}` / `{n,m}` / `{,m}` range quantifier.
+///
+/// `Nfa::compile` expands a range quantifier eagerly: `min` mandatory copies of the inner pattern
+/// plus `max - min` optional copies, at 2 NFA states per pattern variable and 2 more per optional
+/// wrapper. Repeating a single variable therefore costs up to `4` states per repetition, so this cap
+/// bounds such a quantifier at `4 * 1000 = 4000` states, while leaving two orders of magnitude of
+/// headroom over the bounds real patterns use (single or low double digits). A larger inner pattern
+/// costs proportionally more per repetition and is bounded by [`MAX_PATTERN_NFA_STATES`] instead.
+const MAX_QUANTIFIER_BOUND: u32 = 1000;
+
+/// Largest estimated NFA state count accepted for a whole pattern.
+///
+/// [`MAX_QUANTIFIER_BOUND`] alone does not bound the pattern: quantifiers nest, and nesting
+/// multiplies, so `((a{900}){900})` would expand to ~810000 copies of `a` while every individual
+/// bound is legal. This cap bounds the product. For scale: `PERMUTE` of the maximum
+/// [`MAX_PERMUTE_VARS`] variables estimates 8642 states (8.6% of the budget) and `(a b c){1000}`
+/// estimates 6000, so realistic patterns are far below it.
+///
+/// This is a *memory* bound, not a throughput one. The NFA is simulated from every candidate start
+/// for every row, so a pattern anywhere near this many states would build successfully and still be
+/// far too slow to be useful; the cap exists only to keep an absurd pattern from exhausting the
+/// compute node's memory while the actor is being built.
+const MAX_PATTERN_NFA_STATES: u64 = 100_000;
+
+/// Largest number of variables accepted in `PERMUTE(...)`.
+///
+/// `PERMUTE` expands to the alternation of all `n!` orderings of its variables, so the NFA grows
+/// factorially.
+pub(crate) const MAX_PERMUTE_VARS: usize = 6;
+
+/// Rejects a `PERMUTE` with too many variables. Shared with the pattern lowering
+/// (`optimizer::plan_node::stream_match_recognize`) so both report the same thing.
+pub(crate) fn reject_oversized_permute(count: usize) -> RwResult<()> {
+    if count > MAX_PERMUTE_VARS {
+        return Err(crate::error::ErrorCode::NotSupported(
+            format!("PERMUTE over {count} variables (expands to {count}! orderings)"),
+            format!("PERMUTE supports at most {MAX_PERMUTE_VARS} variables"),
+        )
+        .into());
+    }
+    Ok(())
+}
+
+/// Validates that a pattern can be expanded into an NFA, at bind time.
+///
+/// Three hazards, all of which otherwise survive planning: an inverted range (`{5,3}`) expands to an
+/// empty optional tail and silently degrades to `{5}`; a large bound (or a product of nested bounds)
+/// expands to an NFA that exhausts the compute node's memory; and `PERMUTE` grows factorially in its
+/// arity. The expansion happens in `Nfa::compile`, which runs when the actor is built — after the DDL
+/// has been committed in meta — so the only place these can be reported to the author is here.
+///
+/// The arity and per-bound checks run before the whole-pattern budget so that the specific cause is
+/// named: a `PERMUTE` of 8 variables is over the budget too, but "PERMUTE supports at most 6
+/// variables" is the useful thing to say about it.
+fn validate_pattern(pattern: &MatchRecognizePattern) -> RwResult<()> {
+    check_pattern_bounds(pattern)?;
+    let states = estimate_nfa_states(pattern);
+    if states > MAX_PATTERN_NFA_STATES {
+        return Err(crate::error::ErrorCode::NotSupported(
+            format!("a MATCH_RECOGNIZE pattern that expands to about {states} NFA states"),
+            format!(
+                "the pattern is expanded eagerly into at most {MAX_PATTERN_NFA_STATES} states; \
+                 reduce the quantifier bounds, especially where quantifiers are nested"
+            ),
+        )
+        .into());
+    }
+    Ok(())
+}
+
+/// Per-node bound checks: `PERMUTE` arity, `min <= max`, and each bound within
+/// [`MAX_QUANTIFIER_BOUND`].
+fn check_pattern_bounds(pattern: &MatchRecognizePattern) -> RwResult<()> {
+    use risingwave_sqlparser::ast::RepetitionQuantifier as Q;
+
+    match pattern {
+        MatchRecognizePattern::Symbol(_) | MatchRecognizePattern::Exclude(_) => {}
+        MatchRecognizePattern::Permute(symbols) => reject_oversized_permute(symbols.len())?,
+        MatchRecognizePattern::Concat(patterns) | MatchRecognizePattern::Alternation(patterns) => {
+            for p in patterns {
+                check_pattern_bounds(p)?;
+            }
+        }
+        MatchRecognizePattern::Group(inner) => check_pattern_bounds(inner)?,
+        MatchRecognizePattern::Repetition(inner, quantifier, _) => {
+            if let Q::Range(min, max) = quantifier
+                && min > max
+            {
+                return Err(crate::error::ErrorCode::NotSupported(
+                    format!("a range quantifier with a lower bound above its upper bound ({{{min},{max}}})"),
+                    format!("use {{{max},{min}}} if the bounds were swapped, or {{{min}}} for exactly {min} repetitions"),
+                )
+                .into());
+            }
+            let bounds = match quantifier {
+                Q::ZeroOrMore | Q::OneOrMore | Q::AtMostOne => vec![],
+                Q::Exactly(n) | Q::AtLeast(n) => vec![*n],
+                Q::AtMost(m) => vec![*m],
+                Q::Range(n, m) => vec![*n, *m],
+            };
+            for b in bounds {
+                if b > MAX_QUANTIFIER_BOUND {
+                    return Err(crate::error::ErrorCode::NotSupported(
+                        format!("a range quantifier bound of {b}"),
+                        format!(
+                            "a bound is expanded eagerly into up to 4 NFA states per repetition of \
+                             a single variable (more for a larger inner pattern), so it may be at \
+                             most {MAX_QUANTIFIER_BOUND}"
+                        ),
+                    )
+                    .into());
+                }
+            }
+            check_pattern_bounds(inner)?;
+        }
+    }
+    Ok(())
+}
+
+/// Upper bound on the number of NFA states `Nfa::compile` will allocate for `pattern`.
+///
+/// Mirrors the construction in `nfa.rs` (`Nfa::build`): a variable is 2 states; an alternation adds a
+/// start and an accept state; `*`, `?` and each optional copy of a range add 2; `+` builds the inner
+/// pattern twice; `PERMUTE` of `n` variables becomes an alternation of `n!` concatenations. Saturating
+/// throughout, so an over-large pattern reports a saturated estimate rather than wrapping.
+///
+/// **This is a model of code in another crate**, so it cannot be checked by a test: `risingwave_stream`
+/// depends on `risingwave_frontend`'s protos, not the reverse, and nothing can observe both. If the
+/// state count of any construct in `nfa.rs` changes, this must change with it, or the guard above
+/// silently becomes an under-estimate. The construction sites in `nfa.rs` carry a comment pointing
+/// back here.
+fn estimate_nfa_states(pattern: &MatchRecognizePattern) -> u64 {
+    use risingwave_sqlparser::ast::RepetitionQuantifier as Q;
+
+    match pattern {
+        // Anchors and exclusions are rejected when the pattern is lowered; 2 is the cost of the
+        // variable form.
+        MatchRecognizePattern::Symbol(_) | MatchRecognizePattern::Exclude(_) => 2,
+        MatchRecognizePattern::Permute(symbols) => {
+            let n = symbols.len() as u64;
+            let orderings = (1..=n)
+                .try_fold(1u64, |acc, i| acc.checked_mul(i))
+                .unwrap_or(u64::MAX);
+            orderings
+                .saturating_mul(n.saturating_mul(2))
+                .saturating_add(2)
+        }
+        MatchRecognizePattern::Concat(patterns) => patterns
+            .iter()
+            .map(estimate_nfa_states)
+            .fold(0u64, u64::saturating_add)
+            .max(1),
+        MatchRecognizePattern::Alternation(patterns) => patterns
+            .iter()
+            .map(estimate_nfa_states)
+            .fold(2u64, u64::saturating_add),
+        MatchRecognizePattern::Group(inner) => estimate_nfa_states(inner),
+        MatchRecognizePattern::Repetition(inner, quantifier, _) => {
+            let inner = estimate_nfa_states(inner);
+            match quantifier {
+                Q::ZeroOrMore | Q::AtMostOne => inner.saturating_add(2),
+                Q::OneOrMore => inner.saturating_mul(2).saturating_add(2),
+                // `min` mandatory copies, then an unbounded `*` tail.
+                Q::AtLeast(min) => inner
+                    .saturating_mul(*min as u64)
+                    .saturating_add(inner)
+                    .saturating_add(2),
+                // `min` mandatory copies, then `max - min` optional (`?`) copies.
+                Q::Exactly(n) => inner.saturating_mul(*n as u64).max(1),
+                Q::AtMost(max) => inner.saturating_add(2).saturating_mul(*max as u64).max(1),
+                Q::Range(min, max) => inner
+                    .saturating_mul(*min as u64)
+                    .saturating_add(
+                        inner
+                            .saturating_add(2)
+                            .saturating_mul(max.saturating_sub(*min) as u64),
+                    )
+                    .max(1),
+            }
+        }
     }
 }
 
@@ -721,8 +944,15 @@ impl NavExtractor<'_> {
             self.nav_slots.push(slot);
             return Ok(());
         }
+        // Every variant that carries sub-expressions is traversed. The match is deliberately
+        // exhaustive (no `_` arm): a navigation call the traversal fails to reach is never extracted,
+        // and binding then reports the misleading "function prev(integer) does not exist" instead of
+        // anything about navigation. Making the compiler flag new `Expr` variants keeps that from
+        // silently regressing.
         match node {
-            AstExpr::BinaryOp { left, right, .. } => {
+            AstExpr::BinaryOp { left, right, .. }
+            | AstExpr::IsDistinctFrom(left, right)
+            | AstExpr::IsNotDistinctFrom(left, right) => {
                 self.rewrite(left)?;
                 self.rewrite(right)?;
             }
@@ -734,6 +964,14 @@ impl NavExtractor<'_> {
             | AstExpr::IsNotTrue(expr)
             | AstExpr::IsFalse(expr)
             | AstExpr::IsNotFalse(expr)
+            | AstExpr::IsUnknown(expr)
+            | AstExpr::IsNotUnknown(expr)
+            | AstExpr::IsJson { expr, .. }
+            | AstExpr::FieldIdentifier(expr, _)
+            | AstExpr::SomeOp(expr)
+            | AstExpr::AllOp(expr)
+            | AstExpr::Extract { expr, .. }
+            | AstExpr::Collate { expr, .. }
             | AstExpr::Cast { expr, .. }
             | AstExpr::TryCast { expr, .. } => self.rewrite(expr)?,
             AstExpr::Between {
@@ -743,14 +981,139 @@ impl NavExtractor<'_> {
                 self.rewrite(low)?;
                 self.rewrite(high)?;
             }
-            AstExpr::Function(func) => {
-                for arg in &mut func.arg_list.args {
-                    if let FunctionArg::Unnamed(FunctionArgExpr::Expr(e)) = arg {
+            AstExpr::InList { expr, list, .. } => {
+                self.rewrite(expr)?;
+                for e in list {
+                    self.rewrite(e)?;
+                }
+            }
+            AstExpr::Like { expr, pattern, .. }
+            | AstExpr::ILike { expr, pattern, .. }
+            | AstExpr::SimilarTo { expr, pattern, .. } => {
+                self.rewrite(expr)?;
+                self.rewrite(pattern)?;
+            }
+            AstExpr::AtTimeZone {
+                timestamp,
+                time_zone,
+            } => {
+                self.rewrite(timestamp)?;
+                self.rewrite(time_zone)?;
+            }
+            AstExpr::Substring {
+                expr,
+                substring_from,
+                substring_for,
+            } => {
+                self.rewrite(expr)?;
+                for e in substring_from.iter_mut().chain(substring_for.iter_mut()) {
+                    self.rewrite(e)?;
+                }
+            }
+            AstExpr::Position { substring, string } => {
+                self.rewrite(substring)?;
+                self.rewrite(string)?;
+            }
+            AstExpr::Overlay {
+                expr,
+                new_substring,
+                start,
+                count,
+            } => {
+                self.rewrite(expr)?;
+                self.rewrite(new_substring)?;
+                self.rewrite(start)?;
+                if let Some(e) = count {
+                    self.rewrite(e)?;
+                }
+            }
+            AstExpr::Trim {
+                expr, trim_what, ..
+            } => {
+                self.rewrite(expr)?;
+                if let Some(e) = trim_what {
+                    self.rewrite(e)?;
+                }
+            }
+            AstExpr::Case {
+                operand,
+                conditions,
+                results,
+                else_result,
+            } => {
+                for e in operand.iter_mut().chain(else_result.iter_mut()) {
+                    self.rewrite(e)?;
+                }
+                for e in conditions.iter_mut().chain(results.iter_mut()) {
+                    self.rewrite(e)?;
+                }
+            }
+            AstExpr::GroupingSets(sets) | AstExpr::Cube(sets) | AstExpr::Rollup(sets) => {
+                for set in sets {
+                    for e in set {
                         self.rewrite(e)?;
                     }
                 }
             }
-            _ => {}
+            AstExpr::Row(exprs) => {
+                for e in exprs {
+                    self.rewrite(e)?;
+                }
+            }
+            AstExpr::Array(array) => {
+                for e in &mut array.elem {
+                    self.rewrite(e)?;
+                }
+            }
+            AstExpr::Index { obj, index } => {
+                self.rewrite(obj)?;
+                self.rewrite(index)?;
+            }
+            AstExpr::ArrayRangeIndex { obj, start, end } => {
+                self.rewrite(obj)?;
+                for e in start.iter_mut().chain(end.iter_mut()) {
+                    self.rewrite(e)?;
+                }
+            }
+            AstExpr::Map { entries } => {
+                for (k, v) in entries {
+                    self.rewrite(k)?;
+                    self.rewrite(v)?;
+                }
+            }
+            // A non-navigation call: only its arguments can contain navigation. The modifiers
+            // (`FILTER`, `OVER`, `WITHIN GROUP`, the aggregate `ORDER BY`) are not traversed — they
+            // only occur on aggregate and window calls, neither of which is supported in a DEFINE
+            // predicate at all.
+            AstExpr::Function(func) => {
+                for arg in &mut func.arg_list.args {
+                    match arg {
+                        FunctionArg::Unnamed(FunctionArgExpr::Expr(e))
+                        | FunctionArg::Named {
+                            arg: FunctionArgExpr::Expr(e),
+                            ..
+                        } => self.rewrite(e)?,
+                        _ => {}
+                    }
+                }
+            }
+            // Leaves: nothing to traverse.
+            AstExpr::Identifier(_)
+            | AstExpr::CompoundIdentifier(_)
+            | AstExpr::Value(_)
+            | AstExpr::Parameter { .. }
+            | AstExpr::TypedString { .. } => {}
+            // `IN (SELECT ...)`: the left-hand operand is an ordinary expression outside the
+            // subquery, so it is traversed; only the subquery itself is not.
+            AstExpr::InSubquery { expr, .. } => self.rewrite(expr)?,
+            // The remaining subquery-bearing forms carry nothing but a `Query`. Row-pattern
+            // navigation is defined over the rows of the match, which a subquery cannot see, so
+            // nothing inside one is extracted; a navigation call there is reported by ordinary
+            // binding.
+            AstExpr::Exists(_) | AstExpr::Subquery(_) | AstExpr::ArraySubquery(_) => {}
+            // A lambda body is evaluated per element by the higher-order function that receives it,
+            // not once per candidate row, so a navigation placeholder cannot be lifted out of it.
+            AstExpr::LambdaFunction { .. } => {}
         }
         Ok(())
     }
@@ -758,6 +1121,8 @@ impl NavExtractor<'_> {
     /// Builds the [`DefineSlot`] for a navigation function call.
     fn nav_slot(&self, func: &Function) -> RwResult<DefineSlot> {
         let name = func.name.0[0].real_value().to_ascii_lowercase();
+        // Only the name and the argument list are read below, so any modifier would be dropped.
+        reject_func_modifiers(func, "DEFINE")?;
         let args = &func.arg_list.args;
         let Some(FunctionArg::Unnamed(FunctionArgExpr::Expr(inner))) = args.first() else {
             bail_not_implemented!(
@@ -767,6 +1132,21 @@ impl NavExtractor<'_> {
         };
         match name.as_str() {
             "prev" | "next" => {
+                // Not `bail_not_implemented!`: this is not a feature gap, the call is simply wrong.
+                if args.len() > 2 {
+                    return Err(crate::error::ErrorCode::NotSupported(
+                        format!(
+                            "{}() with {} arguments in DEFINE",
+                            name.to_uppercase(),
+                            args.len()
+                        ),
+                        format!(
+                            "{}() takes a column and an optional positive integer offset",
+                            name.to_uppercase()
+                        ),
+                    )
+                    .into());
+                }
                 let col_idx = self.physical_col(inner)?;
                 let offset = match args.get(1) {
                     Some(arg) => self.parse_offset(arg, &name)?,
@@ -848,20 +1228,53 @@ impl NavExtractor<'_> {
     }
 
     fn parse_offset(&self, arg: &FunctionArg, name: &str) -> RwResult<usize> {
-        if let FunctionArg::Unnamed(FunctionArgExpr::Expr(AstExpr::Value(AstValue::Number(s)))) =
-            arg
-            && let Ok(n) = s.parse::<usize>()
-            && n >= 1
-        {
-            Ok(n)
-        } else {
-            // The offset must be a positive literal: `PREV(col, 0)` / `NEXT(col, 0)` would resolve to
-            // the current row, which is surprising for physical navigation and not what these mean.
-            bail_not_implemented!(
+        let FunctionArg::Unnamed(FunctionArgExpr::Expr(AstExpr::Value(AstValue::Number(s)))) = arg
+        else {
+            return Err(Self::offset_not_a_positive_literal(name));
+        };
+        // A `Number` token can be any numeric literal, so distinguish "not a non-negative integer at
+        // all" from "an integer that is simply too large": the latter must report the cap, not claim
+        // the literal was not an integer.
+        let is_integer_literal = !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
+        match s.parse::<u64>() {
+            // The offset is carried to the executor as a `u32`, so an offset that does not fit would
+            // wrap — and `PREV(col, 4294967296)` would wrap to `0`, i.e. the candidate row itself,
+            // exactly what rejecting a `0` offset is meant to prevent.
+            Ok(n) if n > u32::MAX as u64 => Err(Self::offset_above_cap(name, s)),
+            // The offset must be positive: `PREV(col, 0)` / `NEXT(col, 0)` would resolve to the
+            // current row, which is surprising for physical navigation and not what these mean.
+            Ok(0) => Err(Self::offset_not_a_positive_literal(name)),
+            Ok(n) => Ok(n as usize),
+            // Out of `u64` range, but still a decimal integer literal: over the cap, by a lot.
+            Err(_) if is_integer_literal => Err(Self::offset_above_cap(name, s)),
+            Err(_) => Err(Self::offset_not_a_positive_literal(name)),
+        }
+    }
+
+    fn offset_above_cap(name: &str, literal: &str) -> crate::error::RwError {
+        crate::error::ErrorCode::NotSupported(
+            format!("{}() offset of {}", name.to_uppercase(), literal),
+            format!(
+                "the offset is a physical row count carried as a 32-bit value, so it may be at \
+                 most {}",
+                u32::MAX
+            ),
+        )
+        .into()
+    }
+
+    fn offset_not_a_positive_literal(name: &str) -> crate::error::RwError {
+        crate::error::ErrorCode::NotSupported(
+            format!(
+                "a non-literal or non-positive {}() offset",
+                name.to_uppercase()
+            ),
+            format!(
                 "{}() offset must be a positive integer literal (>= 1)",
                 name.to_uppercase()
-            );
-        }
+            ),
+        )
+        .into()
     }
 }
 
@@ -1042,5 +1455,99 @@ impl ExprRewriter for SlotLoweringRewriter<'_, '_> {
                 self.slots.len() - 1
             });
         InputRef::new(slot_idx, data_type).into()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_sqlparser::ast::RepetitionQuantifier as Q;
+
+    use super::*;
+
+    fn var(name: &str) -> MatchRecognizePattern {
+        MatchRecognizePattern::Symbol(MatchRecognizeSymbol::Named(Ident::new_unchecked(name)))
+    }
+
+    fn rep(inner: MatchRecognizePattern, q: Q) -> MatchRecognizePattern {
+        MatchRecognizePattern::Repetition(Box::new(inner), q, false)
+    }
+
+    /// The estimate must mirror `Nfa::build`: 2 states per variable, 2 more per optional copy.
+    #[test]
+    fn nfa_state_estimate_matches_the_expansion() {
+        assert_eq!(estimate_nfa_states(&var("a")), 2);
+        assert_eq!(estimate_nfa_states(&rep(var("a"), Q::Exactly(1000))), 2000);
+        // 3 mandatory copies (2 each) plus 7 optional ones (2 + 2 each).
+        assert_eq!(estimate_nfa_states(&rep(var("a"), Q::Range(3, 10))), 34);
+        // `min` mandatory copies plus a `*` tail (inner + 2).
+        assert_eq!(estimate_nfa_states(&rep(var("a"), Q::AtLeast(3))), 10);
+        assert_eq!(estimate_nfa_states(&rep(var("a"), Q::ZeroOrMore)), 4);
+        assert_eq!(estimate_nfa_states(&rep(var("a"), Q::OneOrMore)), 6);
+        // `PERMUTE` over the maximum 6 variables: 6! orderings of 6 variables, plus the alternation's
+        // own start and accept states. Quoted in `MAX_PATTERN_NFA_STATES`.
+        let permute6 = MatchRecognizePattern::Permute(
+            ["a", "b", "c", "d", "e", "f"]
+                .iter()
+                .map(|n| MatchRecognizeSymbol::Named(Ident::new_unchecked(*n)))
+                .collect(),
+        );
+        assert_eq!(estimate_nfa_states(&permute6), 8642);
+        assert!(estimate_nfa_states(&permute6) < MAX_PATTERN_NFA_STATES);
+    }
+
+    /// Nesting multiplies, so per-quantifier bounds within [`MAX_QUANTIFIER_BOUND`] are not enough.
+    #[test]
+    fn nested_quantifiers_within_the_per_bound_cap_are_still_rejected() {
+        let nested = rep(
+            MatchRecognizePattern::Group(Box::new(rep(var("a"), Q::Exactly(900)))),
+            Q::Exactly(900),
+        );
+        assert!(check_pattern_bounds(&nested).is_ok());
+        assert!(validate_pattern(&nested).is_err());
+    }
+
+    #[test]
+    fn inverted_and_oversized_bounds_are_rejected() {
+        assert!(validate_pattern(&rep(var("a"), Q::Range(5, 3))).is_err());
+        assert!(validate_pattern(&rep(var("a"), Q::Range(3, 5))).is_ok());
+        assert!(validate_pattern(&rep(var("a"), Q::Exactly(MAX_QUANTIFIER_BOUND))).is_ok());
+        assert!(validate_pattern(&rep(var("a"), Q::Exactly(MAX_QUANTIFIER_BOUND + 1))).is_err());
+        assert!(validate_pattern(&rep(var("a"), Q::AtMost(u32::MAX))).is_err());
+    }
+
+    fn permute(n: usize) -> MatchRecognizePattern {
+        MatchRecognizePattern::Permute(
+            (0..n)
+                .map(|i| {
+                    MatchRecognizeSymbol::Named(Ident::new_unchecked(format!("v{i}").as_str()))
+                })
+                .collect(),
+        )
+    }
+
+    /// An oversized `PERMUTE` is over the whole-pattern budget as well, so the arity check has to run
+    /// first or the budget's quantifier-shaped message shadows the precise one.
+    #[test]
+    fn oversized_permute_reports_its_arity_not_the_state_budget() {
+        // 7 variables is over the arity cap but *under* the state budget: the arity check is the only
+        // thing that rejects it.
+        assert_eq!(estimate_nfa_states(&permute(7)), 70562);
+        assert!(estimate_nfa_states(&permute(7)) < MAX_PATTERN_NFA_STATES);
+        let seven = validate_pattern(&permute(7)).unwrap_err().to_string();
+        assert!(
+            seven.contains("PERMUTE supports at most 6 variables"),
+            "{seven}"
+        );
+
+        // 8 variables is over both; the arity message must still be the one reported.
+        assert!(estimate_nfa_states(&permute(8)) > MAX_PATTERN_NFA_STATES);
+        let eight = validate_pattern(&permute(8)).unwrap_err().to_string();
+        assert!(
+            eight.contains("PERMUTE supports at most 6 variables"),
+            "{eight}"
+        );
+        assert!(!eight.contains("NFA states"), "{eight}");
+
+        assert!(validate_pattern(&permute(MAX_PERMUTE_VARS)).is_ok());
     }
 }

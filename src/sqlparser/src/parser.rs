@@ -5945,16 +5945,19 @@ impl Parser<'_> {
         &mut self,
     ) -> ModalResult<Option<(RepetitionQuantifier, bool)>> {
         if self.consume_token(&Token::LBrace) {
+            // The quantifier bounds are `u32` in the AST, so parse them as `u32`: a `u64` parse plus
+            // an `as u32` cast would silently wrap (`{4294967296}` to `{0}`, a pattern that matches
+            // nothing) instead of reporting the out-of-range bound.
             let lower = if matches!(self.peek_token().token, Token::Comma) {
                 None
             } else {
-                Some(self.parse_literal_u64()? as u32)
+                Some(self.parse_literal_u32()?)
             };
             let quantifier = if self.consume_token(&Token::Comma) {
                 let upper = if matches!(self.peek_token().token, Token::RBrace) {
                     None
                 } else {
-                    Some(self.parse_literal_u64()? as u32)
+                    Some(self.parse_literal_u32()?)
                 };
                 match (lower, upper) {
                     (Some(n), None) => RepetitionQuantifier::AtLeast(n),

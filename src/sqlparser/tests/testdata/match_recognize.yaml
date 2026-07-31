@@ -23,3 +23,13 @@
     sql parser error: expected DEFINE, found: )
     LINE 1: select * from t match_recognize (pattern (a))
                                                         ^
+- input: select * from t match_recognize (pattern (a{4294967296}) define a as a.x > 0)
+  error_msg: |-
+    sql parser error: invalid u32: number too large to fit in target type
+    LINE 1: select * from t match_recognize (pattern (a{4294967296}) define a as a.x > 0)
+                                                        ^
+- input: select * from t match_recognize (pattern (a{1,4294967296}) define a as a.x > 0)
+  error_msg: |-
+    sql parser error: invalid u32: number too large to fit in target type
+    LINE 1: select * from t match_recognize (pattern (a{1,4294967296}) define a as a.x > 0)
+                                                          ^

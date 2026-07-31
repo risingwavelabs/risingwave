@@ -260,3 +260,256 @@
   stream_error: |-
     Not supported: MATCH_RECOGNIZE emits only final matches (Emit-On-Window-Close semantics)
     HINT: declare the materialized view with EMIT ON WINDOW CLOSE
+- name: MATCH_RECOGNIZE rejects a range quantifier whose lower bound exceeds its upper bound (silently became {5})
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures a.v as m
+      one row per match
+      after match skip past last row
+      pattern (a{5,3} b)
+      define a as a.v > 0, b as b.v < 0
+    );
+  binder_error: |-
+    Not supported: a range quantifier with a lower bound above its upper bound ({5,3})
+    HINT: use {3,5} if the bounds were swapped, or {5} for exactly 5 repetitions
+- name: MATCH_RECOGNIZE rejects a range quantifier above the expansion cap (the NFA is expanded eagerly at actor build time)
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures a.v as m
+      one row per match
+      after match skip past last row
+      pattern (a{2000} b)
+      define a as a.v > 0, b as b.v < 0
+    );
+  binder_error: |-
+    Not supported: a range quantifier bound of 2000
+    HINT: a bound is expanded eagerly into up to 4 NFA states per repetition of a single variable (more for a larger inner pattern), so it may be at most 1000
+- name: MATCH_RECOGNIZE rejects an at-least quantifier above the expansion cap
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures a.v as m
+      one row per match
+      after match skip past last row
+      pattern (a{2000,} b)
+      define a as a.v > 0, b as b.v < 0
+    );
+  binder_error: |-
+    Not supported: a range quantifier bound of 2000
+    HINT: a bound is expanded eagerly into up to 4 NFA states per repetition of a single variable (more for a larger inner pattern), so it may be at most 1000
+- name: MATCH_RECOGNIZE rejects nested quantifiers whose product exceeds the total NFA state budget
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures a.v as m
+      one row per match
+      after match skip past last row
+      pattern ((a{900}){900} b)
+      define a as a.v > 0, b as b.v < 0
+    );
+  binder_error: |-
+    Not supported: a MATCH_RECOGNIZE pattern that expands to about 1620002 NFA states
+    HINT: the pattern is expanded eagerly into at most 100000 states; reduce the quantifier bounds, especially where quantifiers are nested
+- name: MATCH_RECOGNIZE DEFINE rejects extra arguments to PREV (they were silently ignored)
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures a.v as m
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as a.v > 0, b as b.v < prev(b.v, 1, 999)
+    );
+  binder_error: |-
+    Not supported: PREV() with 3 arguments in DEFINE
+    HINT: PREV() takes a column and an optional positive integer offset
+- name: MATCH_RECOGNIZE DEFINE rejects a PREV offset above u32 (it truncated to 0, i.e. the candidate row)
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures a.v as m
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as a.v > 0, b as b.v < prev(b.v, 4294967296)
+    );
+  binder_error: |-
+    Not supported: PREV() offset of 4294967296
+    HINT: the offset is a physical row count carried as a 32-bit value, so it may be at most 4294967295
+- name: MATCH_RECOGNIZE DEFINE rejects FILTER on navigation (it was silently dropped)
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures a.v as m
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as a.v > 0, b as b.v < last(a.v) filter (where a.v > 0)
+    );
+  binder_error: |-
+    Feature is not yet implemented: FILTER on LAST() in MATCH_RECOGNIZE DEFINE
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- name: MATCH_RECOGNIZE DEFINE rejects an OVER clause on navigation (it was silently dropped)
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures a.v as m
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as a.v > 0, b as b.v < last(a.v) over ()
+    );
+  binder_error: |-
+    Feature is not yet implemented: OVER on LAST() in MATCH_RECOGNIZE DEFINE
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- name: MATCH_RECOGNIZE DEFINE rejects DISTINCT on navigation (it was silently dropped)
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures a.v as m
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as a.v > 0, b as b.v < last(distinct a.v)
+    );
+  binder_error: |-
+    Feature is not yet implemented: DISTINCT on LAST() in MATCH_RECOGNIZE DEFINE
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- name: MATCH_RECOGNIZE DEFINE rejects IGNORE NULLS on navigation (it was silently dropped)
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures a.v as m
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as a.v > 0, b as b.v < prev(b.v, 1 ignore nulls)
+    );
+  binder_error: |-
+    Feature is not yet implemented: IGNORE NULLS on PREV() in MATCH_RECOGNIZE DEFINE
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- name: MATCH_RECOGNIZE rejects AFTER MATCH SKIP TO a variable that only appears in DEFINE (it degraded on every match)
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures a.v as m
+      one row per match
+      after match skip to last x
+      pattern (a b)
+      define a as a.v > 0, b as b.v < 0, x as x.v > 100
+    );
+  binder_error: |-
+    Not supported: AFTER MATCH SKIP TO FIRST/LAST x, which is defined in DEFINE but does not appear in PATTERN
+    HINT: the skip target must be a variable of the pattern
+- name: MATCH_RECOGNIZE DEFINE navigation nested in a CASE expression
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures a.v as m
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as a.v > 0, b as b.v < case when prev(b.v) > 0 then prev(b.v) else 0 end
+    );
+  eowc_stream_plan: |-
+    StreamMaterialize { columns: [partition_0, m, _match_id(hidden)], stream_key: [partition_0, _match_id], pk_columns: [partition_0, _match_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [partition_0, m, _match_id] }
+      └─StreamMatchRecognize { partition_by: [$0], order_by: [$1], measures: ["m"], pattern: a b }
+        └─StreamExchange { dist: HashShard(t.id) }
+          └─StreamTableScan { table: t, columns: [t.id, t.ts, t.v, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: MATCH_RECOGNIZE DEFINE navigation nested in an IN list
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures a.v as m
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as a.v > 0, b as b.v in (prev(b.v), last(a.v))
+    );
+  eowc_stream_plan: |-
+    StreamMaterialize { columns: [partition_0, m, _match_id(hidden)], stream_key: [partition_0, _match_id], pk_columns: [partition_0, _match_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [partition_0, m, _match_id] }
+      └─StreamMatchRecognize { partition_by: [$0], order_by: [$1], measures: ["m"], pattern: a b }
+        └─StreamExchange { dist: HashShard(t.id) }
+          └─StreamTableScan { table: t, columns: [t.id, t.ts, t.v, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: MATCH_RECOGNIZE rejects PERMUTE over too many variables by its arity, not by the state budget
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures a.v as m
+      one row per match
+      after match skip past last row
+      pattern (permute(a, b, c, d, e, f, g, h))
+      define a as a.v > 0, b as b.v < 0, c as c.v > 1, d as d.v > 2,
+             e as e.v > 3, f as f.v > 4, g as g.v > 5, h as h.v > 6
+    );
+  binder_error: |-
+    Not supported: PERMUTE over 8 variables (expands to 8! orderings)
+    HINT: PERMUTE supports at most 6 variables
+- name: MATCH_RECOGNIZE DEFINE navigation on the left of IN (subquery) is extracted, not reported as an unknown function
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures a.v as m
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as a.v > 0, b as prev(b.v) in (select v from t)
+    );
+  binder_error: |-
+    Not supported: a subquery in the DEFINE predicate of b
+    HINT: a DEFINE predicate must be a scalar expression over the pattern variables
+- name: MATCH_RECOGNIZE DEFINE navigation nested in IS DISTINCT FROM, LIKE, an array constructor and a subscript
+  sql: |
+    create table t(id int, ts int, v int, s varchar, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures a.v as m
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as a.v > 0,
+             b as (prev(b.v) is distinct from b.v)
+                  and (prev(s) like 'a%')
+                  and ((array[prev(b.v, 2), last(a.v)])[1] < b.v)
+    );
+  eowc_stream_plan: |-
+    StreamMaterialize { columns: [partition_0, m, _match_id(hidden)], stream_key: [partition_0, _match_id], pk_columns: [partition_0, _match_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [partition_0, m, _match_id] }
+      └─StreamMatchRecognize { partition_by: [$0], order_by: [$1], measures: ["m"], pattern: a b }
+        └─StreamExchange { dist: HashShard(t.id) }
+          └─StreamTableScan { table: t, columns: [t.id, t.ts, t.v, t.s, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }

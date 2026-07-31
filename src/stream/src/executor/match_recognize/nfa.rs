@@ -580,6 +580,10 @@ impl NfaBuilder {
         self.states[from].push(Transition::OnVar { var, target: to });
     }
 
+    /// LOCKSTEP: the per-construct state counts below are mirrored by `estimate_nfa_states` in
+    /// `frontend/src/binder/relation/match_recognize.rs`, which rejects a pattern whose expansion
+    /// would exhaust memory here. No test can span the two crates, so changing how many states a
+    /// construct allocates requires updating that estimator in the same change.
     fn build(&mut self, pattern: &Pattern) -> Fragment {
         match pattern {
             Pattern::Var(v) => {
@@ -630,6 +634,7 @@ impl NfaBuilder {
         }
     }
 
+    /// LOCKSTEP with `estimate_nfa_states` — see [`Self::build`].
     fn build_quantified(&mut self, inner: &Pattern, q: &Quantifier, reluctant: bool) -> Fragment {
         match q {
             Quantifier::Star => self.build_star(inner, reluctant),
@@ -662,6 +667,7 @@ impl NfaBuilder {
         }
     }
 
+    /// LOCKSTEP with `estimate_nfa_states` — see [`Self::build`].
     fn build_star(&mut self, inner: &Pattern, reluctant: bool) -> Fragment {
         let start = self.new_state();
         let accept = self.new_state();
@@ -683,6 +689,8 @@ impl NfaBuilder {
         Fragment { start, accept }
     }
 
+    /// LOCKSTEP with `estimate_nfa_states` — see [`Self::build`]. The bounds reaching here are already
+    /// capped at bind time precisely because this expansion is eager.
     fn build_range(
         &mut self,
         inner: &Pattern,

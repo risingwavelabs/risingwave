@@ -421,19 +421,10 @@ fn lower_pattern(
         }
         Pat::Permute(symbols) => {
             // PERMUTE expands to the alternation of all n! orderings of its variables, so the NFA
-            // grows factorially. Cap the variable count to keep that bounded.
-            const MAX_PERMUTE_VARS: usize = 6;
-            if symbols.len() > MAX_PERMUTE_VARS {
-                return Err(crate::error::ErrorCode::NotSupported(
-                    format!(
-                        "PERMUTE over {} variables (expands to {}! orderings)",
-                        symbols.len(),
-                        symbols.len()
-                    ),
-                    format!("PERMUTE supports at most {MAX_PERMUTE_VARS} variables"),
-                )
-                .into());
-            }
+            // grows factorially. Cap the variable count to keep that bounded. The binder already
+            // rejects this (`validate_pattern`), which is what a user sees; the same check here keeps
+            // the cap attached to the expansion it protects.
+            crate::binder::reject_oversized_permute(symbols.len())?;
             Ok(node(Node::Permute(MatchRecognizePermutePattern {
                 vars: symbols
                     .iter()
@@ -457,6 +448,11 @@ fn lower_pattern(
 
 /// Map a `RepetitionQuantifier` to the proto quantifier. `*`, `+`, `?` map to their dedicated
 /// kinds; the `{...}` forms all map to `RANGE` with an explicit `min` and an optional `max`.
+///
+/// The bounds are validated at bind time (`binder::relation::match_recognize`: `validate_pattern`),
+/// which is the last point at which a bad bound can be reported to the author: the NFA is expanded
+/// from these bounds in `Nfa::compile`, on the compute node, when the actor is built — long after the
+/// statement has been acknowledged.
 fn lower_quantifier(
     quantifier: &risingwave_sqlparser::ast::RepetitionQuantifier,
 ) -> risingwave_pb::stream_plan::MatchRecognizeQuantifier {

@@ -47,6 +47,187 @@ select * from src match_recognize (
 )
 emit on window close;
 
+# PREV/NEXT carry the offset to the executor as a u32, so an offset that does not fit would wrap --
+# and wrapping past u32 lands on 0, i.e. the candidate row, the case rejected just above.
+statement error PREV.. offset of 4294967296
+create materialized view bad_offset_huge as
+select * from src match_recognize (
+  partition by id
+  order by ts
+  measures a.v as m
+  one row per match
+  pattern (a b)
+  define a as a.v > 0, b as b.v < prev(b.v, 4294967296)
+)
+emit on window close;
+
+# Only the function name and argument list of a navigation call are read, so anything past the offset
+# would be silently ignored.
+statement error with 3 arguments in DEFINE
+create materialized view bad_prev_arity as
+select * from src match_recognize (
+  partition by id
+  order by ts
+  measures a.v as m
+  one row per match
+  pattern (a b)
+  define a as a.v > 0, b as b.v < prev(b.v, 1, 999)
+)
+emit on window close;
+
+# ... and the same holds for every function-call modifier: it would be dropped and the plain call
+# evaluated, so each is rejected in DEFINE exactly as it already is in MEASURES.
+statement error FILTER on LAST
+create materialized view bad_define_filter as
+select * from src match_recognize (
+  partition by id
+  order by ts
+  measures a.v as m
+  one row per match
+  pattern (a b)
+  define a as a.v > 0, b as b.v < last(a.v) filter (where a.v > 0)
+)
+emit on window close;
+
+statement error OVER on LAST
+create materialized view bad_define_over as
+select * from src match_recognize (
+  partition by id
+  order by ts
+  measures a.v as m
+  one row per match
+  pattern (a b)
+  define a as a.v > 0, b as b.v < last(a.v) over ()
+)
+emit on window close;
+
+statement error DISTINCT on LAST
+create materialized view bad_define_distinct as
+select * from src match_recognize (
+  partition by id
+  order by ts
+  measures a.v as m
+  one row per match
+  pattern (a b)
+  define a as a.v > 0, b as b.v < last(distinct a.v)
+)
+emit on window close;
+
+statement error IGNORE NULLS on PREV
+create materialized view bad_define_ignore_nulls as
+select * from src match_recognize (
+  partition by id
+  order by ts
+  measures a.v as m
+  one row per match
+  pattern (a b)
+  define a as a.v > 0, b as b.v < prev(b.v, 1 ignore nulls)
+)
+emit on window close;
+
+# Navigation nested in an AST node the extractor has to traverse: these used to fail with a
+# misleading "function prev does not exist".
+statement ok
+create materialized view nested_nav as
+select * from src match_recognize (
+  partition by id
+  order by ts
+  measures a.v as m
+  one row per match
+  pattern (a b)
+  define a as a.v > 0,
+         b as b.v < case when prev(b.v) > 0 then prev(b.v) else 0 end
+                and b.v not in (prev(b.v, 2), last(a.v))
+                and (prev(b.v) is distinct from b.v)
+                and ((array[prev(b.v, 2), last(a.v)])[1] < b.v)
+)
+emit on window close;
+
+statement ok
+drop materialized view nested_nav;
+
+# The left-hand operand of `IN (subquery)` is outside the subquery, so navigation there is extracted
+# and the predicate is then rejected for the subquery itself -- not for an "unknown function".
+statement error subquery in the DEFINE predicate
+create materialized view bad_define_subquery as
+select * from src match_recognize (
+  partition by id
+  order by ts
+  measures a.v as m
+  one row per match
+  pattern (a b)
+  define a as a.v > 0, b as prev(b.v) in (select v from src)
+)
+emit on window close;
+
+# A range quantifier is expanded eagerly into NFA states when the actor is built, i.e. after the DDL
+# has been committed, so a bound that cannot be expanded has to be rejected here.
+statement error lower bound above its upper bound
+create materialized view bad_range_inverted as
+select * from src match_recognize (
+  partition by id
+  order by ts
+  measures a.v as m
+  one row per match
+  pattern (a{5,3} b)
+  define a as a.v > 0, b as b.v < 0
+)
+emit on window close;
+
+statement error range quantifier bound of 2000
+create materialized view bad_range_too_large as
+select * from src match_recognize (
+  partition by id
+  order by ts
+  measures a.v as m
+  one row per match
+  pattern (a{2000} b)
+  define a as a.v > 0, b as b.v < 0
+)
+emit on window close;
+
+# Nested quantifiers multiply, so bounds that are individually legal can still expand out of range.
+statement error NFA states
+create materialized view bad_range_nested as
+select * from src match_recognize (
+  partition by id
+  order by ts
+  measures a.v as m
+  one row per match
+  pattern ((a{900}){900} b)
+  define a as a.v > 0, b as b.v < 0
+)
+emit on window close;
+
+# A bound above u32 used to wrap to 0, i.e. a pattern that can never match; the parser rejects it.
+statement error invalid u32
+create materialized view bad_range_overflow as
+select * from src match_recognize (
+  partition by id
+  order by ts
+  measures a.v as m
+  one row per match
+  pattern (a{4294967296} b)
+  define a as a.v > 0, b as b.v < 0
+)
+emit on window close;
+
+# AFTER MATCH SKIP TO FIRST/LAST looks its target up among the labels of a completed match, so a
+# variable that only exists as a DEFINE symbol can never be found and the skip would silently
+# degrade to skipping past the last row -- on every match, forever.
+statement error does not appear in PATTERN
+create materialized view bad_skip_define_only as
+select * from src match_recognize (
+  partition by id
+  order by ts
+  measures a.v as m
+  one row per match
+  after match skip to last x
+  pattern (a b)
+  define a as a.v > 0, b as b.v < 0, x as x.v > 100
+)
+emit on window close;
+
 # The executor matches over an append-only sequence and emits insert-only results; a non-append-only
 # input (here, an aggregation that produces a retract stream) must be rejected during planning.
 statement ok

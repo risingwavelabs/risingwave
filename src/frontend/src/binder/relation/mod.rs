@@ -44,6 +44,7 @@ mod window_table_function;
 
 pub use gap_fill::BoundGapFill;
 pub use join::BoundJoin;
+pub(crate) use match_recognize::reject_oversized_permute;
 pub use match_recognize::{
     BoundMatchRecognize, BoundMeasure, BoundSymbolDefinition, DefineSlotKind, MeasureSlotKind,
 };
