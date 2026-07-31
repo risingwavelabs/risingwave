@@ -405,7 +405,10 @@ statement ok
 drop source variant_alter_source_t;
 
 # ENCODE PARQUET reads variant via the Parquet Variant extension type, so ALTER may add one.
+# Skipped under madsim: once the source is created, the meta split enumerator lists the
+# directory via real tokio::fs, which panics outside a tokio runtime.
 
+skipif madsim
 statement ok
 create source variant_alter_parquet_source_t (id int)
 with (
@@ -414,9 +417,11 @@ with (
     match_pattern = '*.parquet'
 ) format plain encode parquet;
 
+skipif madsim
 statement ok
 alter source variant_alter_parquet_source_t add column v variant;
 
+skipif madsim
 statement ok
 drop source variant_alter_parquet_source_t;
 
