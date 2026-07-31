@@ -1022,6 +1022,16 @@ impl Binder {
             // f
             // ```
             AstDataType::Char(_) => self.bind_cast_inner(expr, &DataType::Varchar),
+            AstDataType::Custom(s) if s.real_value() == "regtype" => {
+                let input = self.bind_expr_inner(expr)?;
+                Ok(ExprImpl::FunctionCall(Box::new(
+                    FunctionCall::new_unchecked(
+                        ExprType::FormatType,
+                        vec![input, ExprImpl::literal_null(DataType::Int32)],
+                        DataType::Varchar,
+                    ),
+                )))
+            }
             _ => self.bind_cast_inner(expr, &bind_data_type(data_type)?),
         }
     }
