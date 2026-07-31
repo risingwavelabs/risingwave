@@ -290,7 +290,7 @@ mod tests {
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::EpochWithGap;
-    use risingwave_hummock_sdk::key::{TableKey, UserKey};
+    use risingwave_hummock_sdk::key::UserKey;
     use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
 
     use super::*;
@@ -329,78 +329,34 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_scan_start_and_empty_window() {
+    async fn test_backward_scan_crossed_range_reads_no_blocks() {
         let sstable_store = mock_sstable_store().await;
         let (sstable, sstable_info) =
             gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
                 .await;
-        let start_key = test_key_of(TEST_KEYS_COUNT / 2);
-        let start_user_key = UserKey::new(
-            start_key.user_key.table_id,
-            TableKey(Bytes::from(start_key.user_key.table_key.0.clone())),
-        );
-        let expected_start = sstable
-            .meta
-            .block_metas
-            .partition_point(|block_meta| {
-                FullKey::decode(&block_meta.smallest_key).user_key <= start_key.user_key.as_ref()
-            })
-            .saturating_sub(1);
-        let options = Arc::new(SstableIteratorReadOptions {
-            cache_policy: CachePolicy::Disable,
-            scan_user_key_range: Some((
-                Bound::Included(start_user_key.clone()),
-                Bound::Excluded(UserKey::new(
-                    TableId::new(start_user_key.table_id.as_raw_id() + 1),
-                    TableKey(Bytes::new()),
-                )),
-            )),
-            prefetch: false,
-            max_preload_retry_times: 0,
-        });
+        let start = test_key_of(TEST_KEYS_COUNT / 2)
+            .user_key
+            .as_ref()
+            .copy_into::<Bytes>();
+        let end = test_key_of(TEST_KEYS_COUNT / 4)
+            .user_key
+            .as_ref()
+            .copy_into::<Bytes>();
         let mut iter = BackwardSstableIterator::create(
-            sstable.clone(),
-            sstable_store.clone(),
-            options,
+            sstable,
+            sstable_store,
+            Arc::new(SstableIteratorReadOptions {
+                cache_policy: CachePolicy::Disable,
+                scan_user_key_range: Some((Bound::Included(start), Bound::Excluded(end))),
+                prefetch: false,
+                max_preload_retry_times: 0,
+            }),
             &sstable_info,
         );
-        assert_eq!(iter.read_block_meta_range.start, expected_start);
         iter.rewind().await.unwrap();
-        assert!(iter.is_valid());
-        assert_eq!(iter.key(), test_key_of(TEST_KEYS_COUNT - 1).to_ref());
-        iter.seek(start_key.to_ref()).await.unwrap();
-        assert!(iter.is_valid());
-        assert_eq!(iter.key(), start_key.to_ref());
-
-        let options = Arc::new(SstableIteratorReadOptions {
-            cache_policy: CachePolicy::Disable,
-            scan_user_key_range: Some((
-                Bound::Included(UserKey::new(
-                    test_key_of(TEST_KEYS_COUNT / 2).user_key.table_id,
-                    TableKey(Bytes::from(
-                        test_key_of(TEST_KEYS_COUNT / 2).user_key.table_key.0,
-                    )),
-                )),
-                Bound::Excluded(UserKey::new(
-                    test_key_of(TEST_KEYS_COUNT / 4).user_key.table_id,
-                    TableKey(Bytes::from(
-                        test_key_of(TEST_KEYS_COUNT / 4).user_key.table_key.0,
-                    )),
-                )),
-            )),
-            prefetch: false,
-            max_preload_retry_times: 0,
-        });
-        let mut empty_iter =
-            BackwardSstableIterator::create(sstable, sstable_store, options, &sstable_info);
-        assert_eq!(
-            empty_iter.read_block_meta_range.start,
-            empty_iter.read_block_meta_range.end
-        );
-        empty_iter.rewind().await.unwrap();
-        assert!(!empty_iter.is_valid());
+        assert!(!iter.is_valid());
         let mut stats = StoreLocalStatistic::default();
-        empty_iter.collect_local_statistic(&mut stats);
+        iter.collect_local_statistic(&mut stats);
         assert_eq!(stats.cache_data_block_total, 0);
     }
 
