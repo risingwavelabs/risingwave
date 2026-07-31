@@ -5,6 +5,10 @@ sparksql --e "
 DROP TABLE IF EXISTS demo.demo_db.test_append_only_cow PURGE;
 DROP TABLE IF EXISTS demo.demo_db.test_append_only_mor PURGE;
 DROP TABLE IF EXISTS demo.demo_db.test_append_only_default PURGE;
+CREATE TABLE demo.demo_db.test_append_only_mor (id BIGINT, data STRING)
+TBLPROPERTIES ('format-version'='2');
+CREATE TABLE demo.demo_db.test_append_only_default (id BIGINT, data STRING)
+TBLPROPERTIES ('format-version'='2');
 "
 
 statement ok
@@ -50,13 +54,13 @@ CREATE SINK s_append_only_mor AS SELECT * FROM t_append_only WITH (
     s3.region = 'us-east-1',
     s3.access.key = 'hummockadmin',
     s3.secret.key = 'hummockadmin',
-    create_table_if_not_exists = 'true',
+    create_table_if_not_exists = 'false',
     write_mode = 'merge-on-read'
 );
 
-# Wait until the sink writer has initialized its target table before dropping
-# it. Otherwise the writer can race with the external-catalog cleanup below and
-# recreate the table after it has been purged.
+# Exercise the sink writer before dropping it. The external target is
+# pre-created and auto-creation is disabled so that a delayed writer cannot
+# recreate the table after the cleanup below.
 statement ok
 INSERT INTO t_append_only VALUES (1, 'explicit');
 
@@ -81,7 +85,7 @@ CREATE SINK s_append_only_default AS SELECT * FROM t_append_only WITH (
     s3.region = 'us-east-1',
     s3.access.key = 'hummockadmin',
     s3.secret.key = 'hummockadmin',
-    create_table_if_not_exists = 'true'
+    create_table_if_not_exists = 'false'
 );
 
 statement ok
