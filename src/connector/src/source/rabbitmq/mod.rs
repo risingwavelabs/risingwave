@@ -62,11 +62,15 @@ pub struct RabbitmqProperties {
     #[serde(rename = "url")]
     pub url: String,
 
-    /// A single queue name to consume. Use either `queue` or `queues`.
+    /// A single queue name to consume. Use either `queue` or `queues`. RabbitMQ queues use
+    /// competing-consumer semantics; independent subscribers need separate queues bound to the
+    /// publishing exchange.
     #[serde(rename = "queue")]
     pub queue: Option<String>,
 
     /// Comma-separated queue names. Each queue has at most one active consumer in one RW source.
+    /// RabbitMQ distributes a queue's deliveries among every consumer, including consumers outside
+    /// this source; independent subscribers need separate queues.
     #[serde(rename = "queues")]
     pub queues: Option<String>,
 
@@ -208,7 +212,6 @@ impl RabbitmqProperties {
     pub fn connection_attempts(&self) -> usize {
         self.connection_attempts
             .unwrap_or(DEFAULT_CONNECTION_ATTEMPTS)
-            .max(1)
     }
 
     pub fn retry_delay(&self) -> Duration {
@@ -265,6 +268,10 @@ impl RabbitmqProperties {
             "RabbitMQ source max_connections must be <= {MAX_CONNECTIONS} to honor broker vhost connection limits"
         );
         ensure!(
+            self.connection_attempts() > 0,
+            "RabbitMQ source connection_attempts must be greater than 0"
+        );
+        ensure!(
             self.blocked_connection_timeout() > Duration::ZERO,
             "RabbitMQ source blocked_connection_timeout must be greater than 0"
         );
@@ -306,7 +313,8 @@ impl RabbitmqProperties {
     pub async fn connect(&self) -> ConnectorResult<Connection> {
         self.validate()?;
         let url = self.connection_url()?;
-        let strategy = FixedInterval::new(self.retry_delay()).take(self.connection_attempts());
+        // `Retry` always performs the action once, then consumes one delay per retry.
+        let strategy = FixedInterval::new(self.retry_delay()).take(self.connection_attempts() - 1);
         let props = ConnectionProperties::default();
         Retry::spawn(strategy, || {
             let url = url.clone();
@@ -455,6 +463,34 @@ mod tests {
                 .to_string()
                 .contains("max_connections")
         );
+    }
+
+    #[test]
+    fn reject_zero_connection_attempts() {
+        let props = parse(&[("connection_attempts", "0")]);
+        assert!(
+            props
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("connection_attempts")
+        );
+    }
+
+    #[test]
+    fn connection_attempts_count_initial_try() {
+        for attempts in [1, 2, 5] {
+            let attempts = attempts.to_string();
+            let props = parse(&[("connection_attempts", &attempts)]);
+            props.validate().unwrap();
+            assert_eq!(
+                FixedInterval::new(props.retry_delay())
+                    .take(props.connection_attempts() - 1)
+                    .count()
+                    + 1,
+                props.connection_attempts()
+            );
+        }
     }
 
     #[test]

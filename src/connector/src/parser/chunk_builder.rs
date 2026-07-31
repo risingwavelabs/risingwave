@@ -159,6 +159,15 @@ impl SourceStreamChunkBuilder {
         self.finish_current_chunk(); // each heartbeat should be a separate chunk
     }
 
+    /// Write an invisible row that advances connector-internal state without producing user data.
+    pub fn invisible_progress(&mut self, meta: MessageMeta<'_>) {
+        _ = self
+            .row_writer()
+            .invisible()
+            .with_meta(meta)
+            .do_insert(|_| Ok(Datum::None));
+    }
+
     /// Finish and build a [`StreamChunk`] from the current pending records in the builder,
     /// no matter whether the builder is in a transaction or not, `split_txn` or not. The
     /// built chunk will be appended to the `ready_chunks` and the builder will be reset.

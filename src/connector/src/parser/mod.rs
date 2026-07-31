@@ -480,6 +480,18 @@ async fn parse_message_stream<P: ByteStreamSourceParser>(
                             context.source_name.clone(),
                             context.fragment_id.to_string(),
                         ]);
+
+                        // RabbitMQ has no replayable offset. A skipped delivery still has to
+                        // advance the checkpoint-aligned cumulative ACK frontier; otherwise a
+                        // full prefetch window of malformed messages permanently exhausts QoS
+                        // credit and prevents a later valid delivery from arriving.
+                        if matches!(&msg.meta, SourceMeta::Rabbitmq(_)) {
+                            chunk_builder.invisible_progress(MessageMeta {
+                                source_meta: &msg.meta,
+                                split_id: &msg.split_id,
+                                offset: &msg.offset,
+                            });
+                        }
                     }
 
                     for chunk in chunk_builder.consume_ready_chunks() {
@@ -686,5 +698,61 @@ pub mod test_utils {
             .unwrap()
             .unwrap()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use futures::{StreamExt, stream};
+    use risingwave_common::array::Array;
+    use risingwave_common::types::DataType;
+    use risingwave_pb::plan_common::additional_column::ColumnType;
+    use risingwave_pb::plan_common::{AdditionalColumn, AdditionalColumnRabbitmqAckData};
+
+    use super::*;
+    use crate::source::rabbitmq::source::RabbitmqMeta;
+    use crate::source::{SourceMessage, SplitId};
+
+    #[tokio::test]
+    async fn rabbitmq_parse_error_emits_invisible_ack_progress() {
+        let mut ack_column =
+            SourceColumnDesc::simple("_rw_rabbitmq_ack_data", DataType::Bytea, 1.into());
+        ack_column.is_hidden_addition_col = true;
+        ack_column.additional_column = AdditionalColumn {
+            column_type: Some(ColumnType::RabbitmqAckData(
+                AdditionalColumnRabbitmqAckData {},
+            )),
+        };
+        let columns = vec![
+            SourceColumnDesc::simple("id", DataType::Int32, 0.into()),
+            ack_column,
+        ];
+        let parser = PlainParser::new(
+            SpecificParserConfig::DEFAULT_PLAIN_JSON,
+            columns,
+            SourceContext::dummy().into(),
+        )
+        .await
+        .unwrap();
+        let ack_data = vec![1, 2, 3, 4];
+        let message = SourceMessage {
+            payload: Some(b"not-json".to_vec()),
+            split_id: SplitId::from("0"),
+            offset: "q:1:1".to_owned(),
+            meta: SourceMeta::Rabbitmq(RabbitmqMeta {
+                ack_data: Some(ack_data.clone()),
+            }),
+            ..SourceMessage::dummy()
+        };
+        let mut events = Box::pin(parser.parse_stream_with_events(
+            stream::once(async { Ok(SourceMessageEvent::Data(vec![message])) }).boxed(),
+        ));
+
+        let SourceReaderEvent::DataChunk(chunk) = events.next().await.unwrap().unwrap() else {
+            panic!("parse error should emit an invisible progress chunk");
+        };
+        assert_eq!(chunk.capacity(), 1);
+        assert_eq!(chunk.cardinality(), 0);
+        assert_eq!(chunk.column_at(1).as_bytea().value_at(0), Some(&*ack_data));
     }
 }

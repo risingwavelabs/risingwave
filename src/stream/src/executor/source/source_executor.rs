@@ -45,7 +45,7 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::time::Instant;
 
 use super::executor_core::StreamSourceCore;
-use super::{barrier_to_message_stream, get_split_offset_col_idx, prune_additional_cols};
+use super::{barrier_to_message_stream, get_source_state_col_indices, prune_additional_cols};
 use crate::executor::UpdateMutation;
 use crate::executor::prelude::*;
 use crate::executor::source::reader_stream::{SourceReaderEventWithState, StreamReaderBuilder};
@@ -622,7 +622,7 @@ impl<S: StateStore> SourceExecutor<S> {
         )
         .await?;
 
-        let source_state_column_indices = get_split_offset_col_idx(&source_desc.columns);
+        let source_state_column_indices = get_source_state_col_indices(&source_desc.columns);
         let (Some(split_idx), Some(offset_idx)) = (
             source_state_column_indices.split_idx,
             source_state_column_indices.offset_idx,

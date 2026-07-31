@@ -117,6 +117,25 @@ class RabbitmqAdmin:
                     f"RabbitMQ publish did not route message {message_id}: {response.text}"
                 )
 
+    def publish_raw(
+        self, exchange: str, routing_key: str, count: int, payload: str
+    ) -> None:
+        for seq in range(count):
+            response = self._request(
+                "POST",
+                ("exchanges", self.vhost, exchange, "publish"),
+                json={
+                    "properties": {"content_type": "application/octet-stream"},
+                    "routing_key": routing_key,
+                    "payload": payload,
+                    "payload_encoding": "string",
+                },
+            )
+            if response.json().get("routed") is not True:
+                raise RuntimeError(
+                    f"RabbitMQ raw publish did not route message {seq}: {response.text}"
+                )
+
     def queue_stats(
         self,
         queue: str,
@@ -175,6 +194,12 @@ def main() -> int:
     p.add_argument("--start-id", type=int, default=0)
     p.add_argument("--value-prefix", default="message")
 
+    p = sub.add_parser("publish-raw")
+    p.add_argument("--exchange", required=True)
+    p.add_argument("--routing-key", required=True)
+    p.add_argument("--count", type=int, required=True)
+    p.add_argument("--payload", required=True)
+
     p = sub.add_parser("queue-stats")
     p.add_argument("--queue", required=True)
     p.add_argument("--expect-ready", type=int, required=True)
@@ -201,6 +226,9 @@ def main() -> int:
             args.start_id,
             args.value_prefix,
         )
+    elif args.command == "publish-raw":
+        admin.health()
+        admin.publish_raw(args.exchange, args.routing_key, args.count, args.payload)
     elif args.command == "queue-stats":
         admin.health()
         admin.queue_stats(

@@ -34,7 +34,7 @@ use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;
 use crate::executor::source::{
     StreamSourceCore, apply_rate_limit_with_for_streaming_file_source_reader,
-    get_split_offset_col_idx, prune_additional_cols, source_reader_event_to_chunk_stream,
+    get_source_state_col_indices, prune_additional_cols, source_reader_event_to_chunk_stream,
 };
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::task::LocalBarrierManager;
@@ -194,8 +194,11 @@ where
             .build()
             .map_err(StreamExecutorError::connector_error)?;
 
-        let (Some(split_idx), Some(offset_idx), _) = get_split_offset_col_idx(&source_desc.columns)
-        else {
+        let source_state_column_indices = get_source_state_col_indices(&source_desc.columns);
+        let (Some(split_idx), Some(offset_idx)) = (
+            source_state_column_indices.split_idx,
+            source_state_column_indices.offset_idx,
+        ) else {
             unreachable!("Partition and offset columns must be set.");
         };
 

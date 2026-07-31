@@ -97,7 +97,7 @@ pub struct SourceStateColumnIndices {
 }
 
 /// Get the indices of internal source-state columns.
-pub fn get_split_offset_col_idx(column_descs: &[SourceColumnDesc]) -> SourceStateColumnIndices {
+pub fn get_source_state_col_indices(column_descs: &[SourceColumnDesc]) -> SourceStateColumnIndices {
     let mut split_idx = None;
     let mut offset_idx = None;
     let mut pulsar_message_id_idx = None;
@@ -316,7 +316,7 @@ mod tests {
         ];
 
         assert_eq!(
-            get_split_offset_col_idx(&columns),
+            get_source_state_col_indices(&columns),
             SourceStateColumnIndices {
                 split_idx: None,
                 offset_idx: None,
