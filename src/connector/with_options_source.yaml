@@ -1466,7 +1466,7 @@ RabbitmqProperties:
   - name: queue
     field_type: String
     comments: |-
-      A single queue name to consume. Use either `queue` or `queues`. RabbitMQ queues use
+      A single queue name to consume. Use either `queue` or `queues`. `RabbitMQ` queues use
       competing-consumer semantics; independent subscribers need separate queues bound to the
       publishing exchange.
     required: false
@@ -1474,7 +1474,7 @@ RabbitmqProperties:
     field_type: String
     comments: |-
       Comma-separated queue names. Each queue has at most one active consumer in one RW source.
-      RabbitMQ distributes a queue's deliveries among every consumer, including consumers outside
+      `RabbitMQ` distributes a queue's deliveries among every consumer, including consumers outside
       this source; independent subscribers need separate queues.
     required: false
   - name: prefetch_count

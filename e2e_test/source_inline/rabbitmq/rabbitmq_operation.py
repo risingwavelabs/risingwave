@@ -71,15 +71,17 @@ class RabbitmqAdmin:
                 )
 
     def setup(self, exchange: str, queue: str, routing_key: str) -> None:
+        # RabbitMQ 4.x rejects deprecated transient non-exclusive queues by default.
+        # Durable test resources also let recovery tests restart the broker safely.
         self._request(
             "PUT",
             ("exchanges", self.vhost, exchange),
-            json={"type": "direct", "durable": False, "auto_delete": False, "arguments": {}},
+            json={"type": "direct", "durable": True, "auto_delete": False, "arguments": {}},
         )
         self._request(
             "PUT",
             ("queues", self.vhost, queue),
-            json={"durable": False, "auto_delete": False, "arguments": {}},
+            json={"durable": True, "auto_delete": False, "arguments": {}},
         )
         self._request(
             "POST",
@@ -105,7 +107,10 @@ class RabbitmqAdmin:
                 "POST",
                 ("exchanges", self.vhost, exchange, "publish"),
                 json={
-                    "properties": {"content_type": "application/json"},
+                    "properties": {
+                        "content_type": "application/json",
+                        "delivery_mode": 2,
+                    },
                     "routing_key": routing_key,
                     "payload": payload,
                     "payload_encoding": "string",
@@ -125,7 +130,10 @@ class RabbitmqAdmin:
                 "POST",
                 ("exchanges", self.vhost, exchange, "publish"),
                 json={
-                    "properties": {"content_type": "application/octet-stream"},
+                    "properties": {
+                        "content_type": "application/octet-stream",
+                        "delivery_mode": 2,
+                    },
                     "routing_key": routing_key,
                     "payload": payload,
                     "payload_encoding": "string",

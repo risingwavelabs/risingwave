@@ -62,14 +62,14 @@ pub struct RabbitmqProperties {
     #[serde(rename = "url")]
     pub url: String,
 
-    /// A single queue name to consume. Use either `queue` or `queues`. RabbitMQ queues use
+    /// A single queue name to consume. Use either `queue` or `queues`. `RabbitMQ` queues use
     /// competing-consumer semantics; independent subscribers need separate queues bound to the
     /// publishing exchange.
     #[serde(rename = "queue")]
     pub queue: Option<String>,
 
     /// Comma-separated queue names. Each queue has at most one active consumer in one RW source.
-    /// RabbitMQ distributes a queue's deliveries among every consumer, including consumers outside
+    /// `RabbitMQ` distributes a queue's deliveries among every consumer, including consumers outside
     /// this source; independent subscribers need separate queues.
     #[serde(rename = "queues")]
     pub queues: Option<String>,
