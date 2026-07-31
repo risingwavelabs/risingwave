@@ -45,7 +45,9 @@ pub use gap_fill::BoundGapFill;
 pub use join::BoundJoin;
 pub use share::{BoundShare, BoundShareInput};
 pub use subquery::BoundSubquery;
-pub use table_or_source::{BoundBaseTable, BoundSource, BoundSystemTable};
+pub use table_or_source::{
+    BoundBaseTable, BoundIcebergMetadataTable, BoundSource, BoundSystemTable,
+};
 pub use watermark::BoundWatermark;
 pub use window_table_function::{BoundWindowTableFunction, WindowTableFunctionKind};
 
@@ -58,6 +60,7 @@ pub enum Relation {
     Source(Box<BoundSource>),
     BaseTable(Box<BoundBaseTable>),
     SystemTable(Box<BoundSystemTable>),
+    IcebergMetadataTable(Box<BoundIcebergMetadataTable>),
     Subquery(Box<BoundSubquery>),
     Join(Box<BoundJoin>),
     Apply(Box<BoundJoin>),

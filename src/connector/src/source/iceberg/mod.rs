@@ -26,7 +26,7 @@ use futures_async_stream::{for_await, try_stream};
 use iceberg::Catalog;
 use iceberg::expr::{BoundPredicate, Predicate as IcebergPredicate};
 use iceberg::scan::FileScanTask;
-use iceberg::spec::FormatVersion;
+use iceberg::spec::{FormatVersion, TableMetadata};
 use iceberg::table::Table;
 pub use parquet_file_handler::*;
 use phf::{Set, phf_set};
@@ -279,26 +279,28 @@ impl IcebergSplitEnumerator {
         table: &Table,
         time_travel_info: Option<IcebergTimeTravelInfo>,
     ) -> ConnectorResult<Option<i64>> {
-        let current_snapshot = table.metadata().current_snapshot();
-        let Some(current_snapshot) = current_snapshot else {
-            return Ok(None);
-        };
+        Self::get_snapshot_id_from_metadata(table.metadata(), time_travel_info)
+    }
 
+    fn get_snapshot_id_from_metadata(
+        metadata: &TableMetadata,
+        time_travel_info: Option<IcebergTimeTravelInfo>,
+    ) -> ConnectorResult<Option<i64>> {
         let snapshot_id = match time_travel_info {
             Some(IcebergTimeTravelInfo::Version(version)) => {
-                let Some(snapshot) = table.metadata().snapshot_by_id(version) else {
+                let Some(snapshot) = metadata.snapshot_by_id(version) else {
                     bail!("Cannot find the snapshot id in the iceberg table.");
                 };
-                snapshot.snapshot_id()
+                Some(snapshot.snapshot_id())
             }
             Some(IcebergTimeTravelInfo::TimestampMs(timestamp)) => {
-                let snapshot = table
-                    .metadata()
-                    .snapshots()
-                    .filter(|snapshot| snapshot.timestamp_ms() <= timestamp)
-                    .max_by_key(|snapshot| snapshot.timestamp_ms());
-                match snapshot {
-                    Some(snapshot) => snapshot.snapshot_id(),
+                let snapshot_log = metadata
+                    .history()
+                    .iter()
+                    .rev()
+                    .find(|snapshot_log| snapshot_log.timestamp_ms() <= timestamp);
+                match snapshot_log {
+                    Some(snapshot_log) => Some(snapshot_log.snapshot_id),
                     None => {
                         // convert unix time to human-readable time
                         let time = chrono::DateTime::from_timestamp_millis(timestamp);
@@ -311,9 +313,9 @@ impl IcebergSplitEnumerator {
                     }
                 }
             }
-            None => current_snapshot.snapshot_id(),
+            None => metadata.current_snapshot_id(),
         };
-        Ok(Some(snapshot_id))
+        Ok(snapshot_id)
     }
 
     pub async fn list_scan_tasks(
@@ -608,12 +610,117 @@ impl SplitReader for IcebergFileReader {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::sync::Arc;
 
     use iceberg::scan::FileScanTask;
-    use iceberg::spec::{DataContentType, Schema};
+    use iceberg::spec::{
+        DataContentType, FormatVersion, MAIN_BRANCH, NestedField, Operation, PrimitiveType, Schema,
+        Snapshot, SortOrder, Summary, TableMetadataBuilder, Type, UnboundPartitionSpec,
+    };
 
     use super::*;
+
+    fn test_snapshot(
+        snapshot_id: i64,
+        parent_snapshot_id: Option<i64>,
+        timestamp_ms: i64,
+    ) -> Snapshot {
+        Snapshot::builder()
+            .with_snapshot_id(snapshot_id)
+            .with_parent_snapshot_id(parent_snapshot_id)
+            .with_sequence_number(snapshot_id)
+            .with_timestamp_ms(timestamp_ms)
+            .with_manifest_list(format!("/snap-{snapshot_id}.avro"))
+            .with_summary(Summary {
+                operation: Operation::Append,
+                additional_properties: HashMap::new(),
+            })
+            .with_schema_id(0)
+            .build()
+    }
+
+    fn test_table_metadata_builder() -> TableMetadataBuilder {
+        TableMetadataBuilder::new(
+            Schema::builder()
+                .with_fields(vec![
+                    NestedField::new(1, "id", Type::Primitive(PrimitiveType::Long), false).into(),
+                ])
+                .build()
+                .unwrap(),
+            UnboundPartitionSpec::builder().build(),
+            SortOrder::unsorted_order(),
+            "s3://warehouse/db/table".to_owned(),
+            FormatVersion::V2,
+            HashMap::new(),
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn test_get_snapshot_id_uses_main_branch_history_for_timestamp() {
+        let metadata = test_table_metadata_builder()
+            .set_branch_snapshot(test_snapshot(1, None, 1_000), MAIN_BRANCH)
+            .unwrap()
+            .build()
+            .unwrap()
+            .metadata;
+        let metadata = metadata
+            .into_builder(Some("s3://warehouse/db/table/v2.metadata.json".to_owned()))
+            .set_branch_snapshot(test_snapshot(2, Some(1), 2_000), MAIN_BRANCH)
+            .unwrap()
+            .build()
+            .unwrap()
+            .metadata;
+        let metadata = metadata
+            .into_builder(Some("s3://warehouse/db/table/v3.metadata.json".to_owned()))
+            .set_branch_snapshot(test_snapshot(3, Some(1), 3_000), "audit")
+            .unwrap()
+            .build()
+            .unwrap()
+            .metadata;
+
+        assert_eq!(
+            IcebergSplitEnumerator::get_snapshot_id_from_metadata(
+                &metadata,
+                Some(IcebergTimeTravelInfo::TimestampMs(3_500)),
+            )
+            .unwrap(),
+            Some(2)
+        );
+        assert_eq!(
+            IcebergSplitEnumerator::get_snapshot_id_from_metadata(
+                &metadata,
+                Some(IcebergTimeTravelInfo::TimestampMs(1_500)),
+            )
+            .unwrap(),
+            Some(1)
+        );
+    }
+
+    #[test]
+    fn test_get_snapshot_id_version_without_current_snapshot() {
+        let metadata = test_table_metadata_builder()
+            .add_snapshot(test_snapshot(7, None, 1_000))
+            .unwrap()
+            .build()
+            .unwrap()
+            .metadata;
+
+        assert_eq!(metadata.current_snapshot_id(), None);
+        assert_eq!(
+            IcebergSplitEnumerator::get_snapshot_id_from_metadata(
+                &metadata,
+                Some(IcebergTimeTravelInfo::Version(7)),
+            )
+            .unwrap(),
+            Some(7)
+        );
+        assert_eq!(
+            IcebergSplitEnumerator::get_snapshot_id_from_metadata(&metadata, None).unwrap(),
+            None
+        );
+    }
 
     fn create_file_scan_task(length: u64, id: u64) -> FileScanTask {
         FileScanTask {
