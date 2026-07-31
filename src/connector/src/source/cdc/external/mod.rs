@@ -247,20 +247,6 @@ pub trait ExternalTableReader: Sized {
         limit: u32,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>>;
 
-    /// Read snapshot rows while propagating every conversion failure.
-    ///
-    /// Readers without a fallible conversion layer, such as the test reader, may use this
-    /// default implementation. Database readers override it to opt into strict row decoding.
-    fn snapshot_read_strict(
-        &self,
-        table_name: SchemaTableName,
-        start_pk: Option<OwnedRow>,
-        primary_keys: Vec<String>,
-        limit: u32,
-    ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
-        self.snapshot_read(table_name, start_pk, primary_keys, limit)
-    }
-
     fn get_parallel_cdc_splits(
         &self,
         options: CdcTableSnapshotSplitOption,
@@ -377,16 +363,6 @@ impl ExternalTableReader for ExternalTableReaderImpl {
         self.snapshot_read_inner(table_name, start_pk, primary_keys, limit)
     }
 
-    fn snapshot_read_strict(
-        &self,
-        table_name: SchemaTableName,
-        start_pk: Option<OwnedRow>,
-        primary_keys: Vec<String>,
-        limit: u32,
-    ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
-        self.snapshot_read_strict_inner(table_name, start_pk, primary_keys, limit)
-    }
-
     fn get_parallel_cdc_splits(
         &self,
         options: CdcTableSnapshotSplitOption,
@@ -462,36 +438,6 @@ impl ExternalTableReaderImpl {
         for row in stream {
             let row = row?;
             yield row;
-        }
-    }
-
-    #[try_stream(boxed, ok = OwnedRow, error = ConnectorError)]
-    async fn snapshot_read_strict_inner(
-        &self,
-        table_name: SchemaTableName,
-        start_pk: Option<OwnedRow>,
-        primary_keys: Vec<String>,
-        limit: u32,
-    ) {
-        let stream = match self {
-            ExternalTableReaderImpl::MySql(mysql) => {
-                mysql.snapshot_read_strict(table_name, start_pk, primary_keys, limit)
-            }
-            ExternalTableReaderImpl::Postgres(postgres) => {
-                postgres.snapshot_read_strict(table_name, start_pk, primary_keys, limit)
-            }
-            ExternalTableReaderImpl::SqlServer(sql_server) => {
-                sql_server.snapshot_read_strict(table_name, start_pk, primary_keys, limit)
-            }
-            ExternalTableReaderImpl::Mock(mock) => {
-                mock.snapshot_read_strict(table_name, start_pk, primary_keys, limit)
-            }
-        };
-
-        pin_mut!(stream);
-        #[for_await]
-        for row in stream {
-            yield row?;
         }
     }
 

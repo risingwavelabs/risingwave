@@ -21,9 +21,9 @@ use risingwave_common::array::StreamChunk;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::ColumnId;
 use risingwave_common::hash::VnodeCountCompat;
+use risingwave_common::row;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_common::{bail, row};
 use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::plan_common::StorageTableDesc;
 use risingwave_storage::StateStore;
@@ -75,12 +75,11 @@ impl<S: StateStore> ResnapshotDiffRead<S> {
             upstream_table_reader.pk_column_unsigned_i64_compare_flags()?;
         let rate_limiter = snapshot_rate_limiter(read_args.rate_limit_rps);
         let left = snapshot_read_rows(
-            upstream_table_reader.snapshot_read_full_table_strict(
+            upstream_table_reader.snapshot_read_full_table_with_rate_limiter(
                 read_args.clone(),
                 batch_size,
                 rate_limiter.clone(),
             ),
-            pk_indices.clone(),
         );
         let right = self.storage_table_read(read_args);
         Ok(diff_ordered_row_streams(
@@ -121,7 +120,6 @@ impl<S: StateStore> ResnapshotDiffRead<S> {
 #[try_stream(ok = OwnedRow, error = StreamExecutorError)]
 async fn snapshot_read_rows(
     input: impl Stream<Item = StreamExecutorResult<Option<StreamChunk>>> + Send,
-    pk_indices: Vec<usize>,
 ) {
     pin_mut!(input);
     #[for_await]
@@ -129,21 +127,6 @@ async fn snapshot_read_rows(
         match output? {
             Some(chunk) => {
                 for (_, row) in chunk.rows() {
-                    for &pk_index in &pk_indices {
-                        if pk_index >= row.len() {
-                            bail!(
-                                "CDC resnapshot snapshot row has {} columns, but primary-key index \
-                                 {pk_index} is out of bounds",
-                                row.len()
-                            );
-                        }
-                        if row.datum_at(pk_index).is_none() {
-                            bail!(
-                                "CDC resnapshot decoded a NULL primary key at output index \
-                                 {pk_index}"
-                            );
-                        }
-                    }
                     yield row.to_owned_row();
                 }
             }
@@ -154,17 +137,13 @@ async fn snapshot_read_rows(
 
 #[cfg(test)]
 mod tests {
-    use futures::{StreamExt, pin_mut};
-    use risingwave_common::array::{Op, StreamChunk};
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
-    use risingwave_common::row::OwnedRow;
-    use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
     use risingwave_pb::plan_common::StorageTableDesc;
     use risingwave_storage::memory::MemoryStateStore;
 
-    use super::{ResnapshotDiffRead, snapshot_read_rows};
-    use crate::executor::StreamExecutorError;
+    use super::ResnapshotDiffRead;
 
     #[test]
     fn resnapshot_projects_only_cdc_scan_output_columns() {
@@ -197,34 +176,5 @@ mod tests {
             read.table.schema().data_types(),
             vec![DataType::Int32, DataType::Varchar]
         );
-    }
-
-    #[tokio::test]
-    async fn rejects_null_snapshot_primary_key() {
-        let row = OwnedRow::new(vec![None, Some(ScalarImpl::from("payload"))]);
-        let chunk =
-            StreamChunk::from_rows(&[(Op::Insert, row)], &[DataType::Int32, DataType::Varchar]);
-        let input = futures::stream::iter(vec![Ok(Some(chunk)), Ok(None)]);
-        let rows = snapshot_read_rows(input, vec![0]);
-        pin_mut!(rows);
-
-        let Some(Err(err)) = rows.next().await else {
-            panic!("NULL snapshot primary key must fail resnapshot");
-        };
-        assert!(err.to_string().contains("NULL primary key"));
-    }
-
-    #[tokio::test]
-    async fn propagates_strict_non_pk_decode_error() {
-        let input = futures::stream::iter(vec![Err(StreamExecutorError::from(anyhow::anyhow!(
-            "failed to decode non-PK snapshot column `payload`"
-        )))]);
-        let rows = snapshot_read_rows(input, vec![0]);
-        pin_mut!(rows);
-
-        let Some(Err(err)) = rows.next().await else {
-            panic!("strict non-PK decode error must fail resnapshot");
-        };
-        assert!(err.to_string().contains("payload"));
     }
 }

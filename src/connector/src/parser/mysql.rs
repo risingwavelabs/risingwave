@@ -24,7 +24,7 @@ use thiserror_ext::AsReport;
 use crate::parser::utils::log_error;
 
 static LOG_SUPPRESSOR: LazyLock<LogSuppressor> = LazyLock::new(LogSuppressor::default);
-use anyhow::{Context, anyhow};
+use anyhow::anyhow;
 use chrono::NaiveDate;
 use risingwave_common::bail;
 use risingwave_common::types::{
@@ -282,25 +282,6 @@ pub fn mysql_row_to_owned_row_with_strict_pk(
     )
 }
 
-/// Decode a MySQL snapshot row without replacing conversion failures with SQL `NULL`.
-///
-/// Destructive repair paths use this strict variant so malformed values cannot be mistaken for
-/// authoritative nulls. Initial CDC backfill uses [`mysql_row_to_owned_row_with_strict_pk`] to
-/// preserve lenient decoding for non-key columns.
-pub fn mysql_row_to_owned_row_strict(
-    mysql_row: &mut MysqlRow,
-    schema: &Schema,
-) -> anyhow::Result<OwnedRow> {
-    let mut datums = Vec::with_capacity(schema.fields.len());
-    for (i, rw_field) in schema.fields.iter().enumerate() {
-        let name = rw_field.name.as_str();
-        let datum = mysql_datum_to_rw_datum(mysql_row, i, name, &rw_field.data_type)
-            .with_context(|| format!("failed to decode MySQL snapshot column `{name}`"))?;
-        datums.push(datum);
-    }
-    Ok(OwnedRow::new(datums))
-}
-
 #[cfg(test)]
 mod tests {
 
@@ -318,10 +299,7 @@ mod tests {
     use risingwave_common::types::DataType;
     use tokio_stream::StreamExt;
 
-    use crate::parser::{
-        mysql_row_to_owned_row, mysql_row_to_owned_row_strict,
-        mysql_row_to_owned_row_with_strict_pk,
-    };
+    use crate::parser::{mysql_row_to_owned_row, mysql_row_to_owned_row_with_strict_pk};
 
     fn mysql_row(values: Vec<Value>, names: &[&str]) -> MySqlRow {
         let columns = names
@@ -378,39 +356,6 @@ mod tests {
         let row = mysql_row_to_owned_row_with_strict_pk(&mut row, &schema, &[0]).unwrap();
         assert!(row.datum_at(0).is_some());
         assert!(row.datum_at(1).is_none());
-    }
-
-    #[test]
-    fn strict_decode_rejects_malformed_pk_value() {
-        let schema = Schema::new(vec![
-            Field::with_name(DataType::Int32, "id"),
-            Field::with_name(DataType::Varchar, "payload"),
-        ]);
-        let mut row = mysql_row(
-            vec![
-                Value::Bytes(b"not-an-int".to_vec()),
-                Value::Bytes(b"ok".to_vec()),
-            ],
-            &["id", "payload"],
-        );
-
-        let err = mysql_row_to_owned_row_strict(&mut row, &schema).unwrap_err();
-        assert!(err.to_string().contains("`id`"));
-    }
-
-    #[test]
-    fn strict_decode_rejects_malformed_non_pk_value() {
-        let schema = Schema::new(vec![
-            Field::with_name(DataType::Int32, "id"),
-            Field::with_name(DataType::Int32, "payload"),
-        ]);
-        let mut row = mysql_row(
-            vec![Value::Int(1), Value::Bytes(b"not-an-int".to_vec())],
-            &["id", "payload"],
-        );
-
-        let err = mysql_row_to_owned_row_strict(&mut row, &schema).unwrap_err();
-        assert!(err.to_string().contains("`payload`"));
     }
 
     // manual test case

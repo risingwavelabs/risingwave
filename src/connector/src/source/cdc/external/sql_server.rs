@@ -28,10 +28,7 @@ use serde::{Deserialize, Serialize};
 use tiberius::{Config, Query, QueryItem};
 
 use crate::error::{ConnectorError, ConnectorResult};
-use crate::parser::{
-    ScalarImplTiberiusWrapper, sql_server_row_to_owned_row_strict,
-    sql_server_row_to_owned_row_with_strict_pk,
-};
+use crate::parser::{ScalarImplTiberiusWrapper, sql_server_row_to_owned_row_with_strict_pk};
 use crate::sink::sqlserver::SqlServerClient;
 use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::external::{
@@ -281,17 +278,7 @@ impl ExternalTableReader for SqlServerExternalTableReader {
         primary_keys: Vec<String>,
         limit: u32,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
-        self.snapshot_read_inner(table_name, start_pk, primary_keys, limit, false)
-    }
-
-    fn snapshot_read_strict(
-        &self,
-        table_name: SchemaTableName,
-        start_pk: Option<OwnedRow>,
-        primary_keys: Vec<String>,
-        limit: u32,
-    ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
-        self.snapshot_read_inner(table_name, start_pk, primary_keys, limit, true)
+        self.snapshot_read_inner(table_name, start_pk, primary_keys, limit)
     }
 
     fn get_parallel_cdc_splits(
@@ -511,7 +498,6 @@ impl SqlServerExternalTableReader {
         start_pk_row: Option<OwnedRow>,
         primary_keys: Vec<String>,
         limit: u32,
-        strict: bool,
     ) {
         let order_key = primary_keys
             .iter()
@@ -555,17 +541,8 @@ impl SqlServerExternalTableReader {
         let row_stream = stream.map(|res| {
             // convert sql server row into OwnedRow
             let mut row = res?;
-            if strict {
-                sql_server_row_to_owned_row_strict(&mut row, &self.rw_schema)
-                    .map_err(ConnectorError::from)
-            } else {
-                sql_server_row_to_owned_row_with_strict_pk(
-                    &mut row,
-                    &self.rw_schema,
-                    &self.pk_indices,
-                )
+            sql_server_row_to_owned_row_with_strict_pk(&mut row, &self.rw_schema, &self.pk_indices)
                 .map_err(ConnectorError::from)
-            }
         });
 
         pin_mut!(row_stream);

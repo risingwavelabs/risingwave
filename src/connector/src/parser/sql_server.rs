@@ -82,28 +82,6 @@ pub fn sql_server_row_to_owned_row_with_strict_pk(
     )
 }
 
-/// Decode a SQL Server snapshot row without replacing conversion failures with SQL `NULL`.
-pub fn sql_server_row_to_owned_row_strict(
-    row: &mut Row,
-    schema: &Schema,
-) -> anyhow::Result<OwnedRow> {
-    let money_fields = sql_server_money_fields(row);
-    let mut datums = Vec::with_capacity(schema.fields.len());
-    for (i, rw_field) in schema.fields.iter().enumerate() {
-        let name = rw_field.name.as_str();
-        let datum = sql_server_cell_to_rw_datum(
-            row,
-            i,
-            name,
-            &rw_field.data_type,
-            money_fields.contains(name),
-        )
-        .with_context(|| format!("failed to decode SQL Server snapshot column `{name}`"))?;
-        datums.push(datum);
-    }
-    Ok(OwnedRow::new(datums))
-}
-
 fn sql_server_money_fields(row: &Row) -> HashSet<String> {
     let mut money_fields = HashSet::new();
     // Special handling of the money field, as the third-party library Tiberius converts the money type to i64.

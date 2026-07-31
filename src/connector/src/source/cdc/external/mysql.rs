@@ -41,7 +41,7 @@ use crate::connector_common::SslMode;
 // Re-export SslMode for convenience
 pub use crate::connector_common::SslMode as MySqlSslMode;
 use crate::error::{ConnectorError, ConnectorResult};
-use crate::parser::{mysql_row_to_owned_row_strict, mysql_row_to_owned_row_with_strict_pk};
+use crate::parser::mysql_row_to_owned_row_with_strict_pk;
 use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::external::{
     CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption, DebeziumOffset,
@@ -495,17 +495,7 @@ impl ExternalTableReader for MySqlExternalTableReader {
         primary_keys: Vec<String>,
         limit: u32,
     ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
-        self.snapshot_read_inner(table_name, start_pk, primary_keys, limit, false)
-    }
-
-    fn snapshot_read_strict(
-        &self,
-        table_name: SchemaTableName,
-        start_pk: Option<OwnedRow>,
-        primary_keys: Vec<String>,
-        limit: u32,
-    ) -> BoxStream<'_, ConnectorResult<OwnedRow>> {
-        self.snapshot_read_inner(table_name, start_pk, primary_keys, limit, true)
+        self.snapshot_read_inner(table_name, start_pk, primary_keys, limit)
     }
 
     async fn disconnect(self) -> ConnectorResult<()> {
@@ -788,7 +778,6 @@ impl MySqlExternalTableReader {
         start_pk_row: Option<OwnedRow>,
         primary_keys: Vec<String>,
         limit: u32,
-        strict: bool,
     ) {
         let order_key = primary_keys
             .iter()
@@ -875,17 +864,8 @@ impl MySqlExternalTableReader {
             let row_stream = rs_stream.map(|row| {
                 // convert mysql row into OwnedRow
                 let mut row = row?;
-                if strict {
-                    mysql_row_to_owned_row_strict(&mut row, &self.rw_schema)
-                        .map_err(ConnectorError::from)
-                } else {
-                    mysql_row_to_owned_row_with_strict_pk(
-                        &mut row,
-                        &self.rw_schema,
-                        &self.pk_indices,
-                    )
+                mysql_row_to_owned_row_with_strict_pk(&mut row, &self.rw_schema, &self.pk_indices)
                     .map_err(ConnectorError::from)
-                }
             });
             pin_mut!(row_stream);
             #[for_await]
@@ -898,17 +878,8 @@ impl MySqlExternalTableReader {
             let row_stream = rs_stream.map(|row| {
                 // convert mysql row into OwnedRow
                 let mut row = row?;
-                if strict {
-                    mysql_row_to_owned_row_strict(&mut row, &self.rw_schema)
-                        .map_err(ConnectorError::from)
-                } else {
-                    mysql_row_to_owned_row_with_strict_pk(
-                        &mut row,
-                        &self.rw_schema,
-                        &self.pk_indices,
-                    )
+                mysql_row_to_owned_row_with_strict_pk(&mut row, &self.rw_schema, &self.pk_indices)
                     .map_err(ConnectorError::from)
-                }
             });
             pin_mut!(row_stream);
             #[for_await]

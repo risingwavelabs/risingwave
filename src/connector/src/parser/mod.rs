@@ -40,16 +40,15 @@ use risingwave_connector_codec::decoder::avro::MapHandling;
 use thiserror_ext::AsReport;
 
 pub use self::mysql::{
-    mysql_datum_to_rw_datum, mysql_row_to_owned_row, mysql_row_to_owned_row_strict,
-    mysql_row_to_owned_row_with_strict_pk,
+    mysql_datum_to_rw_datum, mysql_row_to_owned_row, mysql_row_to_owned_row_with_strict_pk,
 };
 use self::plain_parser::PlainParser;
 pub use self::postgres::{
     postgres_cell_to_scalar_impl, postgres_cell_to_scalar_impl_strict, postgres_row_to_owned_row,
-    postgres_row_to_owned_row_strict, postgres_row_to_owned_row_with_strict_pk,
+    postgres_row_to_owned_row_with_strict_pk,
 };
 pub use self::sql_server::{
-    ScalarImplTiberiusWrapper, sql_server_row_to_owned_row, sql_server_row_to_owned_row_strict,
+    ScalarImplTiberiusWrapper, sql_server_row_to_owned_row,
     sql_server_row_to_owned_row_with_strict_pk,
 };
 pub use self::unified::Access;

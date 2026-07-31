@@ -195,22 +195,12 @@ impl UpstreamTableReader<ExternalStorageTable> {
             .pk_column_unsigned_i64_compare_flags(&primary_keys)?)
     }
 
-    pub(super) fn snapshot_read_full_table_strict(
-        &self,
-        args: SnapshotReadArgs,
-        batch_size: u32,
-        rate_limiter: Arc<RateLimiter>,
-    ) -> impl Stream<Item = StreamExecutorResult<Option<StreamChunk>>> + Send + '_ {
-        self.snapshot_read_full_table_inner(args, batch_size, rate_limiter, true)
-    }
-
     #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
-    async fn snapshot_read_full_table_inner(
+    pub(super) async fn snapshot_read_full_table_with_rate_limiter(
         &self,
         args: SnapshotReadArgs,
         batch_size: u32,
         rate_limiter: Arc<RateLimiter>,
-        strict: bool,
     ) {
         let primary_keys = self
             .table
@@ -242,21 +232,12 @@ impl UpstreamTableReader<ExternalStorageTable> {
             );
 
             let mut read_count: usize = 0;
-            let row_stream = if strict {
-                self.reader.snapshot_read_strict(
-                    self.table.schema_table_name(),
-                    read_args.current_pos.clone(),
-                    primary_keys.clone(),
-                    batch_size,
-                )
-            } else {
-                self.reader.snapshot_read(
-                    self.table.schema_table_name(),
-                    read_args.current_pos.clone(),
-                    primary_keys.clone(),
-                    batch_size,
-                )
-            };
+            let row_stream = self.reader.snapshot_read(
+                self.table.schema_table_name(),
+                read_args.current_pos.clone(),
+                primary_keys.clone(),
+                batch_size,
+            );
 
             pin_mut!(row_stream);
             let mut builder = DataChunkBuilder::new(
@@ -324,7 +305,7 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
         batch_size: u32,
     ) -> impl Stream<Item = StreamExecutorResult<Option<StreamChunk>>> + Send + '_ {
         let rate_limiter = snapshot_rate_limiter(args.rate_limit_rps);
-        self.snapshot_read_full_table_inner(args, batch_size, rate_limiter, false)
+        self.snapshot_read_full_table_with_rate_limiter(args, batch_size, rate_limiter)
     }
 
     #[try_stream(ok = Option<StreamChunk>, error = StreamExecutorError)]
