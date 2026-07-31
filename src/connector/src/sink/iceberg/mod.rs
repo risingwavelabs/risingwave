@@ -18,6 +18,7 @@ mod test;
 mod commit;
 mod config;
 mod create_table;
+mod metadata;
 mod prometheus;
 mod writer;
 
@@ -30,6 +31,7 @@ pub use commit::*;
 pub use config::*;
 pub use create_table::*;
 use iceberg::table::Table;
+pub use metadata::*;
 use risingwave_common::bail;
 use risingwave_common::license::Feature;
 use tokio::sync::mpsc::UnboundedSender;
