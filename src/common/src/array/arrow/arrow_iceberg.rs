@@ -131,6 +131,12 @@ impl ToArrow for IcebergArrowConvert {
             DataType::Serial => self.serial_type_to_arrow(),
             DataType::Decimal => return Ok(self.decimal_type_to_arrow(name)),
             DataType::Jsonb => self.varchar_type_to_arrow(),
+            // TODO(#25165): support Iceberg variant.
+            DataType::Variant => {
+                return Err(ArrayError::to_arrow(
+                    "VARIANT is not supported for Iceberg yet",
+                ));
+            }
             DataType::Struct(fields) => self.struct_type_to_arrow(fields)?,
             DataType::List(list) => self.list_type_to_arrow(list)?,
             DataType::Map(map) => self.map_type_to_arrow(map)?,
@@ -306,6 +312,12 @@ impl ToArrow for IcebergCreateTableArrowConvert {
             DataType::Serial => self.serial_type_to_arrow(),
             DataType::Decimal => return Ok(self.decimal_type_to_arrow(name)),
             DataType::Jsonb => self.varchar_type_to_arrow(),
+            // TODO(#25165): support Iceberg variant.
+            DataType::Variant => {
+                return Err(ArrayError::to_arrow(
+                    "VARIANT is not supported for Iceberg yet",
+                ));
+            }
             DataType::Struct(fields) => self.struct_type_to_arrow(fields)?,
             DataType::List(list) => self.list_type_to_arrow(list)?,
             DataType::Map(map) => self.map_type_to_arrow(map)?,
