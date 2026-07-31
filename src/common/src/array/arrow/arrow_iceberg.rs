@@ -276,12 +276,22 @@ fn variant_arrow_field(name: &str) -> arrow_schema::Field {
 
 fn variant_array_to_variant(array: &arrow_array::ArrayRef) -> Result<ArrayImpl, ArrayError> {
     let variant_array = VariantArray::try_new(array.as_ref()).map_err(ArrayError::from_arrow)?;
-    // The upstream decoder for the shredded encoding still panics (or silently nulls)
-    // on data it cannot handle, so reject it wholesale like the iceberg-rust scan does.
+    // The shredded encoding cannot be reconstructed yet, and decoding only metadata/value
+    // would yield silently partial objects, so the whole column reads as NULL.
     if variant_array.typed_value_field().is_some() {
-        return Err(ArrayError::from_arrow(
-            "shredded variant (with a `typed_value` field) is not supported yet",
-        ));
+        static LOG_SUPPRESSOR: LazyLock<LogSuppressor> = LazyLock::new(LogSuppressor::default);
+        if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
+            tracing::warn!(
+                suppressed_count,
+                "shredded variant column (with a `typed_value` field) is not supported yet; \
+                 reading it as NULL",
+            );
+        }
+        let mut builder = VariantArrayBuilder::new(variant_array.len());
+        for _ in 0..variant_array.len() {
+            builder.append_null();
+        }
+        return Ok(ArrayImpl::Variant(builder.finish()));
     }
     // The physical binary layout is constant across the batch, so resolve the typed
     // accessors once here rather than re-dispatching and downcasting per row.
@@ -916,7 +926,7 @@ mod test {
     }
 
     #[test]
-    fn shredded_variant_is_rejected() {
+    fn shredded_variant_decodes_as_null() {
         let field = variant_arrow_field("variant_col");
         let array = Arc::new(arrow_array::StructArray::from(vec![
             (
@@ -939,10 +949,11 @@ mod test {
             ),
         ])) as ArrayRef;
 
-        let err = IcebergArrowConvert
+        let decoded = IcebergArrowConvert
             .array_from_arrow_array(&field, &array)
-            .unwrap_err();
-        assert!(err.to_string().contains("shredded variant"), "{err}");
+            .unwrap();
+        assert_eq!(decoded.len(), 1);
+        assert!(decoded.as_variant().is_null(0));
     }
 
     #[test]
