@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering;
+use std::collections::HashMap;
 
 use anyhow::{Context, anyhow};
 use futures::stream::BoxStream;
@@ -323,7 +324,14 @@ impl SqlServerExternalTableReader {
         }
         client_config.trust_cert();
 
-        let client = SqlServerClient::new_with_config(client_config).await?;
+        let mut client = SqlServerClient::new_with_config(client_config).await?;
+
+        let primary_keys = pk_indices
+            .iter()
+            .map(|index| rw_schema.fields[*index].name.clone())
+            .collect_vec();
+        Self::validate_pk_ordering(&mut client, &config.schema, &config.table, &primary_keys)
+            .await?;
 
         let field_names = rw_schema
             .fields
@@ -337,6 +345,91 @@ impl SqlServerExternalTableReader {
             field_names,
             client: tokio::sync::Mutex::new(client),
         })
+    }
+
+    async fn validate_pk_ordering(
+        client: &mut SqlServerClient,
+        schema: &str,
+        table: &str,
+        primary_keys: &[String],
+    ) -> ConnectorResult<()> {
+        let mut query = Query::new(
+            "SELECT col.name, type_schema.name, typ.name, typ.is_user_defined \
+             FROM sys.columns col \
+             JOIN sys.tables tbl ON tbl.object_id = col.object_id \
+             JOIN sys.schemas table_schema ON table_schema.schema_id = tbl.schema_id \
+             JOIN sys.types typ ON typ.user_type_id = col.user_type_id \
+             JOIN sys.schemas type_schema ON type_schema.schema_id = typ.schema_id \
+             WHERE table_schema.name = @P1 AND tbl.name = @P2",
+        );
+        query.bind(schema.to_owned());
+        query.bind(table.to_owned());
+        let mut stream = query.query(&mut client.inner_client).await?;
+        let mut column_types = HashMap::new();
+        while let Some(item) = stream.try_next().await? {
+            if let QueryItem::Row(row) = item {
+                let column_name: &str = row
+                    .try_get(0)?
+                    .context("SQL Server system catalog returned a column without a name")?;
+                let type_schema: &str = row
+                    .try_get(1)?
+                    .context("SQL Server system catalog returned a type without a schema")?;
+                let type_name: &str = row
+                    .try_get(2)?
+                    .context("SQL Server system catalog returned a type without a name")?;
+                let is_user_defined: bool = row.try_get(3)?.unwrap_or(false);
+                column_types.insert(
+                    column_name.to_lowercase(),
+                    (
+                        type_schema.to_owned(),
+                        type_name.to_owned(),
+                        is_user_defined,
+                    ),
+                );
+            }
+        }
+
+        for column_name in primary_keys {
+            let (type_schema, type_name, is_user_defined) = column_types
+                .get(&column_name.to_lowercase())
+                .ok_or_else(|| {
+                    anyhow!(
+                        "SQL Server system catalog did not return primary-key column \
+                         `{column_name}` from table `{schema}`.`{table}`"
+                    )
+                })?;
+            if let Some(reason) = Self::unsupported_pk_ordering_reason(type_name, *is_user_defined)
+            {
+                return Err(anyhow!(
+                    "SQL Server CDC primary-key column `{column_name}` has type \
+                     `{type_schema}`.`{type_name}`, which is not supported because {reason}"
+                )
+                .into());
+            }
+        }
+        Ok(())
+    }
+
+    fn unsupported_pk_ordering_reason(
+        type_name: &str,
+        is_user_defined: bool,
+    ) -> Option<&'static str> {
+        if is_user_defined {
+            return Some(
+                "its decoded representation and upstream ordering are not proven identical to \
+                 RisingWave ordering",
+            );
+        }
+        match type_name.to_ascii_lowercase().as_str() {
+            "char" | "nchar" | "varchar" | "nvarchar" | "text" | "ntext" | "xml" => Some(
+                "its upstream character collation may not match RisingWave UTF-8 byte ordering",
+            ),
+            "uniqueidentifier" => Some(
+                "SQL Server uniqueidentifier ordering does not match the canonical string \
+                 representation used by RisingWave",
+            ),
+            _ => None,
+        }
     }
 
     pub fn get_cdc_offset_parser() -> CdcOffsetParseFunc {
@@ -473,6 +566,23 @@ mod tests {
         assert_eq!(
             expr,
             "(\"aa\" > @P1) OR ((\"aa\" = @P1) AND (\"bb\" > @P2)) OR ((\"aa\" = @P1) AND (\"bb\" = @P2) AND (\"cc\" > @P3))"
+        );
+    }
+
+    #[test]
+    fn test_sql_server_text_pk_ordering_is_rejected() {
+        for type_name in ["varchar", "nvarchar", "text", "xml", "uniqueidentifier"] {
+            assert!(
+                SqlServerExternalTableReader::unsupported_pk_ordering_reason(type_name, false)
+                    .is_some()
+            );
+        }
+        assert!(
+            SqlServerExternalTableReader::unsupported_pk_ordering_reason("int", false).is_none()
+        );
+        assert!(
+            SqlServerExternalTableReader::unsupported_pk_ordering_reason("custom_id", true)
+                .is_some()
         );
     }
 }

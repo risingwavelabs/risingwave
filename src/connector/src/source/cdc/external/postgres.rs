@@ -268,10 +268,7 @@ impl PostgresExternalTableReader {
                     Self::get_normalized_table_name(table_name)
                 )
             })?;
-            let Some(pg_type) = PgType::from_oid(*type_oid) else {
-                // User-defined and domain types are outside the exact built-in type policy.
-                continue;
-            };
+            let pg_type = Self::resolve_builtin_pk_type(column_name, *type_oid)?;
             if Self::is_binary_collated_pk_type(&pg_type) {
                 binary_collated_columns.insert(column_name.clone());
             } else if let Some(reason) = Self::unsupported_pk_type_reason(&pg_type) {
@@ -284,6 +281,17 @@ impl PostgresExternalTableReader {
             }
         }
         Ok(binary_collated_columns)
+    }
+
+    fn resolve_builtin_pk_type(column_name: &str, type_oid: u32) -> ConnectorResult<PgType> {
+        PgType::from_oid(type_oid).ok_or_else(|| {
+            anyhow::anyhow!(
+                "PostgreSQL CDC primary-key column `{column_name}` has a user-defined, \
+                     domain, or extension type with OID {type_oid}; its decoded representation \
+                     and upstream ordering are not proven identical to RisingWave ordering"
+            )
+            .into()
+        })
     }
 
     fn is_binary_collated_pk_type(pg_type: &PgType) -> bool {
@@ -1537,6 +1545,17 @@ mod tests {
             PostgresExternalTableReader::unsupported_pk_type_reason(&PgType::INTERVAL).is_some()
         );
         assert!(PostgresExternalTableReader::unsupported_pk_type_reason(&PgType::UUID).is_none());
+
+        assert!(
+            PostgresExternalTableReader::resolve_builtin_pk_type("v1", PgType::TEXT.oid()).is_ok()
+        );
+        let error =
+            PostgresExternalTableReader::resolve_builtin_pk_type("v1", u32::MAX).unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("user-defined, domain, or extension")
+        );
     }
 
     // manual test

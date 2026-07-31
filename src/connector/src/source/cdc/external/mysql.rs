@@ -567,6 +567,7 @@ impl MySqlExternalTableReader {
         // Query MySQL primary key infos for type casting.
         let upstream_mysql_pk_infos =
             Self::query_upstream_pk_infos(&pool, &database, &table).await?;
+        Self::validate_pk_ordering(&upstream_mysql_pk_infos)?;
         // Get MySQL version
         let (major_version, minor_version, is_mariadb) = Self::get_mysql_version(&pool).await?;
         let mysql_version = (major_version, minor_version);
@@ -634,6 +635,42 @@ impl MySqlExternalTableReader {
         drop(conn);
 
         Ok(column_infos)
+    }
+
+    fn validate_pk_ordering(primary_keys: &[(String, ColumnType)]) -> ConnectorResult<()> {
+        for (column_name, column_type) in primary_keys {
+            if let Some(reason) = Self::unsupported_pk_ordering_reason(column_type) {
+                return Err(anyhow!(
+                    "MySQL CDC primary-key column `{column_name}` has type {column_type:?}, which \
+                     is not supported because {reason}"
+                )
+                .into());
+            }
+        }
+        Ok(())
+    }
+
+    fn unsupported_pk_ordering_reason(column_type: &ColumnType) -> Option<&'static str> {
+        match column_type {
+            ColumnType::Char(_)
+            | ColumnType::NChar(_)
+            | ColumnType::Varchar(_)
+            | ColumnType::NVarchar(_)
+            | ColumnType::Text(_)
+            | ColumnType::TinyText(_)
+            | ColumnType::MediumText(_)
+            | ColumnType::LongText(_) => Some(
+                "its upstream character collation may not match RisingWave UTF-8 byte ordering",
+            ),
+            ColumnType::Enum(_) => Some(
+                "MySQL orders ENUM values by declaration index while RisingWave orders their \
+                 decoded strings by UTF-8 bytes",
+            ),
+            ColumnType::Unknown(_) => {
+                Some("its decoded representation and upstream ordering are not proven")
+            }
+            _ => None,
+        }
     }
 
     /// Check whether a column is `BIGINT UNSIGNED`.
@@ -981,6 +1018,31 @@ mod tests {
         assert_eq!(
             expr,
             "(`aa` > :aa) OR ((`aa` = :aa) AND (`bb` > :bb)) OR ((`aa` = :aa) AND (`bb` = :bb) AND (`cc` > :cc))"
+        );
+    }
+
+    #[test]
+    fn test_mysql_text_pk_ordering_is_rejected() {
+        for column_type in [
+            ColumnType::Varchar(Default::default()),
+            ColumnType::Text(Default::default()),
+            ColumnType::Enum(Default::default()),
+        ] {
+            assert!(
+                MySqlExternalTableReader::unsupported_pk_ordering_reason(&column_type).is_some()
+            );
+        }
+        assert!(
+            MySqlExternalTableReader::unsupported_pk_ordering_reason(&ColumnType::Int(
+                Default::default()
+            ))
+            .is_none()
+        );
+        assert!(
+            MySqlExternalTableReader::unsupported_pk_ordering_reason(&ColumnType::Varbinary(
+                Default::default()
+            ))
+            .is_none()
         );
     }
 
