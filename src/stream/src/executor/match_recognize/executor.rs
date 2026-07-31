@@ -20,10 +20,19 @@
 //!
 //! Event-time model: rows are buffered per partition (in any arrival order). Matching is driven by
 //! the watermark on the leading `ORDER BY` column: when the watermark advances to `w`, every row
-//! with `order_key <= w` is final (no earlier row can still arrive), so the buffer is sorted by
-//! order key and the `<= w` prefix is matched. A match is emitted once it is followed by another
-//! safe row (so the greedy match is known maximal); consumed rows are evicted. This handles
-//! out-of-order arrival within the watermark's lateness and bounds state.
+//! with `order_key < w` is final, so the buffer is sorted by order key and the `< w` prefix is
+//! matched. A match is emitted once it is followed by another safe row (so the greedy match is known
+//! maximal); consumed rows are evicted. This handles out-of-order arrival within the watermark's
+//! lateness and bounds state.
+//!
+//! The boundary is **strict**. A RisingWave watermark `w` promises only that no future row will have
+//! `order_key < w`; a row with `order_key == w` may still arrive, and `watermark_filter` forwards it
+//! (it keeps `event_time >= watermark`). So a row at exactly `w` is not final, and neither is a
+//! `WITHIN` deadline at exactly `w` — a completing row at `w` can still land inside the bound. Every
+//! finality decision here is therefore `< w`, and the wakeup frontier's complement is `>= w` so that
+//! a partition is always revisited for its rows sitting at `w`. Emit and eviction share the same
+//! predicate on purpose: were the emit side stricter than the eviction side, eviction would delete
+//! the rows of a match the emit side is still holding, dropping it silently.
 //!
 //! Measures are evaluated at match time, not at arrival: a measure references specific matched rows
 //! (e.g. `FIRST(a.ts)`, `LAST(b.v)`), which are only known once the match and its per-row pattern
@@ -749,6 +758,12 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                     // `next_wakeup` is known and past `w`, no partition can be due — skip the
                     // per-vnode index scans entirely. Unknown (`None`) falls through to a scan,
                     // which re-establishes the exact value below.
+                    //
+                    // Deliberately `> w` (and the candidate check below `<= w`), i.e. one step *less*
+                    // strict than the finality predicates: a wakeup at exactly `w` is admitted, so the
+                    // partition is visited and simply finds nothing newly final. Waking a partition
+                    // early only costs a scan; the wakeup tests must never be stricter than the
+                    // finality tests, or a partition that is genuinely due is skipped.
                     match &min_wakeup {
                         Some(None) => continue,
                         Some(Some(k)) if k.default_cmp(&w).is_gt() => continue,
@@ -866,11 +881,15 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                 continue;
                             }
 
-                            // The prefix with leading order_key <= w is final.
+                            // The prefix with leading `order_key < w` is final. Strictly below `w`:
+                            // the watermark contract only promises that no future row has
+                            // `order_key < w`, so a row *at* `w` may still arrive (`watermark_filter`
+                            // admits `event_time >= watermark`) and could sort before an already
+                            // buffered row at `w` under a multi-column ORDER BY.
                             let safe_len = rows
                                 .iter()
                                 .take_while(|r| {
-                                    matches!(&r.order_key, Some(k) if k.default_cmp(&w).is_le())
+                                    matches!(&r.order_key, Some(k) if k.default_cmp(&w).is_lt())
                                 })
                                 .count();
                             // WITHIN-deadline memo for the safe prefix (see `deadline_at`); only
@@ -897,11 +916,17 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                 }
                                 // At the safe boundary we normally wait for a trailing safe row to
                                 // confirm the greedy match is maximal (it might still extend). But
-                                // under WITHIN, once the watermark has passed this match's deadline
-                                // (its first row's order_key + interval), no future row can legally
-                                // extend it — any extension would fall inside the now-fully-safe
-                                // window — so it is final and must be emitted now, before the WITHIN
-                                // eviction below drops its rows. Without WITHIN, keep waiting.
+                                // under WITHIN, once the watermark is strictly past this match's
+                                // deadline (its first row's order_key + interval), no future row can
+                                // legally extend it — any extension would fall inside the
+                                // now-fully-safe window — so it is final and must be emitted now,
+                                // before the WITHIN eviction below drops its rows. `deadline < w`,
+                                // not `<=`: at `deadline == w` a row at `order_key == w` may still
+                                // arrive and still fall within the bound, so the match can grow.
+                                // This test must stay in exact lockstep with the WITHIN eviction
+                                // predicate below — a stricter emit than eviction deletes a match's
+                                // rows while it is still being held, silently dropping it.
+                                // Without WITHIN, keep waiting.
                                 if m.end >= safe_len {
                                     let within_final = if let Some(dl) = &within_deadline {
                                         let deadline = Self::deadline_at(
@@ -911,7 +936,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                             m.start,
                                         )
                                         .await;
-                                        matches!(&deadline, Some(d) if d.default_cmp(&w).is_le())
+                                        matches!(&deadline, Some(d) if d.default_cmp(&w).is_lt())
                                     } else {
                                         false
                                     };
@@ -978,12 +1003,17 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                             //    `[a, x, x]` whose `a` is followed only by non-matching safe rows can
                             //    never complete, though the `a` can still begin it.)
                             //
-                            //  * its WITHIN window is still open — `order_key + interval > w`. Once the
-                            //    watermark passes that deadline, every row within the bound is final,
-                            //    so if no match from `p` has completed by now none ever can, and `p` is
-                            //    dead even though the NFA is structurally still expecting more input.
-                            //    This is what bounds idle-partition state (see the doc's state bound):
-                            //    reaches_boundary_alive alone would keep a lone `[a]` forever.
+                            //  * its WITHIN window is still open — `order_key + interval >= w`. Once
+                            //    the watermark is strictly past that deadline, every row within the
+                            //    bound is final, so if no match from `p` has completed by now none ever
+                            //    can, and `p` is dead even though the NFA is structurally still
+                            //    expecting more input. This is what bounds idle-partition state (see
+                            //    the doc's state bound): reaches_boundary_alive alone would keep a lone
+                            //    `[a]` forever. The window is still open at `deadline == w`, because a
+                            //    row at `order_key == w` may still arrive and still fall inside the
+                            //    bound — this predicate must stay in exact lockstep with the WITHIN
+                            //    boundary-emit test above, or a match held there has its rows deleted
+                            //    here and is lost.
                             //
                             // The partition iterator is already dropped, so delete in place.
                             let mut retain_from = safe_len;
@@ -996,8 +1026,8 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                         p,
                                     )
                                     .await;
-                                    // Window closed (deadline <= w): `p` is dead, skip it.
-                                    if matches!(&deadline, Some(d) if d.default_cmp(&w).is_le()) {
+                                    // Window closed (deadline < w): `p` is dead, skip it.
+                                    if matches!(&deadline, Some(d) if d.default_cmp(&w).is_lt()) {
                                         continue;
                                     }
                                 }
@@ -1015,14 +1045,18 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
 
                             // Recompute the wakeup frontier as the earlier of two events:
                             //
-                            //  (a) the next row to become safe — the earliest surviving row whose
-                            //      order_key is still past the watermark. Survivors `rows[retain_from..]`
+                            //  (a) the next row to become safe — the earliest surviving row that is not
+                            //      yet final, i.e. whose `order_key >= w`. This is the exact complement
+                            //      of the safe prefix (`order_key < w`), so every surviving unprocessed
+                            //      row is covered: a row sitting exactly at `w` still needs a later
+                            //      watermark to become safe, and scheduling it at `w` is what guarantees
+                            //      the partition is revisited for it. Survivors `rows[retain_from..]`
                             //      are PK-ordered, so it is the first such row.
                             //
                             //  (b) the earliest WITHIN expiry of a retained live partial — so an idle
                             //      partition (no future row) is still woken to evict a partial that
                             //      times out. The earliest retained safe partial is `rows[retain_from]`
-                            //      (if it is `<= w`); its deadline is `first_order_key + interval`,
+                            //      (if it is `< w`); its deadline is `first_order_key + interval`,
                             //      evaluated from `within_deadline`. After that watermark the existing
                             //      eviction predicate (which already honours WITHIN) drops it.
                             //
@@ -1030,7 +1064,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                             let row_wakeup: Option<Datum> = rows[retain_from..]
                                 .iter()
                                 .find(|r| {
-                                    matches!(&r.order_key, Some(k) if k.default_cmp(&w).is_gt())
+                                    matches!(&r.order_key, Some(k) if k.default_cmp(&w).is_ge())
                                 })
                                 .map(|r| r.order_key.clone());
                             let within_wakeup: Option<Datum> = match &within_deadline {
@@ -1038,7 +1072,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                     if retain_from < rows.len()
                                         && matches!(
                                             &rows[retain_from].order_key,
-                                            Some(k) if k.default_cmp(&w).is_le()
+                                            Some(k) if k.default_cmp(&w).is_lt()
                                         ) =>
                                 {
                                     let dl = Self::deadline_at(
@@ -1066,8 +1100,14 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                             };
                             match new_wakeup {
                                 Some(nw) => {
-                                    // The re-pointed wakeup is > w, so it belongs in the recomputed
-                                    // lower bound.
+                                    // The re-pointed wakeup is >= w (a row or deadline sitting exactly
+                                    // at `w` is not yet final, so `w` itself is a legitimate next
+                                    // wakeup), so it belongs in the recomputed lower bound. `nw == w`
+                                    // is harmless: watermarks advance strictly, so the next one picks
+                                    // the entry up, and a repeated `w` merely re-runs an idempotent
+                                    // pass. It can also make `nw == old_wakeup`, which `move_frontier`
+                                    // handles — a delete plus an insert of the same key collapses to an
+                                    // update in the mem table.
                                     if let Some(k) = &nw {
                                         Self::fold_min(&mut next_min, k);
                                     }

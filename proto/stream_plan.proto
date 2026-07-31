@@ -239,7 +239,12 @@ message Barrier {
 message Watermark {
   // The reference to the watermark column in the stream's schema.
   expr.InputRef column = 1;
-  // The watermark value, there will be no record having a greater value in the watermark column.
+  // The watermark value: no future record will have a *smaller* value in the watermark column.
+  //
+  // The bound is not strict — a future record may still carry exactly this value. Anything deciding
+  // that data is complete must therefore compare strictly (`col < watermark`), which is what the
+  // in-tree consumers do: `WatermarkFilterExecutor` forwards rows with `col >= watermark`, EOWC's
+  // sort buffer emits only keys `< watermark`, and hash join / dynamic filter clean state on `<`.
   data.Datum val = 3;
 }
 

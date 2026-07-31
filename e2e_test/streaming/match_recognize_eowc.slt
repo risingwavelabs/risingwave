@@ -49,8 +49,9 @@ select * from t_eowc match_recognize (
 )
 emit on window close;
 
-# a@10, b@13: span exactly the WITHIN bound -> valid; sentinel advances the watermark to the match's
-# deadline. Identical inputs and expectations as the plain-MV boundary test.
+# a@10, b@13: span exactly the WITHIN bound -> valid; the sentinel (ts 15, lateness 1) advances the
+# watermark to 14, strictly past the match's deadline of 13. Identical inputs and expectations as the
+# plain-MV boundary test, which it mirrors.
 statement ok
 insert into t_eowc values (1, 10, 5);
 
@@ -58,7 +59,7 @@ statement ok
 insert into t_eowc values (1, 13, -1);
 
 statement ok
-insert into t_eowc values (2, 14, 0);
+insert into t_eowc values (2, 15, 0);
 
 query III rowsort
 select * from mv_eowc;

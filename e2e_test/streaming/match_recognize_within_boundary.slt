@@ -7,7 +7,7 @@
 #
 # Regression for a bug where the emit path waited for a trailing safe row to confirm greedy
 # maximality (`m.end >= safe_len` -> skip) while the WITHIN-eviction path deleted the rows first
-# (deadline <= watermark), silently dropping a valid boundary match.
+# (the deadline having been cleared by the watermark), silently dropping a valid boundary match.
 
 statement ok
 set streaming_parallelism = 1;
@@ -47,8 +47,10 @@ select * from t match_recognize (
 emit on window close;
 
 # a@10, b@13: span 13 - 10 = 3, exactly the WITHIN bound -> valid. Partition 1 has no trailing row;
-# the sentinel in partition 2 (ts 14, lateness 1) advances the watermark to 13 -- exactly this
-# match's deadline (10 + 3). No future row can extend it, so it must be emitted, not evicted.
+# the sentinel in partition 2 (ts 15, lateness 1) advances the watermark to 14 -- strictly past this
+# match's deadline (10 + 3 = 13). No future row can extend it, so it must be emitted, not evicted.
+# (The watermark must clear the deadline strictly: at watermark 13 a completing row at ts 13 is still
+# admissible, so the match is not yet final -- see match_recognize_watermark_boundary.slt.)
 statement ok
 insert into t values (1, 10, 5);
 
@@ -56,7 +58,7 @@ statement ok
 insert into t values (1, 13, -1);
 
 statement ok
-insert into t values (2, 14, 0);
+insert into t values (2, 15, 0);
 
 query III rowsort
 select * from mv_boundary;

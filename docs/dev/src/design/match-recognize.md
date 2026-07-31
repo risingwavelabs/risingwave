@@ -156,7 +156,7 @@ to keep the factorial bounded).
   for entries with `next_wakeup <= w` (the index is PK-ordered by `next_wakeup`, so it stops at the
   first entry past `w`), then for each candidate partition reads just that partition from the buffer
   table with `iter_with_prefix`, in PK order — `(partition, order_key, seq)`, already `ORDER BY`
-  ordered, so no in-memory sort. Every row with `order_key <= w` is final; the matcher runs over the
+  ordered, so no in-memory sort. Every row with `order_key < w` is final; the matcher runs over the
   safe prefix, a match is emitted once a later safe row follows it (so the greedy match is known
   maximal), and `AFTER MATCH SKIP` decides where the scan resumes. Matches stream straight into a
   `StreamChunkBuilder`, flushed a chunk at a time. After processing, the partition's frontier entry is
@@ -183,6 +183,29 @@ Matching is **not incremental**: each advancing watermark re-runs the matcher fr
 buffer rather than resuming partial NFA state. Eviction keeps that work bounded by the live window
 rather than the partition's history; carrying incremental NFA state across watermarks is possible
 future work.
+
+### The watermark boundary is strict
+
+A RisingWave watermark `w` promises only that **no future row will have `order_key < w`** — a row
+with `order_key == w` may still arrive, and `WatermarkFilterExecutor` forwards it (it keeps
+`event_time >= watermark`). Every finality decision in this operator is therefore expressed with a
+strict `< w`:
+
+- the safe prefix is `order_key < w`;
+- a `WITHIN` window is closed only when `deadline < w` (at `deadline == w` a completing row at
+  `order_key == w` still falls inside the bound);
+- a match held at the safe boundary becomes `WITHIN`-final under that same `deadline < w`.
+
+The last two must stay in lockstep. If the emit test were stricter than the eviction test, eviction
+would delete the rows of a match the emit side is still holding, and the match would be lost with no
+trace.
+
+The wakeup frontier is the **complement**: a partition's next row-driven wakeup is its earliest
+surviving row with `order_key >= w`, so a row sitting exactly at `w` still schedules a revisit. The
+frontier's own lookups (the idle fast path and the candidate range scan, both `next_wakeup <= w`)
+stay one step *less* strict on purpose — waking a partition that turns out to have nothing final
+costs only a scan, whereas a wakeup test stricter than the finality tests would skip a partition that
+is genuinely due and park its match forever.
 
 ## State and fault tolerance
 
@@ -242,8 +265,8 @@ rescale.
 State is bounded to the **live (unfinalized) window** — the rows that could still begin or extend a
 match. What bounds that window depends on whether the pattern carries a `WITHIN` clause:
 
-- **With `WITHIN <interval>`** the span of any match is capped, so once the watermark passes a row's
-  `order_key + interval` that row can no longer begin or extend a match and is evicted. State per
+- **With `WITHIN <interval>`** the span of any match is capped, so once the watermark is strictly past
+  a row's `order_key + interval` that row can no longer begin or extend a match and is evicted. State per
   partition is bounded by the `WITHIN` window, and total state by that window times the number of
   live partitions.
 - **Without `WITHIN`** a buffered prefix can be completed by an arbitrarily distant future row — e.g.

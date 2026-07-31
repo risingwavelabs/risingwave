@@ -1234,6 +1234,14 @@ impl Barrier {
     }
 }
 
+/// A watermark on `col_idx`: a promise that no future record in this stream will have a value
+/// *smaller* than `val` in that column.
+///
+/// The bound is **not strict** — a future record may still carry exactly `val`. So an operator that
+/// treats data as complete must compare strictly: `col < val` is final, `col == val` is not.
+/// `WatermarkFilterExecutor` matches this by forwarding rows with `col >= val`, and the in-tree
+/// consumers follow it (EOWC's sort buffer emits keys `< val`; hash join and dynamic filter clean
+/// state on `<`).
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Watermark {
     pub col_idx: usize,

@@ -55,10 +55,12 @@ query III rowsort
 select * from mv_held;
 ----
 
-# Advance the watermark to 15 = the match's deadline (sentinel ts 16). No new row arrives in partition
-# 1: it is revisited purely via its wakeup-frontier entry, and the now-final match is emitted.
+# Advance the watermark to 16, strictly past the match's deadline of 15 (sentinel ts 17, lateness 1).
+# No new row arrives in partition 1: it is revisited purely via its wakeup-frontier entry (scheduled at
+# 15, the deadline), and the now-final match is emitted. The watermark must clear the deadline strictly
+# -- at watermark 15 a completing row at ts 15 is still admissible, so the match could still grow.
 statement ok
-insert into t values (2, 16, 0);
+insert into t values (2, 17, 0);
 
 query III rowsort
 select * from mv_held;
