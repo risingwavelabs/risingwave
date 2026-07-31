@@ -147,6 +147,7 @@ impl ExecutorBuilder for MatchRecognizeExecutorBuilder {
             within,
             nfa,
             skip,
+            eval_error_report: params.eval_error_report,
             within_deadline,
             input_arity,
             state_table,

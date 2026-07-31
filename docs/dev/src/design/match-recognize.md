@@ -222,6 +222,59 @@ stay one step *less* strict on purpose — waking a partition that turns out to 
 costs only a scan, whereas a wakeup test stricter than the finality tests would skip a partition that
 is genuinely due and park its match forever.
 
+### Invalid `AFTER MATCH SKIP` targets degrade, and say so
+
+`AFTER MATCH SKIP TO FIRST|LAST <var>` has no valid resume row in two data-dependent cases — the same
+query hits them or not depending on which rows arrive:
+
+| case | example | resume position | degrades to |
+|---|---|---|---|
+| the target is bound to no row of the match | `PATTERN (a b?)` matching only `a`, `SKIP TO LAST b` | the match end | `SKIP PAST LAST ROW` |
+| the target is the match's own first row | `PATTERN (a b)`, `SKIP TO FIRST a` | `match start + 1` | `SKIP TO NEXT ROW` |
+
+The SQL standard prescribes a runtime error for both (Oracle raises ORA-62511 / ORA-62512; Flink
+likewise). This implementation keeps the degradation and **reports** it instead of raising it. The
+condition is data-dependent, and the materialized view is already committed by the time any row
+arrives: an error would abort the actor, recovery would replay the same rows, and the actor would die
+again — a recoverable query turned into a crash loop. No RisingWave streaming operator fails an actor
+for a data-dependent condition; every hard error in this operator is a contract or plan violation
+(non-append-only input, an unknown slot kind) that recovery cannot fix either way.
+
+So the degradation is made visible rather than fatal. `SkipMode::next_pos` returns the resume position
+plus an optional diagnostic (keeping `nfa.rs` pure — it holds no error reporter), and the executor's
+emit path routes it to the actor's `EvalErrorReport`: the same *surface* expression evaluation errors in
+this operator already use, i.e. the rate-limited `stream_expr_error` log and the `user_compute_error`
+metric. The reported error names the skip mode, its target variable and the strategy actually applied:
+
+```
+Invalid parameter AFTER MATCH SKIP TO LAST: target variable `c` is bound to no row of the match,
+so there is no row to resume at; the scan resumed past the match's last row instead (degraded to
+SKIP PAST LAST ROW)
+```
+
+Two things about that surface are worth knowing when reading the output. First, while the surface is
+precedented, the *carrier* is not: no other `EvalErrorReport` user synthesizes an error — they all pass
+on one produced by an actual expression evaluation. `ExprError` is simply the only type the trait
+accepts, and `InvalidParam` is the honest fit (the query's `AFTER MATCH SKIP` parameter cannot be
+honored); `ExprError::Custom` was rejected as the UDF error channel and slated for removal. A
+consequence is that the log line carries the surface's fixed prefix `failed to evaluate expression`,
+hardcoded in `ActorContext::on_compute_error`, even though nothing was evaluated — the actionable
+content is the self-contained `error=` field, not the head of the line. Second, the metric labels
+(`["ExprError", executor_name, fragment_id]`) separate this operator from others but not from this
+operator's own `DEFINE`/`MEASURES`/`WITHIN` evaluation errors, so the metric reads as "this
+`MATCH_RECOGNIZE` query is unhealthy" and the log line is the artifact that says why.
+
+Reporting is deduplicated **per kind per watermark pass**. The cause is a property of the query, not of
+one row: a target no match can bind degrades on every match forever, and one that only sometimes fails
+to bind (`PATTERN (a? b)` with `SKIP TO FIRST b`) still repeats without bound. Every repetition within a
+pass would be a byte-identical duplicate, so one report per kind per pass keeps the signal steady and
+bounded by watermark frequency rather than by match or partition count; the metric therefore counts
+passes that degraded, not individual degradations.
+
+Note the related bind-time check: a `SKIP TO FIRST|LAST <var>` target that is not a *pattern* variable
+at all (e.g. a `DEFINE`-only symbol) is rejected when the query is bound, so it never reaches the
+executor.
+
 ## State and fault tolerance
 
 The operator declares three internal state tables: the **buffer table** plus the two **wakeup

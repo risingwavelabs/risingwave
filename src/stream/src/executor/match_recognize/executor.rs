@@ -34,6 +34,12 @@
 //! predicate on purpose: were the emit side stricter than the eviction side, eviction would delete
 //! the rows of a match the emit side is still holding, dropping it silently.
 //!
+//! `AFTER MATCH SKIP TO FIRST|LAST <var>` has no valid resume row when the target is bound to no row
+//! of a match, or resolves to the match's own first row. Both are data-dependent, so instead of
+//! failing the actor (which would crash-loop a committed materialized view) the resume position
+//! degrades to a weaker skip strategy and the degradation is *reported* — see [`SkipMode::next_pos`]
+//! and [`report_skip_degradation_once`].
+//!
 //! Measures are evaluated at match time, not at arrival: a measure references specific matched rows
 //! (e.g. `FIRST(a.ts)`, `LAST(b.v)`), which are only known once the match and its per-row pattern
 //! variable labels are found. Each measure is an expression over a synthetic row whose columns are
@@ -57,6 +63,7 @@ use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::row::{OwnedRow, Row, RowExt, once};
 use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl, ToOwnedDatum};
 use risingwave_common::util::row_id::RowIdGenerator;
+use risingwave_expr::ExprError;
 use risingwave_expr::aggregate::{AggCall, BoxedAggregateFunction, build_append_only};
 use risingwave_expr::expr::{EvalErrorReport, NonStrictExpression, build_non_strict_from_prost};
 use risingwave_pb::stream_plan::{
@@ -66,9 +73,62 @@ use risingwave_pb::stream_plan::{
 use risingwave_storage::StateStore;
 use risingwave_storage::store::PrefetchOptions;
 
-use super::nfa::{CandidateMatcher, Nfa, SkipMode};
+use super::nfa::{CandidateMatcher, Nfa, SkipDegradation, SkipMode};
 use crate::common::table::state_table::StateTable;
 use crate::executor::prelude::*;
+use crate::task::ActorEvalErrorReport;
+
+/// Report an `AFTER MATCH SKIP` degradation ([`SkipDegradation`]) — unless the same degradation was
+/// already reported in this watermark pass, in which case it is dropped.
+///
+/// The condition is data-dependent and deliberately not fatal (see [`SkipMode::next_pos`] for why an
+/// error would turn a committed materialized view into a crash loop), so the only thing left is to
+/// make it visible. It goes to the actor's [`EvalErrorReport`], which is the surface every expression
+/// evaluation error in this operator already uses: the rate-limited `stream_expr_error` log and the
+/// `user_compute_error` metric, labelled `["ExprError", executor_name, fragment_id]`.
+///
+/// **The carrier is new, the surface is not.** Nothing else in the tree hands `EvalErrorReport` a
+/// *synthesized* error — every other reporter passes on an error produced by an actual expression
+/// evaluation. [`ExprError`] is nonetheless the only type the trait accepts, and
+/// `ExprError::InvalidParam` is the honest fit: the query's `AFTER MATCH SKIP` parameter cannot be
+/// honored. (`ExprError::Custom` was rejected — it is the UDF error channel and slated for removal;
+/// `Internal`/`InvalidState` would misreport a user-query problem as an engine fault.) Two
+/// consequences to expect when reading the output:
+///
+///  * the log line carries the surface's fixed prefix `failed to evaluate expression`, hardcoded in
+///    `ActorContext::on_compute_error`, even though no expression was evaluated here. The actionable
+///    content is the `error=` field, which is self-contained;
+///  * the metric labels separate this operator from others, but not this operator's own
+///    `DEFINE`/`MEASURES`/`WITHIN` evaluation errors, which report through the same labels. So the
+///    metric reads as "this `MATCH_RECOGNIZE` query is unhealthy" and the log line is what says why.
+///
+/// **Volume policy.** The cause is a property of the query, not of one row: a skip target that no
+/// match can ever bind degrades on every match, forever, and even a target that only *sometimes*
+/// fails to bind (`PATTERN (a? b)` with `SKIP TO FIRST b`, degrading on the matches where `a` did not
+/// bind) repeats without bound. The diagnostic names the skip clause, its target variable and the
+/// applied fallback — and nothing row-, match- or partition-specific — so every repetition within one
+/// watermark pass is a byte-identical duplicate carrying no new information, at the cost of a
+/// `format!` on the emit path. `already_reported` therefore holds the kinds already reported in this
+/// pass (at most two exist, and `Vec::new()` allocates only if one actually fires); it is reset per
+/// pass, so a persisting condition keeps producing one report per kind per watermark — a steady
+/// signal, bounded by watermark frequency rather than by match or partition count. The trade-off is
+/// deliberate: the metric counts *passes* that degraded, not degradations.
+fn report_skip_degradation_once(
+    report: &impl EvalErrorReport,
+    skip: &SkipMode,
+    degradation: SkipDegradation,
+    already_reported: &mut Vec<SkipDegradation>,
+) {
+    if already_reported.contains(&degradation) {
+        return;
+    }
+    already_reported.push(degradation);
+    // The mode is named once, by `clause_name`; `describe` names the target variable and the fallback.
+    report.report(ExprError::InvalidParam {
+        name: skip.clause_name(),
+        reason: degradation.describe(skip).into(),
+    });
+}
 
 /// How a [`MeasureSlot`] resolves against the rows of a match (mirrors the planner's slot kinds).
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -443,6 +503,10 @@ pub struct MatchRecognizeExecutorArgs<S: StateStore> {
     pub within_deadline: Option<NonStrictExpression>,
     pub nfa: Nfa,
     pub skip: SkipMode,
+    /// Where the actor's compute-error reports go. The compiled `DEFINE`/`MEASURES`/`WITHIN`
+    /// expressions already report evaluation errors through it; the executor itself uses it for
+    /// `AFTER MATCH SKIP` degradations (see [`report_skip_degradation_once`]).
+    pub eval_error_report: ActorEvalErrorReport,
     /// Number of input columns; the buffered raw input row stored per row in the state table.
     pub input_arity: usize,
     pub state_table: StateTable<S>,
@@ -471,6 +535,8 @@ pub struct MatchRecognizeExecutor<S: StateStore> {
     within_deadline: Option<NonStrictExpression>,
     nfa: Nfa,
     skip: SkipMode,
+    /// Where `AFTER MATCH SKIP` degradations are reported (see [`MatchRecognizeExecutorArgs`]).
+    eval_error_report: ActorEvalErrorReport,
     input_arity: usize,
     state_table: StateTable<S>,
     /// Wakeup frontier (see [`MatchRecognizeExecutorArgs`]). Maintained on insert so a watermark can
@@ -512,6 +578,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             within_deadline: args.within_deadline,
             nfa: args.nfa,
             skip: args.skip,
+            eval_error_report: args.eval_error_report,
             input_arity: args.input_arity,
             state_table: args.state_table,
             frontier_meta_table: args.frontier_meta_table,
@@ -658,6 +725,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             within_deadline,
             nfa,
             skip,
+            eval_error_report,
             input_arity,
             mut state_table,
             mut frontier_meta_table,
@@ -806,6 +874,10 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                     // plus every re-pointed candidate wakeup — every remaining frontier entry is one
                     // or the other.
                     let mut next_min: Datum = None;
+                    // `AFTER MATCH SKIP` degradations already reported in this pass; see
+                    // `report_skip_degradation_once` for the policy. Empty (and unallocated) unless a
+                    // skip target actually fails to resolve.
+                    let mut reported_degradations: Vec<SkipDegradation> = Vec::new();
                     let vnodes: Vec<_> = state_table.vnodes().iter_vnodes().collect();
                     for vnode in vnodes {
                         // 1. Collect candidate `(old_wakeup, partition)` from the index, then drop the
@@ -1014,7 +1086,21 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                 ) {
                                     yield Message::Chunk(c);
                                 }
-                                cursor = skip.next_pos(m.start, m.end, &m.labels);
+                                // Where the scan resumes after this match. A variable-targeted skip
+                                // whose target row does not exist in this match degrades to a weaker
+                                // strategy instead of failing the actor; that is reported, not
+                                // silent (see `report_skip_degradation_once`).
+                                let (next_cursor, degradation) =
+                                    skip.next_pos(m.start, m.end, &m.labels);
+                                cursor = next_cursor;
+                                if let Some(degradation) = degradation {
+                                    report_skip_degradation_once(
+                                        &eval_error_report,
+                                        &skip,
+                                        degradation,
+                                        &mut reported_degradations,
+                                    );
+                                }
                             }
 
                             // Evict finalized rows that can no longer be part of any match. Retain
@@ -1206,6 +1292,8 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{Arc, Mutex};
+
     use risingwave_expr::expr::LogReport;
     use risingwave_pb::expr::expr_node::{RexNode, Type as PbExprType};
     use risingwave_pb::expr::{ExprNode, FunctionCall as PbFunctionCall};
@@ -1443,5 +1531,91 @@ mod tests {
         // Different values: had the candidate been treated as the running last of `a`, this would
         // become a tautology and match.
         assert_eq!(find_all(&nfa, &defines, &[7, 8]).await, vec![]);
+    }
+
+    /// Collects what the executor reports, so the `AFTER MATCH SKIP` diagnostic can be asserted
+    /// without an actor (in production the report goes to `ActorEvalErrorReport`).
+    #[derive(Clone, Default)]
+    struct CollectReport(Arc<Mutex<Vec<String>>>);
+
+    impl EvalErrorReport for CollectReport {
+        fn report(&self, error: ExprError) {
+            self.0.lock().unwrap().push(error.to_string());
+        }
+    }
+
+    impl CollectReport {
+        fn messages(&self) -> Vec<String> {
+            self.0.lock().unwrap().clone()
+        }
+    }
+
+    /// The reported error must be actionable on its own — it is what lands in the `error=` field of
+    /// the `stream_expr_error` log line. Pinned verbatim: it names the skip mode (once), the target
+    /// variable, and the strategy the resume position degraded to.
+    #[test]
+    fn skip_degradation_report_names_clause_and_fallback() {
+        let report = CollectReport::default();
+        let mut reported = Vec::new();
+        report_skip_degradation_once(
+            &report,
+            &SkipMode::ToLast("c".to_owned()),
+            SkipDegradation::TargetAbsent,
+            &mut reported,
+        );
+        report_skip_degradation_once(
+            &report,
+            &SkipMode::ToFirst("a".to_owned()),
+            SkipDegradation::TargetAtMatchStart,
+            &mut reported,
+        );
+        assert_eq!(
+            report.messages(),
+            vec![
+                "Invalid parameter AFTER MATCH SKIP TO LAST: target variable `c` is bound to no row \
+                 of the match, so there is no row to resume at; the scan resumed past the match's \
+                 last row instead (degraded to SKIP PAST LAST ROW)",
+                "Invalid parameter AFTER MATCH SKIP TO FIRST: target variable `a` resolves to the \
+                 match's own first row, so resuming there would re-find the same match forever; the \
+                 scan resumed at the row after the match's first row instead (degraded to SKIP TO \
+                 NEXT ROW)",
+            ]
+        );
+    }
+
+    /// Volume policy: the degradation repeats without bound (on every match, when no match can bind
+    /// the target), and the message has no row, match or partition identity, so a per-match report
+    /// would be byte-identical chatter. One report per kind per watermark pass.
+    #[test]
+    fn skip_degradation_report_is_deduplicated_per_pass() {
+        let report = CollectReport::default();
+        let skip = SkipMode::ToLast("x".to_owned());
+        let mut reported = Vec::new();
+        for _ in 0..5 {
+            report_skip_degradation_once(
+                &report,
+                &skip,
+                SkipDegradation::TargetAbsent,
+                &mut reported,
+            );
+        }
+        assert_eq!(report.messages().len(), 1, "{:?}", report.messages());
+        // A different degradation is a different diagnostic, so it is reported once too.
+        report_skip_degradation_once(
+            &report,
+            &skip,
+            SkipDegradation::TargetAtMatchStart,
+            &mut reported,
+        );
+        assert_eq!(report.messages().len(), 2, "{:?}", report.messages());
+        // The next pass starts with a fresh set, so a persisting condition keeps being visible.
+        let mut next_pass = Vec::new();
+        report_skip_degradation_once(
+            &report,
+            &skip,
+            SkipDegradation::TargetAbsent,
+            &mut next_pass,
+        );
+        assert_eq!(report.messages().len(), 3, "{:?}", report.messages());
     }
 }

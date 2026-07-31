@@ -201,25 +201,117 @@ pub enum SkipMode {
     ToLast(String),
 }
 
+/// Why a variable-targeted `AFTER MATCH SKIP` could not resume where the query asked, and which
+/// weaker strategy the resume position fell back to. Returned by [`SkipMode::next_pos`] next to the
+/// position instead of being reported here: this module stays pure (no error reporter, no executor
+/// types), and the executor — which owns the actor's `EvalErrorReport` — decides what to do with it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkipDegradation {
+    /// The target variable is bound to no row of the match, so there is no row to resume at. The
+    /// scan resumed past the match's last row, i.e. as `SKIP PAST LAST ROW`.
+    TargetAbsent,
+    /// The target resolves to the match's own first row, so resuming there would re-find the same
+    /// match forever. The scan resumed one row later, i.e. as `SKIP TO NEXT ROW`.
+    TargetAtMatchStart,
+}
+
+impl SkipDegradation {
+    /// The user-facing diagnostic for this degradation under `skip`: the target variable, what could
+    /// not be resolved about it, and the strategy actually applied. The *clause* is not repeated here
+    /// — the caller supplies it separately via [`SkipMode::clause_name`], so the rendered message
+    /// names the mode once (see `report_skip_degradation_once` in `executor.rs`).
+    ///
+    /// Deliberately carries no row, match or partition identity: the cause is a property of the
+    /// query, not of one row, which is what lets the executor report it once per watermark pass
+    /// instead of once per match.
+    pub fn describe(&self, skip: &SkipMode) -> String {
+        // Unreachable for the variable-less modes: only the targeted arms of `next_pos` can produce a
+        // degradation. A placeholder rather than an `unwrap` — a diagnostic path must not panic.
+        let target = skip.target_var().unwrap_or("?");
+        match self {
+            SkipDegradation::TargetAbsent => format!(
+                "target variable `{target}` is bound to no row of the match, so there is no row to \
+                 resume at; the scan resumed past the match's last row instead (degraded to SKIP \
+                 PAST LAST ROW)"
+            ),
+            SkipDegradation::TargetAtMatchStart => format!(
+                "target variable `{target}` resolves to the match's own first row, so resuming there \
+                 would re-find the same match forever; the scan resumed at the row after the match's \
+                 first row instead (degraded to SKIP TO NEXT ROW)"
+            ),
+        }
+    }
+}
+
 impl SkipMode {
+    /// The `AFTER MATCH SKIP` clause as SQL spells it, *without* the target variable — the mode alone.
+    /// `&'static str` so it can be the `name` of an `ExprError::InvalidParam`; the target variable is
+    /// named by [`SkipDegradation::describe`] instead, so a rendered diagnostic states the mode once.
+    pub fn clause_name(&self) -> &'static str {
+        match self {
+            SkipMode::PastLastRow => "AFTER MATCH SKIP PAST LAST ROW",
+            SkipMode::ToNextRow => "AFTER MATCH SKIP TO NEXT ROW",
+            SkipMode::ToFirst(_) => "AFTER MATCH SKIP TO FIRST",
+            SkipMode::ToLast(_) => "AFTER MATCH SKIP TO LAST",
+        }
+    }
+
+    /// The pattern variable a `SKIP TO FIRST|LAST` resumes at; `None` for the variable-less modes,
+    /// which are also the only ones that can never degrade.
+    pub fn target_var(&self) -> Option<&str> {
+        match self {
+            SkipMode::PastLastRow | SkipMode::ToNextRow => None,
+            SkipMode::ToFirst(var) | SkipMode::ToLast(var) => Some(var),
+        }
+    }
+
     /// The position the scan resumes at after a match spanning `[start, end)` with per-row `labels`
-    /// (`labels[i]` is the variable bound to `rows[start + i]`). Always returns `> start` so the scan
-    /// makes progress: `SKIP TO FIRST` of the match's leading variable would not advance, which the
-    /// SQL standard reports as an error; here it degrades to advancing one row instead of looping.
-    pub fn next_pos(&self, start: usize, end: usize, labels: &[String]) -> usize {
-        let target = match self {
-            SkipMode::PastLastRow => end,
-            SkipMode::ToNextRow => start + 1,
-            SkipMode::ToFirst(var) => labels
-                .iter()
-                .position(|l| l == var)
-                .map_or(end, |j| start + j),
-            SkipMode::ToLast(var) => labels
-                .iter()
-                .rposition(|l| l == var)
-                .map_or(end, |j| start + j),
+    /// (`labels[i]` is the variable bound to `rows[start + i]`), plus a [`SkipDegradation`] when that
+    /// position is not the one the query asked for. Always returns `> start` so the scan makes
+    /// progress.
+    ///
+    /// Two cases have no valid resume row, and both are data-dependent — the same query degrades or
+    /// not depending on which rows arrive:
+    ///
+    ///  * the target variable is bound to no row of this match (`(a b?)` matching only `a`, with
+    ///    `SKIP TO LAST b`), so the resume position falls back to the match end — silently becoming
+    ///    `SKIP PAST LAST ROW`;
+    ///  * the target resolves to the match's own first row (`SKIP TO FIRST` of the pattern's leading
+    ///    variable), which would re-find the same match forever, so it is clamped to `start + 1` —
+    ///    silently becoming `SKIP TO NEXT ROW`.
+    ///
+    /// The SQL standard prescribes a runtime error for both (Oracle raises ORA-62511 / ORA-62512;
+    /// Flink likewise). This implementation deliberately keeps the degradation and **reports** it
+    /// instead of raising it: an error here would abort the actor over a data-dependent condition,
+    /// and since the materialized view is already committed, every recovery attempt would replay the
+    /// same rows and die again — a recoverable query turned into a crash loop. No RisingWave
+    /// streaming operator fails an actor for a data-dependent condition; every hard error in this
+    /// operator is a contract or plan violation (non-append-only input, an unknown slot kind), which
+    /// recovery cannot fix either way. So the degradation is made *visible* rather than fatal: the
+    /// executor routes the returned diagnostic to the actor's `EvalErrorReport`, the same surface
+    /// expression evaluation errors already use (the `stream_expr_error` log and the
+    /// `user_compute_error` metric). See `report_skip_degradation_once` in `executor.rs` for how the
+    /// message is rendered — including the surface's fixed log prefix — and for the volume policy.
+    pub fn next_pos(
+        &self,
+        start: usize,
+        end: usize,
+        labels: &[String],
+    ) -> (usize, Option<SkipDegradation>) {
+        // Resolve a variable-targeted skip: `found` is the target's index within `labels`. Only these
+        // modes can degrade; the variable-less ones always have a valid resume row.
+        let resolve = |found: Option<usize>| match found {
+            // Index 0 is the match's own first row, so resuming there makes no progress.
+            Some(0) => (start + 1, Some(SkipDegradation::TargetAtMatchStart)),
+            Some(j) => (start + j, None),
+            None => (end.max(start + 1), Some(SkipDegradation::TargetAbsent)),
         };
-        target.max(start + 1)
+        match self {
+            SkipMode::PastLastRow => (end.max(start + 1), None),
+            SkipMode::ToNextRow => (start + 1, None),
+            SkipMode::ToFirst(var) => resolve(labels.iter().position(|l| l == var)),
+            SkipMode::ToLast(var) => resolve(labels.iter().rposition(|l| l == var)),
+        }
     }
 }
 
@@ -379,7 +471,8 @@ impl Nfa {
                 && end > i
             {
                 let start = i;
-                i = skip.next_pos(start, end, &labels);
+                // Test-only matcher: the diagnostic is dropped (there is no actor to report to).
+                (i, _) = skip.next_pos(start, end, &labels);
                 matches.push(LabeledMatch { start, end, labels });
             } else {
                 i += 1;
@@ -410,7 +503,11 @@ impl Nfa {
                 && end > i
             {
                 let start = i;
-                i = skip.next_pos(start, end, &labels);
+                // The diagnostic is dropped here on purpose: the executor recomputes the resume
+                // position for the matches it actually *emits* and reports from there, so a match
+                // that this scan finds but the emit path holds back or skips is not reported twice
+                // (nor reported at all until it is emitted).
+                (i, _) = skip.next_pos(start, end, &labels);
                 matches.push(LabeledMatch { start, end, labels });
             } else {
                 i += 1;
@@ -1032,6 +1129,94 @@ mod tests {
         assert_eq!(starts(&SkipMode::PastLastRow), vec![0]);
         assert_eq!(starts(&SkipMode::ToLast("b".to_owned())), vec![0, 2]);
         assert_eq!(starts(&SkipMode::ToFirst("b".to_owned())), vec![0, 1, 2]);
+    }
+
+    /// The two data-dependent cases where a variable-targeted skip has no valid resume row degrade
+    /// (deliberately, instead of raising the runtime error the SQL standard prescribes — see
+    /// [`SkipMode::next_pos`]). The degradation must be *visible*, so `next_pos` returns a
+    /// diagnostic alongside the position, and the position itself must be unchanged: this is a
+    /// visibility fix, not a behavior change.
+    #[test]
+    fn skip_target_degradations_are_reported() {
+        // A match over rows 3..5, labelled `a` then `b`.
+        let labels = lbl("ab");
+
+        // (a) The target is bound to no row of this match: nothing to resume at, so the scan resumes
+        //     past the match's last row — silently becoming SKIP PAST LAST ROW.
+        assert_eq!(
+            SkipMode::ToLast("c".to_owned()).next_pos(3, 5, &labels),
+            (5, Some(SkipDegradation::TargetAbsent))
+        );
+        assert_eq!(
+            SkipMode::ToFirst("c".to_owned()).next_pos(3, 5, &labels),
+            (5, Some(SkipDegradation::TargetAbsent))
+        );
+
+        // (b) The target resolves to the match's own first row: resuming there would re-find the
+        //     same match forever, so it is clamped one row on — silently becoming SKIP TO NEXT ROW.
+        assert_eq!(
+            SkipMode::ToFirst("a".to_owned()).next_pos(3, 5, &labels),
+            (4, Some(SkipDegradation::TargetAtMatchStart))
+        );
+        assert_eq!(
+            SkipMode::ToLast("a".to_owned()).next_pos(3, 5, &labels),
+            (4, Some(SkipDegradation::TargetAtMatchStart))
+        );
+
+        // A resolvable target reports nothing — note it can land on the same position as the clamped
+        // case above, so the diagnostic (not the position) is what distinguishes them.
+        assert_eq!(
+            SkipMode::ToLast("b".to_owned()).next_pos(3, 5, &labels),
+            (4, None)
+        );
+        // The variable-less modes cannot degrade.
+        assert_eq!(SkipMode::PastLastRow.next_pos(3, 5, &labels), (5, None));
+        assert_eq!(SkipMode::ToNextRow.next_pos(3, 5, &labels), (4, None));
+    }
+
+    /// The diagnostic names the target variable and the strategy the resume position degraded to. The
+    /// skip mode itself is named by the caller (`clause_name`), so it must NOT be repeated here — the
+    /// rendered message would otherwise say `SKIP` twice.
+    #[test]
+    fn skip_degradation_describes_target_and_fallback() {
+        let absent = SkipDegradation::TargetAbsent.describe(&SkipMode::ToLast("c".to_owned()));
+        assert!(absent.contains("target variable `c`"), "{absent}");
+        assert!(absent.contains("SKIP PAST LAST ROW"), "{absent}");
+        assert!(!absent.contains("SKIP TO LAST"), "{absent}");
+
+        let at_start =
+            SkipDegradation::TargetAtMatchStart.describe(&SkipMode::ToFirst("a".to_owned()));
+        assert!(at_start.contains("target variable `a`"), "{at_start}");
+        assert!(at_start.contains("SKIP TO NEXT ROW"), "{at_start}");
+        assert!(!at_start.contains("SKIP TO FIRST"), "{at_start}");
+    }
+
+    /// The clause name feeds the `ExprError` parameter name, so it must state the mode without the
+    /// target variable (which `describe` names) — one mention of the mode per rendered message.
+    #[test]
+    fn skip_clause_name_and_target_var() {
+        assert_eq!(
+            SkipMode::ToLast("c".to_owned()).clause_name(),
+            "AFTER MATCH SKIP TO LAST"
+        );
+        assert_eq!(
+            SkipMode::ToFirst("a".to_owned()).clause_name(),
+            "AFTER MATCH SKIP TO FIRST"
+        );
+        assert_eq!(
+            SkipMode::PastLastRow.clause_name(),
+            "AFTER MATCH SKIP PAST LAST ROW"
+        );
+        assert_eq!(
+            SkipMode::ToNextRow.clause_name(),
+            "AFTER MATCH SKIP TO NEXT ROW"
+        );
+
+        assert_eq!(SkipMode::ToLast("c".to_owned()).target_var(), Some("c"));
+        assert_eq!(SkipMode::ToFirst("a".to_owned()).target_var(), Some("a"));
+        // The variable-less modes have no target — and can never degrade.
+        assert_eq!(SkipMode::PastLastRow.target_var(), None);
+        assert_eq!(SkipMode::ToNextRow.target_var(), None);
     }
 
     #[test]
