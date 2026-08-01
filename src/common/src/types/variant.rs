@@ -1034,7 +1034,7 @@ mod tests {
     }
 
     #[test]
-    fn path_access_supports_dot_and_bracket() {
+    fn access_path_with_preparsed_path() {
         let v: VariantVal = r#"{"a":[{"b":7}]}"#.parse().unwrap();
         let path = VariantPath::parse("$.a[0].b").unwrap();
         assert_eq!(
@@ -1045,6 +1045,11 @@ mod tests {
                 .to_string(),
             "7"
         );
+    }
+
+    #[test]
+    fn path_access_supports_dot_and_bracket() {
+        let v: VariantVal = r#"{"a":[{"b":7}]}"#.parse().unwrap();
         assert_eq!(
             v.as_scalar_ref()
                 .access_path("$.a[0].b")
