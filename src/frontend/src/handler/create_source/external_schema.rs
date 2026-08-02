@@ -134,26 +134,6 @@ pub(super) async fn resolve_pulsar_auto_encode(
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_pulsar_schema_type_to_encode() {
-        assert_eq!(
-            pulsar_schema_type_to_encode(PulsarSchemaType::Avro).unwrap(),
-            Encode::Avro
-        );
-
-        let error = pulsar_schema_type_to_encode(PulsarSchemaType::Unsupported(
-            "PROTOBUF_NATIVE".to_owned(),
-        ))
-        .unwrap_err()
-        .to_string();
-        assert!(error.contains("currently only `AVRO` is supported"));
-    }
-}
-
 /// Resolves the schema of the source from external schema file.
 /// See <https://docs.risingwave.com/sql/commands/sql-create-source> for more information.
 ///
@@ -572,5 +552,25 @@ fn get_name_strategy_or_default(name_strategy: Option<AstString>) -> Result<Opti
         Some(name) => Ok(Some(name_strategy_from_str(name.0.as_str())
             .ok_or_else(|| RwError::from(ProtocolError(format!("\
             expect strategy name in topic_name_strategy, record_name_strategy and topic_record_name_strategy, but got {}", name))))? as i32)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pulsar_schema_type_to_encode() {
+        assert_eq!(
+            pulsar_schema_type_to_encode(PulsarSchemaType::Avro).unwrap(),
+            Encode::Avro
+        );
+
+        let error = pulsar_schema_type_to_encode(PulsarSchemaType::Unsupported(
+            "PROTOBUF_NATIVE".to_owned(),
+        ))
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("currently only `AVRO` is supported"));
     }
 }
