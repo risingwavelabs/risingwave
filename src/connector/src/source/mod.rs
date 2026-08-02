@@ -26,6 +26,7 @@ pub mod prelude {
     pub use crate::source::nexmark::NexmarkSplitEnumerator;
     pub use crate::source::pulsar::PulsarSplitEnumerator;
     pub use crate::source::test_source::TestSourceSplitEnumerator as TestSplitEnumerator;
+    pub use crate::source::websocket::WebsocketSplitEnumerator;
     pub type AzblobSplitEnumerator =
         OpendalEnumerator<crate::source::filesystem::opendal_source::OpendalAzblob>;
     pub type GcsSplitEnumerator =
@@ -58,6 +59,7 @@ pub mod nats;
 pub mod nexmark;
 pub mod pulsar;
 pub mod utils;
+pub mod websocket;
 
 mod util;
 use std::future::IntoFuture;
@@ -74,6 +76,7 @@ use monitor::{ConnectorAckFailureType, GLOBAL_SOURCE_METRICS};
 pub use mqtt::MQTT_CONNECTOR;
 pub use nats::NATS_CONNECTOR;
 use utils::feature_gated_source_mod;
+pub use websocket::WEBSOCKET_CONNECTOR;
 
 pub use self::adbc_snowflake::ADBC_SNOWFLAKE_CONNECTOR;
 mod common;
