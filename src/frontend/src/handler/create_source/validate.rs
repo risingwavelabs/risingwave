@@ -157,7 +157,7 @@ pub fn validate_compatibility(
         })?;
 
     validate_license(&connector)?;
-    if connector != KAFKA_CONNECTOR {
+    if connector != KAFKA_CONNECTOR && connector != PULSAR_CONNECTOR {
         let res = match (&format_encode.format, &format_encode.row_encode) {
             (Format::Plain, Encode::Protobuf) | (Format::Plain, Encode::Avro) => {
                 let mut options = WithOptions::try_from(format_encode.row_options())?;
@@ -169,7 +169,7 @@ pub fn validate_compatibility(
         };
         if res {
             return Err(RwError::from(ProtocolError(format!(
-                "The {} must be kafka when schema registry is used",
+                "The {} must be kafka or pulsar when schema registry is used",
                 UPSTREAM_SOURCE_KEY
             ))));
         }

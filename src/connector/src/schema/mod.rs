@@ -17,6 +17,7 @@ use crate::error::ConnectorError;
 pub mod avro;
 mod loader;
 pub mod protobuf;
+pub mod pulsar;
 pub mod schema_registry;
 
 pub use loader::{ConfluentSchemaLoader, SchemaLoader, SchemaVersion};

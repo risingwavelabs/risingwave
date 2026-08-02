@@ -14,6 +14,9 @@
 
 //! bind columns from external schema
 
+use risingwave_connector::schema::pulsar::{
+    PulsarSchemaClient, PulsarSchemaRegistryConfig, PulsarSchemaType,
+};
 use risingwave_connector::source::ADBC_SNOWFLAKE_CONNECTOR;
 
 use super::*;
@@ -63,6 +66,88 @@ feature_gated_function!(
         with_properties: &WithOptionsSecResolved,
     ) -> anyhow::Result<Vec<ColumnCatalog>>
 );
+
+fn validate_pulsar_auto_encode_schema_type(schema_type: PulsarSchemaType) -> Result<()> {
+    match schema_type {
+        PulsarSchemaType::Avro => Ok(()),
+        schema_type => Err(RwError::from(ProtocolError(format!(
+            "Pulsar schema type `{schema_type}` is not supported by `ENCODE AUTO`; currently only `AVRO` is supported"
+        )))),
+    }
+}
+
+pub(super) async fn resolve_pulsar_auto_encode(
+    session: &SessionImpl,
+    format_encode: &mut FormatEncodeOptions,
+    source_options: &WithOptions,
+) -> Result<()> {
+    if format_encode.row_encode != Encode::Auto {
+        return Ok(());
+    }
+    if format_encode.format != Format::Plain {
+        return Err(RwError::from(ProtocolError(
+            "ENCODE AUTO is only supported with FORMAT PLAIN".to_owned(),
+        )));
+    }
+    if !source_options.is_pulsar_connector() {
+        return Err(RwError::from(ProtocolError(
+            "ENCODE AUTO is only supported for Pulsar sources".to_owned(),
+        )));
+    }
+
+    let (resolved_source_options, connection_type, _) = resolve_connection_ref_and_secret_ref(
+        source_options.clone(),
+        session,
+        Some(TelemetryDatabaseObject::Source),
+    )?;
+    if !SOURCE_ALLOWED_CONNECTION_CONNECTOR.contains(&connection_type) {
+        return Err(RwError::from(ProtocolError(format!(
+            "connection type {:?} is not allowed, allowed types: {:?}",
+            connection_type, SOURCE_ALLOWED_CONNECTION_CONNECTOR
+        ))));
+    }
+    let (source_options, source_secret_refs) = resolved_source_options.into_parts();
+    let source_options =
+        LocalSecretManager::global().fill_secrets(source_options, source_secret_refs)?;
+
+    let (resolved_format_options, connection_type, _) = resolve_connection_ref_and_secret_ref(
+        WithOptions::try_from(format_encode.row_options())?,
+        session,
+        Some(TelemetryDatabaseObject::Source),
+    )?;
+    ensure_connection_type_allowed(connection_type, &SOURCE_ALLOWED_CONNECTION_SCHEMA_REGISTRY)?;
+    let (format_options, format_secret_refs) = resolved_format_options.into_parts();
+    let format_options =
+        LocalSecretManager::global().fill_secrets(format_options, format_secret_refs)?;
+
+    let registry_url = format_options.get("schema.registry").ok_or_else(|| {
+        RwError::from(ProtocolError(
+            "missing `schema.registry` for Pulsar ENCODE AUTO".to_owned(),
+        ))
+    })?;
+    let config =
+        PulsarSchemaRegistryConfig::from_source_options(registry_url.clone(), &source_options)?;
+    let schema = PulsarSchemaClient::new(config)?.get_latest_schema().await?;
+    validate_pulsar_auto_encode_schema_type(schema.schema_type())?;
+
+    format_encode.row_encode = Encode::Avro;
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_validate_pulsar_auto_encode_schema_type() {
+        validate_pulsar_auto_encode_schema_type(PulsarSchemaType::Avro).unwrap();
+
+        let error = validate_pulsar_auto_encode_schema_type(PulsarSchemaType::ProtobufNative)
+            .unwrap_err()
+            .to_string();
+        assert!(error.contains("currently only `AVRO` is supported"));
+    }
+}
 
 /// Resolves the schema of the source from external schema file.
 /// See <https://docs.risingwave.com/sql/commands/sql-create-source> for more information.
@@ -433,6 +518,7 @@ fn format_to_prost(format: &Format) -> FormatType {
 }
 fn row_encode_to_prost(row_encode: &Encode) -> EncodeType {
     match row_encode {
+        Encode::Auto => unreachable!("ENCODE AUTO must be resolved before source binding"),
         Encode::Native => EncodeType::Native,
         Encode::Json => EncodeType::Json,
         Encode::Avro => EncodeType::Avro,
