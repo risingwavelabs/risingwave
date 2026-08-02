@@ -105,6 +105,7 @@ message CreateSinkRequest {
   bool if_not_exists = 5;
   StreamingJobResourceType resource_type = 6;
   optional uint64 since_timestamp_epoch = 7;
+  optional uint64 refresh_interval_sec = 8;
 }
 
 message CreateSinkResponse {

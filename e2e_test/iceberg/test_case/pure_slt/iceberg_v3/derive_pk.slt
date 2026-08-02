@@ -30,6 +30,7 @@ WITH (
     create_table_if_not_exists = 'true',
     write_mode = 'merge-on-read',
     format_version = '3',
+    refresh.interval.sec = '1',
     enable_pk_index = 'true'
 );
 
@@ -151,6 +152,7 @@ WITH (
     create_table_if_not_exists = 'true',
     write_mode = 'merge-on-read',
     format_version = '3',
+    refresh.interval.sec = '1',
     enable_pk_index = 'true'
 );
 
@@ -236,7 +238,31 @@ WITH (
     primary_key = 'item_id',
     write_mode = 'merge-on-read',
     format_version = '3',
+    refresh.interval.sec = '1',
     enable_pk_index = 'true'
+);
+
+statement error commit_checkpoint_interval
+CREATE SINK s_v3_derive_pk_commit_interval_reject FROM t_v3_derive_pk_reject
+WITH (
+    connector = 'iceberg',
+    type = 'upsert',
+    force_append_only = 'false',
+    catalog.name = 'demo',
+    database.name = 'public',
+    table.name = 'derive_pk_commit_interval_reject_v3_pk_index_table',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://hummock001/iceberg_v3',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin',
+    create_table_if_not_exists = 'true',
+    write_mode = 'merge-on-read',
+    format_version = '3',
+    refresh.interval.sec = '1',
+    enable_pk_index = 'true',
+    commit_checkpoint_interval = '60'
 );
 
 statement ok

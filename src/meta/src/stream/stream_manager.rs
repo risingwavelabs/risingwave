@@ -661,9 +661,7 @@ impl GlobalStreamManager {
                 bail!("since_timestamp should not be specified when no snapshot backfill");
             }
             let snapshot_backfill_info = snapshot_backfill_info.ok_or_else(|| {
-                anyhow::anyhow!(
-                    "batch refresh materialized view must have snapshot backfill upstream"
-                )
+                anyhow::anyhow!("batch refresh job must have snapshot backfill upstream")
             })?;
             // Batch refresh jobs must not contain source or source-backfill nodes,
             // because we skip split assignment resolution for them.
@@ -673,7 +671,7 @@ impl GlobalStreamManager {
                     || mask.contains(FragmentTypeFlag::SourceScan)
                 {
                     bail!(
-                        "batch refresh materialized views must not depend on sources directly; \
+                        "batch refresh jobs must not depend on sources directly; \
                          fragment {} has source/source-backfill nodes",
                         fragment.fragment_id
                     );

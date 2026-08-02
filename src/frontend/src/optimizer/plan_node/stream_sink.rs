@@ -26,6 +26,7 @@ use risingwave_common::types::{DataType, StructType};
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
 use risingwave_connector::sink::catalog::{SinkFormat, SinkFormatDesc, SinkId, SinkType};
+use risingwave_connector::sink::decouple_checkpoint_log_sink::COMMIT_CHECKPOINT_INTERVAL;
 use risingwave_connector::sink::file_sink::fs::FsSink;
 use risingwave_connector::sink::iceberg::{ENABLE_PK_INDEX, ICEBERG_SINK};
 use risingwave_connector::sink::trivial::TABLE_SINK;
@@ -293,6 +294,7 @@ impl StreamSink {
         target_table_mapping: Option<Vec<Option<usize>>>,
         definition: String,
         mut properties: WithOptionsSecResolved,
+        batch_refresh: bool,
         format_desc: Option<SinkFormatDesc>,
         partition_info: Option<PartitionComputeInfo>,
         auto_refresh_schema_from_table: Option<Arc<TableCatalog>>,
@@ -314,6 +316,19 @@ impl StreamSink {
             && properties
                 .get(ENABLE_PK_INDEX)
                 .is_some_and(|v| v.eq_ignore_ascii_case("true"));
+
+        if is_iceberg_pk_index && batch_refresh {
+            if properties.contains_key(COMMIT_CHECKPOINT_INTERVAL) {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "`commit_checkpoint_interval` does not apply to Iceberg sinks with \
+                     `enable_pk_index='true'`. Batch refresh controls the checkpoint cadence for \
+                     these sinks."
+                        .to_owned(),
+                )
+                .into());
+            }
+            properties.insert(COMMIT_CHECKPOINT_INTERVAL.to_owned(), "1".to_owned());
+        }
 
         // For Iceberg pk-index sinks, the iceberg primary key is derived entirely from the
         // upstream stream key, so the user must not specify `primary_key` explicitly.

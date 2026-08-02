@@ -407,6 +407,7 @@ impl CatalogWriter for MockCatalogWriter {
         _resource_type: streaming_job_resource_type::ResourceType,
         _if_not_exists: bool,
         _since_timestamp_epoch: Option<u64>,
+        _refresh_interval_sec: Option<u64>,
     ) -> Result<()> {
         let sink_id = self.create_sink_inner(sink, graph)?;
         self.insert_object_dependencies(sink_id.as_object_id(), dependencies);

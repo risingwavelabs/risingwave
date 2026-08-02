@@ -486,6 +486,7 @@ impl MetaClient {
         resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
         since_timestamp_epoch: Option<u64>,
+        refresh_interval_sec: Option<u64>,
     ) -> Result<WaitVersion> {
         let request = CreateSinkRequest {
             sink: Some(sink),
@@ -496,6 +497,7 @@ impl MetaClient {
                 resource_type: Some(resource_type),
             }),
             since_timestamp_epoch,
+            refresh_interval_sec,
         };
 
         let resp = self.inner.create_sink(request).await?;
