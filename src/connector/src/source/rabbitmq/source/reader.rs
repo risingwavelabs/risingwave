@@ -26,7 +26,7 @@ use futures::{FutureExt, Stream, StreamExt};
 use futures_async_stream::try_stream;
 use lapin::options::{BasicAckOptions, BasicConsumeOptions, BasicQosOptions};
 use lapin::types::FieldTable;
-use lapin::{Channel, Connection, ConnectionStatus, Consumer};
+use lapin::{Channel, ConnectionStatus, Consumer};
 use moka::future::Cache as MokaCache;
 use risingwave_common::ensure;
 use rw_futures_util::select_all;
@@ -38,7 +38,7 @@ use super::message::{RabbitmqMessage, next_ack_consumer_id};
 use crate::error::ConnectorResult as Result;
 use crate::parser::ParserConfig;
 use crate::source::common::into_chunk_stream;
-use crate::source::rabbitmq::{RabbitmqProperties, RabbitmqSplit};
+use crate::source::rabbitmq::{RabbitmqConnection, RabbitmqProperties, RabbitmqSplit};
 use crate::source::{
     BoxSourceChunkStream, Column, SourceContextRef, SourceMessage, SplitId, SplitMetaData,
     SplitReader,
@@ -74,7 +74,7 @@ struct RabbitmqConnectionState {
     split_id: SplitId,
     // Keep the AMQP connection alive for the consumers/channels owned by this split.
     #[expect(dead_code)]
-    connection: Connection,
+    connection: RabbitmqConnection,
     status: ConnectionStatus,
     blocked_since: Option<Instant>,
 }

@@ -17,13 +17,18 @@ pub mod source;
 pub mod split;
 
 use std::collections::{HashMap, HashSet};
+use std::net::{Shutdown, TcpStream};
+use std::ops::Deref;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
 use anyhow::{Context, anyhow};
 pub use enumerator::RabbitmqSplitEnumerator;
 use lapin::options::QueueDeclareOptions;
+use lapin::tcp::OwnedTLSConfig;
 use lapin::types::FieldTable;
-use lapin::{Connection, ConnectionProperties};
+use lapin::uri::{AMQPScheme, AMQPUri};
+use lapin::{AsyncTcpStream, Connection, ConnectionProperties};
 use phf::{Set, phf_set};
 use risingwave_common::{bail, ensure};
 use serde::Deserialize;
@@ -40,6 +45,65 @@ use crate::error::ConnectorResult;
 use crate::source::SourceProperties;
 
 pub const RABBITMQ_CONNECTOR: &str = "rabbitmq";
+
+pub(crate) struct RabbitmqConnection {
+    connection: Connection,
+    shutdown_stream: Arc<Mutex<Option<TcpStream>>>,
+}
+
+impl RabbitmqConnection {
+    fn abort(&self) {
+        let shutdown_stream = match self.shutdown_stream.lock() {
+            Ok(shutdown_stream) => shutdown_stream,
+            Err(error) => {
+                tracing::debug!(%error, "RabbitMQ TCP shutdown handle lock was poisoned");
+                return;
+            }
+        };
+        let Some(shutdown_stream) = shutdown_stream.as_ref() else {
+            tracing::debug!("RabbitMQ TCP shutdown handle was unavailable");
+            return;
+        };
+        if let Err(error) = shutdown_stream.shutdown(Shutdown::Both) {
+            tracing::debug!(%error, "RabbitMQ TCP connection was already closed");
+        }
+    }
+}
+
+impl Drop for RabbitmqConnection {
+    fn drop(&mut self) {
+        // Lapin deliberately stops every socket write while a broker connection is blocked.
+        // Its automatic AMQP close is therefore queued forever in exactly the failure case where
+        // this connector must discard the reader and requeue its unacked deliveries. Shutting down
+        // a duplicate TCP handle breaks that deadlock without making normal reader shutdowns
+        // abrupt.
+        if self.connection.status().blocked() {
+            self.abort();
+        }
+    }
+}
+
+impl Deref for RabbitmqConnection {
+    type Target = Connection;
+
+    fn deref(&self) -> &Self::Target {
+        &self.connection
+    }
+}
+
+#[cfg(unix)]
+fn clone_tcp_shutdown_handle(stream: &tokio::net::TcpStream) -> std::io::Result<TcpStream> {
+    use std::os::fd::AsFd;
+
+    Ok(stream.as_fd().try_clone_to_owned()?.into())
+}
+
+#[cfg(windows)]
+fn clone_tcp_shutdown_handle(stream: &tokio::net::TcpStream) -> std::io::Result<TcpStream> {
+    use std::os::windows::io::AsSocket;
+
+    Ok(stream.as_socket().try_clone_to_owned()?.into())
+}
 
 const DEFAULT_PREFETCH_COUNT: u16 = 50;
 const MAX_PREFETCH_COUNT: u16 = 1000;
@@ -310,7 +374,7 @@ impl RabbitmqProperties {
         Ok(url.to_string())
     }
 
-    pub async fn connect(&self) -> ConnectorResult<Connection> {
+    pub(crate) async fn connect(&self) -> ConnectorResult<RabbitmqConnection> {
         self.validate()?;
         let url = self.connection_url()?;
         // `Retry` always performs the action once, then consumes one delay per retry.
@@ -322,7 +386,7 @@ impl RabbitmqProperties {
             async move {
                 tokio::time::timeout(
                     self.socket_timeout(),
-                    Connection::connect(url.as_str(), props),
+                    connect_with_shutdown_handle(url.as_str(), props),
                 )
                 .await
                 .map_err(|_| {
@@ -362,6 +426,84 @@ impl RabbitmqProperties {
         }
         Ok(())
     }
+}
+
+async fn connect_with_shutdown_handle(
+    url: &str,
+    properties: ConnectionProperties,
+) -> ConnectorResult<RabbitmqConnection> {
+    let uri = url
+        .parse::<AMQPUri>()
+        .map_err(|error| anyhow!("failed to parse RabbitMQ AMQP URI: {error}"))?;
+    let runtime = lapin::runtime::default_runtime()?;
+    let connector_runtime = runtime.clone();
+    let shutdown_stream = Arc::new(Mutex::new(None));
+    let connector_shutdown_stream = Arc::clone(&shutdown_stream);
+    let connection = Connection::connector(
+        uri,
+        runtime,
+        move |uri: AMQPUri, _runtime| {
+            let runtime = connector_runtime.clone();
+            let connector_shutdown_stream = Arc::clone(&connector_shutdown_stream);
+            async move {
+                let addresses =
+                    runtime.to_socket_addrs((uri.authority.host.clone(), uri.authority.port));
+                let connect = AsyncTcpStream::connect(&runtime, addresses);
+                let stream = if let Some(timeout_ms) = uri.query.connection_timeout {
+                    tokio::time::timeout(Duration::from_millis(timeout_ms), connect)
+                        .await
+                        .map_err(|_| {
+                            lapin::Error::from(std::io::Error::new(
+                                std::io::ErrorKind::TimedOut,
+                                format!("RabbitMQ TCP connect timed out after {timeout_ms}ms"),
+                            ))
+                        })?
+                        .map_err(lapin::Error::from)?
+                } else {
+                    connect.await.map_err(lapin::Error::from)?
+                };
+                let shutdown_handle = match &stream {
+                    AsyncTcpStream::Plain(stream) => {
+                        clone_tcp_shutdown_handle(stream.get_ref()).map_err(lapin::Error::from)?
+                    }
+                    _ => {
+                        return Err(lapin::Error::from(std::io::Error::other(
+                            "RabbitMQ connector expected a plain TCP stream before TLS setup",
+                        )));
+                    }
+                };
+                *connector_shutdown_stream.lock().map_err(|_| {
+                    lapin::Error::from(std::io::Error::other(
+                        "RabbitMQ TCP shutdown handle lock was poisoned",
+                    ))
+                })? = Some(shutdown_handle);
+
+                match uri.scheme {
+                    AMQPScheme::AMQP => Ok(stream),
+                    AMQPScheme::AMQPS => {
+                        let tls_config = OwnedTLSConfig::default();
+                        stream
+                            .into_tls(&uri.authority.host, tls_config.as_ref())
+                            .await
+                            .map_err(lapin::Error::from)
+                    }
+                }
+            }
+        },
+        properties,
+    )
+    .await?;
+    let has_shutdown_stream = shutdown_stream
+        .lock()
+        .map_err(|_| anyhow!("RabbitMQ TCP shutdown handle lock was poisoned"))?
+        .is_some();
+    if !has_shutdown_stream {
+        return Err(anyhow!("RabbitMQ connection did not retain a TCP shutdown handle").into());
+    }
+    Ok(RabbitmqConnection {
+        connection,
+        shutdown_stream,
+    })
 }
 
 #[cfg(test)]
@@ -535,7 +677,7 @@ mod tests {
         let props = parse(&[
             (
                 "url",
-                "amqps://guest:guest@example.com:5671/vhost?heartbeat=10&frame_max=4096&locale=en_US",
+                "amqps://guest:guest@example.com:5671/vhost?heartbeat=10&frame_max=4096&connection_timeout=4321&locale=en_US",
             ),
             ("heartbeat_interval", "600"),
             ("frame_max", "131072"),
@@ -543,9 +685,29 @@ mod tests {
 
         let url = props.connection_url().unwrap();
         assert!(url.contains("locale=en_US"));
+        assert!(url.contains("connection_timeout=4321"));
         assert!(url.contains("heartbeat=600"));
         assert!(url.contains("frame_max=131072"));
         assert!(!url.contains("heartbeat=10"));
         assert!(!url.contains("frame_max=4096"));
+    }
+
+    #[tokio::test]
+    async fn cloned_shutdown_handle_terminates_socket() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let client = tokio::net::TcpStream::connect(address);
+        let (client, accepted) = tokio::join!(client, listener.accept());
+        let client = client.unwrap();
+        let (server, _) = accepted.unwrap();
+        let shutdown_handle = clone_tcp_shutdown_handle(&client).unwrap();
+
+        shutdown_handle.shutdown(Shutdown::Both).unwrap();
+        tokio::time::timeout(Duration::from_secs(1), server.readable())
+            .await
+            .expect("server should observe the forced TCP shutdown")
+            .unwrap();
+        let mut byte = [0_u8; 1];
+        assert_eq!(server.try_read(&mut byte).unwrap(), 0);
     }
 }
