@@ -155,6 +155,9 @@ impl Format {
 /// Check `CONNECTORS_COMPATIBLE_FORMATS` for what `FORMAT ... ENCODE ...` combinations are allowed.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum Encode {
+    /// Resolve the encoding from external metadata before binding.
+    /// This is transient AST state and must not be stored in the catalog.
+    Auto,
     Avro,     // Keyword::Avro
     Csv,      // Keyword::CSV
     Protobuf, // Keyword::PROTOBUF
@@ -177,6 +180,7 @@ impl fmt::Display for Encode {
             f,
             "{}",
             match self {
+                Encode::Auto => "AUTO",
                 Encode::Avro => "AVRO",
                 Encode::Csv => "CSV",
                 Encode::Protobuf => "PROTOBUF",
@@ -195,6 +199,7 @@ impl fmt::Display for Encode {
 impl Encode {
     pub fn from_keyword(s: &str) -> ModalResult<Self> {
         Ok(match s {
+            "AUTO" => Encode::Auto,
             "AVRO" => Encode::Avro,
             "TEXT" => Encode::Text,
             "BYTES" => Encode::Bytes,
@@ -206,7 +211,7 @@ impl Encode {
             "NATIVE" => Encode::Native,
             "NONE" => Encode::None,
             _ => parser_err!(
-                "expected AVRO | BYTES | CSV | PROTOBUF | JSON | NATIVE | TEMPLATE | PARQUET | NONE after Encode"
+                "expected AUTO | AVRO | BYTES | CSV | PROTOBUF | JSON | NATIVE | TEMPLATE | PARQUET | NONE after Encode"
             ),
         })
     }
@@ -235,6 +240,7 @@ impl Parser<'_> {
         &mut self,
         connector: &str,
         cdc_source_job: bool,
+        allow_auto: bool,
     ) -> ModalResult<CompatibleFormatEncode> {
         // row format for cdc source must be debezium json
         // row format for nexmark source must be native
@@ -273,7 +279,14 @@ impl Parser<'_> {
             Ok(expected.into())
         } else if connector.contains("datagen") {
             Ok(if self.peek_format_encode_format() {
-                parse_format_encode(self)?
+                let format_encode = parse_format_encode(self)?;
+                if matches!(
+                    &format_encode,
+                    CompatibleFormatEncode::V2(options) if options.row_encode == Encode::Auto
+                ) {
+                    parser_err!("ENCODE AUTO is only supported for Pulsar sources");
+                }
+                format_encode
             } else {
                 FormatEncodeOptions::native().into()
             })
@@ -295,7 +308,25 @@ impl Parser<'_> {
                  Please use the `CREATE TABLE ... WITH ...` statement instead.",
             );
         } else {
-            Ok(parse_format_encode(self)?)
+            let format_encode = parse_format_encode(self)?;
+            if matches!(
+                &format_encode,
+                CompatibleFormatEncode::V2(options) if options.row_encode == Encode::Auto
+            ) {
+                if !allow_auto {
+                    parser_err!("ENCODE AUTO is only supported for CREATE SOURCE");
+                }
+                if !connector.contains("pulsar") {
+                    parser_err!("ENCODE AUTO is only supported for Pulsar sources");
+                }
+                if !matches!(
+                    &format_encode,
+                    CompatibleFormatEncode::V2(options) if options.format == Format::Plain
+                ) {
+                    parser_err!("ENCODE AUTO is only supported with FORMAT PLAIN");
+                }
+            }
+            Ok(format_encode)
         }
     }
 
@@ -569,6 +600,12 @@ impl CreateSinkStatement {
         }
 
         let sink_schema = p.parse_schema()?;
+        if sink_schema
+            .as_ref()
+            .is_some_and(|format_encode| format_encode.row_encode == Encode::Auto)
+        {
+            parser_err!("ENCODE AUTO is only supported for CREATE SOURCE");
+        }
 
         Ok(Self {
             or_replace,

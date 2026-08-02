@@ -2149,7 +2149,8 @@ impl Parser<'_> {
 
         // row format for nexmark source must be native
         // default row format for datagen source is native
-        let format_encode = self.parse_format_encode_with_connector(&connector, cdc_source_job)?;
+        let format_encode =
+            self.parse_format_encode_with_connector(&connector, cdc_source_job, true)?;
 
         let stmt = CreateSourceStatement {
             temporary,
@@ -2588,7 +2589,7 @@ impl Parser<'_> {
         let format_encode = if let Some(connector) = connector
             && !contain_webhook
         {
-            Some(self.parse_format_encode_with_connector(&connector, false)?)
+            Some(self.parse_format_encode_with_connector(&connector, false, false)?)
         } else {
             None // Table is NOT created with an external connector.
         };
@@ -3995,6 +3996,9 @@ impl Parser<'_> {
             }
         } else if self.peek_nth_any_of_keywords(0, &[Keyword::FORMAT]) {
             let format_encode = self.parse_schema()?.unwrap();
+            if format_encode.row_encode == Encode::Auto {
+                parser_err!("ENCODE AUTO is only supported for CREATE SOURCE");
+            }
             if format_encode.key_encode.is_some() {
                 parser_err!("key encode clause is not supported in source schema");
             }
@@ -6484,7 +6488,62 @@ impl Word {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ast::{CompatibleFormatEncode, Encode, Format, Statement};
     use crate::test_utils::run_parser_method;
+
+    #[test]
+    fn test_pulsar_source_encode_auto() {
+        let statements = Parser::parse_sql(
+            "CREATE SOURCE s WITH (connector = 'pulsar', topic = 'persistent://public/default/t') FORMAT PLAIN ENCODE AUTO (schema.registry = 'http://localhost:8080')",
+        )
+        .unwrap();
+        let Statement::CreateSource { stmt } = &statements[0] else {
+            panic!("expected CREATE SOURCE");
+        };
+        let CompatibleFormatEncode::V2(format_encode) = &stmt.format_encode else {
+            panic!("expected v2 source format");
+        };
+        assert_eq!(format_encode.format, Format::Plain);
+        assert_eq!(format_encode.row_encode, Encode::Auto);
+        assert_eq!(format_encode.row_options.len(), 1);
+        assert_eq!(
+            format_encode.row_options[0].name.real_value(),
+            "schema.registry"
+        );
+        assert_eq!(
+            format_encode.row_options[0].value.to_string(),
+            "'http://localhost:8080'"
+        );
+        assert!(
+            statements[0]
+                .to_string()
+                .contains("FORMAT PLAIN ENCODE AUTO")
+        );
+        assert!(
+            Parser::parse_sql(
+                "CREATE SOURCE s WITH (connector = 'pulsar', topic = 'persistent://public/default/t')"
+            )
+            .is_err()
+        );
+        assert!(
+            Parser::parse_sql(
+                "CREATE SOURCE s WITH (connector = 'kafka') FORMAT PLAIN ENCODE AUTO (schema.registry = 'http://localhost:8080')"
+            )
+            .is_err()
+        );
+        assert!(
+            Parser::parse_sql(
+                "CREATE TABLE t WITH (connector = 'pulsar') FORMAT PLAIN ENCODE AUTO (schema.registry = 'http://localhost:8080')"
+            )
+            .is_err()
+        );
+        assert!(
+            Parser::parse_sql(
+                "CREATE SOURCE s WITH (connector = 'pulsar') FORMAT UPSERT ENCODE AUTO (schema.registry = 'http://localhost:8080')"
+            )
+            .is_err()
+        );
+    }
 
     #[test]
     fn test_parse_integer_min() {

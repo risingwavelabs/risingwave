@@ -1056,7 +1056,7 @@ fn bind_sink_format_desc(
         E::Template => SinkEncode::Template,
         E::Parquet => SinkEncode::Parquet,
         E::Bytes => SinkEncode::Bytes,
-        e @ (E::Native | E::Csv | E::None | E::Text) => {
+        e @ (E::Auto | E::Native | E::Csv | E::None | E::Text) => {
             return Err(ErrorCode::BindError(format!("sink encode unsupported: {e}")).into());
         }
     };
