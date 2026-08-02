@@ -17,5 +17,5 @@ mod schema;
 mod supplier;
 
 pub use config::{PULSAR_SCHEMA_REGISTRY_AUTH_TYPE_TOKEN, PulsarSchemaRegistryConfig};
-pub use schema::{PulsarSchema, PulsarSchemaVersion};
+pub use schema::{PulsarSchemaInfo, PulsarSchemaType, PulsarSchemaVersion};
 pub use supplier::PulsarSchemaSupplier;

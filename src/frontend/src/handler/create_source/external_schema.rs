@@ -15,7 +15,7 @@
 //! bind columns from external schema
 
 use risingwave_connector::schema::pulsar_schema_registry::{
-    PulsarSchemaRegistryConfig, PulsarSchemaSupplier,
+    PulsarSchemaRegistryConfig, PulsarSchemaSupplier, PulsarSchemaType,
 };
 use risingwave_connector::source::ADBC_SNOWFLAKE_CONNECTOR;
 
@@ -67,13 +67,12 @@ feature_gated_function!(
     ) -> anyhow::Result<Vec<ColumnCatalog>>
 );
 
-fn validate_pulsar_auto_encode_schema_type(schema_type: &str) -> Result<()> {
-    if schema_type.eq_ignore_ascii_case("AVRO") {
-        Ok(())
-    } else {
-        Err(RwError::from(ProtocolError(format!(
+fn pulsar_schema_type_to_encode(schema_type: PulsarSchemaType) -> Result<Encode> {
+    match schema_type {
+        PulsarSchemaType::Avro => Ok(Encode::Avro),
+        PulsarSchemaType::Unsupported(schema_type) => Err(RwError::from(ProtocolError(format!(
             "Pulsar schema type `{schema_type}` is not supported by `ENCODE AUTO`; currently only `AVRO` is supported"
-        ))))
+        )))),
     }
 }
 
@@ -131,9 +130,7 @@ pub(super) async fn resolve_pulsar_auto_encode(
     let schema = PulsarSchemaSupplier::new(config)?
         .get_latest_schema()
         .await?;
-    validate_pulsar_auto_encode_schema_type(&schema.r#type)?;
-
-    format_encode.row_encode = Encode::Avro;
+    format_encode.row_encode = pulsar_schema_type_to_encode(schema.schema_type())?;
     Ok(())
 }
 
@@ -142,12 +139,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_validate_pulsar_auto_encode_schema_type() {
-        validate_pulsar_auto_encode_schema_type("AVRO").unwrap();
+    fn test_pulsar_schema_type_to_encode() {
+        assert_eq!(
+            pulsar_schema_type_to_encode(PulsarSchemaType::Avro).unwrap(),
+            Encode::Avro
+        );
 
-        let error = validate_pulsar_auto_encode_schema_type("PROTOBUF_NATIVE")
-            .unwrap_err()
-            .to_string();
+        let error = pulsar_schema_type_to_encode(PulsarSchemaType::Unsupported(
+            "PROTOBUF_NATIVE".to_owned(),
+        ))
+        .unwrap_err()
+        .to_string();
         assert!(error.contains("currently only `AVRO` is supported"));
     }
 }

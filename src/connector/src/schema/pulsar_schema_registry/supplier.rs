@@ -17,9 +17,8 @@ use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use reqwest::{Client, Url};
 use risingwave_common::bail;
 
-use super::{PULSAR_SCHEMA_REGISTRY_AUTH_TYPE_TOKEN, PulsarSchema, PulsarSchemaRegistryConfig};
+use super::{PulsarSchemaInfo, PulsarSchemaRegistryConfig};
 use crate::error::ConnectorResult;
-use crate::schema::schema_registry::handle_sr_list;
 use crate::source::pulsar::topic::parse_topic;
 
 #[derive(Debug, Clone)]
@@ -31,32 +30,19 @@ pub struct PulsarSchemaSupplier {
 
 impl PulsarSchemaSupplier {
     pub fn new(config: PulsarSchemaRegistryConfig) -> ConnectorResult<Self> {
-        let admin_url = handle_sr_list(&config.admin_url)?
-            .into_iter()
-            .next()
-            .context("pulsar schema registry URL is empty")?;
+        let admin_url = Url::parse(&config.admin_url).context("invalid Pulsar admin URL")?;
         if admin_url.cannot_be_a_base() {
             bail!("Pulsar admin URL must be a base URL");
         }
+        if !matches!(admin_url.scheme(), "http" | "https") {
+            bail!("Pulsar admin URL must use HTTP or HTTPS");
+        }
         let topic = parse_topic(&config.topic)?;
         let mut headers = HeaderMap::new();
-        if let Some(auth_type) = config.username {
-            if !auth_type.eq_ignore_ascii_case(PULSAR_SCHEMA_REGISTRY_AUTH_TYPE_TOKEN) {
-                bail!(
-                    "unsupported Pulsar schema registry auth type `{}`, expected `{}`",
-                    auth_type,
-                    PULSAR_SCHEMA_REGISTRY_AUTH_TYPE_TOKEN
-                );
-            }
-            let token = config.password.ok_or_else(|| {
-                anyhow::anyhow!("Pulsar schema registry token auth requires password")
-            })?;
-            let token = token.strip_prefix("token:").unwrap_or(&token);
+        if let Some(token) = config.bearer_token {
             let value = HeaderValue::from_str(&format!("Bearer {token}"))
                 .context("invalid Pulsar auth token header")?;
             headers.insert(AUTHORIZATION, value);
-        } else if config.password.is_some() {
-            bail!("Pulsar schema registry password requires username");
         }
         let http_client = Client::builder()
             .default_headers(headers)
@@ -81,8 +67,8 @@ impl PulsarSchemaSupplier {
         url
     }
 
-    pub async fn get_latest_schema(&self) -> ConnectorResult<PulsarSchema> {
-        let url = self.build_schema_url(&["schema"]);
+    async fn fetch_schema(&self, suffix: &[&str]) -> ConnectorResult<PulsarSchemaInfo> {
+        let url = self.build_schema_url(suffix);
         let response = self
             .http_client
             .get(url.clone())
@@ -97,21 +83,13 @@ impl PulsarSchemaSupplier {
             .with_context(|| format!("failed to parse Pulsar schema response from {url}"))?)
     }
 
-    pub async fn get_schema_by_version(&self, version: i64) -> ConnectorResult<PulsarSchema> {
+    pub async fn get_latest_schema(&self) -> ConnectorResult<PulsarSchemaInfo> {
+        self.fetch_schema(&["schema"]).await
+    }
+
+    pub async fn get_schema_by_version(&self, version: i64) -> ConnectorResult<PulsarSchemaInfo> {
         let version = version.to_string();
-        let url = self.build_schema_url(&["schema", version.as_str()]);
-        let response = self
-            .http_client
-            .get(url.clone())
-            .send()
-            .await
-            .with_context(|| format!("failed to fetch Pulsar schema from {url}"))?
-            .error_for_status()
-            .with_context(|| format!("Pulsar schema request failed for {url}"))?;
-        Ok(response
-            .json()
-            .await
-            .with_context(|| format!("failed to parse Pulsar schema response from {url}"))?)
+        self.fetch_schema(&["schema", version.as_str()]).await
     }
 }
 
@@ -123,8 +101,7 @@ mod tests {
         PulsarSchemaRegistryConfig {
             admin_url: "http://localhost:8080".to_owned(),
             topic: topic.to_owned(),
-            username: Some("token".to_owned()),
-            password: Some("test-token".to_owned()),
+            bearer_token: Some("test-token".to_owned()),
         }
     }
 

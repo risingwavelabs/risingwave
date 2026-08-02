@@ -18,15 +18,17 @@ use anyhow::Context;
 use apache_avro::Schema;
 use moka::future::Cache;
 use risingwave_common::bail;
+use tokio::sync::OnceCell;
 
 use crate::error::ConnectorResult;
 use crate::schema::pulsar_schema_registry::{
-    PulsarSchema, PulsarSchemaRegistryConfig, PulsarSchemaSupplier,
+    PulsarSchemaInfo, PulsarSchemaRegistryConfig, PulsarSchemaSupplier, PulsarSchemaType,
 };
 
 #[derive(Debug)]
 pub struct PulsarSchemaCache {
     schema_cache: Cache<i64, Arc<Schema>>,
+    latest_schema: OnceCell<Arc<Schema>>,
     schema_supplier: PulsarSchemaSupplier,
 }
 
@@ -34,16 +36,17 @@ impl PulsarSchemaCache {
     pub fn new(config: PulsarSchemaRegistryConfig) -> ConnectorResult<Self> {
         Ok(Self {
             schema_cache: Cache::new(u64::MAX),
+            latest_schema: OnceCell::new(),
             schema_supplier: PulsarSchemaSupplier::new(config)?,
         })
     }
 
     async fn parse_and_cache_schema(
         &self,
-        raw_schema: PulsarSchema,
+        raw_schema: PulsarSchemaInfo,
     ) -> ConnectorResult<Arc<Schema>> {
-        if !raw_schema.r#type.eq_ignore_ascii_case("AVRO") {
-            bail!("expected Pulsar AVRO schema, got {}", raw_schema.r#type);
+        if let PulsarSchemaType::Unsupported(schema_type) = raw_schema.schema_type() {
+            bail!("expected Pulsar AVRO schema, got {schema_type}");
         }
         let schema =
             Schema::parse_str(&raw_schema.data).context("failed to parse Pulsar avro schema")?;
@@ -55,8 +58,14 @@ impl PulsarSchemaCache {
     }
 
     pub async fn get_latest(&self) -> ConnectorResult<Arc<Schema>> {
-        self.parse_and_cache_schema(self.schema_supplier.get_latest_schema().await?)
-            .await
+        let schema = self
+            .latest_schema
+            .get_or_try_init(|| async {
+                self.parse_and_cache_schema(self.schema_supplier.get_latest_schema().await?)
+                    .await
+            })
+            .await?;
+        Ok(Arc::clone(schema))
     }
 
     pub async fn get_by_version(&self, version: i64) -> ConnectorResult<Arc<Schema>> {

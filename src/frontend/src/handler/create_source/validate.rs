@@ -135,14 +135,6 @@ fn uses_schema_registry(format_encode: &FormatEncodeOptions) -> Result<bool> {
     }
 }
 
-fn uses_pulsar_schema_registry(format_encode: &FormatEncodeOptions) -> Result<bool> {
-    let options = WithOptions::try_from(format_encode.row_options())?;
-    // Pulsar sources default `schema.registry` to the Pulsar admin schema API.
-    Ok(options
-        .get(SCHEMA_REGISTRY_TYPE_KEY)
-        .is_none_or(|value| value.eq_ignore_ascii_case("pulsar")))
-}
-
 pub fn validate_compatibility(
     format_encode: &FormatEncodeOptions,
     props: &mut BTreeMap<String, String>,
@@ -178,11 +170,11 @@ pub fn validate_compatibility(
 
     validate_license(&connector)?;
     if connector != KAFKA_CONNECTOR
+        && connector != PULSAR_CONNECTOR
         && uses_schema_registry(format_encode)?
-        && !(connector == PULSAR_CONNECTOR && uses_pulsar_schema_registry(format_encode)?)
     {
         return Err(RwError::from(ProtocolError(format!(
-            "The {} must be kafka when schema registry is used, or pulsar when using the Pulsar schema registry",
+            "The {} must be kafka or pulsar when schema registry is used",
             UPSTREAM_SOURCE_KEY
         ))));
     }

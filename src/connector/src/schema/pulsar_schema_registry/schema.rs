@@ -16,11 +16,27 @@ use anyhow::Context;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
-pub struct PulsarSchema {
+pub struct PulsarSchemaInfo {
     pub version: i64,
     #[serde(rename = "type")]
     pub r#type: String,
     pub data: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PulsarSchemaType {
+    Avro,
+    Unsupported(String),
+}
+
+impl PulsarSchemaInfo {
+    pub fn schema_type(&self) -> PulsarSchemaType {
+        if self.r#type.eq_ignore_ascii_case("AVRO") {
+            PulsarSchemaType::Avro
+        } else {
+            PulsarSchemaType::Unsupported(self.r#type.clone())
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -43,6 +59,21 @@ impl TryFrom<&[u8]> for PulsarSchemaVersion {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn test_pulsar_schema_type() {
+        let avro: PulsarSchemaInfo =
+            serde_json::from_str(r#"{"version":0,"type":"avro","data":"{}"}"#).unwrap();
+        assert_eq!(avro.schema_type(), PulsarSchemaType::Avro);
+
+        let protobuf: PulsarSchemaInfo =
+            serde_json::from_str(r#"{"version":1,"type":"PROTOBUF_NATIVE","data":"descriptor"}"#)
+                .unwrap();
+        assert_eq!(
+            protobuf.schema_type(),
+            PulsarSchemaType::Unsupported("PROTOBUF_NATIVE".to_owned())
+        );
+    }
 
     #[test]
     fn test_pulsar_schema_version_from_bytes() {

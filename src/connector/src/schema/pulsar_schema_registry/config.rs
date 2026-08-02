@@ -25,8 +25,7 @@ pub const PULSAR_SCHEMA_REGISTRY_AUTH_TYPE_TOKEN: &str = "token";
 pub struct PulsarSchemaRegistryConfig {
     pub admin_url: String,
     pub topic: String,
-    pub username: Option<String>,
-    pub password: Option<String>,
+    pub bearer_token: Option<String>,
 }
 
 impl PulsarSchemaRegistryConfig {
@@ -40,18 +39,15 @@ impl PulsarSchemaRegistryConfig {
             .or_else(|| source_options.get("topic"))
             .ok_or_else(|| anyhow::anyhow!("Must specify 'pulsar.topic' or 'topic'"))?
             .clone();
-        let (username, password) = Self::credentials(format_options)?;
+        let bearer_token = Self::bearer_token(format_options)?;
         Ok(Self {
             admin_url,
             topic,
-            username,
-            password,
+            bearer_token,
         })
     }
 
-    fn credentials(
-        format_options: &BTreeMap<String, String>,
-    ) -> ConnectorResult<(Option<String>, Option<String>)> {
+    fn bearer_token(format_options: &BTreeMap<String, String>) -> ConnectorResult<Option<String>> {
         match format_options.get(SCHEMA_REGISTRY_USERNAME) {
             Some(auth_type)
                 if auth_type.eq_ignore_ascii_case(PULSAR_SCHEMA_REGISTRY_AUTH_TYPE_TOKEN) =>
@@ -66,7 +62,11 @@ impl PulsarSchemaRegistryConfig {
                             PULSAR_SCHEMA_REGISTRY_AUTH_TYPE_TOKEN
                         )
                     })?;
-                return Ok((Some(auth_type.clone()), Some(token.clone())));
+                let token = token.strip_prefix("token:").unwrap_or(token);
+                if token.is_empty() {
+                    bail!("Pulsar schema registry token must not be empty");
+                }
+                return Ok(Some(token.to_owned()));
             }
             Some(auth_type) => {
                 bail!(
@@ -86,7 +86,7 @@ impl PulsarSchemaRegistryConfig {
             }
         }
 
-        Ok((None, None))
+        Ok(None)
     }
 }
 
@@ -118,8 +118,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(config.topic, "persistent://tenant/ns/events");
-        assert_eq!(config.username, Some("token".to_owned()));
-        assert_eq!(config.password, Some("registry-token".to_owned()));
+        assert_eq!(config.bearer_token, Some("registry-token".to_owned()));
 
         let config = PulsarSchemaRegistryConfig::new(
             "http://localhost:8080".to_owned(),
@@ -129,8 +128,7 @@ mod tests {
         .unwrap();
 
         assert_eq!(config.topic, "events");
-        assert_eq!(config.username, None);
-        assert_eq!(config.password, None);
+        assert_eq!(config.bearer_token, None);
     }
 
     #[test]
