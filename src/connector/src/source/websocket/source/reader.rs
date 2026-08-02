@@ -183,8 +183,8 @@ impl WebsocketSplitReader {
                 .idle_timeout_secs
                 .filter(|secs| *secs > 0)
                 .map(Duration::from_secs);
-            let mut idle_deadline = idle_timeout
-                .map(|timeout| tokio::time::Instant::now() + timeout);
+            let mut idle_deadline =
+                idle_timeout.map(|timeout| tokio::time::Instant::now() + timeout);
 
             // Read messages until the connection is lost, then reconnect.
             loop {
@@ -496,7 +496,10 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(batch[0].payload.as_deref(), Some(b"data-2".as_slice()));
-        assert_eq!(batch[0].offset, "1", "sequence number continues across reconnects");
+        assert_eq!(
+            batch[0].offset, "1",
+            "sequence number continues across reconnects"
+        );
     }
 
     #[tokio::test]
