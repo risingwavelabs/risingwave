@@ -183,13 +183,18 @@ impl WebsocketSplitReader {
                 .idle_timeout_secs
                 .filter(|secs| *secs > 0)
                 .map(Duration::from_secs);
-            let mut idle_deadline = idle_timeout.map(|timeout| tokio::time::Instant::now() + timeout);
+            let mut idle_deadline = idle_timeout
+                .map(|timeout| tokio::time::Instant::now() + timeout);
 
             // Read messages until the connection is lost, then reconnect.
             loop {
-                let event =
-                    next_event(&mut ws_stream, &mut ping_ticker, ping_enabled, idle_deadline)
-                        .await;
+                let event = next_event(
+                    &mut ws_stream,
+                    &mut ping_ticker,
+                    ping_enabled,
+                    idle_deadline,
+                )
+                .await;
 
                 match event {
                     Event::Message(Some(Ok(message))) => match message {

@@ -89,9 +89,9 @@ mod tests {
     use tokio::net::TcpListener;
 
     use super::*;
+    use crate::source::SourceEnumeratorContext;
     #[cfg(not(madsim))]
     use crate::source::SplitMetaData;
-    use crate::source::SourceEnumeratorContext;
 
     fn test_properties(url: String) -> WebsocketProperties {
         WebsocketProperties {
