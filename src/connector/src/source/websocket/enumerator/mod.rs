@@ -83,11 +83,15 @@ impl SplitEnumerator for WebsocketSplitEnumerator {
 
 #[cfg(test)]
 mod tests {
+    #[cfg(not(madsim))]
     use futures::StreamExt;
+    #[cfg(not(madsim))]
     use tokio::net::TcpListener;
 
     use super::*;
-    use crate::source::{SourceEnumeratorContext, SplitMetaData};
+    #[cfg(not(madsim))]
+    use crate::source::SplitMetaData;
+    use crate::source::SourceEnumeratorContext;
 
     fn test_properties(url: String) -> WebsocketProperties {
         WebsocketProperties {
@@ -100,6 +104,10 @@ mod tests {
         }
     }
 
+    // These tests dial a local TCP server via `tokio_tungstenite`, which drives the
+    // connection with the real `tokio` runtime. They are therefore incompatible with the
+    // madsim simulation runtime, where no real reactor is running.
+    #[cfg(not(madsim))]
     #[tokio::test]
     async fn test_list_splits_checks_connectivity_once() {
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -130,6 +138,7 @@ mod tests {
         assert_eq!(splits.len(), 1);
     }
 
+    #[cfg(not(madsim))]
     #[tokio::test]
     async fn test_list_splits_unreachable_server() {
         // Bind and drop a listener to obtain an address that refuses connections.

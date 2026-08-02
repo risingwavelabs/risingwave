@@ -273,7 +273,10 @@ impl WebsocketSplitReader {
     }
 }
 
-#[cfg(test)]
+// These tests run a local TCP server and drive the reader via `tokio_tungstenite`, which
+// uses the real `tokio` runtime. They are therefore incompatible with the madsim
+// simulation runtime, where no real reactor is running.
+#[cfg(all(test, not(madsim)))]
 mod tests {
     use futures::StreamExt;
     use tokio::net::TcpListener;
