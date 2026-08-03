@@ -885,6 +885,7 @@ mod tests {
                 tracingSlf4jEvent                        (Ljava/lang/String;Ljava/lang/String;ILjava/lang/String;Ljava/lang/String;)V,
                 tracingSlf4jEventEnabled                 (I)Z,
                 defaultVnodeCount                        ()I,
+                validateCdcSourceColumnType              (ILjava/lang/String;IJZLjava/lang/String;)Z,
                 iteratorNewStreamChunk                   (J)J,
                 iteratorNext                             (J)Z,
                 initObjectStoreForTest                   (Ljava/lang/String;Ljava/lang/String;)V,
