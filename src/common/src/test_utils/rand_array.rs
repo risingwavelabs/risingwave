@@ -28,7 +28,7 @@ use rand::{Rng, SeedableRng};
 use crate::array::{Array, ArrayBuilder, ArrayRef, VectorVal};
 use crate::types::{
     Date, Decimal, Int256, Interval, JsonbVal, NativeType, Scalar, Serial, Time, Timestamp,
-    Timestamptz,
+    Timestamptz, VariantVal,
 };
 
 pub fn gen_vector_for_test(d: usize) -> VectorVal {
@@ -142,6 +142,12 @@ impl RandValue for Int256 {
 impl RandValue for JsonbVal {
     fn rand_value<R: rand::Rng>(_rand: &mut R) -> Self {
         JsonbVal::null()
+    }
+}
+
+impl RandValue for VariantVal {
+    fn rand_value<R: rand::Rng>(_rand: &mut R) -> Self {
+        VariantVal::null()
     }
 }
 

@@ -833,6 +833,38 @@ pub enum SqlColumnStrategy {
     Ignore,
 }
 
+/// Reject user-declared `VARIANT` columns (including nested) on binding paths whose ingest
+/// pipeline cannot produce variant values. `context` names the path in the error message.
+pub(crate) fn reject_variant_columns(columns: &[ColumnCatalog], context: &str) -> Result<()> {
+    if let Some(col) = columns.iter().find(|c| c.data_type().contains_variant()) {
+        return Err(RwError::from(NotSupported(
+            format!(
+                "VARIANT column \"{}\" is not supported {context} yet",
+                col.name()
+            ),
+            format!("VARIANT columns are not supported {context} yet"),
+        )));
+    }
+    Ok(())
+}
+
+/// Reject user-declared `VARIANT` columns when the `FORMAT ... ENCODE ...` is handled by a
+/// row-encode parser or native generator, none of which can produce variant values.
+///
+/// Not gated: connector-native schemas (`ENCODE NONE`, e.g. iceberg) infer their own schema.
+fn reject_variant_columns_for_unsupported_encoding(
+    format_encode: &FormatEncodeOptions,
+    columns_from_sql: &[ColumnCatalog],
+) -> Result<()> {
+    if matches!(
+        (&format_encode.format, &format_encode.row_encode),
+        (Format::None, Encode::None)
+    ) {
+        return Ok(());
+    }
+    reject_variant_columns(columns_from_sql, "for this source encoding")
+}
+
 /// Entrypoint for binding source connector.
 /// Common logic shared by `CREATE SOURCE` and `CREATE TABLE`.
 #[expect(clippy::too_many_arguments)]
@@ -932,6 +964,8 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
         )));
     }
     let columns_from_sql = bind_sql_columns(sql_columns_defs, false)?;
+
+    reject_variant_columns_for_unsupported_encoding(&format_encode, &columns_from_sql)?;
 
     let mut columns = bind_all_columns(
         &format_encode,

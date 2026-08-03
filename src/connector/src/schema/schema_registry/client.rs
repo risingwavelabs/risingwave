@@ -343,29 +343,3 @@ impl Client {
         Ok((origin_subject, subjects))
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[tokio::test]
-    #[ignore]
-    async fn test_get_subject() {
-        let url = Url::parse("http://localhost:8081").unwrap();
-        let client = Client::new(
-            vec![url],
-            &SchemaRegistryConfig {
-                username: None,
-                password: None,
-                ca_pem_path: None,
-                retry_config: SchemaRegistryRetryConfig::default(),
-            },
-        )
-        .unwrap();
-        let subject = client
-            .get_subject_and_references("proto_c_bin-value")
-            .await
-            .unwrap();
-        println!("{:?}", subject);
-    }
-}

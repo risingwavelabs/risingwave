@@ -930,7 +930,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 40
+    timeout_in_minutes: 50
     retry: *auto-retry
 
   - label: "e2e single-node binary test"

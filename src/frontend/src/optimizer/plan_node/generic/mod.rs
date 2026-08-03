@@ -93,6 +93,9 @@ pub use now::*;
 mod file_scan;
 pub use file_scan::*;
 
+mod iceberg_metadata_scan;
+pub use iceberg_metadata_scan::*;
+
 mod postgres_query;
 pub use postgres_query::*;
 
