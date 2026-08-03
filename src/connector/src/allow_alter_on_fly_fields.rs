@@ -192,6 +192,14 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "doris.stream_load.http.timeout.ms".to_owned(),
         ].into_iter().collect(),
     ).unwrap();
+    // DynamoDbConfig
+    map.try_insert(
+        std::any::type_name::<DynamoDbConfig>().to_owned(),
+        [
+            "dynamodb.batch_write_retry_times".to_owned(),
+            "dynamodb.batch_write_retry_backoff_ms".to_owned(),
+        ].into_iter().collect(),
+    ).unwrap();
     // IcebergConfig
     map.try_insert(
         std::any::type_name::<IcebergConfig>().to_owned(),
