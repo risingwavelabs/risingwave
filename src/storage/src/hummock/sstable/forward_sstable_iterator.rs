@@ -770,7 +770,7 @@ mod tests {
         let expected_start = table_2_block_start
             + sstable.meta.block_metas[table_2_block_start..table_3_block_start]
                 .partition_point(|block_meta| {
-                    FullKey::decode(&block_meta.smallest_key).user_key <= mid_key.user_key.as_ref()
+                    FullKey::decode(&block_meta.smallest_key).user_key < mid_key.user_key.as_ref()
                 })
                 .saturating_sub(1);
         let options = Arc::new(SstableIteratorReadOptions {
@@ -794,6 +794,65 @@ mod tests {
         sstable_iter.seek(mid_key.to_ref()).await.unwrap();
         assert!(sstable_iter.is_valid());
         assert_eq!(sstable_iter.key(), mid_key.to_ref());
+    }
+
+    #[tokio::test]
+    async fn test_point_range_keeps_preceding_block_for_repeated_user_key() {
+        let sstable_store = mock_sstable_store().await;
+        let mut builder_options = default_builder_opt_for_test();
+        builder_options.block_capacity = 64;
+        let key = |table_key: &[u8], epoch: u64| {
+            FullKey::for_test(TableId::default(), table_key.to_vec(), test_epoch(epoch))
+        };
+        let value = b"01234567890123456789012345678901".to_vec();
+        let (sstable, sstable_info) = gen_test_sstable_with_table_ids(
+            builder_options,
+            11,
+            vec![
+                (key(b"a", 1), HummockValue::put(value.clone())),
+                (key(b"hot", 4), HummockValue::put(value.clone())),
+                (key(b"hot", 3), HummockValue::put(value.clone())),
+                (key(b"hot", 2), HummockValue::put(value.clone())),
+                (key(b"hot", 1), HummockValue::put(value.clone())),
+                (key(b"z", 1), HummockValue::put(value)),
+            ]
+            .into_iter(),
+            sstable_store.clone(),
+            vec![TableId::default().as_raw_id()],
+        )
+        .await;
+
+        let hot = UserKey::new(TableId::default(), TableKey(Bytes::from_static(b"hot")));
+        let first_hot_block = sstable.meta.block_metas.partition_point(|block_meta| {
+            FullKey::decode(&block_meta.smallest_key).user_key.table_key
+                < TableKey(hot.table_key.as_ref())
+        });
+        assert!(first_hot_block > 0);
+        assert!(
+            sstable.meta.block_metas[first_hot_block..]
+                .iter()
+                .filter(|block_meta| {
+                    FullKey::decode(&block_meta.smallest_key).user_key.table_key
+                        == TableKey(hot.table_key.as_ref())
+                })
+                .count()
+                >= 2
+        );
+
+        let mut iter = SstableIterator::create(
+            sstable,
+            sstable_store,
+            Arc::new(SstableIteratorReadOptions {
+                cache_policy: CachePolicy::Disable,
+                scan_user_key_range: Some((Bound::Included(hot.clone()), Bound::Included(hot))),
+                prefetch: false,
+                max_preload_retry_times: 0,
+            }),
+            &sstable_info,
+        );
+        iter.seek(key(b"hot", 4).to_ref()).await.unwrap();
+        assert!(iter.is_valid());
+        assert_eq!(iter.key(), key(b"hot", 4).to_ref());
     }
 
     #[tokio::test]

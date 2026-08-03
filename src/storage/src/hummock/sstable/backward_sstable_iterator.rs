@@ -231,18 +231,22 @@ impl HummockIterator for BackwardSstableIterator {
     }
 
     async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
-        let block_idx = self
-            .sst
-            .meta
-            .block_metas
-            .partition_point(|block_meta| {
-                // Compare by version comparator
-                // Note: we are comparing against the `smallest_key` of the `block`, thus the
-                // partition point should be `prev(<=)` instead of `<`.
-                let ord = FullKey::decode(&block_meta.smallest_key).cmp(&key);
-                ord == Less || ord == Equal
-            })
-            .saturating_sub(1); // considering the boundary of 0
+        if self.read_block_meta_range.is_empty() {
+            self.block_iter = None;
+            return Ok(());
+        }
+
+        let range = self.read_block_meta_range.clone();
+        let block_idx = range.start
+            + self.sst.meta.block_metas[range.clone()]
+                .partition_point(|block_meta| {
+                    // Compare by version comparator
+                    // Note: we are comparing against the `smallest_key` of the `block`, thus the
+                    // partition point should be `prev(<=)` instead of `<`.
+                    let ord = FullKey::decode(&block_meta.smallest_key).cmp(&key);
+                    ord == Less || ord == Equal
+                })
+                .saturating_sub(1); // considering the boundary of 0
         let block_idx = block_idx as isize;
 
         self.seek_idx(block_idx, Some(key)).await?;
@@ -290,7 +294,7 @@ mod tests {
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::EpochWithGap;
-    use risingwave_hummock_sdk::key::UserKey;
+    use risingwave_hummock_sdk::key::{TableKey, UserKey};
     use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
 
     use super::*;
@@ -358,6 +362,54 @@ mod tests {
         let mut stats = StoreLocalStatistic::default();
         iter.collect_local_statistic(&mut stats);
         assert_eq!(stats.cache_data_block_total, 0);
+    }
+
+    #[tokio::test]
+    async fn test_backward_seek_stays_in_clipped_block_window() {
+        let sstable_store = mock_sstable_store().await;
+        let mut builder_options = default_builder_opt_for_test();
+        builder_options.block_capacity = 64;
+        let key = |table_key: &[u8], epoch: u64| {
+            FullKey::for_test(TableId::default(), table_key.to_vec(), test_epoch(epoch))
+        };
+        let value = b"01234567890123456789012345678901".to_vec();
+        let (sstable, sstable_info) = gen_test_sstable_with_table_ids(
+            builder_options,
+            12,
+            vec![
+                (key(b"a", 1), HummockValue::put(value.clone())),
+                (key(b"hot", 4), HummockValue::put(value.clone())),
+                (key(b"hot", 3), HummockValue::put(value.clone())),
+                (key(b"hot", 2), HummockValue::put(value.clone())),
+                (key(b"hot", 1), HummockValue::put(value.clone())),
+                (key(b"z", 1), HummockValue::put(value)),
+            ]
+            .into_iter(),
+            sstable_store.clone(),
+            vec![TableId::default().as_raw_id()],
+        )
+        .await;
+        let a = UserKey::new(TableId::default(), TableKey(Bytes::from_static(b"a")));
+        let hot = UserKey::new(TableId::default(), TableKey(Bytes::from_static(b"hot")));
+        let mut iter = BackwardSstableIterator::create(
+            sstable,
+            sstable_store,
+            Arc::new(SstableIteratorReadOptions {
+                cache_policy: CachePolicy::Disable,
+                scan_user_key_range: Some((Bound::Included(a), Bound::Excluded(hot))),
+                prefetch: false,
+                max_preload_retry_times: 0,
+            }),
+            &sstable_info,
+        );
+
+        assert_eq!(iter.read_block_meta_range, 0..1);
+        iter.seek(key(b"hot", 0).to_ref()).await.unwrap();
+        assert!(iter.is_valid());
+        assert_eq!(iter.key(), key(b"a", 1).to_ref());
+        let mut stats = StoreLocalStatistic::default();
+        iter.collect_local_statistic(&mut stats);
+        assert_eq!(stats.cache_data_block_total, 1);
     }
 
     #[tokio::test]

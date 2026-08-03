@@ -554,12 +554,18 @@ pub(super) fn scan_block_meta_range(
     let table_metas = &block_metas[table_start..table_end];
 
     let start = table_start
-        + table_metas
-            .partition_point(|block_meta| {
+        + match &user_key_range.0 {
+            Bound::Included(_) => table_metas.partition_point(|block_meta| {
+                FullKey::decode(&block_meta.smallest_key).user_key.table_key
+                    < TableKey(start_key.table_key.as_ref())
+            }),
+            Bound::Excluded(_) => table_metas.partition_point(|block_meta| {
                 FullKey::decode(&block_meta.smallest_key).user_key.table_key
                     <= TableKey(start_key.table_key.as_ref())
-            })
-            .saturating_sub(1);
+            }),
+            Bound::Unbounded => unreachable!("canonical scan range must have a lower bound"),
+        }
+        .saturating_sub(1);
     let end = table_start
         + match &user_key_range.1 {
             Bound::Unbounded => table_metas.len(),
@@ -642,7 +648,7 @@ mod tests {
         );
         assert_eq!(
             range(Bound::Included(key(b"m")), Bound::Included(key(b"m"))),
-            2..3
+            1..3
         );
         assert_eq!(
             range(Bound::Included(key(b"z")), Bound::Excluded(key(b"m"))),
@@ -651,6 +657,29 @@ mod tests {
         assert_eq!(
             scan_block_meta_range(&block_metas, 1..4, &(table_start(), table_end())),
             1..4
+        );
+
+        let repeated_user_key_metas = vec![
+            block_meta(2, b"a"),
+            block_meta(2, b"hot"),
+            block_meta(2, b"hot"),
+            block_meta(2, b"hot"),
+            block_meta(2, b"z"),
+        ];
+        let repeated_range = |start, end| {
+            scan_block_meta_range(
+                &repeated_user_key_metas,
+                0..repeated_user_key_metas.len(),
+                &(start, end),
+            )
+        };
+        assert_eq!(
+            repeated_range(Bound::Included(key(b"hot")), Bound::Included(key(b"hot"))),
+            0..4
+        );
+        assert_eq!(
+            repeated_range(Bound::Excluded(key(b"hot")), table_end()),
+            3..5
         );
 
         let max_table = TableId::new(u32::MAX);
