@@ -1,18 +1,15 @@
-# Physical navigation across watermark batches.
-#
-# NEXT in DEFINE reads rows *after* the candidate, so a row's verdict is only decidable once its
-# lookahead is watermark-safe. The executor therefore separates two boundaries: `safe_len` (rows the
-# watermark has finalized — the navigation clamp, NEXT reads real rows below it) and
-# `decision_len = safe_len - max_lookahead` (rows whose verdicts are final — everything the operator
-# emits or evicts is bounded by it). Without that split, a NEXT evaluated at the safe boundary reads
-# NULL as a *verdict* instead of a wait: the liveness walker judges the start dead and deletes its
-# rows, and the match is lost forever on perfectly ordinary (not late) data.
+# Physical navigation across watermark batches: the accepted PREV shape.
 #
 # PREV in DEFINE reads rows *before* the candidate; the bind-time start-distance rule guarantees
 # those reads stay inside the match span, so they need no retention — but only if that holds across
-# evictions, which is what the second scenario pins: a second match in the same partition, found
-# after the first match's rows were consumed and deleted, must evaluate its PREV against its own
-# rows (buffer index 0 is now mid-partition).
+# evictions, which is what this scenario pins: a second match in the same partition, found after
+# the first match's rows were consumed and deleted, must evaluate its PREV against its own rows
+# (buffer index 0 is now mid-partition).
+#
+# Physical NEXT in DEFINE is rejected at bind time (see match_recognize_validation.slt): a row's
+# verdict would depend on rows after it, and per-candidate decidability — an out-of-range read
+# being a wait for exactly that candidate, not a NULL verdict and not a global horizon — is not
+# implemented yet.
 
 statement ok
 set streaming_parallelism = 1;
@@ -21,121 +18,7 @@ statement ok
 set rw_implicit_flush to true;
 
 # ---------------------------------------------------------------------------------------------
-# Scenario 1: NEXT(col) at the safe boundary is a wait, not a verdict.
-# The watermark is deliberately driven to land BETWEEN the candidate and its lookahead.
-# ---------------------------------------------------------------------------------------------
-
-statement ok
-create table t_nav_next (id int, ts int, v int, watermark for ts as ts - 1) append only;
-
-statement ok
-create materialized view mv_nav_next as
-select * from t_nav_next match_recognize (
-  partition by id
-  order by ts
-  measures a.ts as a_ts, b.ts as b_ts
-  one row per match
-  after match skip past last row
-  pattern (a b)
-  define a as next(a.v) < 0, b as b.v < 0
-)
-emit on window close;
-
-# The candidate `a` arrives alone; the sentinel (partition 9) drives the watermark to 13 -- `a@10`
-# is safe but its lookahead is not yet buffered. The un-fixed executor evaluates NEXT as NULL,
-# judges the start dead, and DELETES the row here.
-statement ok
-insert into t_nav_next values (1, 10, 1);
-
-statement ok
-insert into t_nav_next values (9, 14, 0);
-
-# The lookahead/completing row arrives (13 >= watermark 13, admitted), then later rows push the
-# watermark past the match AND its decision horizon (the match needs `end + 1` safe rows: one
-# lookahead for `a`'s NEXT, one trailing row past the horizon to prove the greedy match maximal).
-statement ok
-insert into t_nav_next values (1, 13, -1);
-
-statement ok
-insert into t_nav_next values (9, 16, 0);
-
-statement ok
-insert into t_nav_next values (1, 20, 5);
-
-statement ok
-insert into t_nav_next values (9, 22, 0);
-
-statement ok
-insert into t_nav_next values (1, 24, 5);
-
-statement ok
-insert into t_nav_next values (9, 30, 0);
-
-# The match (a@10, b@13) must be found: the rows survived the watermark that landed between them.
-query II rowsort
-select a_ts, b_ts from mv_nav_next;
-----
-10 13
-
-statement ok
-drop materialized view mv_nav_next;
-
-statement ok
-drop table t_nav_next;
-
-# ---------------------------------------------------------------------------------------------
-# Scenario 2: NEXT with offset 2 -- the horizon is the MAX offset, not "an" offset.
-# ---------------------------------------------------------------------------------------------
-
-statement ok
-create table t_nav_next2 (id int, ts int, v int, watermark for ts as ts - 1) append only;
-
-statement ok
-create materialized view mv_nav_next2 as
-select * from t_nav_next2 match_recognize (
-  partition by id
-  order by ts
-  measures a.ts as a_ts, b.ts as b_ts
-  one row per match
-  after match skip past last row
-  pattern (a b)
-  define a as next(a.v, 2) > 0, b as b.v < 0
-)
-emit on window close;
-
-# a@1 needs the row TWO positions ahead (v=7 at ts 3) to say yes. Drive the watermark to land after
-# `a` but before that lookahead, then complete everything.
-statement ok
-insert into t_nav_next2 values (1, 1, 1);
-
-statement ok
-insert into t_nav_next2 values (9, 3, 0);
-
-statement ok
-insert into t_nav_next2 values (1, 2, -1), (1, 3, 7);
-
-statement ok
-insert into t_nav_next2 values (9, 6, 0);
-
-statement ok
-insert into t_nav_next2 values (1, 8, 5), (1, 9, 5);
-
-statement ok
-insert into t_nav_next2 values (9, 14, 0);
-
-query II rowsort
-select a_ts, b_ts from mv_nav_next2;
-----
-1 2
-
-statement ok
-drop materialized view mv_nav_next2;
-
-statement ok
-drop table t_nav_next2;
-
-# ---------------------------------------------------------------------------------------------
-# Scenario 3: accepted PREV shape stays correct across an eviction. The first match is emitted and
+# Accepted PREV shape stays correct across an eviction. The first match is emitted and
 # its rows deleted; the second match's `down` rows then sit at the START of the surviving buffer,
 # and their PREV must read the second match's own rows (never a stale or missing predecessor).
 # ---------------------------------------------------------------------------------------------

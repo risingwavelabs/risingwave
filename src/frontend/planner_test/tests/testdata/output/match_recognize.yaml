@@ -349,7 +349,7 @@
     );
   binder_error: |-
     Not supported: PREV() offset of 4294967296
-    HINT: a NEXT() offset defers match finality by that many rows and a PREV() offset requires that many mandatory pattern rows before the variable, so the offset may be at most 100
+    HINT: a PREV() offset requires that many mandatory pattern rows before the variable, so the offset may be at most 100
 - name: MATCH_RECOGNIZE DEFINE rejects FILTER on navigation (it was silently dropped)
   sql: |
     create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
@@ -510,7 +510,7 @@
   binder_error: |-
     Not supported: PREV with offset 2 in DEFINE b: the variable can occur 1 row(s) from the match start, so the read could reach rows before the match, which are not retained
     HINT: ensure the variable is always preceded by at least as many pattern rows as the PREV offset, e.g. prefix the pattern with an anchor variable (`x` with `x AS TRUE`)
-- name: MATCH_RECOGNIZE DEFINE rejects a navigation offset above the operational cap (the offset bounds finality latency and required pattern prefix)
+- name: MATCH_RECOGNIZE DEFINE rejects a PREV offset above the operational cap (the offset demands that many mandatory pattern rows)
   sql: |
     create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
     select * from t match_recognize (
@@ -520,11 +520,11 @@
       one row per match
       after match skip past last row
       pattern (a b)
-      define a as a.v > 0, b as next(b.v, 101) < 0
+      define a as a.v > 0, b as b.v < prev(b.v, 101)
     );
   binder_error: |-
-    Not supported: NEXT() offset of 101
-    HINT: a NEXT() offset defers match finality by that many rows and a PREV() offset requires that many mandatory pattern rows before the variable, so the offset may be at most 100
+    Not supported: PREV() offset of 101
+    HINT: a PREV() offset requires that many mandatory pattern rows before the variable, so the offset may be at most 100
 - name: MATCH_RECOGNIZE DEFINE rejects PREV on a variable that can start the match (the read would reach before the match)
   sql: |
     create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
@@ -624,7 +624,7 @@
       └─StreamMatchRecognize { partition_by: [$0], order_by: [$1], measures: ["m"], pattern: s (a | b) c }
         └─StreamExchange { dist: HashShard(t.id) }
           └─StreamTableScan { table: t, columns: [t.id, t.ts, t.v, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
-- name: MATCH_RECOGNIZE DEFINE accepts NEXT on any variable (lookahead is bounded by the decision horizon, not by position)
+- name: MATCH_RECOGNIZE DEFINE rejects physical NEXT (a global decision horizon can starve an idle partition; per-path decidability is future work)
   sql: |
     create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
     select * from t match_recognize (
@@ -636,9 +636,6 @@
       pattern (a b)
       define a as next(a.v) < 0, b as b.v < 0
     );
-  eowc_stream_plan: |-
-    StreamMaterialize { columns: [partition_0, m, _match_id(hidden)], stream_key: [partition_0, _match_id], pk_columns: [partition_0, _match_id], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [partition_0, m, _match_id] }
-      └─StreamMatchRecognize { partition_by: [$0], order_by: [$1], measures: ["m"], pattern: a b }
-        └─StreamExchange { dist: HashShard(t.id) }
-          └─StreamTableScan { table: t, columns: [t.id, t.ts, t.v, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+  binder_error: |-
+    Feature is not yet implemented: physical NEXT() in MATCH_RECOGNIZE DEFINE (a row's verdict would depend on rows after it; per-candidate decidability is not implemented yet)
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml

@@ -61,6 +61,21 @@ select * from src match_recognize (
 )
 emit on window close;
 
+# Physical NEXT in DEFINE is rejected outright: a row's verdict would depend on rows after it, and
+# per-candidate decidability (an out-of-range read must be a wait for exactly that candidate, not a
+# NULL verdict and not a global horizon that can starve an idle partition) is not implemented yet.
+statement error physical NEXT
+create materialized view bad_next as
+select * from src match_recognize (
+  partition by id
+  order by ts
+  measures a.v as m
+  one row per match
+  pattern (a b)
+  define a as next(a.v) < 0, b as b.v < 0
+)
+emit on window close;
+
 # Physical PREV may only read rows inside the match span: rows before the match are not retained,
 # so a variable that can START the match must not look behind itself. `PREV(v) IS NULL` here would
 # accept a mid-partition row as a match start or not depending only on whether eviction has run.

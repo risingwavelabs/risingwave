@@ -793,14 +793,13 @@ const MAX_QUANTIFIER_BOUND: u32 = 1000;
 /// compute node's memory while the actor is being built.
 const MAX_PATTERN_NFA_STATES: u64 = 100_000;
 
-/// Operational cap on a physical `PREV`/`NEXT` offset in `DEFINE`.
+/// Operational cap on a physical `PREV` offset in `DEFINE`.
 ///
-/// The offset is not just a wire value: a `NEXT(col, k)` defers every finality decision by `k`
-/// rows (the executor's decision horizon must wait for the lookahead to become safe), and a
-/// `PREV(col, k)` requires the variable to sit at least `k` mandatory rows from the match start
-/// (see [`min_start_distances`]). Both scale retained rows and emission latency linearly, so the
-/// cap is deliberately small — far above any observed real pattern (offsets of 1–3), far below
-/// anything that would silently pin a partition's state.
+/// The offset is not just a wire value: `PREV(col, k)` requires the variable to sit at least `k`
+/// mandatory rows from the match start (see [`min_start_distances`]), so it scales the pattern's
+/// required prefix. The cap is deliberately small — far above any observed real pattern (offsets
+/// of 1–3), far below anything degenerate. (Physical `NEXT` is rejected in `DEFINE` outright; see
+/// the navigation lowering.)
 const MAX_NAV_OFFSET: usize = 100;
 
 /// Largest number of variables accepted in `PERMUTE(...)`.
@@ -1201,18 +1200,27 @@ impl NavExtractor<'_> {
                     )
                     .into());
                 }
+                // Physical NEXT in DEFINE is not in the v1 subset. A row's verdict would read rows
+                // after it, so it is only final once that lookahead is watermark-safe — and a single
+                // global "decision horizon" (defer everything by the max offset) can permanently
+                // starve an idle partition whose match is in fact already decidable (the lookahead
+                // row is inside the match). Correct support needs per-path decidability: an
+                // evaluation that actually reads past the safe prefix must be a wait for exactly
+                // that candidate, not a global delay and not a NULL verdict. Until that lands,
+                // reject rather than expose either wrong behaviour.
+                if name != "prev" {
+                    bail_not_implemented!(
+                        "physical NEXT() in MATCH_RECOGNIZE DEFINE (a row's verdict would depend \
+                         on rows after it; per-candidate decidability is not implemented yet)"
+                    );
+                }
                 let col_idx = self.physical_col(inner)?;
                 let offset = match args.get(1) {
                     Some(arg) => self.parse_offset(arg, &name)?,
                     None => 1,
                 };
-                let kind = if name == "prev" {
-                    DefineSlotKind::Prev
-                } else {
-                    DefineSlotKind::Next
-                };
                 Ok(DefineSlot {
-                    kind,
+                    kind: DefineSlotKind::Prev,
                     vars: vec![],
                     col_idx,
                     offset,
@@ -1291,10 +1299,9 @@ impl NavExtractor<'_> {
         // the literal was not an integer.
         let is_integer_literal = !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
         match s.parse::<u64>() {
-            // The offset is an operational knob, not just a wire-format concern: a `NEXT` offset
-            // defers finality by that many rows (the decision horizon), and a `PREV` offset demands
-            // that many mandatory rows before the variable in the pattern. Both scale retained
-            // state and latency, so the cap is deliberately small.
+            // The offset is an operational knob, not just a wire-format concern: a `PREV` offset
+            // demands that many mandatory rows before the variable in the pattern, so the cap is
+            // deliberately small.
             Ok(n) if n > MAX_NAV_OFFSET as u64 => Err(Self::offset_above_cap(name, s)),
             // The offset must be positive: `PREV(col, 0)` / `NEXT(col, 0)` would resolve to the
             // current row, which is surprising for physical navigation and not what these mean.
@@ -1310,9 +1317,8 @@ impl NavExtractor<'_> {
         crate::error::ErrorCode::NotSupported(
             format!("{}() offset of {}", name.to_uppercase(), literal),
             format!(
-                "a NEXT() offset defers match finality by that many rows and a PREV() offset \
-                 requires that many mandatory pattern rows before the variable, so the offset may \
-                 be at most {MAX_NAV_OFFSET}"
+                "a PREV() offset requires that many mandatory pattern rows before the variable, \
+                 so the offset may be at most {MAX_NAV_OFFSET}"
             ),
         )
         .into()

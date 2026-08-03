@@ -41,8 +41,8 @@ use crate::optimizer::plan_node::utils::to_iceberg_time_travel_as_of;
 use crate::optimizer::plan_node::{
     LogicalApply, LogicalGapFill, LogicalHopWindow, LogicalIcebergIntermediateScan,
     LogicalIcebergMetadataScan, LogicalJoin, LogicalMatchRecognize, LogicalPlanRef as PlanRef,
-    LogicalProject, LogicalScan, LogicalShare, LogicalSource, LogicalSysScan,
-    LogicalTableFunction, LogicalValues,
+    LogicalProject, LogicalScan, LogicalShare, LogicalSource, LogicalSysScan, LogicalTableFunction,
+    LogicalValues,
 };
 use crate::optimizer::property::Cardinality;
 use crate::planner::{PlanFor, Planner};

@@ -42,7 +42,8 @@ them. Flink and BigQuery columns reflect their public documentation as of June 2
 | Anchors (`^` `$`) | ❌ | ✅ | ❌ |
 | Exclusion (`{- … -}`) | ❌ | ❌ | ❌ |
 | Running nav in `DEFINE` (`A.col`, `FIRST`/`LAST`) | ✅ | ✅ | ✅ |
-| Physical `PREV`/`NEXT` | ❌ ³ | ✅ | ✅ |
+| Physical `PREV` in `DEFINE` | ❌ ³ | ✅ | ✅ |
+| Physical `NEXT` in `DEFINE` | ❌ ³ | ✅ | ❌ ⁴ |
 | `MEASURES` `FIRST`/`LAST` | ✅ | ✅ | ✅ |
 | Aggregates in `MEASURES` (`COUNT`/`SUM`/`AVG`/`MIN`/`MAX`) | ✅ | ✅ | ✅ |
 | `CLASSIFIER()` | ❌ | ✅ | ✅ |
@@ -57,6 +58,8 @@ them. Flink and BigQuery columns reflect their public documentation as of June 2
 ² BigQuery has no `ROWS PER MATCH` keyword; it emits one row per match and requires aggregation in
 `MEASURES` (use `ARRAY_AGG` for all-rows-style output).
 ³ Flink expresses physical offsets through `LAST(expr, n)` rather than `PREV`/`NEXT`.
+⁴ Rejected at bind time: a row's verdict would depend on rows after it, which needs per-candidate
+decidability (an out-of-range read as a wait for exactly that candidate) — future work.
 
 Sources: [Apache Flink — Pattern Recognition](https://nightlies.apache.org/flink/flink-docs-stable/docs/dev/table/sql/queries/match_recognize/),
 [BigQuery — `MATCH_RECOGNIZE` clause](https://docs.cloud.google.com/bigquery/docs/reference/standard-sql/query-syntax#match_recognize_clause).
@@ -171,28 +174,30 @@ to keep the factorial bounded).
   for entries with `next_wakeup <= w` (the index is PK-ordered by `next_wakeup`, so it stops at the
   first entry past `w`), then for each candidate partition reads just that partition from the buffer
   table with `iter_with_prefix`, in PK order — `(partition, order_key, seq)`, already `ORDER BY`
-  ordered, so no in-memory sort. Every row with `order_key < w` is *safe* (its content is final).
-  With physical `NEXT` in a `DEFINE` the safe prefix further splits into a navigation window and a
-  **decision window** `decision_len = safe_len - max_lookahead`: a row's verdict reads up to
-  `max_lookahead` rows ahead, so only positions whose lookahead is itself safe may be emitted,
-  evicted, or judged dead — a `NEXT` past the safe prefix is a wait, never a NULL verdict. (Without
-  `NEXT` the two windows coincide.) The matcher runs over the decision window; a match is emitted
-  once a later decided row follows it (so the greedy match is known maximal), **or immediately if
-  its accepting path is terminal** — no continuation of the automaton could consume another row, as
-  for a fixed `(a b)` — since that wait would otherwise starve an idle partition forever.
-  `AFTER MATCH SKIP` decides where the scan resumes. Matches stream straight into a
+  ordered, so no in-memory sort. Every row with `order_key < w` is final; the matcher runs over the
+  safe prefix. A match is emitted once a later safe row follows it (so the greedy match is known
+  maximal), **or immediately if the finder's preferred result can no longer change** — no path the
+  finder prefers over the current accepting one could become accepting with more rows, as for a
+  fixed `(a b)`, an ordered alternation whose first-listed branch already accepted, or a reluctant
+  quantifier's short result. That wait would otherwise starve an idle partition forever. The check
+  follows the matcher's preference order exactly (`Nfa::may_extend`): a lower-priority path — a
+  later-listed alternation branch, a greedy loop the finder already exited on real data — never
+  holds a match. `AFTER MATCH SKIP` decides where the scan resumes. Matches stream straight into a
   `StreamChunkBuilder`, flushed a chunk at a time. After processing, the partition's frontier entry is
   recomputed (the earlier of its next future row and the earliest WITHIN expiry of a retained
   partial) or dropped. Work per watermark is therefore proportional to the
   partitions that need attention, not to the number of live partitions; the working set is the largest
   single candidate partition's live rows plus one output chunk.
 
-  Physical `PREV` needs no window of its own: the binder admits `PREV(.., k)` only on variables at
+  Physical `PREV` needs no retention machinery: the binder admits `PREV(.., k)` only on variables at
   least `k` rows from the match start (an exact minimum-distance walk over the pattern), so every
   `PREV` read lands inside the match span, whose rows are retained while the match is live. Shapes
   that could read before the match — where rows are no longer retained, so the same row would flip
   its verdict depending on whether eviction has run — are rejected at bind time until lookbehind
-  retention is designed as its own change.
+  retention is designed as its own change. Physical `NEXT` in `DEFINE` is rejected at bind time
+  entirely: a verdict depending on rows after the candidate needs per-candidate decidability, and a
+  global deferral (hold everything by the max offset) can starve a partition whose match is already
+  decidable.
 - **Measures at match time.** Measures reference specific matched rows (`FIRST(a.ts)`, `LAST(b.v)`),
   known only once the match and its per-row variable labels are found, so each measure's synthetic
   row is built from the matched rows and the expression evaluated then. `WITHIN` is enforced during
@@ -350,11 +355,7 @@ match. What bounds that window depends on whether the pattern carries a `WITHIN`
 - **With `WITHIN <interval>`** the span of any match is capped, so once the watermark is strictly past
   a row's `order_key + interval` that row can no longer begin or extend a match and is evicted. State per
   partition is bounded by the `WITHIN` window, and total state by that window times the number of
-  live partitions. One amendment when a `DEFINE` uses physical `NEXT`: deadline-finality waits for
-  the lookahead rows (the decision window above), so an idle partition retains its trailing
-  `max_lookahead` rows and any pending match until new data arrives. Bounded — the binder caps the
-  offset — but `WITHIN` then no longer drains an idle partition to empty; it is a liveness/latency
-  cost, not a leak.
+  live partitions.
 - **Without `WITHIN`** a buffered prefix can be completed by an arbitrarily distant future row — e.g.
   `PATTERN (A B)` retains an `A` until some later `B` arrives, however long that takes — so an
   unmatched partial is kept indefinitely. This is correct SQL semantics (a streaming join without a

@@ -452,7 +452,7 @@
     );
   expected_outputs:
     - binder_error
-- name: MATCH_RECOGNIZE DEFINE rejects a navigation offset above the operational cap (the offset bounds finality latency and required pattern prefix)
+- name: MATCH_RECOGNIZE DEFINE rejects a PREV offset above the operational cap (the offset demands that many mandatory pattern rows)
   sql: |
     create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
     select * from t match_recognize (
@@ -462,7 +462,7 @@
       one row per match
       after match skip past last row
       pattern (a b)
-      define a as a.v > 0, b as next(b.v, 101) < 0
+      define a as a.v > 0, b as b.v < prev(b.v, 101)
     );
   expected_outputs:
     - binder_error
@@ -550,7 +550,7 @@
     );
   expected_outputs:
     - eowc_stream_plan
-- name: MATCH_RECOGNIZE DEFINE accepts NEXT on any variable (lookahead is bounded by the decision horizon, not by position)
+- name: MATCH_RECOGNIZE DEFINE rejects physical NEXT (a global decision horizon can starve an idle partition; per-path decidability is future work)
   sql: |
     create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
     select * from t match_recognize (
@@ -563,4 +563,4 @@
       define a as next(a.v) < 0, b as b.v < 0
     );
   expected_outputs:
-    - eowc_stream_plan
+    - binder_error

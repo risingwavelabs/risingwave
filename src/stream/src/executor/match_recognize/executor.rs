@@ -25,18 +25,13 @@
 //! the greedy match is known maximal); consumed rows are evicted. This handles out-of-order arrival
 //! within the watermark's lateness and bounds state.
 //!
-//! Safe is not the same as *decided* when a `DEFINE` uses physical `NEXT`: a row's verdict reads up
-//! to `max_lookahead` rows ahead, so it is only final once that lookahead is itself safe. The safe
-//! prefix therefore splits into a navigation window (`NEXT` reads real rows below `safe_len`) and a
-//! decision window (`decision_len = safe_len - max_lookahead`) that bounds everything the operator
-//! emits, evicts, or judges dead — a `NEXT` past the safe prefix is a wait, never a NULL verdict.
-//! Physical `PREV` needs no retention counterpart: the binder only admits `PREV(.., k)` on
-//! variables at least `k` rows from the match start, so those reads stay inside the match span,
-//! whose rows are always retained while the match is live. One consequence to know: with `NEXT`
-//! present, `WITHIN` no longer drains an idle partition to empty — deadline-finality waits for the
-//! lookahead rows, so a quiescent partition retains its trailing `max_lookahead` rows and any
-//! pending match until new data arrives. Bounded (the binder caps the offset), but a
-//! liveness/latency cost, not a leak.
+//! Physical `PREV` needs no retention machinery: the binder only admits `PREV(.., k)` on variables
+//! at least `k` rows from the match start, so those reads stay inside the match span, whose rows
+//! are always retained while the match is live. Physical `NEXT` in `DEFINE` is rejected at bind
+//! time: a row's verdict would depend on rows after it, and doing that correctly needs
+//! per-candidate decidability (an out-of-range read must be a wait for exactly that candidate —
+//! not a NULL verdict, and not a global horizon that can starve an idle partition whose match is
+//! already decidable). Until that lands, the safe prefix is the only boundary.
 //!
 //! The boundary is **strict**. A RisingWave watermark `w` promises only that no future row will have
 //! `order_key < w`; a row with `order_key == w` may still arrive, and `watermark_filter` forwards it
@@ -399,11 +394,7 @@ impl CompiledDefine {
 /// universally true.
 struct DefineMatcher<'a> {
     rows: &'a [BufferedRow],
-    /// The navigation clamp: `NEXT` reads real rows strictly below it (the watermark-safe prefix).
-    /// Deliberately NOT the decision boundary — a decided position's lookahead may sit in
-    /// `[decision_len, nav_len)`, final but itself undecided. One name per meaning: the old shared
-    /// `safe_len` naming for both boundaries is how the lookahead bug was written.
-    nav_len: usize,
+    safe_len: usize,
     defines: &'a HashMap<String, CompiledDefine>,
     /// `WITHIN` span predicate over `[last_order_key, first_order_key]`. Applied as a candidate is
     /// bound so the NFA prunes any extension that would push the match's span past the bound,
@@ -440,11 +431,11 @@ impl DefineMatcher<'_> {
             DefineSlotKind::SelfCol => col_at(pos),
             DefineSlotKind::Prev => pos.checked_sub(slot.offset).and_then(col_at),
             DefineSlotKind::Next => {
+                // Unreachable from SQL: the binder rejects physical NEXT in DEFINE (a verdict must
+                // not depend on rows after the candidate). Kept for proto compatibility; a stale
+                // plan reaching it gets a conservative NULL.
                 let i = pos + slot.offset;
-                // Out of range is unreachable for any *decided* position (the decision horizon
-                // guarantees `pos + offset < nav_len` there); it remains reachable only when a
-                // caller probes beyond the horizon, and `None` is then a conservative non-verdict.
-                if i < self.nav_len { col_at(i) } else { None }
+                if i < self.safe_len { col_at(i) } else { None }
             }
             // The candidate is the running first only when no earlier row of the match is in the set.
             DefineSlotKind::RunningFirst => labels
@@ -555,12 +546,6 @@ pub struct MatchRecognizeExecutor<S: StateStore> {
     within_deadline: Option<NonStrictExpression>,
     nfa: Nfa,
     skip: SkipMode,
-    /// The largest `NEXT` offset any `DEFINE` reads. A row's verdict is only final once its
-    /// lookahead is watermark-safe, so every finality decision is bounded by
-    /// `decision_len = safe_len - max_lookahead` (the decision horizon) while navigation itself
-    /// keeps reading up to `safe_len`. `0` when no `DEFINE` uses `NEXT`, making the two boundaries
-    /// coincide — behaviour is then exactly the pre-horizon executor.
-    max_lookahead: usize,
     /// Where `AFTER MATCH SKIP` degradations are reported (see [`MatchRecognizeExecutorArgs`]).
     eval_error_report: ActorEvalErrorReport,
     input_arity: usize,
@@ -586,14 +571,6 @@ struct BufferedRow {
 impl<S: StateStore> MatchRecognizeExecutor<S> {
     pub fn new(args: MatchRecognizeExecutorArgs<S>) -> Self {
         let time_col = args.order_key_indices[0];
-        let max_lookahead = args
-            .defines
-            .iter()
-            .flat_map(|d| &d.slots)
-            .filter(|s| s.kind == DefineSlotKind::Next)
-            .map(|s| s.offset)
-            .max()
-            .unwrap_or(0);
         let defines = args
             .defines
             .into_iter()
@@ -612,7 +589,6 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             within_deadline: args.within_deadline,
             nfa: args.nfa,
             skip: args.skip,
-            max_lookahead,
             eval_error_report: args.eval_error_report,
             input_arity: args.input_arity,
             state_table: args.state_table,
@@ -760,7 +736,6 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             within_deadline,
             nfa,
             skip,
-            max_lookahead,
             eval_error_report,
             input_arity,
             mut state_table,
@@ -1024,35 +999,8 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                     matches!(&r.order_key, Some(k) if k.default_cmp(&w).is_lt())
                                 })
                                 .count();
-                            // The decision horizon: a row's verdict may read up to `max_lookahead`
-                            // rows ahead (`NEXT`), so it is only final once that lookahead is safe.
-                            // Everything the operator *decides* — the finder, the emit guard, the
-                            // eviction scan and its liveness walk — is bounded by `decision_len`;
-                            // navigation itself keeps reading real rows up to `safe_len` (the
-                            // matcher's `nav_len`). For every decided position `p < decision_len`
-                            // and offset `k <= max_lookahead`, `p + k < safe_len`, so a decided
-                            // `NEXT` never reads NULL-as-a-verdict. Without `NEXT` the two
-                            // boundaries coincide and nothing changes.
-                            let decision_len = safe_len.saturating_sub(max_lookahead);
-                            // WITHIN-finality frontier for decisions: a deadline is final only when
-                            // every row a match starting there could legally use is *decided*.
-                            // Rows are PK-sorted by order key, so any row with
-                            // `order_key < decision_w` sits at a position `< decision_len`. When
-                            // the horizon is not deferring anything this is exactly `w` — today's
-                            // predicate, byte for byte.
-                            let decision_w: ScalarImpl = if decision_len < safe_len {
-                                rows[decision_len]
-                                    .order_key
-                                    .clone()
-                                    .unwrap_or_else(|| w.clone())
-                            } else {
-                                w.clone()
-                            };
-                            // WITHIN-deadline memo, sized to the FULL safe prefix — not
-                            // `decision_len`. `deadline_at` indexes it unguarded, and the wakeup
-                            // recompute below consults `rows[retain_from]` where `retain_from` can
-                            // equal `decision_len` while that row's key is already `< w`; sizing by
-                            // the smaller bound would be an out-of-bounds panic in an actor.
+                            // WITHIN-deadline memo for the safe prefix (see `deadline_at`); only
+                            // sized when a WITHIN bound exists.
                             let mut deadline_memo: Vec<Option<Datum>> = if within_deadline.is_some()
                             {
                                 vec![None; safe_len]
@@ -1063,37 +1011,30 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                             // borrows `rows`.
                             let matcher = DefineMatcher {
                                 rows: &rows,
-                                nav_len: safe_len,
+                                safe_len,
                                 defines: &defines,
                                 within: within.as_ref(),
                             };
-                            let found =
-                                nfa.find_matches_dynamic(decision_len, &matcher, &skip).await?;
+                            let found = nfa.find_matches_dynamic(safe_len, &matcher, &skip).await?;
                             let mut cursor = 0usize;
                             for m in found {
                                 if m.start < cursor {
                                     continue;
                                 }
-                                // At the decision boundary we normally wait for a trailing decided
-                                // row to confirm the greedy match is maximal (it might still
-                                // extend). But under WITHIN, once the decision frontier is strictly
-                                // past this match's deadline (its first row's order_key +
-                                // interval), no future row can legally extend it — any extension
-                                // would fall inside the now-fully-decided window — so it is final
-                                // and must be emitted now, before the WITHIN eviction below drops
-                                // its rows. The comparison is against `decision_w`, not `w`: with a
-                                // `NEXT` horizon a row can sit in `[decision_len, safe_len)` —
-                                // final, buffered, inside the deadline window, yet deliberately not
-                                // consumable (binding it would need its own not-yet-safe
-                                // lookahead). Emitting against `w` there would yield a non-maximal
-                                // match and let eviction destroy the longer one. And strictly `<`:
-                                // at `deadline == decision_w` a row at that key may still arrive
-                                // (or sit undecided) and fall within the bound, so the match can
-                                // grow. This test must stay in exact lockstep with the WITHIN
-                                // eviction predicate below — a stricter emit than eviction deletes
-                                // a match's rows while it is still being held, silently dropping
-                                // it. Without WITHIN, keep waiting.
-                                if m.end >= decision_len {
+                                // At the safe boundary we normally wait for a trailing safe row to
+                                // confirm the greedy match is maximal (it might still extend). But
+                                // under WITHIN, once the watermark is strictly past this match's
+                                // deadline (its first row's order_key + interval), no future row can
+                                // legally extend it — any extension would fall inside the
+                                // now-fully-safe window — so it is final and must be emitted now,
+                                // before the WITHIN eviction below drops its rows. `deadline < w`,
+                                // not `<=`: at `deadline == w` a row at `order_key == w` may still
+                                // arrive and still fall within the bound, so the match can grow.
+                                // This test must stay in exact lockstep with the WITHIN eviction
+                                // predicate below — a stricter emit than eviction deletes a match's
+                                // rows while it is still being held, silently dropping it.
+                                // Without WITHIN, keep waiting.
+                                if m.end >= safe_len {
                                     let within_final = if let Some(dl) = &within_deadline {
                                         let deadline = Self::deadline_at(
                                             dl,
@@ -1102,7 +1043,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                             m.start,
                                         )
                                         .await;
-                                        matches!(&deadline, Some(d) if d.default_cmp(&decision_w).is_lt())
+                                        matches!(&deadline, Some(d) if d.default_cmp(&w).is_lt())
                                     } else {
                                         false
                                     };
@@ -1192,31 +1133,27 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                             // from the earliest row that is still a live match start; drop everything
                             // before it. A start at position `p` is live only if BOTH hold:
                             //
-                            //  * it is structurally alive at the decision boundary — a match from `p`
-                            //    can still reach the boundary given the decided rows so far. (It is not
-                            //    enough that `p` can merely *begin* the pattern: for `(a b)`, a buffer
-                            //    `[a, x, x]` whose `a` is followed only by non-matching decided rows
-                            //    can never complete, though the `a` can still begin it.)
+                            //  * it is structurally alive at the safe boundary — a match from `p` can
+                            //    still reach the boundary given the safe rows so far. (It is not enough
+                            //    that `p` can merely *begin* the pattern: for `(a b)`, a buffer
+                            //    `[a, x, x]` whose `a` is followed only by non-matching safe rows can
+                            //    never complete, though the `a` can still begin it.)
                             //
-                            //  * its WITHIN window is still open — `order_key + interval >= decision_w`.
-                            //    Once the decision frontier is strictly past that deadline, every row
-                            //    within the bound is decided, so if no match from `p` has completed by
-                            //    now none ever can, and `p` is dead even though the NFA is structurally
-                            //    still expecting more input. This is what bounds idle-partition state
-                            //    (see the doc's state bound): reaches_boundary_alive alone would keep a
-                            //    lone `[a]` forever. The window is still open at
-                            //    `deadline == decision_w`, because a row at that order key may still
-                            //    arrive (or sit undecided) and fall inside the bound — this predicate
-                            //    must stay in exact lockstep with the WITHIN boundary-emit test above,
-                            //    or a match held there has its rows deleted here and is lost.
+                            //  * its WITHIN window is still open — `order_key + interval >= w`. Once
+                            //    the watermark is strictly past that deadline, every row within the
+                            //    bound is final, so if no match from `p` has completed by now none ever
+                            //    can, and `p` is dead even though the NFA is structurally still
+                            //    expecting more input. This is what bounds idle-partition state (see
+                            //    the doc's state bound): reaches_boundary_alive alone would keep a lone
+                            //    `[a]` forever. The window is still open at `deadline == w`, because a
+                            //    row at `order_key == w` may still arrive and still fall inside the
+                            //    bound — this predicate must stay in exact lockstep with the WITHIN
+                            //    boundary-emit test above, or a match held there has its rows deleted
+                            //    here and is lost.
                             //
-                            // The partition iterator is already dropped, so delete in place. The
-                            // whole scan is bounded by `decision_len`, not `safe_len`: a position
-                            // in `[decision_len, safe_len)` is undecided (its `NEXT` lookahead is
-                            // not yet safe), so it may neither be judged dead nor evicted — a NULL
-                            // lookahead is a wait, not a verdict.
-                            let mut retain_from = decision_len;
-                            for (p, _) in rows.iter().enumerate().take(decision_len).skip(cursor) {
+                            // The partition iterator is already dropped, so delete in place.
+                            let mut retain_from = safe_len;
+                            for (p, _) in rows.iter().enumerate().take(safe_len).skip(cursor) {
                                 if let Some(deadline_expr) = &within_deadline {
                                     let deadline = Self::deadline_at(
                                         deadline_expr,
@@ -1225,14 +1162,12 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                         p,
                                     )
                                     .await;
-                                    // Window closed (deadline < decision_w): `p` is dead, skip it
-                                    // (same frontier as the boundary-emit test above, lockstep).
-                                    if matches!(&deadline, Some(d) if d.default_cmp(&decision_w).is_lt())
-                                    {
+                                    // Window closed (deadline < w): `p` is dead, skip it.
+                                    if matches!(&deadline, Some(d) if d.default_cmp(&w).is_lt()) {
                                         continue;
                                     }
                                 }
-                                if nfa.reaches_boundary_alive(p, decision_len, &matcher).await? {
+                                if nfa.reaches_boundary_alive(p, safe_len, &matcher).await? {
                                     retain_from = p;
                                     break;
                                 }
@@ -1269,19 +1204,8 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                 })
                                 .map(|r| r.order_key.clone());
                             let within_wakeup: Option<Datum> = match &within_deadline {
-                                // Gated on `decision_len == safe_len`: the WITHIN predicates above
-                                // compare against `decision_w`, which advances only when `safe_len`
-                                // grows — i.e. only via a `row_wakeup`. When the horizon is
-                                // deferring decisions (`decision_len < safe_len`), the eviction has
-                                // already been applied as far as the currently-known `decision_w`
-                                // allows; re-scheduling the deadline would produce a wakeup forever
-                                // `< w`, making the partition a candidate on EVERY later watermark
-                                // for a full futile re-scan. When both wakeups are `None` the entry
-                                // is dropped, which is correct: only an insert can make progress
-                                // then, and an insert re-schedules.
                                 Some(deadline_expr)
-                                    if decision_len == safe_len
-                                        && retain_from < rows.len()
+                                    if retain_from < rows.len()
                                         && matches!(
                                             &rows[retain_from].order_key,
                                             Some(k) if k.default_cmp(&w).is_lt()
@@ -1487,7 +1411,7 @@ mod tests {
         let rows = buffered(vals);
         let matcher = DefineMatcher {
             rows: &rows,
-            nav_len: rows.len(),
+            safe_len: rows.len(),
             defines,
             within: None,
         };
@@ -1522,7 +1446,7 @@ mod tests {
         let defines = HashMap::from([nav_eq_self("a", nav_slot(KIND_RUNNING_LAST, &["a"], 0))]);
         let matcher = DefineMatcher {
             rows: &rows,
-            nav_len: rows.len(),
+            safe_len: rows.len(),
             defines: &defines,
             within: None,
         };
