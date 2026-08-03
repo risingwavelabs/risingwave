@@ -164,7 +164,6 @@ struct EqJoinArgs<'a, S: StateStore, E: AsOfRowEncoding> {
     join_cache_evict_interval_rows: u32,
     high_join_amplification_threshold: usize,
     /// Bound at executor scope so the guard isn't dropped between chunks (which resets the series).
-    /// Only observed by [`AsOfJoinExecutor::eq_join_right`].
     join_matched_join_keys: &'a LabelGuardedHistogram,
 }
 
@@ -565,7 +564,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
     async fn eq_join_left(args: EqJoinArgs<'_, S, E>) {
         let EqJoinArgs {
-            ctx: _,
+            ctx,
             side_l,
             side_r,
             null_safe,
@@ -575,8 +574,8 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
             chunk_size,
             cnt_rows_received,
             join_cache_evict_interval_rows,
-            high_join_amplification_threshold: _,
-            join_matched_join_keys: _,
+            high_join_amplification_threshold,
+            join_matched_join_keys,
         } = args;
 
         let (side_update, side_match) = (side_l, side_r);
@@ -635,6 +634,8 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
             let inequal_key_is_null = side_update.ht.check_inequal_key_null(&row);
             let inequal_key = row.project(&inequal_key_idx_update);
 
+            let mut join_matched_rows_cnt = 0;
+
             if !inequal_key_is_null {
                 let matched_row_by_inequality = match asof_desc.inequality_type {
                     AsOfInequalityType::Lt => {
@@ -678,6 +679,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
                 match op {
                     Op::Insert | Op::UpdateInsert => {
                         if let Some(matched_row) = matched_row_by_inequality {
+                            join_matched_rows_cnt += 1;
                             if let Some(chunk) =
                                 join_chunk_builder.with_match_on_insert(&row, &matched_row)
                             {
@@ -692,6 +694,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
                     }
                     Op::Delete | Op::UpdateDelete => {
                         if let Some(matched_row) = matched_row_by_inequality {
+                            join_matched_rows_cnt += 1;
                             if let Some(chunk) =
                                 join_chunk_builder.with_match_on_delete(&row, &matched_row)
                             {
@@ -724,6 +727,18 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
                         }
                     }
                 }
+            }
+            join_matched_join_keys.observe(join_matched_rows_cnt as _);
+            if join_matched_rows_cnt > high_join_amplification_threshold {
+                tracing::warn!(target: "high_join_amplification",
+                    matched_rows_len = join_matched_rows_cnt,
+                    update_table_id = %side_update.ht.table_id(),
+                    match_table_id = %side_match.ht.table_id(),
+                    join_key = ?join_key,
+                    actor_id = %ctx.id,
+                    fragment_id = %ctx.fragment_id,
+                    "large rows matched for join key when AsOf join updating left side",
+                );
             }
         }
         if let Some(chunk) = join_chunk_builder.take() {
