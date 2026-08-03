@@ -300,11 +300,29 @@ impl PostgresExternalTableReader {
 
     fn unsupported_pk_type_reason(pg_type: &PgType) -> Option<&'static str> {
         match *pg_type {
+            PgType::BOOL
+            | PgType::INT2
+            | PgType::INT4
+            | PgType::INT8
+            | PgType::FLOAT4
+            | PgType::FLOAT8
+            | PgType::NUMERIC
+            | PgType::DATE
+            | PgType::TIME
+            | PgType::TIMESTAMP
+            | PgType::TIMESTAMPTZ
+            | PgType::VARCHAR
+            | PgType::TEXT
+            | PgType::BYTEA
+            | PgType::UUID => None,
             PgType::BPCHAR => Some(
                 "its blank-padding comparison semantics do not match RisingWave VARCHAR ordering",
             ),
             PgType::INTERVAL => Some("its cross-system ordering is not canonical"),
-            _ => None,
+            _ => Some(
+                "its decoded representation and upstream ordering are not proven identical to \
+                 RisingWave ordering",
+            ),
         }
     }
 
@@ -1530,7 +1548,7 @@ mod tests {
     }
 
     #[test]
-    fn test_exact_text_pk_type_policy() {
+    fn test_postgres_pk_type_policy_is_allowlist() {
         assert!(PostgresExternalTableReader::is_binary_collated_pk_type(
             &PgType::TEXT
         ));
@@ -1540,11 +1558,44 @@ mod tests {
         assert!(!PostgresExternalTableReader::is_binary_collated_pk_type(
             &PgType::BPCHAR
         ));
-        assert!(PostgresExternalTableReader::unsupported_pk_type_reason(&PgType::BPCHAR).is_some());
-        assert!(
-            PostgresExternalTableReader::unsupported_pk_type_reason(&PgType::INTERVAL).is_some()
-        );
-        assert!(PostgresExternalTableReader::unsupported_pk_type_reason(&PgType::UUID).is_none());
+
+        for pg_type in [
+            &PgType::BOOL,
+            &PgType::INT2,
+            &PgType::INT4,
+            &PgType::INT8,
+            &PgType::FLOAT4,
+            &PgType::FLOAT8,
+            &PgType::NUMERIC,
+            &PgType::DATE,
+            &PgType::TIME,
+            &PgType::TIMESTAMP,
+            &PgType::TIMESTAMPTZ,
+            &PgType::VARCHAR,
+            &PgType::TEXT,
+            &PgType::BYTEA,
+            &PgType::UUID,
+        ] {
+            assert!(
+                PostgresExternalTableReader::unsupported_pk_type_reason(pg_type).is_none(),
+                "{} should be accepted",
+                pg_type
+            );
+        }
+        for pg_type in [
+            &PgType::BPCHAR,
+            &PgType::INTERVAL,
+            &PgType::JSONB,
+            &PgType::INT4_ARRAY,
+            &PgType::TIMETZ,
+            &PgType::MONEY,
+        ] {
+            assert!(
+                PostgresExternalTableReader::unsupported_pk_type_reason(pg_type).is_some(),
+                "{} should be rejected",
+                pg_type
+            );
+        }
 
         assert!(
             PostgresExternalTableReader::resolve_builtin_pk_type("v1", PgType::TEXT.oid()).is_ok()
