@@ -15,12 +15,14 @@ PGDATABASE=${PGDATABASE:-postgres} psql -v ON_ERROR_STOP=1 -c "
     DROP PUBLICATION IF EXISTS pg_cdc_select_privilege_pub;
     DROP TABLE IF EXISTS public.pg_cdc_select_privilege_test CASCADE;
     DROP ROLE IF EXISTS rw_cdc_slt_limited;
-    CREATE ROLE rw_cdc_slt_limited LOGIN PASSWORD 'rw_cdc_slt_limited';
+    CREATE ROLE rw_cdc_slt_limited LOGIN REPLICATION PASSWORD 'rw_cdc_slt_limited';
     CREATE TABLE public.pg_cdc_select_privilege_test (
         id int PRIMARY KEY,
         value text
     );
     REVOKE ALL ON TABLE public.pg_cdc_select_privilege_test FROM PUBLIC;
+    CREATE PUBLICATION pg_cdc_select_privilege_pub
+        FOR TABLE public.pg_cdc_select_privilege_test;
     "
 
 statement ok
