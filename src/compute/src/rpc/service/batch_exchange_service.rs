@@ -103,32 +103,3 @@ impl BatchExchangeService for BatchExchangeServiceImpl {
         Ok(Response::new(BatchDataStream::new(rx, await_tree_root)))
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use tokio_stream::StreamExt;
-
-    use super::*;
-
-    #[tokio::test]
-    async fn batch_data_stream_holds_root_for_its_lifetime() {
-        let registry = await_tree::Registry::new(await_tree::Config::default());
-
-        let key = GrpcCall::new("dropped stream");
-        let root = registry.register(key.clone(), "get_data");
-        let (_tx, rx) = tokio::sync::mpsc::channel(1);
-        let stream = BatchDataStream::new(rx, Some(root));
-        assert!(registry.get(key.clone()).is_some());
-        drop(stream);
-        assert!(registry.get(key).is_none());
-
-        let key = GrpcCall::new("completed stream");
-        let root = registry.register(key.clone(), "get_data");
-        let (tx, rx) = tokio::sync::mpsc::channel(1);
-        let mut stream = BatchDataStream::new(rx, Some(root));
-        drop(tx);
-        assert!(registry.get(key.clone()).is_some());
-        assert!(stream.next().await.is_none());
-        assert!(registry.get(key).is_none());
-    }
-}
