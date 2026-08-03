@@ -349,7 +349,7 @@
     );
   binder_error: |-
     Not supported: PREV() offset of 4294967296
-    HINT: the offset is a physical row count carried as a 32-bit value, so it may be at most 4294967295
+    HINT: a NEXT() offset defers match finality by that many rows and a PREV() offset requires that many mandatory pattern rows before the variable, so the offset may be at most 100
 - name: MATCH_RECOGNIZE DEFINE rejects FILTER on navigation (it was silently dropped)
   sql: |
     create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
@@ -492,7 +492,7 @@
   binder_error: |-
     Not supported: a subquery in the DEFINE predicate of b
     HINT: a DEFINE predicate must be a scalar expression over the pattern variables
-- name: MATCH_RECOGNIZE DEFINE navigation nested in IS DISTINCT FROM, LIKE, an array constructor and a subscript
+- name: MATCH_RECOGNIZE DEFINE navigation nested in IS DISTINCT FROM, LIKE, an array constructor and a subscript (traversal reaches the PREV(b.v, 2) that reads before the match, so the start-distance rule rejects it)
   sql: |
     create table t(id int, ts int, v int, s varchar, watermark for ts as ts - 10) append only;
     select * from t match_recognize (
@@ -507,9 +507,138 @@
                   and (prev(s) like 'a%')
                   and ((array[prev(b.v, 2), last(a.v)])[1] < b.v)
     );
+  binder_error: |-
+    Not supported: PREV with offset 2 in DEFINE b: the variable can occur 1 row(s) from the match start, so the read could reach rows before the match, which are not retained
+    HINT: ensure the variable is always preceded by at least as many pattern rows as the PREV offset, e.g. prefix the pattern with an anchor variable (`x` with `x AS TRUE`)
+- name: MATCH_RECOGNIZE DEFINE rejects a navigation offset above the operational cap (the offset bounds finality latency and required pattern prefix)
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures a.v as m
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as a.v > 0, b as next(b.v, 101) < 0
+    );
+  binder_error: |-
+    Not supported: NEXT() offset of 101
+    HINT: a NEXT() offset defers match finality by that many rows and a PREV() offset requires that many mandatory pattern rows before the variable, so the offset may be at most 100
+- name: MATCH_RECOGNIZE DEFINE rejects PREV on a variable that can start the match (the read would reach before the match)
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures a.v as m
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as prev(a.v) is null, b as b.v < 0
+    );
+  binder_error: |-
+    Not supported: PREV with offset 1 in DEFINE a: the variable can occur 0 row(s) from the match start, so the read could reach rows before the match, which are not retained
+    HINT: ensure the variable is always preceded by at least as many pattern rows as the PREV offset, e.g. prefix the pattern with an anchor variable (`x` with `x AS TRUE`)
+- name: MATCH_RECOGNIZE DEFINE accepts PREV on a variable always preceded by enough rows (the anchored V-shape)
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures a.v as m
+      one row per match
+      after match skip past last row
+      pattern (a b+)
+      define b as b.v < prev(b.v)
+    );
+  eowc_stream_plan: |-
+    StreamMaterialize { columns: [partition_0, m, _match_id(hidden)], stream_key: [partition_0, _match_id], pk_columns: [partition_0, _match_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [partition_0, m, _match_id] }
+      └─StreamMatchRecognize { partition_by: [$0], order_by: [$1], measures: ["m"], pattern: a b+ }
+        └─StreamExchange { dist: HashShard(t.id) }
+          └─StreamTableScan { table: t, columns: [t.id, t.ts, t.v, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: MATCH_RECOGNIZE DEFINE rejects PREV behind a zero-minimum quantifier prefix (the prefix can match no rows, so the variable can start the match)
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures a.v as m
+      one row per match
+      after match skip past last row
+      pattern (a* b)
+      define a as a.v > 0, b as b.v < prev(b.v)
+    );
+  binder_error: |-
+    Not supported: PREV with offset 1 in DEFINE b: the variable can occur 0 row(s) from the match start, so the read could reach rows before the match, which are not retained
+    HINT: ensure the variable is always preceded by at least as many pattern rows as the PREV offset, e.g. prefix the pattern with an anchor variable (`x` with `x AS TRUE`)
+- name: MATCH_RECOGNIZE DEFINE accepts PREV behind a one-minimum quantifier prefix
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures a.v as m
+      one row per match
+      after match skip past last row
+      pattern (a+ b)
+      define a as a.v > 0, b as b.v < prev(b.v)
+    );
+  eowc_stream_plan: |-
+    StreamMaterialize { columns: [partition_0, m, _match_id(hidden)], stream_key: [partition_0, _match_id], pk_columns: [partition_0, _match_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [partition_0, m, _match_id] }
+      └─StreamMatchRecognize { partition_by: [$0], order_by: [$1], measures: ["m"], pattern: a+ b }
+        └─StreamExchange { dist: HashShard(t.id) }
+          └─StreamTableScan { table: t, columns: [t.id, t.ts, t.v, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: MATCH_RECOGNIZE DEFINE rejects PREV inside PERMUTE (any variable can be ordered first)
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures a.v as m
+      one row per match
+      after match skip past last row
+      pattern (permute(a, b))
+      define a as a.v > 0, b as b.v < prev(b.v)
+    );
+  binder_error: |-
+    Not supported: PREV with offset 1 in DEFINE b: the variable can occur 0 row(s) from the match start, so the read could reach rows before the match, which are not retained
+    HINT: ensure the variable is always preceded by at least as many pattern rows as the PREV offset, e.g. prefix the pattern with an anchor variable (`x` with `x AS TRUE`)
+- name: MATCH_RECOGNIZE DEFINE accepts PREV whose distance is met through an alternation (both branches consume a row first)
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures a.v as m
+      one row per match
+      after match skip past last row
+      pattern (s (a | b) c)
+      define s as s.v > 0, a as a.v > 0, b as b.v < 0, c as c.v < prev(c.v, 2)
+    );
+  eowc_stream_plan: |-
+    StreamMaterialize { columns: [partition_0, m, _match_id(hidden)], stream_key: [partition_0, _match_id], pk_columns: [partition_0, _match_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [partition_0, m, _match_id] }
+      └─StreamMatchRecognize { partition_by: [$0], order_by: [$1], measures: ["m"], pattern: s (a | b) c }
+        └─StreamExchange { dist: HashShard(t.id) }
+          └─StreamTableScan { table: t, columns: [t.id, t.ts, t.v, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: MATCH_RECOGNIZE DEFINE accepts NEXT on any variable (lookahead is bounded by the decision horizon, not by position)
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures a.v as m
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as next(a.v) < 0, b as b.v < 0
+    );
   eowc_stream_plan: |-
     StreamMaterialize { columns: [partition_0, m, _match_id(hidden)], stream_key: [partition_0, _match_id], pk_columns: [partition_0, _match_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [partition_0, m, _match_id] }
       └─StreamMatchRecognize { partition_by: [$0], order_by: [$1], measures: ["m"], pattern: a b }
         └─StreamExchange { dist: HashShard(t.id) }
-          └─StreamTableScan { table: t, columns: [t.id, t.ts, t.v, t.s, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamTableScan { table: t, columns: [t.id, t.ts, t.v, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }

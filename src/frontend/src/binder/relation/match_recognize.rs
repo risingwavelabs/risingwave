@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeSet;
+use std::collections::{BTreeSet, HashMap};
 
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::Field;
@@ -329,6 +329,49 @@ impl Binder {
             .iter()
             .map(|s| self.lower_define(s, &resolver, &input_fields))
             .collect::<RwResult<Vec<_>>>()?;
+
+        // Physical `PREV` in `DEFINE` may only read rows inside the match span. Rows before the
+        // match are not retained: eviction deletes consumed rows, and "buffer index 0" is the
+        // eligible-start floor, so a read reaching before the match start would see a real row
+        // before an eviction and `NULL` after it — the same row flipping its verdict on timing
+        // (and `PREV(v) IS NULL`, the idiomatic first-row test, turning a mid-partition row into a
+        // spurious match start). Require each variable using `PREV(.., k)` to sit at least `k`
+        // rows from the match start (see [`min_start_distances`]); everything the walk can prove
+        // stays inside the match is allowed, the rest is rejected until lookbehind retention is
+        // designed as its own change. `NEXT` needs no such rule: its reads go forward and are
+        // bounded by the decision horizon instead.
+        let min_dists = min_start_distances(pattern);
+        for def in &defines {
+            let max_prev = def
+                .slots
+                .iter()
+                .filter(|s| s.kind == DefineSlotKind::Prev)
+                .map(|s| s.offset)
+                .max()
+                .unwrap_or(0);
+            if max_prev == 0 {
+                continue;
+            }
+            // A DEFINE symbol that never appears in PATTERN is never evaluated; skip it.
+            let Some(&dist) = min_dists.get(&def.symbol) else {
+                continue;
+            };
+            if dist < max_prev as u64 {
+                return Err(crate::error::ErrorCode::NotSupported(
+                    format!(
+                        "PREV with offset {max_prev} in DEFINE {}: the variable can occur {dist} \
+                         row(s) from the match start, so the read could reach rows before the \
+                         match, which are not retained",
+                        def.symbol
+                    ),
+                    "ensure the variable is always preceded by at least as many pattern rows as \
+                     the PREV offset, e.g. prefix the pattern with an anchor variable (`x` with \
+                     `x AS TRUE`)"
+                        .to_owned(),
+                )
+                .into());
+            }
+        }
 
         // MEASURES: <expr> AS <alias>.
         let measures = measures
@@ -749,6 +792,16 @@ const MAX_QUANTIFIER_BOUND: u32 = 1000;
 /// far too slow to be useful; the cap exists only to keep an absurd pattern from exhausting the
 /// compute node's memory while the actor is being built.
 const MAX_PATTERN_NFA_STATES: u64 = 100_000;
+
+/// Operational cap on a physical `PREV`/`NEXT` offset in `DEFINE`.
+///
+/// The offset is not just a wire value: a `NEXT(col, k)` defers every finality decision by `k`
+/// rows (the executor's decision horizon must wait for the lookahead to become safe), and a
+/// `PREV(col, k)` requires the variable to sit at least `k` mandatory rows from the match start
+/// (see [`min_start_distances`]). Both scale retained rows and emission latency linearly, so the
+/// cap is deliberately small — far above any observed real pattern (offsets of 1–3), far below
+/// anything that would silently pin a partition's state.
+const MAX_NAV_OFFSET: usize = 100;
 
 /// Largest number of variables accepted in `PERMUTE(...)`.
 ///
@@ -1238,10 +1291,11 @@ impl NavExtractor<'_> {
         // the literal was not an integer.
         let is_integer_literal = !s.is_empty() && s.bytes().all(|b| b.is_ascii_digit());
         match s.parse::<u64>() {
-            // The offset is carried to the executor as a `u32`, so an offset that does not fit would
-            // wrap — and `PREV(col, 4294967296)` would wrap to `0`, i.e. the candidate row itself,
-            // exactly what rejecting a `0` offset is meant to prevent.
-            Ok(n) if n > u32::MAX as u64 => Err(Self::offset_above_cap(name, s)),
+            // The offset is an operational knob, not just a wire-format concern: a `NEXT` offset
+            // defers finality by that many rows (the decision horizon), and a `PREV` offset demands
+            // that many mandatory rows before the variable in the pattern. Both scale retained
+            // state and latency, so the cap is deliberately small.
+            Ok(n) if n > MAX_NAV_OFFSET as u64 => Err(Self::offset_above_cap(name, s)),
             // The offset must be positive: `PREV(col, 0)` / `NEXT(col, 0)` would resolve to the
             // current row, which is surprising for physical navigation and not what these mean.
             Ok(0) => Err(Self::offset_not_a_positive_literal(name)),
@@ -1256,9 +1310,9 @@ impl NavExtractor<'_> {
         crate::error::ErrorCode::NotSupported(
             format!("{}() offset of {}", name.to_uppercase(), literal),
             format!(
-                "the offset is a physical row count carried as a 32-bit value, so it may be at \
-                 most {}",
-                u32::MAX
+                "a NEXT() offset defers match finality by that many rows and a PREV() offset \
+                 requires that many mandatory pattern rows before the variable, so the offset may \
+                 be at most {MAX_NAV_OFFSET}"
             ),
         )
         .into()
@@ -1346,6 +1400,92 @@ fn collect_pattern_variables(
         vars.insert(s.symbol.real_value());
     }
     vars.into_iter().collect()
+}
+
+/// Per pattern variable: the minimum number of rows a match has necessarily consumed before a row
+/// can be labeled with that variable — its minimum distance from the match start.
+///
+/// This is what makes a physical `PREV(col, k)` in the variable's `DEFINE` safe without any
+/// retention of pre-match rows: if the variable can only ever sit at distance `>= k` from the
+/// match start, every `PREV` read lands inside the match span, and rows of a live match are never
+/// evicted (the eviction walker keeps everything from the first live start onward). A read that
+/// could reach *before* the match start would observe a retained row before eviction and `NULL`
+/// after it — the same row flipping its verdict on timing — so those shapes are rejected at bind
+/// time (see the check in [`Binder::bind_match_recognize`]).
+///
+/// The walk is exact for the supported constructs and conservative by construction elsewhere:
+/// - concatenation shifts a variable's distance by the *minimum* length of everything before it
+///   (a zero-minimum quantifier prefix contributes 0 — `(a* b)` leaves `b` at distance 0);
+/// - alternation takes the minimum across branches;
+/// - a quantified sub-pattern keeps its inner distances unshifted (the first iteration starts at
+///   the node's start; later iterations only sit further from the match start);
+/// - `PERMUTE` puts every element at distance 0 (any ordering may put it first).
+///
+/// A variable occurring several times keeps the smallest distance of any occurrence.
+fn min_start_distances(pattern: &MatchRecognizePattern) -> HashMap<String, u64> {
+    fn insert_min(map: &mut HashMap<String, u64>, var: String, dist: u64) {
+        map.entry(var)
+            .and_modify(|d| *d = (*d).min(dist))
+            .or_insert(dist);
+    }
+
+    /// Returns the minimum number of rows `pattern` consumes, recording each contained variable's
+    /// minimum start distance *relative to this node's start* into `map`.
+    fn walk(pattern: &MatchRecognizePattern, map: &mut HashMap<String, u64>) -> u64 {
+        use risingwave_sqlparser::ast::RepetitionQuantifier as Q;
+        match pattern {
+            MatchRecognizePattern::Symbol(MatchRecognizeSymbol::Named(ident))
+            | MatchRecognizePattern::Exclude(MatchRecognizeSymbol::Named(ident)) => {
+                insert_min(map, ident.real_value(), 0);
+                1
+            }
+            // Unnamed symbols (anchors) are not in the v1 subset; count them as consuming no rows,
+            // which can only *shrink* distances — conservative for this check.
+            MatchRecognizePattern::Symbol(_) | MatchRecognizePattern::Exclude(_) => 0,
+            MatchRecognizePattern::Permute(symbols) => {
+                for s in symbols {
+                    if let MatchRecognizeSymbol::Named(ident) = s {
+                        // Any element can be ordered first.
+                        insert_min(map, ident.real_value(), 0);
+                    }
+                }
+                symbols.len() as u64
+            }
+            MatchRecognizePattern::Concat(patterns) => {
+                let mut prefix = 0u64;
+                for p in patterns {
+                    let mut inner = HashMap::new();
+                    let len = walk(p, &mut inner);
+                    for (v, d) in inner {
+                        insert_min(map, v, d.saturating_add(prefix));
+                    }
+                    prefix = prefix.saturating_add(len);
+                }
+                prefix
+            }
+            MatchRecognizePattern::Alternation(patterns) => {
+                let mut min_len = u64::MAX;
+                for p in patterns {
+                    min_len = min_len.min(walk(p, map));
+                }
+                if patterns.is_empty() { 0 } else { min_len }
+            }
+            MatchRecognizePattern::Group(inner) => walk(inner, map),
+            MatchRecognizePattern::Repetition(inner, quantifier, _) => {
+                let len = walk(inner, map);
+                let min_reps: u64 = match quantifier {
+                    Q::ZeroOrMore | Q::AtMostOne | Q::AtMost(_) => 0,
+                    Q::OneOrMore => 1,
+                    Q::Exactly(n) | Q::AtLeast(n) | Q::Range(n, _) => u64::from(*n),
+                };
+                len.saturating_mul(min_reps)
+            }
+        }
+    }
+
+    let mut map = HashMap::new();
+    walk(pattern, &mut map);
+    map
 }
 
 fn collect_from_pattern(pattern: &MatchRecognizePattern, out: &mut BTreeSet<String>) {
@@ -1494,6 +1634,61 @@ mod tests {
         );
         assert_eq!(estimate_nfa_states(&permute6), 8642);
         assert!(estimate_nfa_states(&permute6) < MAX_PATTERN_NFA_STATES);
+    }
+
+    /// The minimum-start-distance walk backing the physical-`PREV` rule: exact for the supported
+    /// constructs, and the zero-minimum-prefix / alternation / `PERMUTE` corners each pin the case
+    /// that would make the rule unsound if gotten wrong.
+    #[test]
+    fn min_start_distances_cover_the_pattern_constructs() {
+        let concat = |ps: Vec<MatchRecognizePattern>| MatchRecognizePattern::Concat(ps);
+        let d = |p: &MatchRecognizePattern, v: &str| min_start_distances(p).get(v).copied();
+
+        // Concatenation shifts by the preceding minimum length.
+        let ab = concat(vec![var("a"), var("b")]);
+        assert_eq!(d(&ab, "a"), Some(0));
+        assert_eq!(d(&ab, "b"), Some(1));
+        // A variable absent from the pattern has no distance.
+        assert_eq!(d(&ab, "x"), None);
+
+        // A zero-minimum quantifier prefix contributes nothing: `(a* b)` leaves `b` at 0.
+        let a_star_b = concat(vec![rep(var("a"), Q::ZeroOrMore), var("b")]);
+        assert_eq!(d(&a_star_b, "b"), Some(0));
+        // ...while a one-minimum prefix contributes its single row: `(a+ b)` puts `b` at 1.
+        let a_plus_b = concat(vec![rep(var("a"), Q::OneOrMore), var("b")]);
+        assert_eq!(d(&a_plus_b, "b"), Some(1));
+        // `{n,...}` prefixes contribute `n` rows.
+        let a3_b = concat(vec![rep(var("a"), Q::AtLeast(3)), var("b")]);
+        assert_eq!(d(&a3_b, "b"), Some(3));
+
+        // Inside a quantified node the first iteration starts at the node's start: `b+` itself
+        // leaves `b` at 0, even though later iterations sit further away.
+        assert_eq!(d(&rep(var("b"), Q::OneOrMore), "b"), Some(0));
+
+        // Alternation takes the minimum branch length as a prefix: `s (a | b c) t`.
+        let alt = concat(vec![
+            var("s"),
+            MatchRecognizePattern::Alternation(vec![var("a"), concat(vec![var("b"), var("c")])]),
+            var("t"),
+        ]);
+        assert_eq!(d(&alt, "a"), Some(1));
+        assert_eq!(d(&alt, "c"), Some(2));
+        // `t` follows the alternation's *minimum* (1 row via the `a` branch).
+        assert_eq!(d(&alt, "t"), Some(2));
+
+        // PERMUTE: any element can be ordered first.
+        let permute = MatchRecognizePattern::Permute(vec![
+            MatchRecognizeSymbol::Named(Ident::new_unchecked("a")),
+            MatchRecognizeSymbol::Named(Ident::new_unchecked("b")),
+        ]);
+        assert_eq!(d(&permute, "b"), Some(0));
+        // ...and a PERMUTE consumes all its elements as a prefix.
+        let permute_t = concat(vec![permute, var("t")]);
+        assert_eq!(d(&permute_t, "t"), Some(2));
+
+        // A variable occurring twice keeps its smallest distance.
+        let twice = concat(vec![var("a"), var("b"), var("a")]);
+        assert_eq!(d(&twice, "a"), Some(0));
     }
 
     /// Nesting multiplies, so per-quantifier bounds within [`MAX_QUANTIFIER_BOUND`] are not enough.

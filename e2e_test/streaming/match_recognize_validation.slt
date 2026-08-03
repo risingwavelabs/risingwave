@@ -47,8 +47,8 @@ select * from src match_recognize (
 )
 emit on window close;
 
-# PREV/NEXT carry the offset to the executor as a u32, so an offset that does not fit would wrap --
-# and wrapping past u32 lands on 0, i.e. the candidate row, the case rejected just above.
+# The offset is an operational knob: a NEXT offset defers finality by that many rows and a PREV
+# offset requires that many mandatory pattern rows before the variable, so it is capped small (100).
 statement error PREV.. offset of 4294967296
 create materialized view bad_offset_huge as
 select * from src match_recognize (
@@ -58,6 +58,35 @@ select * from src match_recognize (
   one row per match
   pattern (a b)
   define a as a.v > 0, b as b.v < prev(b.v, 4294967296)
+)
+emit on window close;
+
+# Physical PREV may only read rows inside the match span: rows before the match are not retained,
+# so a variable that can START the match must not look behind itself. `PREV(v) IS NULL` here would
+# accept a mid-partition row as a match start or not depending only on whether eviction has run.
+statement error can occur 0 row.s. from the match start
+create materialized view bad_prev_at_start as
+select * from src match_recognize (
+  partition by id
+  order by ts
+  measures a.v as m
+  one row per match
+  pattern (a b)
+  define a as prev(a.v) is null, b as b.v < 0
+)
+emit on window close;
+
+# A zero-minimum quantifier prefix can match no rows, so the variable behind it can still start the
+# match; the same read-before-the-match rejection applies.
+statement error can occur 0 row.s. from the match start
+create materialized view bad_prev_zero_prefix as
+select * from src match_recognize (
+  partition by id
+  order by ts
+  measures a.v as m
+  one row per match
+  pattern (a* b)
+  define a as a.v > 0, b as b.v < prev(b.v)
 )
 emit on window close;
 
