@@ -253,7 +253,13 @@ impl BatchServiceImpl {
             "local execute request: plan:{:?} with task id:{:?}",
             plan, task_id
         );
-        let task = BatchTaskExecution::new(&task_id, plan, context, mgr.runtime())?;
+        let task = BatchTaskExecution::new(
+            &task_id,
+            plan,
+            context,
+            mgr.runtime(),
+            mgr.await_tree_reg().cloned(),
+        )?;
         let task = Arc::new(task);
         let (tx, rx) = tokio::sync::mpsc::channel(mgr.config().developer.local_execute_buffer_size);
         if let Err(e) = task
