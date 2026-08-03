@@ -697,7 +697,7 @@ impl HummockVersionReader {
         // Therefore, it is necessary to construct the `full_key` with `MAX_SPILL_TIMES`, otherwise, the iterator might skip keys with spill offset greater than 0.
         let full_key = FullKey::new_with_gap_epoch(
             table_id,
-            TableKey(table_key.clone()),
+            table_key.clone(),
             EpochWithGap::new(epoch, MAX_SPILL_TIMES),
         );
         let single_table_key_range = table_key.clone()..=table_key.clone();
@@ -710,7 +710,7 @@ impl HummockVersionReader {
             if let Some(iter) = get_from_sstable_info(
                 self.sstable_store.clone(),
                 local_sst,
-                full_key.to_ref(),
+                &full_key,
                 &read_options,
                 dist_key_hash,
                 local_stats,
@@ -769,7 +769,7 @@ impl HummockVersionReader {
                         if let Some(iter) = get_from_sstable_info(
                             self.sstable_store.clone(),
                             sstable_info,
-                            full_key.to_ref(),
+                            &full_key,
                             &read_options,
                             dist_key_hash,
                             local_stats,
@@ -835,7 +835,7 @@ impl HummockVersionReader {
                     if let Some(iter) = get_from_sstable_info(
                         self.sstable_store.clone(),
                         sstable_info,
-                        full_key.to_ref(),
+                        &full_key,
                         &read_options,
                         dist_key_hash,
                         local_stats,

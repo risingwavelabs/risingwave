@@ -18,7 +18,7 @@ use std::ops::Bound;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKey, UserKeyRangeRef};
+use risingwave_hummock_sdk::key::{FullKey, TableKey, UserKeyRangeRef};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::{HummockEpoch, *};
 
@@ -72,7 +72,7 @@ use crate::store::ReadOptions;
 pub async fn get_from_sstable_info(
     sstable_store_ref: SstableStoreRef,
     sstable_info: &SstableInfo,
-    full_key: FullKey<&[u8]>,
+    full_key: &FullKey<Bytes>,
     read_options: &ReadOptions,
     dist_key_hash: Option<u64>,
     local_stats: &mut StoreLocalStatistic,
@@ -85,8 +85,8 @@ pub async fn get_from_sstable_info(
         && !hit_sstable_filter(
             &sstable,
             &(
-                Bound::Included(full_key.user_key),
-                Bound::Included(full_key.user_key),
+                Bound::Included(full_key.user_key.as_ref()),
+                Bound::Included(full_key.user_key.as_ref()),
             ),
             hash,
             local_stats,
@@ -95,7 +95,7 @@ pub async fn get_from_sstable_info(
         return Ok(None);
     }
 
-    let point: UserKey<Bytes> = full_key.user_key.copy_into();
+    let point = full_key.user_key.clone();
     let mut sstable_read_options = SstableIteratorReadOptions::from_read_options(read_options);
     sstable_read_options.scan_user_key_range =
         Some((Bound::Included(point.clone()), Bound::Included(point)));
@@ -105,17 +105,17 @@ pub async fn get_from_sstable_info(
         Arc::new(sstable_read_options),
         sstable_info,
     );
-    iter.seek(full_key).await?;
+    iter.seek(full_key.to_ref()).await?;
+    iter.collect_local_statistic(local_stats);
+
     // Iterator has sought passed the borders.
     if !iter.is_valid() {
         return Ok(None);
     }
 
-    iter.collect_local_statistic(local_stats);
-
     // Iterator gets us the key, we tell if it's the key we want
     // or key next to it.
-    let value = if iter.key().user_key == full_key.user_key {
+    let value = if iter.key().user_key == full_key.user_key.as_ref() {
         Some(iter)
     } else {
         None
@@ -149,4 +149,56 @@ pub fn get_from_batch<'a>(
     imm.get(table_key, read_epoch, read_options).inspect(|_| {
         local_stats.get_shared_buffer_hit_counts += 1;
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use bytes::Bytes;
+    use risingwave_common::catalog::TableId;
+    use risingwave_common::util::epoch::test_epoch;
+    use risingwave_hummock_sdk::key::FullKey;
+
+    use super::*;
+    use crate::hummock::HummockValue;
+    use crate::hummock::iterator::test_utils::mock_sstable_store;
+    use crate::hummock::test_utils::{default_builder_opt_for_test, gen_test_sstable_info};
+
+    #[tokio::test]
+    async fn test_get_from_sstable_info_collects_stats_for_missing_point_key() {
+        let sstable_store = mock_sstable_store().await;
+        let table_id = TableId::default();
+        let sstable_info = gen_test_sstable_info(
+            default_builder_opt_for_test(),
+            1,
+            [
+                (
+                    FullKey::for_test(table_id, Bytes::from_static(b"a"), test_epoch(1)),
+                    HummockValue::put(Bytes::from_static(b"value")),
+                ),
+                (
+                    FullKey::for_test(table_id, Bytes::from_static(b"z"), test_epoch(1)),
+                    HummockValue::put(Bytes::from_static(b"value")),
+                ),
+            ],
+            sstable_store.clone(),
+        )
+        .await;
+        let full_key = FullKey::for_test(table_id, Bytes::from_static(b"m"), test_epoch(1));
+        let mut local_stats = StoreLocalStatistic::default();
+
+        assert!(
+            get_from_sstable_info(
+                sstable_store,
+                &sstable_info,
+                &full_key,
+                &ReadOptions::default(),
+                None,
+                &mut local_stats,
+            )
+            .await
+            .unwrap()
+            .is_none()
+        );
+        assert_eq!(local_stats.cache_data_block_total, 1);
+    }
 }
