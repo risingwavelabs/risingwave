@@ -106,9 +106,10 @@ statement ok
 drop table t_term_open;
 
 # ---------------------------------------------------------------------------------------------
-# Scenario 3: terminal-through-alternation. After (a, b) the path through the `b` branch is
-# terminal, but the automaton as a whole can still extend the match through the `b c` branch, so
-# the match must be HELD until `c`'s possibility is closed.
+# Scenario 3: ordered alternation is terminal through PREFERENCE. After (a, b), the first-listed
+# `b` branch has already produced the finder's preferred result; a later `c` could only complete
+# the lower-priority `b c` branch, which can never override it. The match is final immediately —
+# holding it would wait for an outcome the finder cannot return.
 # ---------------------------------------------------------------------------------------------
 
 statement ok
@@ -133,19 +134,8 @@ insert into t_term_alt values (1, 10, 5), (1, 11, -1);
 statement ok
 insert into t_term_alt values (9, 13, 0);
 
-# (a, b) accepts via the first branch, but `b c` could still be preferred (greedy, longer) if a
-# `c` arrives: held.
-query II rowsort
-select a_ts, n from mv_term_alt;
-----
-
-# The next row is not a `c` (7 <= 100): the longer branch dies, the two-row match is final.
-statement ok
-insert into t_term_alt values (1, 20, 7);
-
-statement ok
-insert into t_term_alt values (9, 22, 0);
-
+# The first-listed branch already accepted and outranks `b c` forever: emitted now, idle partition
+# notwithstanding.
 query II rowsort
 select a_ts, n from mv_term_alt;
 ----
@@ -156,3 +146,55 @@ drop materialized view mv_term_alt;
 
 statement ok
 drop table t_term_alt;
+
+# ---------------------------------------------------------------------------------------------
+# Scenario 4: the same alternation with the LONGER branch listed first. Now a future `c` WOULD
+# produce the preferred result, so the two-row match must be held until the `c` possibility is
+# closed by a non-matching row. Preference order, not structure, decides.
+# ---------------------------------------------------------------------------------------------
+
+statement ok
+create table t_term_alt_rev (id int, ts int, v int, watermark for ts as ts - 1) append only;
+
+statement ok
+create materialized view mv_term_alt_rev as
+select * from t_term_alt_rev match_recognize (
+  partition by id
+  order by ts
+  measures a.ts as a_ts, count(*) as n
+  one row per match
+  after match skip past last row
+  pattern (a (b c | b))
+  define a as a.v > 0, b as b.v < 0, c as c.v > 100
+)
+emit on window close;
+
+statement ok
+insert into t_term_alt_rev values (1, 10, 5), (1, 11, -1);
+
+statement ok
+insert into t_term_alt_rev values (9, 13, 0);
+
+# `b c` is preferred and only blocked on the missing `c` row: held.
+query II rowsort
+select a_ts, n from mv_term_alt_rev;
+----
+
+# The next row is not a `c` (7 <= 100): the preferred branch dies on real data, the two-row match
+# via the second branch is final.
+statement ok
+insert into t_term_alt_rev values (1, 20, 7);
+
+statement ok
+insert into t_term_alt_rev values (9, 22, 0);
+
+query II rowsort
+select a_ts, n from mv_term_alt_rev;
+----
+10 2
+
+statement ok
+drop materialized view mv_term_alt_rev;
+
+statement ok
+drop table t_term_alt_rev;

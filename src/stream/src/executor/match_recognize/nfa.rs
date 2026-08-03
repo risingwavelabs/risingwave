@@ -105,14 +105,11 @@ pub struct Nfa {
     states: Vec<Vec<Transition>>,
     start: StateId,
     accept: StateId,
-    /// Per state: whether `accept` is reachable from it via a path containing at least one
-    /// consuming transition, with every predicate assumed satisfiable. This is the static half of
-    /// [`Nfa::may_extend`]: a state where this is `false` cannot contribute to any longer match no
-    /// matter what rows arrive. Computed once at compile via two reverse BFS passes (plain
-    /// accept-reachability, then ≥1-consumption reachability seeded by consuming edges into the
-    /// former and propagated backward along ε-edges only — a consuming edge on the left needs no
-    /// propagation, it supplies the consumption itself).
-    extendable: Vec<bool>,
+    /// Per state: whether `accept` is reachable from it, with every predicate assumed satisfiable.
+    /// This is the static half of [`Nfa::may_extend`]: a consuming transition at the row boundary
+    /// whose target cannot reach `accept` can never contribute a longer match, no matter what rows
+    /// arrive. Computed once at compile with one reverse BFS.
+    reach_accept: Vec<bool>,
 }
 
 impl Nfa {
@@ -120,68 +117,39 @@ impl Nfa {
     pub fn compile(pattern: &Pattern) -> Self {
         let mut builder = NfaBuilder { states: Vec::new() };
         let frag = builder.build(pattern);
-        let extendable = Self::compute_extendable(&builder.states, frag.accept);
+        let reach_accept = Self::compute_reach_accept(&builder.states, frag.accept);
         Nfa {
             states: builder.states,
             start: frag.start,
             accept: frag.accept,
-            extendable,
+            reach_accept,
         }
     }
 
-    /// See the `extendable` field. Linear in states + transitions.
-    fn compute_extendable(states: &[Vec<Transition>], accept: StateId) -> Vec<bool> {
+    /// See the `reach_accept` field. Linear in states + transitions (one reverse BFS).
+    fn compute_reach_accept(states: &[Vec<Transition>], accept: StateId) -> Vec<bool> {
         let n = states.len();
-        // Reverse adjacency, split by transition kind.
-        let mut rev_any: Vec<Vec<StateId>> = vec![Vec::new(); n];
-        let mut rev_eps: Vec<Vec<StateId>> = vec![Vec::new(); n];
+        let mut rev: Vec<Vec<StateId>> = vec![Vec::new(); n];
         for (s, ts) in states.iter().enumerate() {
             for t in ts {
                 match t {
-                    Transition::Epsilon(next) => {
-                        rev_any[*next].push(s);
-                        rev_eps[*next].push(s);
-                    }
-                    Transition::OnVar { target, .. } => rev_any[*target].push(s),
+                    Transition::Epsilon(next) => rev[*next].push(s),
+                    Transition::OnVar { target, .. } => rev[*target].push(s),
                 }
             }
         }
-        // reach[s]: `accept` reachable from `s` via any path (predicates assumed satisfiable).
         let mut reach = vec![false; n];
         let mut stack = vec![accept];
         reach[accept] = true;
         while let Some(s) = stack.pop() {
-            for &p in &rev_any[s] {
+            for &p in &rev[s] {
                 if !reach[p] {
                     reach[p] = true;
                     stack.push(p);
                 }
             }
         }
-        // extendable[s]: as `reach`, but the path must consume at least one row. Seeds are the
-        // sources of consuming edges into reach-states; propagation is along reverse ε-edges only
-        // (an ε into an extendable state stays extendable; a consuming edge needs only `reach` on
-        // its target — it is itself the consumption).
-        let mut extendable = vec![false; n];
-        let mut stack: Vec<StateId> = Vec::new();
-        for (s, ts) in states.iter().enumerate() {
-            let seeded = ts
-                .iter()
-                .any(|t| matches!(t, Transition::OnVar { target, .. } if reach[*target]));
-            if seeded {
-                extendable[s] = true;
-                stack.push(s);
-            }
-        }
-        while let Some(s) = stack.pop() {
-            for &p in &rev_eps[s] {
-                if !extendable[p] {
-                    extendable[p] = true;
-                    stack.push(p);
-                }
-            }
-        }
-        extendable
+        reach
     }
 
     /// The set of states reachable from `states` via ε-transitions (inclusive). Only the test-only
@@ -602,16 +570,28 @@ impl Nfa {
             .await
     }
 
-    /// Whether the match `[start, end)` could become *longer* given rows that are not yet decided:
-    /// there exists a path from `start` that consumes the rows `start..end` (predicate-driven, any
-    /// labeling) and lands at `end` in a state from which the automaton could still consume more
-    /// and re-accept ([`Nfa::extendable`], predicates assumed satisfiable for the unknown rows).
+    /// Whether the finder's *preferred* result for the match starting at `start` could change if
+    /// more rows arrived past the boundary `end`.
     ///
-    /// `false` means the accepting path is **terminal**: no future or undecided row can produce a
-    /// longer match from this start, so a boundary match is final and must be emitted — holding it
-    /// would starve an idle partition forever (the frontier recompute finds neither a future row
-    /// nor, without `WITHIN`, a deadline, and drops the partition). `true` means the standard
-    /// greedy-maximality wait applies.
+    /// The finder ([`Nfa::preferred_from_dynamic`]) returns the first accepting path in transition
+    /// order: greedy quantifiers try their consume edge before their exit edge, reluctant ones the
+    /// reverse, and ordered alternation tries branches as listed. A lower-priority path can
+    /// therefore NEVER override an accepting higher-priority one, no matter what rows arrive — for
+    /// `PATTERN (A (B | B C))` the first-listed `B` alternative wins even if a `C` shows up later.
+    /// So the question is not "could any NFA path consume more" but "could a path the finder
+    /// prefers over the current result become accepting".
+    ///
+    /// This walk mirrors the finder's own traversal exactly and stops at its first accept — the
+    /// preferred result. It answers `true` iff, strictly before that accept in preference order,
+    /// some consuming transition was blocked by the row boundary while its target can still reach
+    /// `accept` ([`Nfa::reach_accept`], unknown rows assumed satisfiable): exactly the paths that
+    /// arriving rows could turn into a more-preferred accepting result. Everything explored after
+    /// the accept is lower-priority and irrelevant.
+    ///
+    /// `false` means the preferred result is **terminal**: it cannot change, so a boundary match is
+    /// final and must be emitted — holding it would starve an idle partition forever (the frontier
+    /// recompute finds neither a future row nor, without `WITHIN`, a deadline, and drops the
+    /// partition). `true` means the standard maximality wait applies.
     pub async fn may_extend(
         &self,
         start: usize,
@@ -620,18 +600,35 @@ impl Nfa {
     ) -> StreamExecutorResult<bool> {
         let mut path: Vec<String> = Vec::new();
         let mut visited = Visited::new(self.states.len());
-        self.extendable_past(end, self.start, start, &mut path, matcher, &mut visited)
-            .await
+        let mut blocked = false;
+        let accepted = self
+            .preferred_blocked_before_accept(
+                end,
+                self.start,
+                start,
+                &mut path,
+                matcher,
+                &mut visited,
+                &mut blocked,
+            )
+            .await?;
+        // Called for a match the finder produced over these same rows, so an accepting path within
+        // `end` exists and `accepted` holds; if a caller ever probes a non-match, every explored
+        // path is by definition higher-priority than the (absent) result, so `blocked` is still
+        // the right answer.
+        debug_assert!(accepted, "may_extend probed a non-accepting span");
+        Ok(blocked)
     }
 
-    /// Path-carrying DFS backing [`Nfa::may_extend`]. Mirrors [`Nfa::live_to_boundary`]'s traversal
-    /// exactly, with one different base case: reaching `pos == end` answers the *static* question
-    /// ([`Nfa::extendable`]) instead of an unconditional "alive" — the rows past `end` are unknown,
-    /// so any transition out of the landing state is assumed satisfiable. Reaching `accept` before
-    /// `end` is a shorter match, not an extension of this one, and `accept` has no outgoing
-    /// transitions, so that path contributes nothing.
+    /// Path-carrying DFS backing [`Nfa::may_extend`]. Mirrors [`Nfa::preferred_from_dynamic`]'s
+    /// traversal (same transition order, same visited discipline, predicates over the real rows),
+    /// bounded by `end`: a consuming transition at `pos == end` cannot be evaluated, and if its
+    /// target can still reach `accept` it is recorded in `blocked` — a hypothetical future row
+    /// could fire it and produce a more-preferred result. Returns on the first accept, leaving
+    /// `blocked` reflecting only what was explored before it.
     #[async_recursion]
-    async fn extendable_past(
+    #[allow(clippy::too_many_arguments)]
+    async fn preferred_blocked_before_accept(
         &self,
         end: usize,
         state: StateId,
@@ -639,28 +636,45 @@ impl Nfa {
         path: &mut Vec<String>,
         matcher: &(impl CandidateMatcher + Sync),
         visited: &mut Visited,
+        blocked: &mut bool,
     ) -> StreamExecutorResult<bool> {
-        if pos == end {
-            return Ok(self.extendable[state]);
-        }
         if state == self.accept {
-            return Ok(false);
+            return Ok(true);
         }
         if !visited.insert(state) {
             return Ok(false);
         }
         for t in &self.states[state] {
-            let extendable = match t {
+            let accepted = match t {
                 Transition::Epsilon(next) => {
-                    self.extendable_past(end, *next, pos, path, matcher, visited)
-                        .await?
+                    self.preferred_blocked_before_accept(
+                        end, *next, pos, path, matcher, visited, blocked,
+                    )
+                    .await?
                 }
                 Transition::OnVar { var, target } => {
-                    if matcher.matches(var, pos, path).await? {
+                    if pos == end {
+                        // Boundary: the row this edge would consume does not exist yet. If the
+                        // target can still reach `accept`, a future row could fire this edge —
+                        // and everything explored so far (including this edge) is preferred over
+                        // any accept found later in the walk.
+                        if self.reach_accept[*target] {
+                            *blocked = true;
+                        }
+                        false
+                    } else if matcher.matches(var, pos, path).await? {
                         path.push(var.clone());
                         let mut next_visited = Visited::new(self.states.len());
                         let r = self
-                            .extendable_past(end, *target, pos + 1, path, matcher, &mut next_visited)
+                            .preferred_blocked_before_accept(
+                                end,
+                                *target,
+                                pos + 1,
+                                path,
+                                matcher,
+                                &mut next_visited,
+                                blocked,
+                            )
                             .await?;
                         path.pop();
                         r
@@ -669,7 +683,7 @@ impl Nfa {
                     }
                 }
             };
-            if extendable {
+            if accepted {
                 visited.remove(state);
                 return Ok(true);
             }
@@ -1404,33 +1418,51 @@ mod tests {
         );
     }
 
-    /// [`Nfa::may_extend`]: a boundary match on a terminal accepting path is final (emit now); one
-    /// whose automaton can still consume — an open quantifier, a pending longer alternation branch,
-    /// an unexhausted range, an optional tail — must be held.
+    /// [`Nfa::may_extend`]: a boundary match whose PREFERRED result cannot change is final (emit
+    /// now); one where a higher-priority path is blocked on the row boundary — an open greedy
+    /// quantifier, an earlier-listed longer alternation branch, an unexhausted range, an optional
+    /// tail — must be held. The check follows the finder's preference order: lower-priority paths
+    /// (a later-listed alternation branch, a reluctant loop's consume edge) can never override an
+    /// accepting result and must not hold it.
     #[tokio::test]
-    async fn may_extend_distinguishes_terminal_from_open_paths() {
+    async fn may_extend_follows_the_finder_preference_order() {
         let m = |s: &str| SetMatcher { rows: rows(s) };
 
         // Fixed (a b): after consuming both, nothing can extend — terminal.
         let fixed = Nfa::compile(&Pattern::Concat(vec![vars("a"), vars("b")]));
         assert!(!fixed.may_extend(0, 2, &m("ab")).await.unwrap());
 
-        // (a b+): a future `b` extends the greedy match — held.
+        // (a b+): the greedy loop's consume edge precedes its exit, so a future `b` would produce
+        // a preferred (longer) result — held.
         let open = Nfa::compile(&Pattern::Concat(vec![
             vars("a"),
             Pattern::Quantified(Box::new(vars("b")), Quantifier::Plus, false),
         ]));
         assert!(open.may_extend(0, 2, &m("ab")).await.unwrap());
 
-        // (a (b | b c)): (a, b) accepts via the first branch, but the `b c` path is still open.
+        // (a (b | b c)): ordered alternation — the first-listed `b` branch already accepted, and a
+        // later `c` cannot override it. Terminal, matching what the finder would return.
         let alt = Nfa::compile(&Pattern::Concat(vec![
             vars("a"),
-            Pattern::Alt(vec![
-                vars("b"),
-                Pattern::Concat(vec![vars("b"), vars("c")]),
-            ]),
+            Pattern::Alt(vec![vars("b"), Pattern::Concat(vec![vars("b"), vars("c")])]),
         ]));
-        assert!(alt.may_extend(0, 2, &m("ab")).await.unwrap());
+        assert!(!alt.may_extend(0, 2, &m("ab")).await.unwrap());
+
+        // (a (b c | b)): the LONGER branch is listed first, so a future `c` would produce a
+        // preferred result — held. Preference direction, not structure, decides.
+        let alt_rev = Nfa::compile(&Pattern::Concat(vec![
+            vars("a"),
+            Pattern::Alt(vec![Pattern::Concat(vec![vars("b"), vars("c")]), vars("b")]),
+        ]));
+        assert!(alt_rev.may_extend(0, 2, &m("ab")).await.unwrap());
+
+        // (a b+?): reluctant — the exit edge precedes the consume edge, so the short result is the
+        // preferred one and future `b`s cannot change it. Terminal.
+        let reluctant = Nfa::compile(&Pattern::Concat(vec![
+            vars("a"),
+            Pattern::Quantified(Box::new(vars("b")), Quantifier::Plus, true),
+        ]));
+        assert!(!reluctant.may_extend(0, 2, &m("ab")).await.unwrap());
 
         // (a b{1,2}): one `b` leaves the range open; two exhaust it.
         let range = Nfa::compile(&Pattern::Concat(vec![
