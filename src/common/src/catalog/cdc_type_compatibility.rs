@@ -1,0 +1,410 @@
+// Copyright 2026 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use risingwave_pb::catalog::table::CdcTableType as PbCdcTableType;
+use risingwave_pb::data::data_type::TypeName as PbTypeName;
+
+use crate::types::DataType;
+
+pub fn cdc_source_column_type_compatible(
+    cdc_table_type: PbCdcTableType,
+    upstream_type_name: &str,
+    rw_type_name: PbTypeName,
+    char_max_length: Option<i64>,
+    is_unsigned: bool,
+    postgres_udt_name: Option<&str>,
+) -> bool {
+    let upstream_type_name = upstream_type_name.to_ascii_lowercase();
+    match cdc_table_type {
+        PbCdcTableType::Mysql => mysql_source_column_type_compatible(
+            &upstream_type_name,
+            rw_type_name,
+            char_max_length,
+            is_unsigned,
+        ),
+        PbCdcTableType::Sqlserver => {
+            sql_server_source_column_type_compatible(&upstream_type_name, rw_type_name)
+        }
+        PbCdcTableType::Postgres | PbCdcTableType::Citus => postgres_source_column_type_compatible(
+            &upstream_type_name,
+            rw_type_name,
+            char_max_length,
+            postgres_udt_name,
+        ),
+        PbCdcTableType::Unspecified | PbCdcTableType::Mongo => false,
+    }
+}
+
+/// Whether an existing CDC table column type can be preserved when an auto schema
+/// change event reconstructs the same upstream column as `mapped_type`.
+///
+/// Debezium schema change events carry full table schemas, but the meta service
+/// receives only the RW type already mapped from the upstream type. These rules
+/// are therefore connector-specific and mirror creation-time compatibility for
+/// the cases where source metadata is still distinguishable from the canonical
+/// mapped RW type.
+pub fn cdc_auto_schema_change_existing_type_compatible(
+    cdc_table_type: PbCdcTableType,
+    existing_type: &DataType,
+    mapped_type: &DataType,
+) -> bool {
+    if existing_type == mapped_type {
+        return true;
+    }
+
+    match cdc_table_type {
+        PbCdcTableType::Mysql => mysql_cdc_existing_type_compatible(existing_type, mapped_type),
+        PbCdcTableType::Sqlserver => {
+            sql_server_cdc_existing_type_compatible(existing_type, mapped_type)
+        }
+        PbCdcTableType::Postgres | PbCdcTableType::Citus => {
+            postgres_cdc_existing_type_compatible(existing_type, mapped_type)
+        }
+        PbCdcTableType::Unspecified | PbCdcTableType::Mongo => false,
+    }
+}
+
+fn type_in_range(value: PbTypeName, start: PbTypeName, end: PbTypeName) -> bool {
+    let value = value as i32;
+    (start as i32..=end as i32).contains(&value)
+}
+
+fn mysql_source_column_type_compatible(
+    mysql_type: &str,
+    rw_type: PbTypeName,
+    char_max_length: Option<i64>,
+    is_unsigned: bool,
+) -> bool {
+    if is_unsigned {
+        match mysql_type {
+            "tinyint" => return type_in_range(rw_type, PbTypeName::Int16, PbTypeName::Int64),
+            "smallint" => return type_in_range(rw_type, PbTypeName::Int32, PbTypeName::Int64),
+            "mediumint" | "int" => return rw_type == PbTypeName::Int64,
+            "bigint" => {
+                return matches!(rw_type, PbTypeName::Int64 | PbTypeName::Decimal);
+            }
+            _ => {}
+        }
+    }
+
+    match mysql_type {
+        "tinyint" => {
+            rw_type == PbTypeName::Boolean
+                || type_in_range(rw_type, PbTypeName::Int16, PbTypeName::Int64)
+        }
+        "smallint" => type_in_range(rw_type, PbTypeName::Int16, PbTypeName::Int64),
+        "mediumint" | "int" => type_in_range(rw_type, PbTypeName::Int32, PbTypeName::Int64),
+        "bigint" => matches!(rw_type, PbTypeName::Int64 | PbTypeName::Decimal),
+        "boolean" | "bool" => rw_type == PbTypeName::Boolean,
+        "enum" | "char" | "varchar" | "text" | "tinytext" | "mediumtext" => {
+            rw_type == PbTypeName::Varchar
+        }
+        "longtext" => matches!(rw_type, PbTypeName::Bytea | PbTypeName::Varchar),
+        "float" | "real" => matches!(rw_type, PbTypeName::Float | PbTypeName::Double),
+        "double" => rw_type == PbTypeName::Double,
+        "numeric" | "decimal" => rw_type == PbTypeName::Decimal,
+        "date" => rw_type == PbTypeName::Date,
+        "time" => rw_type == PbTypeName::Time,
+        "datetime" => rw_type == PbTypeName::Timestamp,
+        "timestamp" => rw_type == PbTypeName::Timestamptz,
+        "json" => rw_type == PbTypeName::Jsonb,
+        "bit" => {
+            if char_max_length == Some(1) {
+                rw_type == PbTypeName::Boolean
+            } else {
+                rw_type == PbTypeName::Bytea
+            }
+        }
+        "tinyblob" | "blob" | "mediumblob" | "longblob" | "binary" | "varbinary" => {
+            rw_type == PbTypeName::Bytea
+        }
+        "year" => rw_type == PbTypeName::Int32,
+        _ => false,
+    }
+}
+
+fn postgres_source_column_type_compatible(
+    postgres_type: &str,
+    rw_type: PbTypeName,
+    char_max_length: Option<i64>,
+    udt_name: Option<&str>,
+) -> bool {
+    match postgres_type {
+        "boolean" => rw_type == PbTypeName::Boolean,
+        "bit" => char_max_length.is_none_or(|length| length == 1) && rw_type == PbTypeName::Boolean,
+        "smallint" => rw_type == PbTypeName::Int16,
+        "integer" => rw_type == PbTypeName::Int32,
+        "bigint" | "oid" => rw_type == PbTypeName::Int64,
+        "real" => rw_type == PbTypeName::Float,
+        "double precision" => rw_type == PbTypeName::Double,
+        "character varying" | "character" | "char" => rw_type == PbTypeName::Varchar,
+        "text" | "xml" | "uuid" | "inet" | "cidr" | "macaddr" | "macaddr8" | "int4range"
+        | "int8range" | "numrange" | "tsrange" | "tstzrange" | "daterange" => {
+            rw_type == PbTypeName::Varchar
+        }
+        "timestamp with time zone" | "timestamptz" => rw_type == PbTypeName::Timestamptz,
+        "timestamp without time zone" | "timestamp" => rw_type == PbTypeName::Timestamp,
+        "time with time zone" | "timetz" | "time without time zone" | "time" => {
+            rw_type == PbTypeName::Time
+        }
+        "interval" => rw_type == PbTypeName::Interval,
+        "bytea" | "geometry" => rw_type == PbTypeName::Bytea,
+        "json" | "jsonb" => rw_type == PbTypeName::Jsonb,
+        "date" => rw_type == PbTypeName::Date,
+        "numeric" => matches!(
+            rw_type,
+            PbTypeName::Decimal | PbTypeName::Int256 | PbTypeName::Varchar
+        ),
+        "money" => rw_type == PbTypeName::Decimal,
+        "point" => rw_type == PbTypeName::Struct,
+        "array" => rw_type == PbTypeName::List,
+        "user-defined" => match udt_name.map(str::to_ascii_lowercase).as_deref() {
+            Some("citext") => rw_type == PbTypeName::Varchar,
+            Some("geometry") => rw_type == PbTypeName::Bytea,
+            Some("vector") => rw_type == PbTypeName::Vector,
+            Some("ltree" | "hstore") | None => false,
+            Some(_) => rw_type == PbTypeName::Varchar,
+        },
+        _ => false,
+    }
+}
+
+fn sql_server_source_column_type_compatible(sql_server_type: &str, rw_type: PbTypeName) -> bool {
+    match sql_server_type {
+        "bit" | "boolean" => rw_type == PbTypeName::Boolean,
+        "tinyint" | "smallint" => type_in_range(rw_type, PbTypeName::Int16, PbTypeName::Int64),
+        "integer" | "int" => type_in_range(rw_type, PbTypeName::Int32, PbTypeName::Int64),
+        "bigint" => rw_type == PbTypeName::Int64,
+        "money" | "decimal" | "numeric" => rw_type == PbTypeName::Decimal,
+        "float" | "real" => matches!(rw_type, PbTypeName::Float | PbTypeName::Double),
+        "double" | "double precision" => rw_type == PbTypeName::Double,
+        "char" | "nchar" | "varchar" | "nvarchar" | "text" | "ntext" | "xml"
+        | "uniqueidentifier" => rw_type == PbTypeName::Varchar,
+        "binary" | "varbinary" => rw_type == PbTypeName::Bytea,
+        "date" => rw_type == PbTypeName::Date,
+        "time" => rw_type == PbTypeName::Time,
+        "datetime" | "datetime2" | "smalldatetime" => rw_type == PbTypeName::Timestamp,
+        "datetimeoffset" => rw_type == PbTypeName::Timestamptz,
+        _ => false,
+    }
+}
+
+fn mysql_cdc_existing_type_compatible(existing_type: &DataType, mapped_type: &DataType) -> bool {
+    match mapped_type {
+        DataType::Int16 => {
+            matches!(
+                existing_type,
+                DataType::Int16 | DataType::Int32 | DataType::Int64
+            )
+        }
+        DataType::Int32 => matches!(existing_type, DataType::Int32 | DataType::Int64),
+        DataType::Int64 => matches!(existing_type, DataType::Int64 | DataType::Decimal),
+        DataType::Decimal => matches!(existing_type, DataType::Decimal | DataType::Int64),
+        DataType::Float32 => matches!(existing_type, DataType::Float32 | DataType::Float64),
+        _ => false,
+    }
+}
+
+fn sql_server_cdc_existing_type_compatible(
+    existing_type: &DataType,
+    mapped_type: &DataType,
+) -> bool {
+    match mapped_type {
+        DataType::Int16 => {
+            matches!(
+                existing_type,
+                DataType::Int16 | DataType::Int32 | DataType::Int64
+            )
+        }
+        DataType::Int32 => matches!(existing_type, DataType::Int32 | DataType::Int64),
+        DataType::Float32 | DataType::Float64 => {
+            matches!(existing_type, DataType::Float32 | DataType::Float64)
+        }
+        _ => false,
+    }
+}
+
+fn postgres_cdc_existing_type_compatible(existing_type: &DataType, mapped_type: &DataType) -> bool {
+    match mapped_type {
+        DataType::Decimal => {
+            matches!(
+                existing_type,
+                DataType::Decimal | DataType::Int256 | DataType::Varchar
+            )
+        }
+        _ => false,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_mysql_source_column_type_compatibility() {
+        assert!(cdc_source_column_type_compatible(
+            PbCdcTableType::Mysql,
+            "int",
+            PbTypeName::Int64,
+            None,
+            true,
+            None,
+        ));
+        assert!(!cdc_source_column_type_compatible(
+            PbCdcTableType::Mysql,
+            "int",
+            PbTypeName::Int32,
+            None,
+            true,
+            None,
+        ));
+        assert!(cdc_source_column_type_compatible(
+            PbCdcTableType::Mysql,
+            "bit",
+            PbTypeName::Boolean,
+            Some(1),
+            false,
+            None,
+        ));
+        assert!(cdc_source_column_type_compatible(
+            PbCdcTableType::Mysql,
+            "bit",
+            PbTypeName::Bytea,
+            Some(8),
+            false,
+            None,
+        ));
+    }
+
+    #[test]
+    fn test_postgres_source_column_type_compatibility() {
+        assert!(cdc_source_column_type_compatible(
+            PbCdcTableType::Postgres,
+            "numeric",
+            PbTypeName::Int256,
+            None,
+            false,
+            None,
+        ));
+        assert!(cdc_source_column_type_compatible(
+            PbCdcTableType::Postgres,
+            "USER-DEFINED",
+            PbTypeName::Varchar,
+            None,
+            false,
+            Some("mood"),
+        ));
+        assert!(!cdc_source_column_type_compatible(
+            PbCdcTableType::Postgres,
+            "bit",
+            PbTypeName::Bytea,
+            Some(8),
+            false,
+            None,
+        ));
+    }
+
+    #[test]
+    fn test_sql_server_source_column_type_compatibility() {
+        assert!(cdc_source_column_type_compatible(
+            PbCdcTableType::Sqlserver,
+            "int",
+            PbTypeName::Int64,
+            None,
+            false,
+            None,
+        ));
+        assert!(cdc_source_column_type_compatible(
+            PbCdcTableType::Sqlserver,
+            "real",
+            PbTypeName::Double,
+            None,
+            false,
+            None,
+        ));
+        assert!(!cdc_source_column_type_compatible(
+            PbCdcTableType::Sqlserver,
+            "bigint",
+            PbTypeName::Decimal,
+            None,
+            false,
+            None,
+        ));
+    }
+
+    #[test]
+    fn test_mysql_cdc_auto_schema_change_existing_type_compatibility() {
+        assert!(cdc_auto_schema_change_existing_type_compatible(
+            PbCdcTableType::Mysql,
+            &DataType::Int64,
+            &DataType::Int32,
+        ));
+        assert!(cdc_auto_schema_change_existing_type_compatible(
+            PbCdcTableType::Mysql,
+            &DataType::Float64,
+            &DataType::Float32,
+        ));
+        assert!(cdc_auto_schema_change_existing_type_compatible(
+            PbCdcTableType::Mysql,
+            &DataType::Int64,
+            &DataType::Decimal,
+        ));
+
+        assert!(!cdc_auto_schema_change_existing_type_compatible(
+            PbCdcTableType::Mysql,
+            &DataType::Varchar,
+            &DataType::Int32,
+        ));
+    }
+
+    #[test]
+    fn test_sql_server_cdc_auto_schema_change_existing_type_compatibility() {
+        assert!(cdc_auto_schema_change_existing_type_compatible(
+            PbCdcTableType::Sqlserver,
+            &DataType::Int64,
+            &DataType::Int32,
+        ));
+        assert!(cdc_auto_schema_change_existing_type_compatible(
+            PbCdcTableType::Sqlserver,
+            &DataType::Float32,
+            &DataType::Float64,
+        ));
+
+        assert!(!cdc_auto_schema_change_existing_type_compatible(
+            PbCdcTableType::Sqlserver,
+            &DataType::Decimal,
+            &DataType::Int64,
+        ));
+    }
+
+    #[test]
+    fn test_postgres_cdc_auto_schema_change_existing_type_compatibility() {
+        assert!(cdc_auto_schema_change_existing_type_compatible(
+            PbCdcTableType::Postgres,
+            &DataType::Int256,
+            &DataType::Decimal,
+        ));
+        assert!(cdc_auto_schema_change_existing_type_compatible(
+            PbCdcTableType::Postgres,
+            &DataType::Varchar,
+            &DataType::Decimal,
+        ));
+
+        assert!(!cdc_auto_schema_change_existing_type_compatible(
+            PbCdcTableType::Postgres,
+            &DataType::Int64,
+            &DataType::Int32,
+        ));
+    }
+}

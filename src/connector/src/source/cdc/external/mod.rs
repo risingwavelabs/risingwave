@@ -28,7 +28,6 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::secret::LocalSecretManager;
-use risingwave_common::types::DataType;
 use risingwave_pb::catalog::table::CdcTableType as PbCdcTableType;
 use risingwave_pb::secret::PbSecretRef;
 use serde::{Deserialize, Serialize};
@@ -132,87 +131,6 @@ impl From<PbCdcTableType> for ExternalCdcTableType {
             PbCdcTableType::Citus => Self::Citus,
             PbCdcTableType::Unspecified => Self::Undefined,
         }
-    }
-}
-
-/// Whether an existing CDC table column type can be preserved when an auto schema
-/// change event reconstructs the same upstream column as `mapped_type`.
-///
-/// Debezium schema change events carry full table schemas, but the meta service
-/// receives only the RW type already mapped from the upstream type. These rules
-/// are therefore connector-specific and intentionally mirror the compatibility
-/// accepted at CDC table creation for the cases where that source metadata is
-/// still distinguishable from the canonical mapped RW type.
-pub fn cdc_auto_schema_change_existing_type_compatible(
-    cdc_table_type: PbCdcTableType,
-    existing_type: &DataType,
-    mapped_type: &DataType,
-) -> bool {
-    if existing_type == mapped_type {
-        return true;
-    }
-
-    match cdc_table_type {
-        PbCdcTableType::Mysql => mysql_cdc_existing_type_compatible(existing_type, mapped_type),
-        PbCdcTableType::Sqlserver => {
-            sql_server_cdc_existing_type_compatible(existing_type, mapped_type)
-        }
-        PbCdcTableType::Postgres | PbCdcTableType::Citus => {
-            postgres_cdc_existing_type_compatible(existing_type, mapped_type)
-        }
-        PbCdcTableType::Unspecified | PbCdcTableType::Mongo => false,
-    }
-}
-
-fn mysql_cdc_existing_type_compatible(existing_type: &DataType, mapped_type: &DataType) -> bool {
-    match mapped_type {
-        // MySQL tinyint/smallint/manual integer mappings allow upcasts.
-        DataType::Int16 => {
-            matches!(
-                existing_type,
-                DataType::Int16 | DataType::Int32 | DataType::Int64
-            )
-        }
-        DataType::Int32 => matches!(existing_type, DataType::Int32 | DataType::Int64),
-        // MySQL BIGINT may be declared as DECIMAL; unsigned INT canonically maps to INT64.
-        DataType::Int64 => matches!(existing_type, DataType::Int64 | DataType::Decimal),
-        // MySQL unsigned BIGINT canonically maps to DECIMAL, while the validator also accepts
-        // BIGINT for Debezium's default signed i64 representation.
-        DataType::Decimal => matches!(existing_type, DataType::Decimal | DataType::Int64),
-        DataType::Float32 => matches!(existing_type, DataType::Float32 | DataType::Float64),
-        _ => false,
-    }
-}
-
-fn sql_server_cdc_existing_type_compatible(
-    existing_type: &DataType,
-    mapped_type: &DataType,
-) -> bool {
-    match mapped_type {
-        DataType::Int16 => {
-            matches!(
-                existing_type,
-                DataType::Int16 | DataType::Int32 | DataType::Int64
-            )
-        }
-        DataType::Int32 => matches!(existing_type, DataType::Int32 | DataType::Int64),
-        DataType::Float32 | DataType::Float64 => {
-            matches!(existing_type, DataType::Float32 | DataType::Float64)
-        }
-        _ => false,
-    }
-}
-
-fn postgres_cdc_existing_type_compatible(existing_type: &DataType, mapped_type: &DataType) -> bool {
-    match mapped_type {
-        // PostgreSQL numeric accepts DECIMAL, INT256, or VARCHAR at validation time.
-        DataType::Decimal => {
-            matches!(
-                existing_type,
-                DataType::Decimal | DataType::Int256 | DataType::Varchar
-            )
-        }
-        _ => false,
     }
 }
 
@@ -617,73 +535,3 @@ impl ExternalTableImpl {
 }
 
 pub const CDC_TABLE_SPLIT_ID_START: i64 = 1;
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn test_mysql_cdc_auto_schema_change_existing_type_compatibility() {
-        assert!(cdc_auto_schema_change_existing_type_compatible(
-            PbCdcTableType::Mysql,
-            &DataType::Int64,
-            &DataType::Int32,
-        ));
-        assert!(cdc_auto_schema_change_existing_type_compatible(
-            PbCdcTableType::Mysql,
-            &DataType::Float64,
-            &DataType::Float32,
-        ));
-        assert!(cdc_auto_schema_change_existing_type_compatible(
-            PbCdcTableType::Mysql,
-            &DataType::Int64,
-            &DataType::Decimal,
-        ));
-
-        assert!(!cdc_auto_schema_change_existing_type_compatible(
-            PbCdcTableType::Mysql,
-            &DataType::Varchar,
-            &DataType::Int32,
-        ));
-    }
-
-    #[test]
-    fn test_sql_server_cdc_auto_schema_change_existing_type_compatibility() {
-        assert!(cdc_auto_schema_change_existing_type_compatible(
-            PbCdcTableType::Sqlserver,
-            &DataType::Int64,
-            &DataType::Int32,
-        ));
-        assert!(cdc_auto_schema_change_existing_type_compatible(
-            PbCdcTableType::Sqlserver,
-            &DataType::Float32,
-            &DataType::Float64,
-        ));
-
-        assert!(!cdc_auto_schema_change_existing_type_compatible(
-            PbCdcTableType::Sqlserver,
-            &DataType::Decimal,
-            &DataType::Int64,
-        ));
-    }
-
-    #[test]
-    fn test_postgres_cdc_auto_schema_change_existing_type_compatibility() {
-        assert!(cdc_auto_schema_change_existing_type_compatible(
-            PbCdcTableType::Postgres,
-            &DataType::Int256,
-            &DataType::Decimal,
-        ));
-        assert!(cdc_auto_schema_change_existing_type_compatible(
-            PbCdcTableType::Postgres,
-            &DataType::Varchar,
-            &DataType::Decimal,
-        ));
-
-        assert!(!cdc_auto_schema_change_existing_type_compatible(
-            PbCdcTableType::Postgres,
-            &DataType::Int64,
-            &DataType::Int32,
-        ));
-    }
-}
