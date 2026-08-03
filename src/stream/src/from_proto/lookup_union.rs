@@ -19,6 +19,8 @@ use crate::executor::LookupUnionExecutor;
 
 pub struct LookupUnionExecutorBuilder;
 
+impl_stream_node_body!(LookupUnion(LookupUnionNode) => LookupUnionExecutorBuilder);
+
 impl ExecutorBuilder for LookupUnionExecutorBuilder {
     type Node = LookupUnionNode;
 

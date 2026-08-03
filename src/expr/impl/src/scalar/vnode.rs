@@ -20,17 +20,20 @@ use risingwave_common::array::{ArrayBuilder, ArrayImpl, ArrayRef, DataChunk, I16
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum};
-use risingwave_expr::expr::{BoxedExpression, Expression};
+use risingwave_expr::expr::{
+    AsyncExpression, AsyncExpressionBoxExt, BoxedExpression, ExpressionInfo, SyncExpression,
+    SyncExpressionBoxExt, try_into_sync_exprs,
+};
 use risingwave_expr::{Result, build_function, expr_context};
 
 #[derive(Debug)]
-struct VnodeExpression {
+struct VnodeExpression<E> {
     /// `Some` if it's from the first argument of user-facing function `VnodeUser` (`rw_vnode`),
     /// `None` if it's from the internal function `Vnode`.
     vnode_count: Option<usize>,
 
     /// A list of expressions to get the distribution key columns. Typically `InputRef`.
-    children: Vec<BoxedExpression>,
+    children: Vec<E>,
 
     /// Normally, we pass the distribution key indices to `VirtualNode::compute_xx` functions.
     /// But in this case, all children columns are used to compute vnode. So we cache a vector of
@@ -40,11 +43,21 @@ struct VnodeExpression {
 
 #[build_function("vnode(...) -> int2")]
 fn build(_: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression> {
-    Ok(Box::new(VnodeExpression {
-        vnode_count: None,
-        all_indices: (0..children.len()).collect(),
-        children,
-    }))
+    let all_indices = (0..children.len()).collect();
+    match try_into_sync_exprs(children) {
+        Ok(children) => Ok(VnodeExpression {
+            vnode_count: None,
+            all_indices,
+            children,
+        }
+        .boxed()),
+        Err(children) => Ok(VnodeExpression {
+            vnode_count: None,
+            all_indices,
+            children,
+        }
+        .boxed()),
+    }
 }
 
 #[build_function("vnode_user(...) -> int2")]
@@ -68,51 +81,83 @@ fn build_user(_: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpres
     }
 
     let children = children.collect_vec();
-
-    Ok(Box::new(VnodeExpression {
-        vnode_count: Some(vnode_count.try_into().unwrap()),
-        all_indices: (0..children.len()).collect(),
-        children,
-    }))
+    let all_indices = (0..children.len()).collect();
+    match try_into_sync_exprs(children) {
+        Ok(children) => Ok(VnodeExpression {
+            vnode_count: Some(vnode_count.try_into().unwrap()),
+            all_indices,
+            children,
+        }
+        .boxed()),
+        Err(children) => Ok(VnodeExpression {
+            vnode_count: Some(vnode_count.try_into().unwrap()),
+            all_indices,
+            children,
+        }
+        .boxed()),
+    }
 }
 
-#[async_trait::async_trait]
-impl Expression for VnodeExpression {
+impl<E: ExpressionInfo> ExpressionInfo for VnodeExpression<E> {
     fn return_type(&self) -> DataType {
         DataType::Int16
     }
+}
 
-    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
-        let mut arrays = Vec::with_capacity(self.children.len());
-        for child in &self.children {
-            arrays.push(child.eval(input).await?);
+macro_rules! eval_vnode {
+    ($mode:ident, $this:expr, $input:expr) => {{
+        let mut arrays = Vec::with_capacity($this.children.len());
+        for child in &$this.children {
+            arrays.push(risingwave_expr::forward!($mode, child, eval($input))?);
         }
-        let input = DataChunk::new(arrays, input.visibility().clone());
+        let input = DataChunk::new(arrays, $input.visibility().clone());
 
-        let vnodes = VirtualNode::compute_chunk(&input, &self.all_indices, self.vnode_count()?);
+        let vnodes = VirtualNode::compute_chunk(&input, &$this.all_indices, $this.vnode_count()?);
         let mut builder = I16ArrayBuilder::new(input.capacity());
         vnodes
             .into_iter()
             .for_each(|vnode| builder.append(Some(vnode.to_scalar())));
         Ok(Arc::new(ArrayImpl::from(builder.finish())))
-    }
+    }};
+}
 
-    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
-        let mut datums = Vec::with_capacity(self.children.len());
-        for child in &self.children {
-            datums.push(child.eval_row(input).await?);
+macro_rules! eval_row_vnode {
+    ($mode:ident, $this:expr, $input:expr) => {{
+        let mut datums = Vec::with_capacity($this.children.len());
+        for child in &$this.children {
+            datums.push(risingwave_expr::forward!($mode, child, eval_row($input))?);
         }
         let input = OwnedRow::new(datums);
 
         Ok(Some(
-            VirtualNode::compute_row(input, &self.all_indices, self.vnode_count()?)
+            VirtualNode::compute_row(input, &$this.all_indices, $this.vnode_count()?)
                 .to_scalar()
                 .into(),
         ))
+    }};
+}
+
+impl<E: SyncExpression> SyncExpression for VnodeExpression<E> {
+    fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        eval_vnode!(sync, self, input)
+    }
+
+    fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        eval_row_vnode!(sync, self, input)
     }
 }
 
-impl VnodeExpression {
+impl<E: AsyncExpression> AsyncExpression for VnodeExpression<E> {
+    async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        eval_vnode!(async, self, input)
+    }
+
+    async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        eval_row_vnode!(async, self, input)
+    }
+}
+
+impl<E> VnodeExpression<E> {
     fn vnode_count(&self) -> Result<usize> {
         if let Some(vnode_count) = self.vnode_count {
             Ok(vnode_count)

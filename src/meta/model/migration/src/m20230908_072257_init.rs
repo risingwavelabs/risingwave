@@ -1167,7 +1167,7 @@ enum StreamingJob {
 }
 
 #[derive(DeriveIden)]
-#[allow(clippy::enum_variant_names)]
+#[expect(clippy::enum_variant_names)]
 enum Table {
     Table,
     TableId,

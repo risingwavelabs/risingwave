@@ -19,6 +19,8 @@ use crate::from_proto::*;
 
 pub struct LocalApproxPercentileExecutorBuilder;
 
+impl_stream_node_body!(LocalApproxPercentile(LocalApproxPercentileNode) => LocalApproxPercentileExecutorBuilder);
+
 impl ExecutorBuilder for LocalApproxPercentileExecutorBuilder {
     type Node = LocalApproxPercentileNode;
 

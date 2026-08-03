@@ -18,8 +18,8 @@ use risingwave_common::row;
 use risingwave_common::types::{DefaultOrdered, Interval, Timestamptz, ToDatumRef};
 use risingwave_expr::capture_context;
 use risingwave_expr::expr::{
-    EvalErrorReport, ExpressionBoxExt, InputRefExpression, LiteralExpression, NonStrictExpression,
-    build_func_non_strict,
+    EvalErrorReport, InputRefExpression, LiteralExpression, NonStrictExpression,
+    SyncExpressionBoxExt, build_func_non_strict,
 };
 use risingwave_expr::expr_context::TIME_ZONE;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -285,12 +285,9 @@ impl<S: StateStore> NowExecutor<S> {
 
                     // Update the last timestamp.
                     state_table.update(row::once(&last_timestamp_datum), &last_row);
-                    last_timestamp_datum = last_row
-                        .into_inner()
-                        .into_vec()
-                        .into_iter()
-                        .exactly_one()
-                        .unwrap();
+                    last_timestamp_datum =
+                        Itertools::exactly_one(last_row.into_inner().into_vec().into_iter())
+                            .unwrap();
                 }
                 _ => unreachable!(),
             }

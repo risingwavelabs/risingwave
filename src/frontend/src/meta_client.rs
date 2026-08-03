@@ -26,6 +26,7 @@ use risingwave_pb::backup_service::{BackupJobStatus, MetaSnapshotMetadata};
 use risingwave_pb::catalog::Table;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::DdlProgress;
+use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig as PbMutableConfig;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
@@ -228,6 +229,8 @@ pub trait FrontendMetaClient: Send + Sync {
 
     async fn compact_iceberg_table(&self, sink_id: SinkId) -> Result<u64>;
 
+    async fn rewrite_iceberg_table_manifests(&self, sink_id: SinkId) -> Result<()>;
+
     async fn expire_iceberg_table_snapshots(&self, sink_id: SinkId) -> Result<()>;
 
     async fn refresh(&self, request: RefreshRequest) -> Result<RefreshResponse>;
@@ -235,6 +238,12 @@ pub trait FrontendMetaClient: Send + Sync {
     fn cluster_id(&self) -> &str;
 
     async fn list_unmigrated_tables(&self) -> Result<HashMap<TableId, String>>;
+
+    async fn update_compaction_config(
+        &self,
+        compaction_group_ids: Vec<CompactionGroupId>,
+        configs: Vec<PbMutableConfig>,
+    ) -> Result<()>;
 }
 
 pub struct FrontendMetaClientImpl(pub MetaClient);
@@ -573,6 +582,10 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
         self.0.compact_iceberg_table(sink_id).await
     }
 
+    async fn rewrite_iceberg_table_manifests(&self, sink_id: SinkId) -> Result<()> {
+        self.0.rewrite_iceberg_table_manifests(sink_id).await
+    }
+
     async fn expire_iceberg_table_snapshots(&self, sink_id: SinkId) -> Result<()> {
         self.0.expire_iceberg_table_snapshots(sink_id).await
     }
@@ -595,5 +608,15 @@ impl FrontendMetaClient for FrontendMetaClientImpl {
 
     async fn list_iceberg_compaction_status(&self) -> Result<Vec<IcebergCompactionStatus>> {
         self.0.list_iceberg_compaction_status().await
+    }
+
+    async fn update_compaction_config(
+        &self,
+        compaction_group_ids: Vec<CompactionGroupId>,
+        configs: Vec<PbMutableConfig>,
+    ) -> Result<()> {
+        self.0
+            .risectl_update_compaction_config(&compaction_group_ids, &configs)
+            .await
     }
 }

@@ -222,6 +222,21 @@ steps:
       timeout_in_minutes: 35
       retry: *auto-retry
 
+  - label: "end-to-end refill test"
+    key: "e2e-test-release-refill"
+    command: "ci/scripts/e2e-refill-test.sh -p ci-release -m ci-3streaming-2serving-3fe"
+    if: |
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-e2e-refill-tests"
+      || build.env("CI_STEPS") =~ /(^|,)e2e-refill-tests?(,|$$)/
+    depends_on:
+      - "build"
+    plugins:
+      - docker-compose#v5.5.0: *docker-compose-standard
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 20
+    retry: *auto-retry
+
   - label: "end-to-end kafka source test"
     key: "e2e-test-release-source-kafka"
     command: "ci/scripts/e2e-source-kafka-test.sh -p ci-release"
@@ -398,6 +413,26 @@ steps:
       - docker-compose#v5.5.0:
           <<: *docker-compose-standard
           run: sink-elasticsearch-test-env
+          wait: true
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 15
+    retry: *auto-retry
+
+  - label: "end-to-end opensearch sink test"
+    key: "e2e-test-release-sink-opensearch"
+    command: "ci/scripts/e2e-opensearch-sink-ci-test.sh -p ci-release"
+    if: |
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-e2e-opensearch-sink-tests"
+      || build.env("CI_STEPS") =~ /(^|,)e2e-opensearch-sink-tests?(,|$$)/
+    depends_on:
+      - "build"
+      - "build-other"
+    plugins:
+      - docker-compose#v5.5.0:
+          <<: *docker-compose-standard
+          run: sink-opensearch-test-env
+          wait: true
       - ./ci/plugins/upload-failure-logs
     timeout_in_minutes: 15
     retry: *auto-retry
@@ -454,7 +489,7 @@ steps:
           <<: *docker-compose
           environment:
           - CODECOV_TOKEN
-    timeout_in_minutes: 30
+    timeout_in_minutes: 40
     retry: *auto-retry
 
   - label: "unit test (madsim)"
@@ -746,6 +781,20 @@ steps:
     timeout_in_minutes: 25
     retry: *auto-retry
 
+  - label: "S3 FULL_RELOAD refresh SLT"
+    key: "s3-full-reload-refresh-slt"
+    command: "ci/scripts/s3-source-slt-test.sh -p ci-release"
+    if: |
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-s3-source-tests"
+      || build.env("CI_STEPS") =~ /(^|,)s3-source-tests?(,|$$)/
+    depends_on: build
+    plugins:
+      - docker-compose#v5.5.0: *docker-compose
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 25
+    retry: *auto-retry
+
   - label: "pulsar source check"
     key: "pulsar-source-tests"
     command: "ci/scripts/pulsar-source-test.sh -p ci-release"
@@ -812,6 +861,7 @@ steps:
       || build.env("CI_STEPS") =~ /(^|,)backwards?-compat-tests?(,|$$)/
     depends_on:
       - "build"
+      - "build-other"
     plugins:
       - docker-compose#v5.5.0:
           <<: *docker-compose
@@ -880,7 +930,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 40
+    timeout_in_minutes: 50
     retry: *auto-retry
 
   - label: "e2e single-node binary test"
@@ -895,7 +945,7 @@ steps:
     plugins:
       - docker-compose#v5.5.0: *docker-compose
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 40
+    timeout_in_minutes: 45
     retry: *auto-retry
 
   - label: "end-to-end test for opendal storage backend (parallel)"
@@ -903,6 +953,7 @@ steps:
     command: "ci/scripts/e2e-test-parallel-for-opendal.sh -p ci-release"
     if: |
       !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-opendal-tests"
       || build.pull_request.labels includes "ci/run-e2e-tests-for-opendal"
       || build.env("CI_STEPS") =~ /(^|,)e2e-parallel-tests?-for-opendal(,|$$)/
     depends_on:
@@ -1055,6 +1106,23 @@ steps:
     timeout_in_minutes: 10
     retry: *auto-retry
 
+  - label: "end-to-end session init test"
+    key: "e2e-session-init-tests"
+    command: "ci/scripts/e2e-session-init-test.sh -p ci-release"
+    if: |
+      !(build.pull_request.labels includes "ci/main-cron/run-selected") && build.env("CI_STEPS") == null
+      || build.pull_request.labels includes "ci/run-e2e-session-init-tests"
+      || build.env("CI_STEPS") =~ /(^|,)e2e-session-init-tests?(,|$$)/
+    depends_on:
+      - "build"
+      - "build-other"
+      - "docslt"
+    plugins:
+      - docker-compose#v5.5.0: *docker-compose
+      - ./ci/plugins/upload-failure-logs
+    timeout_in_minutes: 10
+    retry: *auto-retry
+
   - label: "end-to-end sqlserver sink test"
     key: "e2e-sqlserver-sink-tests"
     command: "ci/scripts/e2e-sqlserver-sink-test.sh -p ci-release"
@@ -1158,7 +1226,6 @@ steps:
     matrix:
       setup:
         java_version:
-          - "17"
           - "21"
     timeout_in_minutes: 10
     retry: *auto-retry

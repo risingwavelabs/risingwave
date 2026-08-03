@@ -40,7 +40,7 @@ pub type AppendOnlyGroupTopNExecutor<K, S, const WITH_TIES: bool> =
 impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
     AppendOnlyGroupTopNExecutor<K, S, WITH_TIES>
 {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         input: Executor,
         ctx: ActorContextRef,
@@ -98,7 +98,7 @@ pub struct InnerAppendOnlyGroupTopNExecutor<K: HashKey, S: StateStore, const WIT
 impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
     InnerAppendOnlyGroupTopNExecutor<K, S, WITH_TIES>
 {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         schema: Schema,
         storage_key: Vec<ColumnOrder>,

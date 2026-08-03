@@ -106,7 +106,7 @@ pub fn merge_streaming_config_section(
 }
 
 #[cfg(test)]
-#[allow(clippy::bool_assert_comparison)]
+#[expect(clippy::bool_assert_comparison)]
 mod tests {
     use thiserror_ext::AsReport;
 

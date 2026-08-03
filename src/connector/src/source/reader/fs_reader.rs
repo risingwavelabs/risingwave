@@ -17,8 +17,8 @@
 use std::sync::Arc;
 
 use anyhow::Context;
-use futures::StreamExt;
 use futures::stream::pending;
+use futures::{StreamExt, TryStreamExt};
 use risingwave_common::catalog::ColumnId;
 
 use crate::WithOptionsSecResolved;
@@ -26,6 +26,7 @@ use crate::error::ConnectorResult;
 use crate::parser::{CommonParserConfig, ParserConfig, SpecificParserConfig};
 use crate::source::{
     BoxSourceChunkStream, ConnectorProperties, ConnectorState, SourceColumnDesc, SourceContext,
+    SourceReaderEvent,
 };
 
 #[derive(Clone, Debug)]
@@ -89,18 +90,17 @@ impl LegacyFsSourceReader {
         };
         let stream = match state {
             None => pending().boxed(),
-            Some(splits) => {
-                config
-                    .create_split_reader(
-                        splits,
-                        parser_config,
-                        source_ctx,
-                        None,
-                        Default::default(),
-                    )
-                    .await?
-                    .0
-            }
+            Some(splits) => config
+                .create_split_reader(splits, parser_config, source_ctx, None, Default::default())
+                .await?
+                .0
+                .try_filter_map(|event| async move {
+                    Ok(match event {
+                        SourceReaderEvent::DataChunk(chunk) => Some(chunk),
+                        SourceReaderEvent::SplitProgress(_) => None,
+                    })
+                })
+                .boxed(),
         };
         Ok(stream)
     }

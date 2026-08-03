@@ -129,8 +129,8 @@ async fn test_shared_source() -> Result<()> {
         3 8 HASH {SOURCE_SCAN} 4 256"#]]
     .assert_eq(&cluster.run("select fragment_id, table_id, distribution_type, flags, parallelism, max_parallelism from rw_fragments;").await?);
     expect_test::expect![[r#"
-        6 CREATED ADAPTIVE 256
-        8 CREATED ADAPTIVE 256"#]]
+        6 CREATED bounded(4) 256
+        8 CREATED bounded(64) 256"#]]
     .assert_eq(&cluster.run("select * from rw_table_fragments;").await?);
 
     // hash agg can be scaled independently
@@ -162,8 +162,8 @@ async fn test_shared_source() -> Result<()> {
         3 8 HASH {SOURCE_SCAN} 3 256"#]]
     .assert_eq(&cluster.run("select fragment_id, table_id, distribution_type, flags, parallelism, max_parallelism from rw_fragments;").await?);
     expect_test::expect![[r#"
-        6 CREATED FIXED(3) 256
-        8 CREATED FIXED(5) 256"#]]
+        6 CREATED 3 256
+        8 CREATED 5 256"#]]
     .assert_eq(&cluster.run("select * from rw_table_fragments;").await?);
 
     cluster.run("alter source s set parallelism = 7").await?;
@@ -175,8 +175,8 @@ async fn test_shared_source() -> Result<()> {
         3 8 HASH {SOURCE_SCAN} 7 256"#]]
     .assert_eq(&cluster.run("select fragment_id, table_id, distribution_type, flags, parallelism, max_parallelism from rw_fragments;").await?);
     expect_test::expect![[r#"
-        6 CREATED FIXED(7) 256
-        8 CREATED FIXED(5) 256"#]]
+        6 CREATED 7 256
+        8 CREATED 5 256"#]]
     .assert_eq(&cluster.run("select * from rw_table_fragments;").await?);
     Ok(())
 }
@@ -219,8 +219,8 @@ CREATE SOURCE s(v1 timestamp with time zone) WITH (
         4 8 SINGLE {NOW} 1 1"#]]
     .assert_eq(&cluster.run("select fragment_id, table_id, distribution_type, flags, parallelism, max_parallelism from rw_fragments;").await?);
     expect_test::expect![[r#"
-        6 CREATED ADAPTIVE 256
-        8 CREATED ADAPTIVE 256"#]]
+        6 CREATED bounded(4) 256
+        8 CREATED bounded(64) 256"#]]
     .assert_eq(&cluster.run("select * from rw_table_fragments;").await?);
 
     // source is the NoShuffle upstream. It can be scaled, and the downstream SourceBackfill/DynamicFilter will be scaled together.
@@ -234,8 +234,8 @@ CREATE SOURCE s(v1 timestamp with time zone) WITH (
         4 8 SINGLE {NOW} 1 1"#]]
     .assert_eq(&cluster.run("select fragment_id, table_id, distribution_type, flags, parallelism, max_parallelism from rw_fragments;").await?);
     expect_test::expect![[r#"
-        6 CREATED FIXED(3) 256
-        8 CREATED ADAPTIVE 256"#]]
+        6 CREATED 3 256
+        8 CREATED bounded(64) 256"#]]
     .assert_eq(&cluster.run("select * from rw_table_fragments;").await?);
 
     // resolve_no_shuffle for backfill fragment is OK, which will scale the upstream together.
@@ -249,8 +249,8 @@ CREATE SOURCE s(v1 timestamp with time zone) WITH (
         4 8 SINGLE {NOW} 1 1"#]]
     .assert_eq(&cluster.run("select fragment_id, table_id, distribution_type, flags, parallelism, max_parallelism from rw_fragments;").await?);
     expect_test::expect![[r#"
-        6 CREATED FIXED(7) 256
-        8 CREATED ADAPTIVE 256"#]]
+        6 CREATED 7 256
+        8 CREATED bounded(64) 256"#]]
     .assert_eq(&cluster.run("select * from rw_table_fragments;").await?);
     Ok(())
 }

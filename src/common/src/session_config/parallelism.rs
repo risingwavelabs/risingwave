@@ -25,6 +25,21 @@ const KEYWORD_ADAPTIVE: &str = "adaptive";
 const KEYWORD_AUTO: &str = "auto";
 const KEYWORD_DEFAULT_STRATEGY: &str = "default";
 
+const fn non_zero_u64(parallelism: u64) -> NonZeroU64 {
+    match NonZeroU64::new(parallelism) {
+        Some(parallelism) => parallelism,
+        None => panic!("parallelism must be non-zero"),
+    }
+}
+
+const fn bounded_parallelism(parallelism: u64) -> ConfigParallelism {
+    ConfigParallelism::Bounded(non_zero_u64(parallelism))
+}
+
+pub const DEFAULT_GLOBAL_STREAMING_PARALLELISM: ConfigParallelism = bounded_parallelism(64);
+pub const DEFAULT_TABLE_SOURCE_STREAMING_PARALLELISM: ConfigParallelism = bounded_parallelism(4);
+pub const DEFAULT_SINK_STREAMING_PARALLELISM: ConfigParallelism = bounded_parallelism(8);
+
 #[derive(Copy, Debug, Clone, PartialEq, Default)]
 pub enum ConfigParallelism {
     #[default]
@@ -338,11 +353,6 @@ mod tests {
     fn test_parallelism_parse_ratio() {
         let parallelism: ConfigParallelism = "ratio(0.5)".parse().unwrap();
         assert_eq!(parallelism, ConfigParallelism::Ratio(0.5));
-    }
-
-    #[test]
-    fn test_parallelism_default_variant() {
-        assert_eq!(ConfigParallelism::default(), ConfigParallelism::Default);
     }
 
     #[test]

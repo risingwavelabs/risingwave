@@ -20,6 +20,7 @@ use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_protocol::truncated_fmt;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeManagerRef;
+use risingwave_common::acl::AclMode;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{ColumnCatalog, ColumnDesc};
 use risingwave_common::session_config::{SearchPath, USER_NAME_WILD_CARD};
@@ -44,9 +45,10 @@ use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::catalog::schema_catalog::SchemaCatalog;
 use crate::catalog::{CatalogError, IndexCatalog};
-use crate::error::{Result, RwError};
+use crate::error::{ErrorCode, Result, RwError};
 use crate::handler::HandlerArgs;
-use crate::handler::create_connection::print_connection_params;
+use crate::handler::create_connection::print_connection_params_with_secret_visibility;
+use crate::handler::privilege::ObjectCheckItem;
 use crate::session::{SessionImpl, WorkerProcessId};
 use crate::user::user_catalog::UserCatalog;
 use crate::user::{has_access_to_object, has_schema_usage_privilege};
@@ -55,7 +57,7 @@ pub fn get_columns_from_table(
     session: &SessionImpl,
     table_name: ObjectName,
 ) -> Result<Vec<ColumnCatalog>> {
-    let mut binder = Binder::new_for_system(session);
+    let mut binder = Binder::new_for_batch(session);
     let relation = binder.bind_relation_by_name(&table_name, None, None, false)?;
     let column_catalogs = match relation {
         Relation::Source(s) => s.catalog.columns,
@@ -75,6 +77,20 @@ pub fn get_columns_from_sink(
 ) -> Result<Vec<ColumnCatalog>> {
     let binder = Binder::new_for_system(session);
     let sink = binder.bind_sink_by_name(sink_name)?;
+
+    let catalog_reader = session.env().catalog_reader().read_guard();
+    let schema = catalog_reader
+        .get_schema_by_id(sink.sink_catalog.database_id, sink.sink_catalog.schema_id)?;
+    session.check_privileges(&[
+        ObjectCheckItem::new(schema.owner, AclMode::Usage, schema.name(), schema.id()),
+        ObjectCheckItem::new(
+            sink.sink_catalog.owner,
+            AclMode::Select,
+            sink.sink_catalog.name.clone(),
+            sink.sink_catalog.id,
+        ),
+    ])?;
+
     Ok(sink.sink_catalog.full_columns().to_vec())
 }
 
@@ -82,6 +98,8 @@ pub fn get_columns_from_view(
     session: &SessionImpl,
     view_name: ObjectName,
 ) -> Result<Vec<ColumnCatalog>> {
+    let _authorized_relation =
+        Binder::new_for_batch(session).bind_relation_by_name(&view_name, None, None, false)?;
     let binder = Binder::new_for_system(session);
     let view = binder.bind_view_by_name(view_name)?;
 
@@ -101,7 +119,7 @@ pub fn get_indexes_from_table(
     session: &SessionImpl,
     table_name: ObjectName,
 ) -> Result<Vec<Arc<IndexCatalog>>> {
-    let mut binder = Binder::new_for_system(session);
+    let mut binder = Binder::new_for_batch(session);
     let relation = binder.bind_relation_by_name(&table_name, None, None, false)?;
     let indexes = match relation {
         Relation::BaseTable(t) => t.table_indexes,
@@ -201,6 +219,10 @@ impl ShowObjectRow {
     fn base_name(&self) -> String {
         self.name.0.base_name()
     }
+}
+
+fn is_permission_denied(err: &RwError) -> bool {
+    matches!(err.inner(), ErrorCode::PermissionDenied(_))
 }
 
 #[derive(Fields)]
@@ -504,7 +526,7 @@ pub async fn handle_show_object(
             let (reader, current_user) = get_catalog_reader();
             iter_schema_items(&session, &schema, &reader, &current_user, |schema| {
                 schema
-                    .iter_user_table()
+                    .iter_user_table_with_acl(&current_user)
                     .map(|t| with_schema_name(&schema.name, &t.name))
                     .map(|name| ShowObjectRow { name })
                     .collect()
@@ -514,7 +536,7 @@ pub async fn handle_show_object(
             let (reader, current_user) = get_catalog_reader();
             iter_schema_items(&session, &schema, &reader, &current_user, |schema| {
                 schema
-                    .iter_internal_table()
+                    .iter_internal_table_with_acl(&current_user)
                     .map(|t| with_schema_name(&schema.name, &t.name))
                     .map(|name| ShowObjectRow { name })
                     .collect()
@@ -544,7 +566,7 @@ pub async fn handle_show_object(
             let (reader, current_user) = get_catalog_reader();
             iter_schema_items(&session, &schema, &reader, &current_user, |schema| {
                 schema
-                    .iter_view()
+                    .iter_view_with_acl(&current_user)
                     .map(|t| with_schema_name(&schema.name, &t.name))
                     .map(|name| ShowObjectRow { name })
                     .collect()
@@ -554,7 +576,7 @@ pub async fn handle_show_object(
             let (reader, current_user) = get_catalog_reader();
             iter_schema_items(&session, &schema, &reader, &current_user, |schema| {
                 schema
-                    .iter_created_mvs()
+                    .iter_created_mvs_with_acl(&current_user)
                     .map(|t| with_schema_name(&schema.name, &t.name))
                     .map(|name| ShowObjectRow { name })
                     .collect()
@@ -565,7 +587,7 @@ pub async fn handle_show_object(
             let mut sources =
                 iter_schema_items(&session, &schema, &reader, &current_user, |schema| {
                     schema
-                        .iter_source()
+                        .iter_source_with_acl(&current_user)
                         .map(|t| with_schema_name(&schema.name, &t.name))
                         .map(|name| ShowObjectRow { name })
                         .collect()
@@ -584,7 +606,7 @@ pub async fn handle_show_object(
             let (reader, current_user) = get_catalog_reader();
             iter_schema_items(&session, &schema, &reader, &current_user, |schema| {
                 schema
-                    .iter_sink()
+                    .iter_sink_with_acl(&current_user)
                     .map(|t| with_schema_name(&schema.name, &t.name))
                     .map(|name| ShowObjectRow { name })
                     .collect()
@@ -594,7 +616,7 @@ pub async fn handle_show_object(
             let (reader, current_user) = get_catalog_reader();
             let rows = iter_schema_items(&session, &schema, &reader, &current_user, |schema| {
                 schema
-                    .iter_subscription()
+                    .iter_subscription_with_acl(&current_user)
                     .map(|t| ShowSubscriptionRow {
                         name: with_schema_name(&schema.name, &t.name),
                         retention_seconds: t.retention_seconds as i64,
@@ -609,22 +631,37 @@ pub async fn handle_show_object(
             let (reader, current_user) = get_catalog_reader();
             iter_schema_items(&session, &schema, &reader, &current_user, |schema| {
                 schema
-                    .iter_secret()
+                    .iter_secret_with_acl(&current_user)
                     .map(|t| with_schema_name(&schema.name, &t.name))
                     .map(|name| ShowObjectRow { name })
                     .collect()
             })
         }
         ShowObject::Columns { table } => {
-            let Ok(columns) = get_columns_from_table(&session, table.clone())
-                .or(get_columns_from_sink(&session, table.clone()))
-                .or(get_columns_from_view(&session, table.clone()))
-            else {
-                return Err(CatalogError::not_found(
-                    "table, source, sink or view",
-                    table.to_string(),
-                )
-                .into());
+            let columns = match get_columns_from_table(&session, table.clone()) {
+                Ok(columns) => columns,
+                Err(err) if is_permission_denied(&err) => {
+                    return Err(err);
+                }
+                Err(_) => match get_columns_from_sink(&session, table.clone()) {
+                    Ok(columns) => columns,
+                    Err(err) if is_permission_denied(&err) => {
+                        return Err(err);
+                    }
+                    Err(_) => match get_columns_from_view(&session, table.clone()) {
+                        Ok(columns) => columns,
+                        Err(err) if is_permission_denied(&err) => {
+                            return Err(err);
+                        }
+                        Err(_) => {
+                            return Err(CatalogError::not_found(
+                                "table, source, sink or view",
+                                table.to_string(),
+                            )
+                            .into());
+                        }
+                    },
+                },
             };
 
             return Ok(PgResponse::builder(StatementType::SHOW_COMMAND)
@@ -641,7 +678,7 @@ pub async fn handle_show_object(
         ShowObject::Connection { schema } => {
             let (reader, current_user) = get_catalog_reader();
             let rows = iter_schema_items(&session, &schema, &reader, &current_user, |schema| {
-                schema.iter_connections()
+                schema.iter_connections_with_acl(&current_user)
                 .map(|c| {
                     let name = c.name.clone();
                     let r#type = match &c.info {
@@ -657,13 +694,23 @@ pub async fn handle_show_object(
                         .get_source_ids_by_connection(c.id)
                         .unwrap_or_default()
                         .into_iter()
-                        .filter_map(|sid| schema.get_source_by_id(sid).map(|catalog| catalog.name.as_str()))
+                        .filter_map(|sid| {
+                            schema.get_source_by_id(sid).and_then(|catalog| {
+                                has_access_to_object(&current_user, catalog.id, catalog.owner)
+                                    .then_some(catalog.name.as_str())
+                            })
+                        })
                         .collect_vec();
                     let sink_names = schema
                         .get_sink_ids_by_connection(c.id)
                         .unwrap_or_default()
                         .into_iter()
-                        .filter_map(|sid| schema.get_sink_by_id(sid).map(|catalog| catalog.name.as_str()))
+                        .filter_map(|sid| {
+                            schema.get_sink_by_id(sid).and_then(|catalog| {
+                                has_access_to_object(&current_user, catalog.id, catalog.owner)
+                                    .then_some(catalog.name.as_str())
+                            })
+                        })
                         .collect_vec();
                     let properties = match &c.info {
                         #[expect(deprecated)]
@@ -680,7 +727,12 @@ pub async fn handle_show_object(
                         }
                         connection::Info::ConnectionParams(params) => {
                             // todo: show dep relations
-                            print_connection_params(&session.database(), params, &reader)
+                            print_connection_params_with_secret_visibility(
+                                &session.database(),
+                                params,
+                                &reader,
+                                &current_user,
+                            )
                         }
                     };
                     ShowConnectionRow {
@@ -698,7 +750,7 @@ pub async fn handle_show_object(
             let (reader, current_user) = get_catalog_reader();
             let rows = iter_schema_items(&session, &schema, &reader, &current_user, |schema| {
                 schema
-                    .iter_function()
+                    .iter_function_with_acl(&current_user)
                     .map(|t| ShowFunctionRow {
                         name: with_schema_name(&schema.name, &t.name),
                         arguments: t.arg_types.iter().map(|t| t.to_string()).join(", "),

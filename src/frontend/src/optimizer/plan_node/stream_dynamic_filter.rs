@@ -176,7 +176,7 @@ impl StreamNode for StreamDynamicFilter {
         let right = self.right();
         let right_table = infer_right_internal_table_catalog(right.plan_base())
             .with_id(state.gen_table_id_wrapped());
-        #[allow(deprecated)]
+        #[expect(deprecated)]
         NodeBody::DynamicFilter(Box::new(DynamicFilterNode {
             left_key: left_index as u32,
             condition,

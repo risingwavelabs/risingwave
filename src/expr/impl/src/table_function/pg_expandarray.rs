@@ -37,7 +37,7 @@ use risingwave_expr::{Result, function};
     type_infer = "infer_type"
 )]
 fn _pg_expandarray(array: ListRef<'_>) -> impl Iterator<Item = (Option<ScalarRefImpl<'_>>, i32)> {
-    #[allow(clippy::disallowed_methods)]
+    #[expect(clippy::disallowed_methods)]
     array.iter().zip(1..)
 }
 

@@ -102,13 +102,11 @@ impl Binder {
                     Ok((c.is_hidden, c.field))
                 }
             })
-            .chain(
-                [
-                    Ok((false, Field::with_name(output_type.clone(), "window_start"))),
-                    Ok((false, Field::with_name(output_type, "window_end"))),
-                ]
-                .into_iter(),
-            ).collect::<Result<Vec<_>>>()?;
+            .chain([
+                Ok((false, Field::with_name(output_type.clone(), "window_start"))),
+                Ok((false, Field::with_name(output_type, "window_end"))),
+            ])
+            .collect::<Result<Vec<_>>>()?;
 
         let (schema_name, table_name) =
             Self::resolve_schema_qualified_name(&self.db_name, &table_name)?;

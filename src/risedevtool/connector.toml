@@ -30,7 +30,15 @@ if (command -v mvn &> /dev/null) || [ -d "${PREFIX_BIN}/maven" ]; then
     exit 0
 else
     echo "Maven is not installed. Downloading now..."
-    curl -sSL "https://downloads.apache.org/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.tar.gz" -o "${MAVEN_DOWNLOAD_PATH}"
+    # Use `archive.apache.org` which permanently keeps all historical versions. `downloads.apache.org` only keeps
+    # the latest patch of each Maven line, so a slightly stale MAVEN_VERSION would 404 there.
+    MAVEN_URL="https://archive.apache.org/dist/maven/maven-3/${MAVEN_VERSION}/binaries/apache-maven-${MAVEN_VERSION}-bin.tar.gz"
+    if ! curl -fsSL "${MAVEN_URL}" -o "${MAVEN_DOWNLOAD_PATH}"; then
+        echo "Error: failed to download Maven from ${MAVEN_URL}"
+        echo "Check the available versions at https://archive.apache.org/dist/maven/maven-3/"
+        echo "or update MAVEN_VERSION (currently ${MAVEN_VERSION}) in src/risedevtool/connector.toml."
+        exit 1
+    fi
     tar -xzf "${MAVEN_DOWNLOAD_PATH}" -C "${PREFIX_TMP}"
     mv "${PREFIX_TMP}/apache-maven-${MAVEN_VERSION}" "${PREFIX_BIN}/maven"
     echo "Maven has been installed to ${PREFIX_BIN}."

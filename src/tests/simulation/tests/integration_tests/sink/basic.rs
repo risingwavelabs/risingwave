@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
 use std::sync::atomic::Ordering::Relaxed;
 use std::time::Duration;
 
@@ -154,6 +153,193 @@ async fn test_sink_decouple_blackhole() -> Result<()> {
         source_parallelism,
         test_source.create_stream_count.load(Relaxed)
     );
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_sink_log_store_internal_table_point_get_after_flush() -> Result<()> {
+    let mut cluster = start_sink_test_cluster().await?;
+
+    let source_parallelism = 2;
+    let test_sink = SimulationTestSink::register_new(TestSinkType::RetainLog);
+    let test_source = SimulationTestSource::register_new(source_parallelism, 0..64, 1.0, 64);
+
+    let mut session = cluster.start_session();
+    session.run("set streaming_parallelism = 2").await?;
+    session.run("set sink_decouple = true").await?;
+    session.run(CREATE_SOURCE).await?;
+    session.run(CREATE_SINK).await?;
+    test_sink.wait_initial_parallelism(2).await?;
+    test_sink
+        .store
+        .wait_for_count(test_source.id_list.len())
+        .await?;
+    session.flush().await?;
+
+    let log_store_table_id = session
+        .run("select internal_table_id from rw_sink_log_store_tables")
+        .await?
+        .trim()
+        .parse::<u32>()?;
+
+    let point_get_key = session
+        .run(format!(
+            "select kv_log_store_epoch, kv_log_store_seq_id, kv_log_store_vnode \
+             from rw_table({log_store_table_id}) \
+             where kv_log_store_seq_id is not null \
+             limit 1"
+        ))
+        .await?;
+    let [epoch, seq_id, vnode] =
+        TryInto::<[&str; 3]>::try_into(point_get_key.split_whitespace().collect_vec()).unwrap();
+
+    let point_get_count = session
+        .run(format!(
+            "select count(*) from rw_table({log_store_table_id}) \
+             where kv_log_store_epoch = {epoch} \
+               and kv_log_store_seq_id = {seq_id} \
+               and kv_log_store_vnode = {vnode}"
+        ))
+        .await?
+        .trim()
+        .parse::<usize>()?;
+    assert_eq!(1, point_get_count);
+
+    session.run(DROP_SINK).await?;
+    session.run(DROP_SOURCE).await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_sink_since_timestamp_starts_from_changelog() -> Result<()> {
+    let mut cluster = start_sink_test_cluster().await?;
+    let test_sink = SimulationTestSink::register_new(TestSinkType::SinkWriter);
+
+    let mut session = cluster.start_session();
+    session.run("set streaming_parallelism = 1").await?;
+    session.run("set sink_decouple = false").await?;
+    session
+        .run("create table t_since_sink (id int primary key, name varchar)")
+        .await?;
+    session
+        .run("create subscription sub_since_sink from t_since_sink with(retention = '1D')")
+        .await?;
+    session.flush().await?;
+
+    session
+        .run("insert into t_since_sink values (1, 'name-1')")
+        .await?;
+    session.flush().await?;
+    let since_timestamp = session.run("select now()::varchar").await?;
+
+    session
+        .run("insert into t_since_sink values (2, 'name-2')")
+        .await?;
+    session.flush().await?;
+
+    session
+        .run(format!(
+            "create sink test_sink from t_since_sink with (\
+             connector = 'test', \
+             type = 'upsert', \
+             snapshot = 'false', \
+             since_timestamp = '{}')",
+            since_timestamp.trim()
+        ))
+        .await?;
+    test_sink.wait_initial_parallelism(1).await?;
+    session.flush().await?;
+    test_sink.store.wait_for_count(1).await?;
+    test_sink.store.check_result_rows(&[(2, "name-2")])?;
+
+    session.run("drop sink test_sink").await?;
+    drop(test_sink);
+
+    let test_sink_as_select = SimulationTestSink::register_new(TestSinkType::SinkWriter);
+    session
+        .run(format!(
+            "create sink test_sink as \
+             select id, name from t_since_sink \
+             with (\
+             connector = 'test', \
+             type = 'upsert', \
+             snapshot = 'false', \
+             since_timestamp = '{}')",
+            since_timestamp.trim()
+        ))
+        .await?;
+    test_sink_as_select.wait_initial_parallelism(1).await?;
+    session.flush().await?;
+    test_sink_as_select.store.wait_for_count(1).await?;
+    test_sink_as_select
+        .store
+        .check_result_rows(&[(2, "name-2")])?;
+
+    session.run("drop sink test_sink").await?;
+    session.run("drop subscription sub_since_sink").await?;
+    session.run("drop table t_since_sink").await?;
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_sink_since_timestamp_with_pending_upstream_barriers() -> Result<()> {
+    const BARRIER_DELAY: Duration = Duration::from_secs(1);
+
+    let mut cluster = start_sink_test_cluster().await?;
+    let test_sink = SimulationTestSink::register_new(TestSinkType::SlowBarrier(BARRIER_DELAY));
+
+    let mut session = cluster.start_session();
+    session.run("set streaming_parallelism = 1").await?;
+    session.run("set sink_decouple = false").await?;
+    session
+        .run("create table t_since_sink_pending (id int primary key, name varchar)")
+        .await?;
+    session
+        .run(
+            "create subscription sub_since_sink_pending from t_since_sink_pending \
+             with (retention = '1D')",
+        )
+        .await?;
+    session.flush().await?;
+
+    session
+        .run(
+            "create sink slow_sink from t_since_sink_pending with (\
+             connector = 'test', \
+             type = 'upsert')",
+        )
+        .await?;
+    test_sink.wait_initial_parallelism(1).await?;
+
+    session
+        .run("insert into t_since_sink_pending values (1, 'name-1')")
+        .await?;
+    session.flush().await?;
+    let since_timestamp = session.run("select now()::varchar").await?;
+
+    session
+        .run("insert into t_since_sink_pending values (2, 'name-2')")
+        .await?;
+    session.flush().await?;
+
+    // The simulation barrier interval is 250 ms. Keep the sink blocked long enough for several
+    // later barriers to accumulate behind the checkpoint currently being completed.
+    test_sink.enable_barrier_delay();
+    sleep(BARRIER_DELAY * 3).await;
+
+    session
+        .run(format!(
+            "create sink since_sink from t_since_sink_pending with (\
+             connector = 'test', \
+             type = 'upsert', \
+             snapshot = 'false', \
+             since_timestamp = '{}')",
+            since_timestamp.trim()
+        ))
+        .await?;
 
     Ok(())
 }

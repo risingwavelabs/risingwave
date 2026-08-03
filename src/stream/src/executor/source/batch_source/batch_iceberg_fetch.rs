@@ -28,14 +28,14 @@ use risingwave_common::types::{JsonbVal, Scalar, ScalarRef};
 use risingwave_connector::source::iceberg::metrics::{
     GLOBAL_ICEBERG_SCAN_METRICS, IcebergScanMetrics,
 };
-use risingwave_connector::source::iceberg::{IcebergScanOpts, scan_task_to_chunk_with_deletes};
+use risingwave_connector::source::iceberg::{
+    IcebergScanOpts, PersistedFileScanTask, scan_task_to_chunk_with_deletes,
+};
 use risingwave_connector::source::reader::desc::SourceDesc;
 use thiserror_ext::AsReport;
 
 use crate::executor::prelude::*;
-use crate::executor::source::{
-    ChunksWithState, PersistedFileScanTask, StreamSourceCore, prune_additional_cols,
-};
+use crate::executor::source::{ChunksWithState, StreamSourceCore, prune_additional_cols};
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::task::LocalBarrierManager;
 
@@ -528,12 +528,7 @@ impl<S: StateStore> BatchIcebergFetchExecutor<S> {
             for chunk_result in scan_task_to_chunk_with_deletes(
                 table.clone(),
                 task,
-                IcebergScanOpts {
-                    chunk_size,
-                    need_seq_num: true, // Keep for potential future usage
-                    need_file_path_and_pos: true,
-                    handle_delete_files: true,
-                },
+                IcebergScanOpts::new(chunk_size, true, true, true),
                 Some(metrics.clone()),
             ) {
                 let chunk = chunk_result?;

@@ -230,7 +230,7 @@ mod tests {
     use futures::stream::StreamExt;
     use futures_async_stream::for_await;
     use risingwave_common::test_prelude::*;
-    use risingwave_expr::expr::{ExpressionBoxExt, InputRefExpression, LiteralExpression};
+    use risingwave_expr::expr::{InputRefExpression, LiteralExpression, SyncExpressionBoxExt};
     use risingwave_expr::table_function::repeat;
 
     use super::*;

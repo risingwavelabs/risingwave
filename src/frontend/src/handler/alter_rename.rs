@@ -240,8 +240,8 @@ pub async fn handle_rename_schema(
     let new_schema_name = Binder::resolve_schema_name(new_schema_name)?;
 
     let schema_id = {
-        let user_reader = session.env().user_info_reader().read_guard();
         let catalog_reader = session.env().catalog_reader().read_guard();
+        let user_reader = session.env().user_info_reader().read_guard();
         let schema = catalog_reader.get_schema_by_name(db_name, &schema_name)?;
         let db_id = catalog_reader.get_database_by_name(db_name)?.id();
 
@@ -289,8 +289,8 @@ pub async fn handle_rename_database(
     let new_database_name = Binder::resolve_database_name(new_database_name)?;
 
     let database_id = {
-        let user_reader = session.env().user_info_reader().read_guard();
         let catalog_reader = session.env().catalog_reader().read_guard();
+        let user_reader = session.env().user_info_reader().read_guard();
         let database = catalog_reader.get_database_by_name(&database_name)?;
 
         // The user should be super user or owner to alter the database.

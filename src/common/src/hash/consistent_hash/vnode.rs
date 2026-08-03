@@ -153,7 +153,7 @@ impl VirtualNode {
         keys: &[usize],
         vnode_count: usize,
     ) -> Vec<VirtualNode> {
-        if let Ok(idx) = keys.iter().exactly_one()
+        if let Ok(idx) = Itertools::exactly_one(keys.iter())
             && let ArrayImpl::Serial(serial_array) = &**data_chunk.column_at(*idx)
         {
             return serial_array
@@ -190,7 +190,8 @@ impl VirtualNode {
     // `Row`. Similar to `compute_chunk`, it also contains special handling for serial columns.
     pub fn compute_row(row: impl Row, indices: &[usize], vnode_count: usize) -> VirtualNode {
         let project = row.project(indices);
-        if let Ok(Some(ScalarRefImpl::Serial(s))) = project.iter().exactly_one().as_ref() {
+        if let Ok(Some(ScalarRefImpl::Serial(s))) = Itertools::exactly_one(project.iter()).as_ref()
+        {
             return compute_vnode_from_row_id(s.as_row_id(), vnode_count);
         }
 

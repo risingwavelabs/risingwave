@@ -34,7 +34,7 @@
 #![expect(clippy::upper_case_acronyms)]
 #![feature(register_tool)]
 #![register_tool(rw)]
-#![allow(rw::format_error)] // external crate
+#![expect(rw::format_error)] // external crate
 
 pub mod ast;
 pub mod keywords;

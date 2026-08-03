@@ -1,11 +1,12 @@
 import asyncio
 import time
 import json
+import os
 from nats.aio.client import Client as NATS
 from nats.js.api import StreamConfig
 import psycopg2
 
-NATS_SERVER = "nats://nats-server:4222"
+NATS_SERVER = os.environ.get("NATS_SERVER_URL", os.environ.get("RISEDEV_NATS_SERVER_URL", "nats://nats-server:4222"))
 
 async def create_stream(stream_name: str, subjects: str):
     # Create a NATS client

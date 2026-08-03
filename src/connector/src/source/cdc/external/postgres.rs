@@ -26,6 +26,7 @@ use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum, ScalarImpl, ToOwnedDatum};
 use risingwave_common::util::iter_util::ZipEqFast;
 use serde::{Deserialize, Serialize};
+use thiserror_ext::AsReport;
 use tokio_postgres::types::{PgLsn, Type as PgType};
 
 use crate::connector_common::create_pg_client;
@@ -238,21 +239,70 @@ impl PostgresExternalTableReader {
             ?pk_indices,
             "create postgres external table reader"
         );
-        let client = create_pg_client(
-            &config.username,
-            &config.password,
-            &config.host,
-            &config.port,
-            &config.database,
-            &config.ssl_mode,
-            &config.ssl_root_cert,
-            None, // No TCP keepalive for CDC source
-        )
-        .await?;
+        // No TCP keepalive for CDC source
+        let client = create_pg_client(&config.pg_connection_config()?, None).await?;
+
+        // Discover user-defined composite columns and arrays of composites.
+        // tokio-postgres cannot decode composite values natively, so for these
+        // columns we cast to text in the snapshot SELECT. Scalar composites
+        // become `(a,b,c)`; arrays become `text[]` so tokio-postgres can
+        // decode them directly as `Vec<Option<String>>` matching the RW
+        // `List(Varchar)` column. Other varchar columns stay as-is to
+        // preserve RW's own text rendering (e.g. numeric -> "NaN").
+        let composite_columns = client
+            .query(
+                "SELECT a.attname, (t.typcategory = 'A') AS is_array \
+                 FROM pg_attribute a \
+                 JOIN pg_class c ON a.attrelid = c.oid \
+                 JOIN pg_namespace n ON c.relnamespace = n.oid \
+                 JOIN pg_type t ON a.atttypid = t.oid \
+                 LEFT JOIN pg_type t_elem ON t.typelem = t_elem.oid \
+                 WHERE n.nspname = $1 \
+                   AND c.relname = $2 \
+                   AND a.attnum > 0 \
+                   AND NOT a.attisdropped \
+                   AND (t.typtype = 'c' \
+                        OR (t.typcategory = 'A' AND t_elem.typtype = 'c'))",
+                &[
+                    &schema_table_name.schema_name,
+                    &schema_table_name.table_name,
+                ],
+            )
+            .await
+            .map(|rows| {
+                rows.into_iter()
+                    .map(|row| (row.get::<_, String>(0), row.get::<_, bool>(1)))
+                    .collect::<std::collections::HashMap<_, _>>()
+            })
+            .unwrap_or_else(|err| {
+                tracing::warn!(
+                    error = %err.as_report(),
+                    schema = %schema_table_name.schema_name,
+                    table = %schema_table_name.table_name,
+                    "failed to discover postgres composite columns; falling back to no text cast"
+                );
+                std::collections::HashMap::new()
+            });
+
         let field_names = rw_schema
             .fields
             .iter()
-            .map(|f| Self::quote_column(&f.name))
+            .map(|f| {
+                let quoted = Self::quote_column(&f.name);
+                match composite_columns.get(&f.name) {
+                    Some(false) if matches!(f.data_type, DataType::Varchar) => {
+                        format!("{quoted}::text AS {quoted}")
+                    }
+                    Some(true) if matches!(f.data_type, DataType::List(_)) => {
+                        format!(
+                            "CASE WHEN {quoted} IS NULL THEN NULL \
+                             ELSE ARRAY(SELECT t::text FROM unnest({quoted}) t)::text[] \
+                             END AS {quoted}"
+                        )
+                    }
+                    _ => quoted,
+                }
+            })
             .join(",");
 
         Ok(Self {
@@ -942,22 +992,16 @@ mod tests {
         };
 
         let table = PostgresExternalTable::connect(
-            &config.username,
-            &config.password,
-            &config.host,
-            config.port.parse::<u16>().unwrap(),
-            &config.database,
+            &config.pg_connection_config().unwrap(),
             &config.schema,
             &config.table,
-            &config.ssl_mode,
-            &config.ssl_root_cert,
             false,
         )
         .await
         .unwrap();
 
-        println!("columns: {:?}", &table.column_descs());
-        println!("primary keys: {:?}", &table.pk_names());
+        println!("columns: {:?}", table.column_descs());
+        println!("primary keys: {:?}", table.pk_names());
     }
 
     #[test]

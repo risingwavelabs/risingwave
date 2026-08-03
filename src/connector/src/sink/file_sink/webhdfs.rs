@@ -76,6 +76,8 @@ impl UnknownFields for WebhdfsConfig {
     }
 }
 
+crate::impl_sink_unknown_fields!(WebhdfsConfig);
+
 impl OpendalSinkBackend for WebhdfsSink {
     type Properties = WebhdfsConfig;
 

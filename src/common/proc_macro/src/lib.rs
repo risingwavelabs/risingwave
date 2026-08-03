@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(coverage_attribute)]
+#![cfg_attr(coverage, feature(coverage_attribute))]
 
 use estimate_size::{
     add_trait_bounds, extract_ignored_generics_list, has_nested_flag_attribute_list,
@@ -254,6 +254,7 @@ pub fn derive_estimate_size(input: TokenStream) -> TokenStream {
 /// A default value is required by setting the `default` option.
 /// The field name will be the parameter name. You can overwrite the parameter name by setting the `rename` option.
 /// To check the input parameter, you can use `check_hook` option.
+/// To emit a user-facing notice on `SET`, use the `deprecated` option.
 ///
 /// `flags` options include
 /// - `SETTER`: to manually write a `set_your_parameter_name` function, in which you should call `set_your_parameter_name_inner`.

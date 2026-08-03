@@ -30,6 +30,8 @@ use risingwave_common::catalog::{FragmentTypeFlag, TableId};
 use risingwave_common::session_config::SessionConfig;
 use risingwave_common::session_config::parallelism::ConfigParallelism;
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
+use risingwave_common::types::DataType;
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_internal_tables;
 use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_pb::id::{LocalOperatorId, StreamNodeLocalOperatorId};
 use risingwave_pb::plan_common::JoinType;
@@ -45,6 +47,7 @@ use crate::error::ErrorCode::NotSupported;
 use crate::error::{Result, RwError};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{StreamPlanRef as PlanRef, reorganize_elements_id};
+use crate::optimizer::variant_key::variant_key_error;
 use crate::stream_fragmenter::parallelism::{
     ResolvedParallelism, derive_backfill_parallelism, derive_parallelism,
 };
@@ -178,7 +181,8 @@ pub fn build_graph_with_strategy(
     let plan_node = reorganize_elements_id(plan_node);
 
     let mut state = BuildFragmentGraphState::default();
-    let stream_node = plan_node.to_stream_prost(&mut state)?;
+    let mut stream_node = plan_node.to_stream_prost(&mut state)?;
+    reject_variant_in_internal_storage_key(&mut stream_node)?;
     generate_fragment_graph(&mut state, stream_node)?;
     if state.has_source_backfill && state.has_snapshot_backfill {
         return Err(RwError::from(NotSupported(
@@ -198,14 +202,13 @@ pub fn build_graph_with_strategy(
         )));
     }
 
-    let mut fragment_graph = state.fragment_graph.to_protobuf();
-
-    // Set table ids.
-    fragment_graph.dependent_table_ids = state.dependent_table_ids.into_iter().collect();
-    fragment_graph.table_ids_cnt = state.next_table_id;
-
-    // Set parallelism and vnode count.
-    let parallelism_strategy = {
+    let (
+        normal_parallelism,
+        backfill_parallelism,
+        adaptive_parallelism_strategy,
+        backfill_adaptive_parallelism_strategy,
+        max_parallelism,
+    ) = {
         let config = ctx.session_ctx().config();
         let streaming_parallelism = config.streaming_parallelism();
         let job_parallelism = job_type.map(|t| t.to_parallelism(config.deref()));
@@ -219,41 +222,81 @@ pub fn build_graph_with_strategy(
                 adaptive_strategy: None,
             }
         };
-        fragment_graph.parallelism = normal_parallelism.parallelism;
-        fragment_graph.backfill_parallelism = backfill_parallelism.parallelism;
-        fragment_graph.max_parallelism = config.streaming_max_parallelism() as _;
         (
-            normal_parallelism.adaptive_strategy,
-            backfill_parallelism.adaptive_strategy,
+            normal_parallelism.parallelism,
+            backfill_parallelism.parallelism,
+            normal_parallelism
+                .adaptive_strategy
+                .as_ref()
+                .map(AdaptiveParallelismStrategy::to_string)
+                .unwrap_or_default(),
+            backfill_parallelism
+                .adaptive_strategy
+                .as_ref()
+                .map(AdaptiveParallelismStrategy::to_string)
+                .unwrap_or_default(),
+            config.streaming_max_parallelism() as _,
         )
     };
 
-    // Set context for this streaming job.
     let config_override = ctx
         .session_ctx()
         .config()
         .to_initial_streaming_config_override()
         .context("invalid initial streaming config override")?;
-    let adaptive_parallelism_strategy = parallelism_strategy
-        .0
-        .as_ref()
-        .map(AdaptiveParallelismStrategy::to_string)
-        .unwrap_or_default();
-    let backfill_adaptive_parallelism_strategy = parallelism_strategy
-        .1
-        .as_ref()
-        .map(AdaptiveParallelismStrategy::to_string)
-        .unwrap_or_default();
-    fragment_graph.ctx = Some(StreamContext {
-        timezone: ctx.get_session_timezone(),
-        config_override,
+    let fragments = state
+        .fragment_graph
+        .fragments
+        .into_iter()
+        .map(|(k, v)| (k, v.to_protobuf()))
+        .collect();
+    let edges = state.fragment_graph.edges.into_values().collect();
+
+    Ok(StreamFragmentGraphProto {
+        fragments,
+        edges,
+        dependent_table_ids: state.dependent_table_ids.into_iter().collect(),
+        table_ids_cnt: state.next_table_id,
+        ctx: Some(StreamContext {
+            timezone: ctx.get_session_timezone(),
+            config_override,
+        }),
+        parallelism: normal_parallelism,
+        backfill_parallelism,
         adaptive_parallelism_strategy,
         backfill_adaptive_parallelism_strategy,
+        max_parallelism,
+        backfill_order,
+    })
+}
+
+/// Rejects `VARIANT` (including nested) in the storage pk of any internal state table. Internal
+/// tables only materialize when the plan is lowered to protobuf, so this is the single point that
+/// backstops operators whose state keys no logical checker visits.
+fn reject_variant_in_internal_storage_key(stream_node: &mut StreamNode) -> Result<()> {
+    let mut err = None;
+    visit_stream_node_internal_tables(stream_node, |table, table_name| {
+        if err.is_some() {
+            return;
+        }
+        for order in &table.pk {
+            let column = &table.columns[order.column_index as usize];
+            let column_desc = column.column_desc.as_ref().unwrap();
+            let data_type: DataType = column_desc.column_type.as_ref().unwrap().into();
+            if data_type.contains_variant() {
+                err = Some(variant_key_error(format!(
+                    "VARIANT column \"{}\" is part of the storage primary key of the internal \
+                    state table of `{}`",
+                    column_desc.name, table_name,
+                )));
+                return;
+            }
+        }
     });
-
-    fragment_graph.backfill_order = backfill_order;
-
-    Ok(fragment_graph)
+    match err {
+        Some(err) => Err(err),
+        None => Ok(()),
+    }
 }
 
 #[cfg(any())]
@@ -423,6 +466,7 @@ fn build_fragment(
                 current_fragment
                     .fragment_type_mask
                     .add(FragmentTypeFlag::StreamScan);
+                #[expect(deprecated)]
                 match node.stream_scan_type() {
                     StreamScanType::SnapshotBackfill => {
                         current_fragment
@@ -655,4 +699,60 @@ fn build_fragment(
             .collect::<Result<_>>()?;
         Ok(stream_node)
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::types::StructType;
+    use risingwave_pb::catalog::PbTable;
+    use risingwave_pb::common::PbColumnOrder;
+    use risingwave_pb::plan_common::{PbColumnCatalog, PbColumnDesc};
+    use risingwave_pb::stream_plan::TopNNode;
+
+    use super::*;
+
+    /// A `TopN` node is the simplest body carrying exactly one internal table.
+    fn top_n_with_pk_column(data_type: DataType) -> StreamNode {
+        let table = PbTable {
+            columns: vec![PbColumnCatalog {
+                column_desc: Some(PbColumnDesc {
+                    name: "v".to_owned(),
+                    column_type: Some(data_type.to_protobuf()),
+                    ..Default::default()
+                }),
+                ..Default::default()
+            }],
+            pk: vec![PbColumnOrder {
+                column_index: 0,
+                order_type: None,
+            }],
+            ..Default::default()
+        };
+        StreamNode {
+            node_body: Some(NodeBody::TopN(Box::new(TopNNode {
+                table: Some(table),
+                ..Default::default()
+            }))),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn rejects_variant_in_internal_state_table_pk() {
+        for data_type in [
+            DataType::Variant,
+            DataType::list(DataType::Variant),
+            DataType::Struct(StructType::new(vec![("v", DataType::Variant)])),
+        ] {
+            let mut node = top_n_with_pk_column(data_type.clone());
+            let err = reject_variant_in_internal_storage_key(&mut node).unwrap_err();
+            assert!(
+                err.to_string().contains("internal state table of `TopN`"),
+                "{data_type:?}: {err}"
+            );
+        }
+
+        let mut node = top_n_with_pk_column(DataType::Jsonb);
+        reject_variant_in_internal_storage_key(&mut node).unwrap();
+    }
 }

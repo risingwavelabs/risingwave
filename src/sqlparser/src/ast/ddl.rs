@@ -24,9 +24,19 @@ use crate::tokenizer::Token;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AlterDatabaseOperation {
-    ChangeOwner { new_owner_name: Ident },
-    RenameDatabase { database_name: ObjectName },
+    ChangeOwner {
+        new_owner_name: Ident,
+    },
+    RenameDatabase {
+        database_name: ObjectName,
+    },
     SetParam(ConfigParam),
+    /// `SET RESOURCE_GROUP TO 'RESOURCE GROUP' [ DEFERRED ]`
+    /// `RESET RESOURCE_GROUP [ DEFERRED ]`
+    SetResourceGroup {
+        resource_group: Option<SetVariableValue>,
+        deferred: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -34,6 +44,43 @@ pub enum AlterSchemaOperation {
     ChangeOwner { new_owner_name: Ident },
     RenameSchema { schema_name: ObjectName },
     SwapRenameSchema { target_schema: ObjectName },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum AlterRateLimitType {
+    Source,
+    Backfill,
+    Dml,
+    Sink,
+}
+
+impl AlterRateLimitType {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            AlterRateLimitType::Source => "SOURCE_RATE_LIMIT",
+            AlterRateLimitType::Backfill => "BACKFILL_RATE_LIMIT",
+            AlterRateLimitType::Dml => "DML_RATE_LIMIT",
+            AlterRateLimitType::Sink => "SINK_RATE_LIMIT",
+        }
+    }
+}
+
+impl fmt::Display for AlterRateLimitType {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct AlterRateLimit {
+    pub rate_limit_type: AlterRateLimitType,
+    pub rate_limit: i32,
+}
+
+impl fmt::Display for AlterRateLimit {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "SET {} TO {}", self.rate_limit_type, self.rate_limit)
+    }
 }
 
 /// An `ALTER TABLE` (`Statement::AlterTable`) operation
@@ -83,6 +130,12 @@ pub enum AlterTableOperation {
         column_name: Ident,
         op: AlterColumnOperation,
     },
+    /// `ALTER WATERMARK FOR <column> AS <expr> [WITH TTL]`
+    AlterWatermark {
+        column_name: Ident,
+        expr: Expr,
+        with_ttl: bool,
+    },
     /// `OWNER TO <owner_name>`
     ChangeOwner {
         new_owner_name: Ident,
@@ -110,18 +163,7 @@ pub enum AlterTableOperation {
         keys: Vec<ObjectName>,
     },
     RefreshSchema,
-    /// `SET SOURCE_RATE_LIMIT TO <rate_limit>`
-    SetSourceRateLimit {
-        rate_limit: i32,
-    },
-    /// SET BACKFILL_RATE_LIMIT TO <rate_limit>
-    SetBackfillRateLimit {
-        rate_limit: i32,
-    },
-    /// `SET DML_RATE_LIMIT TO <rate_limit>`
-    SetDmlRateLimit {
-        rate_limit: i32,
-    },
+    AlterRateLimit(AlterRateLimit),
     /// `SWAP WITH <table_name>`
     SwapRenameTable {
         target_table: ObjectName,
@@ -148,6 +190,12 @@ pub enum AlterIndexOperation {
     /// `SET BACKFILL_PARALLELISM TO <parallelism> [ DEFERRED ]`
     SetBackfillParallelism {
         parallelism: SetVariableValue,
+        deferred: bool,
+    },
+    /// `SET RESOURCE_GROUP TO 'RESOURCE GROUP' [ DEFERRED ]`
+    /// `RESET RESOURCE_GROUP [ DEFERRED ]`
+    SetResourceGroup {
+        resource_group: Option<SetVariableValue>,
         deferred: bool,
     },
     /// `SET CONFIG (key = value, ...)`
@@ -187,10 +235,7 @@ pub enum AlterViewOperation {
         resource_group: Option<SetVariableValue>,
         deferred: bool,
     },
-    /// `SET BACKFILL_RATE_LIMIT TO <rate_limit>`
-    SetBackfillRateLimit {
-        rate_limit: i32,
-    },
+    AlterRateLimit(AlterRateLimit),
     /// `SWAP WITH <view_name>`
     SwapRenameView {
         target_view: ObjectName,
@@ -233,6 +278,12 @@ pub enum AlterSinkOperation {
         parallelism: SetVariableValue,
         deferred: bool,
     },
+    /// `SET RESOURCE_GROUP TO 'RESOURCE GROUP' [ DEFERRED ]`
+    /// `RESET RESOURCE_GROUP [ DEFERRED ]`
+    SetResourceGroup {
+        resource_group: Option<SetVariableValue>,
+        deferred: bool,
+    },
     /// `SET CONFIG (key = value, ...)`
     SetConfig {
         entries: Vec<SqlOption>,
@@ -245,12 +296,7 @@ pub enum AlterSinkOperation {
     SwapRenameSink {
         target_sink: ObjectName,
     },
-    SetSinkRateLimit {
-        rate_limit: i32,
-    },
-    SetBackfillRateLimit {
-        rate_limit: i32,
-    },
+    AlterRateLimit(AlterRateLimit),
     AlterConnectorProps {
         alter_props: Vec<SqlOption>,
     },
@@ -286,9 +332,7 @@ pub enum AlterSourceOperation {
         format_encode: FormatEncodeOptions,
     },
     RefreshSchema,
-    SetSourceRateLimit {
-        rate_limit: i32,
-    },
+    AlterRateLimit(AlterRateLimit),
     SwapRenameSource {
         target_source: ObjectName,
     },
@@ -343,8 +387,13 @@ pub enum AlterSecretOperation {
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AlterFragmentOperation {
-    AlterBackfillRateLimit { rate_limit: i32 },
+    AlterRateLimit(AlterRateLimit),
     SetParallelism { parallelism: SetVariableValue },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum AlterCompactionGroupOperation {
+    Set { configs: Vec<ConfigParam> },
 }
 
 impl fmt::Display for AlterDatabaseOperation {
@@ -358,6 +407,18 @@ impl fmt::Display for AlterDatabaseOperation {
             }
             AlterDatabaseOperation::SetParam(ConfigParam { param, value }) => {
                 write!(f, "SET {} TO {}", param, value)
+            }
+            AlterDatabaseOperation::SetResourceGroup {
+                resource_group,
+                deferred,
+            } => {
+                let deferred = if *deferred { " DEFERRED" } else { "" };
+
+                if let Some(resource_group) = resource_group {
+                    write!(f, "SET RESOURCE_GROUP TO {}{}", resource_group, deferred)
+                } else {
+                    write!(f, "RESET RESOURCE_GROUP{}", deferred)
+                }
             }
         }
     }
@@ -388,6 +449,17 @@ impl fmt::Display for AlterTableOperation {
             }
             AlterTableOperation::AlterColumn { column_name, op } => {
                 write!(f, "ALTER COLUMN {} {}", column_name, op)
+            }
+            AlterTableOperation::AlterWatermark {
+                column_name,
+                expr,
+                with_ttl,
+            } => {
+                write!(f, "ALTER WATERMARK FOR {} AS {}", column_name, expr)?;
+                if *with_ttl {
+                    write!(f, " WITH TTL")?;
+                }
+                Ok(())
             }
             AlterTableOperation::DropConstraint { name } => write!(f, "DROP CONSTRAINT {}", name),
             AlterTableOperation::DropColumn {
@@ -465,15 +537,7 @@ impl fmt::Display for AlterTableOperation {
             AlterTableOperation::RefreshSchema => {
                 write!(f, "REFRESH SCHEMA")
             }
-            AlterTableOperation::SetSourceRateLimit { rate_limit } => {
-                write!(f, "SET SOURCE_RATE_LIMIT TO {}", rate_limit)
-            }
-            AlterTableOperation::SetBackfillRateLimit { rate_limit } => {
-                write!(f, "SET BACKFILL_RATE_LIMIT TO {}", rate_limit)
-            }
-            AlterTableOperation::SetDmlRateLimit { rate_limit } => {
-                write!(f, "SET DML_RATE_LIMIT TO {}", rate_limit)
-            }
+            AlterTableOperation::AlterRateLimit(rate_limit) => write!(f, "{rate_limit}"),
             AlterTableOperation::SwapRenameTable { target_table } => {
                 write!(f, "SWAP WITH {}", target_table)
             }
@@ -519,6 +583,18 @@ impl fmt::Display for AlterIndexOperation {
                     if *deferred { " DEFERRED" } else { "" }
                 )
             }
+            AlterIndexOperation::SetResourceGroup {
+                resource_group,
+                deferred,
+            } => {
+                let deferred = if *deferred { " DEFERRED" } else { "" };
+
+                if let Some(resource_group) = resource_group {
+                    write!(f, "SET RESOURCE_GROUP TO {}{}", resource_group, deferred)
+                } else {
+                    write!(f, "RESET RESOURCE_GROUP{}", deferred)
+                }
+            }
             AlterIndexOperation::SetConfig { entries } => {
                 write!(f, "SET CONFIG ({})", display_comma_separated(entries))
             }
@@ -563,9 +639,7 @@ impl fmt::Display for AlterViewOperation {
                     if *deferred { " DEFERRED" } else { "" }
                 )
             }
-            AlterViewOperation::SetBackfillRateLimit { rate_limit } => {
-                write!(f, "SET BACKFILL_RATE_LIMIT TO {}", rate_limit)
-            }
+            AlterViewOperation::AlterRateLimit(rate_limit) => write!(f, "{rate_limit}"),
             AlterViewOperation::SwapRenameView { target_view } => {
                 write!(f, "SWAP WITH {}", target_view)
             }
@@ -576,9 +650,9 @@ impl fmt::Display for AlterViewOperation {
                 let deferred = if *deferred { " DEFERRED" } else { "" };
 
                 if let Some(resource_group) = resource_group {
-                    write!(f, "SET RESOURCE_GROUP TO {} {}", resource_group, deferred)
+                    write!(f, "SET RESOURCE_GROUP TO {}{}", resource_group, deferred)
                 } else {
-                    write!(f, "RESET RESOURCE_GROUP {}", deferred)
+                    write!(f, "RESET RESOURCE_GROUP{}", deferred)
                 }
             }
             AlterViewOperation::SetStreamingEnableUnalignedJoin { enable } => {
@@ -631,6 +705,18 @@ impl fmt::Display for AlterSinkOperation {
                     if *deferred { " DEFERRED" } else { "" }
                 )
             }
+            AlterSinkOperation::SetResourceGroup {
+                resource_group,
+                deferred,
+            } => {
+                let deferred = if *deferred { " DEFERRED" } else { "" };
+
+                if let Some(resource_group) = resource_group {
+                    write!(f, "SET RESOURCE_GROUP TO {}{}", resource_group, deferred)
+                } else {
+                    write!(f, "RESET RESOURCE_GROUP{}", deferred)
+                }
+            }
             AlterSinkOperation::SetConfig { entries } => {
                 write!(f, "SET CONFIG ({})", display_comma_separated(entries))
             }
@@ -640,12 +726,7 @@ impl fmt::Display for AlterSinkOperation {
             AlterSinkOperation::SwapRenameSink { target_sink } => {
                 write!(f, "SWAP WITH {}", target_sink)
             }
-            AlterSinkOperation::SetSinkRateLimit { rate_limit } => {
-                write!(f, "SET SINK_RATE_LIMIT TO {}", rate_limit)
-            }
-            AlterSinkOperation::SetBackfillRateLimit { rate_limit } => {
-                write!(f, "SET BACKFILL_RATE_LIMIT TO {}", rate_limit)
-            }
+            AlterSinkOperation::AlterRateLimit(rate_limit) => write!(f, "{rate_limit}"),
             AlterSinkOperation::AlterConnectorProps {
                 alter_props: changed_props,
             } => {
@@ -707,9 +788,7 @@ impl fmt::Display for AlterSourceOperation {
             AlterSourceOperation::RefreshSchema => {
                 write!(f, "REFRESH SCHEMA")
             }
-            AlterSourceOperation::SetSourceRateLimit { rate_limit } => {
-                write!(f, "SET SOURCE_RATE_LIMIT TO {}", rate_limit)
-            }
+            AlterSourceOperation::AlterRateLimit(rate_limit) => write!(f, "{rate_limit}"),
             AlterSourceOperation::SwapRenameSource { target_source } => {
                 write!(f, "SWAP WITH {}", target_source)
             }
@@ -853,11 +932,28 @@ impl fmt::Display for AlterColumnOperation {
 impl fmt::Display for AlterFragmentOperation {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            AlterFragmentOperation::AlterBackfillRateLimit { rate_limit } => {
-                write!(f, "SET BACKFILL_RATE_LIMIT TO {}", rate_limit)
-            }
+            AlterFragmentOperation::AlterRateLimit(rate_limit) => write!(f, "{rate_limit}"),
             AlterFragmentOperation::SetParallelism { parallelism } => {
                 write!(f, "SET PARALLELISM TO {}", parallelism)
+            }
+        }
+    }
+}
+
+impl fmt::Display for AlterCompactionGroupOperation {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            AlterCompactionGroupOperation::Set { configs } => {
+                struct Assign<'a>(&'a ConfigParam);
+
+                impl fmt::Display for Assign<'_> {
+                    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                        write!(f, "{} = {}", self.0.param, self.0.value)
+                    }
+                }
+
+                let assigns: Vec<Assign<'_>> = configs.iter().map(Assign).collect();
+                write!(f, "SET {}", display_comma_separated(&assigns))
             }
         }
     }

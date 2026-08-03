@@ -651,6 +651,21 @@
     └─BatchLookupJoin { type: Inner, predicate: d.t1._row_id IS NOT DISTINCT FROM t1._row_id AND (t1.d > 9:Int32), output: [], lookup table: t1 }
       └─BatchExchange { order: [], dist: Single }
         └─BatchScan { table: d, columns: [d.t1._row_id], scan_ranges: [d.a = Int32(1)], distribution: SomeShard }
+- name: covering index with residual predicate outside the index
+  sql: |
+    create materialized view mc as select 1 as id, 'a' as val, 'x' as tag;
+    create index mc_idx on mc (id) include (val);
+    select 1 from mc where id = 1 and tag = 'x';
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [1:Int32] }
+      └─BatchFilter { predicate: (mc.id = 1:Int32) AND (mc.tag = 'x':Varchar) }
+        └─BatchScan { table: mc, columns: [mc.id, mc.tag], distribution: Single }
+  batch_local_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [1:Int32] }
+      └─BatchFilter { predicate: (mc.id = 1:Int32) AND (mc.tag = 'x':Varchar) }
+        └─BatchScan { table: mc, columns: [mc.id, mc.tag], distribution: SomeShard }
 - name: create index to include all columns by default
   sql: |
     create table t1 (a int, b numeric, c bigint);
@@ -752,6 +767,16 @@
     BatchExchange { order: [], dist: Single }
     └─BatchFilter { predicate: (test_table.name >= 'test_table':Varchar) AND (test_table.name < 'test_tablf':Varchar) AND Like(test_table.name, 'test\_table_2':Varchar) }
       └─BatchScan { table: test_table, columns: [test_table.name], distribution: SomeShard }
+- name: restrict rewrite LIKE with ESCAPE as a binary expression
+  sql: |
+    create table some_trades(id varchar);
+    select * from some_trades
+    where id like '%\_%' escape '\'
+      and id not like 'DROPFEED%';
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchFilter { predicate: Like(some_trades.id, '%\_%':Varchar, '\':Varchar) AND (Not((some_trades.id >= 'DROPFEED':Varchar)) OR Not((some_trades.id < 'DROPFEEE':Varchar))) }
+      └─BatchScan { table: some_trades, columns: [some_trades.id], distribution: SomeShard }
 - sql: |
     create table t1 (k1 int primary key, v1 int);
     create table t2 (k2 int primary key, v2 int);

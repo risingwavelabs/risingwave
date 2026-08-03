@@ -59,6 +59,7 @@ pub trait HummockMetaClient: Send + Sync + 'static {
         compaction_group_id: CompactionGroupId,
         table_id: JobId,
         level: u32,
+        target_level: Option<u32>,
         sst_ids: Vec<HummockSstableId>,
         exclusive: bool,
     ) -> Result<bool>;

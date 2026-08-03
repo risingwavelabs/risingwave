@@ -129,13 +129,13 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_bytes(
-                    "Materialized View Write Size",
+                    "Streaming Relation Write Size",
                     "",
                     [
                         *quantile(
                             lambda quantile, legend: panels.target(
                                 f'sum(histogram_quantile({quantile}, sum(rate({metric("state_store_write_batch_size_bucket")}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}, table_id)) * on(table_id) group_left(materialized_view_id) (group({metric("table_info")}) by (materialized_view_id, table_id))) by (materialized_view_id, table_name)',
-                                f"write p{legend} - materialized view {{{{materialized_view_id}}}}",
+                                f"write p{legend} - relation {{{{materialized_view_id}}}}",
                             ),
                             [50, 99, "max"],
                         ),
@@ -210,19 +210,6 @@ def _(outer_panels: Panels):
                         panels.target(
                             f"sum by(le, {COMPONENT_LABEL}, {NODE_LABEL}, table_id)(rate({table_metric('state_store_write_batch_duration_sum')}[$__rate_interval]))  / sum by(le, {COMPONENT_LABEL}, {NODE_LABEL}, table_id)(rate({table_metric('state_store_write_batch_duration_count')}[$__rate_interval])) > 0",
                             "write to shared_buffer avg - {{table_id}} @ {{%s}} @ {{%s}}"
-                            % (COMPONENT_LABEL, NODE_LABEL),
-                        ),
-                        *quantile(
-                            lambda quantile, legend: panels.target(
-                                f"histogram_quantile({quantile}, sum(rate({metric('state_store_write_shared_buffer_sync_time_bucket')}[$__rate_interval])) by (le, {COMPONENT_LABEL}, {NODE_LABEL}))",
-                                f"write to object_store p{legend}"
-                                + " - {{%s}} @ {{%s}}" % (COMPONENT_LABEL, NODE_LABEL),
-                            ),
-                            [50, 99, "max"],
-                        ),
-                        panels.target(
-                            f"sum by(le, {COMPONENT_LABEL}, {NODE_LABEL})(rate({metric('state_store_write_shared_buffer_sync_time_sum')}[$__rate_interval]))  / sum by(le, {COMPONENT_LABEL}, {NODE_LABEL})(rate({metric('state_store_write_shared_buffer_sync_time_count')}[$__rate_interval])) > 0",
-                            "write to object_store - {{%s}} @ {{%s}}"
                             % (COMPONENT_LABEL, NODE_LABEL),
                         ),
                     ],

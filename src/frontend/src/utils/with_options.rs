@@ -51,6 +51,7 @@ pub mod options {
     pub const RETENTION_SECONDS: &str = "retention_seconds";
 }
 
+pub const MV_REFRESH_INTERVAL_SEC_KEY: &str = "refresh.interval.sec";
 pub const SOURCE_REFRESH_MODE_KEY: &str = "refresh_mode";
 pub const SOURCE_REFRESH_INTERVAL_SEC_KEY: &str = "refresh_interval_sec";
 
@@ -152,6 +153,29 @@ impl WithOptions {
         self.inner
             .get(options::RETENTION_SECONDS)
             .and_then(|s| s.parse().ok())
+    }
+
+    pub fn refresh_interval_sec(&self) -> RwResult<Option<u64>> {
+        self.inner
+            .get(MV_REFRESH_INTERVAL_SEC_KEY)
+            .map(|seconds| {
+                let seconds = seconds.parse::<u64>().map_err(|e| {
+                    RwError::from(ErrorCode::InvalidParameterValue(format!(
+                        "`{}` must be a positive integer, but got: {} (error: {})",
+                        MV_REFRESH_INTERVAL_SEC_KEY,
+                        seconds,
+                        e.as_report()
+                    )))
+                })?;
+                if seconds == 0 {
+                    return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+                        "`{}` must be larger than 0, but got: {}",
+                        MV_REFRESH_INTERVAL_SEC_KEY, seconds
+                    ))));
+                }
+                Ok(seconds)
+            })
+            .transpose()
     }
 
     /// Get a subset of the options from the given keys.
@@ -477,6 +501,14 @@ pub(crate) fn resolve_source_refresh_mode_in_with_option(
         return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
             "Refreshable source {} must be refreshed with 'FULL_RELOAD' refresh mode. Please set `refresh_mode` to 'FULL_RELOAD'.",
             with_options.get_connector().unwrap(),
+        ))));
+    }
+    if is_full_reload && !with_options.supports_full_reload_refresh() {
+        return Err(RwError::from(ErrorCode::InvalidParameterValue(format!(
+            "FULL_RELOAD refresh mode is only supported for connectors: s3, gcs, __for_testing_only_batch_posix_fs, iceberg, adbc_snowflake, but got: {}",
+            with_options
+                .get_connector()
+                .unwrap_or_else(|| "<missing>".to_owned()),
         ))));
     }
     Ok(source_refresh_mode)

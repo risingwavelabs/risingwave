@@ -21,6 +21,8 @@ use crate::executor::{FilterExecutor, UpsertFilterExecutor};
 
 pub struct FilterExecutorBuilder;
 
+impl_stream_node_body!(Filter(FilterNode) => FilterExecutorBuilder);
+
 impl ExecutorBuilder for FilterExecutorBuilder {
     type Node = FilterNode;
 

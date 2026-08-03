@@ -1,0 +1,68 @@
+statement ok
+set sink_decouple = false;
+
+statement ok
+set streaming_parallelism=4;
+
+statement ok
+DROP SINK IF EXISTS field_id_gap_sink;
+
+statement ok
+DROP MATERIALIZED VIEW IF EXISTS field_id_gap_mv;
+
+statement ok
+DROP TABLE IF EXISTS field_id_gap_t;
+
+statement ok
+CREATE TABLE field_id_gap_t (k int, b int, primary key (k));
+
+statement ok
+CREATE MATERIALIZED VIEW field_id_gap_mv AS SELECT * FROM field_id_gap_t;
+
+statement ok
+CREATE SINK field_id_gap_sink AS SELECT k, b FROM field_id_gap_mv WITH (
+    connector = 'iceberg',
+    type = 'upsert',
+    force_append_only = 'false',
+    primary_key = 'k',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata/demo',
+    database.name = 'demo_db',
+    table.name = 'field_id_gap_upsert_table',
+    commit_checkpoint_interval = 1,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin'
+);
+
+statement ok
+INSERT INTO field_id_gap_t VALUES (1, 500);
+
+statement ok
+FLUSH;
+
+sleep 10s
+
+statement ok
+INSERT INTO field_id_gap_t VALUES (1, 600);
+
+statement ok
+FLUSH;
+
+sleep 10s
+
+query II
+SELECT * FROM field_id_gap_t ORDER BY k;
+----
+1 600
+
+statement ok
+DROP SINK field_id_gap_sink;
+
+statement ok
+DROP MATERIALIZED VIEW field_id_gap_mv;
+
+statement ok
+DROP TABLE field_id_gap_t;

@@ -290,9 +290,10 @@ impl SpecificParserConfig {
             ) => EncodingProperties::Json(JsonProperties {
                 use_schema_registry: info.use_schema_registry,
                 timestamp_handling: None,
-                timestamptz_handling: TimestamptzHandling::from_options(
-                    &format_encode_options_with_secret,
-                )?,
+                timestamptz_handling: format_encode_options_with_secret
+                    .get(TimestamptzHandling::OPTION_KEY)
+                    .map(|value| TimestamptzHandling::from_options(value))
+                    .transpose()?,
                 time_handling: None,
                 bigint_unsigned_handling: None,
                 handle_toast_columns: false,

@@ -47,10 +47,6 @@ labels:
   files:
   - "src\\/meta\\/model\\/migration\\/.*.rs"
 
-- label: "ci/run-e2e-test-other-backends"
-  files:
-  - "src\\/meta\\/.*.rs"
-
 - label: "ci/run-e2e-iceberg-tests"
   files:
   - ".*iceberg.*"
@@ -176,6 +172,14 @@ labels:
 - label: "ci/run-e2e-elasticsearch-sink-tests"
   files:
   - "ci\\/scripts\\/e2e-elasticsearch-sink-ci-test\\.sh"
+  - "ci\\/scripts\\/e2e-elasticsearch-sink-test\\.sh"
+  - "e2e_test\\/sink\\/elasticsearch\\/.*"
+  - "src\\/connector\\/src\\/sink\\/elasticsearch_opensearch\\/.*"
+
+- label: "ci/run-e2e-opensearch-sink-tests"
+  files:
+  - "ci\\/scripts\\/e2e-opensearch-sink-ci-test\\.sh"
+  - "ci\\/scripts\\/e2e-opensearch-sink-test\\.sh"
   - "e2e_test\\/sink\\/elasticsearch\\/.*"
   - "src\\/connector\\/src\\/sink\\/elasticsearch_opensearch\\/.*"
 
@@ -203,6 +207,9 @@ labels:
 
 - label: "ci/run-e2e-redis-sink-tests"
   files:
+  - "ci\\/scripts\\/e2e-redis-sink-test\\.sh"
+  - "e2e_test\\/commands\\/redis"
+  - "e2e_test\\/sink\\/redis.*"
   - "src\\/connector\\/src\\/sink\\/redis\\.rs"
 
 - label: "ci/run-e2e-doris-sink-tests"
@@ -226,3 +233,5 @@ labels:
 - label: "ci/run-e2e-deltalake-sink-rust-tests"
   files:
   - "src\\/connector\\/src\\/sink\\/deltalake\\.rs"
+  - "ci\\/scripts\\/e2e-deltalake-sink-rust-test\\.sh"
+  - "e2e_test\\/sink\\/deltalake_rust_sink\\.slt"

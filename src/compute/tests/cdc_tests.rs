@@ -997,6 +997,32 @@ async fn test_parallelized_cdc_backfill_reschedule() {
         Message::Chunk(_)
     ));
     send_and_poll_barrier(&mut curr_epoch, &mut tx, &mut materialize).await;
+    // Rows in the active split stay buffered until that split is closed.
+    assert_mv(
+        DataChunk::from_pretty(
+            "I F
+            1 10.01
+            2 22.22
+            3 3.03
+            4 4.04
+            5 5.05
+            6 10.08
+            8 1.0008
+            400 400.1",
+        )
+        .into(),
+        &table_schema,
+        memory_state_store.clone(),
+        materialize_table_id,
+    )
+    .await;
+
+    assert!(matches!(
+        materialize.next().await.unwrap().unwrap(),
+        Message::Chunk(_)
+    ));
+    send_and_poll_barrier(&mut curr_epoch, &mut tx, &mut materialize).await;
+    // The buffered rows for split 2 have been consumed.
     assert_mv(
         DataChunk::from_pretty(
             "I F

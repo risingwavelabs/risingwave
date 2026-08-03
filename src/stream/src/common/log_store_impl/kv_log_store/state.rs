@@ -40,6 +40,7 @@ pub(crate) struct LogStoreReadState<S: StateStoreRead> {
 }
 
 impl<S: StateStoreRead> LogStoreReadState<S> {
+    #[cfg(test)]
     pub(crate) fn update_vnode_bitmap(&mut self, vnode_bitmap: Arc<Bitmap>) {
         self.serde.update_vnode_bitmap(vnode_bitmap);
     }

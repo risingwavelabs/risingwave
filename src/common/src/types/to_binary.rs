@@ -50,7 +50,7 @@ macro_rules! implement_using_to_sql {
                     match ty {
                         DataType::$data_type => {
                             let mut output = BytesMut::new();
-                            #[allow(clippy::redundant_closure_call)]
+
                             $accessor(self).to_sql(&Type::ANY, &mut output).map_err(ToBinaryError::ToSql)?;
                             Ok(output.freeze())
                         },
@@ -165,6 +165,7 @@ impl ToBinary for ScalarRefImpl<'_> {
             ScalarRefImpl::Time(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Bytea(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Jsonb(v) => v.to_binary_with_type(ty),
+            ScalarRefImpl::Variant(v) => v.to_binary_with_type(ty),
             ScalarRefImpl::Vector(v) => {
                 assert_eq!(&DataType::Vector(v.dimension()), ty);
                 list_to_binary_with_type(

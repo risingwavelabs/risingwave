@@ -19,6 +19,8 @@ use crate::executor::ExpandExecutor;
 
 pub struct ExpandExecutorBuilder;
 
+impl_stream_node_body!(Expand(ExpandNode) => ExpandExecutorBuilder);
+
 impl ExecutorBuilder for ExpandExecutorBuilder {
     type Node = ExpandNode;
 

@@ -351,6 +351,14 @@
   expected_outputs:
   - batch_plan
   - batch_local_plan
+- name: covering index with residual predicate outside the index
+  sql: |
+    create materialized view mc as select 1 as id, 'a' as val, 'x' as tag;
+    create index mc_idx on mc (id) include (val);
+    select 1 from mc where id = 1 and tag = 'x';
+  expected_outputs:
+  - batch_plan
+  - batch_local_plan
 - name: create index to include all columns by default
   sql: |
     create table t1 (a int, b numeric, c bigint);
@@ -422,6 +430,14 @@
 - sql: |
     create table test_table(name varchar);
     select * from test_table where name like 'test\_table_2';
+  expected_outputs:
+  - batch_plan
+- name: restrict rewrite LIKE with ESCAPE as a binary expression
+  sql: |
+    create table some_trades(id varchar);
+    select * from some_trades
+    where id like '%\_%' escape '\'
+      and id not like 'DROPFEED%';
   expected_outputs:
   - batch_plan
 - sql: |

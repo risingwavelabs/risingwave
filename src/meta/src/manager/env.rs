@@ -19,9 +19,8 @@ use std::sync::atomic::AtomicU32;
 
 use anyhow::Context;
 use risingwave_common::config::{
-    CompactionConfig, DefaultParallelism, ObjectStoreConfig, RpcClientConfig,
+    CompactionConfig, DefaultParallelism, ObjectStoreConfig, RpcClientConfig, SessionInitConfig,
 };
-use risingwave_common::session_config::SessionConfig;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::{bail, system_param};
 use risingwave_meta_model::prelude::Cluster;
@@ -105,8 +104,12 @@ pub struct MetaOpts {
     pub parallelism_control_trigger_period_sec: u64,
     /// The first delay of parallelism control.
     pub parallelism_control_trigger_first_delay_sec: u64,
-    /// The maximum number of barriers in-flight in the compute nodes.
+    /// The maximum number of pending barriers in each partial graph.
     pub in_flight_barrier_nums: usize,
+    /// The maximum number of lagged barriers when finishing snapshot backfill.
+    pub snapshot_backfill_finish_max_lagged_barriers: usize,
+    /// The multiplier applied to the pending-barrier limit for snapshot backfill partial graphs.
+    pub snapshot_backfill_barrier_amplification_factor: usize,
     /// After specified seconds of idle (no mview or flush), the process will be exited.
     /// 0 for infinite, process will never be exited due to long idle time.
     pub max_idle_ms: u64,
@@ -123,6 +126,10 @@ pub struct MetaOpts {
     pub vacuum_spin_interval_ms: u64,
     /// Interval of invoking iceberg garbage collection, to expire old snapshots.
     pub iceberg_gc_interval_sec: u64,
+    /// Maximum time to wait for an iceberg compaction task report before the lease expires.
+    pub iceberg_compaction_report_timeout_sec: u64,
+    /// Maximum time to reuse cached iceberg compaction schedule config before refreshing it.
+    pub iceberg_compaction_config_refresh_interval_sec: u64,
     pub time_travel_vacuum_interval_sec: u64,
     pub time_travel_vacuum_max_version_count: Option<u32>,
     /// Interval of hummock version checkpoint.
@@ -138,6 +145,7 @@ pub struct MetaOpts {
     pub hummock_time_travel_sst_info_fetch_batch_size: usize,
     pub hummock_time_travel_sst_info_insert_batch_size: usize,
     pub hummock_time_travel_epoch_version_insert_batch_size: usize,
+    pub hummock_time_travel_delta_fetch_batch_size: usize,
     pub hummock_gc_history_insert_batch_size: usize,
     pub hummock_time_travel_filter_out_objects_batch_size: usize,
     pub hummock_time_travel_filter_out_objects_v1: bool,
@@ -306,6 +314,7 @@ pub struct MetaOpts {
 
     pub enable_legacy_table_migration: bool,
     pub pause_on_next_bootstrap_offline: bool,
+    pub serverless_backfill_controller_addr: String,
 }
 
 impl MetaOpts {
@@ -318,6 +327,8 @@ impl MetaOpts {
             parallelism_control_trigger_period_sec: 10,
             parallelism_control_trigger_first_delay_sec: 30,
             in_flight_barrier_nums: 40,
+            snapshot_backfill_finish_max_lagged_barriers: 100,
+            snapshot_backfill_barrier_amplification_factor: 1,
             max_idle_ms: 0,
             compaction_deterministic_test: false,
             default_parallelism: DefaultParallelism::Full,
@@ -326,6 +337,8 @@ impl MetaOpts {
             time_travel_vacuum_max_version_count: None,
             vacuum_spin_interval_ms: 0,
             iceberg_gc_interval_sec: 3600,
+            iceberg_compaction_report_timeout_sec: 30 * 60,
+            iceberg_compaction_config_refresh_interval_sec: 60,
             hummock_version_checkpoint_interval_sec: 30,
             enable_hummock_data_archive: false,
             checkpoint_compression_algorithm:
@@ -336,6 +349,7 @@ impl MetaOpts {
             hummock_time_travel_sst_info_fetch_batch_size: 10_000,
             hummock_time_travel_sst_info_insert_batch_size: 10,
             hummock_time_travel_epoch_version_insert_batch_size: 1000,
+            hummock_time_travel_delta_fetch_batch_size: 1000,
             hummock_gc_history_insert_batch_size: 1000,
             hummock_time_travel_filter_out_objects_batch_size: 1000,
             hummock_time_travel_filter_out_objects_v1: false,
@@ -409,6 +423,7 @@ impl MetaOpts {
             enable_legacy_table_migration: true,
             refresh_scheduler_interval_sec: 60,
             pause_on_next_bootstrap_offline: false,
+            serverless_backfill_controller_addr: String::new(),
             table_change_log_insert_batch_size: 1000,
             table_change_log_delete_batch_size: 1000,
         }
@@ -419,7 +434,7 @@ impl MetaSrvEnv {
     pub async fn new(
         opts: MetaOpts,
         mut init_system_params: SystemParams,
-        init_session_config: SessionConfig,
+        session_init: SessionInitConfig,
         meta_store_impl: SqlMetaStore,
     ) -> MetaResult<Self> {
         let idle_manager = Arc::new(IdleManager::new(opts.max_idle_ms));
@@ -482,7 +497,7 @@ impl MetaSrvEnv {
             SessionParamsController::new(
                 meta_store_impl.clone(),
                 notification_manager.clone(),
-                init_session_config,
+                session_init,
             )
             .await?,
         );

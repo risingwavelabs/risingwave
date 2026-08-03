@@ -400,6 +400,7 @@ impl WholeLevelCompactionPicker {
                     select_input_size,
                     total_file_count,
                     vnode_partition_count,
+                    skip_target_range_conflict_check: true,
                     ..Default::default()
                 };
                 if wait_enough

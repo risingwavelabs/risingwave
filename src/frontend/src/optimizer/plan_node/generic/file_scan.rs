@@ -31,7 +31,7 @@ pub enum StorageType {
     Azblob,
 }
 
-#[allow(clippy::enum_variant_names)]
+#[expect(clippy::enum_variant_names)]
 #[derive(Debug, Clone, Educe)]
 #[educe(PartialEq, Eq, Hash)]
 pub enum FileScanBackend {

@@ -84,6 +84,479 @@ statement ok
 drop table t2;
 
 
+# asof inner join: right-row delete triggers rematch to next-best candidate
+
+statement ok
+create table t1 (v1 int, v2 int, v3 int primary key);
+
+statement ok
+create table t2 (v1 int, v2 int, v3 int primary key);
+
+statement ok
+create materialized view mv_rematch as SELECT t1.v1 t1_v1, t1.v2 t1_v2, t1.v3 t1_v3, t2.v1 t2_v1, t2.v2 t2_v2, t2.v3 t2_v3 FROM t1 ASOF JOIN t2 ON t1.v1 = t2.v1 and t1.v2 <= t2.v2;
+
+# Insert left row and two right candidates
+statement ok
+insert into t1 values (1, 5, 100);
+
+statement ok
+insert into t2 values (1, 5, 10);
+
+statement ok
+insert into t2 values (1, 8, 20);
+
+# Should match the closest: (1, 5, 10) since 5 <= 5
+query IIIIII
+select * from mv_rematch;
+----
+1 5 100 1 5 10
+
+# Delete the currently matched right row
+statement ok
+delete from t2 where v3 = 10;
+
+# Should rematch to the next-best candidate: (1, 8, 20) since 5 <= 8
+query IIIIII
+select * from mv_rematch;
+----
+1 5 100 1 8 20
+
+# Delete the remaining right row
+statement ok
+delete from t2 where v3 = 20;
+
+# No match available — inner join produces no output
+query IIIIII
+select * from mv_rematch;
+----
+
+# Insert a new right row to verify re-join
+statement ok
+insert into t2 values (1, 6, 30);
+
+query IIIIII
+select * from mv_rematch;
+----
+1 5 100 1 6 30
+
+statement ok
+drop materialized view mv_rematch;
+
+statement ok
+drop table t1;
+
+statement ok
+drop table t2;
+
+
+# asof inner join: one right-side change affects multiple left rows
+
+statement ok
+create table t1 (v1 int, v2 int, v3 int primary key);
+
+statement ok
+create table t2 (v1 int, v2 int, v3 int primary key);
+
+statement ok
+create materialized view mv_multi as SELECT t1.v1 t1_v1, t1.v2 t1_v2, t1.v3 t1_v3, t2.v1 t2_v1, t2.v2 t2_v2, t2.v3 t2_v3 FROM t1 ASOF JOIN t2 ON t1.v1 = t2.v1 and t1.v2 <= t2.v2;
+
+# Insert multiple left rows with different inequality keys
+statement ok
+insert into t1 values (1, 3, 101), (1, 5, 102), (1, 7, 103);
+
+# Insert a right row that matches all three left rows (3 <= 10, 5 <= 10, 7 <= 10)
+statement ok
+insert into t2 values (1, 10, 200);
+
+query IIIIII rowsort
+select * from mv_multi;
+----
+1 3 101 1 10 200
+1 5 102 1 10 200
+1 7 103 1 10 200
+
+# Insert a closer right row for left rows with v2=3 and v2=5 (but not v2=7)
+statement ok
+insert into t2 values (1, 6, 201);
+
+# Left rows v2=3 and v2=5 should rematch to (1, 6, 201), v2=7 stays with (1, 10, 200)
+query IIIIII rowsort
+select * from mv_multi;
+----
+1 3 101 1 6 201
+1 5 102 1 6 201
+1 7 103 1 10 200
+
+# Delete the closer right row — left rows v2=3 and v2=5 should fall back to (1, 10, 200)
+statement ok
+delete from t2 where v3 = 201;
+
+query IIIIII rowsort
+select * from mv_multi;
+----
+1 3 101 1 10 200
+1 5 102 1 10 200
+1 7 103 1 10 200
+
+statement ok
+drop materialized view mv_multi;
+
+statement ok
+drop table t1;
+
+statement ok
+drop table t2;
+
+
+# asof inner join: PK tie-breaking with <= (lower_bound path, same inequality key, different PKs)
+
+statement ok
+create table t1 (v1 int, v2 int, v3 int primary key);
+
+statement ok
+create table t2 (v1 int, v2 int, v3 int primary key);
+
+statement ok
+create materialized view mv_pk_le as SELECT t1.v1 t1_v1, t1.v2 t1_v2, t1.v3 t1_v3, t2.v1 t2_v1, t2.v2 t2_v2, t2.v3 t2_v3 FROM t1 ASOF JOIN t2 ON t1.v1 = t2.v1 and t1.v2 <= t2.v2;
+
+statement ok
+insert into t1 values (1, 5, 100);
+
+# Insert right rows with same inequality key (v2=5), different PKs
+statement ok
+insert into t2 values (1, 5, 30);
+
+query IIIIII
+select * from mv_pk_le;
+----
+1 5 100 1 5 30
+
+# Insert another right row with same inequality key but smaller PK — should take over
+statement ok
+insert into t2 values (1, 5, 10);
+
+query IIIIII
+select * from mv_pk_le;
+----
+1 5 100 1 5 10
+
+# Insert yet another with even smaller PK
+statement ok
+insert into t2 values (1, 5, 5);
+
+query IIIIII
+select * from mv_pk_le;
+----
+1 5 100 1 5 5
+
+# Delete the current best (smallest PK=5) — should fall back to PK=10
+statement ok
+delete from t2 where v3 = 5;
+
+query IIIIII
+select * from mv_pk_le;
+----
+1 5 100 1 5 10
+
+# Delete PK=10 — should fall back to PK=30
+statement ok
+delete from t2 where v3 = 10;
+
+query IIIIII
+select * from mv_pk_le;
+----
+1 5 100 1 5 30
+
+# Delete last one — no match
+statement ok
+delete from t2 where v3 = 30;
+
+query IIIIII
+select * from mv_pk_le;
+----
+
+# Re-insert to verify recovery
+statement ok
+insert into t2 values (1, 5, 20);
+
+query IIIIII
+select * from mv_pk_le;
+----
+1 5 100 1 5 20
+
+statement ok
+drop materialized view mv_pk_le;
+
+statement ok
+drop table t1;
+
+statement ok
+drop table t2;
+
+
+# asof left join: PK tie-breaking with > (upper_bound path, same inequality key, different PKs)
+
+statement ok
+create table t1 (v1 int, v2 int, v3 int primary key);
+
+statement ok
+create table t2 (v1 int, v2 int, v3 int primary key);
+
+statement ok
+create materialized view mv_pk_gt as SELECT t1.v1 t1_v1, t1.v2 t1_v2, t1.v3 t1_v3, t2.v1 t2_v1, t2.v2 t2_v2, t2.v3 t2_v3 FROM t1 ASOF LEFT JOIN t2 ON t1.v1 = t2.v1 and t1.v2 > t2.v2;
+
+statement ok
+insert into t1 values (1, 10, 100);
+
+# Insert right rows with same inequality key (v2=5), different PKs
+statement ok
+insert into t2 values (1, 5, 30);
+
+# 10 > 5, matches
+query IIIIII
+select * from mv_pk_gt;
+----
+1 10 100 1 5 30
+
+statement ok
+insert into t2 values (1, 5, 10);
+
+# Two right rows with v2=5, PK=10 and PK=30. eq_join_right picks the smallest PK.
+query IIIIII
+select * from mv_pk_gt;
+----
+1 10 100 1 5 10
+
+statement ok
+insert into t2 values (1, 5, 5);
+
+query IIIIII
+select * from mv_pk_gt;
+----
+1 10 100 1 5 5
+
+# Delete PK=5 — should fall back to next
+statement ok
+delete from t2 where v3 = 5;
+
+query IIIIII
+select * from mv_pk_gt;
+----
+1 10 100 1 5 10
+
+# Delete PK=10 — should fall back to PK=30
+statement ok
+delete from t2 where v3 = 10;
+
+query IIIIII
+select * from mv_pk_gt;
+----
+1 10 100 1 5 30
+
+# Delete PK=30 — no match, left outer shows NULLs
+statement ok
+delete from t2 where v3 = 30;
+
+query IIIIII
+select * from mv_pk_gt;
+----
+1 10 100 NULL NULL NULL
+
+# Insert a right row with a different inequality key closer to left (v2=8, still < 10)
+statement ok
+insert into t2 values (1, 8, 40);
+
+query IIIIII
+select * from mv_pk_gt;
+----
+1 10 100 1 8 40
+
+# Insert another at v2=8 with smaller PK
+statement ok
+insert into t2 values (1, 8, 15);
+
+query IIIIII
+select * from mv_pk_gt;
+----
+1 10 100 1 8 15
+
+statement ok
+drop materialized view mv_pk_gt;
+
+statement ok
+drop table t1;
+
+statement ok
+drop table t2;
+
+
+# asof inner join: PK tie-breaking with >= (upper_bound path)
+
+statement ok
+create table t1 (v1 int, v2 int, v3 int primary key);
+
+statement ok
+create table t2 (v1 int, v2 int, v3 int primary key);
+
+statement ok
+create materialized view mv_pk_ge as SELECT t1.v1 t1_v1, t1.v2 t1_v2, t1.v3 t1_v3, t2.v1 t2_v1, t2.v2 t2_v2, t2.v3 t2_v3 FROM t1 ASOF JOIN t2 ON t1.v1 = t2.v1 and t1.v2 >= t2.v2;
+
+statement ok
+insert into t1 values (1, 5, 100);
+
+# Insert right row with v2=5 (5 >= 5 matches)
+statement ok
+insert into t2 values (1, 5, 20);
+
+query IIIIII
+select * from mv_pk_ge;
+----
+1 5 100 1 5 20
+
+# Insert another at same inequality key v2=5 with smaller PK
+statement ok
+insert into t2 values (1, 5, 10);
+
+query IIIIII
+select * from mv_pk_ge;
+----
+1 5 100 1 5 10
+
+# Insert at v2=3 (also matches since 5 >= 3), but v2=5 is closer
+statement ok
+insert into t2 values (1, 3, 50);
+
+# Should still match v2=5 (closest to left v2=5)
+query IIIIII
+select * from mv_pk_ge;
+----
+1 5 100 1 5 10
+
+# Delete both v2=5 rows — should fall back to v2=3
+statement ok
+delete from t2 where v2 = 5;
+
+query IIIIII
+select * from mv_pk_ge;
+----
+1 5 100 1 3 50
+
+# Insert two rows at v2=4 with different PKs
+statement ok
+insert into t2 values (1, 4, 8), (1, 4, 25);
+
+# v2=4 is closer than v2=3, should match v2=4
+query IIIIII
+select * from mv_pk_ge;
+----
+1 5 100 1 4 8
+
+# Delete PK=8 — should switch to PK=25 within same inequality key
+statement ok
+delete from t2 where v3 = 8;
+
+query IIIIII
+select * from mv_pk_ge;
+----
+1 5 100 1 4 25
+
+statement ok
+drop materialized view mv_pk_ge;
+
+statement ok
+drop table t1;
+
+statement ok
+drop table t2;
+
+
+# asof left join: PK tie-breaking with < (lower_bound path)
+
+statement ok
+create table t1 (v1 int, v2 int, v3 int primary key);
+
+statement ok
+create table t2 (v1 int, v2 int, v3 int primary key);
+
+statement ok
+create materialized view mv_pk_lt as SELECT t1.v1 t1_v1, t1.v2 t1_v2, t1.v3 t1_v3, t2.v1 t2_v1, t2.v2 t2_v2, t2.v3 t2_v3 FROM t1 ASOF LEFT JOIN t2 ON t1.v1 = t2.v1 and t1.v2 < t2.v2;
+
+statement ok
+insert into t1 values (1, 5, 100);
+
+# v2=5 not < 5, no match
+statement ok
+insert into t2 values (1, 5, 20);
+
+query IIIIII
+select * from mv_pk_lt;
+----
+1 5 100 NULL NULL NULL
+
+# v2=6 > 5, matches
+statement ok
+insert into t2 values (1, 6, 30);
+
+query IIIIII
+select * from mv_pk_lt;
+----
+1 5 100 1 6 30
+
+# Insert another at v2=6 with smaller PK
+statement ok
+insert into t2 values (1, 6, 10);
+
+query IIIIII
+select * from mv_pk_lt;
+----
+1 5 100 1 6 10
+
+# Insert at v2=6 with even smaller PK
+statement ok
+insert into t2 values (1, 6, 5);
+
+query IIIIII
+select * from mv_pk_lt;
+----
+1 5 100 1 6 5
+
+# Delete PK=5 — should fall back to PK=10
+statement ok
+delete from t2 where v3 = 5;
+
+query IIIIII
+select * from mv_pk_lt;
+----
+1 5 100 1 6 10
+
+# Delete PK=10 — should fall back to PK=30
+statement ok
+delete from t2 where v3 = 10;
+
+query IIIIII
+select * from mv_pk_lt;
+----
+1 5 100 1 6 30
+
+# Delete PK=30 — no match, left outer NULLs
+statement ok
+delete from t2 where v3 = 30;
+
+query IIIIII
+select * from mv_pk_lt;
+----
+1 5 100 NULL NULL NULL
+
+statement ok
+drop materialized view mv_pk_lt;
+
+statement ok
+drop table t1;
+
+statement ok
+drop table t2;
+
+
 # asof left join
 
 statement ok
@@ -157,3 +630,124 @@ drop table t1;
 
 statement ok
 drop table t2;
+
+
+# eq_join_left PK tie with > (upper_bound path)
+# When multiple right rows share the same inequality key, eq_join_left picks the
+# row with the smallest PK. eq_join_right must agree on this tie-breaking rule.
+
+statement ok
+create table t_left_gt (v1 int, v2 int, v3 int primary key);
+
+statement ok
+create table t_right_gt (v1 int, v2 int, v3 int primary key);
+
+statement ok
+create materialized view mv_left_pktie_gt as SELECT t_left_gt.v1 t1_v1, t_left_gt.v2 t1_v2, t_left_gt.v3 t1_v3, t_right_gt.v1 t2_v1, t_right_gt.v2 t2_v2, t_right_gt.v3 t2_v3 FROM t_left_gt ASOF JOIN t_right_gt ON t_left_gt.v1 = t_right_gt.v1 and t_left_gt.v2 > t_right_gt.v2;
+
+# Insert multiple right rows with same inequality key FIRST
+statement ok
+insert into t_right_gt values (1, 5, 10), (1, 5, 30);
+
+# Now insert left row — eq_join_left calls upper_bound, returns smallest PK
+statement ok
+insert into t_left_gt values (1, 10, 100);
+
+# Smallest PK=10 among right rows with v2=5
+query IIIIII
+select * from mv_left_pktie_gt;
+----
+1 10 100 1 5 10
+
+# Insert another right row with smaller PK at same inequality key
+statement ok
+insert into t_right_gt values (1, 5, 5);
+
+# eq_join_right replaces current match with smaller PK=5
+query IIIIII
+select * from mv_left_pktie_gt;
+----
+1 10 100 1 5 5
+
+# Delete PK=5 — eq_join_right falls back to PK=10
+statement ok
+delete from t_right_gt where v3 = 5;
+
+query IIIIII
+select * from mv_left_pktie_gt;
+----
+1 10 100 1 5 10
+
+# Delete left row and re-insert to re-trigger eq_join_left with remaining ties (PK=10,30)
+statement ok
+delete from t_left_gt where v3 = 100;
+
+statement ok
+insert into t_left_gt values (1, 10, 100);
+
+# Smallest PK=10 again
+query IIIIII
+select * from mv_left_pktie_gt;
+----
+1 10 100 1 5 10
+
+statement ok
+drop materialized view mv_left_pktie_gt;
+
+statement ok
+drop table t_left_gt;
+
+statement ok
+drop table t_right_gt;
+
+
+# eq_join_left PK tie with >= (upper_bound path)
+
+statement ok
+create table t_left_ge (v1 int, v2 int, v3 int primary key);
+
+statement ok
+create table t_right_ge (v1 int, v2 int, v3 int primary key);
+
+statement ok
+create materialized view mv_left_pktie_ge as SELECT t_left_ge.v1 t1_v1, t_left_ge.v2 t1_v2, t_left_ge.v3 t1_v3, t_right_ge.v1 t2_v1, t_right_ge.v2 t2_v2, t_right_ge.v3 t2_v3 FROM t_left_ge ASOF JOIN t_right_ge ON t_left_ge.v1 = t_right_ge.v1 and t_left_ge.v2 >= t_right_ge.v2;
+
+# Insert multiple right rows with same inequality key (v2=5) FIRST
+statement ok
+insert into t_right_ge values (1, 5, 10), (1, 5, 30), (1, 5, 20);
+
+# Insert left row with v2=5 (5 >= 5 matches) — eq_join_left calls upper_bound
+statement ok
+insert into t_left_ge values (1, 5, 100);
+
+# Smallest PK=10
+query IIIIII
+select * from mv_left_pktie_ge;
+----
+1 5 100 1 5 10
+
+# Delete left and re-insert to re-exercise eq_join_left
+statement ok
+delete from t_left_ge where v3 = 100;
+
+# Delete PK=10, leaving PK=20 and PK=30
+statement ok
+delete from t_right_ge where v3 = 10;
+
+statement ok
+insert into t_left_ge values (1, 5, 100);
+
+# Smallest remaining PK=20
+query IIIIII
+select * from mv_left_pktie_ge;
+----
+1 5 100 1 5 20
+
+statement ok
+drop materialized view mv_left_pktie_ge;
+
+statement ok
+drop table t_left_ge;
+
+statement ok
+drop table t_right_ge;

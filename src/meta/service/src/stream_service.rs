@@ -27,7 +27,7 @@ use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::manager::iceberg_compaction::IcebergCompactionManagerRef;
 use risingwave_meta::stream::{GlobalRefreshManagerRef, SourceManagerRunningInfo};
 use risingwave_meta::{MetaError, model};
-use risingwave_meta_model::{ConnectionId, FragmentId, SourceId, StreamingParallelism};
+use risingwave_meta_model::{ConnectionId, FragmentId, JobStatus, SourceId, StreamingParallelism};
 use risingwave_pb::common::ThrottleType;
 use risingwave_pb::meta::alter_connector_props_request::AlterConnectorPropsObject;
 use risingwave_pb::meta::cancel_creating_jobs_request::Jobs;
@@ -84,6 +84,23 @@ impl StreamServiceImpl {
     }
 }
 
+fn effective_streaming_job_parallelism(
+    job_status: JobStatus,
+    parallelism: StreamingParallelism,
+    adaptive_parallelism_strategy: Option<String>,
+    backfill_parallelism: Option<StreamingParallelism>,
+    backfill_adaptive_parallelism_strategy: Option<String>,
+) -> (StreamingParallelism, Option<String>) {
+    if job_status != JobStatus::Created {
+        (
+            backfill_parallelism.unwrap_or(parallelism),
+            backfill_adaptive_parallelism_strategy.or(adaptive_parallelism_strategy),
+        )
+    } else {
+        (parallelism, adaptive_parallelism_strategy)
+    }
+}
+
 #[async_trait::async_trait]
 impl StreamManagerService for StreamServiceImpl {
     async fn flush(&self, request: Request<FlushRequest>) -> TonicResponse<FlushResponse> {
@@ -128,7 +145,6 @@ impl StreamManagerService for StreamServiceImpl {
         let statuses = self
             .iceberg_compaction_manager
             .list_compaction_statuses()
-            .await
             .into_iter()
             .map(
                 |status| list_iceberg_compaction_status_response::IcebergCompactionStatus {
@@ -179,7 +195,7 @@ impl StreamManagerService for StreamServiceImpl {
 
         let raw_object_id: u32;
         let jobs: HashSet<JobId>;
-        let fragments: HashSet<FragmentId>;
+        let fragments: HashMap<FragmentId, _>;
 
         match (throttle_type, throttle_target) {
             (ThrottleType::Source, ThrottleTarget::Source | ThrottleTarget::Table) => {
@@ -217,11 +233,16 @@ impl StreamManagerService for StreamServiceImpl {
             }
             // FIXME(kwannoel): specialize for throttle type x target
             (_, ThrottleTarget::Fragment) => {
-                self.metadata_manager
-                    .update_fragment_rate_limit_by_fragment_id(request.id.into(), request.rate)
-                    .await?;
                 let fragment_id = request.id.into();
-                fragments = [fragment_id].into_iter().collect();
+                let stream_node = self
+                    .metadata_manager
+                    .update_fragment_rate_limit_by_fragment_id(
+                        fragment_id,
+                        throttle_type,
+                        request.rate,
+                    )
+                    .await?;
+                fragments = [(fragment_id, stream_node)].into_iter().collect();
                 let job_id = self
                     .metadata_manager
                     .catalog_controller
@@ -248,18 +269,13 @@ impl StreamManagerService for StreamServiceImpl {
             rate_limit: request.rate,
             throttle_type: throttle_type.into(),
         };
+        let config = fragments
+            .into_iter()
+            .map(|(fragment_id, stream_node)| (fragment_id, (throttle_config, stream_node)))
+            .collect();
         let _i = self
             .barrier_scheduler
-            .run_command(
-                database_id,
-                Command::Throttle {
-                    jobs,
-                    config: fragments
-                        .into_iter()
-                        .map(|fragment_id| (fragment_id, throttle_config))
-                        .collect(),
-                },
-            )
+            .run_command(database_id, Command::Throttle { jobs, config })
             .await?;
 
         Ok(Response::new(ApplyThrottleResponse { status: None }))
@@ -367,6 +383,9 @@ impl StreamManagerService for StreamServiceImpl {
                      job_status,
                      name,
                      parallelism,
+                     adaptive_parallelism_strategy,
+                     backfill_parallelism,
+                     backfill_adaptive_parallelism_strategy,
                      max_parallelism,
                      resource_group,
                      database_id,
@@ -374,6 +393,16 @@ impl StreamManagerService for StreamServiceImpl {
                      config_override,
                      ..
                  }| {
+                    // While a job is still being created, system tables should surface the
+                    // temporary backfill override instead of the post-backfill target value.
+                    let (parallelism, adaptive_parallelism_strategy) =
+                        effective_streaming_job_parallelism(
+                            job_status,
+                            parallelism,
+                            adaptive_parallelism_strategy,
+                            backfill_parallelism,
+                            backfill_adaptive_parallelism_strategy,
+                        );
                     let parallelism = match parallelism {
                         StreamingParallelism::Adaptive => model::TableParallelism::Adaptive,
                         StreamingParallelism::Custom => model::TableParallelism::Custom,
@@ -390,7 +419,7 @@ impl StreamManagerService for StreamServiceImpl {
                         database_id,
                         schema_id,
                         config_override,
-                        adaptive_parallelism_strategy: None,
+                        adaptive_parallelism_strategy,
                     }
                 },
             )
@@ -1105,5 +1134,54 @@ fn fragment_desc_to_distribution(
         vnode_count: fragment_desc.vnode_count as _,
         node,
         parallelism_policy: fragment_desc.parallelism_policy,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_meta_model::{JobStatus, StreamingParallelism};
+
+    use super::effective_streaming_job_parallelism;
+
+    #[test]
+    fn test_effective_streaming_job_parallelism_prefers_backfill_override() {
+        let (parallelism, strategy) = effective_streaming_job_parallelism(
+            JobStatus::Creating,
+            StreamingParallelism::Adaptive,
+            Some("BOUNDED(4)".to_owned()),
+            Some(StreamingParallelism::Adaptive),
+            Some("BOUNDED(2)".to_owned()),
+        );
+
+        assert_eq!(parallelism, StreamingParallelism::Adaptive);
+        assert_eq!(strategy.as_deref(), Some("BOUNDED(2)"));
+    }
+
+    #[test]
+    fn test_effective_streaming_job_parallelism_falls_back_to_job_strategy() {
+        let (parallelism, strategy) = effective_streaming_job_parallelism(
+            JobStatus::Initial,
+            StreamingParallelism::Adaptive,
+            Some("RATIO(0.5)".to_owned()),
+            Some(StreamingParallelism::Adaptive),
+            None,
+        );
+
+        assert_eq!(parallelism, StreamingParallelism::Adaptive);
+        assert_eq!(strategy.as_deref(), Some("RATIO(0.5)"));
+    }
+
+    #[test]
+    fn test_effective_streaming_job_parallelism_ignores_backfill_after_creation() {
+        let (parallelism, strategy) = effective_streaming_job_parallelism(
+            JobStatus::Created,
+            StreamingParallelism::Fixed(4),
+            None,
+            Some(StreamingParallelism::Fixed(2)),
+            Some("BOUNDED(2)".to_owned()),
+        );
+
+        assert_eq!(parallelism, StreamingParallelism::Fixed(4));
+        assert_eq!(strategy, None);
     }
 }

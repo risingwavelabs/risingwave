@@ -17,16 +17,20 @@ mod basic;
 #[cfg(madsim)]
 mod err_isolation;
 #[cfg(madsim)]
+mod exactly_once;
+#[cfg(madsim)]
+mod iceberg_v3_2pc;
+#[cfg(madsim)]
 mod rate_limit;
 #[cfg(madsim)]
 mod recovery;
 #[cfg(madsim)]
 mod scale;
 #[cfg(madsim)]
+mod schema_change;
+#[cfg(madsim)]
 mod utils;
 
-#[cfg(madsim)]
-mod exactly_once;
 #[cfg(madsim)]
 #[macro_export]
 macro_rules! assert_with_err_returned {

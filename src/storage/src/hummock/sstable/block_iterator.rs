@@ -130,9 +130,11 @@ impl BlockIterator {
         }
         self.prev_until_key(key);
     }
-}
 
-impl BlockIterator {
+    pub(crate) fn finish_block(&mut self) {
+        self.invalidate();
+    }
+
     /// Invalidates current state after reaching a invalid state.
     fn invalidate(&mut self) {
         self.offset = self.block.len();

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fmt;
 
 use anyhow::{Context, anyhow};
@@ -25,6 +25,7 @@ use sea_schema::postgres::def::{ColumnType as SeaType, TableDef, TableInfo};
 use sea_schema::postgres::discovery::SchemaDiscovery;
 use sea_schema::sea_query::{Alias, IntoIden};
 use serde::Deserialize;
+use serde_with::{DisplayFromStr, serde_as};
 use sqlx::postgres::{PgConnectOptions, PgSslMode};
 use sqlx::{PgPool, Row};
 use thiserror_ext::AsReport;
@@ -34,18 +35,175 @@ use tokio_postgres::{Client as PgClient, NoTls};
 #[cfg(not(madsim))]
 use super::maybe_tls_connector::MaybeMakeTlsConnector;
 use crate::error::ConnectorResult;
-use crate::sink::postgres::TcpKeepaliveConfig;
 
 /// SQL query to discover primary key columns directly from PostgreSQL system tables.
 /// This bypasses querying `information_schema.table_constraints` to avoid permission issues.
+/// Match `pg_class` and `pg_namespace` by exact catalog names instead of casting a
+/// constructed string to `regclass`, as unquoted `regclass` input folds mixed-case
+/// table names to lower case.
 const DISCOVER_PRIMARY_KEY_QUERY: &str = r#"
     SELECT a.attname as column_name
     FROM pg_index i
+    JOIN pg_class c ON c.oid = i.indrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
     JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
-    WHERE i.indrelid = ($1 || '.' || $2)::regclass
+    WHERE n.nspname = $1
+      AND c.relname = $2
       AND i.indisprimary = true
     ORDER BY array_position(i.indkey, a.attnum)
 "#;
+
+/// Discover pgvector columns with both `atttypmod` (dimension) and `format_type` text.
+/// `vector(n)` is stored as `atttypmod = n`, while dimension-less `vector` uses `-1`.
+/// We rely on this to keep user-defined type modifiers that are not preserved by sea-schema.
+const DISCOVER_PGVECTOR_COLUMNS_QUERY: &str = r#"
+    SELECT
+      a.attname as column_name,
+      a.atttypmod as atttypmod,
+      format_type(a.atttypid, a.atttypmod) as formatted_type
+    FROM pg_attribute a
+    JOIN pg_class c ON c.oid = a.attrelid
+    JOIN pg_namespace n ON n.oid = c.relnamespace
+    JOIN pg_type t ON t.oid = a.atttypid
+    WHERE n.nspname = $1
+      AND c.relname = $2
+      AND t.typname = 'vector'
+      AND a.attnum > 0
+      AND NOT a.attisdropped
+    ORDER BY a.attnum
+"#;
+
+/// Canonical Postgres connection parameters shared across sink, source CDC, batch
+/// executor, and frontend `postgres_query` table function. Each caller constructs
+/// this from its own user-facing config struct before invoking the shared helpers
+/// like `create_pg_client` or `PostgresExternalTable::connect`.
+#[derive(Debug, Clone)]
+pub struct PgConnectionConfig {
+    pub host: String,
+    pub port: u16,
+    pub user: String,
+    pub password: String,
+    pub database: String,
+    pub ssl_mode: SslMode,
+    pub ssl_root_cert: Option<String>,
+}
+
+impl PgConnectionConfig {
+    fn to_sqlx_connect_options(&self) -> PgConnectOptions {
+        let mut options = PgConnectOptions::new()
+            .username(&self.user)
+            .password(&self.password)
+            .host(&self.host)
+            .port(self.port)
+            .database(&self.database)
+            .ssl_mode(match self.ssl_mode {
+                SslMode::Disabled => PgSslMode::Disable,
+                SslMode::Preferred => PgSslMode::Prefer,
+                SslMode::Required => PgSslMode::Require,
+                SslMode::VerifyCa => PgSslMode::VerifyCa,
+                SslMode::VerifyFull => PgSslMode::VerifyFull,
+            });
+
+        if matches!(self.ssl_mode, SslMode::VerifyCa | SslMode::VerifyFull)
+            && let Some(root_cert) = &self.ssl_root_cert
+        {
+            options = options.ssl_root_cert(root_cert.as_str());
+        }
+
+        options
+    }
+}
+
+/// TCP keepalive knobs for the long-lived Postgres client used by the sink.
+/// Lives in `connector_common` so both the sink config and the shared
+/// `create_pg_client` helper reference the same definition.
+#[serde_as]
+#[derive(Debug, Clone, Deserialize)]
+pub struct TcpKeepaliveConfig {
+    #[serde(rename = "tcp.keepalive.idle")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub tcp_keepalive_idle: u32,
+    #[serde(rename = "tcp.keepalive.interval")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub tcp_keepalive_interval: u32,
+    #[serde(rename = "tcp.keepalive.count")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub tcp_keepalive_count: u32,
+}
+
+impl Default for TcpKeepaliveConfig {
+    fn default() -> Self {
+        Self {
+            tcp_keepalive_idle: 10 * 60,
+            tcp_keepalive_interval: 10,
+            tcp_keepalive_count: 3,
+        }
+    }
+}
+
+pub fn pg_connection_config_from_properties(
+    props: &BTreeMap<String, String>,
+) -> ConnectorResult<PgConnectionConfig> {
+    Ok(PgConnectionConfig {
+        host: props
+            .get("hostname")
+            .context("missing `hostname` in postgres-cdc properties")?
+            .clone(),
+        port: {
+            let raw = props
+                .get("port")
+                .context("missing `port` in postgres-cdc properties")?;
+            raw.parse::<u16>()
+                .with_context(|| format!("invalid postgres port `{}`", raw))?
+        },
+        user: props
+            .get("username")
+            .context("missing `username` in postgres-cdc properties")?
+            .clone(),
+        password: props.get("password").cloned().unwrap_or_default(),
+        database: props
+            .get("database.name")
+            .context("missing `database.name` in postgres-cdc properties")?
+            .clone(),
+        ssl_mode: props
+            .get("ssl.mode")
+            .and_then(|v| v.parse::<SslMode>().ok())
+            .unwrap_or_default(),
+        ssl_root_cert: props.get("ssl.root.cert").cloned(),
+    })
+}
+
+pub async fn create_pg_client_from_properties(
+    props: &BTreeMap<String, String>,
+    tcp_keepalive: Option<TcpKeepaliveConfig>,
+) -> ConnectorResult<PgClient> {
+    let config = pg_connection_config_from_properties(props)?;
+    create_pg_client(&config, tcp_keepalive)
+        .await
+        .map_err(Into::into)
+}
+
+pub async fn discover_pgvector_dimensions(
+    client: &PgClient,
+    schema: &str,
+    table: &str,
+) -> ConnectorResult<HashMap<String, usize>> {
+    let rows = client
+        .query(DISCOVER_PGVECTOR_COLUMNS_QUERY, &[&schema, &table])
+        .await?;
+
+    let mut dims = HashMap::new();
+    for row in rows {
+        let col_name: String = row.get("column_name");
+        let atttypmod: i32 = row.get("atttypmod");
+        if atttypmod > 0
+            && let Ok(dim) = usize::try_from(atttypmod)
+        {
+            dims.insert(col_name, dim);
+        }
+    }
+    Ok(dims)
+}
 
 #[derive(Debug, Clone, PartialEq, Deserialize, Default)]
 #[serde(rename_all = "lowercase")]
@@ -99,36 +257,11 @@ impl PostgresExternalTable {
     /// This method uses direct PostgreSQL system table queries for primary keys
     /// to avoid permission issues when querying `information_schema.table_constraints`
     async fn discover_pk_and_full_columns(
-        username: &str,
-        password: &str,
-        host: &str,
-        port: u16,
-        database: &str,
+        config: &PgConnectionConfig,
         schema: &str,
         table: &str,
-        ssl_mode: &SslMode,
-        ssl_root_cert: &Option<String>,
     ) -> ConnectorResult<(Vec<sea_schema::postgres::def::ColumnInfo>, Vec<String>)> {
-        let mut options = PgConnectOptions::new()
-            .username(username)
-            .password(password)
-            .host(host)
-            .port(port)
-            .database(database)
-            .ssl_mode(match ssl_mode {
-                SslMode::Disabled => PgSslMode::Disable,
-                SslMode::Preferred => PgSslMode::Prefer,
-                SslMode::Required => PgSslMode::Require,
-                SslMode::VerifyCa => PgSslMode::VerifyCa,
-                SslMode::VerifyFull => PgSslMode::VerifyFull,
-            });
-
-        if (*ssl_mode == SslMode::VerifyCa || *ssl_mode == SslMode::VerifyFull)
-            && let Some(root_cert) = ssl_root_cert
-        {
-            options = options.ssl_root_cert(root_cert.as_str());
-        }
-
+        let options = config.to_sqlx_connect_options();
         let connection = PgPool::connect_with(options).await?;
 
         // Use sea-schema only for column discovery (no permission issues)
@@ -142,6 +275,34 @@ impl PostgresExternalTable {
             )
             .await?;
 
+        let pgvector_columns = sqlx::query(DISCOVER_PGVECTOR_COLUMNS_QUERY)
+            .bind(schema)
+            .bind(table)
+            .fetch_all(&connection)
+            .await
+            .context("Failed to discover PostgreSQL pgvector columns")?;
+        let formatted_type_by_column: HashMap<String, String> = pgvector_columns
+            .into_iter()
+            .map(|row| {
+                (
+                    row.get::<String, _>("column_name"),
+                    row.get::<String, _>("formatted_type"),
+                )
+            })
+            .collect();
+
+        // sea-schema reports pgvector as `Unknown("vector")` and drops the dimension.
+        // Patch it with PostgreSQL's formatted type text so we can derive vector(n).
+        let mut columns = columns;
+        for col in &mut columns {
+            if let SeaType::Unknown(name) = &col.col_type
+                && name.eq_ignore_ascii_case("vector")
+                && let Some(formatted_type) = formatted_type_by_column.get(&col.name)
+            {
+                col.col_type = SeaType::Unknown(formatted_type.clone());
+            }
+        }
+
         // Use direct system table query for primary key discovery
         let pk_columns = Self::discover_primary_key(&connection, schema, table).await?;
 
@@ -149,36 +310,11 @@ impl PostgresExternalTable {
     }
 
     async fn discover_schema(
-        username: &str,
-        password: &str,
-        host: &str,
-        port: u16,
-        database: &str,
+        config: &PgConnectionConfig,
         schema: &str,
         table: &str,
-        ssl_mode: &SslMode,
-        ssl_root_cert: &Option<String>,
     ) -> ConnectorResult<TableDef> {
-        let mut options = PgConnectOptions::new()
-            .username(username)
-            .password(password)
-            .host(host)
-            .port(port)
-            .database(database)
-            .ssl_mode(match ssl_mode {
-                SslMode::Disabled => PgSslMode::Disable,
-                SslMode::Preferred => PgSslMode::Prefer,
-                SslMode::Required => PgSslMode::Require,
-                SslMode::VerifyCa => PgSslMode::VerifyCa,
-                SslMode::VerifyFull => PgSslMode::VerifyFull,
-            });
-
-        if (*ssl_mode == SslMode::VerifyCa || *ssl_mode == SslMode::VerifyFull)
-            && let Some(root_cert) = ssl_root_cert
-        {
-            options = options.ssl_root_cert(root_cert.as_str());
-        }
-
+        let options = config.to_sqlx_connect_options();
         let connection = PgPool::connect_with(options).await?;
         let schema_discovery = SchemaDiscovery::new(connection, schema);
         // fetch column schema and primary key
@@ -196,31 +332,14 @@ impl PostgresExternalTable {
     }
 
     pub async fn connect(
-        username: &str,
-        password: &str,
-        host: &str,
-        port: u16,
-        database: &str,
+        config: &PgConnectionConfig,
         schema: &str,
         table: &str,
-        ssl_mode: &SslMode,
-        ssl_root_cert: &Option<String>,
         is_append_only: bool,
     ) -> ConnectorResult<Self> {
         tracing::debug!("connect to postgres external table");
 
-        let (columns, pk_names) = Self::discover_pk_and_full_columns(
-            username,
-            password,
-            host,
-            port,
-            database,
-            schema,
-            table,
-            ssl_mode,
-            ssl_root_cert,
-        )
-        .await?;
+        let (columns, pk_names) = Self::discover_pk_and_full_columns(config, schema, table).await?;
 
         let mut column_descs = vec![];
         for col in &columns {
@@ -269,30 +388,13 @@ impl PostgresExternalTable {
 
     // return the mapping from column name to pg type, the pg type is used for writing data to postgres
     pub async fn type_mapping(
-        username: &str,
-        password: &str,
-        host: &str,
-        port: u16,
-        database: &str,
+        config: &PgConnectionConfig,
         schema: &str,
         table: &str,
-        ssl_mode: &SslMode,
-        ssl_root_cert: &Option<String>,
         is_append_only: bool,
     ) -> ConnectorResult<HashMap<String, tokio_postgres::types::Type>> {
         tracing::debug!("connect to postgres external table to get type mapping");
-        let table_schema = Self::discover_schema(
-            username,
-            password,
-            host,
-            port,
-            database,
-            schema,
-            table,
-            ssl_mode,
-            ssl_root_cert,
-        )
-        .await?;
+        let table_schema = Self::discover_schema(config, schema, table).await?;
         let mut column_name_to_pg_type = HashMap::new();
         for col in &table_schema.columns {
             let pg_type = sea_type_to_pg_type(&col.col_type)?;
@@ -337,22 +439,16 @@ impl std::str::FromStr for SslMode {
 }
 
 pub async fn create_pg_client(
-    user: &str,
-    password: &str,
-    host: &str,
-    port: &str,
-    database: &str,
-    ssl_mode: &SslMode,
-    ssl_root_cert: &Option<String>,
+    config: &PgConnectionConfig,
     tcp_keepalive: Option<TcpKeepaliveConfig>,
 ) -> anyhow::Result<PgClient> {
     let mut pg_config = tokio_postgres::Config::new();
     pg_config
-        .user(user)
-        .password(password)
-        .host(host)
-        .port(port.parse::<u16>().unwrap())
-        .dbname(database);
+        .user(&config.user)
+        .password(&config.password)
+        .host(&config.host)
+        .port(config.port)
+        .dbname(&config.database);
 
     // Configure TCP keepalive if provided
     if let Some(keepalive) = tcp_keepalive {
@@ -375,14 +471,10 @@ pub async fn create_pg_client(
         );
     }
 
-    let (_verify_ca, verify_hostname) = match ssl_mode {
-        SslMode::VerifyCa => (true, false),
-        SslMode::VerifyFull => (true, true),
-        _ => (false, false),
-    };
+    let verify_hostname = matches!(config.ssl_mode, SslMode::VerifyFull);
 
     #[cfg(not(madsim))]
-    let connector = match ssl_mode {
+    let connector = match config.ssl_mode {
         SslMode::Disabled => {
             pg_config.ssl_mode(tokio_postgres::config::SslMode::Disable);
             MaybeMakeTlsConnector::NoTls(NoTls)
@@ -412,15 +504,15 @@ pub async fn create_pg_client(
         SslMode::VerifyCa | SslMode::VerifyFull => {
             pg_config.ssl_mode(tokio_postgres::config::SslMode::Require);
             let mut builder = SslConnector::builder(SslMethod::tls())?;
-            if let Some(ssl_root_cert) = ssl_root_cert {
+            if let Some(ssl_root_cert) = &config.ssl_root_cert {
                 builder.set_ca_file(ssl_root_cert).map_err(|e| {
                     anyhow!(format!("bad ssl root cert error: {}", e.to_report_string()))
                 })?;
             }
             let mut connector = MakeTlsConnector::new(builder.build());
             if !verify_hostname {
-                connector.set_callback(|config, _| {
-                    config.set_verify_hostname(false);
+                connector.set_callback(|c, _| {
+                    c.set_verify_hostname(false);
                     Ok(())
                 });
             }
@@ -501,13 +593,45 @@ pub fn sea_type_to_rw_type(col_type: &SeaType) -> ConnectorResult<DataType> {
             bail!("{:?} type not supported", col_type);
         }
         SeaType::Unknown(name) => {
-            // NOTES: user-defined enum type is classified as `Unknown`
-            tracing::warn!("Unknown Postgres data type: {name}, map to varchar");
-            DataType::Varchar
+            if let Some(dim) = parse_pgvector_dimension(name)? {
+                DataType::Vector(dim)
+            } else {
+                // NOTES: user-defined enum type is classified as `Unknown`
+                tracing::warn!("Unknown Postgres data type: {name}, map to varchar");
+                DataType::Varchar
+            }
         }
     };
 
     Ok(dtype)
+}
+
+fn parse_pgvector_dimension(type_name: &str) -> ConnectorResult<Option<usize>> {
+    let normalized = type_name.trim().to_ascii_lowercase();
+    if normalized == "vector" {
+        bail!("pgvector type `vector` is missing dimension, expected `vector(n)`")
+    }
+    if !normalized.starts_with("vector(") || !normalized.ends_with(')') {
+        return Ok(None);
+    }
+
+    let dim_text = normalized
+        .trim_start_matches("vector(")
+        .trim_end_matches(')')
+        .trim();
+    let dim = dim_text
+        .parse::<usize>()
+        .map_err(|_| anyhow!("invalid pgvector dimension in type `{type_name}`"))?;
+
+    if !(1..=DataType::VEC_MAX_SIZE).contains(&dim) {
+        bail!(
+            "pgvector dimension out of range in type `{}`: expect 1..={}",
+            type_name,
+            DataType::VEC_MAX_SIZE
+        );
+    }
+
+    Ok(Some(dim))
 }
 
 // Used for sink connector
@@ -595,5 +719,23 @@ fn sea_type_to_pg_type(sea_type: &SeaType) -> ConnectorResult<tokio_postgres::ty
             ))
         }
         _ => bail!("unsupported type: {:?}", sea_type),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_pgvector_dimension;
+
+    #[test]
+    fn test_parse_pgvector_dimension() {
+        assert_eq!(parse_pgvector_dimension("vector(3)").unwrap(), Some(3));
+        assert_eq!(parse_pgvector_dimension("VECTOR(768)").unwrap(), Some(768));
+        assert_eq!(parse_pgvector_dimension("varchar").unwrap(), None);
+    }
+
+    #[test]
+    fn test_parse_pgvector_dimension_requires_size() {
+        let err = parse_pgvector_dimension("vector").unwrap_err();
+        assert!(err.to_string().contains("missing dimension"));
     }
 }

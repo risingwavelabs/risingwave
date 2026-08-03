@@ -12,21 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::ops::Bound;
+
+use futures::TryStreamExt;
 use itertools::Itertools;
 use risingwave_common::catalog::ColumnDesc;
 use risingwave_common::row::RowExt;
-use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_common_estimate_size::collections::EstimatedVec;
-use risingwave_hummock_sdk::HummockReadEpoch;
+use risingwave_storage::row_serde::value_serde::ValueRowSerde;
 use risingwave_storage::store::PrefetchOptions;
-use risingwave_storage::table::TableIter;
-use risingwave_storage::table::batch_table::BatchTable;
 
 use super::sides::{stream_lookup_arrange_prev_epoch, stream_lookup_arrange_this_epoch};
-use crate::cache::keyed_cache_may_stale;
 use crate::common::metrics::MetricsInfo;
+use crate::common::table::state_table::ReplicatedStateTable;
 use crate::executor::join::builder::JoinStreamChunkBuilder;
 use crate::executor::lookup::LookupExecutor;
 use crate::executor::lookup::cache::LookupCache;
@@ -35,7 +35,7 @@ use crate::executor::monitor::LookupExecutorMetrics;
 use crate::executor::prelude::*;
 
 /// Parameters for [`LookupExecutor`].
-pub struct LookupExecutorParams<S: StateStore> {
+pub struct LookupExecutorParams<S: StateStore, SD: ValueRowSerde> {
     pub ctx: ActorContextRef,
     pub info: ExecutorInfo,
 
@@ -89,15 +89,15 @@ pub struct LookupExecutorParams<S: StateStore> {
     /// The join keys on the arrangement side.
     pub arrange_join_key_indices: Vec<usize>,
 
-    pub batch_table: BatchTable<S>,
+    pub state_table: ReplicatedStateTable<S, SD>,
 
     pub watermark_epoch: AtomicU64Ref,
 
     pub chunk_size: usize,
 }
 
-impl<S: StateStore> LookupExecutor<S> {
-    pub fn new(params: LookupExecutorParams<S>) -> Self {
+impl<S: StateStore, SD: ValueRowSerde> LookupExecutor<S, SD> {
+    pub fn new(params: LookupExecutorParams<S, SD>) -> Self {
         let LookupExecutorParams {
             ctx,
             info,
@@ -109,7 +109,7 @@ impl<S: StateStore> LookupExecutor<S> {
             stream_join_key_indices,
             arrange_join_key_indices,
             column_mapping,
-            batch_table: storage_table,
+            state_table: storage_table,
             watermark_epoch,
             chunk_size,
         } = params;
@@ -194,7 +194,6 @@ impl<S: StateStore> LookupExecutor<S> {
         Self {
             ctx,
             chunk_data_types,
-            last_barrier: None,
             stream_executor: Some(stream),
             arrangement_executor: Some(arrangement),
             stream: StreamJoinSide {
@@ -209,7 +208,7 @@ impl<S: StateStore> LookupExecutor<S> {
                 order_rules: arrangement_order_rules,
                 key_indices: arrange_join_key_indices,
                 use_current_epoch,
-                batch_table: storage_table,
+                state_table: storage_table,
             },
             column_mapping,
             key_indices_mapping,
@@ -225,22 +224,26 @@ impl<S: StateStore> LookupExecutor<S> {
     /// If we can use `async_stream` to write this part, things could be easier.
     #[try_stream(ok = Message, error = StreamExecutorError)]
     pub async fn execute_inner(mut self: Box<Self>) {
+        let mut stream_input = self.stream_executor.take().unwrap().execute();
+        let mut arrangement_input = self.arrangement_executor.take().unwrap().execute();
+
+        let first_barrier = expect_first_barrier(&mut stream_input).await?;
+        let arrangement_first_barrier = expect_first_barrier(&mut arrangement_input).await?;
+        if first_barrier.epoch != arrangement_first_barrier.epoch {
+            return Err(StreamExecutorError::align_barrier(
+                first_barrier.clone(),
+                arrangement_first_barrier,
+            ));
+        }
+
         let input = if self.arrangement.use_current_epoch {
-            stream_lookup_arrange_this_epoch(
-                self.stream_executor.take().unwrap(),
-                self.arrangement_executor.take().unwrap(),
-            )
-            .boxed()
+            stream_lookup_arrange_this_epoch(stream_input, arrangement_input).boxed()
         } else {
-            stream_lookup_arrange_prev_epoch(
-                self.stream_executor.take().unwrap(),
-                self.arrangement_executor.take().unwrap(),
-            )
-            .boxed()
+            stream_lookup_arrange_prev_epoch(stream_input, arrangement_input).boxed()
         };
 
         let metrics = self.ctx.streaming_metrics.new_lookup_executor_metrics(
-            self.arrangement.batch_table.table_id(),
+            self.arrangement.state_table.table_id(),
             self.ctx.id,
             self.ctx.fragment_id,
         );
@@ -257,24 +260,40 @@ impl<S: StateStore> LookupExecutor<S> {
             .map(|x| self.chunk_data_types[*x].clone())
             .collect_vec();
 
+        // Yield the barrier before init_epoch: init_epoch calls wait_for_epoch(epoch.prev)
+        // which blocks until the previous epoch is committed, and that requires all actors
+        // to have already forwarded this barrier downstream.
+        yield Message::Barrier(first_barrier.clone());
+        self.arrangement
+            .state_table
+            .init_epoch(first_barrier.epoch)
+            .await?;
+
         #[for_await]
         for msg in input {
             let msg = msg?;
             self.lookup_cache.evict();
             match msg {
                 ArrangeMessage::Barrier(barrier) => {
-                    self.process_barrier(&barrier);
+                    barrier.assume_no_update_vnode_bitmap(self.ctx.id)?;
+                    self.arrangement
+                        .state_table
+                        .commit_assert_no_update_vnode_bitmap(barrier.epoch)
+                        .await?;
 
                     if self.arrangement.use_current_epoch {
                         // When lookup this epoch, stream side barrier always come after arrangement
                         // ready, so we can forward barrier now.
-                        yield Message::Barrier(barrier);
+                        yield Message::Barrier(barrier.clone());
                     }
                 }
                 ArrangeMessage::ArrangeReady(arrangement_chunks, barrier) => {
                     // The arrangement is ready, and we will receive a bunch of stream messages for
                     // the next poll.
                     // TODO: apply chunk as soon as we receive them, instead of batching.
+                    for chunk in &arrangement_chunks {
+                        self.arrangement.state_table.write_chunk(chunk.clone());
+                    }
 
                     for chunk in arrangement_chunks {
                         self.lookup_cache
@@ -299,14 +318,7 @@ impl<S: StateStore> LookupExecutor<S> {
                     );
 
                     for (op, row) in ops.iter().zip_eq_debug(chunk.rows()) {
-                        for matched_row in self
-                            .lookup_one_row(
-                                &row,
-                                self.last_barrier.as_ref().unwrap().epoch,
-                                &metrics,
-                            )
-                            .await?
-                        {
+                        for matched_row in self.lookup_one_row(&row, &metrics).await? {
                             tracing::debug!(target: "events::stream::lookup::put", "{:?} {:?}", row, matched_row);
 
                             if let Some(chunk) = builder.append_row(*op, row, &matched_row) {
@@ -324,29 +336,10 @@ impl<S: StateStore> LookupExecutor<S> {
         }
     }
 
-    /// Process the barrier and apply changes if necessary.
-    fn process_barrier(&mut self, barrier: &Barrier) {
-        if let Some(vnode_bitmap) = barrier.as_update_vnode_bitmap(self.ctx.id) {
-            let previous_vnode_bitmap = self
-                .arrangement
-                .batch_table
-                .update_vnode_bitmap(vnode_bitmap.clone());
-
-            // Manipulate the cache if necessary.
-            if keyed_cache_may_stale(&previous_vnode_bitmap, &vnode_bitmap) {
-                self.lookup_cache.clear();
-            }
-        }
-
-        // Use the new stream barrier epoch as new cache epoch
-        self.last_barrier = Some(barrier.clone());
-    }
-
-    /// Lookup all rows corresponding to a join key in shared buffer.
+    /// Lookup all rows corresponding to a join key in the replicated state table.
     async fn lookup_one_row(
         &mut self,
         stream_row: &RowRef<'_>,
-        epoch_pair: EpochPair,
         metrics: &LookupExecutorMetrics,
     ) -> StreamExecutorResult<Vec<OwnedRow>> {
         // stream_row is the row from stream side, we need to transform into the correct order of
@@ -366,38 +359,19 @@ impl<S: StateStore> LookupExecutor<S> {
         tracing::debug!(target: "events::stream::lookup::lookup_row", "{:?}", lookup_row);
 
         let mut all_rows = EstimatedVec::new();
-        // Drop the stream.
         {
-            let all_data_iter = match self.arrangement.use_current_epoch {
-                true => {
-                    self.arrangement
-                        .batch_table
-                        .batch_iter_with_pk_bounds(
-                            HummockReadEpoch::NoWait(epoch_pair.curr),
-                            &lookup_row,
-                            ..,
-                            false,
-                            PrefetchOptions::default(),
-                        )
-                        .await?
-                }
-                false => {
-                    self.arrangement
-                        .batch_table
-                        .batch_iter_with_pk_bounds(
-                            HummockReadEpoch::NoWait(epoch_pair.prev),
-                            &lookup_row,
-                            ..,
-                            false,
-                            PrefetchOptions::default(),
-                        )
-                        .await?
-                }
-            };
+            let all_data_iter = self
+                .arrangement
+                .state_table
+                .iter_with_prefix(
+                    &lookup_row,
+                    &(Bound::<OwnedRow>::Unbounded, Bound::<OwnedRow>::Unbounded),
+                    PrefetchOptions::default(),
+                )
+                .await?;
 
             pin_mut!(all_data_iter);
-            while let Some(row) = all_data_iter.next_row().await? {
-                // Only need value (include storage pk).
+            while let Some(row) = all_data_iter.try_next().await? {
                 all_rows.push(row);
             }
         }

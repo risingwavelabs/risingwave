@@ -46,6 +46,9 @@ create materialized view mv3 as select v3, sum(v1) as sum_v1, min(v1) as min_v1,
 statement ok
 create materialized view mv4 as select count(*) as count, d from t5 group by d;
 
+statement ok
+create materialized view mv5 as select v2, avg(v1) filter (where false) as avg_v1 from t1 group by v2;
+
 query III rowsort
 select v1, v2, v3 from mv1;
 ----
@@ -90,6 +93,12 @@ select * from mv4
 1	Infinity
 1	NaN
 
+query IR rowsort
+select v2, avg_v1 from mv5
+----
+3 NULL
+4 NULL
+
 statement ok
 drop materialized view mv1
 
@@ -101,6 +110,9 @@ drop materialized view mv3
 
 statement ok
 drop materialized view mv4
+
+statement ok
+drop materialized view mv5
 
 statement ok
 drop table t1
@@ -155,4 +167,3 @@ CREATE MATERIALIZED VIEW mv AS SELECT random();
 
 statement ok
 drop materialized view mv
-

@@ -426,7 +426,7 @@ impl LdapAuthenticator {
     }
 
     /// Establish an LDAP connection with configurable options
-    #[allow(rw::format_error)]
+    #[expect(rw::format_error)]
     async fn establish_connection(&self) -> PsqlResult<ldap3::Ldap> {
         let config = &self.config;
         let mut settings = ldap3::LdapConnSettings::new();

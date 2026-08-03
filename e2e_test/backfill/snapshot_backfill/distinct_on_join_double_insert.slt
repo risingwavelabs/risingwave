@@ -1,0 +1,106 @@
+# Regression test for snapshot backfill over a DISTINCT ON MV.
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO TRUE;
+
+statement ok
+SET streaming_use_snapshot_backfill = true;
+
+statement ok
+SET streaming_parallelism = 1;
+
+statement ok
+SET streaming_parallelism_for_table = 1;
+
+statement ok
+SET streaming_parallelism_for_materialized_view = 1;
+
+statement ok
+SET streaming_parallelism_for_backfill = 1;
+
+# streaming_max_parallelism must be greater than 1.
+statement ok
+SET streaming_max_parallelism = 2;
+
+statement ok
+CREATE TABLE repro_t1 (
+  id int primary key,
+  k int,
+  v int,
+  ts timestamp,
+  score double precision
+);
+
+statement ok
+CREATE TABLE repro_t2 (
+  k int primary key
+);
+
+statement ok
+INSERT INTO repro_t2 VALUES (1);
+
+statement ok
+INSERT INTO repro_t1 VALUES (1, 1, 10, '2026-01-01 00:00:00', 0.5);
+
+statement ok
+CREATE MATERIALIZED VIEW repro_dedup AS
+SELECT DISTINCT ON (k) k, v
+FROM repro_t1
+WHERE k IS NOT NULL
+ORDER BY k, ts DESC NULLS LAST, score DESC NULLS LAST, id DESC;
+
+query TT
+SELECT * FROM repro_dedup;
+----
+1 10
+
+statement ok
+SET BACKGROUND_DDL = true;
+
+statement ok
+CREATE MATERIALIZED VIEW repro_joined
+WITH (backfill_rate_limit = 0) AS
+SELECT repro_t2.k, repro_dedup.v
+FROM repro_t2
+LEFT JOIN repro_dedup ON repro_dedup.k = repro_t2.k;
+
+query I retry 4 backoff 1s
+SELECT count(*) FROM rw_catalog.rw_ddl_progress;
+----
+1
+
+query T retry 4 backoff 1s
+SELECT backfill_type FROM rw_catalog.rw_ddl_progress;
+----
+SNAPSHOT_BACKFILL
+
+statement ok
+INSERT INTO repro_t1 VALUES (2, 1, 20, '2026-01-02 00:00:00', 0.9);
+
+query TT
+SELECT * FROM repro_dedup;
+----
+1 20
+
+statement ok
+ALTER MATERIALIZED VIEW repro_joined SET backfill_rate_limit = default;
+
+statement ok
+wait;
+
+query TT
+SELECT * FROM repro_joined;
+----
+1 20
+
+statement ok
+DROP MATERIALIZED VIEW repro_joined;
+
+statement ok
+DROP MATERIALIZED VIEW repro_dedup;
+
+statement ok
+DROP TABLE repro_t2;
+
+statement ok
+DROP TABLE repro_t1;

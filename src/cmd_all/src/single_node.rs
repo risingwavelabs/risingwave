@@ -162,12 +162,12 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
     // Set state store for meta (if not set). It could be set by environment variables before this.
     if meta_opts.state_store.is_none() {
         if opts.in_memory {
-            meta_opts.state_store = Some(HUMMOCK_IN_MEMORY.to_owned());
+            meta_opts.state_store = Some(HUMMOCK_IN_MEMORY.to_owned().into());
         } else {
-            let state_store_dir = format!("{}/state_store", &store_directory);
+            let state_store_dir = format!("{}/state_store", store_directory);
             std::fs::create_dir_all(&state_store_dir).unwrap();
-            let state_store_url = format!("hummock+fs://{}", &state_store_dir);
-            meta_opts.state_store = Some(state_store_url);
+            let state_store_url = format!("hummock+fs://{}", state_store_dir);
+            meta_opts.state_store = Some(state_store_url.into());
         }
 
         // FIXME: otherwise it reports: missing system param "data_directory", but I think it should be set by this way...
@@ -188,9 +188,9 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
             meta_opts.backend = Some(MetaBackend::Mem);
         } else {
             meta_opts.backend = Some(MetaBackend::Sqlite);
-            let meta_store_dir = format!("{}/meta_store", &store_directory);
+            let meta_store_dir = format!("{}/meta_store", store_directory);
             std::fs::create_dir_all(&meta_store_dir).unwrap();
-            let meta_store_endpoint = format!("{}/single_node.db", &meta_store_dir);
+            let meta_store_endpoint = format!("{}/single_node.db", meta_store_dir);
             meta_opts.sql_endpoint = Some(meta_store_endpoint.into());
         }
     }
@@ -243,6 +243,7 @@ pub fn map_single_node_opts_to_standalone_opts(opts: SingleNodeOpts) -> ParsedSt
         .state_store
         .as_ref()
         .unwrap()
+        .expose()
         .starts_with(HUMMOCK_IN_MEMORY);
 
     ParsedStandaloneOpts {
@@ -290,7 +291,8 @@ mod tests {
             (standalone_opts.meta_opts.as_ref().unwrap())
                 .state_store
                 .as_ref()
-                .unwrap(),
+                .unwrap()
+                .expose(),
             HUMMOCK_IN_MEMORY,
         );
     }

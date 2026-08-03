@@ -39,7 +39,7 @@ impl<PlanRef: GenericPlanRef> Dedup<PlanRef> {
         debug_assert!(
             dedup_cols.iter().all(|&idx| idx < input.schema().len()),
             "Invalid dedup keys {:?} input schema size = {}",
-            &dedup_cols,
+            dedup_cols,
             input.schema().len()
         );
         Dedup { input, dedup_cols }

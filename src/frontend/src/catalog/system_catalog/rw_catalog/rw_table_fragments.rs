@@ -41,7 +41,7 @@ async fn read_rw_table_fragments_info(
             RwTableFragment {
                 table_id: state.table_id,
                 status: state.state().as_str_name().into(),
-                parallelism: parallelism.to_uppercase(),
+                parallelism,
                 max_parallelism: state.max_parallelism as i32,
             }
         })

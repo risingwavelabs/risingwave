@@ -14,7 +14,6 @@
 
 #![feature(coroutines)]
 #![feature(proc_macro_hygiene)]
-#![feature(stmt_expr_attributes)]
 #![recursion_limit = "256"]
 
 use core::str::FromStr;
@@ -206,7 +205,7 @@ impl ThroughputMetric {
     pub async fn print_throughput(self) {
         self.stop_tx.send(()).unwrap();
         let throughput_sum_vec = self.vec_rx.await.unwrap();
-        #[allow(clippy::disallowed_methods)]
+        #[expect(clippy::disallowed_methods)]
         let throughput_vec = throughput_sum_vec
             .iter()
             .zip(throughput_sum_vec.iter().skip(1))
@@ -395,7 +394,7 @@ async fn consume_log_stream<S: Sink>(
 }
 
 #[derive(Debug, Deserialize)]
-#[allow(dead_code)]
+#[expect(dead_code)]
 struct TableSchemaFromYml {
     table_name: String,
     pk_indices: Option<Vec<usize>>,

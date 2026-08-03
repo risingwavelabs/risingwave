@@ -256,7 +256,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
     /// For [`SimpleAggExecutor`], the `group_key` should be `None`.
     ///
     /// [`SimpleAggExecutor`]: crate::executor::aggregate::SimpleAggExecutor
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub async fn create(
         version: PbAggNodeVersion,
         group_key: Option<GroupKey>,
@@ -315,7 +315,7 @@ impl<S: StateStore, Strtg: Strategy> AggGroup<S, Strtg> {
 
     /// Create a group from intermediate states for EOWC output.
     /// Will always produce `Insert` when building change.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn for_eowc_output(
         version: PbAggNodeVersion,
         group_key: Option<GroupKey>,

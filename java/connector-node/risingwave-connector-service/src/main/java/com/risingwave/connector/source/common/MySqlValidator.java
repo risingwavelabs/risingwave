@@ -24,6 +24,9 @@ import java.sql.SQLException;
 import java.util.*;
 
 public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
+    private static final String REPLICATION_CLIENT = "REPLICATION CLIENT";
+    private static final String BINLOG_MONITOR = "BINLOG MONITOR";
+
     private final Map<String, String> userProps;
 
     private final TableSchema tableSchema;
@@ -149,7 +152,7 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
                     }
 
                     // remove granted privilege from the set
-                    hashSet.removeIf(granted::contains);
+                    hashSet.removeIf(required -> isPrivilegeGranted(required, granted));
                     if (hashSet.isEmpty()) {
                         break;
                     }
@@ -164,16 +167,26 @@ public class MySqlValidator extends DatabaseValidator implements AutoCloseable {
         }
     }
 
+    static boolean isPrivilegeGranted(String required, String granted) {
+        if (granted.contains(required)) {
+            return true;
+        }
+
+        // MariaDB 10.5 renamed REPLICATION CLIENT to BINLOG MONITOR. The old GRANT syntax is
+        // accepted for compatibility, but SHOW GRANTS reports the new privilege name.
+        return required.equals(REPLICATION_CLIENT) && granted.contains(BINLOG_MONITOR);
+    }
+
     private String[] getRequiredPrivileges() {
         if (isCdcSourceJob) {
-            return new String[] {"SELECT", "REPLICATION SLAVE", "REPLICATION CLIENT"};
+            return new String[] {"SELECT", "REPLICATION SLAVE", REPLICATION_CLIENT};
         } else if (isBackfillTable) {
             // check privilege again to ensure the user has the privilege to backfill
-            return new String[] {"SELECT", "REPLICATION SLAVE", "REPLICATION CLIENT"};
+            return new String[] {"SELECT", "REPLICATION SLAVE", REPLICATION_CLIENT};
         } else {
             // dedicated source needs more privileges to acquire global lock
             return new String[] {
-                "SELECT", "RELOAD", "SHOW DATABASES", "REPLICATION SLAVE", "REPLICATION CLIENT"
+                "SELECT", "RELOAD", "SHOW DATABASES", "REPLICATION SLAVE", REPLICATION_CLIENT
             };
         }
     }

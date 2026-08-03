@@ -20,7 +20,7 @@ use std::sync::{Arc, LazyLock};
 use arrow_array::ArrayRef;
 use num_traits::abs;
 
-pub use super::arrow_57::{
+pub use super::arrow_58::{
     FromArrow, ToArrow, arrow_array, arrow_buffer, arrow_cast, arrow_schema,
     is_parquet_schema_match_source_schema,
 };
@@ -131,6 +131,12 @@ impl ToArrow for IcebergArrowConvert {
             DataType::Serial => self.serial_type_to_arrow(),
             DataType::Decimal => return Ok(self.decimal_type_to_arrow(name)),
             DataType::Jsonb => self.varchar_type_to_arrow(),
+            // TODO(#25165): support Iceberg variant.
+            DataType::Variant => {
+                return Err(ArrayError::to_arrow(
+                    "VARIANT is not supported for Iceberg yet",
+                ));
+            }
             DataType::Struct(fields) => self.struct_type_to_arrow(fields)?,
             DataType::List(list) => self.list_type_to_arrow(list)?,
             DataType::Map(map) => self.map_type_to_arrow(map)?,
@@ -175,7 +181,7 @@ impl ToArrow for IcebergArrowConvert {
                         let value = match scale {
                             _ if scale < max_scale => value
                                 .checked_mul(10_i128.pow(diff_scale as u32))
-                                .and_then(|v| if abs(v) <= max_value { Some(v) } else { None })
+                                .filter(|&v| abs(v) <= max_value)
                                 .unwrap_or_else(|| {
                                     tracing::warn!(
                                         "Decimal overflow when converting to arrow decimal with precision {} and scale {}. It will be replaced with inf/-inf.",
@@ -306,6 +312,12 @@ impl ToArrow for IcebergCreateTableArrowConvert {
             DataType::Serial => self.serial_type_to_arrow(),
             DataType::Decimal => return Ok(self.decimal_type_to_arrow(name)),
             DataType::Jsonb => self.varchar_type_to_arrow(),
+            // TODO(#25165): support Iceberg variant.
+            DataType::Variant => {
+                return Err(ArrayError::to_arrow(
+                    "VARIANT is not supported for Iceberg yet",
+                ));
+            }
             DataType::Struct(fields) => self.struct_type_to_arrow(fields)?,
             DataType::List(list) => self.list_type_to_arrow(list)?,
             DataType::Map(map) => self.map_type_to_arrow(map)?,

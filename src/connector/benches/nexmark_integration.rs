@@ -30,13 +30,29 @@ use risingwave_connector::parser::{
     ByteStreamSourceParserImpl, CommonParserConfig, ParserConfig, SpecificParserConfig,
 };
 use risingwave_connector::source::{
-    BoxSourceChunkStream, BoxSourceMessageStream, SourceColumnDesc, SourceMessage, SourceMeta,
+    BoxSourceChunkStream, BoxSourceMessageStream, SourceChunkStream, SourceColumnDesc,
+    SourceMessage, SourceMessageEvent, SourceMeta, SourceReaderEvent,
 };
 use tracing::Level;
 use tracing_subscriber::prelude::*;
 
 static BATCH: LazyLock<Vec<SourceMessage>> = LazyLock::new(|| make_batch(false));
 static STRUCT_BATCH: LazyLock<Vec<SourceMessage>> = LazyLock::new(|| make_batch(true));
+
+fn into_data_chunk_stream(
+    stream: impl futures::Stream<Item = risingwave_connector::error::ConnectorResult<SourceReaderEvent>>
+    + Send
+    + 'static,
+) -> impl SourceChunkStream {
+    stream
+        .try_filter_map(|event| async move {
+            Ok(match event {
+                SourceReaderEvent::DataChunk(chunk) => Some(chunk),
+                SourceReaderEvent::SplitProgress(_) => None,
+            })
+        })
+        .boxed()
+}
 
 fn make_batch(use_struct: bool) -> Vec<SourceMessage> {
     let mut generator = nexmark::EventGenerator::default()
@@ -114,9 +130,14 @@ fn make_parser(use_struct: bool) -> ByteStreamSourceParserImpl {
 }
 
 fn make_stream_iter(use_struct: bool) -> impl Iterator<Item = StreamChunk> {
-    let mut stream: BoxSourceChunkStream = make_parser(use_struct)
-        .parse_stream(make_data_stream(use_struct))
-        .boxed();
+    let mut stream: BoxSourceChunkStream = into_data_chunk_stream(
+        make_parser(use_struct).parse_stream_with_events(
+            make_data_stream(use_struct)
+                .map_ok(SourceMessageEvent::Data)
+                .boxed(),
+        ),
+    )
+    .boxed();
 
     std::iter::from_fn(move || {
         stream

@@ -205,14 +205,14 @@ def _(outer_panels: Panels):
                 panels.subheader("Latency By Relation"),
                 # FIXME(kwannoel): We should use the max timestamp of the database, rather than cluster level.
                 panels.timeseries_latency(
-                    "Latency of Materialize Views & Sinks",
-                    "The current epoch that the Materialize Executors or Sink Executor are processing. If an MV/Sink's epoch is far behind the others, "
-                    "it's very likely to be the performance bottleneck",
+                    "Latency of Streaming Relations & Sinks",
+                    "The current epoch lag that each streaming relation (table, materialized view, or index) or sink executor is processing. If a relation or sink lags behind the others, "
+                    "it's very likely to be the performance bottleneck.",
                     [
                         panels.target(
                             # Here we use `min` but actually no much difference. Any of the sampled `current_epoch` makes sense.
-                            f"max(timestamp({metric('stream_mview_current_epoch')}) - {epoch_to_unix_millis(metric('stream_mview_current_epoch'))}/1000) by (table_id) * on(table_id) group_left(table_name) group({metric('table_info')}) by (table_id, table_name)",
-                            "{{table_id}} {{table_name}}",
+                            f"max(timestamp({metric('stream_mview_current_epoch')}) - {epoch_to_unix_millis(metric('stream_mview_current_epoch'))}/1000) by (table_id) * on(table_id) group_left(table_name, table_type) group({metric('table_info')}) by (table_id, table_name, table_type)",
+                            "{{table_type}} {{table_id}} {{table_name}}",
                         ),
                         panels.target(
                             f"max(timestamp({metric('log_store_latest_read_epoch')}) - {epoch_to_unix_millis(metric('log_store_latest_read_epoch'))}/1000) by (sink_id, sink_name)",
@@ -226,29 +226,29 @@ def _(outer_panels: Panels):
                 ),
                 panels.subheader("Epoch By Relation"),
                 panels.timeseries_epoch(
-                    "Current Epoch of Materialize Views",
-                    "The current epoch that the Materialize Executors are processing. If an MV's epoch is far behind the others, "
-                    "it's very likely to be the performance bottleneck",
+                    "Current Epoch of Streaming Relations",
+                    "The current epoch that each streaming relation (table, materialized view, or index) is processing. If a relation's epoch is far behind the others, "
+                    "it's very likely to be the performance bottleneck.",
                     [
                         panels.target(
                             # Here we use `min` but actually no much difference. Any of the sampled `current_epoch` makes sense.
-                            f"min({metric('stream_mview_current_epoch')} != 0) by (table_id) * on(table_id) group_left(table_name) group({metric('table_info')}) by (table_id, table_name)",
-                            "{{table_id}} {{table_name}}",
+                            f"min({metric('stream_mview_current_epoch')} != 0) by (table_id) * on(table_id) group_left(table_name, table_type) group({metric('table_info')}) by (table_id, table_name, table_type)",
+                            "{{table_type}} {{table_id}} {{table_name}}",
                         ),
                     ],
                 ),
                 panels.subheader("Throughput By Relation"),
                 panels.timeseries_rowsps(
-                    "Materialized View Throughput (rows/s)",
-                    "The figure shows the number of rows written into each materialized view per second.",
+                    "Streaming Relation Throughput (rows/s)",
+                    "The figure shows the number of rows written into each streaming relation (table, materialized view, or index) per second.",
                     [
                         panels.target(
-                            f"sum(rate({table_metric('stream_mview_input_row_count')}[$__rate_interval])) by (table_id) * on(table_id) group_left(table_name) group({metric('table_info')}) by (table_id, table_name)",
-                            "mview {{table_id}} {{table_name}}",
+                            f"sum(rate({table_metric('stream_mview_input_row_count')}[$__rate_interval])) by (table_id) * on(table_id) group_left(table_name, table_type) group({metric('table_info')}) by (table_id, table_name, table_type)",
+                            "{{table_type}} {{table_id}} {{table_name}}",
                         ),
                         panels.target_hidden(
-                            f"rate({table_metric('stream_mview_input_row_count')}[$__rate_interval]) * on(fragment_id, table_id) group_left(table_name) {metric('table_info')}",
-                            "mview {{table_id}} {{table_name}} - actor {{actor_id}} fragment_id {{fragment_id}}",
+                            f"rate({table_metric('stream_mview_input_row_count')}[$__rate_interval]) * on(fragment_id, table_id) group_left(table_name, table_type) {metric('table_info')}",
+                            "{{table_type}} {{table_id}} {{table_name}} - actor {{actor_id}} fragment_id {{fragment_id}}",
                         ),
                     ],
                 ),
@@ -282,12 +282,12 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_bytes(
-                    "Executor Cache Memory Usage of Materialized Views",
-                    "Memory usage aggregated by materialized views",
+                    "Executor Cache Memory Usage of Streaming Relations",
+                    "Memory usage aggregated by streaming relation.",
                     [
                         panels.target(
                             executor_cache_usage_expr,
-                            "materialized view {{materialized_view_id}}",
+                            "relation {{materialized_view_id}}",
                         ),
                     ],
                 ),

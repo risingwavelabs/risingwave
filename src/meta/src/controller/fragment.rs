@@ -24,7 +24,8 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
 use risingwave_common::hash::{VnodeCount, VnodeCountCompat};
 use risingwave_common::id::JobId;
-use risingwave_common::system_param::reader::SystemParamsRead;
+use risingwave_common::system_param::AdaptiveParallelismStrategy;
+use risingwave_common::system_param::adaptive_parallelism_strategy::parse_strategy;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_body;
 use risingwave_connector::source::SplitImpl;
 use risingwave_connector::source::cdc::CdcScanOptions;
@@ -66,7 +67,7 @@ use sea_orm::{
 use serde::{Deserialize, Serialize};
 
 use crate::barrier::{SharedActorInfos, SharedFragmentInfo, SnapshotBackfillInfo};
-use crate::controller::catalog::CatalogController;
+use crate::controller::catalog::{CatalogController, CatalogControllerInner};
 use crate::controller::scale::{
     FragmentRenderMap, LoadedFragmentContext, NoShuffleEnsemble, RenderedGraph,
     find_fragment_no_shuffle_dags_detailed, load_fragment_context_for_jobs,
@@ -82,7 +83,6 @@ use crate::manager::{ActiveStreamingWorkerNodes, LocalNotification, Notification
 use crate::model::{
     DownstreamFragmentRelation, Fragment, FragmentActorDispatchers, FragmentDownstreamRelation,
     StreamActor, StreamContext, StreamJobFragments, StreamingJobModelContextExt as _,
-    TableParallelism,
 };
 use crate::rpc::ddl_controller::build_upstream_sink_info;
 use crate::stream::UpstreamSinkInfo;
@@ -131,7 +131,10 @@ pub struct InflightFragmentInfo {
 }
 
 #[derive(Clone, Debug)]
-pub struct FragmentParallelismInfo {
+pub struct FragmentServingInfo {
+    /// The query-visible result table for this job, if it has one.
+    /// Sink/source jobs have no serving target.
+    pub result_table_id: Option<TableId>,
     pub distribution_type: FragmentDistributionType,
     pub vnode_count: usize,
 }
@@ -165,6 +168,14 @@ pub struct StreamingJobInfo {
     pub name: String,
     pub job_status: JobStatus,
     pub parallelism: StreamingParallelism,
+    pub adaptive_parallelism_strategy: Option<String>,
+    // These backfill fields are only used to derive the effective parallelism shown for
+    // in-progress jobs. They are skipped in JSON responses so existing dashboard payloads keep
+    // the same schema.
+    #[serde(skip)]
+    pub backfill_parallelism: Option<StreamingParallelism>,
+    #[serde(skip)]
+    pub backfill_adaptive_parallelism_strategy: Option<String>,
     pub max_parallelism: i32,
     pub resource_group: String,
     pub config_override: String,
@@ -225,6 +236,49 @@ impl NotificationManager {
         self.notify_local_subscribers(LocalNotification::ServingFragmentMappingsDelete(
             fragment_ids,
         ));
+    }
+}
+
+impl CatalogControllerInner {
+    /// Returns distribution type, vnode count and query-visible result table for all fragments.
+    ///
+    /// Reads directly from the persistent catalog rather than from the in-memory
+    /// `shared_actor_infos`. This is critical because the serving vnode mapping
+    /// must be available even before recovery has populated `shared_actor_infos`.
+    pub async fn fragment_serving_infos(
+        &self,
+    ) -> MetaResult<HashMap<FragmentId, FragmentServingInfo>> {
+        let query = FragmentModel::find().select_only().columns([
+            fragment::Column::FragmentId,
+            fragment::Column::JobId,
+            fragment::Column::DistributionType,
+            fragment::Column::VnodeCount,
+            fragment::Column::StateTableIds,
+        ]);
+        let fragments: Vec<(FragmentId, JobId, DistributionType, i32, TableIdArray)> =
+            query.into_tuple().all(&self.db).await?;
+
+        Ok(fragments
+            .into_iter()
+            .map(
+                |(fragment_id, job_id, distribution_type, vnode_count, state_table_ids)| {
+                    // Table/MV/index result tables reuse the job id and appear only in their
+                    // owning fragment; sink/source jobs therefore have no matching state table.
+                    let result_table_id = job_id.as_mv_table_id();
+                    (
+                        fragment_id,
+                        FragmentServingInfo {
+                            result_table_id: state_table_ids
+                                .0
+                                .contains(&result_table_id)
+                                .then_some(result_table_id),
+                            distribution_type: PbFragmentDistributionType::from(distribution_type),
+                            vnode_count: vnode_count as usize,
+                        },
+                    )
+                },
+            )
+            .collect())
     }
 }
 
@@ -294,7 +348,6 @@ impl CatalogController {
         state: PbState,
         ctx: StreamContext,
         fragments: Vec<(fragment::Model, Vec<ActorInfo>)>,
-        parallelism: StreamingParallelism,
         max_parallelism: usize,
         job_definition: Option<String>,
     ) -> MetaResult<(
@@ -321,11 +374,6 @@ impl CatalogController {
             state: state as _,
             fragments: pb_fragments,
             ctx,
-            assigned_parallelism: match parallelism {
-                StreamingParallelism::Custom => TableParallelism::Custom,
-                StreamingParallelism::Adaptive => TableParallelism::Adaptive,
-                StreamingParallelism::Fixed(n) => TableParallelism::Fixed(n as _),
-            },
             max_parallelism,
         };
 
@@ -427,36 +475,11 @@ impl CatalogController {
         Ok((pb_fragment, pb_actors, pb_actor_status, pb_actor_splits))
     }
 
-    /// Returns distribution type and vnode count for all (or filtered) fragments.
-    ///
-    /// Reads directly from the persistent catalog (fragment table) rather than
-    /// from the in-memory `shared_actor_infos`.  This is critical because the
-    /// serving vnode mapping must be available even before the barrier manager's
-    /// recovery has completed and populated `shared_actor_infos`.
-    pub async fn fragment_parallelisms(
+    pub async fn fragment_serving_infos(
         &self,
-    ) -> MetaResult<HashMap<FragmentId, FragmentParallelismInfo>> {
+    ) -> MetaResult<HashMap<FragmentId, FragmentServingInfo>> {
         let inner = self.inner.read().await;
-        let query = FragmentModel::find().select_only().columns([
-            fragment::Column::FragmentId,
-            fragment::Column::DistributionType,
-            fragment::Column::VnodeCount,
-        ]);
-        let fragments: Vec<(FragmentId, DistributionType, i32)> =
-            query.into_tuple().all(&inner.db).await?;
-
-        Ok(fragments
-            .into_iter()
-            .map(|(fragment_id, distribution_type, vnode_count)| {
-                (
-                    fragment_id,
-                    FragmentParallelismInfo {
-                        distribution_type: PbFragmentDistributionType::from(distribution_type),
-                        vnode_count: vnode_count as usize,
-                    },
-                )
-            })
-            .collect())
+        inner.fragment_serving_infos().await
     }
 
     pub async fn fragment_job_mapping(&self) -> MetaResult<HashMap<FragmentId, JobId>> {
@@ -512,11 +535,14 @@ impl CatalogController {
             None => return Ok(None),
         };
 
-        let job_parallelism: Option<StreamingParallelism> =
+        let job_parallelism: Option<(StreamingParallelism, Option<String>)> =
             StreamingJob::find_by_id(fragment_model.job_id)
                 .select_only()
-                .column(streaming_job::Column::Parallelism)
-                .into_tuple()
+                .columns([
+                    streaming_job::Column::Parallelism,
+                    streaming_job::Column::AdaptiveParallelismStrategy,
+                ])
+                .into_tuple::<(StreamingParallelism, Option<String>)>()
                 .one(&inner.db)
                 .await?;
 
@@ -558,7 +584,10 @@ impl CatalogController {
         let parallelism_policy = Self::format_fragment_parallelism_policy(
             fragment_model.distribution_type,
             fragment_model.parallelism.as_ref(),
-            job_parallelism.as_ref(),
+            job_parallelism.as_ref().map(|(parallelism, _)| parallelism),
+            job_parallelism
+                .as_ref()
+                .and_then(|(_, strategy)| strategy.as_deref()),
             &root_fragments,
         );
 
@@ -628,7 +657,6 @@ impl CatalogController {
             job_info.job_status.into(),
             job_info.stream_context(),
             fragment_actors,
-            job_info.parallelism,
             job_info.max_parallelism as _,
             job_definition,
         )
@@ -869,6 +897,9 @@ impl CatalogController {
             .columns([
                 streaming_job::Column::JobStatus,
                 streaming_job::Column::Parallelism,
+                streaming_job::Column::AdaptiveParallelismStrategy,
+                streaming_job::Column::BackfillParallelism,
+                streaming_job::Column::BackfillAdaptiveParallelismStrategy,
                 streaming_job::Column::MaxParallelism,
             ])
             .column_as(
@@ -1059,7 +1090,6 @@ impl CatalogController {
                     job.job_status.into(),
                     job.stream_context(),
                     fragment_actors,
-                    job.parallelism,
                     job.max_parallelism as _,
                     job_definition.remove(&job.job_id),
                 )?,
@@ -1218,7 +1248,7 @@ impl CatalogController {
         let txn = inner.db.begin().await?;
 
         let fragments_query = Self::build_fragment_query(is_creating);
-        #[allow(clippy::type_complexity)]
+        #[expect(clippy::type_complexity)]
         let fragments: Vec<(
             FragmentId,
             JobId,
@@ -1292,22 +1322,25 @@ impl CatalogController {
         let fragment_ids = rows.iter().map(|row| row.fragment_id).collect_vec();
         let job_ids = rows.iter().map(|row| row.job_id).unique().collect_vec();
 
-        let job_parallelisms: HashMap<JobId, StreamingParallelism> = if fragment_ids.is_empty() {
-            HashMap::new()
-        } else {
-            StreamingJob::find()
-                .select_only()
-                .columns([
-                    streaming_job::Column::JobId,
-                    streaming_job::Column::Parallelism,
-                ])
-                .filter(streaming_job::Column::JobId.is_in(job_ids))
-                .into_tuple()
-                .all(txn)
-                .await?
-                .into_iter()
-                .collect()
-        };
+        let job_parallelisms: HashMap<JobId, (StreamingParallelism, Option<String>)> =
+            if fragment_ids.is_empty() {
+                HashMap::new()
+            } else {
+                StreamingJob::find()
+                    .select_only()
+                    .columns([
+                        streaming_job::Column::JobId,
+                        streaming_job::Column::Parallelism,
+                        streaming_job::Column::AdaptiveParallelismStrategy,
+                    ])
+                    .filter(streaming_job::Column::JobId.is_in(job_ids))
+                    .into_tuple::<(JobId, StreamingParallelism, Option<String>)>()
+                    .all(txn)
+                    .await?
+                    .into_iter()
+                    .map(|(job_id, parallelism, strategy)| (job_id, (parallelism, strategy)))
+                    .collect()
+            };
 
         let upstream_entries: Vec<(FragmentId, FragmentId, DispatcherType)> =
             if fragment_ids.is_empty() {
@@ -1357,7 +1390,12 @@ impl CatalogController {
             let parallelism_policy = Self::format_fragment_parallelism_policy(
                 row.distribution_type,
                 row.parallelism_override.as_ref(),
-                job_parallelisms.get(&row.job_id),
+                job_parallelisms
+                    .get(&row.job_id)
+                    .map(|(parallelism, _)| parallelism),
+                job_parallelisms
+                    .get(&row.job_id)
+                    .and_then(|(_, strategy)| strategy.as_deref()),
                 &root_fragments,
             );
 
@@ -1454,6 +1492,7 @@ impl CatalogController {
         distribution_type: DistributionType,
         fragment_parallelism: Option<&StreamingParallelism>,
         job_parallelism: Option<&StreamingParallelism>,
+        job_adaptive_parallelism_strategy: Option<&str>,
         root_fragments: &[FragmentId],
     ) -> String {
         if distribution_type == DistributionType::Single {
@@ -1463,7 +1502,7 @@ impl CatalogController {
         if let Some(parallelism) = fragment_parallelism {
             return format!(
                 "override({})",
-                Self::format_streaming_parallelism(parallelism)
+                Self::format_streaming_parallelism(parallelism, job_adaptive_parallelism_strategy)
             );
         }
 
@@ -1476,17 +1515,38 @@ impl CatalogController {
         }
 
         let inherited = job_parallelism
-            .map(Self::format_streaming_parallelism)
+            .map(|parallelism| {
+                Self::format_streaming_parallelism(parallelism, job_adaptive_parallelism_strategy)
+            })
             .unwrap_or_else(|| "unknown".to_owned());
         format!("inherit({inherited})")
     }
 
-    fn format_streaming_parallelism(parallelism: &StreamingParallelism) -> String {
+    fn format_streaming_parallelism(
+        parallelism: &StreamingParallelism,
+        adaptive_parallelism_strategy: Option<&str>,
+    ) -> String {
         match parallelism {
-            StreamingParallelism::Adaptive => "adaptive".to_owned(),
-            StreamingParallelism::Fixed(n) => format!("fixed({n})"),
-            StreamingParallelism::Custom => "custom".to_owned(),
+            StreamingParallelism::Adaptive => adaptive_parallelism_strategy
+                .and_then(Self::format_adaptive_parallelism_strategy)
+                .unwrap_or_else(|| "adaptive".to_owned()),
+            StreamingParallelism::Fixed(n) => n.to_string(),
+            StreamingParallelism::Custom => adaptive_parallelism_strategy
+                .and_then(Self::format_adaptive_parallelism_strategy)
+                .unwrap_or_else(|| "custom".to_owned()),
         }
+    }
+
+    fn format_adaptive_parallelism_strategy(strategy: &str) -> Option<String> {
+        parse_strategy(strategy)
+            .ok()
+            .map(|strategy| match strategy {
+                AdaptiveParallelismStrategy::Auto | AdaptiveParallelismStrategy::Full => {
+                    "adaptive".to_owned()
+                }
+                AdaptiveParallelismStrategy::Bounded(n) => format!("bounded({n})"),
+                AdaptiveParallelismStrategy::Ratio(r) => format!("ratio({r})"),
+            })
     }
 
     pub async fn list_sink_actor_mapping(
@@ -1560,15 +1620,9 @@ impl CatalogController {
             return Ok(HashMap::new());
         }
 
-        let adaptive_parallelism_strategy = {
-            let system_params_reader = self.env.system_params_reader().await;
-            system_params_reader.adaptive_parallelism_strategy()
-        };
-
         let RenderedGraph { fragments, .. } = render_actor_assignments(
             self.env.actor_id_generator(),
             worker_nodes.current(),
-            adaptive_parallelism_strategy,
             &loaded,
         )?;
 
@@ -1703,8 +1757,11 @@ impl CatalogController {
                     .column(fragment::Column::DistributionType)
                     .into_tuple()
                     .one(txn)
-                    .await?
-                    .ok_or_else(|| anyhow!("failed to find fragment: {}", fragment_id))?
+                    .await
+                    .map_err(MetaError::from)?
+                    .ok_or_else(|| {
+                        MetaError::from(anyhow!("failed to find fragment: {}", fragment_id))
+                    })?
             };
             result
         };
@@ -2360,10 +2417,95 @@ mod tests {
             fragment.distribution_type,
             fragment.parallelism.as_ref(),
             Some(&job_parallelism),
+            None,
             &[],
         );
 
-        assert_eq!(policy, "inherit(fixed(4))");
+        assert_eq!(policy, "inherit(4)");
+    }
+
+    #[test]
+    fn test_parallelism_policy_with_adaptive_strategy() {
+        #[expect(deprecated)]
+        let fragment = fragment::Model {
+            fragment_id: 4.into(),
+            job_id: TEST_JOB_ID,
+            fragment_type_mask: 0,
+            distribution_type: DistributionType::Hash,
+            stream_node: StreamNode::from(&PbStreamNode::default()),
+            state_table_ids: TableIdArray::default(),
+            upstream_fragment_id: Default::default(),
+            vnode_count: 0,
+            parallelism: None,
+        };
+
+        let job_parallelism = StreamingParallelism::Adaptive;
+
+        let policy = super::CatalogController::format_fragment_parallelism_policy(
+            fragment.distribution_type,
+            fragment.parallelism.as_ref(),
+            Some(&job_parallelism),
+            Some("RATIO(0.5)"),
+            &[],
+        );
+
+        assert_eq!(policy, "inherit(ratio(0.5))");
+    }
+
+    #[test]
+    fn test_parallelism_policy_with_custom_strategy() {
+        #[expect(deprecated)]
+        let fragment = fragment::Model {
+            fragment_id: 6.into(),
+            job_id: TEST_JOB_ID,
+            fragment_type_mask: 0,
+            distribution_type: DistributionType::Hash,
+            stream_node: StreamNode::from(&PbStreamNode::default()),
+            state_table_ids: TableIdArray::default(),
+            upstream_fragment_id: Default::default(),
+            vnode_count: 0,
+            parallelism: None,
+        };
+
+        let job_parallelism = StreamingParallelism::Custom;
+
+        let policy = super::CatalogController::format_fragment_parallelism_policy(
+            fragment.distribution_type,
+            fragment.parallelism.as_ref(),
+            Some(&job_parallelism),
+            Some("BOUNDED(8)"),
+            &[],
+        );
+
+        assert_eq!(policy, "inherit(bounded(8))");
+    }
+
+    #[test]
+    fn test_parallelism_policy_with_invalid_adaptive_strategy_falls_back() {
+        #[expect(deprecated)]
+        let fragment = fragment::Model {
+            fragment_id: 7.into(),
+            job_id: TEST_JOB_ID,
+            fragment_type_mask: 0,
+            distribution_type: DistributionType::Hash,
+            stream_node: StreamNode::from(&PbStreamNode::default()),
+            state_table_ids: TableIdArray::default(),
+            upstream_fragment_id: Default::default(),
+            vnode_count: 0,
+            parallelism: None,
+        };
+
+        let job_parallelism = StreamingParallelism::Adaptive;
+
+        let policy = super::CatalogController::format_fragment_parallelism_policy(
+            fragment.distribution_type,
+            fragment.parallelism.as_ref(),
+            Some(&job_parallelism),
+            Some("NOT_A_STRATEGY"),
+            &[],
+        );
+
+        assert_eq!(policy, "inherit(adaptive)");
     }
 
     #[test]
@@ -2384,6 +2526,7 @@ mod tests {
         let policy = super::CatalogController::format_fragment_parallelism_policy(
             fragment.distribution_type,
             fragment.parallelism.as_ref(),
+            None,
             None,
             &[3.into(), 1.into(), 2.into(), 1.into()],
         );

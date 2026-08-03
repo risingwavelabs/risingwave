@@ -296,7 +296,7 @@ fn data_types_match(a: &arrow_schema_udf::Schema, b: &arrow_schema_udf::Schema) 
     if a.fields().len() != b.fields().len() {
         return false;
     }
-    #[allow(clippy::disallowed_methods)]
+    #[expect(clippy::disallowed_methods)]
     a.fields()
         .iter()
         .zip(b.fields())

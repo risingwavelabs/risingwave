@@ -12,25 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(clippy::derive_partial_eq_without_eq)]
+#![expect(clippy::derive_partial_eq_without_eq)]
 #![warn(clippy::large_futures, clippy::large_stack_frames)]
 #![feature(coroutines)]
 #![feature(proc_macro_hygiene)]
 #![feature(stmt_expr_attributes)]
-#![feature(box_patterns)]
 #![feature(trait_alias)]
-#![feature(box_into_inner)]
 #![feature(type_alias_impl_trait)]
 #![feature(associated_type_defaults)]
-#![feature(impl_trait_in_assoc_type)]
 #![feature(iter_from_coroutine)]
-#![feature(if_let_guard)]
 #![feature(iterator_try_collect)]
 #![feature(try_blocks)]
 #![feature(error_generic_member_access)]
 #![feature(negative_impls)]
 #![feature(register_tool)]
-#![feature(assert_matches)]
 #![feature(never_type)]
 #![feature(map_try_insert)]
 #![register_tool(rw)]
@@ -195,8 +190,9 @@ mod tests {
     use expect_test::expect_file;
 
     use crate::with_options_test::{
-        generate_allow_alter_on_fly_fields_combined, generate_with_options_yaml_connection,
-        generate_with_options_yaml_sink, generate_with_options_yaml_source,
+        generate_allow_alter_on_fly_fields_combined, generate_iceberg_engine_fields,
+        generate_with_options_yaml_connection, generate_with_options_yaml_sink,
+        generate_with_options_yaml_source,
     };
 
     /// This test ensures that `src/connector/with_options.yaml` is up-to-date with the default values specified
@@ -217,6 +213,13 @@ mod tests {
     fn test_allow_alter_on_fly_fields_rust_up_to_date() {
         expect_file!("../src/allow_alter_on_fly_fields.rs")
             .assert_eq(&generate_allow_alter_on_fly_fields_combined());
+    }
+
+    /// This test ensures that Iceberg Engine sink fields are up-to-date.
+    #[test]
+    fn test_iceberg_engine_fields_rust_up_to_date() {
+        expect_file!("../src/sink/iceberg/engine_options.rs")
+            .assert_eq(&generate_iceberg_engine_fields());
     }
 
     /// Test some serde behavior we rely on.

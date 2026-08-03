@@ -31,7 +31,6 @@ risingwave_common = { workspace = true }
 risingwave_connector = { workspace = true }
 risingwave_dml = { workspace = true }
 risingwave_expr = { workspace = true }
-risingwave_hummock_sdk = { workspace = true }
 risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_storage = { workspace = true }
@@ -51,7 +50,6 @@ workspace-hack = { path = "../workspace-hack" }
 
 [dev-dependencies]
 rand = { workspace = true }
-risingwave_hummock_sdk = { workspace = true }
 tempfile = "3"
 
 [lints]

@@ -128,7 +128,7 @@ impl BlockExecutor {
     #[try_stream(ok = DataChunk, error = BatchError)]
     async fn do_execute(self) {
         // infinite loop to block
-        #[allow(clippy::empty_loop)]
+        #[expect(clippy::empty_loop)]
         loop {}
     }
 }

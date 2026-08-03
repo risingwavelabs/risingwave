@@ -45,16 +45,6 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_count(
-                    "CDC Source Errors",
-                    "",
-                    [
-                        panels.target(
-                            f"sum({metric('cdc_source_error')}) by (connector_name, source_id, error_msg)",
-                            "{{connector_name}}: {{error_msg}} ({{source_id}})",
-                        ),
-                    ],
-                ),
-                panels.timeseries_count(
                     "Auto Schema Change Failure Count",
                     "Total number of failed auto schema change attempts of CDC Table",
                     [
@@ -112,11 +102,11 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_bytes(
-                    "PostgreSQL CDC State Table WAL Lag (bytes)",
-                    "Upstream WAL lag in bytes: pg_current_wal_lsn - state_table_lsn (computed in PromQL).",
+                    "PostgreSQL CDC Slot WAL Lag (bytes)",
+                    "Upstream WAL lag in bytes: pg_current_wal_lsn - confirmed_flush_lsn (computed in PromQL).",
                     [
                         panels.target(
-                            f"clamp_min({metric('pg_cdc_upstream_max_lsn')} - on(source_id) group_left(slot_name) {metric('stream_pg_cdc_state_table_lsn')}, 0)",
+                            f"{metric('pg_cdc_upstream_max_lsn')} - {metric('pg_cdc_confirmed_flush_lsn')}",
                             "slot {{slot_name}} source_id {{source_id}} - WAL Lag",
                         ),
                     ],

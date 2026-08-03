@@ -34,8 +34,7 @@ impl Psql {
         Self { opts }
     }
 
-    #[allow(clippy::unused_async)]
-    pub(crate) async fn init(&self) -> anyhow::Result<()> {
+    pub(crate) fn init(&self) -> anyhow::Result<()> {
         info!("Initializing instances.");
 
         for _db in [self.opts.database_name(), PG_DB_NAME] {

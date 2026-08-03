@@ -76,13 +76,13 @@
     window w1 as (partition by y order by x),
            w2 as (partition by z order by y);
   logical_plan: |-
-    LogicalProject { exprs: [t.x, t.y, t.z, sum, (sum::Decimal / count::Decimal) as $expr1] }
+    LogicalProject { exprs: [t.x, t.y, t.z, sum, Case((count = 0:Int32), null:Decimal, (sum::Decimal / count::Decimal)) as $expr1] }
     └─LogicalOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), sum(t.y) OVER(PARTITION BY t.z ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count(t.y) OVER(PARTITION BY t.z ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
       └─LogicalProject { exprs: [t.x, t.y, t.z, t._row_id, t._rw_timestamp] }
         └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [t.x, t.y, t.z, sum, (sum::Decimal / count::Decimal) as $expr1] }
+    └─BatchProject { exprs: [t.x, t.y, t.z, sum, Case((count = 0:Int32), null:Decimal, (sum::Decimal / count::Decimal)) as $expr1] }
       └─BatchOverWindow { window_functions: [sum(t.y) OVER(PARTITION BY t.z ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count(t.y) OVER(PARTITION BY t.z ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
         └─BatchExchange { order: [t.z ASC, t.y ASC], dist: HashShard(t.z) }
           └─BatchSort { order: [t.z ASC, t.y ASC] }
@@ -92,7 +92,7 @@
                   └─BatchScan { table: t, columns: [t.x, t.y, t.z], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [x, y, z, sum, avg, t._row_id(hidden)], stream_key: [t._row_id, y, z], pk_columns: [t._row_id, y, z], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [t.x, t.y, t.z, sum, (sum::Decimal / count::Decimal) as $expr1, t._row_id] }
+    └─StreamProject { exprs: [t.x, t.y, t.z, sum, Case((count = 0:Int32), null:Decimal, (sum::Decimal / count::Decimal)) as $expr1, t._row_id] }
       └─StreamOverWindow { window_functions: [sum(t.y) OVER(PARTITION BY t.z ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count(t.y) OVER(PARTITION BY t.z ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
         └─StreamExchange { dist: HashShard(t.z) }
           └─StreamOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
@@ -177,20 +177,20 @@
     from t
     window w as (partition by y order by z);
   logical_plan: |-
-    LogicalProject { exprs: [t.x, t.y, t.z, sum, (sum::Decimal / count::Decimal) as $expr1, min, max, count] }
+    LogicalProject { exprs: [t.x, t.y, t.z, sum, Case((count = 0:Int32), null:Decimal, (sum::Decimal / count::Decimal)) as $expr1, min, max, count] }
     └─LogicalOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count(t.x) OVER(PARTITION BY t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), min(t.x) OVER(PARTITION BY t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), max(t.x) OVER(PARTITION BY t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count() OVER(PARTITION BY t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
       └─LogicalProject { exprs: [t.x, t.y, t.z, t._row_id, t._rw_timestamp] }
         └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [t.x, t.y, t.z, sum, (sum::Decimal / count::Decimal) as $expr1, min, max, count] }
+    └─BatchProject { exprs: [t.x, t.y, t.z, sum, Case((count = 0:Int32), null:Decimal, (sum::Decimal / count::Decimal)) as $expr1, min, max, count] }
       └─BatchOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count(t.x) OVER(PARTITION BY t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), min(t.x) OVER(PARTITION BY t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), max(t.x) OVER(PARTITION BY t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count() OVER(PARTITION BY t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
         └─BatchExchange { order: [t.y ASC, t.z ASC], dist: HashShard(t.y) }
           └─BatchSort { order: [t.y ASC, t.z ASC] }
             └─BatchScan { table: t, columns: [t.x, t.y, t.z], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [x, y, z, sum, avg, min, max, count, t._row_id(hidden)], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [t.x, t.y, t.z, sum, (sum::Decimal / count::Decimal) as $expr1, min, max, count, t._row_id] }
+    └─StreamProject { exprs: [t.x, t.y, t.z, sum, Case((count = 0:Int32), null:Decimal, (sum::Decimal / count::Decimal)) as $expr1, min, max, count, t._row_id] }
       └─StreamOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count(t.x) OVER(PARTITION BY t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), min(t.x) OVER(PARTITION BY t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), max(t.x) OVER(PARTITION BY t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count() OVER(PARTITION BY t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
         └─StreamExchange { dist: HashShard(t.y) }
           └─StreamTableScan { table: t, columns: [t.x, t.y, t.z, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
@@ -269,13 +269,13 @@
     from t
     window w as (partition by y order by x);
   logical_plan: |-
-    LogicalProject { exprs: [t.x, t.y, t.z, sum, (sum::Decimal / count::Decimal) as $expr1, count] }
+    LogicalProject { exprs: [t.x, t.y, t.z, sum, Case((count = 0:Int32), null:Decimal, (sum::Decimal / count::Decimal)) as $expr1, count] }
     └─LogicalOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), sum(t.y) OVER(PARTITION BY t.z ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count(t.y) OVER(PARTITION BY t.z ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
       └─LogicalProject { exprs: [t.x, t.y, t.z, t._row_id, t._rw_timestamp] }
         └─LogicalScan { table: t, columns: [t.x, t.y, t.z, t._row_id, t._rw_timestamp] }
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [t.x, t.y, t.z, sum, (sum::Decimal / count::Decimal) as $expr1, count] }
+    └─BatchProject { exprs: [t.x, t.y, t.z, sum, Case((count = 0:Int32), null:Decimal, (sum::Decimal / count::Decimal)) as $expr1, count] }
       └─BatchOverWindow { window_functions: [sum(t.y) OVER(PARTITION BY t.z ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count(t.y) OVER(PARTITION BY t.z ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
         └─BatchExchange { order: [t.z ASC, t.x ASC], dist: HashShard(t.z) }
           └─BatchSort { order: [t.z ASC, t.x ASC] }
@@ -285,7 +285,7 @@
                   └─BatchScan { table: t, columns: [t.x, t.y, t.z], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [x, y, z, sum, avg, count, t._row_id(hidden)], stream_key: [t._row_id, y, z], pk_columns: [t._row_id, y, z], pk_conflict: NoCheck }
-    └─StreamProject { exprs: [t.x, t.y, t.z, sum, (sum::Decimal / count::Decimal) as $expr1, count, t._row_id] }
+    └─StreamProject { exprs: [t.x, t.y, t.z, sum, Case((count = 0:Int32), null:Decimal, (sum::Decimal / count::Decimal)) as $expr1, count, t._row_id] }
       └─StreamOverWindow { window_functions: [sum(t.y) OVER(PARTITION BY t.z ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count(t.y) OVER(PARTITION BY t.z ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
         └─StreamExchange { dist: HashShard(t.z) }
           └─StreamOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }

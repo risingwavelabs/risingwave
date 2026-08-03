@@ -34,7 +34,7 @@ impl WrapperExecutor {
         Self { input, actor_ctx }
     }
 
-    #[allow(clippy::let_and_return)]
+    #[expect(clippy::let_and_return)]
     fn wrap_debug(
         info: Arc<ExecutorInfo>,
         stream: impl MessageStream + 'static,
@@ -84,10 +84,5 @@ impl Execute for WrapperExecutor {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
         let info = Arc::new(self.input.info().clone());
         Self::wrap(info, self.actor_ctx, self.input.execute()).boxed()
-    }
-
-    fn execute_with_epoch(self: Box<Self>, epoch: u64) -> BoxedMessageStream {
-        let info = Arc::new(self.input.info().clone());
-        Self::wrap(info, self.actor_ctx, self.input.execute_with_epoch(epoch)).boxed()
     }
 }

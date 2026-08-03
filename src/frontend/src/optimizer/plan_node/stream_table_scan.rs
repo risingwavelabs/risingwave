@@ -20,13 +20,18 @@ use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::catalog::Field;
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::scan_range::ScanRange;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_pb::stream_plan::stream_node::{PbNodeBody, PbStreamKind};
 use risingwave_pb::stream_plan::{PbStreamNode, StreamScanType};
 
 use super::stream::prelude::*;
 use super::utils::{Distill, childless_record};
-use super::{ExprRewritable, PlanBase, PlanNodeId, StreamNode, StreamPlanRef as PlanRef, generic};
+use super::{
+    BackfillType, ExprRewritable, PlanBase, PlanNodeId, StreamNode, StreamPlanRef as PlanRef,
+    generic,
+};
 use crate::TableCatalog;
 use crate::catalog::ColumnId;
 use crate::expr::{ExprRewriter, ExprVisitor, FunctionCall};
@@ -44,7 +49,8 @@ pub struct StreamTableScan {
     pub base: PlanBase<Stream>,
     core: generic::TableScan,
     batch_plan_id: PlanNodeId,
-    stream_scan_type: StreamScanType,
+    backfill_type: BackfillType,
+    pk_scan_range: Option<ScanRange>,
 }
 
 impl StreamTableScan {
@@ -54,17 +60,22 @@ impl StreamTableScan {
     pub const ROW_COUNT_COLUMN_NAME: &str = "row_count";
     pub const VNODE_COLUMN_NAME: &str = "vnode";
 
-    pub fn new_with_stream_scan_type(
+    pub fn new_with_backfill_type(core: generic::TableScan, backfill_type: BackfillType) -> Self {
+        Self::new_with_scan_range(core, backfill_type, None)
+    }
+
+    pub fn new_with_scan_range(
         core: generic::TableScan,
-        stream_scan_type: StreamScanType,
+        backfill_type: BackfillType,
+        pk_scan_range: Option<ScanRange>,
     ) -> Self {
         let batch_plan_id = core.ctx.next_plan_node_id();
 
-        let mut stream_scan_type = stream_scan_type;
         if core.cross_database() {
-            assert_ne!(stream_scan_type, StreamScanType::UpstreamOnly);
-            // Force rewrite scan type to cross-db scan
-            stream_scan_type = StreamScanType::CrossDbSnapshotBackfill;
+            assert!(
+                !(backfill_type == BackfillType::Replicated || backfill_type.without_snapshot()),
+                "cross-database replicated or without-snapshot scan is not supported"
+            );
         }
 
         let distribution = {
@@ -81,14 +92,18 @@ impl StreamTableScan {
             }
         };
 
+        let stream_kind = if core.append_only() {
+            StreamKind::AppendOnly
+        } else if backfill_type.without_snapshot() {
+            StreamKind::Upsert
+        } else {
+            StreamKind::Retract
+        };
+
         let base = PlanBase::new_stream_with_core(
             &core,
             distribution,
-            if core.append_only() {
-                StreamKind::AppendOnly
-            } else {
-                StreamKind::Retract
-            },
+            stream_kind,
             false,
             core.watermark_columns(),
             MonotonicityMap::new(),
@@ -97,7 +112,8 @@ impl StreamTableScan {
             base,
             core,
             batch_plan_id,
-            stream_scan_type,
+            backfill_type,
+            pk_scan_range,
         }
     }
 
@@ -114,7 +130,7 @@ impl StreamTableScan {
         index_table_catalog: Arc<TableCatalog>,
         primary_to_secondary_mapping: &BTreeMap<usize, usize>,
         function_mapping: &HashMap<FunctionCall, usize>,
-        stream_scan_type: StreamScanType,
+        backfill_type: BackfillType,
     ) -> StreamTableScan {
         let logical_index_scan = self.core.to_index_scan(
             index_table_catalog,
@@ -124,11 +140,20 @@ impl StreamTableScan {
         logical_index_scan
             .distribution_key()
             .expect("distribution key of stream chain must exist in output columns");
-        StreamTableScan::new_with_stream_scan_type(logical_index_scan, stream_scan_type)
+        StreamTableScan::new_with_backfill_type(logical_index_scan, backfill_type)
     }
 
     pub fn stream_scan_type(&self) -> StreamScanType {
-        self.stream_scan_type
+        self.backfill_type
+            .to_stream_scan_type(self.core.cross_database())
+    }
+
+    pub fn backfill_type(&self) -> BackfillType {
+        self.backfill_type
+    }
+
+    pub fn pk_scan_range(&self) -> Option<&ScanRange> {
+        self.pk_scan_range.as_ref()
     }
 
     // TODO: Add note to reviewer about safety, because of `generic::TableScan` limitation.
@@ -195,6 +220,7 @@ impl StreamTableScan {
         ));
         catalog_builder.add_order_column(0, OrderType::ascending());
 
+        #[expect(deprecated)]
         match stream_scan_type {
             StreamScanType::Chain
             | StreamScanType::Rearrange
@@ -242,9 +268,7 @@ impl StreamTableScan {
                     catalog_builder.add_column(&Field::from(&col.column_desc));
                 }
             }
-            StreamScanType::Unspecified => {
-                unreachable!()
-            }
+            StreamScanType::Unspecified => unreachable!(),
         }
 
         // Reuse the state store pk (vnode) as the vnode as well.
@@ -268,9 +292,52 @@ impl Distill for StreamTableScan {
         let mut vec = Vec::with_capacity(4);
         vec.push(("table", Pretty::from(self.core.table_name().to_owned())));
         vec.push(("columns", self.core.columns_pretty(verbose)));
+        if let Some(scan_range) = &self.pk_scan_range {
+            let mut parts = Vec::new();
+            let pk_cols = self.core.primary_key();
+            // Display eq_conds
+            for (pk, datum) in pk_cols
+                .iter()
+                .take(scan_range.eq_conds.len())
+                .zip_eq_fast(scan_range.eq_conds.iter())
+            {
+                let field = &self.core.table_catalog.columns()[pk.column_index];
+                parts.push(format!("{} = {:?}", field.name(), datum));
+            }
+            // Display range bounds on the next column
+            let range_col_idx = scan_range.eq_conds.len();
+            if range_col_idx < pk_cols.len() {
+                use std::ops::Bound;
+                let field = &self.core.table_catalog.columns()[pk_cols[range_col_idx].column_index];
+                let fmt_bound_val = |v: &Vec<risingwave_common::types::Datum>| -> String {
+                    v.first().map_or("NULL".to_owned(), |d| format!("{:?}", d))
+                };
+                match &scan_range.range.0 {
+                    Bound::Included(v) => {
+                        parts.push(format!("{} >= {}", field.name(), fmt_bound_val(v)))
+                    }
+                    Bound::Excluded(v) => {
+                        parts.push(format!("{} > {}", field.name(), fmt_bound_val(v)))
+                    }
+                    Bound::Unbounded => {}
+                }
+                match &scan_range.range.1 {
+                    Bound::Included(v) => {
+                        parts.push(format!("{} <= {}", field.name(), fmt_bound_val(v)))
+                    }
+                    Bound::Excluded(v) => {
+                        parts.push(format!("{} < {}", field.name(), fmt_bound_val(v)))
+                    }
+                    Bound::Unbounded => {}
+                }
+            }
+            if !parts.is_empty() {
+                vec.push(("pk_scan_range", Pretty::from(parts.join(" AND "))));
+            }
+        }
 
         if verbose {
-            vec.push(("stream_scan_type", Pretty::debug(&self.stream_scan_type)));
+            vec.push(("stream_scan_type", Pretty::debug(&self.stream_scan_type())));
             let stream_key = IndicesDisplay {
                 indices: self.stream_key().unwrap_or_default(),
                 schema: self.base.schema(),
@@ -319,8 +386,11 @@ impl StreamTableScan {
             .map(|x| *x as u32)
             .collect_vec();
 
+        let stream_scan_type = self.stream_scan_type();
+
         // The required columns from the table (both scan and upstream).
-        let upstream_column_ids = match self.stream_scan_type {
+        #[expect(deprecated)]
+        let upstream_column_ids = match stream_scan_type {
             // For backfill, we additionally need the primary key columns.
             StreamScanType::Backfill
             | StreamScanType::ArrangementBackfill
@@ -358,7 +428,7 @@ impl StreamTableScan {
         };
 
         let catalog = self
-            .build_backfill_state_catalog(state, self.stream_scan_type)
+            .build_backfill_state_catalog(state, stream_scan_type)
             .to_internal_table_prost();
 
         // For backfill, we first read pk + output_indices from upstream.
@@ -376,14 +446,14 @@ impl StreamTableScan {
             })
             .collect_vec();
 
-        let arrangement_table = if self.stream_scan_type == StreamScanType::ArrangementBackfill {
+        let arrangement_table = if stream_scan_type == StreamScanType::ArrangementBackfill {
             let upstream_table_catalog = self.get_upstream_state_table();
             Some(upstream_table_catalog.to_internal_table_prost())
         } else {
             None
         };
 
-        let input = if self.stream_scan_type == StreamScanType::CrossDbSnapshotBackfill {
+        let input = if stream_scan_type == StreamScanType::CrossDbSnapshotBackfill {
             vec![]
         } else {
             vec![
@@ -411,7 +481,7 @@ impl StreamTableScan {
 
         let node_body = PbNodeBody::StreamScan(Box::new(StreamScanNode {
             table_id: self.core.table_catalog.id,
-            stream_scan_type: self.stream_scan_type as i32,
+            stream_scan_type: stream_scan_type as i32,
             // The column indices need to be forwarded to the downstream
             output_indices,
             upstream_column_ids,
@@ -420,6 +490,7 @@ impl StreamTableScan {
             state_table: Some(catalog),
             arrangement_table,
             rate_limit: self.base.ctx().overwrite_options().backfill_rate_limit,
+            pk_scan_range: self.pk_scan_range.as_ref().map(|sr| sr.to_protobuf()),
             ..Default::default()
         }));
 
@@ -443,7 +514,7 @@ impl ExprRewritable<Stream> for StreamTableScan {
     fn rewrite_exprs(&self, r: &mut dyn ExprRewriter) -> PlanRef {
         let mut core = self.core.clone();
         core.rewrite_exprs(r);
-        Self::new_with_stream_scan_type(core, self.stream_scan_type).into()
+        Self::new_with_scan_range(core, self.backfill_type, self.pk_scan_range.clone()).into()
     }
 }
 

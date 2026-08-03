@@ -32,7 +32,7 @@ enum TestDataEncoding {
     /// Specially, it handles `union` variants, and differentiates `bytes` from `string`.
     ///
     /// TODO: Not supported yet, because `apache_avro` doesn't support decoding JSON encoded avro..
-    #[allow(dead_code)]
+    #[expect(dead_code)]
     Json,
     /// Each data is a binary encoded Avro value, converted to a hex string.
     ///

@@ -160,6 +160,8 @@ mod distinct_agg_rule;
 pub use distinct_agg_rule::*;
 mod index_selection_rule;
 pub use index_selection_rule::*;
+mod streaming_index_selection_rule;
+pub use streaming_index_selection_rule::StreamingIndexSelectionRule;
 mod push_calculation_of_join_rule;
 pub use push_calculation_of_join_rule::*;
 mod join_commute_rule;

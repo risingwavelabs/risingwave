@@ -24,6 +24,8 @@ use crate::task::ExecutorParams;
 
 pub struct VectorIndexLookupJoinBuilder;
 
+impl_stream_node_body!(VectorIndexLookupJoin(VectorIndexLookupJoinNode) => VectorIndexLookupJoinBuilder);
+
 impl ExecutorBuilder for VectorIndexLookupJoinBuilder {
     type Node = VectorIndexLookupJoinNode;
 

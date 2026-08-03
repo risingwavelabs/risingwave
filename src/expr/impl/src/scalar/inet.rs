@@ -40,11 +40,11 @@ pub fn inet_aton(str: &str) -> Result<i64> {
     for _ in 0..4 {
         let part = parts.next().ok_or(ExprError::InvalidParam {
             name: "str",
-            reason: format!("Invalid IP address: {}", &str).into(),
+            reason: format!("Invalid IP address: {}", str).into(),
         })?;
         let part = part.parse::<u8>().map_err(|_| ExprError::InvalidParam {
             name: "str",
-            reason: format!("Invalid IP address: {}", &str).into(),
+            reason: format!("Invalid IP address: {}", str).into(),
         })?;
         result = (result << 8) | part as i64;
     }
@@ -88,7 +88,7 @@ pub fn inet_ntoa(mut num: i64) -> Result<Box<str>> {
 
 #[cfg(test)]
 mod tests {
-    use std::assert_matches::assert_matches;
+    use std::assert_matches;
 
     use super::*;
 

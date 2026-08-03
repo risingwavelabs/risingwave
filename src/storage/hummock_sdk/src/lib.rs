@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
-#![feature(btree_cursors)]
 #![feature(map_try_insert)]
 #![feature(stmt_expr_attributes)]
 
@@ -406,7 +404,6 @@ pub fn version_checkpoint_dir(checkpoint_path: &str) -> String {
 pub struct EpochWithGap(u64);
 
 impl EpochWithGap {
-    #[allow(unused_variables)]
     pub fn new(epoch: u64, spill_offset: u16) -> Self {
         // We only use 48 high bit to store epoch and use 16 low bit to store spill offset. But for MAX epoch,
         // we still keep `u64::MAX` because we have use it in delete range and persist this value to sstable files.
