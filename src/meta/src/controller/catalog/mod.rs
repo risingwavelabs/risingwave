@@ -648,50 +648,9 @@ impl CatalogController {
             .into_tuple()
             .all(&txn)
             .await?;
-
-        // Filter out dummy objs for replacement.
-        // todo: we'd better introduce a new dummy object type for replacement.
-        let all_dirty_table_ids = dirty_job_objs
-            .iter()
-            .filter(|obj| obj.obj_type == ObjectType::Table)
-            .map(|obj| obj.oid)
-            .collect_vec();
-        let dirty_table_type_map: HashMap<ObjectId, TableType> = Table::find()
-            .select_only()
-            .column(table::Column::TableId)
-            .column(table::Column::TableType)
-            .filter(table::Column::TableId.is_in(all_dirty_table_ids))
-            .into_tuple::<(ObjectId, TableType)>()
-            .all(&txn)
-            .await?
-            .into_iter()
-            .collect();
-
-        let dirty_background_jobs: HashSet<JobId> = streaming_job::Entity::find()
-            .select_only()
-            .column(streaming_job::Column::JobId)
-            .filter(
-                streaming_job::Column::JobId
-                    .is_in(dirty_job_ids.iter().copied())
-                    .and(streaming_job::Column::CreateType.eq(CreateType::Background)),
-            )
-            .into_tuple()
-            .all(&txn)
-            .await?
-            .into_iter()
-            .collect();
-
-        // notify delete for failed materialized views and background jobs.
-        let to_notify_objs = dirty_job_objs
-            .iter()
-            .filter(|obj| {
-                matches!(
-                    dirty_table_type_map.get(&obj.oid),
-                    Some(TableType::MaterializedView)
-                ) || dirty_background_jobs.contains(&obj.oid.as_job_id())
-            })
-            .cloned()
-            .collect_vec();
+        // Frontend deletion is idempotent, so notify every dirty job even if frontend did not
+        // observe its creating catalog or it is a temporary replacement object.
+        let to_notify_objs = dirty_job_objs.clone();
 
         // The source ids for dirty tables with connector.
         // FIXME: we should also clean dirty sources.
@@ -704,6 +663,24 @@ impl CatalogController {
                     .and(table::Column::OptionalAssociatedSourceId.is_not_null()),
             )
             .into_tuple()
+            .all(&txn)
+            .await?;
+        let dirty_associated_source_objs = Object::find()
+            .select_only()
+            .columns([
+                object::Column::Oid,
+                object::Column::ObjType,
+                object::Column::SchemaId,
+                object::Column::DatabaseId,
+            ])
+            .filter(
+                object::Column::Oid.is_in(
+                    dirty_associated_source_ids
+                        .iter()
+                        .map(|source_id| source_id.as_object_id()),
+                ),
+            )
+            .into_partial_model()
             .all(&txn)
             .await?;
 
@@ -785,6 +762,7 @@ impl CatalogController {
             to_notify_objs
                 .into_iter()
                 .chain(dirty_internal_table_objs)
+                .chain(dirty_associated_source_objs)
                 .collect_vec(),
         );
 
@@ -1129,7 +1107,7 @@ impl CatalogControllerInner {
             .collect())
     }
 
-    /// `list_tables` return all `CREATED` tables, `CREATING` materialized views/ `BACKGROUND` jobs and internal tables that belong to them and sinks.
+    /// `list_tables` returns all streaming-job tables and their internal tables.
     async fn list_tables(&self) -> MetaResult<Vec<PbTable>> {
         let mut table_objs = Table::find()
             .find_also_related(Object)
@@ -1142,38 +1120,10 @@ impl CatalogControllerInner {
             .into_iter()
             .map(|job| (job.job_id, job))
             .collect();
-
-        let sink_ids: HashSet<SinkId> = Sink::find()
-            .select_only()
-            .column(sink::Column::SinkId)
-            .into_tuple::<SinkId>()
-            .all(&self.db)
-            .await?
-            .into_iter()
-            .collect();
-
-        let mview_job_ids: HashSet<JobId> = table_objs
-            .iter()
-            .filter_map(|(table, _)| {
-                if table.table_type == TableType::MaterializedView {
-                    Some(table.table_id.as_job_id())
-                } else {
-                    None
-                }
-            })
-            .collect();
-
         table_objs.retain(|(table, _)| {
-            let job_id = table.job_id();
-
-            if sink_ids.contains(&job_id.as_sink_id()) || mview_job_ids.contains(&job_id) {
-                return true;
-            }
-            if let Some(streaming_job) = all_streaming_jobs.get(&job_id) {
-                return streaming_job.job_status == JobStatus::Created
-                    || (streaming_job.create_type == CreateType::Background);
-            }
-            false
+            all_streaming_jobs
+                .get(&table.job_id())
+                .is_some_and(|job| job.job_status != JobStatus::Initial)
         });
 
         let mut tables = Vec::with_capacity(table_objs.len());
@@ -1186,7 +1136,8 @@ impl CatalogControllerInner {
         Ok(tables)
     }
 
-    /// `list_sources` return all sources and `CREATED` ones if contains any streaming jobs.
+    /// `list_sources` returns all sources, including shared and associated sources whose streaming
+    /// jobs are still being created.
     async fn list_sources(&self) -> MetaResult<Vec<PbSource>> {
         let mut source_objs = Source::find()
             .find_also_related(Object)
@@ -1194,30 +1145,30 @@ impl CatalogControllerInner {
             .filter(
                 streaming_job::Column::JobStatus
                     .is_null()
-                    .or(streaming_job::Column::JobStatus.eq(JobStatus::Created)),
+                    .or(streaming_job::Column::JobStatus.ne(JobStatus::Initial)),
             )
             .all(&self.db)
             .await?;
 
-        // filter out inner connector sources that are still under creating.
-        let created_table_ids: HashSet<TableId> = Table::find()
+        let visible_table_ids: HashSet<TableId> = Table::find()
             .select_only()
             .column(table::Column::TableId)
             .join(JoinType::InnerJoin, table::Relation::Object1.def())
-            .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
+            .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
             .filter(
                 table::Column::OptionalAssociatedSourceId
                     .is_not_null()
-                    .and(streaming_job::Column::JobStatus.eq(JobStatus::Created)),
+                    .and(streaming_job::Column::JobStatus.ne(JobStatus::Initial)),
             )
             .into_tuple()
             .all(&self.db)
             .await?
             .into_iter()
             .collect();
-        source_objs.retain_mut(|(source, _)| {
-            source.optional_associated_table_id.is_none()
-                || created_table_ids.contains(&source.optional_associated_table_id.unwrap())
+        source_objs.retain(|(source, _)| {
+            source
+                .optional_associated_table_id
+                .is_none_or(|table_id| visible_table_ids.contains(&table_id))
         });
 
         Ok(source_objs
@@ -1231,6 +1182,11 @@ impl CatalogControllerInner {
         let sink_objs = Sink::find()
             .find_also_related(Object)
             .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
+            .filter(
+                streaming_job::Column::JobStatus
+                    .is_null()
+                    .or(streaming_job::Column::JobStatus.ne(JobStatus::Initial)),
+            )
             .all(&self.db)
             .await?;
         let streaming_jobs = load_streaming_jobs_by_ids(
@@ -1271,16 +1227,12 @@ impl CatalogControllerInner {
             .collect())
     }
 
-    /// `list_indexes` return all `CREATED` and `BACKGROUND` indexes.
+    /// `list_indexes` returns all streaming indexes.
     async fn list_indexes(&self) -> MetaResult<Vec<PbIndex>> {
         let index_objs = Index::find()
             .find_also_related(Object)
-            .join(JoinType::LeftJoin, object::Relation::StreamingJob.def())
-            .filter(
-                streaming_job::Column::JobStatus
-                    .eq(JobStatus::Created)
-                    .or(streaming_job::Column::CreateType.eq(CreateType::Background)),
-            )
+            .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
+            .filter(streaming_job::Column::JobStatus.ne(JobStatus::Initial))
             .all(&self.db)
             .await?;
         let streaming_jobs = load_streaming_jobs_by_ids(
@@ -1290,7 +1242,6 @@ impl CatalogControllerInner {
                 .map(|(index, _)| index.index_id.as_job_id()),
         )
         .await?;
-
         Ok(index_objs
             .into_iter()
             .map(|(index, obj)| {
