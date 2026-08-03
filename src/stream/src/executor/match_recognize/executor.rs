@@ -1106,19 +1106,34 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                     } else {
                                         false
                                     };
-                                    // `break`, not `continue`. `found` is ordered by start; the WITHIN
-                                    // bound is a constant interval and rows are PK-sorted by order key,
-                                    // so a match's deadline (its first order key + interval) is monotone
-                                    // non-decreasing in its start. Once one boundary match is not yet
-                                    // within-final, no later one can be either, so stopping is correct.
-                                    // `continue` would be actively wrong: it could emit a later, shorter
-                                    // match, advance `cursor` past this held boundary match, and then
-                                    // let the eviction below delete this match's start row — losing it.
-                                    // With `break` the held match's rows are retained (a complete match
-                                    // at the boundary is `reaches_boundary_alive`), and any shorter
-                                    // overlapping match is re-found on a later watermark (at worst
-                                    // delayed to this match's WITHIN deadline), never lost.
-                                    if !within_final {
+                                    // A boundary match whose accepting path is TERMINAL — no
+                                    // continuation of the automaton could consume another row, for
+                                    // any future data (`may_extend` is false) — is final now: the
+                                    // wait above is for a proof of maximality that nothing could
+                                    // ever supply. Holding it would starve an idle partition
+                                    // forever: without WITHIN the frontier recompute below finds
+                                    // neither a future row nor a deadline and drops the partition,
+                                    // so the last complete match would never be emitted unless an
+                                    // unrelated row happened to arrive.
+                                    let terminal = !within_final
+                                        && !nfa.may_extend(m.start, m.end, &matcher).await?;
+                                    // `break`, not `continue`, when the match is held. `found` is
+                                    // ordered by start; the WITHIN bound is a constant interval and
+                                    // rows are PK-sorted by order key, so a match's deadline (its
+                                    // first order key + interval) is monotone non-decreasing in its
+                                    // start. Once one boundary match is not yet within-final, no
+                                    // later one can be either, so stopping is correct. `continue`
+                                    // would be actively wrong: it could emit a later, shorter
+                                    // match, advance `cursor` past this held boundary match, and
+                                    // then let the eviction below delete this match's start row —
+                                    // losing it. With `break` the held match's rows are retained (a
+                                    // complete match at the boundary is `reaches_boundary_alive`),
+                                    // and any shorter overlapping match is re-found on a later
+                                    // watermark, never lost. A terminal match, by contrast, is
+                                    // emitted and the loop continues: consuming it cannot mask a
+                                    // later match (the scan resumes at its skip position exactly as
+                                    // for any emitted match).
+                                    if !within_final && !terminal {
                                         break;
                                     }
                                 }

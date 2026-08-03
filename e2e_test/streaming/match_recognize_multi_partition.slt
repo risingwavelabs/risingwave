@@ -33,17 +33,15 @@ select * from t match_recognize (
 )
 emit on window close;
 
-# 100 partitions (ids 1..100). Each partition: up (ts=1, v=10) -> down (ts=2, v=-5) -> a trailing
-# safe row (ts=3, v=1). The (a b) match is ts1->ts2 (dip = -5); the ts=3 row makes that match final
-# (a match finalizes only once a later safe row follows). The ts=3 row begins an `a` with no `b`
-# after it, so it produces no second match.
+# 100 partitions (ids 1..100). Each partition: up (ts=1, v=10) -> down (ts=2, v=-5), and NOTHING
+# after -- the fixed (a b) accepting path is terminal, so each partition's match is final as soon as
+# both rows are watermark-safe, with no trailing row required. (An earlier version of this test
+# inserted a trailing safe row per partition, which masked exactly the idle-partition starvation
+# that terminal finality fixes; see match_recognize_terminal_finality.slt.)
 #
-# Inserted out of order on purpose: all `b` rows, then all trailing rows, then all `a` rows.
+# Inserted out of order on purpose: all `b` rows, then all `a` rows.
 statement ok
 insert into t select i, 2, -5 from generate_series(1, 100) g(i);
-
-statement ok
-insert into t select i, 3, 1 from generate_series(1, 100) g(i);
 
 statement ok
 insert into t select i, 1, 10 from generate_series(1, 100) g(i);
