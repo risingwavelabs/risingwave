@@ -115,11 +115,7 @@ impl CoordinatorStreamHandle {
         }
     }
 
-    pub async fn report_bytes(
-        &mut self,
-        epoch: u64,
-        buffered_bytes: u64,
-    ) -> anyhow::Result<bool> {
+    pub async fn report_bytes(&mut self, epoch: u64, buffered_bytes: u64) -> anyhow::Result<bool> {
         self.send_request(CoordinateRequest {
             msg: Some(coordinate_request::Msg::ReportBytesRequest(
                 coordinate_request::ReportBytesRequest {
@@ -131,12 +127,10 @@ impl CoordinatorStreamHandle {
         .await?;
         match self.next_response().await? {
             CoordinateResponse {
-                msg: Some(coordinate_response::Msg::ReportBytesResponse(
-                    coordinate_response::ReportBytesResponse {
-                        should_commit,
-                        ..
-                    },
-                )),
+                msg:
+                    Some(coordinate_response::Msg::ReportBytesResponse(
+                        coordinate_response::ReportBytesResponse { should_commit, .. },
+                    )),
             } => Ok(should_commit),
             msg => Err(anyhow!(
                 "should get report bytes response but get {:?}",

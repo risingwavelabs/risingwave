@@ -49,11 +49,12 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> CoordinatedLogSinker<
         writer: W,
         commit_checkpoint_interval: NonZeroU64,
     ) -> Result<Self> {
-        let commit_checkpoint_size_threshold_bytes =
-            param.properties.get(COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB)
-                .and_then(|v| v.parse::<u64>().ok())
-                .filter(|&mb| mb > 0)
-                .map(|mb| mb.saturating_mul(1024 * 1024));
+        let commit_checkpoint_size_threshold_bytes = param
+            .properties
+            .get(COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB)
+            .and_then(|v| v.parse::<u64>().ok())
+            .filter(|&mb| mb > 0)
+            .map(|mb| mb.saturating_mul(1024 * 1024));
         Ok(Self {
             writer,
             sink_coordinate_client: writer_param

@@ -114,7 +114,8 @@ impl<R> AligningRequests<R> {
             !self.requests.iter().any(|(hid, _, _)| *hid == handle_id),
             "handle {handle_id} already has a pending request for this epoch"
         );
-        self.requests.push((handle_id, vnode_bitmap.clone(), request));
+        self.requests
+            .push((handle_id, vnode_bitmap.clone(), request));
         Ok(())
     }
 
@@ -142,10 +143,7 @@ impl<R> AligningRequests<R> {
         };
     }
 
-    fn sync_with_running_handles(
-        &mut self,
-        get_vnode_bitmap: impl Fn(HandleId) -> Option<Bitmap>,
-    ) {
+    fn sync_with_running_handles(&mut self, get_vnode_bitmap: impl Fn(HandleId) -> Option<Bitmap>) {
         for (hid, bitmap, _) in &mut self.requests {
             if let Some(current) = get_vnode_bitmap(*hid) {
                 *bitmap = current;
@@ -392,13 +390,15 @@ impl CoordinationHandleManager {
                     epoch
                 )
             })?;
-            handle.send_report_bytes_response(epoch, should_commit).map_err(|_| {
-                anyhow!(
-                    "fail to send report bytes response on epoch {} for handle {}",
-                    epoch,
-                    handle_id
-                )
-            })?;
+            handle
+                .send_report_bytes_response(epoch, should_commit)
+                .map_err(|_| {
+                    anyhow!(
+                        "fail to send report bytes response on epoch {} for handle {}",
+                        epoch,
+                        handle_id
+                    )
+                })?;
         }
         Ok(())
     }
@@ -768,11 +768,14 @@ impl CoordinatorWorker {
         self.try_handle_init_requests(&running_handles, &mut two_phase_handler)
             .await?;
 
-        let commit_checkpoint_size_threshold_bytes: Option<u64> =
-            self.handle_manager.param.properties.get(COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB)
-                .and_then(|v| v.parse::<u64>().ok())
-                .filter(|&mb| mb > 0)
-                .map(|mb| mb.saturating_mul(1024 * 1024));
+        let commit_checkpoint_size_threshold_bytes: Option<u64> = self
+            .handle_manager
+            .param
+            .properties
+            .get(COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB)
+            .and_then(|v| v.parse::<u64>().ok())
+            .filter(|&mb| mb > 0)
+            .map(|mb| mb.saturating_mul(1024 * 1024));
 
         let mut pending_epochs: BTreeMap<u64, AligningRequests<_>> = BTreeMap::new();
         let mut pending_byte_reports: BTreeMap<u64, AligningRequests<u64>> = BTreeMap::new();
@@ -875,7 +878,8 @@ impl CoordinatorWorker {
                         {
                             let (report_epoch, reports) =
                                 pending_byte_reports.pop_first().expect("non-empty");
-                            let total_bytes: u64 = reports.requests.iter().map(|(_, _, b)| *b).sum();
+                            let total_bytes: u64 =
+                                reports.requests.iter().map(|(_, _, b)| *b).sum();
                             let should_commit =
                                 commit_checkpoint_size_threshold_bytes.is_some_and(|threshold| {
                                     total_bytes > 0 && total_bytes >= threshold
@@ -1051,8 +1055,7 @@ impl CoordinatorWorker {
                     }
                 }
 
-                self.handle_manager
-                    .ack_commit(epoch, handle_ids)?;
+                self.handle_manager.ack_commit(epoch, handle_ids)?;
                 self.last_writer_acked_epoch = Some(epoch);
             }
         }

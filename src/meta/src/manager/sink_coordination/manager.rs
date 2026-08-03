@@ -999,10 +999,7 @@ mod tests {
         let vnode1 = build_bitmap(first);
         let vnode2 = build_bitmap(second);
 
-        let metadata = [
-            [vec![1u8, 2u8], vec![3u8, 4u8]],
-            [vec![5u8, 6u8], vec![]],
-        ];
+        let metadata = [[vec![1u8, 2u8], vec![3u8, 4u8]], [vec![5u8, 6u8], vec![]]];
         let sender = Arc::new(tokio::sync::Mutex::new(None));
         let mock_subscriber: SinkCommittedEpochSubscriber = {
             let captured_sender = sender.clone();
@@ -1115,11 +1112,8 @@ mod tests {
                     .await
                     .is_pending()
             );
-            let (result1, result2) = join(
-                report_future1,
-                client2.report_bytes(epoch1, 409600),
-            )
-            .await;
+            let (result1, result2) =
+                join(report_future1, client2.report_bytes(epoch1, 409600)).await;
             assert!(!result1.unwrap());
             assert!(!result2.unwrap());
         }
@@ -1133,11 +1127,8 @@ mod tests {
                     .await
                     .is_pending()
             );
-            let (result1, result2) = join(
-                report_future1,
-                client2.report_bytes(epoch2, 614400),
-            )
-            .await;
+            let (result1, result2) =
+                join(report_future1, client2.report_bytes(epoch2, 614400)).await;
             assert!(result1.unwrap());
             assert!(result2.unwrap());
         }
@@ -1366,11 +1357,8 @@ mod tests {
                     .await
                     .is_pending()
             );
-            let (result1, result2) = join(
-                report_future1,
-                client2.report_bytes(epoch1, 512000),
-            )
-            .await;
+            let (result1, result2) =
+                join(report_future1, client2.report_bytes(epoch1, 512000)).await;
             assert!(!result1.unwrap());
             assert!(!result2.unwrap());
         }
