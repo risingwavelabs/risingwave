@@ -30,7 +30,6 @@ use risingwave_common::array::arrow::{IcebergArrowConvert, IcebergCreateTableArr
 use risingwave_common::bail;
 use risingwave_common::catalog::Field;
 use risingwave_common::error::IcebergError;
-use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
@@ -42,7 +41,7 @@ use tokio::sync::mpsc::UnboundedSender;
 use tracing::warn;
 
 use super::commit_retry::{self, CommitError, CommitRetryLogContext};
-use super::{IcebergConfig, SinkError, commit_branch, resolve_partition_type};
+use super::{GLOBAL_SINK_METRICS, IcebergConfig, SinkError, commit_branch, resolve_partition_type};
 use crate::connector_common::{IcebergCommittedSnapshot, IcebergSinkCompactionUpdate};
 use crate::sink::catalog::SinkId;
 use crate::sink::{Result, SinglePhaseCommitCoordinator, SinkParam, TwoPhaseCommitCoordinator};
@@ -248,7 +247,6 @@ pub struct IcebergSinkCommitter {
     pub(crate) param: SinkParam,
     pub(super) commit_retry_num: u32,
     pub(crate) iceberg_compact_stat_sender: Option<UnboundedSender<IcebergSinkCompactionUpdate>>,
-    pub(crate) iceberg_snapshot_num: LabelGuardedIntGauge,
 }
 
 impl IcebergSinkCommitter {
@@ -785,7 +783,13 @@ impl IcebergSinkCommitter {
         self.table = table;
 
         let snapshot_num = self.table.metadata().snapshots().count();
-        self.iceberg_snapshot_num.set(snapshot_num as i64);
+        let catalog_name = self.config.common.catalog_name();
+        let table_name = self.table.identifier().to_string();
+        let metrics_labels = [&self.param.sink_name, &catalog_name, &table_name];
+        GLOBAL_SINK_METRICS
+            .iceberg_snapshot_num
+            .with_guarded_label_values(&metrics_labels)
+            .set(snapshot_num as i64);
 
         tracing::debug!(
             iceberg_component = "sink_committer",

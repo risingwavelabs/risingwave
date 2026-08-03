@@ -20,7 +20,7 @@ use anyhow::anyhow;
 use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use parking_lot::Mutex;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
-use risingwave_common::metrics::{LabelGuardedIntCounter, LabelGuardedUintGauge};
+use risingwave_common::metrics::LabelGuardedIntCounter;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model::ActorId;
 use risingwave_meta_model::refresh_job::{self, RefreshState};
@@ -445,6 +445,11 @@ impl GlobalRefreshManager {
             elapsed
         };
         if let Some(elapsed) = elapsed {
+            let table_id_label = table_id.to_string();
+            GLOBAL_META_METRICS
+                .refresh_job_duration
+                .with_guarded_label_values(&[&table_id_label, status])
+                .set(elapsed);
             let mut metrics = self.refresh_job_metrics.lock();
             let metrics = metrics
                 .entry(table_id)
@@ -452,7 +457,6 @@ impl GlobalRefreshManager {
                 .finished
                 .entry(status.to_owned())
                 .or_insert_with(|| RefreshFinishedMetrics::new(table_id, status));
-            metrics.duration.set(elapsed);
             metrics.count.inc();
         }
     }
@@ -480,7 +484,6 @@ impl RefreshJobMetrics {
 }
 
 struct RefreshFinishedMetrics {
-    duration: LabelGuardedUintGauge,
     count: LabelGuardedIntCounter,
 }
 
@@ -488,9 +491,6 @@ impl RefreshFinishedMetrics {
     fn new(table_id: TableId, status: &str) -> Self {
         let table_id = table_id.to_string();
         Self {
-            duration: GLOBAL_META_METRICS
-                .refresh_job_duration
-                .with_guarded_label_values(&[&table_id, status]),
             count: GLOBAL_META_METRICS
                 .refresh_job_finish_cnt
                 .with_guarded_label_values(&[&table_id, status]),

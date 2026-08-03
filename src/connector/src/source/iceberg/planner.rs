@@ -27,9 +27,7 @@ use iceberg::spec::{DataContentType, DataFileFormat, SchemaRef};
 use iceberg::table::Table;
 use risingwave_common::bail;
 use risingwave_common::catalog::ColumnCatalog;
-use risingwave_common::metrics::{
-    LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
-};
+use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_common::types::{JsonbRef, JsonbVal, ScalarRef};
 use risingwave_pb::batch_plan::iceberg_scan_node::IcebergScanType;
 use serde::{Deserialize, Serialize};
@@ -92,8 +90,10 @@ impl IcebergScanProjection {
 
 #[derive(Debug, Clone)]
 pub struct IcebergScanMetricsLabels {
+    source_id: String,
+    source_name: String,
+    table_name: String,
     snapshots_discovered_total: LabelGuardedIntCounter,
-    snapshot_lag_seconds: LabelGuardedIntGauge,
     list_duration_seconds: LabelGuardedHistogram,
     delete_files_per_data_file: LabelGuardedHistogram,
     data_files_discovered_total: LabelGuardedIntCounter,
@@ -101,7 +101,6 @@ pub struct IcebergScanMetricsLabels {
     position_delete_files_discovered_total: LabelGuardedIntCounter,
     list_errors_total: LabelGuardedIntCounter,
     fetch_errors_total: LabelGuardedIntCounter,
-    inflight_file_count: LabelGuardedIntGauge,
 }
 
 impl IcebergScanMetricsLabels {
@@ -114,9 +113,6 @@ impl IcebergScanMetricsLabels {
         Self {
             snapshots_discovered_total: GLOBAL_ICEBERG_SCAN_METRICS
                 .iceberg_source_snapshots_discovered_total
-                .with_guarded_label_values(&labels),
-            snapshot_lag_seconds: GLOBAL_ICEBERG_SCAN_METRICS
-                .iceberg_source_snapshot_lag_seconds
                 .with_guarded_label_values(&labels),
             list_duration_seconds: GLOBAL_ICEBERG_SCAN_METRICS
                 .iceberg_source_list_duration_seconds
@@ -139,9 +135,9 @@ impl IcebergScanMetricsLabels {
             fetch_errors_total: GLOBAL_ICEBERG_SCAN_METRICS
                 .iceberg_source_scan_errors_total
                 .with_guarded_label_values(&[labels[0], labels[1], labels[2], "fetch_error"]),
-            inflight_file_count: GLOBAL_ICEBERG_SCAN_METRICS
-                .iceberg_source_inflight_file_count
-                .with_guarded_label_values(&labels),
+            source_id,
+            source_name,
+            table_name,
         }
     }
 
@@ -158,7 +154,14 @@ impl IcebergScanMetricsLabels {
     }
 
     pub fn record_snapshot_lag(&self, lag_secs: i64) {
-        self.snapshot_lag_seconds.set(lag_secs);
+        GLOBAL_ICEBERG_SCAN_METRICS
+            .iceberg_source_snapshot_lag_seconds
+            .with_guarded_label_values(&[
+                self.source_id.as_str(),
+                self.source_name.as_str(),
+                self.table_name.as_str(),
+            ])
+            .set(lag_secs);
     }
 
     pub fn record_caught_up(&self) {
@@ -197,7 +200,14 @@ impl IcebergScanMetricsLabels {
     }
 
     pub fn set_inflight_file_count(&self, count: usize) {
-        self.inflight_file_count.set(count as i64);
+        GLOBAL_ICEBERG_SCAN_METRICS
+            .iceberg_source_inflight_file_count
+            .with_guarded_label_values(&[
+                self.source_id.as_str(),
+                self.source_name.as_str(),
+                self.table_name.as_str(),
+            ])
+            .set(count as i64);
     }
 }
 
