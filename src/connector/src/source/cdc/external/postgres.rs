@@ -1008,6 +1008,7 @@ mod tests {
             &config.schema,
             &config.table,
             false,
+            Some("SELECT"),
         )
         .await
         .unwrap();
