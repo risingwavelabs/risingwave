@@ -23,6 +23,8 @@ use crate::executor::project::{MaterializedExprsArgs, MaterializedExprsExecutor}
 
 pub struct MaterializedExprsExecutorBuilder;
 
+impl_stream_node_body!(MaterializedExprs(MaterializedExprsNode) => MaterializedExprsExecutorBuilder);
+
 impl ExecutorBuilder for MaterializedExprsExecutorBuilder {
     type Node = MaterializedExprsNode;
 

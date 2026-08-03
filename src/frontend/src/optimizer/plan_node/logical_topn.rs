@@ -395,11 +395,11 @@ mod tests {
     #[tokio::test]
     async fn test_prune_col() {
         let ty = DataType::Int32;
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let fields: Vec<Field> = vec![
             Field::with_name(ty.clone(), "v1"),
             Field::with_name(ty.clone(), "v2"),
-            Field::with_name(ty.clone(), "v3"),
+            Field::with_name(ty, "v3"),
         ];
         let values = LogicalValues::new(vec![], Schema { fields }, ctx);
         let input = PlanRef::from(values);

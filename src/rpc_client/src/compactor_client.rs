@@ -46,7 +46,7 @@ pub struct CompactorClient {
 
 impl CompactorClient {
     pub async fn new(host_addr: HostAddr) -> Result<Self> {
-        let channel = Endpoint::from_shared(format!("http://{}", &host_addr))?
+        let channel = Endpoint::from_shared(format!("http://{}", host_addr))?
             .connect_timeout(Duration::from_secs(5))
             .monitored_connect("grpc-compactor-client", Default::default())
             .await?;

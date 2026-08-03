@@ -14,7 +14,7 @@
 
 use std::fmt;
 
-use ddl::WebhookSourceInfo;
+use ddl::{AlterRateLimit, AlterRateLimitType, WebhookSourceInfo};
 use itertools::Itertools;
 use tracing::{debug, instrument};
 use winnow::combinator::{
@@ -99,7 +99,7 @@ pub enum IsLateral {
 
 use IsLateral::*;
 
-use crate::ast::ddl::AlterFragmentOperation;
+use crate::ast::ddl::{AlterCompactionGroupOperation, AlterFragmentOperation};
 
 pub type IncludeOption = Vec<IncludeOptionItem>;
 
@@ -231,18 +231,19 @@ impl Parser<'_> {
 
     /// Parse exactly one statement from a string.
     pub fn parse_exactly_one(sql: &str) -> Result<Statement, ParserError> {
-        Parser::parse_sql(sql)
-            .map_err(|e| {
-                ParserError::ParserError(format!("failed to parse definition sql: {}", e))
-            })?
-            .into_iter()
-            .exactly_one()
-            .map_err(|e| {
-                ParserError::ParserError(format!(
-                    "expecting exactly one statement in definition: {}",
-                    e
-                ))
-            })
+        Itertools::exactly_one(
+            Parser::parse_sql(sql)
+                .map_err(|e| {
+                    ParserError::ParserError(format!("failed to parse definition sql: {}", e))
+                })?
+                .into_iter(),
+        )
+        .map_err(|e| {
+            ParserError::ParserError(format!(
+                "expecting exactly one statement in definition: {}",
+                e
+            ))
+        })
     }
 
     /// Parse object name from a string.
@@ -309,6 +310,7 @@ impl Parser<'_> {
                 Keyword::TRUNCATE => Ok(self.parse_truncate()?),
                 Keyword::REFRESH => Ok(self.parse_refresh()?),
                 Keyword::CREATE => Ok(self.parse_create()?),
+                Keyword::REPLACE => Ok(self.parse_replace()?),
                 Keyword::DISCARD => Ok(self.parse_discard()?),
                 Keyword::DROP => Ok(self.parse_drop()?),
                 Keyword::DELETE => Ok(self.parse_delete()?),
@@ -1859,7 +1861,7 @@ impl Parser<'_> {
         if self.parse_keyword(expected) {
             Ok(())
         } else {
-            self.expected(format!("{:?}", &expected).as_str())
+            self.expected(format!("{:?}", expected).as_str())
         }
     }
 
@@ -1967,6 +1969,9 @@ impl Parser<'_> {
         } else if self.parse_keyword(Keyword::SOURCE) {
             self.parse_create_source(or_replace, temporary)
         } else if self.parse_keyword(Keyword::SINK) {
+            if or_replace {
+                parser_err!("REPLACE SINK should be used instead of CREATE OR REPLACE SINK");
+            }
             self.parse_create_sink(or_replace)
         } else if self.parse_keyword(Keyword::SUBSCRIPTION) {
             self.parse_create_subscription(or_replace)
@@ -2162,16 +2167,24 @@ impl Parser<'_> {
         Ok(Statement::CreateSource { stmt })
     }
 
-    // CREATE [OR REPLACE]?
-    // SINK
+    /// Parse a SQL REPLACE statement.
+    pub fn parse_replace(&mut self) -> ModalResult<Statement> {
+        if self.parse_keyword(Keyword::SINK) {
+            self.parse_create_sink(true)
+        } else {
+            self.expected("SINK after REPLACE")
+        }
+    }
+
+    // CREATE SINK / REPLACE SINK
     // [IF NOT EXISTS]?
     // <sink_name: Ident>
     // FROM
     // <materialized_view: Ident>
     // [WITH (properties)]?
-    pub fn parse_create_sink(&mut self, _or_replace: bool) -> ModalResult<Statement> {
+    pub fn parse_create_sink(&mut self, or_replace: bool) -> ModalResult<Statement> {
         Ok(Statement::CreateSink {
-            stmt: CreateSinkStatement::parse_to(self)?,
+            stmt: CreateSinkStatement::parse_to_with_or_replace(self, or_replace)?,
         })
     }
 
@@ -3060,12 +3073,49 @@ impl Parser<'_> {
     // <config_param> { TO | = } { <value> | DEFAULT }
     // <config_param> is not a keyword, but an identifier
     pub fn parse_config_param(&mut self) -> ModalResult<ConfigParam> {
+        self.parse_config_param_inner(Self::parse_set_variable)
+    }
+
+    fn parse_config_param_inner(
+        &mut self,
+        parse_value: fn(&mut Self) -> ModalResult<SetVariableValue>,
+    ) -> ModalResult<ConfigParam> {
         let param = self.parse_identifier()?;
         if !self.consume_token(&Token::Eq) && !self.parse_keyword(Keyword::TO) {
             return self.expected("'=' or 'TO' after config parameter");
         }
-        let value = self.parse_set_variable()?;
+        let value = parse_value(self)?;
         Ok(ConfigParam { param, value })
+    }
+
+    /// Parse a single-value config param.
+    ///
+    /// This differs from [`Self::parse_config_param`] in that it does **not** allow a comma-separated
+    /// list on the RHS, so it can be safely used in constructs where comma separates multiple
+    /// assignments (e.g. `... SET a = 1, b = 2`).
+    fn parse_config_param_no_list(&mut self) -> ModalResult<ConfigParam> {
+        self.parse_config_param_inner(Self::parse_set_variable_no_list)
+    }
+
+    fn parse_set_variable_no_list(&mut self) -> ModalResult<SetVariableValue> {
+        alt((
+            Keyword::DEFAULT.value(SetVariableValue::Default),
+            alt((
+                Self::ensure_parse_value.map(SetVariableValueSingle::Literal),
+                |parser: &mut Self| {
+                    let checkpoint = *parser;
+                    let ident = parser.parse_identifier()?;
+                    if ident.value == "default" {
+                        *parser = checkpoint;
+                        return parser.expected("parameter list value").map_err(|e| e.cut());
+                    }
+                    Ok(SetVariableValueSingle::Ident(ident))
+                },
+                fail.expect("parameter value"),
+            ))
+            .map(|single: SetVariableValueSingle| SetVariableValue::Single(single)),
+        ))
+        .parse_next(self)
     }
 
     pub fn parse_since(&mut self) -> ModalResult<Since> {
@@ -3153,11 +3203,13 @@ impl Parser<'_> {
             self.parse_alter_secret()
         } else if self.parse_word("FRAGMENT") {
             self.parse_alter_fragment()
+        } else if self.parse_keyword(Keyword::COMPACTION) {
+            self.parse_alter_compaction_group()
         } else if self.parse_keywords(&[Keyword::DEFAULT, Keyword::PRIVILEGES]) {
             self.parse_alter_default_privileges()
         } else {
             self.expected(
-                "DATABASE, FRAGMENT, SCHEMA, TABLE, INDEX, MATERIALIZED, VIEW, SINK, SUBSCRIPTION, SOURCE, FUNCTION, USER, SECRET or SYSTEM after ALTER"
+                "COMPACTION, DATABASE, FRAGMENT, SCHEMA, TABLE, INDEX, MATERIALIZED, VIEW, SINK, SUBSCRIPTION, SOURCE, FUNCTION, USER, SECRET or SYSTEM after ALTER"
             )
         }
     }
@@ -3177,10 +3229,40 @@ impl Parser<'_> {
                 return self.expected("TO after RENAME");
             }
         } else if self.parse_keyword(Keyword::SET) {
-            // check will be delayed to frontend
-            AlterDatabaseOperation::SetParam(self.parse_config_param()?)
+            if self.parse_keyword(Keyword::RESOURCE_GROUP) {
+                if self.expect_keyword(Keyword::TO).is_err()
+                    && self.expect_token(&Token::Eq).is_err()
+                {
+                    return self.expected("TO or = after ALTER DATABASE SET RESOURCE_GROUP");
+                }
+                let value = self.parse_set_variable()?;
+                if !self.parse_keyword(Keyword::DEFERRED) {
+                    return self.expected("DEFERRED after ALTER DATABASE SET RESOURCE_GROUP");
+                }
+
+                AlterDatabaseOperation::SetResourceGroup {
+                    resource_group: Some(value),
+                    deferred: true,
+                }
+            } else {
+                // check will be delayed to frontend
+                AlterDatabaseOperation::SetParam(self.parse_config_param()?)
+            }
+        } else if self.parse_keyword(Keyword::RESET) {
+            if self.parse_keyword(Keyword::RESOURCE_GROUP) {
+                if !self.parse_keyword(Keyword::DEFERRED) {
+                    return self.expected("DEFERRED after ALTER DATABASE RESET RESOURCE_GROUP");
+                }
+
+                AlterDatabaseOperation::SetResourceGroup {
+                    resource_group: None,
+                    deferred: true,
+                }
+            } else {
+                return self.expected("RESOURCE_GROUP after RESET");
+            }
         } else {
-            return self.expected("RENAME, OWNER TO, OR SET after ALTER DATABASE");
+            return self.expected("RENAME, OWNER TO, SET, OR RESET after ALTER DATABASE");
         };
 
         Ok(Statement::AlterDatabase {
@@ -3292,12 +3374,8 @@ impl Parser<'_> {
                     parallelism: value,
                     deferred,
                 }
-            } else if let Some(rate_limit) = self.parse_alter_source_rate_limit(true)? {
-                AlterTableOperation::SetSourceRateLimit { rate_limit }
-            } else if let Some(rate_limit) = self.parse_alter_backfill_rate_limit()? {
-                AlterTableOperation::SetBackfillRateLimit { rate_limit }
-            } else if let Some(rate_limit) = self.parse_alter_dml_rate_limit()? {
-                AlterTableOperation::SetDmlRateLimit { rate_limit }
+            } else if let Some(rate_limit) = self.parse_alter_rate_limit()? {
+                AlterTableOperation::AlterRateLimit(rate_limit)
             } else if self.parse_keyword(Keyword::CONFIG) {
                 let entries = self.parse_options()?;
                 AlterTableOperation::SetConfig { entries }
@@ -3324,6 +3402,22 @@ impl Parser<'_> {
                 cascade,
             }
         } else if self.parse_keyword(Keyword::ALTER) {
+            // `WATERMARK` is non-reserved; require `FOR` so `ALTER <col>` on a
+            // column named `watermark` still falls through to ALTER COLUMN.
+            if self.parse_keywords(&[Keyword::WATERMARK, Keyword::FOR]) {
+                let column_name = self.parse_identifier_non_reserved()?;
+                self.expect_keyword(Keyword::AS)?;
+                let expr = self.parse_expr()?;
+                let with_ttl = self.parse_keywords(&[Keyword::WITH, Keyword::TTL]);
+                return Ok(Statement::AlterTable {
+                    name: table_name,
+                    operation: AlterTableOperation::AlterWatermark {
+                        column_name,
+                        expr,
+                        with_ttl,
+                    },
+                });
+            }
             let _ = self.parse_keyword(Keyword::COLUMN);
             let column_name = self.parse_identifier_non_reserved()?;
 
@@ -3373,71 +3467,37 @@ impl Parser<'_> {
         })
     }
 
-    /// BACKFILL_RATE_LIMIT = default | NUMBER
-    /// BACKFILL_RATE_LIMIT TO default | NUMBER
-    pub fn parse_alter_backfill_rate_limit(&mut self) -> ModalResult<Option<i32>> {
-        if !self.parse_word("BACKFILL_RATE_LIMIT") {
-            return Ok(None);
-        }
+    fn parse_rate_limit_value(&mut self) -> ModalResult<i32> {
         if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
-            return self.expected("TO or = after ALTER TABLE SET BACKFILL_RATE_LIMIT");
+            return self.expected("TO or = after rate limit");
         }
-        let rate_limit = if self.parse_keyword(Keyword::DEFAULT) {
-            -1
+        if self.parse_keyword(Keyword::DEFAULT) {
+            return Ok(-1);
+        }
+        let s = self.parse_number_value()?;
+        if let Ok(n) = s.parse::<i32>() {
+            Ok(n)
         } else {
-            let s = self.parse_number_value()?;
-            if let Ok(n) = s.parse::<i32>() {
-                n
-            } else {
-                return self.expected("number or DEFAULT");
-            }
-        };
-        Ok(Some(rate_limit))
+            self.expected("number or DEFAULT")
+        }
     }
 
-    /// DML_RATE_LIMIT = default | NUMBER
-    /// DML_RATE_LIMIT TO default | NUMBER
-    pub fn parse_alter_dml_rate_limit(&mut self) -> ModalResult<Option<i32>> {
-        if !self.parse_word("DML_RATE_LIMIT") {
-            return Ok(None);
-        }
-        if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
-            return self.expected("TO or = after ALTER TABLE SET DML_RATE_LIMIT");
-        }
-        let rate_limit = if self.parse_keyword(Keyword::DEFAULT) {
-            -1
-        } else {
-            let s = self.parse_number_value()?;
-            if let Ok(n) = s.parse::<i32>() {
-                n
-            } else {
-                return self.expected("number or DEFAULT");
+    pub fn parse_alter_rate_limit(&mut self) -> ModalResult<Option<AlterRateLimit>> {
+        for rate_limit_type in [
+            AlterRateLimitType::Source,
+            AlterRateLimitType::Backfill,
+            AlterRateLimitType::Dml,
+            AlterRateLimitType::Sink,
+        ] {
+            if self.parse_word(rate_limit_type.as_str()) {
+                let rate_limit = self.parse_rate_limit_value()?;
+                return Ok(Some(AlterRateLimit {
+                    rate_limit_type,
+                    rate_limit,
+                }));
             }
-        };
-        Ok(Some(rate_limit))
-    }
-
-    /// SOURCE_RATE_LIMIT = default | NUMBER
-    /// SOURCE_RATE_LIMIT TO default | NUMBER
-    pub fn parse_alter_source_rate_limit(&mut self, is_table: bool) -> ModalResult<Option<i32>> {
-        if !self.parse_word("SOURCE_RATE_LIMIT") {
-            return Ok(None);
         }
-        if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
-            let ddl = if is_table { "TABLE" } else { "SOURCE" };
-            return self.expected(&format!("TO or = after ALTER {ddl} SET SOURCE_RATE_LIMIT"));
-        }
-        let rate_limit = if self.parse_keyword(Keyword::DEFAULT) {
-            -1
-        } else {
-            let s = self.parse_number_value()?;
-            if let Ok(n) = s.parse::<i32>() {
-                n
-            } else {
-                return self.expected("number or DEFAULT");
-            }
-        };
-        Ok(Some(rate_limit))
+        Ok(None)
     }
 
     pub fn parse_alter_index(&mut self) -> ModalResult<Statement> {
@@ -3480,18 +3540,40 @@ impl Parser<'_> {
                     parallelism: value,
                     deferred,
                 }
+            } else if self.parse_keyword(Keyword::RESOURCE_GROUP) {
+                if self.expect_keyword(Keyword::TO).is_err()
+                    && self.expect_token(&Token::Eq).is_err()
+                {
+                    return self.expected("TO or = after ALTER INDEX SET RESOURCE_GROUP");
+                }
+                let value = self.parse_set_variable()?;
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterIndexOperation::SetResourceGroup {
+                    resource_group: Some(value),
+                    deferred,
+                }
             } else if self.parse_keyword(Keyword::CONFIG) {
                 let entries = self.parse_options()?;
                 AlterIndexOperation::SetConfig { entries }
             } else {
-                return self.expected("PARALLELISM/BACKFILL_PARALLELISM or CONFIG after SET");
+                return self.expected(
+                    "PARALLELISM/BACKFILL_PARALLELISM/RESOURCE_GROUP or CONFIG after SET",
+                );
             }
         } else if self.parse_keyword(Keyword::RESET) {
-            if self.parse_keyword(Keyword::CONFIG) {
+            if self.parse_keyword(Keyword::RESOURCE_GROUP) {
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterIndexOperation::SetResourceGroup {
+                    resource_group: None,
+                    deferred,
+                }
+            } else if self.parse_keyword(Keyword::CONFIG) {
                 let keys = self.parse_parenthesized_object_name_list()?;
                 AlterIndexOperation::ResetConfig { keys }
             } else {
-                return self.expected("CONFIG after RESET");
+                return self.expected("RESOURCE_GROUP or CONFIG after RESET");
             }
         } else {
             return self.expected("RENAME, SET, or RESET after ALTER INDEX");
@@ -3584,10 +3666,8 @@ impl Parser<'_> {
                     resource_group: Some(value),
                     deferred,
                 }
-            } else if materialized
-                && let Some(rate_limit) = self.parse_alter_backfill_rate_limit()?
-            {
-                AlterViewOperation::SetBackfillRateLimit { rate_limit }
+            } else if let Some(rate_limit) = self.parse_alter_rate_limit()? {
+                AlterViewOperation::AlterRateLimit(rate_limit)
             } else if self.parse_keyword(Keyword::CONFIG) && materialized {
                 let entries = self.parse_options()?;
                 AlterViewOperation::SetConfig { entries }
@@ -3622,28 +3702,6 @@ impl Parser<'_> {
             name: view_name,
             operation,
         })
-    }
-
-    /// SINK_RATE_LIMIT = default | NUMBER
-    /// SINK_RATE_LIMIT TO default | NUMBER
-    pub fn parse_alter_sink_rate_limit(&mut self) -> ModalResult<Option<i32>> {
-        if !self.parse_word("SINK_RATE_LIMIT") {
-            return Ok(None);
-        }
-        if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
-            return self.expected("TO or = after ALTER SINK SET SINK_RATE_LIMIT");
-        }
-        let rate_limit = if self.parse_keyword(Keyword::DEFAULT) {
-            -1
-        } else {
-            let s = self.parse_number_value()?;
-            if let Ok(n) = s.parse::<i32>() {
-                n
-            } else {
-                return self.expected("number or DEFAULT");
-            }
-        };
-        Ok(Some(rate_limit))
     }
 
     pub fn parse_alter_sink(&mut self) -> ModalResult<Statement> {
@@ -3698,24 +3756,42 @@ impl Parser<'_> {
                     parallelism: value,
                     deferred,
                 }
-            } else if let Some(rate_limit) = self.parse_alter_sink_rate_limit()? {
-                AlterSinkOperation::SetSinkRateLimit { rate_limit }
-            } else if let Some(rate_limit) = self.parse_alter_backfill_rate_limit()? {
-                AlterSinkOperation::SetBackfillRateLimit { rate_limit }
+            } else if self.parse_keyword(Keyword::RESOURCE_GROUP) {
+                if self.expect_keyword(Keyword::TO).is_err()
+                    && self.expect_token(&Token::Eq).is_err()
+                {
+                    return self.expected("TO or = after ALTER SINK SET RESOURCE_GROUP");
+                }
+                let value = self.parse_set_variable()?;
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterSinkOperation::SetResourceGroup {
+                    resource_group: Some(value),
+                    deferred,
+                }
+            } else if let Some(rate_limit) = self.parse_alter_rate_limit()? {
+                AlterSinkOperation::AlterRateLimit(rate_limit)
             } else if self.parse_keyword(Keyword::CONFIG) {
                 let entries = self.parse_options()?;
                 AlterSinkOperation::SetConfig { entries }
             } else {
                 return self.expected(
-                    "SCHEMA/PARALLELISM/BACKFILL_PARALLELISM/SINK_RATE_LIMIT/BACKFILL_RATE_LIMIT/STREAMING_ENABLE_UNALIGNED_JOIN/CONFIG after SET",
+                    "SCHEMA/PARALLELISM/BACKFILL_PARALLELISM/RESOURCE_GROUP/SINK_RATE_LIMIT/BACKFILL_RATE_LIMIT/STREAMING_ENABLE_UNALIGNED_JOIN/CONFIG after SET",
                 );
             }
         } else if self.parse_keyword(Keyword::RESET) {
-            if self.parse_keyword(Keyword::CONFIG) {
+            if self.parse_keyword(Keyword::RESOURCE_GROUP) {
+                let deferred = self.parse_keyword(Keyword::DEFERRED);
+
+                AlterSinkOperation::SetResourceGroup {
+                    resource_group: None,
+                    deferred,
+                }
+            } else if self.parse_keyword(Keyword::CONFIG) {
                 let keys = self.parse_parenthesized_object_name_list()?;
                 AlterSinkOperation::ResetConfig { keys }
             } else {
-                return self.expected("CONFIG after RESET");
+                return self.expected("RESOURCE_GROUP or CONFIG after RESET");
             }
         } else if self.parse_keywords(&[Keyword::SWAP, Keyword::WITH]) {
             let target_sink = self.parse_object_name()?;
@@ -3807,8 +3883,8 @@ impl Parser<'_> {
                 AlterSourceOperation::SetSchema {
                     new_schema_name: schema_name,
                 }
-            } else if let Some(rate_limit) = self.parse_alter_source_rate_limit(false)? {
-                AlterSourceOperation::SetSourceRateLimit { rate_limit }
+            } else if let Some(rate_limit) = self.parse_alter_rate_limit()? {
+                AlterSourceOperation::AlterRateLimit(rate_limit)
             } else if self.parse_keyword(Keyword::PARALLELISM) {
                 if self.expect_keyword(Keyword::TO).is_err()
                     && self.expect_token(&Token::Eq).is_err()
@@ -3999,7 +4075,7 @@ impl Parser<'_> {
             AlterFragmentOperation::SetParallelism { parallelism }
         } else {
             let rate_limit = self.parse_alter_fragment_rate_limit()?;
-            AlterFragmentOperation::AlterBackfillRateLimit { rate_limit }
+            AlterFragmentOperation::AlterRateLimit(rate_limit)
         };
         Ok(Statement::AlterFragment {
             fragment_ids,
@@ -4007,24 +4083,41 @@ impl Parser<'_> {
         })
     }
 
-    fn parse_alter_fragment_rate_limit(&mut self) -> ModalResult<i32> {
-        if !self.parse_word("RATE_LIMIT") {
-            return self.expected("expected RATE_LIMIT after SET");
+    pub fn parse_alter_compaction_group(&mut self) -> ModalResult<Statement> {
+        if !self.parse_keyword(Keyword::GROUP) {
+            return self.expected("GROUP after ALTER COMPACTION");
         }
-        if self.expect_keyword(Keyword::TO).is_err() && self.expect_token(&Token::Eq).is_err() {
-            return self.expected("TO or = after RATE_LIMIT");
+        let mut group_ids = vec![self.parse_literal_u64()?];
+        while self.consume_token(&Token::Comma) {
+            group_ids.push(self.parse_literal_u64()?);
         }
-        let rate_limit = if self.parse_keyword(Keyword::DEFAULT) {
-            -1
+        if !self.parse_keyword(Keyword::SET) {
+            return self.expected("SET after ALTER COMPACTION GROUP <id>");
+        }
+        // NOTE: use the `no_list` variant here, because `parse_set_variable` allows comma-separated
+        // lists (e.g., `SET foo = 1,2,3`), which would conflict with our use of comma to separate
+        // multiple config assignments.
+        let configs = self.parse_comma_separated(Parser::parse_config_param_no_list)?;
+        let operation = AlterCompactionGroupOperation::Set { configs };
+        Ok(Statement::AlterCompactionGroup {
+            group_ids,
+            operation,
+        })
+    }
+
+    fn parse_alter_fragment_rate_limit(&mut self) -> ModalResult<AlterRateLimit> {
+        if self.parse_word("RATE_LIMIT") {
+            let rate_limit = self.parse_rate_limit_value()?;
+            return Ok(AlterRateLimit {
+                rate_limit_type: AlterRateLimitType::Backfill,
+                rate_limit,
+            });
+        }
+        if let Some(rate_limit) = self.parse_alter_rate_limit()? {
+            Ok(rate_limit)
         } else {
-            let s = self.parse_number_value()?;
-            if let Ok(n) = s.parse::<i32>() {
-                n
-            } else {
-                return self.expected("number or DEFAULT");
-            }
-        };
-        Ok(rate_limit)
+            self.expected("expected rate limit after SET")
+        }
     }
 
     /// Parse a copy statement
@@ -4255,6 +4348,7 @@ impl Parser<'_> {
         let token = self.next_token();
         match token.token {
             Token::SingleQuotedString(s) => Ok(s),
+            Token::DollarQuotedString(s) => Ok(s.value),
             _ => self.expected_at(checkpoint, "literal string"),
         }
     }
@@ -5473,7 +5567,6 @@ impl Parser<'_> {
             // followed by some joins or (B) another level of nesting.
             let table_and_joins = self.parse_table_and_joins()?;
 
-            #[allow(clippy::if_same_then_else)]
             if !table_and_joins.joins.is_empty() {
                 self.expect_token(&Token::RParen)?;
                 Ok(TableFactor::NestedJoin(Box::new(table_and_joins))) // (A)

@@ -20,7 +20,7 @@ pub mod mysql;
 
 use std::collections::{BTreeMap, HashMap};
 
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use futures::pin_mut;
 use futures::stream::BoxStream;
 use futures_async_stream::try_stream;
@@ -33,7 +33,7 @@ use risingwave_pb::secret::PbSecretRef;
 use serde::{Deserialize, Serialize};
 
 use crate::WithPropertiesExt;
-use crate::connector_common::{PostgresExternalTable, SslMode};
+use crate::connector_common::{PgConnectionConfig, PostgresExternalTable, SslMode};
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::mysql_row_to_owned_row;
 use crate::source::CdcTableSnapshotSplit;
@@ -80,10 +80,6 @@ impl ExternalCdcTableType {
         // So we only allow transactional metadata for MySQL and Postgres.
         // See more in https://debezium.io/documentation/reference/2.6/connectors/sqlserver.html#sqlserver-transaction-metadata
         matches!(self, Self::MySql | Self::Postgres)
-    }
-
-    pub fn shareable_only(&self) -> bool {
-        matches!(self, Self::SqlServer)
     }
 
     pub async fn create_table_reader(
@@ -239,7 +235,7 @@ pub trait ExternalTableReader: Sized {
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset>;
 
     // Currently, MySQL cdc uses a connection pool to manage connections to MySQL, and other CDC processes do not require the disconnect step for now.
-    #[allow(clippy::unused_async)]
+
     async fn disconnect(self) -> ConnectorResult<()> {
         Ok(())
     }
@@ -327,6 +323,25 @@ impl ExternalTableConfig {
         let config = serde_json::from_value::<ExternalTableConfig>(json_value)?;
         Ok(config)
     }
+
+    /// Project the Postgres-specific subset of this config so it can drive the
+    /// shared `create_pg_client` / `PostgresExternalTable` helpers. Only meaningful
+    /// for the Postgres CDC connector; other connectors ignore the fields.
+    pub fn pg_connection_config(&self) -> ConnectorResult<PgConnectionConfig> {
+        let port = self
+            .port
+            .parse::<u16>()
+            .with_context(|| format!("invalid postgres port `{}`", self.port))?;
+        Ok(PgConnectionConfig {
+            host: self.host.clone(),
+            port,
+            user: self.username.clone(),
+            password: self.password.clone(),
+            database: self.database.clone(),
+            ssl_mode: self.ssl_mode.clone(),
+            ssl_root_cert: self.ssl_root_cert.clone(),
+        })
+    }
 }
 
 impl ExternalTableReader for ExternalTableReaderImpl {
@@ -368,6 +383,21 @@ impl ExternalTableReader for ExternalTableReaderImpl {
 }
 
 impl ExternalTableReaderImpl {
+    /// For each given primary key column (by name), returns whether comparing the RisingWave
+    /// `i64` value needs upstream unsigned `BIGINT` semantics. Only MySQL `BIGINT UNSIGNED` can
+    /// overflow into a negative `i64`; other connectors are always false.
+    pub fn pk_column_unsigned_i64_compare_flags(
+        &self,
+        pk_names: &[String],
+    ) -> ConnectorResult<Vec<bool>> {
+        match self {
+            ExternalTableReaderImpl::MySql(mysql) => {
+                mysql.pk_column_unsigned_i64_compare_flags(pk_names)
+            }
+            _ => Ok(vec![false; pk_names.len()]),
+        }
+    }
+
     pub fn get_cdc_offset_parser(&self) -> CdcOffsetParseFunc {
         match self {
             ExternalTableReaderImpl::MySql(_) => MySqlExternalTableReader::get_cdc_offset_parser(),
@@ -473,21 +503,13 @@ impl ExternalTableImpl {
             CdcSourceType::Mysql => Ok(ExternalTableImpl::MySql(
                 MySqlExternalTable::connect(config).await?,
             )),
-            CdcSourceType::Postgres => Ok(ExternalTableImpl::Postgres(
-                PostgresExternalTable::connect(
-                    &config.username,
-                    &config.password,
-                    &config.host,
-                    config.port.parse::<u16>().unwrap(),
-                    &config.database,
-                    &config.schema,
-                    &config.table,
-                    &config.ssl_mode,
-                    &config.ssl_root_cert,
-                    false,
-                )
-                .await?,
-            )),
+            CdcSourceType::Postgres => {
+                let pg_conn = config.pg_connection_config()?;
+                Ok(ExternalTableImpl::Postgres(
+                    PostgresExternalTable::connect(&pg_conn, &config.schema, &config.table, false)
+                        .await?,
+                ))
+            }
             CdcSourceType::SqlServer => Ok(ExternalTableImpl::SqlServer(
                 SqlServerExternalTable::connect(config).await?,
             )),

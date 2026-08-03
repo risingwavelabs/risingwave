@@ -17,7 +17,7 @@ use std::str::FromStr;
 
 #[derive(Copy, Default, Debug, Clone, PartialEq, Eq)]
 // Some variants are never constructed so allow dead code here.
-#[allow(dead_code)]
+
 pub enum IsolationLevel {
     #[default]
     ReadCommitted,

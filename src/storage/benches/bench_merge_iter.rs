@@ -51,7 +51,7 @@ fn gen_interleave_shared_buffer_batch_iter(
     iterators
 }
 
-#[allow(clippy::type_complexity)]
+#[expect(clippy::type_complexity)]
 fn gen_interleave_shared_buffer_batch_enum_iter(
     batch_size: usize,
     batch_count: usize,

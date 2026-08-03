@@ -31,7 +31,7 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_object_store::object::object_metrics::ObjectStoreMetrics;
 use risingwave_object_store::object::{InMemObjectStore, ObjectStore, ObjectStoreImpl};
-use risingwave_pb::hummock::PbTableSchema;
+use risingwave_pb::hummock::{PbSstableFilterLayout, PbTableSchema};
 use risingwave_storage::compaction_catalog_manager::CompactionCatalogAgent;
 use risingwave_storage::hummock::compactor::compactor_runner::compact_and_build_sst;
 use risingwave_storage::hummock::compactor::{
@@ -305,7 +305,7 @@ async fn compact<I: HummockIterator<Direction = Forward>>(
             KeyRange::inf(),
             CachePolicy::Disable,
             false,
-            true,
+            PbSstableFilterLayout::Blocked,
             HashMap::new(),
         )
     });
@@ -354,8 +354,8 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
     let level2 = vec![info1, info2];
     let read_options = Arc::new(SstableIteratorReadOptions {
         cache_policy: CachePolicy::Fill(Hint::Normal),
-        prefetch_for_large_query: false,
-        must_iterated_end_user_key: None,
+        scan_end_user_key: None,
+        prefetch: false,
         max_preload_retry_times: 0,
     });
     c.bench_function("bench_union_merge_iterator", |b| {
@@ -373,7 +373,6 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
         b.to_async(&runtime).iter(|| {
             let sub_iters = vec![
                 ConcatSstableIterator::new(
-                    vec![0.into()],
                     level1.clone(),
                     KeyRange::inf(),
                     sstable_store.clone(),
@@ -381,7 +380,6 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
                     0,
                 ),
                 ConcatSstableIterator::new(
-                    vec![0.into()],
                     level2.clone(),
                     KeyRange::inf(),
                     sstable_store.clone(),
@@ -455,7 +453,7 @@ fn bench_drop_column_compaction_impl(c: &mut Criterion, column_num: usize) {
         KeyRange::inf(),
         CachePolicy::Disable,
         false,
-        true,
+        PbSstableFilterLayout::Blocked,
         HashMap::new(),
     );
 
@@ -463,7 +461,7 @@ fn bench_drop_column_compaction_impl(c: &mut Criterion, column_num: usize) {
         KeyRange::inf(),
         CachePolicy::Disable,
         false,
-        true,
+        PbSstableFilterLayout::Blocked,
         HashMap::from([
             (
                 10.into(),
@@ -484,7 +482,7 @@ fn bench_drop_column_compaction_impl(c: &mut Criterion, column_num: usize) {
         KeyRange::inf(),
         CachePolicy::Disable,
         false,
-        true,
+        PbSstableFilterLayout::Blocked,
         HashMap::from([
             (
                 10.into(),
@@ -504,7 +502,6 @@ fn bench_drop_column_compaction_impl(c: &mut Criterion, column_num: usize) {
     let get_iter = || {
         let sub_iters = vec![
             ConcatSstableIterator::new(
-                vec![10.into(), 11.into()],
                 level1.clone(),
                 KeyRange::inf(),
                 sstable_store.clone(),
@@ -512,7 +509,6 @@ fn bench_drop_column_compaction_impl(c: &mut Criterion, column_num: usize) {
                 0,
             ),
             ConcatSstableIterator::new(
-                vec![10.into(), 11.into()],
                 level2.clone(),
                 KeyRange::inf(),
                 sstable_store.clone(),

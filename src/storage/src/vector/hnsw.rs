@@ -694,7 +694,7 @@ mod __hnsw_test_hooks {
     use std::cell::RefCell;
 
     thread_local! {
-        #[allow(clippy::missing_const_for_thread_local)]
+        #[expect(clippy::missing_const_for_thread_local)]
         static LEVELS: RefCell<Vec<usize>> = RefCell::new(Vec::new());
     }
 

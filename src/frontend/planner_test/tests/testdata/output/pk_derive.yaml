@@ -103,3 +103,24 @@
     StreamMaterialize { columns: [v1, mv.v2(hidden), mv.v3(hidden)], stream_key: [v1, mv.v2, mv.v3], pk_columns: [v1, mv.v2, mv.v3], pk_conflict: NoCheck }
     └─StreamFilter { predicate: ((mv.v3 = 'world':Varchar) OR (mv.v3 = 'hello':Varchar)) }
       └─StreamTableScan { table: mv, columns: [mv.v1, mv.v2, mv.v3], stream_scan_type: SnapshotBackfill, stream_key: [mv.v1, mv.v2, mv.v3], pk: [v1, v2, v3], dist: UpstreamHashShard(mv.v1, mv.v2, mv.v3) }
+- name: MV pk stops after stream key in order by
+  sql: |
+    create table t (a int, b int, c int);
+    select
+        b,
+        min(a) as a,
+        min(c) as c
+    from
+        t
+    group by
+        b
+    order by
+        a,
+        b,
+        c;
+  stream_plan: |-
+    StreamMaterialize { columns: [b, a, c], stream_key: [b], pk_columns: [a, b], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.b, min(t.a), min(t.c)] }
+      └─StreamHashAgg { group_key: [t.b], aggs: [min(t.a), min(t.c), count] }
+        └─StreamExchange { dist: HashShard(t.b) }
+          └─StreamTableScan { table: t, columns: [t.a, t.b, t.c, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }

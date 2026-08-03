@@ -349,7 +349,10 @@ impl Binder {
             expr => {
                 let bound_expr = self.bind_expr(expr)?;
 
+                // Subqueries are unnested later, and comparing expressions that still contain
+                // subqueries is intentionally unsupported.
                 if bound_expr.is_pure()
+                    && !bound_expr.has_subquery()
                     && let Some(select_items) = select_items_for_match
                     && let Some(existing_idx) = select_items.iter().position(|e| e == &bound_expr)
                 {

@@ -14,6 +14,19 @@
 
 //! Build executor from protobuf.
 
+macro_rules! impl_stream_node_body {
+    ($variant:ident($node:ty) => $executor_builder:ty) => {
+        paste::paste! {
+            impl crate::from_proto::StreamNodeBody
+                for risingwave_pb::stream_plan::stream_node::[<$variant Variant>]
+            {
+                type Node = $node;
+                type ExecutorBuilder = $executor_builder;
+            }
+        }
+    };
+}
+
 mod agg_common;
 mod append_only_dedup;
 mod asof_join;
@@ -70,62 +83,13 @@ mod vector_index_write;
 
 // import for submodules
 use itertools::Itertools;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{StreamNode, TemporalJoinNode};
+use risingwave_common::dispatch_stream_node_body;
+use risingwave_pb::stream_plan::{self, StreamNode, TemporalJoinNode};
 use risingwave_storage::StateStore;
 
-use self::append_only_dedup::*;
-use self::approx_percentile::global::*;
-use self::approx_percentile::local::*;
-use self::asof_join::AsOfJoinExecutorBuilder;
-use self::barrier_recv::*;
-use self::batch_query::*;
-use self::cdc_filter::CdcFilterExecutorBuilder;
-use self::dml::*;
-use self::dynamic_filter::*;
-use self::eowc_gap_fill::EowcGapFillExecutorBuilder;
-use self::eowc_over_window::*;
-use self::expand::*;
-use self::filter::*;
-use self::gap_fill::GapFillExecutorBuilder;
-use self::group_top_n::GroupTopNExecutorBuilder;
-use self::hash_agg::*;
-use self::hash_join::*;
-use self::hop_window::*;
-use self::iceberg_with_pk_index::*;
-use self::locality_provider::*;
-use self::lookup::*;
-use self::lookup_union::*;
-use self::materialized_exprs::MaterializedExprsExecutorBuilder;
 pub(crate) use self::merge::MergeExecutorBuilder;
-use self::mview::*;
-use self::no_op::*;
-use self::now::NowExecutorBuilder;
-use self::over_window::*;
-use self::project::*;
-use self::project_set::*;
-use self::row_id_gen::RowIdGenExecutorBuilder;
-use self::row_merge::*;
-use self::simple_agg::*;
-use self::sink::*;
-use self::sort::*;
-use self::source::*;
-use self::source_backfill::*;
-use self::stateless_simple_agg::*;
-use self::stream_cdc_scan::*;
-use self::stream_scan::*;
-use self::sync_log_store::*;
-use self::temporal_join::*;
-use self::top_n::*;
-use self::union::*;
-use self::upstream_sink_union::*;
-use self::watermark_filter::WatermarkFilterBuilder;
 use crate::error::StreamResult;
 use crate::executor::{Execute, Executor, ExecutorInfo};
-use crate::from_proto::changelog::ChangeLogExecutorBuilder;
-use crate::from_proto::values::ValuesExecutorBuilder;
-use crate::from_proto::vector_index_lookup_join::VectorIndexLookupJoinBuilder;
-use crate::from_proto::vector_index_write::VectorIndexWriteExecutorBuilder;
 use crate::task::ExecutorParams;
 
 trait ExecutorBuilder {
@@ -139,17 +103,41 @@ trait ExecutorBuilder {
     ) -> StreamResult<Executor>;
 }
 
-macro_rules! build_executor {
-    ($source:expr, $node:expr, $store:expr, $($proto_type_name:path => $data_type:ty),* $(,)?) => {
-        match $node.get_node_body().unwrap() {
-            $(
-                $proto_type_name(node) => {
-                    <$data_type>::new_boxed_executor($source, node, $store).await
-                },
-            )*
-            NodeBody::Exchange(_) | NodeBody::DeltaIndexJoin(_) => unreachable!()
-        }
+trait StreamNodeBody {
+    type Node;
+    type ExecutorBuilder: ExecutorBuilder<Node = Self::Node>;
+}
+
+struct UnreachableExecutorBuilder<T>(std::marker::PhantomData<T>);
+
+impl<T> ExecutorBuilder for UnreachableExecutorBuilder<T> {
+    type Node = T;
+
+    async fn new_boxed_executor(
+        _params: ExecutorParams,
+        _node: &Self::Node,
+        _store: impl StateStore,
+    ) -> StreamResult<Executor> {
+        unreachable!()
     }
+}
+
+impl_stream_node_body!(
+    Exchange(stream_plan::ExchangeNode) => UnreachableExecutorBuilder<stream_plan::ExchangeNode>
+);
+impl_stream_node_body!(
+    DeltaIndexJoin(stream_plan::DeltaIndexJoinNode) => UnreachableExecutorBuilder<stream_plan::DeltaIndexJoinNode>
+);
+
+macro_rules! create_executor {
+    ($params:expr, $node:expr, $store:expr) => {
+        dispatch_stream_node_body!($node.get_node_body().unwrap(), NodeVariant, node_body => {
+            <NodeVariant as StreamNodeBody>::ExecutorBuilder::new_boxed_executor(
+                $params, node_body, $store,
+            )
+            .await
+        })
+    };
 }
 
 /// Create an executor from protobuf [`StreamNode`].
@@ -158,64 +146,5 @@ pub async fn create_executor(
     node: &StreamNode,
     store: impl StateStore,
 ) -> StreamResult<Executor> {
-    build_executor! {
-        params,
-        node,
-        store,
-        NodeBody::Source => SourceExecutorBuilder,
-        NodeBody::Sink => SinkExecutorBuilder,
-        NodeBody::Project => ProjectExecutorBuilder,
-        NodeBody::TopN => TopNExecutorBuilder::<false>,
-        NodeBody::AppendOnlyTopN => TopNExecutorBuilder::<true>,
-        NodeBody::StatelessSimpleAgg => StatelessSimpleAggExecutorBuilder,
-        NodeBody::SimpleAgg => SimpleAggExecutorBuilder,
-        NodeBody::HashAgg => HashAggExecutorBuilder,
-        NodeBody::HashJoin => HashJoinExecutorBuilder,
-        NodeBody::HopWindow => HopWindowExecutorBuilder,
-        NodeBody::StreamScan => StreamScanExecutorBuilder,
-        NodeBody::StreamCdcScan => StreamCdcScanExecutorBuilder,
-        NodeBody::BatchPlan => BatchQueryExecutorBuilder,
-        NodeBody::Merge => MergeExecutorBuilder,
-        NodeBody::Materialize => MaterializeExecutorBuilder,
-        NodeBody::Filter => FilterExecutorBuilder,
-        NodeBody::CdcFilter => CdcFilterExecutorBuilder,
-        NodeBody::Arrange => ArrangeExecutorBuilder,
-        NodeBody::Lookup => LookupExecutorBuilder,
-        NodeBody::Union => UnionExecutorBuilder,
-        NodeBody::LookupUnion => LookupUnionExecutorBuilder,
-        NodeBody::Expand => ExpandExecutorBuilder,
-        NodeBody::DynamicFilter => DynamicFilterExecutorBuilder,
-        NodeBody::ProjectSet => ProjectSetExecutorBuilder,
-        NodeBody::GroupTopN => GroupTopNExecutorBuilder::<false>,
-        NodeBody::AppendOnlyGroupTopN => GroupTopNExecutorBuilder::<true>,
-        NodeBody::Sort => SortExecutorBuilder,
-        NodeBody::WatermarkFilter => WatermarkFilterBuilder,
-        NodeBody::Dml => DmlExecutorBuilder,
-        NodeBody::RowIdGen => RowIdGenExecutorBuilder,
-        NodeBody::Now => NowExecutorBuilder,
-        NodeBody::TemporalJoin => TemporalJoinExecutorBuilder,
-        NodeBody::Values => ValuesExecutorBuilder,
-        NodeBody::BarrierRecv => BarrierRecvExecutorBuilder,
-        NodeBody::AppendOnlyDedup => AppendOnlyDedupExecutorBuilder,
-        NodeBody::NoOp => NoOpExecutorBuilder,
-        NodeBody::EowcOverWindow => EowcOverWindowExecutorBuilder,
-        NodeBody::OverWindow => OverWindowExecutorBuilder,
-        NodeBody::StreamFsFetch => FsFetchExecutorBuilder,
-        NodeBody::SourceBackfill => SourceBackfillExecutorBuilder,
-        NodeBody::Changelog => ChangeLogExecutorBuilder,
-        NodeBody::GlobalApproxPercentile => GlobalApproxPercentileExecutorBuilder,
-        NodeBody::LocalApproxPercentile => LocalApproxPercentileExecutorBuilder,
-        NodeBody::RowMerge => RowMergeExecutorBuilder,
-        NodeBody::AsOfJoin => AsOfJoinExecutorBuilder,
-        NodeBody::SyncLogStore => SyncLogStoreExecutorBuilder,
-        NodeBody::MaterializedExprs => MaterializedExprsExecutorBuilder,
-        NodeBody::VectorIndexWrite => VectorIndexWriteExecutorBuilder,
-        NodeBody::UpstreamSinkUnion => UpstreamSinkUnionExecutorBuilder,
-        NodeBody::LocalityProvider => LocalityProviderBuilder,
-        NodeBody::EowcGapFill => EowcGapFillExecutorBuilder,
-        NodeBody::GapFill => GapFillExecutorBuilder,
-        NodeBody::VectorIndexLookupJoin => VectorIndexLookupJoinBuilder,
-        NodeBody::IcebergWithPkIndexWriter => IcebergWithPkIndexWriterExecutorBuilder,
-        NodeBody::IcebergWithPkIndexDvMerger => IcebergWithPkIndexDvMergerExecutorBuilder,
-    }
+    create_executor!(params, node, store)
 }

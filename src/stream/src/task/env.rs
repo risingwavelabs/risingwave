@@ -68,7 +68,7 @@ pub struct StreamEnvironment {
 }
 
 impl StreamEnvironment {
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         server_addr: HostAddr,
         global_config: Arc<StreamingConfig>,

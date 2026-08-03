@@ -14,14 +14,430 @@
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::hash::VirtualNode;
+    use risingwave_meta_model::FragmentId;
+    use risingwave_meta_model::fragment::DistributionType;
+    use risingwave_meta_model::table::HandleConflictBehavior;
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::catalog::subscription::SubscriptionState;
+    use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType, worker_node};
+    use risingwave_pb::meta::SubscribeType;
+    use risingwave_pb::stream_plan::PbStreamNode;
+    use tokio::sync::{mpsc, oneshot};
 
     use crate::controller::catalog::*;
+    use crate::manager::{LocalNotification, WorkerKey};
+    use crate::serving::ServingVnodeMapping;
 
     const TEST_DATABASE_ID: DatabaseId = DatabaseId::new(1);
     const TEST_SCHEMA_ID: SchemaId = SchemaId::new(2);
     const TEST_OWNER_ID: UserId = UserId::new(1);
+
+    async fn insert_test_table(
+        txn: &DatabaseTransaction,
+        table_id: TableId,
+        name: &str,
+        table_type: TableType,
+        belongs_to_job_id: Option<JobId>,
+        definition: &str,
+    ) -> MetaResult<()> {
+        table::ActiveModel {
+            table_id: Set(table_id),
+            name: Set(name.to_owned()),
+            optional_associated_source_id: Set(None),
+            table_type: Set(table_type),
+            belongs_to_job_id: Set(belongs_to_job_id),
+            columns: Set(vec![].into()),
+            pk: Set(vec![].into()),
+            distribution_key: Set(Vec::<i32>::new().into()),
+            stream_key: Set(Vec::<i32>::new().into()),
+            append_only: Set(false),
+            fragment_id: Set(None),
+            vnode_col_index: Set(None),
+            row_id_index: Set(None),
+            value_indices: Set(Vec::<i32>::new().into()),
+            definition: Set(definition.to_owned()),
+            handle_pk_conflict_behavior: Set(HandleConflictBehavior::NoCheck),
+            version_column_indices: Set(None),
+            read_prefix_len_hint: Set(0),
+            watermark_indices: Set(Vec::<i32>::new().into()),
+            dist_key_in_pk: Set(Vec::<i32>::new().into()),
+            dml_fragment_id: Set(None),
+            cardinality: Set(None),
+            cleaned_by_watermark: Set(false),
+            description: Set(None),
+            version: Set(None),
+            retention_seconds: Set(None),
+            cdc_table_id: Set(None),
+            vnode_count: Set(1),
+            webhook_info: Set(None),
+            engine: Set(None),
+            clean_watermark_index_in_pk: Set(None),
+            clean_watermark_indices: Set(None),
+            refreshable: Set(false),
+            vector_index_info: Set(None),
+            cdc_table_type: Set(None),
+        }
+        .insert(txn)
+        .await?;
+        Ok(())
+    }
+
+    async fn insert_test_fragment(
+        txn: &DatabaseTransaction,
+        fragment_id: FragmentId,
+        job_id: JobId,
+        state_table_ids: TableIdArray,
+    ) -> MetaResult<()> {
+        fragment::ActiveModel {
+            fragment_id: Set(fragment_id),
+            job_id: Set(job_id),
+            fragment_type_mask: Set(0),
+            distribution_type: Set(fragment::DistributionType::Hash),
+            stream_node: Set(StreamNode::from(&PbStreamNode::default())),
+            state_table_ids: Set(state_table_ids),
+            upstream_fragment_id: Set(I32Array::default()),
+            vnode_count: Set(1),
+            parallelism: Set(None),
+        }
+        .insert(txn)
+        .await?;
+        Ok(())
+    }
+
+    async fn insert_test_streaming_job(
+        txn: &DatabaseTransaction,
+        name: &str,
+        has_result_table: bool,
+        policy: Option<CacheRefillPolicy>,
+    ) -> MetaResult<(JobId, Option<TableId>, TableId)> {
+        let object_type = if has_result_table {
+            ObjectType::Table
+        } else {
+            ObjectType::Sink
+        };
+        let job_id = CatalogController::create_object(
+            txn,
+            object_type,
+            TEST_OWNER_ID,
+            Some(TEST_DATABASE_ID),
+            Some(TEST_SCHEMA_ID),
+        )
+        .await?
+        .oid
+        .as_job_id();
+        let result_table_id = has_result_table.then_some(job_id.as_mv_table_id());
+        if let Some(table_id) = result_table_id {
+            insert_test_table(txn, table_id, name, TableType::MaterializedView, None, "").await?;
+        }
+
+        let internal_table_id = CatalogController::create_object(
+            txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(TEST_DATABASE_ID),
+            Some(TEST_SCHEMA_ID),
+        )
+        .await?
+        .oid
+        .as_table_id();
+        insert_test_table(
+            txn,
+            internal_table_id,
+            &format!("__internal_{name}"),
+            TableType::Internal,
+            Some(job_id),
+            "",
+        )
+        .await?;
+
+        streaming_job::ActiveModel {
+            job_id: Set(job_id),
+            job_status: Set(JobStatus::Created),
+            create_type: Set(CreateType::Foreground),
+            timezone: Set(None),
+            config_override: Set(policy.map(|policy| {
+                format!(
+                    "[streaming.developer]\ncache_refill_policy = \"{}\"\n",
+                    policy
+                )
+            })),
+            adaptive_parallelism_strategy: Set(None),
+            parallelism: Set(StreamingParallelism::Adaptive),
+            backfill_parallelism: Set(None),
+            backfill_adaptive_parallelism_strategy: Set(None),
+            backfill_orders: Set(None),
+            max_parallelism: Set(1),
+            specific_resource_group: Set(None),
+            is_serverless_backfill: Set(false),
+            refresh_interval_sec: Set(None),
+        }
+        .insert(txn)
+        .await?;
+
+        Ok((job_id, result_table_id, internal_table_id))
+    }
+
+    #[tokio::test]
+    async fn test_table_refill_catalog_snapshot_classifies_table_identity() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let (mv_job, Some(mv_result), mv_internal) =
+            insert_test_streaming_job(&txn, "mv_both", true, Some(CacheRefillPolicy::Both)).await?
+        else {
+            unreachable!()
+        };
+        let (default_job, Some(_default_result), default_internal) =
+            insert_test_streaming_job(&txn, "mv_default", true, None).await?
+        else {
+            unreachable!()
+        };
+        let (sink_job, None, sink_internal) = insert_test_streaming_job(
+            &txn,
+            "sink_streaming",
+            false,
+            Some(CacheRefillPolicy::Streaming),
+        )
+        .await?
+        else {
+            unreachable!()
+        };
+
+        let result_fragment = FragmentId::new(100);
+        let internal_fragment = FragmentId::new(101);
+        let sink_fragment = FragmentId::new(102);
+        for (fragment_id, job_id, table_ids) in [
+            (result_fragment, mv_job, vec![mv_result, mv_internal]),
+            (internal_fragment, default_job, vec![default_internal]),
+            (sink_fragment, sink_job, vec![sink_internal]),
+        ] {
+            insert_test_fragment(&txn, fragment_id, job_id, TableIdArray(table_ids)).await?;
+        }
+        txn.commit().await?;
+        drop(inner);
+
+        let serving_infos = mgr.fragment_serving_infos().await?;
+        assert_eq!(serving_infos.len(), 3);
+        assert_eq!(
+            serving_infos[&result_fragment].result_table_id,
+            Some(mv_result)
+        );
+        assert_eq!(serving_infos[&internal_fragment].result_table_id, None);
+        assert_eq!(serving_infos[&sink_fragment].result_table_id, None);
+
+        let policies = mgr.table_cache_refill_policies_snapshot().await?;
+        assert_eq!(
+            policies
+                .table_policies
+                .into_iter()
+                .map(|policy| (policy.table_id, policy.policy))
+                .collect::<HashMap<_, _>>(),
+            HashMap::from([(
+                mv_result.as_raw_id(),
+                CacheRefillPolicy::Both.to_protobuf() as i32,
+            )])
+        );
+        assert_eq!(
+            policies
+                .internal_table_policies
+                .into_iter()
+                .map(|policy| (policy.table_id, policy.policy))
+                .collect::<HashMap<_, _>>(),
+            HashMap::from([
+                (
+                    mv_internal.as_raw_id(),
+                    CacheRefillPolicy::Both.to_protobuf() as i32,
+                ),
+                (
+                    sink_internal.as_raw_id(),
+                    CacheRefillPolicy::Streaming.to_protobuf() as i32,
+                ),
+            ])
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_alter_streaming_job_cache_refill_policy_notifies_hummock() -> MetaResult<()> {
+        let env = MetaSrvEnv::for_test().await;
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        env.notification_manager().insert_sender(
+            SubscribeType::Hummock,
+            WorkerKey(HostAddress {
+                host: "localhost".to_owned(),
+                port: 1234,
+            }),
+            tx,
+        );
+        let mgr = CatalogController::new(env).await?;
+
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let (_job, Some(result_table_id), internal_table_id) =
+            insert_test_streaming_job(&txn, "mv_cache_refill", true, None).await?
+        else {
+            unreachable!()
+        };
+        txn.commit().await?;
+        drop(inner);
+
+        mgr.alter_streaming_job_config(
+            result_table_id.as_job_id(),
+            HashMap::from([(
+                STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH.to_owned(),
+                "\"both\"".to_owned(),
+            )]),
+            vec![],
+        )
+        .await?;
+
+        let response = rx
+            .recv()
+            .await
+            .expect("should receive hummock notification")
+            .expect("notification should be ok");
+        assert_eq!(response.operation(), NotificationOperation::Update);
+        let info = response.info;
+        let Some(NotificationInfo::TableRefillRuntimeConfig(config)) = info else {
+            panic!("unexpected notification: {:?}", info);
+        };
+        assert!(config.serving_table_vnode_mappings.is_none());
+        let policies = config
+            .table_cache_refill_policies
+            .expect("policy snapshot should be present");
+        assert_eq!(
+            policies
+                .table_policies
+                .into_iter()
+                .map(|policy| (policy.table_id, policy.policy))
+                .collect::<HashMap<_, _>>(),
+            HashMap::from([(
+                result_table_id.as_raw_id(),
+                CacheRefillPolicy::Both.to_protobuf() as i32,
+            )])
+        );
+        assert_eq!(
+            policies
+                .internal_table_policies
+                .into_iter()
+                .map(|policy| (policy.table_id, policy.policy))
+                .collect::<HashMap<_, _>>(),
+            HashMap::from([(
+                internal_table_id.as_raw_id(),
+                CacheRefillPolicy::Both.to_protobuf() as i32,
+            )])
+        );
+
+        Ok(())
+    }
+
+    async fn insert_dirty_creating_job_with_fragment(
+        mgr: &CatalogController,
+        fragment_id: FragmentId,
+        vnode_count: i32,
+    ) -> MetaResult<(JobId, TableId)> {
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let job_obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(TEST_DATABASE_ID),
+            Some(TEST_SCHEMA_ID),
+        )
+        .await?;
+        let job_id = job_obj.oid.as_job_id();
+        let table_id = job_id.as_mv_table_id();
+        insert_test_table(
+            &txn,
+            table_id,
+            "mv_dirty_serving_mapping",
+            TableType::MaterializedView,
+            None,
+            "CREATE MATERIALIZED VIEW mv_dirty_serving_mapping AS SELECT 1",
+        )
+        .await?;
+        streaming_job::ActiveModel {
+            job_id: Set(job_id),
+            job_status: Set(JobStatus::Creating),
+            create_type: Set(CreateType::Foreground),
+            timezone: Set(None),
+            config_override: Set(None),
+            adaptive_parallelism_strategy: Set(None),
+            parallelism: Set(StreamingParallelism::Adaptive),
+            backfill_parallelism: Set(None),
+            backfill_adaptive_parallelism_strategy: Set(None),
+            backfill_orders: Set(None),
+            max_parallelism: Set(1),
+            specific_resource_group: Set(None),
+            is_serverless_backfill: Set(false),
+            refresh_interval_sec: Set(None),
+        }
+        .insert(&txn)
+        .await?;
+        fragment::ActiveModel {
+            fragment_id: Set(fragment_id),
+            job_id: Set(job_id),
+            fragment_type_mask: Set(0),
+            distribution_type: Set(DistributionType::Hash),
+            stream_node: Set(StreamNode::default()),
+            state_table_ids: Set(Vec::<TableId>::new().into()),
+            upstream_fragment_id: Set(Vec::<i32>::new().into()),
+            vnode_count: Set(vnode_count),
+            parallelism: Set(None),
+        }
+        .insert(&txn)
+        .await?;
+        txn.commit().await?;
+        drop(inner);
+
+        Ok((job_id, table_id))
+    }
+
+    #[tokio::test]
+    async fn test_dirty_cleanup_reconcile_removes_stale_serving_vnode_mapping() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let fragment_id = FragmentId::new(42);
+        insert_dirty_creating_job_with_fragment(
+            &mgr,
+            fragment_id,
+            VirtualNode::COUNT_FOR_TEST as i32,
+        )
+        .await?;
+
+        let worker = WorkerNode {
+            id: WorkerId::new(1),
+            r#type: WorkerType::ComputeNode.into(),
+            host: Some(HostAddress {
+                host: "localhost".to_owned(),
+                port: 1,
+            }),
+            state: worker_node::State::Running as i32,
+            property: Some(worker_node::Property {
+                is_serving: true,
+                parallelism: 1,
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        let serving_vnode_mapping = ServingVnodeMapping::default();
+        let initial_snapshot = mgr.fragment_serving_infos().await?;
+        serving_vnode_mapping.upsert(&initial_snapshot, std::slice::from_ref(&worker), None);
+        assert!(serving_vnode_mapping.all().contains_key(&fragment_id));
+
+        mgr.clean_dirty_creating_jobs(Some(TEST_DATABASE_ID))
+            .await?;
+        let current_snapshot = mgr.fragment_serving_infos().await?;
+        assert!(!current_snapshot.contains_key(&fragment_id));
+
+        serving_vnode_mapping.reconcile(&current_snapshot, &[worker], None);
+        assert!(!serving_vnode_mapping.all().contains_key(&fragment_id));
+
+        Ok(())
+    }
 
     #[tokio::test]
     async fn test_database_func() -> MetaResult<()> {
@@ -254,6 +670,268 @@ mod tests {
                 .await?
                 .is_none()
         );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_abort_initial_materialized_view_reports_cancellation() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+
+        let mut inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(TEST_DATABASE_ID),
+            Some(TEST_SCHEMA_ID),
+        )
+        .await?;
+        let job_id = obj.oid.as_job_id();
+
+        table::ActiveModel {
+            table_id: Set(obj.oid.as_table_id()),
+            name: Set("mv_abort_initial".to_owned()),
+            optional_associated_source_id: Set(None),
+            table_type: Set(TableType::MaterializedView),
+            belongs_to_job_id: Set(None),
+            columns: Set(vec![].into()),
+            pk: Set(vec![].into()),
+            distribution_key: Set(Vec::<i32>::new().into()),
+            stream_key: Set(Vec::<i32>::new().into()),
+            append_only: Set(false),
+            fragment_id: Set(None),
+            vnode_col_index: Set(None),
+            row_id_index: Set(None),
+            value_indices: Set(Vec::<i32>::new().into()),
+            definition: Set("CREATE MATERIALIZED VIEW mv_abort_initial AS SELECT 1".to_owned()),
+            handle_pk_conflict_behavior: Set(HandleConflictBehavior::NoCheck),
+            version_column_indices: Set(None),
+            read_prefix_len_hint: Set(0),
+            watermark_indices: Set(Vec::<i32>::new().into()),
+            dist_key_in_pk: Set(Vec::<i32>::new().into()),
+            dml_fragment_id: Set(None),
+            cardinality: Set(None),
+            cleaned_by_watermark: Set(false),
+            description: Set(None),
+            version: Set(None),
+            retention_seconds: Set(None),
+            cdc_table_id: Set(None),
+            vnode_count: Set(1),
+            webhook_info: Set(None),
+            engine: Set(None),
+            clean_watermark_index_in_pk: Set(None),
+            clean_watermark_indices: Set(None),
+            refreshable: Set(false),
+            vector_index_info: Set(None),
+            cdc_table_type: Set(None),
+        }
+        .insert(&txn)
+        .await?;
+
+        streaming_job::ActiveModel {
+            job_id: Set(job_id),
+            job_status: Set(JobStatus::Initial),
+            create_type: Set(CreateType::Foreground),
+            timezone: Set(None),
+            config_override: Set(None),
+            adaptive_parallelism_strategy: Set(None),
+            parallelism: Set(StreamingParallelism::Adaptive),
+            backfill_parallelism: Set(None),
+            backfill_adaptive_parallelism_strategy: Set(None),
+            backfill_orders: Set(None),
+            max_parallelism: Set(1),
+            specific_resource_group: Set(None),
+            is_serverless_backfill: Set(false),
+            refresh_interval_sec: Set(None),
+        }
+        .insert(&txn)
+        .await?;
+
+        let (tx, rx) = oneshot::channel();
+        inner.register_finish_notifier(TEST_DATABASE_ID, job_id, tx);
+        txn.commit().await?;
+        drop(inner);
+
+        let abort_result = mgr.try_abort_creating_streaming_job(job_id, true).await?;
+        assert!(abort_result.aborted);
+        assert_eq!(abort_result.database_id, Some(TEST_DATABASE_ID));
+
+        let err = rx
+            .await
+            .expect("finish notifier should be notified")
+            .expect_err("initial job drop should cancel the create wait");
+        assert!(err.contains("cancelled"));
+
+        let db = &mgr.inner.read().await.db;
+        assert!(Object::find_by_id(job_id).one(db).await?.is_none());
+        assert!(StreamingJob::find_by_id(job_id).one(db).await?.is_none());
+        assert!(
+            Table::find_by_id(job_id.as_mv_table_id())
+                .one(db)
+                .await?
+                .is_none()
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_clean_dirty_creating_jobs_records_dropped_tables_for_per_db_recovery()
+    -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let mv_obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(TEST_DATABASE_ID),
+            Some(TEST_SCHEMA_ID),
+        )
+        .await?;
+        let job_id = mv_obj.oid.as_job_id();
+        let mv_table_id = job_id.as_mv_table_id();
+        insert_test_table(
+            &txn,
+            mv_table_id,
+            "mv_dirty",
+            TableType::MaterializedView,
+            None,
+            "CREATE MATERIALIZED VIEW mv_dirty AS SELECT 1",
+        )
+        .await?;
+
+        let internal_obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(TEST_DATABASE_ID),
+            Some(TEST_SCHEMA_ID),
+        )
+        .await?;
+        let internal_table_id = internal_obj.oid.as_table_id();
+        insert_test_table(
+            &txn,
+            internal_table_id,
+            "__internal_mv_dirty",
+            TableType::Internal,
+            Some(job_id),
+            "",
+        )
+        .await?;
+
+        streaming_job::ActiveModel {
+            job_id: Set(job_id),
+            job_status: Set(JobStatus::Creating),
+            create_type: Set(CreateType::Foreground),
+            timezone: Set(None),
+            config_override: Set(None),
+            adaptive_parallelism_strategy: Set(None),
+            parallelism: Set(StreamingParallelism::Adaptive),
+            backfill_parallelism: Set(None),
+            backfill_adaptive_parallelism_strategy: Set(None),
+            backfill_orders: Set(None),
+            max_parallelism: Set(1),
+            specific_resource_group: Set(None),
+            is_serverless_backfill: Set(false),
+            refresh_interval_sec: Set(None),
+        }
+        .insert(&txn)
+        .await?;
+        txn.commit().await?;
+        drop(inner);
+
+        let cleaned = mgr
+            .clean_dirty_creating_jobs(Some(TEST_DATABASE_ID))
+            .await?;
+        assert_eq!(cleaned.streaming_job_ids, vec![job_id]);
+        assert!(cleaned.source_ids.is_empty());
+        let mut dropped_table_ids = cleaned.dropped_table_ids;
+        dropped_table_ids.sort_unstable();
+        assert_eq!(dropped_table_ids, vec![mv_table_id, internal_table_id]);
+
+        let inner = mgr.inner.read().await;
+        assert!(inner.dropped_tables.contains_key(&mv_table_id));
+        assert!(inner.dropped_tables.contains_key(&internal_table_id));
+        assert!(Object::find_by_id(job_id).one(&inner.db).await?.is_none());
+        assert!(
+            StreamingJob::find_by_id(job_id)
+                .one(&inner.db)
+                .await?
+                .is_none()
+        );
+        assert!(
+            Table::find_by_id(mv_table_id)
+                .one(&inner.db)
+                .await?
+                .is_none()
+        );
+        assert!(
+            Table::find_by_id(internal_table_id)
+                .one(&inner.db)
+                .await?
+                .is_none()
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_clean_dirty_creating_jobs_notifies_serving_mapping_fragment_delete()
+    -> MetaResult<()> {
+        let env = MetaSrvEnv::for_test().await;
+        let (local_notification_tx, mut local_notification_rx) = mpsc::unbounded_channel();
+        env.notification_manager()
+            .insert_local_sender(local_notification_tx);
+        let mgr = CatalogController::new(env).await?;
+        let fragment_id = FragmentId::new(3);
+        let (job_id, mv_table_id) =
+            insert_dirty_creating_job_with_fragment(&mgr, fragment_id, 1).await?;
+
+        assert!(
+            mgr.fragment_serving_infos()
+                .await?
+                .contains_key(&fragment_id)
+        );
+
+        let cleaned = mgr
+            .clean_dirty_creating_jobs(Some(TEST_DATABASE_ID))
+            .await?;
+        assert_eq!(cleaned.streaming_job_ids, vec![job_id]);
+
+        let inner = mgr.inner.read().await;
+        assert!(Object::find_by_id(job_id).one(&inner.db).await?.is_none());
+        assert!(
+            StreamingJob::find_by_id(job_id)
+                .one(&inner.db)
+                .await?
+                .is_none()
+        );
+        assert!(
+            Table::find_by_id(mv_table_id)
+                .one(&inner.db)
+                .await?
+                .is_none()
+        );
+        drop(inner);
+        assert!(
+            !mgr.fragment_serving_infos()
+                .await?
+                .contains_key(&fragment_id)
+        );
+
+        let notification = local_notification_rx.try_recv().expect(
+            "dirty-job cleanup must notify the serving mapping worker about deleted fragments",
+        );
+        match notification {
+            LocalNotification::ServingFragmentMappingsDelete(fragment_ids) => {
+                assert_eq!(fragment_ids, vec![fragment_id]);
+            }
+            notification => panic!("unexpected local notification: {notification:?}"),
+        }
 
         Ok(())
     }

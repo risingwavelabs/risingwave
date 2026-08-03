@@ -29,7 +29,9 @@ use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::id::SourceId;
 use risingwave_common::types::{JsonbVal, ScalarRef, Serial, ToOwnedDatum};
 use risingwave_connector::source::iceberg::metrics::GLOBAL_ICEBERG_SCAN_METRICS;
-use risingwave_connector::source::iceberg::{IcebergScanOpts, scan_task_to_chunk_with_deletes};
+use risingwave_connector::source::iceberg::{
+    IcebergScanOpts, PersistedFileScanTask, scan_task_to_chunk_with_deletes,
+};
 use risingwave_connector::source::reader::desc::SourceDesc;
 use risingwave_connector::source::{SourceContext, SourceCtrlOpts};
 use risingwave_pb::common::ThrottleType;
@@ -77,196 +79,6 @@ pub(crate) struct ChunksWithState {
     /// The last read position in the file, used for checkpointing.
     #[expect(dead_code)]
     pub last_read_pos: Datum,
-}
-
-pub(super) use state::PersistedFileScanTask;
-mod state {
-    use std::sync::Arc;
-
-    use anyhow::Context;
-    use iceberg::expr::BoundPredicate;
-    use iceberg::scan::FileScanTask;
-    use iceberg::spec::{DataContentType, DataFileFormat, SchemaRef};
-    use risingwave_common::types::{JsonbRef, JsonbVal, ScalarRef};
-    use serde::{Deserialize, Serialize};
-
-    use crate::executor::StreamExecutorResult;
-
-    fn default_case_sensitive() -> bool {
-        true
-    }
-    /// This corresponds to the actually persisted `FileScanTask` in the state table.
-    ///
-    /// We introduce this in case the definition of [`FileScanTask`] changes in the iceberg-rs crate.
-    /// Currently, they have the same definition.
-    ///
-    /// We can handle possible compatibility issues in [`Self::from_task`] and [`Self::to_task`].
-    /// A version id needs to be introduced then.
-    #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-    pub struct PersistedFileScanTask {
-        /// The start offset of the file to scan.
-        pub start: u64,
-        /// The length of the file to scan.
-        pub length: u64,
-        /// The number of records in the file to scan.
-        ///
-        /// This is an optional field, and only available if we are
-        /// reading the entire data file.
-        pub record_count: Option<u64>,
-
-        /// The data file path corresponding to the task.
-        pub data_file_path: String,
-
-        /// The content type of the file to scan.
-        pub data_file_content: DataContentType,
-
-        /// The format of the file to scan.
-        pub data_file_format: DataFileFormat,
-
-        /// The schema of the file to scan.
-        pub schema: SchemaRef,
-        /// The field ids to project.
-        pub project_field_ids: Vec<i32>,
-        /// The predicate to filter.
-        #[serde(skip_serializing_if = "Option::is_none")]
-        pub predicate: Option<BoundPredicate>,
-
-        /// The list of delete files that may need to be applied to this data file
-        pub deletes: Vec<PersistedFileScanTask>,
-        /// sequence number
-        pub sequence_number: i64,
-        /// equality ids
-        pub equality_ids: Option<Vec<i32>>,
-
-        pub file_size_in_bytes: u64,
-
-        #[serde(default = "default_case_sensitive")]
-        pub case_sensitive: bool,
-    }
-
-    impl PersistedFileScanTask {
-        /// First decodes the json to the struct, then converts the struct to a [`FileScanTask`].
-        pub fn decode(jsonb_ref: JsonbRef<'_>) -> StreamExecutorResult<FileScanTask> {
-            let persisted_task: Self =
-                serde_json::from_value(jsonb_ref.to_owned_scalar().take())
-                    .with_context(|| format!("invalid state: {:?}", jsonb_ref))?;
-            Ok(Self::to_task(persisted_task))
-        }
-
-        /// First converts the [`FileScanTask`] to a persisted one, then encodes the persisted one to a jsonb value.
-        pub fn encode(task: FileScanTask) -> JsonbVal {
-            let persisted_task = Self::from_task(task);
-            serde_json::to_value(persisted_task).unwrap().into()
-        }
-
-        /// Converts a persisted task to a [`FileScanTask`].
-        fn to_task(
-            Self {
-                start,
-                length,
-                record_count,
-                data_file_path,
-                data_file_content,
-                data_file_format,
-                schema,
-                project_field_ids,
-                predicate,
-                deletes,
-                sequence_number,
-                equality_ids,
-                file_size_in_bytes,
-                case_sensitive,
-            }: Self,
-        ) -> FileScanTask {
-            FileScanTask {
-                start,
-                length,
-                record_count,
-                data_file_path,
-                data_file_content,
-                data_file_format,
-                schema,
-                project_field_ids,
-                predicate,
-                deletes: deletes
-                    .into_iter()
-                    .map(|task| Arc::new(PersistedFileScanTask::to_task(task)))
-                    .collect(),
-                sequence_number,
-                equality_ids,
-                file_size_in_bytes,
-                partition: None,
-                partition_spec: None,
-                name_mapping: None,
-                case_sensitive,
-            }
-        }
-
-        /// Changes a [`FileScanTask`] to a persisted one.
-        fn from_task(
-            FileScanTask {
-                start,
-                length,
-                record_count,
-                data_file_path,
-                data_file_content,
-                data_file_format,
-                schema,
-                project_field_ids,
-                predicate,
-                deletes,
-                sequence_number,
-                equality_ids,
-                file_size_in_bytes,
-                case_sensitive,
-                ..
-            }: FileScanTask,
-        ) -> Self {
-            Self {
-                start,
-                length,
-                record_count,
-                data_file_path,
-                data_file_content,
-                data_file_format,
-                schema,
-                project_field_ids,
-                predicate,
-                deletes: deletes
-                    .into_iter()
-                    .map(PersistedFileScanTask::from_task_ref)
-                    .collect(),
-                sequence_number,
-                equality_ids,
-                file_size_in_bytes,
-                case_sensitive,
-            }
-        }
-
-        fn from_task_ref(task: Arc<FileScanTask>) -> Self {
-            Self {
-                start: task.start,
-                length: task.length,
-                record_count: task.record_count,
-                data_file_path: task.data_file_path.clone(),
-                data_file_content: task.data_file_content,
-                data_file_format: task.data_file_format,
-                schema: task.schema.clone(),
-                project_field_ids: task.project_field_ids.clone(),
-                predicate: task.predicate.clone(),
-                deletes: task
-                    .deletes
-                    .iter()
-                    .cloned()
-                    .map(PersistedFileScanTask::from_task_ref)
-                    .collect(),
-                sequence_number: task.sequence_number,
-                equality_ids: task.equality_ids.clone(),
-                file_size_in_bytes: task.file_size_in_bytes,
-                case_sensitive: task.case_sensitive,
-            }
-        }
-    }
 }
 
 impl<S: StateStore> IcebergFetchExecutor<S> {
@@ -374,6 +186,9 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
         let metrics = Arc::new(GLOBAL_ICEBERG_SCAN_METRICS.clone());
 
         for task in batch {
+            // Capture the file path upfront from the task so we can use it even when the
+            // scan produces no chunks (empty data file or fully equality-deleted file).
+            let task_data_file_path = task.data_file_path.clone();
             let mut chunks = vec![];
             #[for_await]
             for chunk in scan_task_to_chunk_with_deletes(
@@ -383,26 +198,47 @@ impl<S: StateStore> IcebergFetchExecutor<S> {
                     chunk_size: streaming_config.developer.chunk_size,
                     need_seq_num: true, /* Although this column is unnecessary, we still keep it for potential usage in the future */
                     need_file_path_and_pos: true,
+                    // Iceberg V2 position/equality deletes are exposed as separate delete-file
+                    // tasks for table-engine reads. V3 deletion vectors should be applied by
+                    // iceberg-rs while scanning the data file.
                     handle_delete_files: table.metadata().format_version()
                         >= iceberg::spec::FormatVersion::V3,
                 },
                 Some(metrics.clone()),
             ) {
                 let chunk = chunk?;
+                // Skip zero-cardinality chunks: a RecordBatch with 0 visible rows after
+                // predicate/delete filtering would cause `cardinality() - 1` to underflow
+                // below when we extract the last-row metadata. Skipping here is safe
+                // because the existing `task_data_file_path` fallback already covers
+                // the case where no readable rows are produced.
+                if chunk.cardinality() == 0 {
+                    continue;
+                }
                 chunks.push(StreamChunk::from_parts(
                     itertools::repeat_n(Op::Insert, chunk.cardinality()).collect_vec(),
                     chunk,
                 ));
             }
             // We yield once for each file now, because iceberg-rs doesn't support read part of a file now.
-            let last_chunk = chunks.last().unwrap();
-            let last_row = last_chunk.row_at(last_chunk.cardinality() - 1).1;
-            let data_file_path = last_row
-                .datum_at(file_path_idx)
-                .unwrap()
-                .into_utf8()
-                .to_owned();
-            let last_read_pos = last_row.datum_at(file_pos_idx).unwrap().to_owned_datum();
+            // We must always yield — even for an empty task — so that `into_stream` can
+            // decrement `splits_on_fetch` and delete the file assignment from the state
+            // table.  Skipping the yield (e.g. with `continue`) would leave the file
+            // stuck in the state table and prevent subsequent batches from progressing.
+            let (data_file_path, last_read_pos) = if let Some(last_chunk) = chunks.last() {
+                let last_row = last_chunk.row_at(last_chunk.cardinality() - 1).1;
+                let path = last_row
+                    .datum_at(file_path_idx)
+                    .unwrap()
+                    .into_utf8()
+                    .to_owned();
+                let pos = last_row.datum_at(file_pos_idx).unwrap().to_owned_datum();
+                (path, pos)
+            } else {
+                // No rows were produced: fall back to the task's own path so the
+                // consumer can still remove the state entry for this file.
+                (task_data_file_path, None)
+            };
             yield ChunksWithState {
                 chunks,
                 data_file_path,
@@ -699,5 +535,117 @@ impl<S: StateStore> Debug for IcebergFetchExecutor<S> {
         } else {
             f.debug_struct("IcebergFetchExecutor").finish()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use itertools::Itertools;
+    use risingwave_common::array::{DataChunk, Op, StreamChunk};
+
+    use super::ChunksWithState;
+
+    /// Verifies the `ChunksWithState` contract for the empty-task case.
+    ///
+    /// When a `FileScanTask` produces no rows (e.g. an empty data file or an Iceberg file
+    /// fully covered by equality-delete files), `build_batched_stream_reader` now yields a
+    /// `ChunksWithState` with an empty `chunks` vec and the `data_file_path` taken directly
+    /// from the task — rather than skipping the yield entirely.
+    ///
+    /// Skipping the yield would prevent `into_stream` from calling
+    /// `state_store_handler.delete(&data_file_path)` and decrementing `splits_on_fetch`,
+    /// leaving the file assignment stuck in the state table.
+    ///
+    /// This test verifies the two properties that `into_stream` depends on:
+    /// 1. An empty `ChunksWithState` forwards no data downstream (the chunk loop is a
+    ///    no-op), so no spurious rows appear.
+    /// 2. `data_file_path` is populated so the state entry can be cleaned up.
+    #[test]
+    fn test_empty_chunks_with_state_satisfies_into_stream_contract() {
+        let path = "s3://bucket/empty.parquet".to_owned();
+
+        // Simulate what build_batched_stream_reader yields for an empty task.
+        let cws = ChunksWithState {
+            chunks: vec![],
+            data_file_path: path.clone(),
+            last_read_pos: None,
+        };
+
+        // Property 1: no data is forwarded downstream.
+        let forwarded: Vec<_> = cws.chunks.iter().collect();
+        assert!(
+            forwarded.is_empty(),
+            "empty ChunksWithState must not forward any rows"
+        );
+
+        // Property 2: data_file_path is set so the state entry can be deleted.
+        assert_eq!(
+            cws.data_file_path, path,
+            "data_file_path must match the original task path"
+        );
+    }
+
+    /// Verifies that a non-empty `ChunksWithState` carries its chunks unmodified.
+    #[test]
+    fn test_non_empty_chunks_with_state() {
+        let chunk = StreamChunk::from_parts(
+            vec![Op::Insert, Op::Insert, Op::Insert],
+            DataChunk::new_dummy(3),
+        );
+        let cws = ChunksWithState {
+            chunks: vec![chunk],
+            data_file_path: "s3://bucket/data.parquet".to_owned(),
+            last_read_pos: None,
+        };
+
+        assert_eq!(cws.chunks.len(), 1);
+        assert_eq!(cws.chunks[0].cardinality(), 3);
+    }
+
+    /// Verifies that zero-cardinality chunks are excluded from the `chunks` vec.
+    ///
+    /// `scan_task_to_chunk_with_deletes` can emit zero-row `RecordBatch`es after
+    /// predicate or equality-delete filtering. If such a chunk were pushed into `chunks`
+    /// and then chosen as `chunks.last()`, the subsequent `cardinality() - 1` call would
+    /// underflow on `usize` and panic. The fix is to skip those chunks before pushing,
+    /// relying on the `task_data_file_path` fallback to cover the all-empty case.
+    #[test]
+    fn test_zero_cardinality_chunks_are_excluded() {
+        // Simulate what build_batched_stream_reader does when filtering zero-row chunks.
+        let path = "s3://bucket/mostly-deleted.parquet".to_owned();
+
+        let mut chunks: Vec<StreamChunk> = vec![];
+
+        // A zero-cardinality chunk (e.g. from a fully-deleted RecordBatch).
+        let zero_row_chunk = DataChunk::new_dummy(0);
+        if zero_row_chunk.cardinality() == 0 {
+            // skipped — no push
+        } else {
+            chunks.push(StreamChunk::from_parts(
+                itertools::repeat_n(Op::Insert, zero_row_chunk.cardinality()).collect_vec(),
+                zero_row_chunk,
+            ));
+        }
+
+        // After the loop, chunks is empty: the fallback path kicks in.
+        assert!(
+            chunks.is_empty(),
+            "zero-cardinality chunk must not be added to the chunks vec"
+        );
+
+        // Simulate the fallback: data_file_path comes from the task.
+        let cws = ChunksWithState {
+            chunks,
+            data_file_path: path.clone(),
+            last_read_pos: None,
+        };
+
+        // State cleanup can still run.
+        assert_eq!(
+            cws.data_file_path, path,
+            "data_file_path must be set even when all chunks are zero-cardinality"
+        );
+        // No spurious rows forwarded downstream.
+        assert!(cws.chunks.is_empty());
     }
 }

@@ -580,17 +580,32 @@ impl CatalogController {
     pub async fn get_job_parallelisms(
         &self,
         streaming_job_id: JobId,
-    ) -> MetaResult<Option<(StreamingParallelism, Option<StreamingParallelism>)>> {
+    ) -> MetaResult<
+        Option<(
+            StreamingParallelism,
+            Option<String>,
+            Option<StreamingParallelism>,
+            Option<String>,
+        )>,
+    > {
         let inner = self.inner.read().await;
 
-        let parallelisms: Option<(StreamingParallelism, Option<StreamingParallelism>)> =
-            StreamingJob::find_by_id(streaming_job_id)
-                .select_only()
-                .column(streaming_job::Column::Parallelism)
-                .column(streaming_job::Column::BackfillParallelism)
-                .into_tuple()
-                .one(&inner.db)
-                .await?;
+        let parallelisms = StreamingJob::find_by_id(streaming_job_id)
+            .select_only()
+            .columns([
+                streaming_job::Column::Parallelism,
+                streaming_job::Column::AdaptiveParallelismStrategy,
+                streaming_job::Column::BackfillParallelism,
+                streaming_job::Column::BackfillAdaptiveParallelismStrategy,
+            ])
+            .into_tuple::<(
+                StreamingParallelism,
+                Option<String>,
+                Option<StreamingParallelism>,
+                Option<String>,
+            )>()
+            .one(&inner.db)
+            .await?;
 
         Ok(parallelisms)
     }

@@ -20,6 +20,8 @@ use crate::executor::aggregate::StatelessSimpleAggExecutor;
 
 pub struct StatelessSimpleAggExecutorBuilder;
 
+impl_stream_node_body!(StatelessSimpleAgg(SimpleAggNode) => StatelessSimpleAggExecutorBuilder);
+
 impl ExecutorBuilder for StatelessSimpleAggExecutorBuilder {
     type Node = SimpleAggNode;
 

@@ -13,12 +13,10 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
-use std::num::NonZeroUsize;
 
 use assert_matches::assert_matches;
 use risingwave_common::bail;
 use risingwave_common::hash::{IsSingleton, VnodeCount, VnodeCountCompat};
-use risingwave_common::id::JobId;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::stream_graph_visitor::visit_tables;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -445,15 +443,9 @@ pub struct ActorGraphBuilder {
 impl ActorGraphBuilder {
     /// Create a new actor graph builder with the given "complete" graph. Returns an error if the
     /// graph is failed to be scheduled.
-    pub fn new(
-        streaming_job_id: JobId,
-        fragment_graph: CompleteStreamFragmentGraph,
-        default_parallelism: NonZeroUsize,
-    ) -> MetaResult<Self> {
+    pub fn new(fragment_graph: CompleteStreamFragmentGraph) -> MetaResult<Self> {
         let expected_vnode_count = fragment_graph.max_parallelism();
-
-        let scheduler =
-            schedule::Scheduler::new(streaming_job_id, default_parallelism, expected_vnode_count)?;
+        let scheduler = schedule::Scheduler::new(expected_vnode_count)?;
 
         let distributions = scheduler.schedule(&fragment_graph)?;
 

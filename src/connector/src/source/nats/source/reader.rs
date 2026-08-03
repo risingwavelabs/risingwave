@@ -88,7 +88,7 @@ impl SplitReader for NatsSplitReader {
         let mut config = consumer::pull::Config {
             ..Default::default()
         };
-        properties.set_config(&mut config);
+        properties.set_config(&mut config)?;
 
         let (consumer, client) = properties
             .common

@@ -40,7 +40,7 @@ use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::transaction::HummockVersionTransaction;
 use crate::hummock::manager::versioning::Versioning;
 use crate::hummock::manager::{HummockManager, commit_multi_var};
-use crate::hummock::metrics_utils::remove_compaction_group_in_sst_stat;
+use crate::hummock::metrics_utils::remove_compaction_group_metrics;
 use crate::hummock::sequence::{next_compaction_group_id, next_sstable_id};
 use crate::hummock::table_write_throughput_statistic::{
     TableWriteThroughputStatistic, TableWriteThroughputStatisticManager,
@@ -372,6 +372,7 @@ impl HummockManager {
             None,
             &self.metrics,
             &self.env.opts,
+            &self.version_stat_tx,
         );
         let mut new_version_delta = version.new_delta();
 
@@ -425,7 +426,7 @@ impl HummockManager {
                     .levels
                     .len();
 
-                remove_compaction_group_in_sst_stat(
+                remove_compaction_group_metrics(
                     &self.metrics,
                     right_group_id,
                     right_group_max_level,
@@ -469,22 +470,27 @@ impl HummockManager {
         compact_task_assignments
             .into_iter()
             .for_each(|task_assignment| {
-                if let Some(task) = task_assignment.compact_task.as_ref() {
-                    assert_eq!(task.compaction_group_id, right_group_id);
-                    canceled_tasks.push(ReportTask {
-                        task_id: task.task_id,
-                        task_status: TaskStatus::ManualCanceled,
-                        table_stats_change: HashMap::default(),
-                        sorted_output_ssts: vec![],
-                        object_timestamps: HashMap::default(),
-                    });
-                }
+                let task = &task_assignment.compact_task;
+                assert_eq!(task.compaction_group_id, right_group_id);
+                canceled_tasks.push(ReportTask {
+                    task_id: task.task_id,
+                    task_status: TaskStatus::ManualCanceled,
+                    table_stats_change: HashMap::default(),
+                    sorted_output_ssts: vec![],
+                    object_timestamps: HashMap::default(),
+                });
             });
 
         if !canceled_tasks.is_empty() {
             self.report_compact_tasks_impl(canceled_tasks, compaction_guard, versioning_guard)
                 .await?;
+        } else {
+            drop(versioning_guard);
+            drop(compaction_guard);
         }
+
+        self.try_update_write_limits(&[left_group_id, right_group_id])
+            .await;
 
         self.metrics
             .merge_compaction_group_count
@@ -680,6 +686,7 @@ impl HummockManager {
             None,
             &self.metrics,
             &self.env.opts,
+            &self.version_stat_tx,
         );
         let mut new_version_delta = version.new_delta();
 
@@ -794,27 +801,32 @@ impl HummockManager {
         compact_task_assignments
             .into_iter()
             .for_each(|task_assignment| {
-                if let Some(task) = task_assignment.compact_task.as_ref() {
-                    let is_expired = is_compaction_task_expired(
-                        task.compaction_group_version_id,
-                        levels.compaction_group_version_id,
-                    );
-                    if is_expired {
-                        canceled_tasks.push(ReportTask {
-                            task_id: task.task_id,
-                            task_status: TaskStatus::ManualCanceled,
-                            table_stats_change: HashMap::default(),
-                            sorted_output_ssts: vec![],
-                            object_timestamps: HashMap::default(),
-                        });
-                    }
+                let task = &task_assignment.compact_task;
+                let is_expired = is_compaction_task_expired(
+                    task.compaction_group_version_id,
+                    levels.compaction_group_version_id,
+                );
+                if is_expired {
+                    canceled_tasks.push(ReportTask {
+                        task_id: task.task_id,
+                        task_status: TaskStatus::ManualCanceled,
+                        table_stats_change: HashMap::default(),
+                        sorted_output_ssts: vec![],
+                        object_timestamps: HashMap::default(),
+                    });
                 }
             });
 
         if !canceled_tasks.is_empty() {
             self.report_compact_tasks_impl(canceled_tasks, compaction_guard, versioning_guard)
                 .await?;
+        } else {
+            drop(versioning_guard);
+            drop(compaction_guard);
         }
+
+        let affected_group_ids = result.iter().map(|(cg_id, _)| *cg_id).collect_vec();
+        self.try_update_write_limits(&affected_group_ids).await;
 
         self.metrics
             .split_compaction_group_count
@@ -1004,6 +1016,7 @@ impl HummockManager {
                 None,
                 &self.metrics,
                 &self.env.opts,
+                &self.version_stat_tx,
             );
             let mut new_version_delta = version.new_delta();
             let split_key = plan.split_key();
@@ -1066,6 +1079,8 @@ impl HummockManager {
 
         self.cancel_expired_normalize_split_tasks(plan.parent_group_id)
             .await?;
+        self.try_update_write_limits(&[plan.parent_group_id, new_compaction_group_id])
+            .await;
         self.metrics
             .split_compaction_group_count
             .with_label_values(&[&plan.parent_group_id.to_string()])
@@ -1097,12 +1112,11 @@ impl HummockManager {
         compact_task_assignments
             .into_iter()
             .for_each(|task_assignment| {
-                if let Some(task) = task_assignment.compact_task.as_ref()
-                    && is_compaction_task_expired(
-                        task.compaction_group_version_id,
-                        levels.compaction_group_version_id,
-                    )
-                {
+                let task = &task_assignment.compact_task;
+                if is_compaction_task_expired(
+                    task.compaction_group_version_id,
+                    levels.compaction_group_version_id,
+                ) {
                     canceled_tasks.push(ReportTask {
                         task_id: task.task_id,
                         task_status: TaskStatus::ManualCanceled,
@@ -1652,7 +1666,7 @@ impl GroupMergeValidator {
             // check whether the group is in the write stop state after merge
             let l0_sub_level_count_after_merge =
                 group_levels.l0.sub_levels.len() + next_group_levels.l0.sub_levels.len();
-            if GroupStateValidator::write_stop_l0_file_count(
+            if GroupStateValidator::write_stop_sub_level_count(
                 (l0_sub_level_count_after_merge as f64
                     * opts.compaction_group_merge_dimension_threshold) as usize,
                 group.compaction_group_config.compaction_config().deref(),
@@ -1663,8 +1677,13 @@ impl GroupMergeValidator {
                 )));
             }
 
-            let l0_file_count_after_merge =
-                group_levels.l0.sub_levels.len() + next_group_levels.l0.sub_levels.len();
+            let l0_file_count_after_merge = group_levels
+                .l0
+                .sub_levels
+                .iter()
+                .chain(next_group_levels.l0.sub_levels.iter())
+                .map(|level| level.table_infos.len())
+                .sum::<usize>();
             if GroupStateValidator::write_stop_l0_file_count(
                 (l0_file_count_after_merge as f64 * opts.compaction_group_merge_dimension_threshold)
                     as usize,
@@ -1692,8 +1711,8 @@ impl GroupMergeValidator {
 
             // check whether the group is in the emergency state after merge
             if GroupStateValidator::emergency_l0_file_count(
-                (l0_sub_level_count_after_merge as f64
-                    * opts.compaction_group_merge_dimension_threshold) as usize,
+                (l0_file_count_after_merge as f64 * opts.compaction_group_merge_dimension_threshold)
+                    as usize,
                 group.compaction_group_config.compaction_config().deref(),
             ) {
                 return Err(Error::CompactionGroup(format!(

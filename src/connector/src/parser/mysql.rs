@@ -200,7 +200,9 @@ pub fn mysql_datum_to_rw_datum(
                     mysql_datum_index
                 ),
                 Some(Ok(val)) => Ok(val.map(|v| {
-                    ScalarImpl::from(Timestamptz::from_micros(v.and_utc().timestamp_micros()))
+                    ScalarImpl::from(Timestamptz::from_micros_uncheck(
+                        v.and_utc().timestamp_micros(),
+                    ))
                 })),
                 Some(Err(err)) => Err(anyhow::Error::new(err)
                     .context("failed to deserialize MySQL value into rust value")
@@ -233,7 +235,8 @@ pub fn mysql_datum_to_rw_datum(
                 JsonbVal
             )
         }
-        DataType::Vector(_)
+        DataType::Variant
+        | DataType::Vector(_)
         | DataType::Interval
         | DataType::Struct(_)
         | DataType::List(_)

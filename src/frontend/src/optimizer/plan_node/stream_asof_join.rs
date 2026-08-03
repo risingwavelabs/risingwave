@@ -319,7 +319,7 @@ impl StreamNode for StreamAsOfJoin {
             output_indices: self.core.output_indices.iter().map(|&x| x as u32).collect(),
             asof_desc: Some(self.inequality_desc),
             // Join encoding type should now be read from per-job config override.
-            #[allow(deprecated)]
+            #[expect(deprecated)]
             join_encoding_type: PbJoinEncodingType::Unspecified as _,
             use_cache: Some(use_cache),
         }))

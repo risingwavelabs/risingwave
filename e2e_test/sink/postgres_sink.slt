@@ -648,6 +648,62 @@ DROP TABLE rw_pk_only_table;
 system ok
 PGDATABASE=sink_test psql -c "DROP TABLE pg_pk_only_table"
 
+################### Test sink target table with foreign key constraints
+
+system ok
+PGDATABASE=sink_test psql -c "CREATE TABLE pg_fk_parent (id BIGINT PRIMARY KEY); CREATE TABLE pg_fk_child (id BIGINT PRIMARY KEY, parent_id BIGINT REFERENCES pg_fk_parent(id));"
+
+statement ok
+CREATE TABLE rw_fk_child (
+    id BIGINT,
+    parent_id BIGINT,
+    PRIMARY KEY (id)
+);
+
+statement error Postgres sink does not support target table "public"."pg_fk_child" with foreign key constraints
+CREATE SINK rw_fk_child_sink FROM rw_fk_child WITH (
+    connector='postgres',
+    host='$PGHOST',
+    port='$PGPORT',
+    user='$PGUSER',
+    password='$PGPASSWORD',
+    database='sink_test',
+    table='pg_fk_child',
+    type='upsert',
+    primary_key='id',
+);
+
+statement ok
+CREATE TABLE rw_fk_parent (
+    id BIGINT,
+    PRIMARY KEY (id)
+);
+
+statement ok
+CREATE SINK rw_fk_parent_sink FROM rw_fk_parent WITH (
+    connector='postgres',
+    host='$PGHOST',
+    port='$PGPORT',
+    user='$PGUSER',
+    password='$PGPASSWORD',
+    database='sink_test',
+    table='pg_fk_parent',
+    type='upsert',
+    primary_key='id',
+);
+
+statement ok
+DROP SINK rw_fk_parent_sink;
+
+statement ok
+DROP TABLE rw_fk_child;
+
+statement ok
+DROP TABLE rw_fk_parent;
+
+system ok
+PGDATABASE=sink_test psql -c "DROP TABLE pg_fk_child; DROP TABLE pg_fk_parent"
+
 ################### Drop DB
 
 system ok

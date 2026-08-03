@@ -26,6 +26,8 @@ use crate::task::ExecutorParams;
 
 pub struct EowcOverWindowExecutorBuilder;
 
+impl_stream_node_body!(EowcOverWindow(PbEowcOverWindowNode) => EowcOverWindowExecutorBuilder);
+
 impl ExecutorBuilder for EowcOverWindowExecutorBuilder {
     type Node = PbEowcOverWindowNode;
 

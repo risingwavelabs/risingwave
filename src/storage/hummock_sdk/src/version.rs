@@ -686,7 +686,7 @@ impl<T> HummockVersionDeltaCommon<T> {
                         GroupDeltaCommon::GroupConstruct(_)
                         | GroupDeltaCommon::GroupDestroy(_)
                         | GroupDeltaCommon::GroupMerge(_)
-                        | GroupDeltaCommon::TruncateTables(_) => None,
+                        | GroupDeltaCommon::PruneTableIdsFromSsts(_) => None,
                     };
                     sst_slice.into_iter().flatten()
                 })
@@ -1014,7 +1014,10 @@ pub enum GroupDeltaCommon<T> {
     GroupConstruct(Box<PbGroupConstruct>),
     GroupDestroy(PbGroupDestroy),
     GroupMerge(PbGroupMerge),
-    TruncateTables(HashSet<TableId>),
+    /// Prunes table ids from SST metadata.
+    ///
+    /// Serialized as protobuf `truncate_tables` for compatibility.
+    PruneTableIdsFromSsts(HashSet<TableId>),
 }
 
 pub type GroupDelta = GroupDeltaCommon<SstableInfo>;
@@ -1045,7 +1048,9 @@ where
                     .collect(),
             ),
             Some(PbDeltaType::TruncateTables(pb_truncate_tables)) => {
-                GroupDeltaCommon::TruncateTables(pb_truncate_tables.table_ids.into_iter().collect())
+                GroupDeltaCommon::PruneTableIdsFromSsts(
+                    pb_truncate_tables.table_ids.into_iter().collect(),
+                )
             }
 
             None => panic!("delta_type is not set"),
@@ -1079,7 +1084,7 @@ where
                         .collect(),
                 })),
             },
-            GroupDeltaCommon::TruncateTables(table_ids) => PbGroupDelta {
+            GroupDeltaCommon::PruneTableIdsFromSsts(table_ids) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::TruncateTables(PbTruncateTables {
                     table_ids: table_ids.iter().copied().collect(),
                 })),
@@ -1111,7 +1116,7 @@ where
                     inserted_table_infos: new_sub_level.iter().map(PbSstableInfo::from).collect(),
                 })),
             },
-            GroupDeltaCommon::TruncateTables(table_ids) => PbGroupDelta {
+            GroupDeltaCommon::PruneTableIdsFromSsts(table_ids) => PbGroupDelta {
                 delta_type: Some(PbDeltaType::TruncateTables(PbTruncateTables {
                     table_ids: table_ids.iter().copied().collect(),
                 })),
@@ -1146,7 +1151,7 @@ where
                     .collect(),
             ),
             Some(PbDeltaType::TruncateTables(pb_truncate_tables)) => {
-                GroupDeltaCommon::TruncateTables(
+                GroupDeltaCommon::PruneTableIdsFromSsts(
                     pb_truncate_tables.table_ids.iter().copied().collect(),
                 )
             }

@@ -157,12 +157,12 @@ NULL
 query I rowsort
 SELECT cardinality(arr_int) FROM t_array;
 ----
+0
 3
 3
 3
 4
 4
-NULL
 NULL
 NULL
 

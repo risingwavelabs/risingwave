@@ -10,6 +10,9 @@ repository = { workspace = true }
 [lib]
 test = false
 
+[features]
+test = ["risingwave_meta/test", "risingwave_meta_service/test"]
+
 [dependencies]
 clap = { workspace = true }
 educe = "0.6"

@@ -226,7 +226,7 @@ source_test_env_setup() {
     fi
 
     echo "--- starting risingwave cluster: ${risedev_profile}"
-    RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_meta=info" \
+    RUST_LOG="debug,risingwave_stream=info,risingwave_batch=info,risingwave_storage=info,risingwave_meta=info,risingwave_connector::source::kafka::source::reader=warn" \
     risedev ci-start "$risedev_profile"
 }
 

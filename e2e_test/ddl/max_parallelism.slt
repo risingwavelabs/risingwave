@@ -17,7 +17,7 @@ create table t;
 query TT
 select parallelism, max_parallelism from table_parallelism where name = 't';
 ----
-ADAPTIVE 256
+bounded(4) 256
 
 statement ok
 drop table t;
@@ -45,7 +45,7 @@ create table t;
 query TT
 select parallelism, max_parallelism from table_parallelism where name = 't';
 ----
-FIXED(4) 4
+4 4
 
 statement ok
 drop table t;
@@ -61,7 +61,7 @@ create table t;
 query TT
 select parallelism, max_parallelism from table_parallelism where name = 't';
 ----
-ADAPTIVE 4
+bounded(4) 4
 
 # Alter parallelism to a valid value, ok.
 statement ok
@@ -70,7 +70,7 @@ alter table t set parallelism to 4;
 query TT
 select parallelism, max_parallelism from table_parallelism where name = 't';
 ----
-FIXED(4) 4
+4 4
 
 # Alter parallelism to an invalid value, return an error.
 statement error specified parallelism 8 should not exceed max parallelism 4

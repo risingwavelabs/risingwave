@@ -6,7 +6,7 @@ set streaming_use_shared_source to false;
 statement error set `allow_create_stream` to true to create a stream
 create table t_nats ( i int ) with (
   connector = 'nats',
-  server_url='nats-server:4222',
+  server_url='${RISEDEV_NATS_SERVER_URL}',
   subject='testsubject',
   connect_mode='plain',
   consumer.durable_name = 'demo1',
@@ -28,7 +28,7 @@ set streaming_parallelism to 4;
 statement ok
 create table t_nats ( i int ) with (
   connector = 'nats',
-  server_url='nats-server:4222',
+  server_url='${RISEDEV_NATS_SERVER_URL}',
   subject='testsubject',
   connect_mode='plain',
   consumer.durable_name = 'demo1',
@@ -41,7 +41,7 @@ format plain encode json;
 statement ok
 create table t_nats_1 ( i int ) with (
   connector = 'nats',
-  server_url='nats-server:4222',
+  server_url='${RISEDEV_NATS_SERVER_URL}',
   subject='testsubject',
   connect_mode='plain',
   consumer.durable_name = 'demo2',
@@ -142,7 +142,7 @@ include subject
 include offset
 with (
   connector = 'nats',
-  server_url='nats-server:4222',
+  server_url='${RISEDEV_NATS_SERVER_URL}',
   subject='testsubject1,testsubject2',
   connect_mode='plain',
   consumer.durable_name = 'demo_subject',

@@ -25,7 +25,7 @@ pub mod row;
 
 pub(crate) type JoinOpPrimitive = bool;
 
-#[allow(non_snake_case, non_upper_case_globals)]
+#[expect(non_snake_case, non_upper_case_globals)]
 pub(crate) mod JoinOp {
     use super::JoinOpPrimitive;
 
@@ -38,7 +38,7 @@ pub(crate) mod JoinOp {
 // TODO: Use enum to replace this once [feature(adt_const_params)](https://github.com/rust-lang/rust/issues/95174) get completed.
 pub type JoinTypePrimitive = u8;
 
-#[allow(non_snake_case, non_upper_case_globals)]
+#[expect(non_snake_case, non_upper_case_globals)]
 pub mod JoinType {
     use super::JoinTypePrimitive;
     pub const Inner: JoinTypePrimitive = 0;
@@ -53,7 +53,7 @@ pub mod JoinType {
 
 pub type AsOfJoinTypePrimitive = u8;
 
-#[allow(non_snake_case, non_upper_case_globals)]
+#[expect(non_snake_case, non_upper_case_globals)]
 pub mod AsOfJoinType {
     use super::AsOfJoinTypePrimitive;
     pub const Inner: AsOfJoinTypePrimitive = 0;
@@ -61,7 +61,7 @@ pub mod AsOfJoinType {
 }
 
 pub type SideTypePrimitive = u8;
-#[allow(non_snake_case, non_upper_case_globals)]
+#[expect(non_snake_case, non_upper_case_globals)]
 pub mod SideType {
     use super::SideTypePrimitive;
     pub const Left: SideTypePrimitive = 0;

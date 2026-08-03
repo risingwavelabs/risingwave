@@ -199,7 +199,7 @@ create table s13 (
   properties.bootstrap.server = 'message_queue:29092'
 ) row format MAXWELL;
 
-statement ok
+statement error not support format
 create table s13 (
   id integer,
   name varchar,
@@ -212,7 +212,7 @@ create table s13 (
   properties.bootstrap.server = 'message_queue:29092'
 ) row format MAXWELL;
 
-statement ok
+statement error not support format
 create table s14 (
   id integer,
   name varchar,
@@ -227,7 +227,7 @@ create table s14 (
   properties.bootstrap.server = 'message_queue:29092'
 ) ROW FORMAT CANAL_JSON;
 
-statement ok
+statement error not support format
 create table s15 (
   v1 int,
   v2 int,
@@ -558,21 +558,21 @@ select id, code, timestamp, xfas, contacts, jsonb from s12;
 ----
 100 abc 1473305798 {"(0,200,10.0.0.1)","(1,400,10.0.0.2)"} ("{1xxx,2xxx}","{1xxx,2xxx}") {"blockNumber": 16938734}
 
-query ITIT
-select * from s13 order by id;
-----
-1 tom 0 2017-12-31 16:00:01
-2 chi 1 1999-12-31 16:00:01
+# query ITIT
+# select * from s13 order by id;
+# ----
+# 1 tom 0 2017-12-31 16:00:01
+# 2 chi 1 1999-12-31 16:00:01
 
-query ITTTTT
-select * from s14;
-----
-1 mike f 2018-01-01 00:00:01 1500.62 0.65
+# query ITTTTT
+# select * from s14;
+# ----
+# 1 mike f 2018-01-01 00:00:01 1500.62 0.65
 
-query I
-select count(*) from s15
-----
-2
+# query I
+# select count(*) from s15
+# ----
+# 2
 
 query I
 select count(*) from s16
@@ -693,14 +693,14 @@ drop table s8_no_schema_field
 statement ok
 drop table s12
 
-statement ok
-drop table s13
+# statement ok
+# drop table s13
 
-statement ok
-drop table s14
+# statement ok
+# drop table s14
 
-statement ok
-drop table s15
+# statement ok
+# drop table s15
 
 statement ok
 drop table s16

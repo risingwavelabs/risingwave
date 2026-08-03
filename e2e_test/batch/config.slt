@@ -18,8 +18,14 @@ set synchronize_seqscans to f;
 statement ok
 set synchronize_seqscans to default;
 
-statement error time unit is required
+# This means 2ms since v3.0, aligned with PostgreSQL
+# In v2.7 and prior versions, it was 2s
+statement ok
 set statement_timeout = 2;
+
+skipif madsim
+statement error timeout
+select pg_sleep(1);
 
 statement ok
 set statement_timeout = '2s';

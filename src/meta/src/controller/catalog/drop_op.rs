@@ -219,6 +219,25 @@ impl CatalogController {
             .map(|(sink, obj)| ObjectModel(sink, obj.unwrap(), None).into())
             .collect();
 
+        // Iceberg sinks (and the pk-index subset) can be user-created with arbitrary
+        // names, so unlike the iceberg-table cleanup above, identify them by
+        // inspecting properties rather than by name prefix.
+        let mut removed_iceberg_sink_ids: Vec<SinkId> = Vec::new();
+        let mut removed_iceberg_pk_index_sink_ids: Vec<SinkId> = Vec::new();
+        for sink in Sink::find()
+            .filter(sink::Column::SinkId.is_in(removed_object_ids.clone()))
+            .all(&txn)
+            .await?
+        {
+            let properties = sink.properties.inner_ref();
+            if crate::manager::iceberg_compaction::is_iceberg_sink(properties) {
+                removed_iceberg_sink_ids.push(sink.sink_id);
+            }
+            if crate::manager::iceberg_pk_index_sink::is_iceberg_pk_index_sink(properties) {
+                removed_iceberg_pk_index_sink_ids.push(sink.sink_id);
+            }
+        }
+
         let removed_streaming_job_ids: Vec<JobId> = StreamingJob::find()
             .select_only()
             .column(streaming_job::Column::JobId)
@@ -402,9 +421,7 @@ impl CatalogController {
                 let (schema_obj, mut to_notify_objs): (Vec<_>, Vec<_>) = removed_objects
                     .into_values()
                     .partition(|obj| obj.obj_type == ObjectType::Schema && obj.oid == object_id);
-                let schema_obj = schema_obj
-                    .into_iter()
-                    .exactly_one()
+                let schema_obj = Itertools::exactly_one(schema_obj.into_iter())
                     .expect("schema object not found");
                 to_notify_objs.push(schema_obj);
 
@@ -433,6 +450,8 @@ impl CatalogController {
                 removed_fragments,
                 removed_sink_fragment_by_targets,
                 removed_iceberg_table_sinks,
+                removed_iceberg_sink_ids,
+                removed_iceberg_pk_index_sink_ids,
             },
             version,
         ))

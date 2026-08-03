@@ -13,9 +13,7 @@
 // limitations under the License.
 
 #![feature(trait_alias)]
-#![feature(try_blocks)]
 #![feature(register_tool)]
-#![feature(if_let_guard)]
 #![register_tool(rw)]
 #![allow(rw::format_error)] // test code
 

@@ -28,6 +28,8 @@ use crate::task::ExecutorParams;
 
 pub struct OverWindowExecutorBuilder;
 
+impl_stream_node_body!(OverWindow(PbOverWindowNode) => OverWindowExecutorBuilder);
+
 impl ExecutorBuilder for OverWindowExecutorBuilder {
     type Node = PbOverWindowNode;
 
@@ -65,7 +67,7 @@ impl ExecutorBuilder for OverWindowExecutorBuilder {
 
         // Previously, the `cache_policy` is persisted in the plan node.
         // Now it's always `Unspecified` and we should refer to the job's config override.
-        #[allow(deprecated)]
+        #[expect(deprecated)]
         let cache_policy = (node.get_cache_policy())
             .map_or(params.config.developer.over_window_cache_policy, |v| {
                 OverWindowCachePolicy::from_protobuf(v)

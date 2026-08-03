@@ -34,8 +34,8 @@ use risingwave_pb::id::SubscriberId;
 use risingwave_pb::meta::PbFragmentWorkerSlotMapping;
 use risingwave_pb::meta::subscribe_response::Operation;
 use risingwave_pb::source::PbCdcTableSnapshotSplits;
-use risingwave_pb::stream_plan::PbUpstreamSinkInfo;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::{PbStreamNode, PbUpstreamSinkInfo};
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::{info, warn};
 
@@ -83,6 +83,7 @@ pub struct SharedFragmentInfo {
     pub actors: HashMap<ActorId, SharedActorInfo>,
     pub vnode_count: usize,
     pub fragment_type_mask: FragmentTypeMask,
+    pub state_table_ids: HashSet<TableId>,
 }
 
 impl From<(&InflightFragmentInfo, JobId)> for SharedFragmentInfo {
@@ -95,6 +96,7 @@ impl From<(&InflightFragmentInfo, JobId)> for SharedFragmentInfo {
             fragment_type_mask,
             actors,
             vnode_count,
+            state_table_ids,
             ..
         } = info;
 
@@ -108,6 +110,7 @@ impl From<(&InflightFragmentInfo, JobId)> for SharedFragmentInfo {
                 .map(|(actor_id, actor)| (*actor_id, actor.into()))
                 .collect(),
             vnode_count: *vnode_count,
+            state_table_ids: state_table_ids.clone(),
         }
     }
 }
@@ -625,8 +628,9 @@ impl InflightDatabaseInfo {
                         info!(%job_id, "newly create job get cancelled before first barrier is collected")
                     }
                 }
-                CreateStreamingJobType::SnapshotBackfill(_) => {
-                    // The progress of SnapshotBackfill won't be tracked here
+                CreateStreamingJobType::SnapshotBackfill { .. }
+                | CreateStreamingJobType::BatchRefresh(_) => {
+                    // The progress of SnapshotBackfill/BatchRefresh won't be tracked here
                 }
             }
         }
@@ -700,8 +704,7 @@ impl InflightDatabaseInfo {
             .values()
             .flat_map(|resp| &resp.cdc_source_offset_updated)
         {
-            use risingwave_common::id::SourceId;
-            let source_id = SourceId::new(cdc_offset_updated.source_id);
+            let source_id = cdc_offset_updated.source_id;
             let job_id = source_id.as_share_source_job_id();
             if let Some(job) = self.jobs.get_mut(&job_id) {
                 if let CreateStreamingJobStatus::Creating { tracker, .. } = &mut job.status {
@@ -1101,6 +1104,14 @@ impl InflightDatabaseInfo {
         fragment_id: FragmentId,
         drop_upstream_fragment_ids: &[FragmentId],
     ) {
+        if !self.fragment_location.contains_key(&fragment_id) {
+            warn!(
+                target_fragment_id = %fragment_id,
+                drop_upstream_fragment_ids = ?drop_upstream_fragment_ids,
+                "skip dropping upstream sink fragments for non-existing target fragment"
+            );
+            return;
+        }
         {
             {
                 {
@@ -1137,6 +1148,20 @@ impl InflightDatabaseInfo {
                 }
             }
         }
+    }
+
+    /// Sync inflight `nodes` so a later reschedule won't materialize new actors from stale data.
+    pub(crate) fn pre_apply_throttle(
+        &mut self,
+        fragment_id: FragmentId,
+        stream_node: &PbStreamNode,
+    ) {
+        // Snapshot-backfill creating jobs live outside main inflight; their throttles
+        // flow through `on_new_upstream_barrier`.
+        if !self.fragment_location.contains_key(&fragment_id) {
+            return;
+        }
+        self.fragment_mut(fragment_id).0.nodes = stream_node.clone();
     }
 
     /// Update split assignments for actors in fragments.
@@ -1352,6 +1377,23 @@ impl InflightDatabaseInfo {
             }
         }
         shared_actor_writer.finish();
+    }
+
+    pub(crate) fn post_apply_remove_job(
+        &mut self,
+        job_id: JobId,
+    ) -> Option<InflightStreamingJobInfo> {
+        let job = self.jobs.remove(&job_id)?;
+        let inner = self.shared_actor_infos.clone();
+        let mut shared_actor_writer = inner.start_writer(self.database_id);
+        for (fragment_id, fragment) in &job.fragment_infos {
+            self.fragment_location
+                .remove(fragment_id)
+                .expect("should exist");
+            shared_actor_writer.remove(fragment);
+        }
+        shared_actor_writer.finish();
+        Some(job)
     }
 }
 

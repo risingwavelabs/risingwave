@@ -66,7 +66,7 @@ impl EstimateSize for AggState {
 
 impl AggState {
     /// Create an [`AggState`] from a given [`AggCall`].
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn create(
         version: PbAggNodeVersion,
         agg_call: &AggCall,

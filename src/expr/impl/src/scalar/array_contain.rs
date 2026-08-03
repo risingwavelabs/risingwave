@@ -89,8 +89,7 @@ use risingwave_expr::function;
 /// ----
 /// NULL
 /// ```
-#[function("array_contains(anyarray, anyarray) -> boolean")]
-fn array_contains(left: ListRef<'_>, right: ListRef<'_>) -> bool {
+fn array_contains_impl(left: ListRef<'_>, right: ListRef<'_>) -> bool {
     let flatten = left.flatten();
     let set: HashSet<_> = flatten.iter().collect();
     right
@@ -99,26 +98,73 @@ fn array_contains(left: ListRef<'_>, right: ListRef<'_>) -> bool {
         .all(|item| item.is_some_and(|v| set.contains(&Some(v))))
 }
 
+#[function("array_contains(anyarray, anyarray) -> boolean")]
+fn array_contains(left: ListRef<'_>, right: ListRef<'_>) -> bool {
+    array_contains_impl(left, right)
+}
+
 #[function("array_contained(anyarray, anyarray) -> boolean")]
 fn array_contained(left: ListRef<'_>, right: ListRef<'_>) -> bool {
-    array_contains(right, left)
+    array_contains_impl(right, left)
+}
+
+fn array_overlaps_impl(left: ListRef<'_>, right: ListRef<'_>) -> bool {
+    let flatten = left.flatten();
+    let set: HashSet<_> = flatten.iter().flatten().collect();
+    right
+        .flatten()
+        .iter()
+        .any(|item| item.is_some_and(|v| set.contains(&v)))
+}
+
+#[function("array_overlaps(anyarray, anyarray) -> boolean")]
+fn array_overlaps(left: ListRef<'_>, right: ListRef<'_>) -> bool {
+    array_overlaps_impl(left, right)
 }
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::types::{ListValue, Scalar};
+    use risingwave_common::types::{DataType, ListValue, Scalar, ScalarImpl};
 
     use super::*;
 
     #[test]
     fn test_contains() {
-        assert!(array_contains(
+        assert!(array_contains_impl(
             ListValue::from_iter([2, 3]).as_scalar_ref(),
             ListValue::from_iter([2]).as_scalar_ref(),
         ));
-        assert!(!array_contains(
+        assert!(!array_contains_impl(
             ListValue::from_iter([2, 3]).as_scalar_ref(),
             ListValue::from_iter([5]).as_scalar_ref(),
+        ));
+    }
+
+    #[test]
+    fn test_overlaps() {
+        assert!(array_overlaps_impl(
+            ListValue::from_iter([2, 3]).as_scalar_ref(),
+            ListValue::from_iter([3, 5]).as_scalar_ref(),
+        ));
+        assert!(!array_overlaps_impl(
+            ListValue::from_iter([2, 3]).as_scalar_ref(),
+            ListValue::from_iter([4, 5]).as_scalar_ref(),
+        ));
+        assert!(!array_overlaps_impl(
+            ListValue::from_datum_iter(
+                &DataType::Int32,
+                [Some(ScalarImpl::Int32(1)), None::<ScalarImpl>],
+            )
+            .as_scalar_ref(),
+            ListValue::from_datum_iter(
+                &DataType::Int32,
+                [None::<ScalarImpl>, Some(ScalarImpl::Int32(2))],
+            )
+            .as_scalar_ref(),
+        ));
+        assert!(!array_overlaps_impl(
+            ListValue::from_datum_iter(&DataType::Int32, [None::<ScalarImpl>]).as_scalar_ref(),
+            ListValue::from_datum_iter(&DataType::Int32, [None::<ScalarImpl>]).as_scalar_ref(),
         ));
     }
 }

@@ -266,7 +266,7 @@ impl<S: StateStore, E: AsOfRowEncoding> AsOfJoinHashMap<S, E> {
     ///
     /// If `watermark_epoch` is `Some`, an LRU cache is enabled.
     /// If `watermark_epoch` is `None`, the hash map directly queries the state table.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         state_join_key_indices: Vec<usize>,
         state_table: StateTable<S>,

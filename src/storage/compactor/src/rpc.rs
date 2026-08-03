@@ -21,10 +21,10 @@ use risingwave_pb::compactor::{
 use risingwave_pb::monitor_service::monitor_service_server::MonitorService;
 use risingwave_pb::monitor_service::{
     AnalyzeHeapRequest, AnalyzeHeapResponse, GetProfileStatsRequest, GetProfileStatsResponse,
-    GetStreamingStatsRequest, GetStreamingStatsResponse, HeapProfilingRequest,
-    HeapProfilingResponse, ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest,
-    ProfilingResponse, StackTraceRequest, StackTraceResponse, TieredCacheTracingRequest,
-    TieredCacheTracingResponse,
+    GetStreamingStatsRequest, GetStreamingStatsResponse, GetTableCacheRefillStatsRequest,
+    GetTableCacheRefillStatsResponse, HeapProfilingRequest, HeapProfilingResponse,
+    ListHeapProfilingRequest, ListHeapProfilingResponse, ProfilingRequest, ProfilingResponse,
+    StackTraceRequest, StackTraceResponse, TieredCacheTracingRequest, TieredCacheTracingResponse,
 };
 use risingwave_storage::hummock::compactor::CompactionAwaitTreeRegRef;
 use risingwave_storage::hummock::compactor::await_tree_key::Compaction;
@@ -119,14 +119,14 @@ impl MonitorService for MonitorServiceImpl {
         &self,
         request: Request<HeapProfilingRequest>,
     ) -> Result<Response<HeapProfilingResponse>, Status> {
-        self.profile_service.heap_profiling(request).await
+        self.profile_service.heap_profiling(request)
     }
 
     async fn list_heap_profiling(
         &self,
         request: Request<ListHeapProfilingRequest>,
     ) -> Result<Response<ListHeapProfilingResponse>, Status> {
-        self.profile_service.list_heap_profiling(request).await
+        self.profile_service.list_heap_profiling(request)
     }
 
     async fn analyze_heap(
@@ -160,6 +160,15 @@ impl MonitorService for MonitorServiceImpl {
     ) -> Result<Response<GetProfileStatsResponse>, Status> {
         Err(Status::unimplemented(
             "Get Profile Stats unimplemented in compactor",
+        ))
+    }
+
+    async fn get_table_cache_refill_stats(
+        &self,
+        _request: Request<GetTableCacheRefillStatsRequest>,
+    ) -> Result<Response<GetTableCacheRefillStatsResponse>, Status> {
+        Err(Status::unimplemented(
+            "Get Table Cache Refill Stats unimplemented in compactor",
         ))
     }
 }

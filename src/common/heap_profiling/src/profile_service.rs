@@ -36,7 +36,6 @@ pub struct ProfileServiceImpl {
     server_config: ServerConfig,
 }
 
-#[allow(clippy::unused_async)]
 impl ProfileServiceImpl {
     pub fn new(server_config: ServerConfig) -> Self {
         Self { server_config }
@@ -71,7 +70,7 @@ impl ProfileServiceImpl {
         }
     }
 
-    pub async fn heap_profiling(
+    pub fn heap_profiling(
         &self,
         request: Request<HeapProfilingRequest>,
     ) -> Result<Response<HeapProfilingResponse>, Status> {
@@ -121,7 +120,7 @@ impl ProfileServiceImpl {
         }
     }
 
-    pub async fn list_heap_profiling(
+    pub fn list_heap_profiling(
         &self,
         _request: Request<ListHeapProfilingRequest>,
     ) -> Result<Response<ListHeapProfilingResponse>, Status> {

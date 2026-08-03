@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![allow(dead_code, unused_imports)]
-
 // common imports for submodules
 use anyhow::{Context as _, Result};
 use futures_util::stream::BoxStream;
@@ -22,14 +20,10 @@ use risingwave_expr::sig::{
     CreateFunctionOutput, CreateOptions, UDF_IMPLS, UdfImpl, UdfImplDescriptor,
 };
 
-#[cfg(feature = "udf")]
 #[cfg(not(madsim))]
 mod external;
-#[cfg(feature = "udf")]
 mod python;
-#[cfg(feature = "udf")]
 mod quickjs;
-#[cfg(feature = "udf")]
 mod wasm;
 
 /// Download wasm binary from a link.

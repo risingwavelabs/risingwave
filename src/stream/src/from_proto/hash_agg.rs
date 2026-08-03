@@ -47,6 +47,8 @@ impl<S: StateStore> HashKeyDispatcher for HashAggExecutorDispatcherArgs<S> {
 
 pub struct HashAggExecutorBuilder;
 
+impl_stream_node_body!(HashAgg(HashAggNode) => HashAggExecutorBuilder);
+
 impl ExecutorBuilder for HashAggExecutorBuilder {
     type Node = HashAggNode;
 

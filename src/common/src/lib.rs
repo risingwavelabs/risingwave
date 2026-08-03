@@ -17,32 +17,23 @@
     reason = "Some of the Row::iter() implementations returns ExactSizeIterator. Is this reasonable?"
 )]
 #![feature(trait_alias)]
-#![feature(type_alias_impl_trait)]
-#![feature(test)]
+#![cfg_attr(test, feature(test))]
 #![feature(trusted_len)]
 #![feature(allocator_api)]
 #![feature(coroutines)]
-#![feature(map_try_insert)]
 #![feature(error_generic_member_access)]
 #![feature(portable_simd)]
 #![feature(once_cell_try)]
 #![allow(incomplete_features)]
-#![feature(iterator_try_collect)]
 #![feature(iter_order_by)]
 #![feature(binary_heap_into_iter_sorted)]
-#![feature(impl_trait_in_assoc_type)]
 #![feature(negative_impls)]
 #![feature(register_tool)]
-#![feature(btree_cursors)]
-#![feature(assert_matches)]
 #![feature(float_gamma)]
 #![feature(anonymous_lifetime_in_impl_trait)]
-#![feature(vec_into_raw_parts)]
-#![feature(exact_div)]
 #![feature(used_with_arg)]
 #![feature(iter_array_chunks)]
 #![feature(exact_size_is_empty)]
-#![feature(debug_closure_helpers)]
 #![feature(iter_from_coroutine)]
 #![register_tool(rw)]
 
@@ -105,15 +96,15 @@ pub mod test_prelude {
     pub use super::catalog::test_utils::ColumnDescTestExt;
 }
 
+pub use risingwave_common_log as log;
+pub use risingwave_common_metrics as metrics;
 pub use risingwave_common_metrics::{
     monitor, register_guarded_gauge_vec_with_registry,
     register_guarded_histogram_vec_with_registry, register_guarded_int_counter_vec_with_registry,
     register_guarded_int_gauge_vec_with_registry, register_guarded_uint_gauge_vec_with_registry,
 };
-pub use {
-    risingwave_common_log as log, risingwave_common_metrics as metrics,
-    risingwave_common_secret as secret, risingwave_license as license,
-};
+pub use risingwave_common_secret as secret;
+pub use risingwave_license as license;
 
 pub const RW_VERSION: &str = env!("CARGO_PKG_VERSION");
 

@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#![feature(coverage_attribute)]
+#![cfg_attr(coverage, feature(coverage_attribute))]
 
 mod server;
 
@@ -25,6 +25,7 @@ pub use error::{MetaError, MetaResult};
 use redact::Secret;
 use risingwave_common::config::OverrideConfig;
 use risingwave_common::license::LicenseKey;
+use risingwave_common::system_param::StateStoreUrl;
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
@@ -132,7 +133,7 @@ pub struct MetaNodeOpts {
     #[override_opts(path = system.block_size_kb)]
     pub block_size_kb: Option<u32>,
 
-    /// False positive probability of bloom filter.
+    /// Deprecated: Bloom filter is no longer a supported SST filter implementation.
     #[clap(long, hide = true, env = "RW_BLOOM_FALSE_POSITIVE")]
     #[override_opts(path = system.bloom_false_positive)]
     pub bloom_false_positive: Option<f64>,
@@ -140,7 +141,7 @@ pub struct MetaNodeOpts {
     /// State store url
     #[clap(long, hide = true, env = "RW_STATE_STORE")]
     #[override_opts(path = system.state_store)]
-    pub state_store: Option<String>,
+    pub state_store: Option<StateStoreUrl>,
 
     /// Remote directory for storing data and metadata objects.
     #[clap(long, hide = true, env = "RW_DATA_DIRECTORY")]
@@ -199,6 +200,12 @@ pub struct MetaNodeOpts {
         default_value = "./secrets"
     )]
     pub temp_secret_file_dir: String,
+
+    /// Address of the serverless backfill controller.
+    /// Needed if meta receives a streaming job with serverless backfill enabled.
+    /// Feature disabled by default.
+    #[clap(long, env = "RW_SBC_ADDR", default_value = "")]
+    pub serverless_backfill_controller_addr: String,
 }
 
 impl risingwave_common::opts::Opts for MetaNodeOpts {
@@ -315,6 +322,12 @@ pub fn start(
             Duration::from_secs(config.meta.max_heartbeat_interval_secs as u64);
         let max_idle_ms = config.meta.dangerous_max_idle_secs.unwrap_or(0) * 1000;
         let in_flight_barrier_nums = config.streaming.in_flight_barrier_nums;
+        let snapshot_backfill_finish_max_lagged_barriers = config
+            .streaming
+            .snapshot_backfill_finish_max_lagged_barriers;
+        let snapshot_backfill_barrier_amplification_factor = config
+            .streaming
+            .snapshot_backfill_barrier_amplification_factor;
         let privatelink_endpoint_default_tags =
             opts.privatelink_endpoint_default_tags.map(|tags| {
                 tags.split(',')
@@ -375,6 +388,8 @@ pub fn start(
                     .meta
                     .parallelism_control_trigger_first_delay_sec,
                 in_flight_barrier_nums,
+                snapshot_backfill_finish_max_lagged_barriers,
+                snapshot_backfill_barrier_amplification_factor,
                 max_idle_ms,
                 compaction_deterministic_test: config.meta.enable_compaction_deterministic,
                 default_parallelism: config.meta.default_parallelism,
@@ -389,6 +404,12 @@ pub fn start(
                     .time_travel_vacuum_max_version_count,
                 vacuum_spin_interval_ms: config.meta.vacuum_spin_interval_ms,
                 iceberg_gc_interval_sec: config.meta.iceberg_gc_interval_sec,
+                iceberg_compaction_report_timeout_sec: config
+                    .meta
+                    .iceberg_compaction_report_timeout_sec,
+                iceberg_compaction_config_refresh_interval_sec: config
+                    .meta
+                    .iceberg_compaction_config_refresh_interval_sec,
                 hummock_version_checkpoint_interval_sec: config
                     .meta
                     .hummock_version_checkpoint_interval_sec,
@@ -578,9 +599,10 @@ pub fn start(
 
                 enable_legacy_table_migration: config.meta.enable_legacy_table_migration,
                 pause_on_next_bootstrap_offline: config.meta.pause_on_next_bootstrap_offline,
+                serverless_backfill_controller_addr: opts.serverless_backfill_controller_addr,
             },
             config.system.into_init_system_params(),
-            Default::default(),
+            config.session_init,
             shutdown,
         ))
         .await
@@ -615,6 +637,18 @@ fn validate_config(config: &RwConfig) {
 
     if config.meta.compaction_task_id_refill_capacity == 0 {
         let error_msg = "compaction task id refill capacity should be larger than 0";
+        tracing::error!(error_msg);
+        panic!("{}", error_msg);
+    }
+
+    if config.meta.iceberg_compaction_report_timeout_sec == 0 {
+        let error_msg = "iceberg compaction report timeout sec should be larger than 0";
+        tracing::error!(error_msg);
+        panic!("{}", error_msg);
+    }
+
+    if config.meta.iceberg_compaction_config_refresh_interval_sec == 0 {
+        let error_msg = "iceberg compaction config refresh interval sec should be larger than 0";
         tracing::error!(error_msg);
         panic!("{}", error_msg);
     }

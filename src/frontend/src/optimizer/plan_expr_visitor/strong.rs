@@ -285,6 +285,7 @@ impl Strong {
             | ExprType::ArrayReverse
             | ExprType::ArrayContains
             | ExprType::ArrayContained
+            | ExprType::ArrayOverlaps
             | ExprType::ArrayFlatten
             | ExprType::HexToInt256
             | ExprType::JsonbAccess
@@ -320,6 +321,10 @@ impl Strong {
             | ExprType::JsonbToRecord
             | ExprType::JsonbSet
             | ExprType::JsonbPopulateMap
+            | ExprType::ToVariant
+            | ExprType::VariantGet
+            | ExprType::TryVariantGet
+            | ExprType::VariantTypeof
             | ExprType::MapFromEntries
             | ExprType::MapAccess
             | ExprType::MapKeys
@@ -366,7 +371,9 @@ impl Strong {
             | ExprType::RwEpochToTs
             | ExprType::OpenaiEmbedding
             | ExprType::HasDatabasePrivilege
-            | ExprType::Random => false,
+            | ExprType::Random
+            | ExprType::ClockTimestamp
+            | ExprType::GenRandomUuid => false,
             ExprType::Unspecified => unreachable!(),
         }
     }

@@ -532,7 +532,7 @@ pub(crate) mod tests {
         //     /    \
         //   Scan  Scan
         //
-        let ctx = OptimizerContext::mock().await;
+        let ctx = OptimizerContext::mock();
         let table_id = 0.into();
         let vnode_count = VirtualNode::COUNT_FOR_TEST;
 

@@ -63,8 +63,8 @@ def _(outer_panels: Panels):
                     "",
                     [
                         panels.target(
-                            f"(max({metric('log_store_latest_write_epoch')}) by (sink_id, actor_id, sink_name)"
-                            + f"- max({metric('log_store_latest_read_epoch')}) by (sink_id, actor_id, sink_name)) / (2^16) / 1000",
+                            f"(max({metric('log_store_latest_write_epoch')} != 0) by (sink_id, actor_id, sink_name)"
+                            + f"- max({metric('log_store_latest_read_epoch')} != 0) by (sink_id, actor_id, sink_name)) / (2^16) / 1000",
                             "{{sink_id}} {{sink_name}} @ actor {{actor_id}}",
                         ),
                     ],
@@ -84,8 +84,8 @@ def _(outer_panels: Panels):
                     "",
                     [
                         panels.target(
-                            f"clamp_min((max({metric('log_store_first_write_epoch')}) by (sink_id, actor_id, sink_name)"
-                            + f"- max({metric('log_store_latest_read_epoch')}) by (sink_id, actor_id, sink_name)) / (2^16) / 1000, 0)",
+                            f"clamp_min((max({metric('log_store_first_write_epoch')} != 0) by (sink_id, actor_id, sink_name)"
+                            + f"- max({metric('log_store_latest_read_epoch')} != 0) by (sink_id, actor_id, sink_name)) / (2^16) / 1000, 0)",
                             "{{sink_id}} {{sink_name}} @ actor {{actor_id}}",
                         ),
                     ],

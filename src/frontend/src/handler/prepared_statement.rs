@@ -17,8 +17,7 @@ use risingwave_sqlparser::ast::{DataType, Ident, Statement};
 
 use crate::handler::RwPgResponse;
 
-#[expect(clippy::unused_async)]
-pub async fn handle_prepare(
+pub fn handle_prepare(
     _name: Ident,
     _data_types: Vec<DataType>,
     _statement: Box<Statement>,
@@ -32,8 +31,7 @@ pub async fn handle_prepare(
         .into())
 }
 
-#[expect(clippy::unused_async)]
-pub async fn handle_deallocate(
+pub fn handle_deallocate(
     _name: Option<Ident>,
     _prepare: bool,
 ) -> crate::error::Result<RwPgResponse> {

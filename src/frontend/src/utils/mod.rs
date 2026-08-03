@@ -139,7 +139,7 @@ pub trait Endo<T: Tree> {
 
 /// A similar trait to generate traversal over tree-like structure.
 /// See `Endo` for more details.
-#[allow(unused_variables)]
+#[expect(unused_variables)]
 pub trait Visit<T: Tree> {
     fn pre(&mut self, t: &T) {}
 
@@ -181,6 +181,7 @@ impl PartialEq<dyn DynEq + 'static> for dyn DynEq {
     }
 }
 
+#[expect(internal_eq_trait_method_impls)]
 impl Eq for dyn DynEq {
     fn assert_receiver_is_total_eq(&self) {}
 }

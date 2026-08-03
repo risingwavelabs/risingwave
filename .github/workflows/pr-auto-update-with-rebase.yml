@@ -1,0 +1,50 @@
+name: auto update branch with rebase
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+    types:
+      # GitHub Actions cannot filter pull_request events by label in `on`.
+      # Keep this list narrow so ordinary PR updates do not create skipped runs.
+      - labeled
+      - unlabeled
+
+concurrency:
+  group: pr-auto-update-with-rebase-${{ github.event_name == 'pull_request' && github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  autoupdate:
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'push' ||
+      (
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        contains(github.event.pull_request.labels.*.name, 'autoupdate_rebase') &&
+        !contains(github.event.pull_request.labels.*.name, 'autoupdate_merge')
+      )
+    steps:
+      - id: autoupdate
+        name: autoupdate
+        uses: pascalgn/automerge-action@v0.16.4
+        env:
+          # https://github.com/pascalgn/automerge-action#limitations
+          GITHUB_TOKEN: "${{ secrets.RISINGWAVE_CI_GITHUB_TOKEN }}"
+          MERGE_LABELS: "non-existent-label"
+          UPDATE_LABELS: "autoupdate_rebase,!autoupdate_merge"
+          UPDATE_METHOD: "rebase"
+        # https://github.com/pascalgn/automerge-action/issues/191
+        continue-on-error: true
+      - name: Report autoupdate failure
+        if: steps.autoupdate.outcome == 'failure'
+        run: |
+          echo "::warning::autoupdate failed. Check the autoupdate step logs for details."
+          {
+            echo "### Autoupdate failed"
+            echo
+            echo "The autoupdate action failed. Check the autoupdate step logs for details."
+          } >> "$GITHUB_STEP_SUMMARY"

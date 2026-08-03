@@ -334,19 +334,17 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                                     }
                                     Mutation::ListFinish {
                                         associated_source_id,
-                                    } => {
-                                        // Check if this ListFinish is for our source
-                                        if associated_source_id.as_raw_id()
-                                            == core.source_id.as_raw_id()
-                                        {
-                                            tracing::info!(
-                                                ?barrier.epoch,
-                                                actor_id = %actor_ctx.id,
-                                                source_id = %core.source_id,
-                                                "received ListFinish mutation"
-                                            );
-                                            list_finished = true;
-                                        }
+                                    } if associated_source_id.as_raw_id()
+                                        == core.source_id.as_raw_id() =>
+                                    {
+                                        // ListFinish is for our source
+                                        tracing::info!(
+                                            ?barrier.epoch,
+                                            actor_id = %actor_ctx.id,
+                                            source_id = %core.source_id,
+                                            "received ListFinish mutation"
+                                        );
+                                        list_finished = true;
                                     }
                                     _ => (),
                                 }

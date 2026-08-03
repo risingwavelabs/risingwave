@@ -578,7 +578,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     resume_reader!();
                                 }
 
-                                let mut maybe_muatation = None;
+                                let mut maybe_mutation = None;
                                 if let Some(ref mutation) = barrier.mutation.as_deref() {
                                     match mutation {
                                         Mutation::Pause => {
@@ -604,7 +604,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                                 actor_splits = ?actor_splits,
                                                 "source change split received"
                                             );
-                                            maybe_muatation = actor_splits
+                                            maybe_mutation = actor_splits
                                                 .get(&self.actor_ctx.id)
                                                 .cloned()
                                                 .map(|target_splits| {
@@ -617,7 +617,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                         Mutation::Update(UpdateMutation {
                                             actor_splits, ..
                                         }) => {
-                                            maybe_muatation = actor_splits
+                                            maybe_mutation = actor_splits
                                                 .get(&self.actor_ctx.id)
                                                 .cloned()
                                                 .map(|target_splits| {
@@ -627,14 +627,14 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                                     }
                                                 });
                                         }
-                                        Mutation::ConnectorPropsChange(maybe_mutation) => {
+                                        Mutation::ConnectorPropsChange(props_change) => {
                                             if let Some(props_plaintext) =
-                                                maybe_mutation.get(&self.source_id.as_raw_id())
+                                                props_change.get(&self.source_id.as_raw_id())
                                             {
                                                 source_desc
                                                     .update_reader(props_plaintext.clone())?;
 
-                                                maybe_muatation = Some(
+                                                maybe_mutation = Some(
                                                     ApplyMutationAfterBarrier::ConnectorPropsChange,
                                                 );
                                             }
@@ -721,7 +721,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     // yield barrier after reporting progress
                                     yield Message::Barrier(barrier);
 
-                                    if let Some(to_apply_mutation) = maybe_muatation {
+                                    if let Some(to_apply_mutation) = maybe_mutation {
                                         self.apply_split_change_after_yield_barrier(
                                             barrier_epoch,
                                             &mut backfill_stage,
@@ -767,7 +767,7 @@ impl<S: StateStore> SourceBackfillExecutorInner<S> {
                                     // yield barrier after reporting progress
                                     yield Message::Barrier(barrier);
 
-                                    if let Some(to_apply_mutation) = maybe_muatation
+                                    if let Some(to_apply_mutation) = maybe_mutation
                                         && self
                                             .apply_split_change_after_yield_barrier(
                                                 barrier_epoch,

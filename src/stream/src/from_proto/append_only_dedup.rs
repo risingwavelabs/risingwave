@@ -25,6 +25,8 @@ use crate::task::ExecutorParams;
 
 pub struct AppendOnlyDedupExecutorBuilder;
 
+impl_stream_node_body!(AppendOnlyDedup(DedupNode) => AppendOnlyDedupExecutorBuilder);
+
 impl ExecutorBuilder for AppendOnlyDedupExecutorBuilder {
     type Node = DedupNode;
 

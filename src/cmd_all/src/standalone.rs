@@ -393,7 +393,7 @@ It SHOULD NEVER be used in benchmarks and production environment!!!"
 mod test {
     use super::*;
 
-    #[allow(clippy::assertions_on_constants)]
+    #[expect(clippy::assertions_on_constants)]
     #[test]
     fn test_parse_opt_args() {
         // Test parsing into standalone-level opts.

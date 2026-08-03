@@ -170,7 +170,7 @@ impl CompactorMetrics {
 
         let opts = histogram_opts!(
             "compactor_sstable_bloom_filter_size",
-            "Total bytes gotten from sstable_bloom_filter, for observing bloom_filter size",
+            "Total bytes gotten from the SST filter payload, for observing filter size",
             exponential_buckets(16.0, 16.0, 7).unwrap() // max 256MB
         );
 

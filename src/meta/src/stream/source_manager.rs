@@ -24,13 +24,15 @@ use std::time::Duration;
 use anyhow::Context;
 use risingwave_common::catalog::DatabaseId;
 use risingwave_common::id::ObjectId;
-use risingwave_common::metrics::LabelGuardedIntGauge;
+use risingwave_common::metrics::{
+    LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
+};
 use risingwave_common::panic_if_debug;
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::error::ConnectorResult;
 use risingwave_connector::source::{
-    ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo, SplitId, SplitImpl,
-    SplitMetaData,
+    AnySplitEnumerator, ConnectorProperties, SourceEnumeratorContext, SourceEnumeratorInfo,
+    SplitId, SplitImpl, SplitMetaData,
 };
 use risingwave_meta_model::SourceId;
 use risingwave_pb::catalog::Source;
@@ -334,7 +336,12 @@ impl SourceManager {
         {
             let sources = metadata_manager.list_sources().await?;
             for source in sources {
-                create_source_worker_async(source, &mut managed_sources, metrics.clone())?
+                create_source_worker_async(
+                    source,
+                    &mut managed_sources,
+                    metrics.clone(),
+                    env.await_tree_reg().clone(),
+                )?
             }
         }
 
@@ -387,9 +394,7 @@ impl SourceManager {
                 .await
                 .context("failed to create SplitEnumerator")?;
 
-            let _ = tokio::time::timeout(DEFAULT_SOURCE_TICK_TIMEOUT, enumerator.list_splits())
-                .await
-                .context("failed to list splits")??;
+            validate_enumerator_once(&mut *enumerator).await?;
         }
         Ok(())
     }
@@ -449,9 +454,13 @@ impl SourceManager {
             return Ok(());
         }
 
-        let handle = create_source_worker(source, self.metrics.clone())
-            .await
-            .context("failed to create source worker")?;
+        let handle = create_source_worker(
+            source,
+            self.metrics.clone(),
+            core.env.await_tree_reg().clone(),
+        )
+        .await
+        .context("failed to create source worker")?;
 
         core.managed_sources.insert(source_id, handle);
 
@@ -564,15 +573,12 @@ impl SourceManager {
         let core = self.core.lock().await;
         if let Some(handle) = core.managed_sources.get(&source_id) {
             // Clear the cached splits to force re-discovery
-            {
-                let mut splits_guard = handle.splits.lock().await;
-                tracing::info!(
-                    %source_id,
-                    prev_splits = ?splits_guard.splits.as_ref().map(|s| s.len()),
-                    "Clearing cached splits"
-                );
-                splits_guard.splits = None;
-            }
+            let prev_splits = handle.splits.take();
+            tracing::info!(
+                %source_id,
+                prev_splits = ?prev_splits.as_ref().map(|s| s.len()),
+                "Clearing cached splits"
+            );
 
             // Force a tick to re-discover splits
             tracing::info!(
@@ -676,6 +682,13 @@ impl SourceManager {
 
         Ok(split_offsets.keys().cloned().collect())
     }
+}
+
+async fn validate_enumerator_once(enumerator: &mut dyn AnySplitEnumerator) -> MetaResult<()> {
+    let _ = tokio::time::timeout(DEFAULT_SOURCE_TICK_TIMEOUT, enumerator.list_splits())
+        .await
+        .context("failed to list splits")??;
+    Ok(())
 }
 
 #[derive(strum::Display, Debug)]

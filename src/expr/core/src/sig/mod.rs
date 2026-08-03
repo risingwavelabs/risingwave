@@ -253,7 +253,7 @@ impl FuncSign {
             return false;
         }
         // allow `zip` as the length of `args` may be larger than `inputs_type`
-        #[allow(clippy::disallowed_methods)]
+        #[expect(clippy::disallowed_methods)]
         self.inputs_type
             .iter()
             .zip(args.iter())

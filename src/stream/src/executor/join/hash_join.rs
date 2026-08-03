@@ -428,7 +428,7 @@ impl<S: StateStore> TableInner<S> {
 
 impl<K: HashKey, S: StateStore, E: JoinEncoding> JoinHashMap<K, S, E> {
     /// Create a [`JoinHashMap`] with the given LRU capacity.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         watermark_sequence: AtomicU64Ref,
         join_key_data_types: Vec<DataType>,

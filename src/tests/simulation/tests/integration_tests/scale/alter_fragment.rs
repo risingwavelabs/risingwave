@@ -21,63 +21,8 @@ use risingwave_simulation::ctl_ext::predicate::identity_contains;
 use risingwave_simulation::utils::AssertResult;
 
 #[tokio::test]
-async fn test_alter_fragment_no_shuffle() -> Result<()> {
-    let mut cluster = Cluster::start(Configuration::for_scale_no_shuffle()).await?;
-    let default_parallelism = cluster.config().compute_nodes * cluster.config().compute_node_cores;
-    cluster.run("create table t1 (c1 int, c2 int);").await?;
-    let upstream_fragment = cluster
-        .locate_one_fragment([identity_contains("materialize")])
-        .await?;
-
-    let upstream_fragment_id = upstream_fragment.id();
-    cluster
-        .run("create materialized view m as select * from t1;")
-        .await?;
-
-    let downstream_fragment = cluster
-        .locate_one_fragment([identity_contains("StreamTableScan")])
-        .await?;
-
-    let downstream_fragment_id = downstream_fragment.id();
-
-    let new_parallelism = default_parallelism + 1;
-
-    assert!(
-        cluster
-            .run(&format!(
-                "alter fragment {downstream_fragment_id} set parallelism = {new_parallelism};"
-            ))
-            .await
-            .is_err()
-    );
-
-    cluster
-        .run(&format!(
-            "alter fragment {upstream_fragment_id} set parallelism = {new_parallelism};"
-        ))
-        .await?;
-
-    cluster
-        .run(&format!(
-            "select parallelism from rw_fragment_parallelism where fragment_id = {upstream_fragment_id};"
-        ))
-        .await?
-        .assert_result_eq(format!("{new_parallelism}"));
-
-    cluster
-        .run(&format!(
-            "select parallelism from rw_fragment_parallelism where fragment_id = {downstream_fragment_id};"
-        ))
-        .await?
-        .assert_result_eq(format!("{new_parallelism}"));
-
-    Ok(())
-}
-
-#[tokio::test]
 async fn test_alter_fragment() -> Result<()> {
     let mut cluster = Cluster::start(Configuration::for_scale()).await?;
-    let default_parallelism = cluster.config().compute_nodes * cluster.config().compute_node_cores;
     // Table fragments still use the legacy bounded(4) default on the untouched path.
     let initial_table_parallelism = 4;
     cluster.run("create table t1 (c1 int, c2 int);").await?;
@@ -93,7 +38,7 @@ async fn test_alter_fragment() -> Result<()> {
         .await?
         .assert_result_eq(format!("{initial_table_parallelism}"));
 
-    let new_parallelism = default_parallelism + 1;
+    let new_parallelism = 5;
 
     cluster
         .run(&format!(

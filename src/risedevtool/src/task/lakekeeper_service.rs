@@ -44,13 +44,13 @@ impl LakekeeperService {
     }
 
     fn base_uri(&self) -> String {
-        format!("http://{}:{}", &self.config.address, self.config.port)
+        format!("http://{}:{}", self.config.address, self.config.port)
     }
 
     /// Apply command args according to config
     pub fn apply_command_args(cmd: &mut Command, config: &LakekeeperConfig) -> Result<()> {
         // Set basic environment variables
-        let base_uri = format!("http://{}:{}", &config.address, config.port);
+        let base_uri = format!("http://{}:{}", config.address, config.port);
         cmd.env("LAKEKEEPER__BASE_URI", &base_uri)
             .env("LAKEKEEPER__LISTEN_PORT", config.port.to_string())
             .env("LAKEKEEPER__PG_ENCRYPTION_KEY", &config.encryption_key);

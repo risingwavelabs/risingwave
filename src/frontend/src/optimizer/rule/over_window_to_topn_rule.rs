@@ -186,18 +186,14 @@ impl ExprRewriter for FilterArithmeticRewriter {
         match func_call.func_type() {
             Equal | NotEqual | LessThan | LessThanOrEqual | GreaterThan | GreaterThanOrEqual => {
                 let inputs = func_call.inputs();
-                if inputs.len() == 2 {
-                    // Check if left operand is an arithmetic expression and right operand is a constant
-                    if let ExprImpl::FunctionCall(left_func) = &inputs[0]
-                        && inputs[1].is_const()
-                        && let Some(simplified) = self.simplify_arithmetic_comparison(
-                            left_func,
-                            &inputs[1],
-                            func_call.func_type(),
-                        )
-                    {
-                        return simplified;
-                    }
+                if inputs.len() == 2
+                    && let Some(simplified) = self.simplify_arithmetic_comparison(
+                        &inputs[0],
+                        &inputs[1],
+                        func_call.func_type(),
+                    )
+                {
+                    return self.rewrite_expr(simplified);
                 }
             }
             _ => {}
@@ -215,14 +211,38 @@ impl ExprRewriter for FilterArithmeticRewriter {
 }
 
 impl FilterArithmeticRewriter {
+    fn reverse_comparison(comparison_op: ExprType) -> ExprType {
+        match comparison_op {
+            ExprType::LessThan => ExprType::GreaterThan,
+            ExprType::LessThanOrEqual => ExprType::GreaterThanOrEqual,
+            ExprType::GreaterThan => ExprType::LessThan,
+            ExprType::GreaterThanOrEqual => ExprType::LessThanOrEqual,
+            ExprType::Equal | ExprType::NotEqual => comparison_op,
+            _ => unreachable!(),
+        }
+    }
+
     /// Simplify arithmetic comparison: `(col op const1) comp const2` -> `col comp (const2 reverse_op const1)`
     fn simplify_arithmetic_comparison(
         &self,
-        arithmetic_func: &FunctionCall,
-        comparison_const: &ExprImpl,
+        left: &ExprImpl,
+        right: &ExprImpl,
         comparison_op: ExprType,
     ) -> Option<ExprImpl> {
         use ExprType::{Add, Subtract};
+
+        let (arithmetic_func, comparison_const, comparison_op) =
+            if let ExprImpl::FunctionCall(left_func) = left
+                && right.is_const()
+            {
+                (left_func, right, comparison_op)
+            } else if left.is_const()
+                && let ExprImpl::FunctionCall(right_func) = right
+            {
+                (right_func, left, Self::reverse_comparison(comparison_op))
+            } else {
+                return None;
+            };
 
         // Check arithmetic operation
         match arithmetic_func.func_type() {

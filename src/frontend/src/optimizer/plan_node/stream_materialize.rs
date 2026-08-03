@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::assert_matches::assert_matches;
+use std::assert_matches;
 use std::num::NonZeroU32;
 
 use fixedbitset::FixedBitSet;
@@ -45,6 +45,7 @@ use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::plan_can_use_background_ddl;
 use crate::optimizer::plan_node::{PlanBase, PlanNodeMeta};
 use crate::optimizer::property::{Cardinality, Distribution, Order, RequiredDist};
+use crate::optimizer::variant_key::variant_key_error;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// Materializes a stream.
@@ -178,7 +179,7 @@ impl StreamMaterialize {
     /// Different from `create`, the `columns` are passed in directly, instead of being derived from
     /// the input. So the column IDs are preserved from the SQL columns binding step and will be
     /// consistent with the source node and DML node.
-    #[allow(clippy::too_many_arguments)]
+    #[expect(clippy::too_many_arguments)]
     pub fn create_for_table(
         input: PlanRef,
         name: String,
@@ -346,6 +347,18 @@ impl StreamMaterialize {
             derive_pk(input, user_distributed_by, user_order_by, &columns)
         };
 
+        // Guards only this table's own pk (table pk, index keys, MV ORDER BY); internal state
+        // tables are covered by `reject_variant_in_internal_storage_key` in the stream fragmenter.
+        for order in &table_pk {
+            let column = &columns[order.column_index];
+            if column.data_type().contains_variant() {
+                return Err(variant_key_error(format!(
+                    "VARIANT column \"{}\" is part of the storage primary key",
+                    column.name(),
+                )));
+            }
+        }
+
         // Add TTL watermark column to stream key.
         // When a row comes in to a TTL-ed table and we cannot find it in the table, we still cannot tell
         // whether it is a new row or an update to an expired row. Adding the TTL watermark column to the stream key
@@ -438,7 +451,7 @@ impl StreamMaterialize {
             definition,
             conflict_behavior,
             version_column_indices,
-            read_prefix_len_hint,
+            read_prefix_len_hint: _,
             version,
             watermark_columns: _,
             dist_key_in_pk,
@@ -507,7 +520,10 @@ impl StreamMaterialize {
             definition,
             conflict_behavior,
             version_column_indices,
-            read_prefix_len_hint,
+            // Refresh staging tables are consumed by the refresh merge path with
+            // `iter_keyed_row_with_vnode` range scans. They are not read by
+            // fixed-prefix lookups, so prefix SST filters would only add write cost.
+            read_prefix_len_hint: 0,
             version,
             created_at_epoch,
             initialized_at_epoch,

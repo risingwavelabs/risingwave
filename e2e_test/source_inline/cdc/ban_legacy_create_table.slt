@@ -1,0 +1,37 @@
+# Ban CREATE TABLE with cdc connector. Users must use CREATE SOURCE + CREATE TABLE FROM SOURCE
+# for connectors that support shared CDC source (mysql/postgres/sqlserver).
+
+statement error directly creating a CDC table for connector mysql-cdc is no longer supported
+create table products (id INT, name STRING, PRIMARY KEY (id)) with (
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
+ database.name = 'mydb',
+ table.name = 'products',
+ server.id = '5085'
+);
+
+statement error directly creating a CDC table for connector postgres-cdc is no longer supported
+create table shipments (shipment_id INTEGER, PRIMARY KEY (shipment_id)) with (
+ connector = 'postgres-cdc',
+ hostname = 'db',
+ port = '5432',
+ username = 'postgres',
+ password = 'postgres',
+ database.name = 'cdc_test',
+ table.name = 'shipments',
+ slot.name = 'shipments'
+);
+
+statement error directly creating a CDC table for connector sqlserver-cdc is no longer supported
+create table orders (order_id INT PRIMARY KEY) with (
+ connector = 'sqlserver-cdc',
+ hostname = 'sqlserver-server',
+ port = '1433',
+ username = 'SA',
+ password = 'MyPassword',
+ database.name = 'mydb',
+ table.name = 'orders'
+);

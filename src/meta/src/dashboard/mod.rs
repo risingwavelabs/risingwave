@@ -539,7 +539,6 @@ pub(super) mod handlers {
             let result = srv
                 .profile_service
                 .heap_profiling(Request::new(HeapProfilingRequest { dir: "".to_owned() }))
-                .await
                 .map_err(err)?
                 .into_inner();
             return Ok(result.into());
@@ -568,7 +567,6 @@ pub(super) mod handlers {
             let result = srv
                 .profile_service
                 .list_heap_profiling(Request::new(ListHeapProfilingRequest {}))
-                .await
                 .map_err(err)?
                 .into_inner();
             return Ok(result.into());

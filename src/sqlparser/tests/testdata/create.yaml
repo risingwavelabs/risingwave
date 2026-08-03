@@ -153,6 +153,13 @@
     sql parser error: expected FROM or AS after CREATE SINK sink_name, found: EOF
     LINE 1: CREATE SINK snk
                            ^
+- input: REPLACE SINK snk FROM mv WITH (connector = 'blackhole')
+  formatted_sql: REPLACE SINK snk FROM mv WITH (connector = 'blackhole')
+- input: CREATE OR REPLACE SINK snk FROM mv WITH (connector = 'blackhole')
+  error_msg: |-
+    sql parser error: REPLACE SINK should be used instead of CREATE OR REPLACE SINK
+    LINE 1: CREATE OR REPLACE SINK snk FROM mv WITH (connector = 'blackhole')
+                                   ^
 - input: CREATE SINK IF NOT EXISTS snk FROM mv WITH (connector = 'mysql', mysql.endpoint = '127.0.0.1:3306', mysql.table = '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>', mysql.password = '<password>')
   formatted_sql: CREATE SINK IF NOT EXISTS snk FROM mv WITH (connector = 'mysql', mysql.endpoint = '127.0.0.1:3306', mysql.table = '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>', mysql.password = '<password>')
 - input: CREATE SINK IF NOT EXISTS snk AS SELECT count(*) AS cnt FROM mv WITH (connector = 'mysql', mysql.endpoint = '127.0.0.1:3306', mysql.table = '<table_name>', mysql.database = '<database_name>', mysql.user = '<user_name>', mysql.password = '<password>')
@@ -244,3 +251,5 @@
   formatted_sql: CREATE MATERIALIZED VIEW mv WITH (backfill_order = FIXED(t1 -> t2, t2 -> t3)) AS SELECT * FROM t1 JOIN t2 ON t1.id = t2.id JOIN t3 ON t2.id = t3.id
 - input: CREATE MATERIALIZED VIEW mv WITH (backfill_order = FIXED(schema1.t1 -> schema2.t2)) AS SELECT * FROM schema1.t1 JOIN schema2.t2 ON t1.id = t2.id
   formatted_sql: CREATE MATERIALIZED VIEW mv WITH (backfill_order = FIXED(schema1.t1 -> schema2.t2)) AS SELECT * FROM schema1.t1 JOIN schema2.t2 ON t1.id = t2.id
+- input: CREATE MATERIALIZED VIEW mv WITH (refresh.interval.sec = 60) AS SELECT * FROM t
+  formatted_sql: CREATE MATERIALIZED VIEW mv WITH (refresh.interval.sec = 60) AS SELECT * FROM t

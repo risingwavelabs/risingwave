@@ -26,6 +26,8 @@ use crate::task::ExecutorParams;
 /// this executor. May refractor with `BarrierRecvExecutor` in the near future.
 pub struct ValuesExecutorBuilder;
 
+impl_stream_node_body!(Values(ValuesNode) => ValuesExecutorBuilder);
+
 impl ExecutorBuilder for ValuesExecutorBuilder {
     type Node = ValuesNode;
 

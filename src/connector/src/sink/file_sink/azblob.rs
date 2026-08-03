@@ -101,6 +101,8 @@ impl UnknownFields for AzblobConfig {
     }
 }
 
+crate::impl_sink_unknown_fields!(AzblobConfig);
+
 impl OpendalSinkBackend for AzblobSink {
     type Properties = AzblobConfig;
 

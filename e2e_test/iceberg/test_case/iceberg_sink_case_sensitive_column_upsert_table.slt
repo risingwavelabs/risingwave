@@ -1,0 +1,68 @@
+statement ok
+set sink_decouple = false;
+
+statement ok
+set streaming_parallelism=4;
+
+statement ok
+DROP SINK IF EXISTS case_sensitive_column_sink;
+
+statement ok
+DROP MATERIALIZED VIEW IF EXISTS case_sensitive_column_mv;
+
+statement ok
+DROP TABLE IF EXISTS case_sensitive_column_t;
+
+statement ok
+CREATE TABLE case_sensitive_column_t ("Key" int, "Value" int, primary key ("Key"));
+
+statement ok
+CREATE MATERIALIZED VIEW case_sensitive_column_mv AS SELECT * FROM case_sensitive_column_t;
+
+statement ok
+CREATE SINK case_sensitive_column_sink AS SELECT "Key", "Value" FROM case_sensitive_column_mv WITH (
+    connector = 'iceberg',
+    type = 'upsert',
+    force_append_only = 'false',
+    primary_key = 'Key',
+    catalog.name = 'demo',
+    catalog.type = 'storage',
+    warehouse.path = 's3a://icebergdata/demo',
+    database.name = 'demo_db',
+    table.name = 'case_sensitive_column_upsert_table',
+    commit_checkpoint_interval = 1,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1',
+    s3.access.key = 'hummockadmin',
+    s3.secret.key = 'hummockadmin'
+);
+
+statement ok
+INSERT INTO case_sensitive_column_t VALUES (1, 500);
+
+statement ok
+FLUSH;
+
+sleep 10s
+
+statement ok
+INSERT INTO case_sensitive_column_t VALUES (1, 600);
+
+statement ok
+FLUSH;
+
+sleep 10s
+
+query II
+SELECT "Key", "Value" FROM case_sensitive_column_t ORDER BY "Key";
+----
+1 600
+
+statement ok
+DROP SINK case_sensitive_column_sink;
+
+statement ok
+DROP MATERIALIZED VIEW case_sensitive_column_mv;
+
+statement ok
+DROP TABLE case_sensitive_column_t;

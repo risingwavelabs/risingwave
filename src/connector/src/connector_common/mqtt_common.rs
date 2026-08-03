@@ -30,7 +30,7 @@ use crate::error::ConnectorResult;
 
 #[derive(Debug, Clone, PartialEq, Display, Deserialize, EnumString)]
 #[strum(serialize_all = "snake_case")]
-#[allow(clippy::enum_variant_names)]
+#[expect(clippy::enum_variant_names)]
 pub enum QualityOfService {
     AtLeastOnce,
     AtMostOnce,

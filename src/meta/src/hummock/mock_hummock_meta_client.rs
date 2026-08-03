@@ -230,6 +230,7 @@ impl HummockMetaClient for MockHummockMetaClient {
         _compaction_group_id: CompactionGroupId,
         _table_id: JobId,
         _level: u32,
+        _target_level: Option<u32>,
         _sst_ids: Vec<HummockSstableId>,
         _exclusive: bool,
     ) -> Result<bool> {
@@ -401,8 +402,7 @@ impl HummockMetaClient for MockHummockMetaClient {
         exclude_empty: bool,
         limit: Option<u32>,
     ) -> Result<TableChangeLogs> {
-        Ok(self
-            .hummock_manager
+        self.hummock_manager
             .get_table_change_logs(
                 epoch_only,
                 start_epoch_inclusive,
@@ -411,7 +411,8 @@ impl HummockMetaClient for MockHummockMetaClient {
                 exclude_empty,
                 limit,
             )
-            .await)
+            .await
+            .map_err(mock_err)
     }
 }
 

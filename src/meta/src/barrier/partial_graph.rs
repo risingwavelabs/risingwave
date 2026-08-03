@@ -92,7 +92,7 @@ struct PartialGraphRunningState {
 impl PartialGraphRunningState {
     fn new(stat: Box<dyn PartialGraphStat>) -> Self {
         Self {
-            barrier_item_collector: BarrierItemCollector::new(),
+            barrier_item_collector: BarrierItemCollector::new(true),
             completing_epoch: None,
             stat,
         }
@@ -100,6 +100,12 @@ impl PartialGraphRunningState {
 
     fn is_empty(&self) -> bool {
         self.barrier_item_collector.is_empty() && self.completing_epoch.is_none()
+    }
+
+    fn pending_barrier_num(&self) -> usize {
+        self.barrier_item_collector.inflight_barrier_num()
+            + self.barrier_item_collector.collected_barrier_num()
+            + usize::from(self.completing_epoch.is_some())
     }
 
     fn enqueue(&mut self, node_to_collect: NodeToCollect, mut info: PartialGraphBarrierInfo) {
@@ -139,7 +145,7 @@ impl PartialGraphRunningState {
                 self.barrier_item_collector.inflight_barrier_num(),
                 self.barrier_item_collector.collected_barrier_num(),
             );
-            Some(temp_ref.collected_barrier(epoch))
+            Some(temp_ref.collected_barrier(epoch, self.pending_barrier_num()))
         } else {
             None
         }
@@ -227,10 +233,15 @@ impl CollectedBarrierTempRef {
         CollectedBarrierTempRef { resps: &EMPTY }
     }
 
-    fn collected_barrier(&self, epoch: EpochPair) -> CollectedBarrier<'_> {
+    fn collected_barrier(
+        &self,
+        epoch: EpochPair,
+        pending_barrier_num: usize,
+    ) -> CollectedBarrier<'_> {
         CollectedBarrier {
             epoch,
             resps: self.resps,
+            pending_barrier_num,
         }
     }
 
@@ -243,13 +254,18 @@ impl CollectedBarrierTempRef {
             PartialGraphManagerEvent::PartialGraph(partial_graph_id, event) => {
                 let event = match event {
                     PartialGraphEvent::BarrierCollected(collected) => {
+                        let pending_barrier_num = collected.pending_barrier_num;
                         let state = manager.running_graph(partial_graph_id);
                         let (epoch, resps, _) = state
                             .barrier_item_collector
                             .last_collected()
                             .expect("should exist");
                         assert_eq!(epoch, collected.epoch);
-                        PartialGraphEvent::BarrierCollected(CollectedBarrier { epoch, resps })
+                        PartialGraphEvent::BarrierCollected(CollectedBarrier {
+                            epoch,
+                            resps,
+                            pending_barrier_num,
+                        })
                     }
                     PartialGraphEvent::Reset(resps) => PartialGraphEvent::Reset(resps),
                     PartialGraphEvent::Initialized => PartialGraphEvent::Initialized,
@@ -268,6 +284,7 @@ impl CollectedBarrierTempRef {
 pub(super) struct CollectedBarrier<'a> {
     pub epoch: EpochPair,
     pub resps: &'a HashMap<WorkerId, BarrierCompleteResponse>,
+    pub pending_barrier_num: usize,
 }
 
 pub(super) enum PartialGraphEvent<'a> {
@@ -335,7 +352,7 @@ impl PartialGraphManager {
     pub(super) async fn add_worker(
         &mut self,
         node: WorkerNode,
-        context: &impl GlobalBarrierWorkerContext,
+        context: Arc<impl GlobalBarrierWorkerContext>,
     ) {
         self.control_stream_manager
             .add_worker(node, existing_graphs(&self.graphs), &self.term_id, context)
@@ -518,10 +535,8 @@ impl PartialGraphManager {
         graph
     }
 
-    pub(super) fn inflight_barrier_num(&self, partial_graph_id: PartialGraphId) -> usize {
-        self.running_graph(partial_graph_id)
-            .barrier_item_collector
-            .inflight_barrier_num()
+    pub(super) fn pending_barrier_num(&self, partial_graph_id: PartialGraphId) -> usize {
+        self.running_graph(partial_graph_id).pending_barrier_num()
     }
 
     pub(super) fn first_inflight_barrier(
@@ -531,6 +546,16 @@ impl PartialGraphManager {
         self.running_graph(partial_graph_id)
             .barrier_item_collector
             .first_inflight_epoch()
+    }
+
+    pub(super) fn pending_barrier_infos(
+        &self,
+        partial_graph_id: PartialGraphId,
+    ) -> impl Iterator<Item = &BarrierInfo> {
+        self.running_graph(partial_graph_id)
+            .barrier_item_collector
+            .iter_infos()
+            .map(|info| &info.barrier_info)
     }
 
     pub(super) fn start_completing(
@@ -845,5 +870,65 @@ impl PartialGraphManager {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::util::epoch::Epoch;
+
+    use super::*;
+    use crate::barrier::TracedEpoch;
+
+    struct TestPartialGraphStat;
+
+    impl PartialGraphStat for TestPartialGraphStat {
+        fn observe_barrier_latency(&self, _epoch: EpochPair, _barrier_latency_secs: f64) {}
+
+        fn observe_barrier_num(&self, _inflight_barrier_num: usize, _collected_barrier_num: usize) {
+        }
+    }
+
+    fn barrier_info(prev_epoch: u64, curr_epoch: u64) -> PartialGraphBarrierInfo {
+        PartialGraphBarrierInfo::new(
+            PostCollectCommand::barrier(),
+            BarrierInfo {
+                prev_epoch: TracedEpoch::new(Epoch(prev_epoch)),
+                curr_epoch: TracedEpoch::new(Epoch(curr_epoch)),
+                kind: BarrierKind::Barrier,
+            },
+            vec![],
+            HashSet::new(),
+        )
+    }
+
+    #[test]
+    fn test_pending_barrier_num_includes_collected_and_completing() {
+        let mut state = PartialGraphRunningState::new(Box::new(TestPartialGraphStat));
+        let worker_id: WorkerId = 1.into();
+        state.barrier_item_collector.enqueue(
+            EpochPair::new(2, 1),
+            HashSet::from([worker_id]),
+            barrier_info(1, 2),
+        );
+        state.barrier_item_collector.enqueue(
+            EpochPair::new(3, 2),
+            HashSet::from([worker_id]),
+            barrier_info(2, 3),
+        );
+        assert_eq!(state.pending_barrier_num(), 2);
+
+        state
+            .barrier_item_collector
+            .collect(1, worker_id, BarrierCompleteResponse::default());
+        state.barrier_item_collector.barrier_collected();
+        assert_eq!(state.pending_barrier_num(), 2);
+
+        state
+            .barrier_item_collector
+            .take_collected_if(|epoch| epoch.prev == 1)
+            .expect("the first barrier should be collected");
+        state.completing_epoch = Some(1);
+        assert_eq!(state.pending_barrier_num(), 2);
     }
 }

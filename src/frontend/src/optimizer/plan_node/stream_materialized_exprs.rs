@@ -63,11 +63,10 @@ impl Distill for StreamMaterializedExprs {
         {
             vec.push(("output_watermarks", display_output_watermarks));
         }
-        if verbose && self.state_clean_col_idx.is_some() {
-            vec.push((
-                "state_clean_col_idx",
-                Pretty::display(&self.state_clean_col_idx.unwrap()),
-            ));
+        if let Some(idx) = self.state_clean_col_idx
+            && verbose
+        {
+            vec.push(("state_clean_col_idx", Pretty::display(&idx)));
         }
 
         childless_record("StreamMaterializedExprs", vec)

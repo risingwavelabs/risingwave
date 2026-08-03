@@ -1,0 +1,464 @@
+statement ok
+set rw_implicit_flush to true;
+
+statement ok
+set streaming_parallelism to 1;
+
+statement ok
+set streaming_parallelism_for_table to 1;
+
+statement ok
+create table idx_base_t (v int);
+
+# Case: global=default, streaming_parallelism_for_index=default
+statement ok
+set streaming_parallelism to default;
+
+statement ok
+set streaming_parallelism_for_index to default;
+
+statement ok
+create index idx_dd on idx_base_t(v);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'idx_dd';
+----
+bounded(64)
+
+statement ok
+drop index idx_dd;
+
+# Case: global=default, streaming_parallelism_for_index=6
+statement ok
+set streaming_parallelism to default;
+
+statement ok
+set streaming_parallelism_for_index to 6;
+
+statement ok
+create index idx_df on idx_base_t(v);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'idx_df';
+----
+6
+
+statement ok
+drop index idx_df;
+
+# Case: global=default, streaming_parallelism_for_index='ratio(0.5)'
+statement ok
+set streaming_parallelism to default;
+
+statement ok
+set streaming_parallelism_for_index to 'ratio(0.5)';
+
+statement ok
+create index idx_dr on idx_base_t(v);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'idx_dr';
+----
+ratio(0.5)
+
+statement ok
+drop index idx_dr;
+
+# Case: global=default, streaming_parallelism_for_index='bounded(16)'
+statement ok
+set streaming_parallelism to default;
+
+statement ok
+set streaming_parallelism_for_index to 'bounded(16)';
+
+statement ok
+create index idx_db on idx_base_t(v);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'idx_db';
+----
+bounded(16)
+
+statement ok
+drop index idx_db;
+
+# Case: global=default, streaming_parallelism_for_index=adaptive
+statement ok
+set streaming_parallelism to default;
+
+statement ok
+set streaming_parallelism_for_index to adaptive;
+
+statement ok
+create index idx_da on idx_base_t(v);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'idx_da';
+----
+adaptive
+
+statement ok
+drop index idx_da;
+
+# Case: global=8, streaming_parallelism_for_index=default
+statement ok
+set streaming_parallelism to 8;
+
+statement ok
+set streaming_parallelism_for_index to default;
+
+statement ok
+create index idx_fd on idx_base_t(v);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'idx_fd';
+----
+8
+
+statement ok
+drop index idx_fd;
+
+# Case: global=8, streaming_parallelism_for_index=6
+statement ok
+set streaming_parallelism to 8;
+
+statement ok
+set streaming_parallelism_for_index to 6;
+
+statement ok
+create index idx_ff on idx_base_t(v);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'idx_ff';
+----
+6
+
+statement ok
+drop index idx_ff;
+
+# Case: global=8, streaming_parallelism_for_index='ratio(0.5)'
+statement ok
+set streaming_parallelism to 8;
+
+statement ok
+set streaming_parallelism_for_index to 'ratio(0.5)';
+
+statement ok
+create index idx_fr on idx_base_t(v);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'idx_fr';
+----
+ratio(0.5)
+
+statement ok
+drop index idx_fr;
+
+# Case: global=8, streaming_parallelism_for_index='bounded(16)'
+statement ok
+set streaming_parallelism to 8;
+
+statement ok
+set streaming_parallelism_for_index to 'bounded(16)';
+
+statement ok
+create index idx_fb on idx_base_t(v);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'idx_fb';
+----
+bounded(16)
+
+statement ok
+drop index idx_fb;
+
+# Case: global=8, streaming_parallelism_for_index=adaptive
+statement ok
+set streaming_parallelism to 8;
+
+statement ok
+set streaming_parallelism_for_index to adaptive;
+
+statement ok
+create index idx_fa on idx_base_t(v);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'idx_fa';
+----
+adaptive
+
+statement ok
+drop index idx_fa;
+
+# Case: global='ratio(0.5)', streaming_parallelism_for_index=default
+statement ok
+set streaming_parallelism to 'ratio(0.5)';
+
+statement ok
+set streaming_parallelism_for_index to default;
+
+statement ok
+create index idx_rd on idx_base_t(v);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'idx_rd';
+----
+ratio(0.5)
+
+statement ok
+drop index idx_rd;
+
+# Case: global='ratio(0.5)', streaming_parallelism_for_index=6
+statement ok
+set streaming_parallelism to 'ratio(0.5)';
+
+statement ok
+set streaming_parallelism_for_index to 6;
+
+statement ok
+create index idx_rf on idx_base_t(v);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'idx_rf';
+----
+6
+
+statement ok
+drop index idx_rf;
+
+# Case: global='ratio(0.5)', streaming_parallelism_for_index='ratio(0.5)'
+statement ok
+set streaming_parallelism to 'ratio(0.5)';
+
+statement ok
+set streaming_parallelism_for_index to 'ratio(0.5)';
+
+statement ok
+create index idx_rr on idx_base_t(v);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'idx_rr';
+----
+ratio(0.5)
+
+statement ok
+drop index idx_rr;
+
+# Case: global='ratio(0.5)', streaming_parallelism_for_index='bounded(16)'
+statement ok
+set streaming_parallelism to 'ratio(0.5)';
+
+statement ok
+set streaming_parallelism_for_index to 'bounded(16)';
+
+statement ok
+create index idx_rb on idx_base_t(v);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'idx_rb';
+----
+bounded(16)
+
+statement ok
+drop index idx_rb;
+
+# Case: global='ratio(0.5)', streaming_parallelism_for_index=adaptive
+statement ok
+set streaming_parallelism to 'ratio(0.5)';
+
+statement ok
+set streaming_parallelism_for_index to adaptive;
+
+statement ok
+create index idx_ra on idx_base_t(v);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'idx_ra';
+----
+adaptive
+
+statement ok
+drop index idx_ra;
+
+# Case: global='bounded(32)', streaming_parallelism_for_index=default
+statement ok
+set streaming_parallelism to 'bounded(32)';
+
+statement ok
+set streaming_parallelism_for_index to default;
+
+statement ok
+create index idx_bd on idx_base_t(v);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'idx_bd';
+----
+bounded(32)
+
+statement ok
+drop index idx_bd;
+
+# Case: global='bounded(32)', streaming_parallelism_for_index=6
+statement ok
+set streaming_parallelism to 'bounded(32)';
+
+statement ok
+set streaming_parallelism_for_index to 6;
+
+statement ok
+create index idx_bf on idx_base_t(v);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'idx_bf';
+----
+6
+
+statement ok
+drop index idx_bf;
+
+# Case: global='bounded(32)', streaming_parallelism_for_index='ratio(0.5)'
+statement ok
+set streaming_parallelism to 'bounded(32)';
+
+statement ok
+set streaming_parallelism_for_index to 'ratio(0.5)';
+
+statement ok
+create index idx_br on idx_base_t(v);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'idx_br';
+----
+ratio(0.5)
+
+statement ok
+drop index idx_br;
+
+# Case: global='bounded(32)', streaming_parallelism_for_index='bounded(16)'
+statement ok
+set streaming_parallelism to 'bounded(32)';
+
+statement ok
+set streaming_parallelism_for_index to 'bounded(16)';
+
+statement ok
+create index idx_bb on idx_base_t(v);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'idx_bb';
+----
+bounded(16)
+
+statement ok
+drop index idx_bb;
+
+# Case: global='bounded(32)', streaming_parallelism_for_index=adaptive
+statement ok
+set streaming_parallelism to 'bounded(32)';
+
+statement ok
+set streaming_parallelism_for_index to adaptive;
+
+statement ok
+create index idx_ba on idx_base_t(v);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'idx_ba';
+----
+adaptive
+
+statement ok
+drop index idx_ba;
+
+# Case: global=adaptive, streaming_parallelism_for_index=default
+statement ok
+set streaming_parallelism to adaptive;
+
+statement ok
+set streaming_parallelism_for_index to default;
+
+statement ok
+create index idx_ad on idx_base_t(v);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'idx_ad';
+----
+adaptive
+
+statement ok
+drop index idx_ad;
+
+# Case: global=adaptive, streaming_parallelism_for_index=6
+statement ok
+set streaming_parallelism to adaptive;
+
+statement ok
+set streaming_parallelism_for_index to 6;
+
+statement ok
+create index idx_af on idx_base_t(v);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'idx_af';
+----
+6
+
+statement ok
+drop index idx_af;
+
+# Case: global=adaptive, streaming_parallelism_for_index='ratio(0.5)'
+statement ok
+set streaming_parallelism to adaptive;
+
+statement ok
+set streaming_parallelism_for_index to 'ratio(0.5)';
+
+statement ok
+create index idx_ar on idx_base_t(v);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'idx_ar';
+----
+ratio(0.5)
+
+statement ok
+drop index idx_ar;
+
+# Case: global=adaptive, streaming_parallelism_for_index='bounded(16)'
+statement ok
+set streaming_parallelism to adaptive;
+
+statement ok
+set streaming_parallelism_for_index to 'bounded(16)';
+
+statement ok
+create index idx_ab on idx_base_t(v);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'idx_ab';
+----
+bounded(16)
+
+statement ok
+drop index idx_ab;
+
+# Case: global=adaptive, streaming_parallelism_for_index=adaptive
+statement ok
+set streaming_parallelism to adaptive;
+
+statement ok
+set streaming_parallelism_for_index to adaptive;
+
+statement ok
+create index idx_aa on idx_base_t(v);
+
+query T
+select parallelism from rw_streaming_parallelism where name = 'idx_aa';
+----
+adaptive
+
+statement ok
+drop index idx_aa;
+
+statement ok
+drop table idx_base_t;

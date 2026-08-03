@@ -280,9 +280,7 @@ fn bench_expr(c: &mut Criterion) {
     });
     c.bench_function("constant", |bencher| {
         let constant = LiteralExpression::new(DataType::Int32, Some(1_i32.into()));
-        bencher
-            .to_async(FuturesExecutor)
-            .iter(|| constant.eval(&input))
+        bencher.iter(|| constant.eval(&input))
     });
     c.bench_function("extract(constant)", |bencher| {
         let extract = build_from_pretty(format!(
@@ -574,7 +572,7 @@ fn bench_raw(c: &mut Criterion) {
     c.bench_function("raw/add/Option<i32>/zip_eq,checked,cast", |bencher| {
         let a = (0..CHUNK_SIZE as i32).map(Some).collect::<Vec<_>>();
         let b = (0..CHUNK_SIZE as i32).map(Some).collect::<Vec<_>>();
-        #[allow(clippy::useless_conversion)]
+        #[expect(clippy::useless_conversion)]
         fn checked_add(a: i32, b: i32) -> std::result::Result<i32, Error> {
             let a: i32 = a.try_into().map_err(|_| Error::Cast)?;
             let b: i32 = b.try_into().map_err(|_| Error::Cast)?;
@@ -596,7 +594,7 @@ fn bench_raw(c: &mut Criterion) {
         |bencher| {
             let a = (0..CHUNK_SIZE as i32).map(Some).collect::<Vec<_>>();
             let b = (0..CHUNK_SIZE as i32).map(Some).collect::<Vec<_>>();
-            #[allow(clippy::useless_conversion)]
+            #[expect(clippy::useless_conversion)]
             fn checked_add(a: i32, b: i32) -> std::result::Result<i32, Error> {
                 let a: i32 = a.try_into().map_err(|_| Error::Cast)?;
                 let b: i32 = b.try_into().map_err(|_| Error::Cast)?;

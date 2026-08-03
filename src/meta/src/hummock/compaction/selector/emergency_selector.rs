@@ -35,6 +35,7 @@ impl CompactionSelector for EmergencySelector {
             level_handlers,
             selector_stats,
             developer_config,
+            in_progress_compactions,
             ..
         } = context;
         let dynamic_level_core = DynamicLevelSelectorCore::new(
@@ -50,6 +51,14 @@ impl CompactionSelector for EmergencySelector {
 
         let mut stats = LocalPickerStatistic::default();
         if let Some(compaction_input) = picker.pick_compaction(levels, level_handlers, &mut stats) {
+            if !compaction_input.skip_target_range_conflict_check
+                && in_progress_compactions.has_conflict_with_input(&compaction_input)
+            {
+                stats.skip_by_overlapping += 1;
+                selector_stats.skip_picker.push((0, ctx.base_level, stats));
+                return None;
+            }
+
             compaction_input.add_pending_task(task_id, level_handlers);
 
             return Some(create_compaction_task(
