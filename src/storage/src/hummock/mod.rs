@@ -14,7 +14,7 @@
 
 //! Hummock is the state store of the streaming system.
 
-use std::ops::Bound;
+use std::ops::{Bound, Deref, DerefMut};
 use std::sync::Arc;
 
 use bytes::Bytes;
@@ -69,6 +69,48 @@ use crate::mem_table::ImmutableMemtable;
 use crate::monitor::StoreLocalStatistic;
 use crate::store::ReadOptions;
 
+struct HummockIteratorLocalStatisticGuard<'a, I: HummockIterator> {
+    iterator: Option<I>,
+    local_stats: &'a mut StoreLocalStatistic,
+}
+
+impl<'a, I: HummockIterator> HummockIteratorLocalStatisticGuard<'a, I> {
+    fn new(iterator: I, local_stats: &'a mut StoreLocalStatistic) -> Self {
+        Self {
+            iterator: Some(iterator),
+            local_stats,
+        }
+    }
+
+    fn into_inner(mut self) -> I {
+        let iterator = std::mem::take(&mut self.iterator).unwrap();
+        iterator.collect_local_statistic(self.local_stats);
+        iterator
+    }
+}
+
+impl<I: HummockIterator> Deref for HummockIteratorLocalStatisticGuard<'_, I> {
+    type Target = I;
+
+    fn deref(&self) -> &Self::Target {
+        self.iterator.as_ref().unwrap()
+    }
+}
+
+impl<I: HummockIterator> DerefMut for HummockIteratorLocalStatisticGuard<'_, I> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        self.iterator.as_mut().unwrap()
+    }
+}
+
+impl<I: HummockIterator> Drop for HummockIteratorLocalStatisticGuard<'_, I> {
+    fn drop(&mut self) {
+        if let Some(iterator) = self.iterator.take() {
+            iterator.collect_local_statistic(self.local_stats);
+        }
+    }
+}
+
 pub async fn get_from_sstable_info(
     sstable_store_ref: SstableStoreRef,
     sstable_info: &SstableInfo,
@@ -95,11 +137,14 @@ pub async fn get_from_sstable_info(
         return Ok(None);
     }
 
-    let mut iter = SstableIterator::create(
-        sstable,
-        sstable_store_ref.clone(),
-        Arc::new(SstableIteratorReadOptions::from_read_options(read_options)),
-        sstable_info,
+    let mut iter = HummockIteratorLocalStatisticGuard::new(
+        SstableIterator::create(
+            sstable,
+            sstable_store_ref.clone(),
+            Arc::new(SstableIteratorReadOptions::from_read_options(read_options)),
+            sstable_info,
+        ),
+        local_stats,
     );
     iter.seek(full_key).await?;
     // Iterator has sought passed the borders.
@@ -107,12 +152,10 @@ pub async fn get_from_sstable_info(
         return Ok(None);
     }
 
-    iter.collect_local_statistic(local_stats);
-
     // Iterator gets us the key, we tell if it's the key we want
     // or key next to it.
     let value = if iter.key().user_key == full_key.user_key {
-        Some(iter)
+        Some(iter.into_inner())
     } else {
         None
     };
