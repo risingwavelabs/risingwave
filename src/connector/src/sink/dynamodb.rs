@@ -74,6 +74,7 @@ pub struct DynamoDbConfig {
         default = "default_batch_write_retry_times"
     )]
     #[serde_as(as = "DisplayFromStr")]
+    #[with_option(allow_alter_on_fly)]
     pub batch_write_retry_times: usize,
 
     #[serde(
@@ -81,6 +82,7 @@ pub struct DynamoDbConfig {
         default = "default_batch_write_retry_backoff_ms"
     )]
     #[serde_as(as = "DisplayFromStr")]
+    #[with_option(allow_alter_on_fly)]
     pub batch_write_retry_backoff_ms: u64,
 }
 

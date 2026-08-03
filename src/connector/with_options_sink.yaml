@@ -311,10 +311,12 @@ DynamoDbConfig:
     field_type: usize
     required: false
     default: '3'
+    allow_alter_on_fly: true
   - name: dynamodb.batch_write_retry_backoff_ms
     field_type: u64
     required: false
     default: '100'
+    allow_alter_on_fly: true
 ElasticSearchConfig:
   fields:
   - name: url
