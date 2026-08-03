@@ -221,16 +221,19 @@ impl BatchManager {
         let mut task_output = self.take_output(pb_task_output_id)?;
         self.runtime.spawn(async move {
             let mut writer = GrpcExchangeWriter::new(tx.clone());
-            match task_output.take_data(&mut writer).await {
-                Ok(_) => {
-                    tracing::trace!(
-                        from = ?task_id,
-                        "exchanged {} chunks",
-                        writer.written_chunks(),
-                    );
-                    Ok(())
-                }
-                Err(e) => tx.send(Err(e.into())).await,
+            tokio::select! {
+                result = task_output.take_data(&mut writer) => match result {
+                    Ok(_) => {
+                        tracing::trace!(
+                            from = ?task_id,
+                            "exchanged {} chunks",
+                            writer.written_chunks(),
+                        );
+                        Ok(())
+                    }
+                    Err(e) => tx.send(Err(e.into())).await,
+                },
+                _ = tx.closed() => Ok(()),
             }
         });
         Ok(())

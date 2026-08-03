@@ -485,19 +485,10 @@ pub async fn compute_node_serve(
                 AwaitTreeMiddlewareLayer::new_optional(await_tree_reg).layer(srv)
             }
         })
-        .add_service({
-            let await_tree_reg = batch_mgr.await_tree_reg().cloned();
-            let srv = BatchExchangeServiceServer::new(batch_exchange_srv)
-                .max_decoding_message_size(usize::MAX);
-            #[cfg(madsim)]
-            {
-                srv
-            }
-            #[cfg(not(madsim))]
-            {
-                AwaitTreeMiddlewareLayer::new_optional(await_tree_reg).layer(srv)
-            }
-        })
+        .add_service(
+            BatchExchangeServiceServer::new(batch_exchange_srv)
+                .max_decoding_message_size(usize::MAX),
+        )
         .add_service(
             StreamExchangeServiceServer::new(stream_exchange_srv)
                 .max_decoding_message_size(usize::MAX),

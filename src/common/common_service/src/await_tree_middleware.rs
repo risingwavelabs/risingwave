@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::task::{Context, Poll};
 
@@ -24,10 +23,22 @@ use tower::{Layer, Service};
 /// Manages the await-trees of `gRPC` requests that are currently served by a node.
 pub type AwaitTreeRegistryRef = await_tree::Registry;
 
+static NEXT_GRPC_CALL_ID: AtomicU64 = AtomicU64::new(0);
+
 /// Await-tree key type for `gRPC` calls.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct GrpcCall {
     pub desc: String,
+}
+
+impl GrpcCall {
+    /// Creates a key with an ID shared by all middleware layers and registries in this process.
+    pub fn new(desc: impl Into<String>) -> Self {
+        let id = NEXT_GRPC_CALL_ID.fetch_add(1, Ordering::Relaxed);
+        Self {
+            desc: format!("{} - {id}", desc.into()),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -54,7 +65,6 @@ impl<S> Layer<S> for AwaitTreeMiddlewareLayer {
         AwaitTreeMiddleware {
             inner: service,
             registry: self.registry.clone(),
-            next_id: Default::default(),
         }
     }
 }
@@ -63,7 +73,6 @@ impl<S> Layer<S> for AwaitTreeMiddlewareLayer {
 pub struct AwaitTreeMiddleware<S> {
     inner: S,
     registry: Option<AwaitTreeRegistryRef>,
-    next_id: Arc<AtomicU64>,
 }
 
 impl<S> Service<http::Request<Body>> for AwaitTreeMiddleware<S>
@@ -90,13 +99,11 @@ where
         let clone = self.inner.clone();
         let mut inner = std::mem::replace(&mut self.inner, clone);
 
-        let id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        let desc = if let Some(authority) = req.uri().authority() {
-            format!("{authority} - {id}")
-        } else {
-            format!("?? - {id}")
-        };
-        let key = GrpcCall { desc };
+        let desc = req
+            .uri()
+            .authority()
+            .map_or("??", |authority| authority.as_str());
+        let key = GrpcCall::new(desc);
 
         Either::Right(async move {
             let root = registry.register(key, req.uri().path());
@@ -109,4 +116,96 @@ where
 #[cfg(not(madsim))]
 impl<S: tonic::server::NamedService> tonic::server::NamedService for AwaitTreeMiddleware<S> {
     const NAME: &'static str = S::NAME;
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::BTreeMap;
+    use std::convert::Infallible;
+    use std::sync::Arc;
+
+    use tokio::sync::Barrier;
+    use tower::{ServiceExt as _, service_fn};
+
+    use super::*;
+
+    fn pending_service(
+        entered: Arc<Barrier>,
+        release: Arc<Barrier>,
+    ) -> impl Service<http::Request<Body>, Response = http::Response<Body>, Error = Infallible> + Clone
+    {
+        service_fn(move |_| {
+            let entered = entered.clone();
+            let release = release.clone();
+            async move {
+                entered.wait().await;
+                release.wait().await;
+                Ok(http::Response::new(Body::empty()))
+            }
+        })
+    }
+
+    fn request(path: &'static str) -> http::Request<Body> {
+        http::Request::builder()
+            .uri(format!("http://127.0.0.1{path}"))
+            .body(Body::empty())
+            .unwrap()
+    }
+
+    #[tokio::test]
+    async fn grpc_call_keys_are_unique_across_layers() {
+        let registry = await_tree::Registry::new(await_tree::Config::default());
+        let entered = Arc::new(Barrier::new(3));
+        let release = Arc::new(Barrier::new(3));
+
+        let service_1 = AwaitTreeMiddlewareLayer::new(registry.clone())
+            .layer(pending_service(entered.clone(), release.clone()));
+        let service_2 = AwaitTreeMiddlewareLayer::new(registry.clone())
+            .layer(pending_service(entered.clone(), release.clone()));
+
+        let verify = async {
+            entered.wait().await;
+            assert_eq!(registry.collect::<GrpcCall>().len(), 2);
+            release.wait().await;
+        };
+        let (result_1, result_2, ()) = tokio::join!(
+            service_1.oneshot(request("/task_service.TaskService/CreateTask")),
+            service_2.oneshot(request("/task_service.BatchExchangeService/GetData")),
+            verify,
+        );
+        result_1.unwrap();
+        result_2.unwrap();
+    }
+
+    #[tokio::test]
+    async fn grpc_call_keys_are_unique_across_registries() {
+        let registry_1 = await_tree::Registry::new(await_tree::Config::default());
+        let registry_2 = await_tree::Registry::new(await_tree::Config::default());
+        let entered = Arc::new(Barrier::new(3));
+        let release = Arc::new(Barrier::new(3));
+
+        let service_1 = AwaitTreeMiddlewareLayer::new(registry_1.clone())
+            .layer(pending_service(entered.clone(), release.clone()));
+        let service_2 = AwaitTreeMiddlewareLayer::new(registry_2.clone())
+            .layer(pending_service(entered.clone(), release.clone()));
+
+        let verify = async {
+            entered.wait().await;
+            let merged: BTreeMap<_, _> = registry_1
+                .collect::<GrpcCall>()
+                .into_iter()
+                .chain(registry_2.collect::<GrpcCall>())
+                .map(|(key, _)| (key.desc, ()))
+                .collect();
+            assert_eq!(merged.len(), 2);
+            release.wait().await;
+        };
+        let (result_1, result_2, ()) = tokio::join!(
+            service_1.oneshot(request("/task_service.TaskService/CreateTask")),
+            service_2.oneshot(request("/stream_service.StreamService/UpdateActors")),
+            verify,
+        );
+        result_1.unwrap();
+        result_2.unwrap();
+    }
 }
