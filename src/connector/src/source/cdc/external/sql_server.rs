@@ -39,6 +39,8 @@ use crate::source::cdc::external::{
 // The maximum commit_lsn value in Sql Server
 const MAX_COMMIT_LSN: &str = "ffffffff:ffffffff:ffff";
 
+type SqlServerCatalogColumn = (String, String, bool, Option<String>);
+
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub struct SqlServerOffset {
     // https://learn.microsoft.com/en-us/answers/questions/1328359/how-to-accurately-sequence-change-data-capture-dat
@@ -381,7 +383,7 @@ impl SqlServerExternalTableReader {
                 let is_user_defined: bool = row.try_get(3)?.unwrap_or(false);
                 let collation_name: Option<&str> = row.try_get(4)?;
                 column_types.insert(
-                    column_name.to_lowercase(),
+                    column_name.to_owned(),
                     (
                         type_schema.to_owned(),
                         type_name.to_owned(),
@@ -392,10 +394,18 @@ impl SqlServerExternalTableReader {
             }
         }
 
+        Self::validate_pk_ordering_catalog(&column_types, schema, table, primary_keys)
+    }
+
+    fn validate_pk_ordering_catalog(
+        column_types: &HashMap<String, SqlServerCatalogColumn>,
+        schema: &str,
+        table: &str,
+        primary_keys: &[String],
+    ) -> ConnectorResult<()> {
         for column_name in primary_keys {
-            let (type_schema, type_name, is_user_defined, collation_name) = column_types
-                .get(&column_name.to_lowercase())
-                .ok_or_else(|| {
+            let (type_schema, type_name, is_user_defined, collation_name) =
+                column_types.get(column_name).ok_or_else(|| {
                     anyhow!(
                         "SQL Server system catalog did not return primary-key column \
                          `{column_name}` from table `{schema}`.`{table}`"
@@ -596,6 +606,8 @@ impl SqlServerExternalTableReader {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
     use crate::source::cdc::external::SqlServerExternalTableReader;
 
     #[test]
@@ -661,5 +673,46 @@ mod tests {
             SqlServerExternalTableReader::unsupported_pk_ordering_reason("custom_id", true, None,)
                 .is_some()
         );
+    }
+
+    #[test]
+    fn test_sql_server_catalog_column_names_preserve_case() {
+        let column_types = HashMap::from([
+            (
+                "A".to_owned(),
+                (
+                    "sys".to_owned(),
+                    "nvarchar".to_owned(),
+                    false,
+                    Some("Latin1_General_100_BIN2".to_owned()),
+                ),
+            ),
+            (
+                "a".to_owned(),
+                (
+                    "sys".to_owned(),
+                    "nvarchar".to_owned(),
+                    false,
+                    Some("Latin1_General_100_CI_AS_SC".to_owned()),
+                ),
+            ),
+        ]);
+
+        SqlServerExternalTableReader::validate_pk_ordering_catalog(
+            &column_types,
+            "dbo",
+            "case_sensitive_pk",
+            &["A".to_owned()],
+        )
+        .unwrap();
+        let error = SqlServerExternalTableReader::validate_pk_ordering_catalog(
+            &column_types,
+            "dbo",
+            "case_sensitive_pk",
+            &["A".to_owned(), "a".to_owned()],
+        )
+        .unwrap_err();
+        assert!(error.to_string().contains("`a`"));
+        assert!(error.to_string().contains("Latin1_General_100_CI_AS_SC"));
     }
 }
