@@ -20,16 +20,19 @@ use rustc_span::Symbol;
 
 declare_tool_lint! {
     /// ### What it does
-    /// Checks for updating a metric directly on a temporary returned from
-    /// `with_guarded_label_values`.
+    /// Checks for cumulatively updating a metric directly on a temporary
+    /// returned from `with_guarded_label_values`.
     ///
     /// ### Why is this bad?
     /// `with_guarded_label_values` returns a guarded metric. The guard keeps
     /// the label values registered while the returned value is alive. Updating
-    /// the metric through a temporary, such as
-    /// `metrics.with_guarded_label_values(...).set(value)`, immediately drops
-    /// the guard and may remove/reset the label series before Prometheus can
-    /// scrape it.
+    /// a counter or histogram through a temporary, such as
+    /// `metrics.with_guarded_label_values(...).inc()`, immediately drops the
+    /// guard and may reset cumulative state between Prometheus scrapes.
+    ///
+    /// Gauges updated with `set` are intentionally ignored. Collection observes
+    /// a dropped label once before removing it, and a later `set` replaces the
+    /// full gauge value.
     ///
     /// ### Known problems
     /// This lint intentionally only checks common metric update methods. It
@@ -38,12 +41,12 @@ declare_tool_lint! {
     ///
     /// ### Example
     /// ```no_run
-    /// metrics.with_guarded_label_values(&labels).set(value);
+    /// metrics.with_guarded_label_values(&labels).inc();
     /// ```
     /// Use instead:
     /// ```no_run
     /// let metric = metrics.with_guarded_label_values(&labels);
-    /// metric.set(value);
+    /// metric.inc();
     /// ```
     pub rw::TEMPORARY_GUARDED_METRIC,
     Allow,
@@ -83,7 +86,7 @@ impl<'tcx> LateLintPass<'tcx> for TemporaryGuardedMetric {
 fn is_metric_update_method(method: Symbol) -> bool {
     matches!(
         method.as_str(),
-        "add" | "dec" | "dec_by" | "inc" | "inc_by" | "observe" | "set" | "start_timer" | "sub"
+        "add" | "dec" | "dec_by" | "inc" | "inc_by" | "observe" | "start_timer" | "sub"
     )
 }
 
