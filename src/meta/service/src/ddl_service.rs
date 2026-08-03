@@ -1450,6 +1450,10 @@ impl DdlService for DdlServiceImpl {
                             &original_column_types,
                         )
                     } else {
+                        // Keep the raw schema change for non-add/drop-only cases, such as a
+                        // mixed add-and-drop change. Existing validation below should see the
+                        // original change and reject unsupported schema changes without masking
+                        // them through type normalization.
                         table_change.clone()
                     };
 
