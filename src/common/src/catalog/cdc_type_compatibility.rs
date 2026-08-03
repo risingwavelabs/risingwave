@@ -63,16 +63,18 @@ pub fn cdc_auto_schema_change_existing_type_compatible(
         return true;
     }
 
-    match cdc_table_type {
-        PbCdcTableType::Mysql => mysql_cdc_existing_type_compatible(existing_type, mapped_type),
-        PbCdcTableType::Sqlserver => {
-            sql_server_cdc_existing_type_compatible(existing_type, mapped_type)
-        }
-        PbCdcTableType::Postgres | PbCdcTableType::Citus => {
-            postgres_cdc_existing_type_compatible(existing_type, mapped_type)
-        }
-        PbCdcTableType::Unspecified | PbCdcTableType::Mongo => false,
-    }
+    auto_schema_change_source_type_candidates(cdc_table_type, mapped_type)
+        .iter()
+        .any(|candidate| {
+            cdc_source_column_type_compatible(
+                cdc_table_type,
+                candidate.upstream_type_name,
+                existing_type.prost_type_name(),
+                candidate.char_max_length,
+                candidate.is_unsigned,
+                candidate.postgres_udt_name,
+            )
+        })
 }
 
 fn type_in_range(value: PbTypeName, start: PbTypeName, end: PbTypeName) -> bool {
@@ -200,50 +202,107 @@ fn sql_server_source_column_type_compatible(sql_server_type: &str, rw_type: PbTy
     }
 }
 
-fn mysql_cdc_existing_type_compatible(existing_type: &DataType, mapped_type: &DataType) -> bool {
-    match mapped_type {
-        DataType::Int16 => {
-            matches!(
-                existing_type,
-                DataType::Int16 | DataType::Int32 | DataType::Int64
-            )
+#[derive(Clone, Copy)]
+struct SourceTypeCompatibilityInput {
+    upstream_type_name: &'static str,
+    char_max_length: Option<i64>,
+    is_unsigned: bool,
+    postgres_udt_name: Option<&'static str>,
+}
+
+impl SourceTypeCompatibilityInput {
+    const fn new(upstream_type_name: &'static str) -> Self {
+        Self {
+            upstream_type_name,
+            char_max_length: None,
+            is_unsigned: false,
+            postgres_udt_name: None,
         }
-        DataType::Int32 => matches!(existing_type, DataType::Int32 | DataType::Int64),
-        DataType::Int64 => matches!(existing_type, DataType::Int64 | DataType::Decimal),
-        DataType::Decimal => matches!(existing_type, DataType::Decimal | DataType::Int64),
-        DataType::Float32 => matches!(existing_type, DataType::Float32 | DataType::Float64),
-        _ => false,
+    }
+
+    const fn with_char_max_length(mut self, char_max_length: i64) -> Self {
+        self.char_max_length = Some(char_max_length);
+        self
+    }
+
+    const fn unsigned(mut self) -> Self {
+        self.is_unsigned = true;
+        self
     }
 }
 
-fn sql_server_cdc_existing_type_compatible(
-    existing_type: &DataType,
+fn auto_schema_change_source_type_candidates(
+    cdc_table_type: PbCdcTableType,
     mapped_type: &DataType,
-) -> bool {
-    match mapped_type {
-        DataType::Int16 => {
-            matches!(
-                existing_type,
-                DataType::Int16 | DataType::Int32 | DataType::Int64
-            )
+) -> Vec<SourceTypeCompatibilityInput> {
+    match cdc_table_type {
+        PbCdcTableType::Mysql => mysql_auto_schema_change_source_type_candidates(mapped_type),
+        PbCdcTableType::Sqlserver => {
+            sql_server_auto_schema_change_source_type_candidates(mapped_type)
         }
-        DataType::Int32 => matches!(existing_type, DataType::Int32 | DataType::Int64),
-        DataType::Float32 | DataType::Float64 => {
-            matches!(existing_type, DataType::Float32 | DataType::Float64)
+        PbCdcTableType::Postgres | PbCdcTableType::Citus => {
+            postgres_auto_schema_change_source_type_candidates(mapped_type)
         }
-        _ => false,
+        PbCdcTableType::Unspecified | PbCdcTableType::Mongo => vec![],
     }
 }
 
-fn postgres_cdc_existing_type_compatible(existing_type: &DataType, mapped_type: &DataType) -> bool {
+fn mysql_auto_schema_change_source_type_candidates(
+    mapped_type: &DataType,
+) -> Vec<SourceTypeCompatibilityInput> {
+    use SourceTypeCompatibilityInput as Candidate;
+
     match mapped_type {
-        DataType::Decimal => {
-            matches!(
-                existing_type,
-                DataType::Decimal | DataType::Int256 | DataType::Varchar
-            )
-        }
-        _ => false,
+        DataType::Boolean => vec![
+            Candidate::new("bool"),
+            Candidate::new("boolean"),
+            Candidate::new("bit").with_char_max_length(1),
+        ],
+        DataType::Int16 => vec![
+            Candidate::new("tinyint"),
+            Candidate::new("tinyint").unsigned(),
+            Candidate::new("smallint"),
+        ],
+        DataType::Int32 => vec![
+            Candidate::new("smallint").unsigned(),
+            Candidate::new("mediumint"),
+            Candidate::new("int"),
+            Candidate::new("year"),
+        ],
+        DataType::Int64 => vec![Candidate::new("int").unsigned(), Candidate::new("bigint")],
+        DataType::Decimal => vec![
+            Candidate::new("bigint").unsigned(),
+            Candidate::new("decimal"),
+            Candidate::new("numeric"),
+        ],
+        DataType::Float32 => vec![Candidate::new("float"), Candidate::new("real")],
+        DataType::Float64 => vec![Candidate::new("double")],
+        _ => vec![],
+    }
+}
+
+fn postgres_auto_schema_change_source_type_candidates(
+    mapped_type: &DataType,
+) -> Vec<SourceTypeCompatibilityInput> {
+    use SourceTypeCompatibilityInput as Candidate;
+
+    match mapped_type {
+        DataType::Decimal => vec![Candidate::new("numeric")],
+        _ => vec![],
+    }
+}
+
+fn sql_server_auto_schema_change_source_type_candidates(
+    mapped_type: &DataType,
+) -> Vec<SourceTypeCompatibilityInput> {
+    use SourceTypeCompatibilityInput as Candidate;
+
+    match mapped_type {
+        DataType::Int16 => vec![Candidate::new("tinyint"), Candidate::new("smallint")],
+        DataType::Int32 => vec![Candidate::new("int"), Candidate::new("integer")],
+        DataType::Float32 => vec![Candidate::new("real")],
+        DataType::Float64 => vec![Candidate::new("float")],
+        _ => vec![],
     }
 }
 
@@ -345,6 +404,11 @@ mod tests {
 
     #[test]
     fn test_mysql_cdc_auto_schema_change_existing_type_compatibility() {
+        assert!(cdc_auto_schema_change_existing_type_compatible(
+            PbCdcTableType::Mysql,
+            &DataType::Boolean,
+            &DataType::Int16,
+        ));
         assert!(cdc_auto_schema_change_existing_type_compatible(
             PbCdcTableType::Mysql,
             &DataType::Int64,
