@@ -154,9 +154,11 @@ select * from src match_recognize (
 )
 emit on window close;
 
-# Navigation nested in an AST node the extractor has to traverse: these used to fail with a
-# misleading "function prev does not exist".
-statement ok
+# Navigation nested in AST nodes the extractor has to traverse (CASE, IN-list, IS DISTINCT FROM,
+# array constructor, subscript): these used to fail with a misleading "function prev does not
+# exist". The error proves the traversal reached every one of them -- the deepest nested slot,
+# `prev(b.v, 2)`, is what the start-distance rule rejects (`b` sits 1 row from the match start).
+statement error can occur 1 row.s. from the match start
 create materialized view nested_nav as
 select * from src match_recognize (
   partition by id
@@ -169,6 +171,23 @@ select * from src match_recognize (
                 and b.v not in (prev(b.v, 2), last(a.v))
                 and (prev(b.v) is distinct from b.v)
                 and ((array[prev(b.v, 2), last(a.v)])[1] < b.v)
+)
+emit on window close;
+
+# The same nesting with offsets the start-distance rule admits binds and plans cleanly.
+statement ok
+create materialized view nested_nav as
+select * from src match_recognize (
+  partition by id
+  order by ts
+  measures a.v as m
+  one row per match
+  pattern (a b)
+  define a as a.v > 0,
+         b as b.v < case when prev(b.v) > 0 then prev(b.v) else 0 end
+                and b.v not in (prev(b.v), last(a.v))
+                and (prev(b.v) is distinct from b.v)
+                and ((array[prev(b.v), last(a.v)])[1] < b.v)
 )
 emit on window close;
 
