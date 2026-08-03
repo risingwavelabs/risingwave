@@ -183,7 +183,7 @@ pub async fn gen_sink_plan(
         .transpose()?
         .unwrap_or(false);
 
-    if is_auto_schema_change {
+    if is_auto_schema_change && !is_iceberg_engine_internal {
         Feature::SinkAutoSchemaChange.check_available()?;
     }
 

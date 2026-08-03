@@ -1857,14 +1857,7 @@ pub async fn create_iceberg_engine_table(
 
     let mut sink_with = with_common.clone();
 
-    // TODO: Iceberg with pk index doesn't support auto schema change
-    if !handler_args
-        .with_options
-        .get(ENABLE_COMPACTION)
-        .is_some_and(|val| val.eq_ignore_ascii_case("true"))
-    {
-        sink_with.insert(AUTO_SCHEMA_CHANGE_KEY.to_owned(), "true".to_owned());
-    }
+    sink_with.insert(AUTO_SCHEMA_CHANGE_KEY.to_owned(), "true".to_owned());
 
     if table.append_only {
         sink_with.insert("type".to_owned(), "append-only".to_owned());
