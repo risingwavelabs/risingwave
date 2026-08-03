@@ -24,17 +24,22 @@ use std::time::Duration;
 
 use anyhow::{Context, anyhow};
 pub use enumerator::RabbitmqSplitEnumerator;
+#[cfg(not(madsim))]
+use lapin::AsyncTcpStream;
 use lapin::options::QueueDeclareOptions;
+#[cfg(not(madsim))]
 use lapin::tcp::OwnedTLSConfig;
 use lapin::types::FieldTable;
+#[cfg(not(madsim))]
 use lapin::uri::{AMQPScheme, AMQPUri};
-use lapin::{AsyncTcpStream, Connection, ConnectionProperties};
+use lapin::{Connection, ConnectionProperties};
 use phf::{Set, phf_set};
 use risingwave_common::{bail, ensure};
 use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 pub use source::*;
 pub use split::RabbitmqSplit;
+use thiserror_ext::AsReport;
 use tokio_retry::Retry;
 use tokio_retry::strategy::FixedInterval;
 use url::Url;
@@ -56,7 +61,10 @@ impl RabbitmqConnection {
         let shutdown_stream = match self.shutdown_stream.lock() {
             Ok(shutdown_stream) => shutdown_stream,
             Err(error) => {
-                tracing::debug!(%error, "RabbitMQ TCP shutdown handle lock was poisoned");
+                tracing::debug!(
+                    error = %error.as_report(),
+                    "RabbitMQ TCP shutdown handle lock was poisoned"
+                );
                 return;
             }
         };
@@ -65,7 +73,10 @@ impl RabbitmqConnection {
             return;
         };
         if let Err(error) = shutdown_stream.shutdown(Shutdown::Both) {
-            tracing::debug!(%error, "RabbitMQ TCP connection was already closed");
+            tracing::debug!(
+                error = %error.as_report(),
+                "RabbitMQ TCP connection was already closed"
+            );
         }
     }
 }
@@ -91,14 +102,14 @@ impl Deref for RabbitmqConnection {
     }
 }
 
-#[cfg(unix)]
+#[cfg(all(unix, not(madsim)))]
 fn clone_tcp_shutdown_handle(stream: &tokio::net::TcpStream) -> std::io::Result<TcpStream> {
     use std::os::fd::AsFd;
 
     Ok(stream.as_fd().try_clone_to_owned()?.into())
 }
 
-#[cfg(windows)]
+#[cfg(all(windows, not(madsim)))]
 fn clone_tcp_shutdown_handle(stream: &tokio::net::TcpStream) -> std::io::Result<TcpStream> {
     use std::os::windows::io::AsSocket;
 
@@ -428,6 +439,7 @@ impl RabbitmqProperties {
     }
 }
 
+#[cfg(not(madsim))]
 async fn connect_with_shutdown_handle(
     url: &str,
     properties: ConnectionProperties,
@@ -503,6 +515,17 @@ async fn connect_with_shutdown_handle(
     Ok(RabbitmqConnection {
         connection,
         shutdown_stream,
+    })
+}
+
+#[cfg(madsim)]
+async fn connect_with_shutdown_handle(
+    url: &str,
+    properties: ConnectionProperties,
+) -> ConnectorResult<RabbitmqConnection> {
+    Ok(RabbitmqConnection {
+        connection: Connection::connect(url, properties).await?,
+        shutdown_stream: Arc::new(Mutex::new(None)),
     })
 }
 
@@ -692,6 +715,7 @@ mod tests {
         assert!(!url.contains("frame_max=4096"));
     }
 
+    #[cfg(not(madsim))]
     #[tokio::test]
     async fn cloned_shutdown_handle_terminates_socket() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
