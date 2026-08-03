@@ -564,3 +564,73 @@
     );
   expected_outputs:
     - binder_error
+- name: MATCH_RECOGNIZE WITHIN rejects a non-positive bound (nothing could ever match; the MV would be silently empty forever)
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures b.v as dip
+      one row per match
+      after match skip past last row
+      pattern (a b) within -1
+      define a as a.v > 0, b as b.v < 0
+    );
+  expected_outputs:
+    - binder_error
+- name: MATCH_RECOGNIZE WITHIN rejects a zero bound
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures b.v as dip
+      one row per match
+      after match skip past last row
+      pattern (a b) within 0
+      define a as a.v > 0, b as b.v < 0
+    );
+  expected_outputs:
+    - binder_error
+- name: MATCH_RECOGNIZE WITHIN rejects a NULL bound (the span predicate would silently never hold rows to a window)
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures b.v as dip
+      one row per match
+      after match skip past last row
+      pattern (a b) within null
+      define a as a.v > 0, b as b.v < 0
+    );
+  expected_outputs:
+    - binder_error
+- name: MATCH_RECOGNIZE MEASURES rejects physical PREV/NEXT (navigation over rows outside the match; not the misleading "function does not exist")
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures prev(a.v) as before_first
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as a.v > 0, b as b.v < 0
+    );
+  expected_outputs:
+    - binder_error
+- name: MATCH_RECOGNIZE zero-repetition quantifier collapses to its suffix (a{0} b matches like plain b)
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures b.v as dip
+      one row per match
+      after match skip past last row
+      pattern (a{0} b)
+      define a as a.v > 0, b as b.v < 0
+    );
+  expected_outputs:
+    - eowc_stream_plan

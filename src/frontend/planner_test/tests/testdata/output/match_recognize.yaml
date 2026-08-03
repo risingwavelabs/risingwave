@@ -639,3 +639,81 @@
   binder_error: |-
     Feature is not yet implemented: physical NEXT() in MATCH_RECOGNIZE DEFINE (a row's verdict would depend on rows after it; per-candidate decidability is not implemented yet)
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- name: MATCH_RECOGNIZE WITHIN rejects a non-positive bound (nothing could ever match; the MV would be silently empty forever)
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures b.v as dip
+      one row per match
+      after match skip past last row
+      pattern (a b) within -1
+      define a as a.v > 0, b as b.v < 0
+    );
+  binder_error: |-
+    Not supported: a MATCH_RECOGNIZE WITHIN bound that is NULL, zero or negative
+    HINT: the bound is the maximum span of a match; a non-positive bound can never hold a multi-row match (the view would stay empty) and a NULL bound bounds nothing — use a positive constant interval
+- name: MATCH_RECOGNIZE WITHIN rejects a zero bound
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures b.v as dip
+      one row per match
+      after match skip past last row
+      pattern (a b) within 0
+      define a as a.v > 0, b as b.v < 0
+    );
+  binder_error: |-
+    Not supported: a MATCH_RECOGNIZE WITHIN bound that is NULL, zero or negative
+    HINT: the bound is the maximum span of a match; a non-positive bound can never hold a multi-row match (the view would stay empty) and a NULL bound bounds nothing — use a positive constant interval
+- name: MATCH_RECOGNIZE WITHIN rejects a NULL bound (the span predicate would silently never hold rows to a window)
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures b.v as dip
+      one row per match
+      after match skip past last row
+      pattern (a b) within null
+      define a as a.v > 0, b as b.v < 0
+    );
+  binder_error: |-
+    Not supported: a MATCH_RECOGNIZE WITHIN bound that is NULL, zero or negative
+    HINT: the bound is the maximum span of a match; a non-positive bound can never hold a multi-row match (the view would stay empty) and a NULL bound bounds nothing — use a positive constant interval
+- name: MATCH_RECOGNIZE MEASURES rejects physical PREV/NEXT (navigation over rows outside the match; not the misleading "function does not exist")
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures prev(a.v) as before_first
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as a.v > 0, b as b.v < 0
+    );
+  binder_error: |-
+    Feature is not yet implemented: physical PREV() in MATCH_RECOGNIZE MEASURES (it reads rows outside the match; use FIRST/LAST over a pattern variable, or PREV in DEFINE)
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- name: MATCH_RECOGNIZE zero-repetition quantifier collapses to its suffix (a{0} b matches like plain b)
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures b.v as dip
+      one row per match
+      after match skip past last row
+      pattern (a{0} b)
+      define a as a.v > 0, b as b.v < 0
+    );
+  eowc_stream_plan: |-
+    StreamMaterialize { columns: [partition_0, dip, _match_id(hidden)], stream_key: [partition_0, _match_id], pk_columns: [partition_0, _match_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [partition_0, dip, _match_id] }
+      └─StreamMatchRecognize { partition_by: [$0], order_by: [$1], measures: ["dip"], pattern: a{0} b }
+        └─StreamExchange { dist: HashShard(t.id) }
+          └─StreamTableScan { table: t, columns: [t.id, t.ts, t.v, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }

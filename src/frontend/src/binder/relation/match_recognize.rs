@@ -16,7 +16,7 @@ use std::collections::{BTreeSet, HashMap};
 
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::Field;
-use risingwave_common::types::DataType;
+use risingwave_common::types::{DataType, Decimal, Interval, ScalarImpl};
 use risingwave_expr::aggregate::PbAggKind;
 use risingwave_sqlparser::ast::{
     AfterMatchSkip, Expr as AstExpr, Function, FunctionArg, FunctionArgExpr, Ident,
@@ -208,6 +208,39 @@ impl Binder {
                         "MATCH_RECOGNIZE WITHIN bound must be a constant expression; \
                          input column references are not supported"
                     );
+                }
+                // The bound is the maximum span of a match, compared as `last - first <= bound`
+                // and used as the eviction deadline `first + bound`. A NULL bound makes the span
+                // predicate never-true-nor-false — it silently bounds NOTHING while reading as if
+                // it did — and a zero or negative bound can never hold a multi-row match, leaving
+                // a permanently empty view. All three are certainly not what the author meant, so
+                // reject them at bind time. (Positivity is checked for the carrier types the
+                // `order_key + bound` arithmetic admits; an exotic type falls through to runtime
+                // semantics.)
+                let is_positive = match bound.try_fold_const().expect("checked is_const")? {
+                    None => Some(false),
+                    Some(scalar) => match &scalar {
+                        ScalarImpl::Int16(v) => Some(*v > 0),
+                        ScalarImpl::Int32(v) => Some(*v > 0),
+                        ScalarImpl::Int64(v) => Some(*v > 0),
+                        ScalarImpl::Float32(v) => Some(v.into_inner() > 0.0),
+                        ScalarImpl::Float64(v) => Some(v.into_inner() > 0.0),
+                        ScalarImpl::Decimal(d) => Some(*d > Decimal::from(0)),
+                        ScalarImpl::Interval(iv) => {
+                            Some(*iv > Interval::from_month_day_usec(0, 0, 0))
+                        }
+                        _ => None,
+                    },
+                };
+                if is_positive == Some(false) {
+                    return Err(crate::error::ErrorCode::NotSupported(
+                        "a MATCH_RECOGNIZE WITHIN bound that is NULL, zero or negative".to_owned(),
+                        "the bound is the maximum span of a match; a non-positive bound can never \
+                         hold a multi-row match (the view would stay empty) and a NULL bound \
+                         bounds nothing — use a positive constant interval"
+                            .to_owned(),
+                    )
+                    .into());
                 }
                 let Some(order_key) = order_by.first() else {
                     bail_not_implemented!("WITHIN requires an ORDER BY column");
@@ -591,6 +624,23 @@ impl Binder {
             });
         }
 
+        // Physical PREV/NEXT is DEFINE-only navigation in v1; in MEASURES it would read rows
+        // *outside* the matched rows. Reject it by name — letting it fall through to expression
+        // binding would produce a misleading "function prev does not exist".
+        if let AstExpr::Function(func) = &m.expr
+            && func.name.0.len() == 1
+            && matches!(
+                func.name.0[0].real_value().to_ascii_lowercase().as_str(),
+                "prev" | "next"
+            )
+        {
+            bail_not_implemented!(
+                "physical {}() in MATCH_RECOGNIZE MEASURES (it reads rows outside the match; \
+                 use FIRST/LAST over a pattern variable, or PREV in DEFINE)",
+                func.name.0[0].real_value().to_uppercase()
+            );
+        }
+
         // Top-level FIRST(var.col) / LAST(var.col).
         if let AstExpr::Function(func) = &m.expr
             && func.name.0.len() == 1
@@ -666,7 +716,7 @@ impl Binder {
         input_fields: &[Field],
     ) -> RwResult<BoundSymbolDefinition> {
         let symbol = s.symbol.real_value();
-        // A per-symbol prefix keeps the placeholder relation and columns unique across DEFINEs, which
+        // A per-symbol prefix keeps the placeholder relation and columns unique across DEFINE items, which
         // all bind in the same context.
         let prefix = format!("{NAV_TABLE}_{symbol}");
 
@@ -972,7 +1022,7 @@ const NAV_TABLE: &str = "__mr_nav";
 struct NavExtractor<'a> {
     input_fields: &'a [Field],
     resolver: &'a VarResolver<'a>,
-    /// Per-DEFINE prefix for the synthetic placeholder column names (kept unique across DEFINEs).
+    /// Per-DEFINE prefix for the synthetic placeholder column names (kept unique across DEFINE items).
     prefix: &'a str,
     nav_slots: Vec<DefineSlot>,
     nav_fields: Vec<Field>,

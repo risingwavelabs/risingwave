@@ -1376,7 +1376,7 @@ mod tests {
 
     #[test]
     fn row_satisfying_multiple_vars() {
-        // Overlapping DEFINEs: a row can satisfy several variables.
+        // Overlapping DEFINE predicates: a row can satisfy several variables.
         let p = Pattern::Concat(vec![vars("a"), vars("b")]);
         let nfa = Nfa::compile(&p);
         let rows = vec![

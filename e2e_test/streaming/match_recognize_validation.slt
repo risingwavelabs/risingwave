@@ -61,6 +61,46 @@ select * from src match_recognize (
 )
 emit on window close;
 
+# A WITHIN bound that is NULL, zero or negative can never hold a multi-row match: the view would
+# stay empty (or, for NULL, silently bound nothing) while reading as if it were windowed.
+statement error NULL, zero or negative
+create materialized view bad_within_zero as
+select * from src match_recognize (
+  partition by id
+  order by ts
+  measures a.v as m
+  one row per match
+  pattern (a b) within 0
+  define a as a.v > 0, b as b.v < 0
+)
+emit on window close;
+
+statement error NULL, zero or negative
+create materialized view bad_within_null as
+select * from src match_recognize (
+  partition by id
+  order by ts
+  measures a.v as m
+  one row per match
+  pattern (a b) within null
+  define a as a.v > 0, b as b.v < 0
+)
+emit on window close;
+
+# Physical PREV/NEXT in MEASURES reads rows outside the match; rejected by name rather than falling
+# through to a misleading "function prev does not exist".
+statement error in MATCH_RECOGNIZE MEASURES
+create materialized view bad_measures_prev as
+select * from src match_recognize (
+  partition by id
+  order by ts
+  measures prev(a.v) as m
+  one row per match
+  pattern (a b)
+  define a as a.v > 0, b as b.v < 0
+)
+emit on window close;
+
 # Physical NEXT in DEFINE is rejected outright: a row's verdict would depend on rows after it, and
 # per-candidate decidability (an out-of-range read must be a wait for exactly that candidate, not a
 # NULL verdict and not a global horizon that can starve an idle partition) is not implemented yet.
