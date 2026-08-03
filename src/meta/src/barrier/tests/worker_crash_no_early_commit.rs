@@ -20,7 +20,7 @@ use anyhow::anyhow;
 use futures::StreamExt;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::id::{JobId, SinkId};
+use risingwave_common::id::{JobId, PartialGraphId, SinkId};
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::{
@@ -192,6 +192,13 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
         &self,
         _sink_ids: Vec<SinkId>,
     ) -> MetaResult<()> {
+        unimplemented!()
+    }
+
+    fn advance_iceberg_pk_index_sink_committed_epochs(
+        &self,
+        _epochs: impl IntoIterator<Item = (PartialGraphId, u64)>,
+    ) {
         unimplemented!()
     }
 }

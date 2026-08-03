@@ -75,6 +75,7 @@ pub struct DdlServiceImpl {
     meta_metrics: Arc<MetaMetrics>,
     iceberg_compaction_manager: iceberg_compaction::IcebergCompactionManagerRef,
     barrier_scheduler: BarrierScheduler,
+    iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
 }
 
 impl DdlServiceImpl {
@@ -98,7 +99,7 @@ impl DdlServiceImpl {
             barrier_manager,
             sink_manager.clone(),
             iceberg_compaction_manager.clone(),
-            iceberg_pk_index_sink_manager,
+            iceberg_pk_index_sink_manager.clone(),
         )
         .await;
         Self {
@@ -109,6 +110,7 @@ impl DdlServiceImpl {
             meta_metrics,
             iceberg_compaction_manager,
             barrier_scheduler,
+            iceberg_pk_index_sink_manager,
         }
     }
 
@@ -1569,6 +1571,26 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(AutoSchemaChangeResponse {}))
     }
 
+    async fn wait_iceberg_pk_index_sink_epoch(
+        &self,
+        request: Request<WaitIcebergPkIndexSinkEpochRequest>,
+    ) -> Result<Response<WaitIcebergPkIndexSinkEpochResponse>, Status> {
+        let req = request.into_inner();
+        let snapshot_id = self
+            .iceberg_pk_index_sink_manager
+            .wait_epoch(req.sink_id, req.epoch)
+            .await
+            .map_err(|e| {
+                Status::internal(format!(
+                    "Failed to wait for pk-index sink epoch: {}",
+                    e.as_report()
+                ))
+            })?;
+        Ok(Response::new(WaitIcebergPkIndexSinkEpochResponse {
+            snapshot_id,
+        }))
+    }
+
     async fn alter_swap_rename(
         &self,
         request: Request<AlterSwapRenameRequest>,
@@ -1692,6 +1714,29 @@ impl DdlService for DdlServiceImpl {
             })?;
 
         Ok(Response::new(ExpireIcebergTableSnapshotsResponse {
+            status: None,
+        }))
+    }
+
+    async fn rewrite_iceberg_table_manifests(
+        &self,
+        request: Request<RewriteIcebergTableManifestsRequest>,
+    ) -> Result<Response<RewriteIcebergTableManifestsResponse>, Status> {
+        let req = request.into_inner();
+        let sink_id = req.sink_id;
+
+        self.iceberg_compaction_manager
+            .check_and_rewrite_manifests(sink_id)
+            .await
+            .map_err(|e| {
+                Status::internal(format!(
+                    "Failed to rewrite manifests for sink {}: {}",
+                    sink_id,
+                    e.as_report()
+                ))
+            })?;
+
+        Ok(Response::new(RewriteIcebergTableManifestsResponse {
             status: None,
         }))
     }
@@ -1865,7 +1910,7 @@ impl DdlService for DdlServiceImpl {
         {
             let OptionalAssociatedSourceId::AssociatedSourceId(source_id) =
                 table_catalog.optional_associated_source_id.unwrap();
-            let (jobs, fragments) = self
+            let (jobs, fragment_nodes) = self
                 .metadata_manager
                 .update_source_rate_limit_by_source_id(source_id, source_rate_limit)
                 .await?;
@@ -1873,18 +1918,13 @@ impl DdlService for DdlServiceImpl {
                 throttle_type: risingwave_pb::common::ThrottleType::Source.into(),
                 rate_limit: source_rate_limit,
             };
+            let config = fragment_nodes
+                .into_iter()
+                .map(|(fragment_id, stream_node)| (fragment_id, (throttle_config, stream_node)))
+                .collect();
             let _ = self
                 .barrier_scheduler
-                .run_command(
-                    database_id,
-                    Command::Throttle {
-                        jobs,
-                        config: fragments
-                            .into_iter()
-                            .map(|fragment_id| (fragment_id, throttle_config))
-                            .collect(),
-                    },
-                )
+                .run_command(database_id, Command::Throttle { jobs, config })
                 .await?;
         }
 

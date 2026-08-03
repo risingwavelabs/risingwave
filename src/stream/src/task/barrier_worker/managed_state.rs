@@ -27,6 +27,7 @@ use futures::{FutureExt, StreamExt};
 use prometheus::HistogramTimer;
 use risingwave_common::catalog::TableId;
 use risingwave_common::id::{SinkId, SourceId};
+use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntCounter};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
@@ -333,18 +334,51 @@ pub(crate) struct PartialGraphManagedBarrierState {
 
     state_store: StateStoreImpl,
 
-    streaming_metrics: Arc<StreamingMetrics>,
+    barrier_inflight_latency: LabelGuardedHistogram,
+    barrier_sync_latency: LabelGuardedHistogram,
+    barrier_manager_progress: LabelGuardedIntCounter,
 }
 
 impl PartialGraphManagedBarrierState {
-    pub(super) fn new(actor_manager: &StreamActorManager) -> Self {
+    pub(super) fn new(
+        actor_manager: &StreamActorManager,
+        partial_graph_id: PartialGraphId,
+    ) -> Self {
         Self::new_inner(
             actor_manager.env.state_store(),
             actor_manager.streaming_metrics.clone(),
+            partial_graph_id,
         )
     }
 
-    fn new_inner(state_store: StateStoreImpl, streaming_metrics: Arc<StreamingMetrics>) -> Self {
+    fn new_inner(
+        state_store: StateStoreImpl,
+        streaming_metrics: Arc<StreamingMetrics>,
+        partial_graph_id: PartialGraphId,
+    ) -> Self {
+        fn partial_graph_name(partial_graph_id: PartialGraphId) -> String {
+            // HACK: The partial graph ID encoding is owned by meta and intentionally not exposed to
+            // compute nodes. Decode it locally only for the human-readable metrics label.
+            let raw_partial_graph_id = partial_graph_id.as_raw_id();
+            let database_id = raw_partial_graph_id >> 32;
+            let raw_job_id = raw_partial_graph_id as u32;
+            if raw_job_id == u32::MAX {
+                format!("database {database_id}")
+            } else {
+                format!("database {database_id} job {raw_job_id}")
+            }
+        }
+
+        let partial_graph_name = partial_graph_name(partial_graph_id);
+        let barrier_inflight_latency = streaming_metrics
+            .barrier_inflight_latency
+            .with_guarded_label_values(&[&partial_graph_name]);
+        let barrier_sync_latency = streaming_metrics
+            .barrier_sync_latency
+            .with_guarded_label_values(&[&partial_graph_name]);
+        let barrier_manager_progress = streaming_metrics
+            .barrier_manager_progress
+            .with_guarded_label_values(&[&partial_graph_name]);
         Self {
             epoch_barrier_state_map: Default::default(),
             prev_barrier_table_ids: None,
@@ -357,7 +391,9 @@ impl PartialGraphManagedBarrierState {
             truncate_tables: Default::default(),
             refresh_finished_tables: Default::default(),
             state_store,
-            streaming_metrics,
+            barrier_inflight_latency,
+            barrier_sync_latency,
+            barrier_manager_progress,
         }
     }
 
@@ -366,6 +402,7 @@ impl PartialGraphManagedBarrierState {
         Self::new_inner(
             StateStoreImpl::for_test(),
             Arc::new(StreamingMetrics::unused()),
+            PartialGraphId::new(0),
         )
     }
 
@@ -617,7 +654,7 @@ impl PartialGraphState {
             partial_graph_id,
             actor_states: Default::default(),
             actor_pending_new_output_requests: Default::default(),
-            graph_state: PartialGraphManagedBarrierState::new(&actor_manager),
+            graph_state: PartialGraphManagedBarrierState::new(&actor_manager, partial_graph_id),
             table_ids: Default::default(),
             actor_manager,
             local_barrier_manager,
@@ -1203,7 +1240,7 @@ impl PartialGraphManagedBarrierState {
                 }
             }
 
-            self.streaming_metrics.barrier_manager_progress.inc();
+            self.barrier_manager_progress.inc();
 
             let create_mview_progress = self
                 .create_mview_progress
@@ -1322,6 +1359,10 @@ impl PartialGraphManagedBarrierState {
             iceberg_pk_index_sink_metadata,
         }
     }
+
+    pub(super) fn barrier_sync_latency(&self) -> LabelGuardedHistogram {
+        self.barrier_sync_latency.clone()
+    }
 }
 
 pub(crate) struct BarrierToComplete {
@@ -1391,10 +1432,7 @@ impl PartialGraphManagedBarrierState {
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
         table_ids: HashSet<TableId>,
     ) {
-        let timer = self
-            .streaming_metrics
-            .barrier_inflight_latency
-            .start_timer();
+        let timer = self.barrier_inflight_latency.start_timer();
 
         if let Some(hummock) = self.state_store.as_hummock() {
             hummock.start_epoch(barrier.epoch.curr, table_ids.clone());

@@ -19,6 +19,7 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use iceberg::spec::{FormatVersion, MAIN_BRANCH};
 use iceberg::table::Table;
+use iceberg::transaction::{MANIFEST_MIN_MERGE_COUNT_DEFAULT, MANIFEST_TARGET_SIZE_BYTES_DEFAULT};
 use iceberg::{Catalog, TableIdent};
 use parquet::basic::Compression;
 use serde::de::{self, Deserializer, Visitor};
@@ -111,6 +112,9 @@ pub const SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS: &str = "snapshot_expiration_max_ag
 pub const SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_FILES: &str = "snapshot_expiration_clear_expired_files";
 pub const SNAPSHOT_EXPIRATION_CLEAR_EXPIRED_META_DATA: &str =
     "snapshot_expiration_clear_expired_meta_data";
+pub const ENABLE_MANIFEST_REWRITE: &str = "enable_manifest_rewrite";
+pub const MANIFEST_REWRITE_TARGET_SIZE_BYTES: &str = "manifest_rewrite_target_size_bytes";
+pub const MANIFEST_REWRITE_MIN_COUNT_TO_MERGE: &str = "manifest_rewrite_min_count_to_merge";
 pub const COMPACTION_MAX_SNAPSHOTS_NUM: &str = "compaction.max_snapshots_num";
 
 pub const COMPACTION_SMALL_FILES_THRESHOLD_MB: &str = "compaction.small_files_threshold_mb";
@@ -309,15 +313,17 @@ pub struct IcebergConfig {
     pub java_catalog_props: HashMap<String, String>,
 
     #[serde(default)]
+    #[with_option(iceberg_engine)]
     pub partition_by: Option<String>,
 
     #[serde(default)]
+    #[with_option(iceberg_engine)]
     pub order_key: Option<String>,
 
     /// Commit every n(>0) checkpoints, default is 60.
     #[serde(default = "iceberg_default_commit_checkpoint_interval")]
     #[serde_as(as = "DisplayFromStr")]
-    #[with_option(allow_alter_on_fly)]
+    #[with_option(allow_alter_on_fly, iceberg_engine)]
     pub commit_checkpoint_interval: u64,
 
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
@@ -340,13 +346,13 @@ pub struct IcebergConfig {
         default,
         deserialize_with = "deserialize_bool_from_string"
     )]
-    #[with_option(allow_alter_on_fly)]
+    #[with_option(allow_alter_on_fly, iceberg_engine)]
     pub enable_compaction: bool,
 
     /// The interval of iceberg compaction
     #[serde(rename = "compaction_interval_sec", default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
-    #[with_option(allow_alter_on_fly)]
+    #[with_option(allow_alter_on_fly, iceberg_engine)]
     pub compaction_interval_sec: Option<u64>,
 
     /// Whether to enable iceberg expired snapshots.
@@ -355,11 +361,12 @@ pub struct IcebergConfig {
         default = "default_true",
         deserialize_with = "deserialize_bool_from_string"
     )]
-    #[with_option(allow_alter_on_fly)]
+    #[with_option(allow_alter_on_fly, iceberg_engine)]
     pub enable_snapshot_expiration: bool,
 
     /// The iceberg write mode, can be `merge-on-read` or `copy-on-write`.
     #[serde(rename = "write_mode", default = "default_iceberg_write_mode")]
+    #[with_option(iceberg_engine)]
     pub write_mode: IcebergWriteMode,
 
     /// Iceberg format version for table creation.
@@ -368,19 +375,20 @@ pub struct IcebergConfig {
         default = "default_iceberg_format_version",
         deserialize_with = "deserialize_format_version"
     )]
+    #[with_option(iceberg_engine)]
     pub format_version: FormatVersion,
 
     /// The maximum age (in milliseconds) for snapshots before they expire
     /// For example, if set to 3600000, snapshots older than 1 hour will be expired
     #[serde(rename = "snapshot_expiration_max_age_millis", default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
-    #[with_option(allow_alter_on_fly)]
+    #[with_option(allow_alter_on_fly, iceberg_engine)]
     pub snapshot_expiration_max_age_millis: Option<i64>,
 
     /// The number of snapshots to retain
     #[serde(rename = "snapshot_expiration_retain_last", default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
-    #[with_option(allow_alter_on_fly)]
+    #[with_option(allow_alter_on_fly, iceberg_engine)]
     pub snapshot_expiration_retain_last: Option<i32>,
 
     #[serde(
@@ -388,7 +396,7 @@ pub struct IcebergConfig {
         default = "default_true",
         deserialize_with = "deserialize_bool_from_string"
     )]
-    #[with_option(allow_alter_on_fly)]
+    #[with_option(allow_alter_on_fly, iceberg_engine)]
     pub snapshot_expiration_clear_expired_files: bool,
 
     #[serde(
@@ -396,62 +404,83 @@ pub struct IcebergConfig {
         default = "default_true",
         deserialize_with = "deserialize_bool_from_string"
     )]
-    #[with_option(allow_alter_on_fly)]
+    #[with_option(allow_alter_on_fly, iceberg_engine)]
     pub snapshot_expiration_clear_expired_meta_data: bool,
+
+    /// Whether to periodically rewrite fragmented Iceberg data manifests.
+    #[serde(
+        rename = "enable_manifest_rewrite",
+        default,
+        deserialize_with = "deserialize_bool_from_string"
+    )]
+    #[with_option(allow_alter_on_fly, iceberg_engine)]
+    pub enable_manifest_rewrite: bool,
+
+    /// Target size in bytes for rewritten Iceberg data manifests.
+    #[serde(rename = "manifest_rewrite_target_size_bytes", default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly, iceberg_engine)]
+    pub manifest_rewrite_target_size_bytes: Option<u64>,
+
+    /// Minimum number of manifests required to rewrite an under-filled batch.
+    #[serde(rename = "manifest_rewrite_min_count_to_merge", default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly, iceberg_engine)]
+    pub manifest_rewrite_min_count_to_merge: Option<usize>,
 
     /// The maximum number of snapshots allowed since the last rewrite operation
     /// If set, sink will check snapshot count and wait if exceeded
     /// If unset, defaults to 1000 only when compaction is enabled
     #[serde(rename = "compaction.max_snapshots_num", default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
-    #[with_option(allow_alter_on_fly)]
+    #[with_option(allow_alter_on_fly, iceberg_engine)]
     pub max_snapshots_num_before_compaction: Option<usize>,
 
     #[serde(rename = "compaction.small_files_threshold_mb", default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
-    #[with_option(allow_alter_on_fly)]
+    #[with_option(allow_alter_on_fly, iceberg_engine)]
     pub small_files_threshold_mb: Option<u64>,
 
     #[serde(rename = "compaction.delete_files_count_threshold", default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
-    #[with_option(allow_alter_on_fly)]
+    #[with_option(allow_alter_on_fly, iceberg_engine)]
     pub delete_files_count_threshold: Option<usize>,
 
     #[serde(rename = "compaction.trigger_snapshot_count", default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
-    #[with_option(allow_alter_on_fly)]
+    #[with_option(allow_alter_on_fly, iceberg_engine)]
     pub trigger_snapshot_count: Option<usize>,
 
     #[serde(rename = "compaction.target_file_size_mb", default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
-    #[with_option(allow_alter_on_fly)]
+    #[with_option(allow_alter_on_fly, iceberg_engine)]
     pub target_file_size_mb: Option<u64>,
 
     /// Compaction type: `full`, `small-files`, or `files-with-delete`
     /// If not set, will default to `full`
     #[serde(rename = "compaction.type", default)]
-    #[with_option(allow_alter_on_fly)]
+    #[with_option(allow_alter_on_fly, iceberg_engine)]
     pub compaction_type: Option<CompactionType>,
 
     /// Parquet compression codec
     /// Supported values: uncompressed, snappy, gzip, lzo, brotli, lz4, zstd
     /// Default is zstd
     #[serde(rename = "compaction.write_parquet_compression", default)]
-    #[with_option(allow_alter_on_fly)]
+    #[with_option(allow_alter_on_fly, iceberg_engine)]
     pub write_parquet_compression: Option<String>,
 
     /// Deprecated: maximum number of rows in a Parquet row group.
     /// Accepted for backward compatibility, but ignored by the writer.
     #[serde(rename = "compaction.write_parquet_max_row_group_rows", default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
-    #[with_option(allow_alter_on_fly)]
+    #[with_option(allow_alter_on_fly, iceberg_engine)]
     pub write_parquet_max_row_group_rows: Option<usize>,
 
     /// Maximum size of a Parquet row group in bytes
     /// Default is 128 `MiB`, matching Iceberg defaults.
     #[serde(rename = "compaction.write_parquet_max_row_group_bytes", default)]
     #[serde_as(as = "Option<DisplayFromStr>")]
-    #[with_option(allow_alter_on_fly)]
+    #[with_option(allow_alter_on_fly, iceberg_engine)]
     pub write_parquet_max_row_group_bytes: Option<usize>,
 
     /// Whether to enable PK index for upsert sink. Default is false.
@@ -462,6 +491,7 @@ pub struct IcebergConfig {
         default,
         deserialize_with = "deserialize_bool_from_string"
     )]
+    #[with_option(iceberg_engine)]
     pub enable_pk_index: bool,
 
     #[serde(flatten)]
@@ -574,6 +604,7 @@ impl IcebergConfig {
         // Enforce merge-on-read for append-only sinks
         Self::validate_append_only_write_mode(&config.r#type, config.write_mode)?;
         config.validate_enable_pk_index()?;
+        config.validate_manifest_rewrite_format(config.format_version)?;
 
         // All configs start with "catalog." will be treated as java configs.
         config.java_catalog_props = iceberg_java_catalog_props_from_options(
@@ -591,6 +622,12 @@ impl IcebergConfig {
             )));
         }
 
+        if config.compaction_interval_sec == Some(0) {
+            return Err(SinkError::Config(anyhow!(
+                "`compaction_interval_sec` must be greater than 0"
+            )));
+        }
+
         if config.trigger_snapshot_count == Some(0) {
             return Err(SinkError::Config(anyhow!(
                 "`compaction.trigger_snapshot_count` must be greater than 0"
@@ -600,6 +637,48 @@ impl IcebergConfig {
         if config.max_snapshots_num_before_compaction == Some(0) {
             return Err(SinkError::Config(anyhow!(
                 "`compaction.max_snapshots_num` must be greater than 0"
+            )));
+        }
+
+        if config.small_files_threshold_mb == Some(0) {
+            return Err(SinkError::Config(anyhow!(
+                "`compaction.small_files_threshold_mb` must be greater than 0"
+            )));
+        }
+
+        if config.delete_files_count_threshold == Some(0) {
+            return Err(SinkError::Config(anyhow!(
+                "`compaction.delete_files_count_threshold` must be greater than 0"
+            )));
+        }
+
+        if config.target_file_size_mb == Some(0) {
+            return Err(SinkError::Config(anyhow!(
+                "`compaction.target_file_size_mb` must be greater than 0"
+            )));
+        }
+
+        if config.write_parquet_max_row_group_rows == Some(0) {
+            return Err(SinkError::Config(anyhow!(
+                "`compaction.write_parquet_max_row_group_rows` must be greater than 0"
+            )));
+        }
+
+        if config.write_parquet_max_row_group_bytes == Some(0) {
+            return Err(SinkError::Config(anyhow!(
+                "`compaction.write_parquet_max_row_group_bytes` must be greater than 0"
+            )));
+        }
+
+        if config.manifest_rewrite_target_size_bytes == Some(0) {
+            return Err(SinkError::Config(anyhow!(
+                "`manifest_rewrite_target_size_bytes` must be greater than 0"
+            )));
+        }
+
+        if config.manifest_rewrite_min_count_to_merge == Some(0) {
+            return Err(SinkError::Config(anyhow!(
+                "`manifest_rewrite_min_count_to_merge` must be greater than 0"
             )));
         }
 
@@ -686,6 +765,15 @@ impl IcebergConfig {
         self.format_version
     }
 
+    pub fn validate_manifest_rewrite_format(&self, format_version: FormatVersion) -> Result<()> {
+        if self.enable_manifest_rewrite && format_version >= FormatVersion::V3 {
+            return Err(SinkError::Config(anyhow!(
+                "`enable_manifest_rewrite` is not supported for Iceberg format version 3 because rewrite manifests cannot preserve row lineage"
+            )));
+        }
+        Ok(())
+    }
+
     pub fn compaction_interval_sec(&self) -> u64 {
         // default to 1 hour
         self.compaction_interval_sec.unwrap_or(3600)
@@ -696,6 +784,16 @@ impl IcebergConfig {
     pub fn snapshot_expiration_timestamp_ms(&self, current_time_ms: i64) -> Option<i64> {
         self.snapshot_expiration_max_age_millis
             .map(|max_age_millis| current_time_ms - max_age_millis)
+    }
+
+    pub fn manifest_rewrite_target_size_bytes(&self) -> u64 {
+        self.manifest_rewrite_target_size_bytes
+            .unwrap_or(MANIFEST_TARGET_SIZE_BYTES_DEFAULT as u64)
+    }
+
+    pub fn manifest_rewrite_min_count_to_merge(&self) -> usize {
+        self.manifest_rewrite_min_count_to_merge
+            .unwrap_or(MANIFEST_MIN_MERGE_COUNT_DEFAULT as usize)
     }
 
     pub fn trigger_snapshot_count(&self) -> usize {

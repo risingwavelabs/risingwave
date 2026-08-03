@@ -21,10 +21,12 @@ mod tests {
     use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::catalog::subscription::SubscriptionState;
     use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType, worker_node};
+    use risingwave_pb::meta::SubscribeType;
+    use risingwave_pb::stream_plan::PbStreamNode;
     use tokio::sync::{mpsc, oneshot};
 
     use crate::controller::catalog::*;
-    use crate::manager::LocalNotification;
+    use crate::manager::{LocalNotification, WorkerKey};
     use crate::serving::ServingVnodeMapping;
 
     const TEST_DATABASE_ID: DatabaseId = DatabaseId::new(1);
@@ -78,6 +80,257 @@ mod tests {
         }
         .insert(txn)
         .await?;
+        Ok(())
+    }
+
+    async fn insert_test_fragment(
+        txn: &DatabaseTransaction,
+        fragment_id: FragmentId,
+        job_id: JobId,
+        state_table_ids: TableIdArray,
+    ) -> MetaResult<()> {
+        fragment::ActiveModel {
+            fragment_id: Set(fragment_id),
+            job_id: Set(job_id),
+            fragment_type_mask: Set(0),
+            distribution_type: Set(fragment::DistributionType::Hash),
+            stream_node: Set(StreamNode::from(&PbStreamNode::default())),
+            state_table_ids: Set(state_table_ids),
+            upstream_fragment_id: Set(I32Array::default()),
+            vnode_count: Set(1),
+            parallelism: Set(None),
+        }
+        .insert(txn)
+        .await?;
+        Ok(())
+    }
+
+    async fn insert_test_streaming_job(
+        txn: &DatabaseTransaction,
+        name: &str,
+        has_result_table: bool,
+        policy: Option<CacheRefillPolicy>,
+    ) -> MetaResult<(JobId, Option<TableId>, TableId)> {
+        let object_type = if has_result_table {
+            ObjectType::Table
+        } else {
+            ObjectType::Sink
+        };
+        let job_id = CatalogController::create_object(
+            txn,
+            object_type,
+            TEST_OWNER_ID,
+            Some(TEST_DATABASE_ID),
+            Some(TEST_SCHEMA_ID),
+        )
+        .await?
+        .oid
+        .as_job_id();
+        let result_table_id = has_result_table.then_some(job_id.as_mv_table_id());
+        if let Some(table_id) = result_table_id {
+            insert_test_table(txn, table_id, name, TableType::MaterializedView, None, "").await?;
+        }
+
+        let internal_table_id = CatalogController::create_object(
+            txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(TEST_DATABASE_ID),
+            Some(TEST_SCHEMA_ID),
+        )
+        .await?
+        .oid
+        .as_table_id();
+        insert_test_table(
+            txn,
+            internal_table_id,
+            &format!("__internal_{name}"),
+            TableType::Internal,
+            Some(job_id),
+            "",
+        )
+        .await?;
+
+        streaming_job::ActiveModel {
+            job_id: Set(job_id),
+            job_status: Set(JobStatus::Created),
+            create_type: Set(CreateType::Foreground),
+            timezone: Set(None),
+            config_override: Set(policy.map(|policy| {
+                format!(
+                    "[streaming.developer]\ncache_refill_policy = \"{}\"\n",
+                    policy
+                )
+            })),
+            adaptive_parallelism_strategy: Set(None),
+            parallelism: Set(StreamingParallelism::Adaptive),
+            backfill_parallelism: Set(None),
+            backfill_adaptive_parallelism_strategy: Set(None),
+            backfill_orders: Set(None),
+            max_parallelism: Set(1),
+            specific_resource_group: Set(None),
+            is_serverless_backfill: Set(false),
+            refresh_interval_sec: Set(None),
+        }
+        .insert(txn)
+        .await?;
+
+        Ok((job_id, result_table_id, internal_table_id))
+    }
+
+    #[tokio::test]
+    async fn test_table_refill_catalog_snapshot_classifies_table_identity() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let (mv_job, Some(mv_result), mv_internal) =
+            insert_test_streaming_job(&txn, "mv_both", true, Some(CacheRefillPolicy::Both)).await?
+        else {
+            unreachable!()
+        };
+        let (default_job, Some(_default_result), default_internal) =
+            insert_test_streaming_job(&txn, "mv_default", true, None).await?
+        else {
+            unreachable!()
+        };
+        let (sink_job, None, sink_internal) = insert_test_streaming_job(
+            &txn,
+            "sink_streaming",
+            false,
+            Some(CacheRefillPolicy::Streaming),
+        )
+        .await?
+        else {
+            unreachable!()
+        };
+
+        let result_fragment = FragmentId::new(100);
+        let internal_fragment = FragmentId::new(101);
+        let sink_fragment = FragmentId::new(102);
+        for (fragment_id, job_id, table_ids) in [
+            (result_fragment, mv_job, vec![mv_result, mv_internal]),
+            (internal_fragment, default_job, vec![default_internal]),
+            (sink_fragment, sink_job, vec![sink_internal]),
+        ] {
+            insert_test_fragment(&txn, fragment_id, job_id, TableIdArray(table_ids)).await?;
+        }
+        txn.commit().await?;
+        drop(inner);
+
+        let serving_infos = mgr.fragment_serving_infos().await?;
+        assert_eq!(serving_infos.len(), 3);
+        assert_eq!(
+            serving_infos[&result_fragment].result_table_id,
+            Some(mv_result)
+        );
+        assert_eq!(serving_infos[&internal_fragment].result_table_id, None);
+        assert_eq!(serving_infos[&sink_fragment].result_table_id, None);
+
+        let policies = mgr.table_cache_refill_policies_snapshot().await?;
+        assert_eq!(
+            policies
+                .table_policies
+                .into_iter()
+                .map(|policy| (policy.table_id, policy.policy))
+                .collect::<HashMap<_, _>>(),
+            HashMap::from([(
+                mv_result.as_raw_id(),
+                CacheRefillPolicy::Both.to_protobuf() as i32,
+            )])
+        );
+        assert_eq!(
+            policies
+                .internal_table_policies
+                .into_iter()
+                .map(|policy| (policy.table_id, policy.policy))
+                .collect::<HashMap<_, _>>(),
+            HashMap::from([
+                (
+                    mv_internal.as_raw_id(),
+                    CacheRefillPolicy::Both.to_protobuf() as i32,
+                ),
+                (
+                    sink_internal.as_raw_id(),
+                    CacheRefillPolicy::Streaming.to_protobuf() as i32,
+                ),
+            ])
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_alter_streaming_job_cache_refill_policy_notifies_hummock() -> MetaResult<()> {
+        let env = MetaSrvEnv::for_test().await;
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        env.notification_manager().insert_sender(
+            SubscribeType::Hummock,
+            WorkerKey(HostAddress {
+                host: "localhost".to_owned(),
+                port: 1234,
+            }),
+            tx,
+        );
+        let mgr = CatalogController::new(env).await?;
+
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let (_job, Some(result_table_id), internal_table_id) =
+            insert_test_streaming_job(&txn, "mv_cache_refill", true, None).await?
+        else {
+            unreachable!()
+        };
+        txn.commit().await?;
+        drop(inner);
+
+        mgr.alter_streaming_job_config(
+            result_table_id.as_job_id(),
+            HashMap::from([(
+                STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH.to_owned(),
+                "\"both\"".to_owned(),
+            )]),
+            vec![],
+        )
+        .await?;
+
+        let response = rx
+            .recv()
+            .await
+            .expect("should receive hummock notification")
+            .expect("notification should be ok");
+        assert_eq!(response.operation(), NotificationOperation::Update);
+        let info = response.info;
+        let Some(NotificationInfo::TableRefillRuntimeConfig(config)) = info else {
+            panic!("unexpected notification: {:?}", info);
+        };
+        assert!(config.serving_table_vnode_mappings.is_none());
+        let policies = config
+            .table_cache_refill_policies
+            .expect("policy snapshot should be present");
+        assert_eq!(
+            policies
+                .table_policies
+                .into_iter()
+                .map(|policy| (policy.table_id, policy.policy))
+                .collect::<HashMap<_, _>>(),
+            HashMap::from([(
+                result_table_id.as_raw_id(),
+                CacheRefillPolicy::Both.to_protobuf() as i32,
+            )])
+        );
+        assert_eq!(
+            policies
+                .internal_table_policies
+                .into_iter()
+                .map(|policy| (policy.table_id, policy.policy))
+                .collect::<HashMap<_, _>>(),
+            HashMap::from([(
+                internal_table_id.as_raw_id(),
+                CacheRefillPolicy::Both.to_protobuf() as i32,
+            )])
+        );
+
         Ok(())
     }
 
@@ -171,19 +424,16 @@ mod tests {
             ..Default::default()
         };
         let serving_vnode_mapping = ServingVnodeMapping::default();
-        serving_vnode_mapping.upsert(
-            mgr.fragment_parallelisms().await?,
-            std::slice::from_ref(&worker),
-            None,
-        );
+        let initial_snapshot = mgr.fragment_serving_infos().await?;
+        serving_vnode_mapping.upsert(&initial_snapshot, std::slice::from_ref(&worker), None);
         assert!(serving_vnode_mapping.all().contains_key(&fragment_id));
 
         mgr.clean_dirty_creating_jobs(Some(TEST_DATABASE_ID))
             .await?;
-        let current_snapshot = mgr.fragment_parallelisms().await?;
+        let current_snapshot = mgr.fragment_serving_infos().await?;
         assert!(!current_snapshot.contains_key(&fragment_id));
 
-        serving_vnode_mapping.reconcile(current_snapshot, &[worker], None);
+        serving_vnode_mapping.reconcile(&current_snapshot, &[worker], None);
         assert!(!serving_vnode_mapping.all().contains_key(&fragment_id));
 
         Ok(())
@@ -642,7 +892,7 @@ mod tests {
             insert_dirty_creating_job_with_fragment(&mgr, fragment_id, 1).await?;
 
         assert!(
-            mgr.fragment_parallelisms()
+            mgr.fragment_serving_infos()
                 .await?
                 .contains_key(&fragment_id)
         );
@@ -668,7 +918,7 @@ mod tests {
         );
         drop(inner);
         assert!(
-            !mgr.fragment_parallelisms()
+            !mgr.fragment_serving_infos()
                 .await?
                 .contains_key(&fragment_id)
         );

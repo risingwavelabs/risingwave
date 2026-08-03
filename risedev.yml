@@ -1280,6 +1280,21 @@ profile:
       - use: compactor
       - use: mongodb
 
+  local-redis-sink-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+        id: minio-local-redis-sink-test
+      - use: sqlite
+        id: sqlite-local-redis-sink-test
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: redis
+
   local-nats-test:
     config-path: src/config/ci-recovery.toml
     steps:
@@ -1801,6 +1816,13 @@ template:
 
     # address of redis
     address: "127.0.0.1"
+
+    user-managed: false
+
+    # Only effective when NOT user managed
+    image: "redis:7.2.14"
+
+    persist-data: false
 
   # MySQL service backed by docker.
   mysql:

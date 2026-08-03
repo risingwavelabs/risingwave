@@ -19,6 +19,8 @@ mod commit;
 pub mod commit_retry;
 mod config;
 mod create_table;
+mod engine_options;
+mod metadata;
 #[cfg(any(test, madsim))]
 pub mod mock_v3_catalog_registry;
 mod prometheus;
@@ -32,7 +34,9 @@ use anyhow::{Context, anyhow};
 pub use commit::*;
 pub use config::*;
 pub use create_table::*;
+pub use engine_options::*;
 use iceberg::table::Table;
+pub use metadata::*;
 use risingwave_common::bail;
 use tokio::sync::mpsc::UnboundedSender;
 pub use writer::*;
@@ -228,7 +232,9 @@ impl Sink for IcebergSink {
             }
         }
 
-        let _ = self.create_and_validate_table().await?;
+        let table = self.create_and_validate_table().await?;
+        self.config
+            .validate_manifest_rewrite_format(table.metadata().format_version())?;
         Ok(())
     }
 

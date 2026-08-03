@@ -1152,6 +1152,12 @@ impl CatalogController {
         entries_to_add: HashMap<String, String>,
         keys_to_remove: Vec<String>,
     ) -> MetaResult<NotificationVersion> {
+        let updates_cache_refill_policy = entries_to_add
+            .contains_key(STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH)
+            || keys_to_remove
+                .iter()
+                .any(|key| key == STREAMING_CACHE_REFILL_POLICY_CONFIG_PATH);
+
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
@@ -1185,21 +1191,17 @@ impl CatalogController {
         let updated_config_override = table.to_string();
 
         // Validate the config override by trying to merge it to the default config.
-        {
-            let merged = merge_streaming_config_section(
-                &StreamingConfig::default(),
-                &updated_config_override,
-            )
-            .context("invalid streaming job config override")?;
+        let merged =
+            merge_streaming_config_section(&StreamingConfig::default(), &updated_config_override)
+                .context("invalid streaming job config override")?;
 
-            // Reject unrecognized entries.
-            // Note: If these unrecognized entries are pre-existing, we also reject them here.
-            // Users are able to fix them by issuing a `RESET` first.
-            if let Some(merged) = merged {
-                let unrecognized_keys = merged.unrecognized_keys().collect_vec();
-                if !unrecognized_keys.is_empty() {
-                    bail_invalid_parameter!("unrecognized configs: {:?}", unrecognized_keys);
-                }
+        // Reject unrecognized entries.
+        // Note: If these unrecognized entries are pre-existing, we also reject them here.
+        // Users are able to fix them by issuing a `RESET` first.
+        if let Some(merged) = &merged {
+            let unrecognized_keys = merged.unrecognized_keys().collect_vec();
+            if !unrecognized_keys.is_empty() {
+                bail_invalid_parameter!("unrecognized configs: {:?}", unrecognized_keys);
             }
         }
 
@@ -1212,6 +1214,21 @@ impl CatalogController {
         .await?;
 
         txn.commit().await?;
+        drop(inner);
+
+        if updates_cache_refill_policy {
+            let policies = self.table_cache_refill_policies_snapshot().await?;
+            self.env
+                .notification_manager()
+                .notify_hummock(
+                    NotificationOperation::Update,
+                    NotificationInfo::TableRefillRuntimeConfig(PbTableRefillRuntimeConfig {
+                        table_cache_refill_policies: Some(policies),
+                        ..Default::default()
+                    }),
+                )
+                .await;
+        }
 
         Ok(IGNORED_NOTIFICATION_VERSION)
     }

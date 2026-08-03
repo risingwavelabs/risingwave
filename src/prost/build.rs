@@ -337,9 +337,15 @@ for_all_wrapped_id_fields! (
         ResetSourceRequest {
             source_id: SourceId,
         }
+        RewriteIcebergTableManifestsRequest {
+            sink_id: SinkId,
+        }
         RisectlResumeBackfillRequest {
             job_id: JobId,
             fragment_id: FragmentId,
+        }
+        WaitIcebergPkIndexSinkEpochRequest {
+            sink_id: SinkId,
         }
         WaitRequest {
             job_id: JobId,
@@ -1110,6 +1116,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ".stream_plan.StreamSource",
         ".batch_plan.SourceNode",
         ".batch_plan.IcebergScanNode",
+        ".batch_plan.IcebergMetadataScanNode",
         ".iceberg_compaction.IcebergCompactionTask",
     ];
 

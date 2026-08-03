@@ -71,7 +71,11 @@ members = [
     "src/utils/workspace-config",
     "src/workspace-hack",
 ]
-exclude = ["e2e_test/source_inline/pubsub", "e2e_test/udf/embedded_wasm", "lints"]
+exclude = [
+    "e2e_test/source_inline/pubsub",
+    "e2e_test/udf/embedded_wasm",
+    "lints",
+]
 resolver = "2"
 
 [workspace.package]
@@ -168,21 +172,21 @@ hashbrown0_16 = { package = "hashbrown", version = "0.16.1", features = [
 ] }
 hytra = "0.1"
 # branch dev_rebase_main_20260303
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "c034b19105fa0f540256fbe4859be8121c5c0551", features = [
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "08a18f4116382e7c9691d63a91f1b0a0342a40b1", features = [
     "storage-s3",
     "storage-gcs",
     "storage-azblob",
     "storage-azdls",
 ] }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "c034b19105fa0f540256fbe4859be8121c5c0551" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "c034b19105fa0f540256fbe4859be8121c5c0551" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "08a18f4116382e7c9691d63a91f1b0a0342a40b1" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "08a18f4116382e7c9691d63a91f1b0a0342a40b1" }
 indexmap = { version = "2.12.0", features = ["serde"] }
 itertools = "0.14.0"
 jni = { version = "0.21.1", features = ["invocation"] }
 jsonbb = { version = "0.2.3", features = ["float_roundtrip"] }
 jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
 linkme = { version = "0.3.32", features = ["used_linker"] }
-lru = "0.16"
+lru = "0.18"
 madsim = { git = "https://github.com/risingwavelabs/madsim.git", rev = "595455fd05058b3b48bf281bea3ada1bca3d6646" }
 mixtrics = { version = "0.2", features = ["prometheus"] }
 mysql_async = { version = "0.36", features = [
@@ -203,6 +207,8 @@ parking_lot = { version = "0.12", features = [
     "deadlock_detection",
 ] }
 parquet = { version = "58", features = ["async"] }
+parquet-variant = "=58.3.0"
+parquet-variant-json = "=58.3.0"
 pin-project-lite = "0.2"
 prost = { version = "=0.14.3" }
 prost-build = { version = "=0.14.3" }
@@ -376,6 +382,10 @@ redundant_explicit_links = "allow"
 # See `docs/dev/src/build-and-run/profiles.md` for detailed information.
 [profile.dev]
 lto = "off"
+# Full DWARF dominates the size of `target/` without changing what gets logged: backtraces
+# keep `file:line` and inlined frames either way. Override with
+# `[profile.dev.package.<crate>] debug = 2` when you need to inspect variables in a debugger.
+debug = "line-tables-only"
 # use parallel frontend to speed up build
 # TODO: may consider applying to release/production profile as well
 # TODO: re-enable this after it's more stable. It causes many ICE in current version. https://github.com/rust-lang/rust/issues/143342

@@ -1258,7 +1258,7 @@ mod tests {
     fn test_timestamptz_to_i64() {
         assert_eq!(
             "2023-06-01 09:45:00+08:00".parse::<Timestamptz>().unwrap(),
-            Timestamptz::from_micros(1_685_583_900_000_000)
+            Timestamptz::from_micros(1_685_583_900_000_000).unwrap()
         );
     }
 }

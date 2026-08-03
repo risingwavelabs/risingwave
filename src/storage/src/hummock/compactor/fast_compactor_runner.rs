@@ -817,6 +817,7 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
             }
             self.builder
                 .add_full_key(iter.key(), value, is_new_user_key)
+                .instrument_await("fast_add_full_key".verbose())
                 .await?;
             iter.next();
         }

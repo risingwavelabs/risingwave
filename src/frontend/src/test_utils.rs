@@ -1467,6 +1467,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(1)
     }
 
+    async fn rewrite_iceberg_table_manifests(&self, _sink_id: SinkId) -> RpcResult<()> {
+        Ok(())
+    }
+
     async fn expire_iceberg_table_snapshots(&self, _sink_id: SinkId) -> RpcResult<()> {
         Ok(())
     }

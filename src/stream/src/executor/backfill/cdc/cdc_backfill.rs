@@ -341,13 +341,15 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         // If backfill is finished, we should forward the upstream cdc events to downstream.
         let mut table_reader: Option<ExternalTableReaderImpl> = None;
         let external_table = self.external_table.clone();
+        let actor_id = self.actor_ctx.id;
+        let fragment_id = self.actor_ctx.fragment_id;
         let mut future = Box::pin(async move {
             let backoff = get_infinite_backoff_strategy();
             tokio_retry::Retry::spawn(backoff, || async {
                 match external_table.create_table_reader().await {
                     Ok(reader) => Ok(reader),
                     Err(e) => {
-                        tracing::warn!(error = %e.as_report(), "failed to create cdc table reader, retrying...");
+                        tracing::warn!(error = %e.as_report(), actor_id = %actor_id, fragment_id = %fragment_id, "failed to create cdc table reader, retrying...");
                         Err(e)
                     }
                 }
@@ -1159,8 +1161,6 @@ mod tests {
             Some("mydb.orders".to_owned().into()),
         ];
 
-        println!("datums: {:?}", datums[1]);
-
         let mut builders = schema.create_array_builders(8);
         for (builder, datum) in builders.iter_mut().zip_eq_fast(datums.iter()) {
             builder.append(datum.clone());
@@ -1188,10 +1188,32 @@ mod tests {
 
         let parsed_stream = transform_upstream(upstream, columns, None, None, None, None, false);
         pin_mut!(parsed_stream);
-        // the output chunk must contain the offset column
-        if let Some(message) = parsed_stream.next().await {
-            println!("chunk: {:#?}", message.unwrap());
-        }
+        let message = parsed_stream
+            .next()
+            .await
+            .expect("transform stream should yield the input chunk")
+            .expect("transforming the CDC chunk should succeed");
+        let Message::Chunk(chunk) = message else {
+            panic!("expected a transformed chunk");
+        };
+        assert_eq!(
+            chunk
+                .rows()
+                .map(|(op, row)| (op, row.to_owned_row()))
+                .collect::<Vec<_>>(),
+            vec![(
+                Op::Insert,
+                OwnedRow::new(vec![
+                    Some(ScalarImpl::Int64(5)),
+                    Some(ScalarImpl::Int64(44485)),
+                    Some(ScalarImpl::Utf8("F".into())),
+                    Some(ScalarImpl::Decimal("144659.20".parse().unwrap())),
+                    Some(ScalarImpl::Date("1994-07-30".parse().unwrap())),
+                    None,
+                    Some(ScalarImpl::Utf8("file: 1.binlog, pos: 100".into())),
+                ]),
+            )]
+        );
     }
 
     #[tokio::test]

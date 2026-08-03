@@ -96,7 +96,7 @@ pub(crate) struct CheckpointControl {
     pub(crate) env: MetaSrvEnv,
     pub(super) databases: HashMap<DatabaseId, DatabaseCheckpointControlStatus>,
     pub(super) hummock_version_stats: HummockVersionStats,
-    /// The max barrier nums in flight
+    /// The maximum number of pending barriers in each partial graph.
     pub(crate) in_flight_barrier_nums: usize,
 }
 
@@ -378,7 +378,7 @@ impl CheckpointControl {
                 // Skip new barrier for database which is not running.
                 return Ok(());
             };
-            if partial_graph_manager.inflight_barrier_num(database.partial_graph_id)
+            if partial_graph_manager.pending_barrier_num(database.partial_graph_id)
                 >= self.in_flight_barrier_nums
             {
                 // Skip new barrier with no explicit command when the database should pause inject additional barrier

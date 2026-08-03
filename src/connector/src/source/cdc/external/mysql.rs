@@ -41,10 +41,11 @@ use crate::connector_common::SslMode;
 // Re-export SslMode for convenience
 pub use crate::connector_common::SslMode as MySqlSslMode;
 use crate::error::{ConnectorError, ConnectorResult};
+use crate::parser::mysql_row_to_owned_row_with_strict_pk;
 use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::external::{
     CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption, DebeziumOffset,
-    ExternalTableConfig, ExternalTableReader, SchemaTableName, mysql_row_to_owned_row,
+    ExternalTableConfig, ExternalTableReader, SchemaTableName,
 };
 
 /// Build MySQL connection pool with proper SSL configuration.
@@ -347,7 +348,7 @@ fn mysql_type_is_unsigned_bigint(col_type: &ColumnType) -> bool {
 
 pub fn mysql_type_to_rw_type(col_type: &ColumnType) -> ConnectorResult<DataType> {
     let dtype = match col_type {
-        ColumnType::Serial => DataType::Int32,
+        ColumnType::Serial => DataType::Decimal,
         ColumnType::Bit(attr) => {
             if let Some(1) = attr.maximum {
                 DataType::Boolean
@@ -442,6 +443,7 @@ pub fn mysql_type_to_rw_type(col_type: &ColumnType) -> ConnectorResult<DataType>
 
 pub struct MySqlExternalTableReader {
     rw_schema: Schema,
+    pk_indices: Vec<usize>,
     field_names: String,
     pool: mysql_async::Pool,
     upstream_mysql_pk_infos: Vec<(String, ColumnType)>, // (column_name, column_type)
@@ -539,7 +541,11 @@ impl MySqlExternalTableReader {
         major > 8 || (major == 8 && minor >= 4)
     }
 
-    pub async fn new(config: ExternalTableConfig, rw_schema: Schema) -> ConnectorResult<Self> {
+    pub async fn new(
+        config: ExternalTableConfig,
+        rw_schema: Schema,
+        pk_indices: Vec<usize>,
+    ) -> ConnectorResult<Self> {
         let database = config.database.clone();
         let table = config.table.clone();
         let pool = build_mysql_connection_pool(
@@ -573,6 +579,7 @@ impl MySqlExternalTableReader {
 
         Ok(Self {
             rw_schema,
+            pk_indices,
             field_names,
             pool,
             upstream_mysql_pk_infos,
@@ -757,7 +764,8 @@ impl MySqlExternalTableReader {
             let row_stream = rs_stream.map(|row| {
                 // convert mysql row into OwnedRow
                 let mut row = row?;
-                Ok::<_, ConnectorError>(mysql_row_to_owned_row(&mut row, &self.rw_schema))
+                mysql_row_to_owned_row_with_strict_pk(&mut row, &self.rw_schema, &self.pk_indices)
+                    .map_err(ConnectorError::from)
             });
             pin_mut!(row_stream);
             #[for_await]
@@ -770,7 +778,8 @@ impl MySqlExternalTableReader {
             let row_stream = rs_stream.map(|row| {
                 // convert mysql row into OwnedRow
                 let mut row = row?;
-                Ok::<_, ConnectorError>(mysql_row_to_owned_row(&mut row, &self.rw_schema))
+                mysql_row_to_owned_row_with_strict_pk(&mut row, &self.rw_schema, &self.pk_indices)
+                    .map_err(ConnectorError::from)
             });
             pin_mut!(row_stream);
             #[for_await]
@@ -842,7 +851,7 @@ mod tests {
     use risingwave_common::types::DataType;
     use sea_schema::mysql::def::ColumnType;
 
-    use super::{mysql_type_is_unsigned_bigint, type_name_to_mysql_type};
+    use super::{mysql_type_is_unsigned_bigint, mysql_type_to_rw_type, type_name_to_mysql_type};
     use crate::source::cdc::external::mysql::MySqlExternalTable;
     use crate::source::cdc::external::{
         CdcOffset, ExternalTableConfig, ExternalTableReader, MySqlExternalTableReader, MySqlOffset,
@@ -931,6 +940,12 @@ mod tests {
     fn test_mysql_serial_maps_as_unsigned_bigint() {
         let col_type = parse_mysql_type_name("SERIAL");
         assert!(mysql_type_is_unsigned_bigint(&col_type));
+
+        let serial_type = mysql_type_to_rw_type(&col_type).unwrap();
+        let unsigned_bigint_type =
+            mysql_type_to_rw_type(&parse_mysql_type_name("BIGINT UNSIGNED")).unwrap();
+        assert_eq!(serial_type, DataType::Decimal);
+        assert_eq!(serial_type, unsigned_bigint_type);
     }
 
     #[ignore]
@@ -1013,7 +1028,7 @@ mod tests {
         let config =
             serde_json::from_value::<ExternalTableConfig>(serde_json::to_value(props).unwrap())
                 .unwrap();
-        let reader = MySqlExternalTableReader::new(config, rw_schema)
+        let reader = MySqlExternalTableReader::new(config, rw_schema, vec![0])
             .await
             .unwrap();
         let offset = reader.current_cdc_offset().await.unwrap();
