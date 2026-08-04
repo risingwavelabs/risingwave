@@ -15,23 +15,48 @@
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_connector::sink::iceberg::{
     ICEBERG_SINK, IcebergConfig, create_and_validate_table_impl,
 };
 use risingwave_connector::sink::{SinkMetaClient, SinkWriterParam};
+use risingwave_pb::catalog::Table;
 use risingwave_pb::id::SinkId;
 use risingwave_pb::stream_plan::IcebergWithPkIndexWriterNode;
 use risingwave_storage::StateStore;
 
 use super::super::sink::build_sink_param;
-use crate::common::table::state_table::{StateTableBuilder, StateTableOpConsistencyLevel};
+use crate::common::table::state_table::{
+    StateTable, StateTableBuilder, StateTableOpConsistencyLevel,
+};
 use crate::error::StreamResult;
 use crate::executor::{
-    CompactionApplyExecutor, Executor, IcebergWriterImpl, StreamExecutorError, WriterExecutor,
+    CompactionApplyExecutor, Executor, IcebergWriterImpl, PkIndexStateTableFactory,
+    StreamExecutorError, WriterExecutor,
 };
 use crate::from_proto::ExecutorBuilder;
 use crate::task::ExecutorParams;
+
+/// Production [`PkIndexStateTableFactory`]: rebuilds the writer's pk-index state table from the same
+/// plan-node catalog, store, vnode shard and config used to build the initial handle, so a resume
+/// after pause re-opens `table_id` at the latest committed version (observing the rebuild).
+struct IcebergPkIndexStateTableFactory<S: StateStore> {
+    table_catalog: Table,
+    store: S,
+    vnodes: Option<Arc<Bitmap>>,
+}
+
+#[async_trait::async_trait]
+impl<S: StateStore> PkIndexStateTableFactory<S> for IcebergPkIndexStateTableFactory<S> {
+    async fn build(&self) -> StateTable<S> {
+        StateTableBuilder::new(&self.table_catalog, self.store.clone(), self.vnodes.clone())
+            .forbid_preload_all_rows()
+            .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)
+            .build()
+            .await
+    }
+}
 
 pub struct IcebergWithPkIndexWriterExecutorBuilder;
 
@@ -49,14 +74,6 @@ impl ExecutorBuilder for IcebergWithPkIndexWriterExecutorBuilder {
 
         let sink_desc = node.sink_desc.as_ref().unwrap();
         let sink_id: SinkId = sink_desc.get_id();
-        let sink_name = sink_desc.get_name().to_owned();
-
-        let properties_with_secret = LocalSecretManager::global().fill_secrets(
-            sink_desc.get_properties().clone(),
-            sink_desc.get_secret_refs().clone(),
-        )?;
-        let config = IcebergConfig::from_btreemap(properties_with_secret.clone())
-            .map_err(|err| StreamExecutorError::from((err, sink_id)))?;
 
         let pk_indices = sink_desc
             .downstream_pk
@@ -68,9 +85,6 @@ impl ExecutorBuilder for IcebergWithPkIndexWriterExecutorBuilder {
         }
 
         if node.compaction_apply {
-            // A transient compaction-apply job replaces the streaming writer. The state table is
-            // rebuilt from the same plan-node catalog the writer handle uses, so the apply executor
-            // upserts into the latest committed version of the pk-index table.
             let pk_index_state_table = StateTableBuilder::new(
                 node.get_pk_index_table()?,
                 store,
@@ -89,21 +103,28 @@ impl ExecutorBuilder for IcebergWithPkIndexWriterExecutorBuilder {
             return Ok((params.info, exec).into());
         }
 
+        let sink_name = sink_desc.get_name().to_owned();
+        let properties_with_secret = LocalSecretManager::global().fill_secrets(
+            sink_desc.get_properties().clone(),
+            sink_desc.get_secret_refs().clone(),
+        )?;
+        let config = IcebergConfig::from_btreemap(properties_with_secret.clone())
+            .map_err(|err| StreamExecutorError::from((err, sink_id)))?;
+
         let (sink_param, _) = build_sink_param(sink_desc, properties_with_secret, ICEBERG_SINK)?;
 
         let table = create_and_validate_table_impl(&config, &sink_param)
             .await
             .map_err(|e| StreamExecutorError::sink_error(e, sink_id))?;
 
-        let pk_index_state_table = StateTableBuilder::new(
-            node.get_pk_index_table()?,
+        // Build the state table through the factory so the initial handle and any rebuild-on-resume
+        // handle share one construction path.
+        let state_table_factory = IcebergPkIndexStateTableFactory {
+            table_catalog: node.get_pk_index_table()?.clone(),
             store,
-            params.vnode_bitmap.clone().map(Arc::new),
-        )
-        .enable_preload_all_rows_by_config(&params.config)
-        .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)
-        .build()
-        .await;
+            vnodes: params.vnode_bitmap.clone().map(Arc::new),
+        };
+        let pk_index_state_table = state_table_factory.build().await;
 
         let meta_client = params
             .env
@@ -124,16 +145,21 @@ impl ExecutorBuilder for IcebergWithPkIndexWriterExecutorBuilder {
             time_zone: params.actor_context.time_zone,
         };
         let writer = IcebergWriterImpl::build(&config, table, &writer_param)?;
+        let writer_control_rx = params
+            .local_barrier_manager
+            .subscribe_iceberg_pk_index_writer_control(params.actor_context.id, sink_id);
 
         let exec = WriterExecutor::new(
             params.actor_context,
             input,
             pk_indices,
             pk_index_state_table,
+            Box::new(state_table_factory),
             writer,
             params.config.developer.chunk_size,
             sink_id,
             params.local_barrier_manager.clone(),
+            writer_control_rx,
         );
         Ok((params.info, exec).into())
     }

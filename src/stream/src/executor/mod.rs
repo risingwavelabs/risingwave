@@ -157,7 +157,8 @@ pub use hash_join::*;
 pub use hop_window::HopWindowExecutor;
 pub use iceberg_with_pk_index::{
     CompactionApplyExecutor, CompactionResolverExecutor, IcebergWriterImpl,
-    PositionDeleteHandlerImpl, PositionDeleteMergerExecutor, WriterExecutor,
+    PkIndexStateTableFactory, PositionDeleteHandlerImpl, PositionDeleteMergerExecutor,
+    WriterExecutor,
 };
 pub use join::asof_join::{AsOfCpuEncoding, AsOfMemoryEncoding};
 pub use join::row::{CachedJoinRow, CpuEncoding, JoinEncoding, MemoryEncoding};

@@ -955,6 +955,7 @@ async fn test_apply_sink_update_promotes_temporary_manual_track_when_compaction_
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
+        pk_index_result: None,
     });
 
     let guard = manager.inner.read();
@@ -1098,6 +1099,7 @@ async fn test_handle_report_task_success_consumes_backlog_and_resets_to_idle() {
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
+        pk_index_result: None,
     });
 
     let guard = manager.inner.read();
@@ -1127,6 +1129,7 @@ async fn test_handle_report_task_completes_manual_waiter_on_success() {
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
+        pk_index_result: None,
     });
 
     assert_eq!(rx.await.unwrap().unwrap(), task_id);
@@ -1158,6 +1161,7 @@ async fn test_handle_report_task_completes_manual_waiter_on_failure() {
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Failed as i32,
         error_message: Some("boom".to_owned()),
+        pk_index_result: None,
     });
 
     let error = rx.await.unwrap().unwrap_err();
@@ -1191,6 +1195,7 @@ async fn test_handle_report_task_removes_temporary_manual_track_on_success() {
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
+        pk_index_result: None,
     });
 
     assert_eq!(rx.await.unwrap().unwrap(), task_id);
@@ -1221,6 +1226,7 @@ async fn test_handle_report_task_removes_temporary_manual_track_on_failure() {
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Failed as i32,
         error_message: Some("boom".to_owned()),
+        pk_index_result: None,
     });
 
     let error = rx.await.unwrap().unwrap_err();
@@ -1325,6 +1331,7 @@ async fn test_manual_compaction_waiter_is_not_stolen_during_config_load() {
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
+        pk_index_result: None,
     });
     assert!(
         !manager
@@ -1503,6 +1510,7 @@ async fn test_handle_report_task_failure_preserves_backlog_and_resets_to_idle() 
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Failed as i32,
         error_message: Some("boom".to_owned()),
+        pk_index_result: None,
     });
 
     let guard = manager.inner.read();
@@ -1530,6 +1538,7 @@ async fn test_handle_report_task_ignores_stale_task_id() {
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
+        pk_index_result: None,
     });
 
     let guard = manager.inner.read();

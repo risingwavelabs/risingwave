@@ -45,8 +45,8 @@ use crate::executor::Barrier;
 use crate::executor::monitor::StreamingMetrics;
 use crate::task::progress::BackfillState;
 use crate::task::{
-    ActorId, LocalBarrierEvent, LocalBarrierManager, NewOutputRequest, PartialGraphId,
-    StreamActorManager, UpDownActorIds,
+    ActorId, IcebergPkIndexWriterControl, LocalBarrierEvent, LocalBarrierManager, NewOutputRequest,
+    PartialGraphId, StreamActorManager, UpDownActorIds,
 };
 
 struct IssuedState {
@@ -223,11 +223,12 @@ impl InflightActorState {
         join_handle: JoinHandle<()>,
         monitor_task_handle: Option<JoinHandle<()>>,
     ) -> Self {
+        let initial_barrier = initial_barrier.project_for_actor(actor_id);
         Self {
             actor_id,
             barrier_senders: vec![],
             inflight_barriers: VecDeque::from_iter([initial_barrier.epoch.prev]),
-            status: InflightActorStatus::IssuedFirst(vec![initial_barrier.clone()]),
+            status: InflightActorStatus::IssuedFirst(vec![initial_barrier]),
             is_stopping: false,
             new_output_request_tx,
             join_handle,
@@ -237,6 +238,7 @@ impl InflightActorState {
 
     pub(super) fn issue_barrier(&mut self, barrier: &Barrier, is_stop: bool) -> StreamResult<()> {
         assert!(barrier.epoch.prev > self.status.max_issued_epoch());
+        let barrier = barrier.project_for_actor(self.actor_id);
 
         for barrier_sender in &self.barrier_senders {
             barrier_sender.send(barrier.clone()).map_err(|_| {
@@ -255,7 +257,7 @@ impl InflightActorState {
 
         match &mut self.status {
             InflightActorStatus::IssuedFirst(pending_barriers) => {
-                pending_barriers.push(barrier.clone());
+                pending_barriers.push(barrier);
             }
             InflightActorStatus::Running(prev_epoch) => {
                 *prev_epoch = barrier.epoch.prev;
@@ -628,6 +630,8 @@ pub(crate) struct PartialGraphState {
     pub(crate) actor_states: HashMap<ActorId, InflightActorState>,
     pub(super) actor_pending_new_output_requests:
         HashMap<ActorId, Vec<(ActorId, NewOutputRequest)>>,
+    iceberg_pk_index_writer_controls:
+        HashMap<(ActorId, SinkId), UnboundedSender<IcebergPkIndexWriterControl>>,
 
     pub(crate) graph_state: PartialGraphManagedBarrierState,
 
@@ -654,6 +658,7 @@ impl PartialGraphState {
             partial_graph_id,
             actor_states: Default::default(),
             actor_pending_new_output_requests: Default::default(),
+            iceberg_pk_index_writer_controls: Default::default(),
             graph_state: PartialGraphManagedBarrierState::new(&actor_manager, partial_graph_id),
             table_ids: Default::default(),
             actor_manager,
@@ -967,6 +972,19 @@ impl PartialGraphState {
                         });
                     }
                 }
+                LocalBarrierEvent::RegisterIcebergPkIndexWriterControl {
+                    actor_id,
+                    sink_id,
+                    sender,
+                } => {
+                    let previous = self
+                        .iceberg_pk_index_writer_controls
+                        .insert((actor_id, sink_id), sender);
+                    assert!(
+                        previous.is_none(),
+                        "duplicate pk-index writer control registration for actor {actor_id}, sink {sink_id}"
+                    );
+                }
                 LocalBarrierEvent::RegisterLocalUpstreamOutput {
                     actor_id,
                     upstream_actor_id,
@@ -1023,12 +1041,49 @@ impl PartialGraphState {
             .collect(epoch);
         if is_finished {
             let state = self.actor_states.remove(&actor_id).expect("should exist");
+            self.iceberg_pk_index_writer_controls
+                .retain(|(registered_actor_id, _), _| *registered_actor_id != actor_id);
             if let Some(monitor_task_handle) = state.monitor_task_handle {
                 monitor_task_handle.abort();
             }
         }
         self.graph_state.collect(actor_id, epoch);
         self.graph_state.may_have_collected_all()
+    }
+
+    pub(super) fn control_compaction_writer(
+        &mut self,
+        sink_id: SinkId,
+        control: IcebergPkIndexWriterControl,
+        actor_ids: impl IntoIterator<Item = ActorId>,
+    ) -> StreamResult<()> {
+        let actor_ids: Vec<_> = actor_ids.into_iter().collect();
+        for actor_id in &actor_ids {
+            let sender = self
+                .iceberg_pk_index_writer_controls
+                .get(&(*actor_id, sink_id))
+                .ok_or_else(|| {
+                    StreamError::from(anyhow!(
+                        "pk-index writer control is not registered for actor {actor_id}, sink {sink_id}"
+                    ))
+                })?;
+            if sender.is_closed() {
+                return Err(StreamError::from(anyhow!(
+                    "pk-index writer control receiver closed for actor {actor_id}, sink {sink_id}"
+                )));
+            }
+        }
+
+        for actor_id in actor_ids {
+            self.iceberg_pk_index_writer_controls[&(actor_id, sink_id)]
+                .send(control)
+                .map_err(|_| {
+                    StreamError::from(anyhow!(
+                        "pk-index writer control receiver closed for actor {actor_id}, sink {sink_id}"
+                    ))
+                })?;
+        }
+        Ok(())
     }
 
     pub(super) fn pop_barrier_to_complete(&mut self, prev_epoch: u64) -> BarrierToComplete {

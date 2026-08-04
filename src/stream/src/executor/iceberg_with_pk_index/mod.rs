@@ -40,5 +40,5 @@ pub use compaction_apply::CompactionApplyExecutor;
 pub use compaction_resolver::CompactionResolverExecutor;
 pub use position_delete_handler_impl::PositionDeleteHandlerImpl;
 pub use position_delete_merger::PositionDeleteMergerExecutor;
-pub use writer::WriterExecutor;
+pub use writer::{PkIndexStateTableFactory, WriterExecutor};
 pub use writer_impl::IcebergWriterImpl;

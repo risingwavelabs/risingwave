@@ -47,7 +47,8 @@ use crate::task::LocalBarrierManager;
 use crate::task::managed_state::{BarrierToComplete, ResetPartialGraphOutput};
 use crate::task::{
     ActorId, AtomicU64Ref, CONFIG_OVERRIDE_CACHE_DEFAULT_CAPACITY, ConfigOverrideCache, FragmentId,
-    PartialGraphId, StreamActorManager, StreamEnvironment, UpDownActorIds,
+    IcebergPkIndexWriterControl, PartialGraphId, StreamActorManager, StreamEnvironment,
+    UpDownActorIds,
 };
 pub mod managed_state;
 #[cfg(test)]
@@ -501,6 +502,47 @@ impl LocalBarrierWorker {
             Request::ResetPartialGraphs(req) => {
                 self.reset_partial_graphs(req);
                 Ok(())
+            }
+            Request::ControlCompactionWriter(req) => {
+                let partial_graph_id = req.partial_graph_id;
+                let result = || -> StreamResult<()> {
+                    let partial_graph_status = self
+                        .state
+                        .partial_graphs
+                        .get_mut(&partial_graph_id)
+                        .ok_or_else(|| {
+                            anyhow!("partial graph {partial_graph_id} does not exist")
+                        })?;
+                    let PartialGraphStatus::Running(partial_graph_state) = partial_graph_status
+                    else {
+                        warn!(
+                            %partial_graph_id,
+                            "ignoring pk-index writer control for non-running partial graph"
+                        );
+                        return Ok(());
+                    };
+                    let control = match req.stage() {
+                        risingwave_pb::stream_service::streaming_control_stream_request::control_compaction_writer_request::Stage::Unspecified => {
+                            return Err(anyhow!("pk-index writer control stage is unspecified").into());
+                        }
+                        risingwave_pb::stream_service::streaming_control_stream_request::control_compaction_writer_request::Stage::SealReady => IcebergPkIndexWriterControl::SealReady {
+                            task_id: req.task_id,
+                            epoch: req.epoch,
+                        },
+                        risingwave_pb::stream_service::streaming_control_stream_request::control_compaction_writer_request::Stage::Committed => IcebergPkIndexWriterControl::Committed {
+                            task_id: req.task_id,
+                            epoch: req.epoch,
+                        },
+                    };
+                    partial_graph_state.control_compaction_writer(
+                        req.sink_id,
+                        control,
+                        req.actor_ids,
+                    )?;
+                    Ok(())
+                }();
+
+                result.map_err(|e| (partial_graph_id, e))
             }
             Request::Init(_) => {
                 unreachable!()

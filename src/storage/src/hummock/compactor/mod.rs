@@ -57,6 +57,10 @@ pub use context::{
 use futures::{StreamExt, pin_mut};
 // Import iceberg compactor runner types from the local `iceberg_compaction` module.
 use iceberg_compaction::iceberg_compactor_runner::IcebergCompactorRunnerConfigBuilder;
+#[cfg(madsim)]
+pub use iceberg_compaction::set_simulated_pk_index_compaction_result;
+#[cfg(madsim)]
+use iceberg_compaction::simulated_pk_index_compaction_result;
 use iceberg_compaction::{
     IcebergPlanCompletion, IcebergTaskQueue, IcebergTaskReport, IcebergTaskTracker, PushResult,
     ReportSendResult, build_iceberg_task_report, create_task_execution,
@@ -507,6 +511,7 @@ pub fn start_iceberg_compactor(
                     Some(plan_completion) = task_completion_rx.recv() => {
                         let task_key = plan_completion.task_key;
                         let error_message = plan_completion.error_message;
+                        let pk_index_result = plan_completion.pk_index_result;
                         tracing::debug!(
                             task_id = %task_key.0,
                             plan_index = task_key.1,
@@ -521,7 +526,9 @@ pub fn start_iceberg_compactor(
                         else {
                             continue 'consume_stream;
                         };
-                        tracker_entry.get_mut().record_completion(error_message);
+                        tracker_entry
+                            .get_mut()
+                            .record_completion(error_message, pk_index_result);
                         if !tracker_entry.get().is_finished() {
                             continue 'consume_stream;
                         }
@@ -609,6 +616,33 @@ pub fn start_iceberg_compactor(
                             risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event::CompactTask(iceberg_compaction_task) => {
                                 let task_id = iceberg_compaction_task.task_id;
                                 let sink_id = iceberg_compaction_task.sink_id;
+                                // iceberg-rust internally spawns on native Tokio, which is not
+                                // available inside a madsim node. Tests can replace only the
+                                // rewrite result while retaining the real compactor stream and
+                                // all downstream resolver/commit/recovery behavior.
+                                #[cfg(madsim)]
+                                if iceberg_compaction_task.pk_index_coordinated
+                                    && fail::eval(
+                                        "iceberg_pk_index_simulated_compaction_report",
+                                        |_| (),
+                                    )
+                                    .is_some()
+                                    && let Some(result) = simulated_pk_index_compaction_result()
+                                {
+                                    let mut report = build_iceberg_task_report(task_id, sink_id, None);
+                                    report.pk_index_result = Some(result);
+                                    if matches!(
+                                        send_or_buffer_iceberg_task_report(
+                                            &request_sender,
+                                            &mut pending_task_reports,
+                                            report,
+                                        ),
+                                        ReportSendResult::RestartStream
+                                    ) {
+                                        continue 'start_stream;
+                                    }
+                                    continue 'consume_stream;
+                                }
                                 // Note: write_parquet_properties is now built from sink config (IcebergConfig) in create_task_execution
                                 let compactor_runner_config = match IcebergCompactorRunnerConfigBuilder::default()
                                     .max_parallelism((worker_num as f32 * compactor_context.storage_opts.iceberg_compaction_task_parallelism_ratio) as u32)
@@ -669,14 +703,7 @@ pub fn start_iceberg_compactor(
                                 ).await {
                                     Ok(task_execution) => task_execution,
                                     Err(e) => {
-                                        tracing::warn!(
-                                            iceberg_component = "compaction_worker",
-                                            iceberg_operation = "plan_task",
-                                            error = %e.as_report(),
-                                            task_id = %task_id,
-                                            sink_id = sink_id,
-                                            "iceberg_compaction_task_plan_failed",
-                                        );
+                                        tracing::warn!(error = %e.as_report(), task_id = %task_id, "Failed to create plan runners");
                                         let report = build_iceberg_task_report(
                                             task_id,
                                             sink_id,
@@ -703,13 +730,7 @@ pub fn start_iceberg_compactor(
                                 let plan_runners = task_execution.plan_runners;
 
                                 if plan_runners.is_empty() {
-                                    tracing::info!(
-                                        iceberg_component = "compaction_worker",
-                                        iceberg_operation = "enqueue_plan",
-                                        task_id = %task_id,
-                                        sink_id = sink_id,
-                                        "iceberg_compaction_task_skipped_no_plans",
-                                    );
+                                    tracing::info!(task_id = %task_id, sink_id, "No plans to execute");
                                     let report = build_iceberg_task_report(task_id, sink_id, None);
                                     if matches!(
                                         send_or_buffer_iceberg_task_report(
@@ -741,8 +762,6 @@ pub fn start_iceberg_compactor(
                                         PushResult::Added => {
                                             enqueued_count += 1;
                                             tracing::debug!(
-                                                iceberg_component = "compaction_worker",
-                                                iceberg_operation = "enqueue_plan",
                                                 task_id = %task_id,
                                                 sink_id = runner_sink_id,
                                                 plan_index = plan_index,
@@ -754,13 +773,7 @@ pub fn start_iceberg_compactor(
                                         },
                                         PushResult::RejectedCapacity => {
                                             tracing::warn!(
-                                                iceberg_component = "compaction_worker",
-                                                iceberg_operation = "enqueue_plan",
                                                 task_id = %task_id,
-                                                sink_id = runner_sink_id,
-                                                plan_index = plan_index,
-                                                task_type = ?runner_task_type,
-                                                table = %runner_table,
                                                 required_parallelism = required_parallelism,
                                                 pending_budget = pending_parallelism_budget,
                                                 enqueued_count = enqueued_count,
@@ -772,13 +785,7 @@ pub fn start_iceberg_compactor(
                                         },
                                         PushResult::RejectedTooLarge => {
                                             tracing::error!(
-                                                iceberg_component = "compaction_worker",
-                                                iceberg_operation = "enqueue_plan",
                                                 task_id = %task_id,
-                                                sink_id = runner_sink_id,
-                                                plan_index = plan_index,
-                                                task_type = ?runner_task_type,
-                                                table = %runner_table,
                                                 required_parallelism = required_parallelism,
                                                 max_parallelism = max_task_parallelism,
                                                 "iceberg_compaction_plan_rejected_too_large",
@@ -786,23 +793,14 @@ pub fn start_iceberg_compactor(
                                         },
                                         PushResult::RejectedInvalidParallelism => {
                                             tracing::error!(
-                                                iceberg_component = "compaction_worker",
-                                                iceberg_operation = "enqueue_plan",
                                                 task_id = %task_id,
-                                                sink_id = runner_sink_id,
-                                                plan_index = plan_index,
-                                                task_type = ?runner_task_type,
-                                                table = %runner_table,
                                                 required_parallelism = required_parallelism,
                                                 "iceberg_compaction_plan_rejected_invalid_parallelism",
                                             );
                                         },
                                         PushResult::RejectedDuplicate => {
                                             tracing::error!(
-                                                iceberg_component = "compaction_worker",
-                                                iceberg_operation = "enqueue_plan",
                                                 task_id = %task_id,
-                                                sink_id = runner_sink_id,
                                                 plan_index = plan_index,
                                                 task_type = ?runner_task_type,
                                                 table = %runner_table,
@@ -836,8 +834,6 @@ pub fn start_iceberg_compactor(
                                 }
 
                                 tracing::info!(
-                                    iceberg_component = "compaction_worker",
-                                    iceberg_operation = "enqueue_plan",
                                     task_id = %task_id,
                                     sink_id = sink_id,
                                     total_plans = total_plans,
@@ -1447,8 +1443,6 @@ fn schedule_queued_tasks(
 
         let Some(runner) = popped_task.runner else {
             tracing::error!(
-                iceberg_component = "compaction_worker",
-                iceberg_operation = "schedule_plan",
                 task_id = %task_id,
                 plan_index = plan_index,
                 "iceberg_compaction_plan_missing_runner",
@@ -1471,8 +1465,6 @@ fn schedule_queued_tasks(
         }
 
         tracing::info!(
-            iceberg_component = "compaction_worker",
-            iceberg_operation = "schedule_plan",
             task_id = %task_id,
             sink_id = runner_sink_id,
             plan_index = plan_index,
@@ -1492,17 +1484,15 @@ fn schedule_queued_tasks(
             let result = Box::pin(runner.compact(rx)).await;
 
             let completion = match result {
-                Ok(_) => IcebergPlanCompletion {
+                Ok((_stats, pk_index_result)) => IcebergPlanCompletion {
                     task_key,
                     error_message: None,
+                    pk_index_result,
                 },
                 Err(e) => {
                     if is_cancelled_iceberg_compaction_error(&e) {
                         tracing::info!(
-                            iceberg_component = "compaction_worker",
-                            iceberg_operation = "execute_plan",
                             task_id = %task_key.0,
-                            sink_id = runner_sink_id,
                             plan_index = task_key.1,
                             task_type = ?runner_task_type,
                             table = %runner_table,
@@ -1514,7 +1504,6 @@ fn schedule_queued_tasks(
                             iceberg_operation = "execute_plan",
                             error = %e.as_report(),
                             task_id = %task_key.0,
-                            sink_id = runner_sink_id,
                             plan_index = task_key.1,
                             task_type = ?runner_task_type,
                             table = %runner_table,
@@ -1524,16 +1513,14 @@ fn schedule_queued_tasks(
                     IcebergPlanCompletion {
                         task_key,
                         error_message: Some(e.to_report_string()),
+                        pk_index_result: None,
                     }
                 }
             };
 
             if completion_tx_clone.send(completion).is_err() {
                 tracing::warn!(
-                    iceberg_component = "compaction_worker",
-                    iceberg_operation = "notify_plan_completion",
                     task_id = %task_key.0,
-                    sink_id = runner_sink_id,
                     plan_index = task_key.1,
                     task_type = ?runner_task_type,
                     table = %runner_table,
