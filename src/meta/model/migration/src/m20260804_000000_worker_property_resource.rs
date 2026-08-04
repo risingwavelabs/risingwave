@@ -24,6 +24,9 @@ impl MigrationTrait for Migration {
                     .to_owned(),
             )
             .await?;
+        manager
+            .exec_stmt(Query::delete().from_table(Worker::Table).to_owned())
+            .await?;
         Ok(())
     }
 
@@ -46,6 +49,11 @@ impl MigrationTrait for Migration {
             .await?;
         Ok(())
     }
+}
+
+#[derive(DeriveIden)]
+enum Worker {
+    Table,
 }
 
 #[derive(DeriveIden)]
