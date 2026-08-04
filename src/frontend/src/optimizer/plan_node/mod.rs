@@ -1106,7 +1106,6 @@ mod stream_row_id_gen;
 mod stream_row_merge;
 mod stream_simple_agg;
 mod stream_sink;
-mod stream_sort;
 mod stream_source;
 mod stream_source_scan;
 mod stream_stateless_simple_agg;
@@ -1116,6 +1115,7 @@ mod stream_topn;
 mod stream_union;
 mod stream_values;
 mod stream_watermark_filter;
+mod stream_watermark_sort;
 
 mod batch_file_scan;
 mod batch_iceberg_metadata_scan;
@@ -1256,7 +1256,6 @@ pub use stream_row_merge::StreamRowMerge;
 pub use stream_share::StreamShare;
 pub use stream_simple_agg::StreamSimpleAgg;
 pub use stream_sink::{IcebergPartitionInfo, PartitionComputeInfo, StreamSink};
-pub use stream_sort::StreamEowcSort;
 pub use stream_source::StreamSource;
 pub use stream_source_scan::StreamSourceScan;
 pub use stream_stateless_simple_agg::StreamStatelessSimpleAgg;
@@ -1271,6 +1270,7 @@ pub use stream_values::StreamValues;
 pub use stream_vector_index_lookup_join::StreamVectorIndexLookupJoin;
 pub use stream_vector_index_write::StreamVectorIndexWrite;
 pub use stream_watermark_filter::StreamWatermarkFilter;
+pub use stream_watermark_sort::StreamWatermarkSort;
 
 use crate::expr::{ExprImpl, ExprRewriter, ExprVisitor, InputRef, Literal};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
@@ -1406,7 +1406,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Values }
             , { Stream, Dedup }
             , { Stream, EowcOverWindow }
-            , { Stream, EowcSort }
+            , { Stream, WatermarkSort }
             , { Stream, OverWindow }
             , { Stream, FsFetch }
             , { Stream, ChangeLog }

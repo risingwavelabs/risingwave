@@ -28,24 +28,24 @@ use crate::optimizer::property::{Monotonicity, MonotonicityMap, WatermarkColumns
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct StreamEowcSort {
+pub struct StreamWatermarkSort {
     pub base: PlanBase<Stream>,
 
     input: PlanRef,
     sort_column_index: usize,
 }
 
-impl Distill for StreamEowcSort {
+impl Distill for StreamWatermarkSort {
     fn distill<'a>(&self) -> XmlNode<'a> {
         let fields = vec![(
             "sort_column",
             Pretty::display(&FieldDisplay(&self.input.schema()[self.sort_column_index])),
         )];
-        childless_record("StreamEowcSort", fields)
+        childless_record("StreamWatermarkSort", fields)
     }
 }
 
-impl StreamEowcSort {
+impl StreamWatermarkSort {
     pub fn new(input: PlanRef, sort_column_index: usize) -> Self {
         assert!(input.watermark_columns().contains(sort_column_index));
 
@@ -65,7 +65,7 @@ impl StreamEowcSort {
                 .unwrap(),
         );
 
-        // StreamEowcSort makes the sorting watermark column non-decreasing
+        // StreamWatermarkSort makes the sorting watermark column non-decreasing
         let mut columns_monotonicity = MonotonicityMap::new();
         columns_monotonicity.insert(sort_column_index, Monotonicity::NonDecreasing);
 
@@ -120,7 +120,7 @@ impl StreamEowcSort {
     }
 }
 
-impl PlanTreeNodeUnary<Stream> for StreamEowcSort {
+impl PlanTreeNodeUnary<Stream> for StreamWatermarkSort {
     fn input(&self) -> PlanRef {
         self.input.clone()
     }
@@ -130,9 +130,9 @@ impl PlanTreeNodeUnary<Stream> for StreamEowcSort {
     }
 }
 
-impl_plan_tree_node_for_unary! { Stream, StreamEowcSort }
+impl_plan_tree_node_for_unary! { Stream, StreamWatermarkSort }
 
-impl StreamNode for StreamEowcSort {
+impl StreamNode for StreamWatermarkSort {
     fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> PbNodeBody {
         use risingwave_pb::stream_plan::*;
         PbNodeBody::Sort(Box::new(SortNode {
@@ -146,6 +146,6 @@ impl StreamNode for StreamEowcSort {
     }
 }
 
-impl ExprRewritable<Stream> for StreamEowcSort {}
+impl ExprRewritable<Stream> for StreamWatermarkSort {}
 
-impl ExprVisitable for StreamEowcSort {}
+impl ExprVisitable for StreamWatermarkSort {}
