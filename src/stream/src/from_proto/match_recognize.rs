@@ -12,13 +12,20 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::anyhow;
-use risingwave_pb::stream_plan::MatchRecognizeNode;
+use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+use risingwave_expr::expr::build_non_strict_from_prost;
+use risingwave_pb::stream_plan::{MatchRecognizeInputMode, MatchRecognizeNode};
 use risingwave_storage::StateStore;
 
 use super::ExecutorBuilder;
+use crate::common::table::state_table::StateTableBuilder;
 use crate::error::StreamResult;
 use crate::executor::Executor;
+use crate::executor::match_recognize::executor::{
+    CompiledDefine, CompiledMeasure, MatchRecognizeExecutor, MatchRecognizeExecutorArgs,
+};
+use crate::executor::match_recognize::nfa::{Nfa, SkipMode};
+use crate::executor::match_recognize::proto::pattern_from_protobuf;
 use crate::task::ExecutorParams;
 
 pub struct MatchRecognizeExecutorBuilder;
@@ -29,13 +36,144 @@ impl ExecutorBuilder for MatchRecognizeExecutorBuilder {
     type Node = MatchRecognizeNode;
 
     async fn new_boxed_executor(
-        _params: ExecutorParams,
-        _node: &MatchRecognizeNode,
-        _store: impl StateStore,
+        params: ExecutorParams,
+        node: &MatchRecognizeNode,
+        store: impl StateStore,
     ) -> StreamResult<Executor> {
-        // Keeps the dispatch exhaustive while the ordered-input executor lands in the next change
-        // of the series; a plan reaching this in the meantime fails the actor build loudly rather
-        // than running silently wrong.
-        Err(anyhow!("MATCH_RECOGNIZE executor is not yet wired in this build").into())
+        let [input]: [_; 1] = params.input.try_into().unwrap();
+
+        // This executor's entire correctness rests on the ordered-input contract the EVENT_TIME
+        // plan (a WatermarkSort upstream in the same fragment) provides. A different input mode —
+        // PROCESSING_TIME is reserved, unimplemented — must fail here, not silently run against
+        // rows whose ordering guarantee does not hold.
+        // An out-of-range wire value decodes as `Unspecified` through the accessor, which would
+        // silently run an unknown future mode as event-time — the one contract this executor's
+        // correctness rests on. Reject it like every other enum in this decode path; a raw 0
+        // (genuinely unset) is accepted as event-time since this frontend always writes it.
+        if node.input_mode != 0 && node.input_mode() == MatchRecognizeInputMode::Unspecified {
+            return Err(
+                anyhow::anyhow!("unknown MATCH_RECOGNIZE input mode: {}", node.input_mode).into(),
+            );
+        }
+        match node.input_mode() {
+            MatchRecognizeInputMode::Unspecified | MatchRecognizeInputMode::EventTime => {}
+            other => {
+                return Err(
+                    anyhow::anyhow!("unsupported MATCH_RECOGNIZE input mode: {other:?}").into(),
+                );
+            }
+        }
+
+        let partition_key_indices = node.partition_by.iter().map(|&i| i as usize).collect();
+        // ORDER BY is carried as `ColumnOrder`. v1 only supports the default ascending order (the
+        // binder rejects anything else); assert it here too so a non-ascending plan fails fast
+        // rather than being silently sorted ascending by the executor.
+        let order_key_indices = node
+            .order_by
+            .iter()
+            .map(|c| {
+                let co = ColumnOrder::from_protobuf(c);
+                if co.order_type != OrderType::ascending() {
+                    return Err(anyhow::anyhow!(
+                        "MATCH_RECOGNIZE only supports the default ascending ORDER BY, got {:?}",
+                        co.order_type
+                    )
+                    .into());
+                }
+                Ok(co.column_index)
+            })
+            .collect::<StreamResult<Vec<usize>>>()?;
+        // The executor reads the leading ORDER BY column unconditionally; an empty list is a
+        // corrupt plan and must fail here, not index-panic there.
+        if order_key_indices.is_empty() {
+            return Err(anyhow::anyhow!("MATCH_RECOGNIZE plan carries an empty ORDER BY").into());
+        }
+
+        let defines = node
+            .defines
+            .iter()
+            .map(|d| CompiledDefine::from_protobuf(d, params.eval_error_report.clone()))
+            .collect::<crate::executor::StreamExecutorResult<Vec<_>>>()?;
+        let measures = node
+            .measures
+            .iter()
+            .map(|m| CompiledMeasure::from_protobuf(m, params.eval_error_report.clone()))
+            .collect::<crate::executor::StreamExecutorResult<Vec<_>>>()?;
+
+        let pattern_node = node
+            .pattern_node
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("MATCH_RECOGNIZE node missing pattern"))?;
+        let pattern = pattern_from_protobuf(pattern_node)
+            .map_err(|e| anyhow::anyhow!("invalid MATCH_RECOGNIZE pattern: {e}"))?;
+        let nfa = Nfa::compile(&pattern);
+
+        // Fail fast on anything malformed rather than silently defaulting to PAST LAST ROW, which
+        // would mask a corrupt plan or a version skew.
+        let skip = {
+            use risingwave_pb::stream_plan::match_recognize_after_match_skip::Mode;
+            let pb_skip = node
+                .after_match_skip
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("MATCH_RECOGNIZE node missing after_match_skip"))?;
+            let target = || {
+                pb_skip.target.clone().ok_or_else(|| {
+                    anyhow::anyhow!("AFTER MATCH SKIP TO FIRST/LAST missing its target variable")
+                })
+            };
+            match pb_skip.mode() {
+                Mode::PastLastRow => SkipMode::PastLastRow,
+                Mode::ToNextRow => SkipMode::ToNextRow,
+                Mode::ToFirst => SkipMode::ToFirst(target()?),
+                Mode::ToLast => SkipMode::ToLast(target()?),
+                Mode::Unspecified => {
+                    return Err(anyhow::anyhow!(
+                        "invalid MATCH_RECOGNIZE after_match_skip mode: {}",
+                        pb_skip.mode
+                    )
+                    .into());
+                }
+            }
+        };
+
+        let within = node
+            .within
+            .as_ref()
+            .map(|e| build_non_strict_from_prost(e, params.eval_error_report.clone()))
+            .transpose()?;
+        let within_deadline = node
+            .within_deadline
+            .as_ref()
+            .map(|e| build_non_strict_from_prost(e, params.eval_error_report.clone()))
+            .transpose()?;
+
+        let vnode_bitmap = params.vnode_bitmap.clone().map(std::sync::Arc::new);
+        let state_table_catalog = node
+            .state_table
+            .as_ref()
+            .ok_or_else(|| anyhow::anyhow!("MATCH_RECOGNIZE node missing its state table"))?;
+        let state_table =
+            StateTableBuilder::new(state_table_catalog, store.clone(), vnode_bitmap.clone())
+                .forbid_preload_all_rows()
+                .build()
+                .await;
+        let exec = MatchRecognizeExecutor::new(MatchRecognizeExecutorArgs {
+            ctx: params.actor_context,
+            input,
+            schema: params.info.schema.clone(),
+            chunk_size: params.config.developer.chunk_size,
+            partition_key_indices,
+            order_key_indices,
+            measures,
+            defines,
+            within,
+            nfa,
+            skip,
+            eval_error_report: params.eval_error_report,
+            within_deadline,
+            state_table,
+        });
+
+        Ok((params.info, exec).into())
     }
 }
