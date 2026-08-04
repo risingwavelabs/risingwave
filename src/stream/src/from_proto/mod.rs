@@ -48,6 +48,7 @@ mod hop_window;
 mod iceberg_with_pk_index;
 mod locality_provider;
 mod lookup;
+mod match_recognize;
 mod lookup_union;
 mod materialized_exprs;
 mod merge;
