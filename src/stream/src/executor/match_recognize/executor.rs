@@ -81,7 +81,7 @@ use risingwave_pb::stream_plan::{
 use risingwave_storage::StateStore;
 use risingwave_storage::store::PrefetchOptions;
 
-use super::nfa::{CandidateMatcher, MatchScan, Nfa, SkipDegradation, SkipMode};
+use super::nfa::{CandidateMatcher, MatchScan, Nfa, ScanBudget, SkipDegradation, SkipMode};
 use crate::common::table::state_table::StateTable;
 use crate::executor::prelude::*;
 use crate::task::ActorEvalErrorReport;
@@ -135,6 +135,31 @@ fn report_skip_degradation_once(
     report.report(ExprError::InvalidParam {
         name: skip.clause_name(),
         reason: degradation.describe(skip).into(),
+    });
+}
+
+/// Predicate evaluations one partition visit may spend across all its NFA walks (matching,
+/// eviction liveness, extension probing) before the visit degrades — see [`ScanBudget`]. The
+/// matcher's worst case is exponential for pathological patterns whose `DEFINE`s read the running
+/// label assignment (path-independent patterns are memoized and never approach this); the budget
+/// converts that from a pinned compute node into a bounded, reported degradation. Sized so that
+/// realistic patterns stay orders of magnitude below it: a memoized scan costs
+/// O(states × rows) per start.
+const SCAN_BUDGET_EVALUATIONS: usize = 1 << 20;
+
+/// Report a spent [`ScanBudget`] — once per watermark pass (the cause is a property of the query
+/// and its buffered data, so per-partition repeats add volume, not information).
+fn report_scan_budget_once(report: &impl EvalErrorReport, already_reported: &mut bool) {
+    if *already_reported {
+        return;
+    }
+    *already_reported = true;
+    report.report(ExprError::InvalidParam {
+        name: "MATCH_RECOGNIZE",
+        reason: format!(
+            "pattern-match scan budget ({SCAN_BUDGET_EVALUATIONS} predicate evaluations)              exhausted while processing one partition; the partition is left undecided for this              watermark (nothing emitted or evicted beyond what was already decided) and will be              retried. This indicates a pattern with catastrophic backtracking over the buffered              data — simplify nested optional/alternation quantifiers, or add/tighten WITHIN"
+        )
+        .into(),
     });
 }
 
@@ -743,6 +768,18 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             mut frontier_index_table,
         } = *self;
 
+        // Whether the per-start `(state, position)` failure memo is sound for this query: no
+        // `DEFINE` slot may read the running label assignment (`RunningFirst`/`RunningLast` —
+        // bare cross-variable references and FIRST/LAST). `SelfCol` and `Prev` are functions of
+        // the position alone, and within one start so is the `WITHIN` span check, so verdicts are
+        // `(var, pos)`-determined and a failed `(state, pos)` fails identically on re-entry. See
+        // `Memo` in the NFA module.
+        let memoizable = defines.values().all(|d| {
+            d.slots
+                .iter()
+                .all(|s| matches!(s.kind, DefineSlotKind::SelfCol | DefineSlotKind::Prev))
+        });
+
         let mut input = input.execute();
         let barrier = expect_first_barrier(&mut input).await?;
         let first_epoch = barrier.epoch;
@@ -889,6 +926,9 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                     // `report_skip_degradation_once` for the policy. Empty (and unallocated) unless a
                     // skip target actually fails to resolve.
                     let mut reported_degradations: Vec<SkipDegradation> = Vec::new();
+                    // Scan-budget exhaustion already reported in this pass; see
+                    // `report_scan_budget_once`.
+                    let mut reported_budget = false;
                     let vnodes: Vec<_> = state_table.vnodes().iter_vnodes().collect();
                     for vnode in vnodes {
                         // 1. Collect candidate `(old_wakeup, partition)` from the index, then drop the
@@ -1021,10 +1061,23 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                             // recomputed next watermark — and at most one match's labels are
                             // resident, instead of a worst-case O(rows²) collected vector under an
                             // overlapping skip mode (see `Nfa::next_match`).
+                            // One budget for everything this partition's visit evaluates —
+                            // matching, extension probes, eviction liveness. On exhaustion the
+                            // walks stop without verdicts and everything undecided is treated
+                            // conservatively below.
+                            let mut budget = ScanBudget::new(SCAN_BUDGET_EVALUATIONS);
                             let mut scan = MatchScan::new();
                             let mut cursor = 0usize;
-                            while let Some(m) =
-                                nfa.next_match(&mut scan, safe_len, &matcher, &skip).await?
+                            while let Some(m) = nfa
+                                .next_match(
+                                    &mut scan,
+                                    safe_len,
+                                    &matcher,
+                                    &skip,
+                                    &mut budget,
+                                    memoizable,
+                                )
+                                .await?
                             {
                                 if m.start < cursor {
                                     continue;
@@ -1064,8 +1117,19 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                     // neither a future row nor a deadline and drops the partition,
                                     // so the last complete match would never be emitted unless an
                                     // unrelated row happened to arrive.
+                                    // On a spent budget `may_extend` answers "may extend"
+                                    // (hold), so a partial probe can never emit a non-maximal
+                                    // match.
                                     let terminal = !within_final
-                                        && !nfa.may_extend(m.start, m.end, &matcher).await?;
+                                        && !nfa
+                                            .may_extend(
+                                                m.start,
+                                                m.end,
+                                                &matcher,
+                                                &mut budget,
+                                                memoizable,
+                                            )
+                                            .await?;
                                     // `break`, not `continue`, when the match is held. `found` is
                                     // ordered by start; the WITHIN bound is a constant interval and
                                     // rows are PK-sorted by order key, so a match's deadline (its
@@ -1175,10 +1239,29 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                         continue;
                                     }
                                 }
-                                if nfa.reaches_boundary_alive(p, safe_len, &matcher).await? {
+                                let alive = nfa
+                                    .reaches_boundary_alive(
+                                        p,
+                                        safe_len,
+                                        &matcher,
+                                        &mut budget,
+                                        memoizable,
+                                    )
+                                    .await?;
+                                // A spent budget means `p` (and everything after it) is undecided:
+                                // retain it all — a fabricated "dead" here would evict rows of a
+                                // live match. The partition is retried on a later watermark.
+                                if budget.hit {
                                     retain_from = p;
                                     break;
                                 }
+                                if alive {
+                                    retain_from = p;
+                                    break;
+                                }
+                            }
+                            if budget.hit {
+                                report_scan_budget_once(&eval_error_report, &mut reported_budget);
                             }
                             // Delete by reference: the seq datum chained onto the borrowed buffered
                             // row (`delete` takes `impl Row`), so no owned copy is built per evictee.
@@ -1463,9 +1546,15 @@ mod tests {
             Pattern::Var("b".to_owned()),
         ]));
         assert!(
-            nfa.reaches_boundary_alive(0, rows.len(), &matcher)
-                .await
-                .unwrap()
+            nfa.reaches_boundary_alive(
+                0,
+                rows.len(),
+                &matcher,
+                &mut ScanBudget::unlimited(),
+                false,
+            )
+            .await
+            .unwrap()
         );
     }
 

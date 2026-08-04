@@ -49,6 +49,96 @@ impl MatchScan {
     }
 }
 
+/// Per-visit budget on `DEFINE` predicate evaluations, shared by every NFA walk of one partition
+/// visit (matching, eviction liveness, extension probing).
+///
+/// The matcher is a backtracking DFS whose worst case is exponential in the pattern for
+/// pathological shapes (`(a? a? … a? b)` over a run of `a`-rows — the classic catastrophic
+/// regex-backtracking family), and [`MAX_PATTERN_NFA_STATES`-style caps bound *space*, not time.
+/// [`Memo`] removes the blowup entirely for path-independent patterns; for the rest, this budget
+/// is the hard backstop: when it runs out, the walk STOPS — it never fakes a verdict (a fabricated
+/// `false` in the liveness walker would evict rows of a live match, the exact bug class the
+/// decision-wait semantics exist to prevent). The caller must treat everything undecided
+/// conservatively (emit nothing more, evict nothing more, report once, retry next watermark), so a
+/// pathological pattern degrades to bounded CPU per visit and an observable report instead of
+/// pinning a compute node.
+#[derive(Debug)]
+pub struct ScanBudget {
+    remaining: usize,
+    /// Set once the budget runs out; sticky for the rest of the visit.
+    pub hit: bool,
+}
+
+impl ScanBudget {
+    pub fn new(evaluations: usize) -> Self {
+        Self {
+            remaining: evaluations,
+            hit: false,
+        }
+    }
+
+    /// No practical limit — for callers (tests, the collect wrapper) that need the historical
+    /// unbounded behaviour.
+    pub fn unlimited() -> Self {
+        Self::new(usize::MAX)
+    }
+
+    /// Account one predicate evaluation. Returns `false` — and latches `hit` — once exhausted.
+    fn charge(&mut self) -> bool {
+        if self.remaining == 0 {
+            self.hit = true;
+            return false;
+        }
+        self.remaining -= 1;
+        true
+    }
+}
+
+/// Per-start `(state, position)` failure memo for the backtracking walkers.
+///
+/// Soundness: an entry is recorded ONLY for recursion entered through a *consuming* transition —
+/// that recursion always starts with a fresh visited-set, so its outcome is context-free — and
+/// only when the pattern's verdicts are path-independent (no `DEFINE` slot reads the running label
+/// assignment; see the executor's `memoizable` flag). Within one start, a verdict then depends
+/// only on `(var, pos)` (`labels.len()` is `pos - start`, so `WITHIN` and the match-start offset
+/// are position-determined), so a failed `(state, pos)` fails identically on every re-entry. That
+/// re-entry via different consumption prefixes is exactly the exponential blowup; memoizing it
+/// makes a start's scan polynomial. ε-level failures are NOT recorded: they can be artifacts of
+/// the cycle-cutting visited-set and are not context-free.
+struct Memo {
+    /// Failure sets indexed by position offset from the memo's start; one [`Visited`] per position
+    /// (bitmask for small automata, set fallback beyond).
+    failed: Vec<Visited>,
+    n_states: usize,
+    base: usize,
+}
+
+impl Memo {
+    fn new(base: usize, n_rows: usize, n_states: usize) -> Self {
+        Self {
+            failed: Vec::with_capacity(n_rows.saturating_sub(base) + 1),
+            n_states,
+            base,
+        }
+    }
+
+    fn slot(&mut self, pos: usize) -> &mut Visited {
+        let idx = pos - self.base;
+        while self.failed.len() <= idx {
+            self.failed.push(Visited::new(self.n_states));
+        }
+        &mut self.failed[idx]
+    }
+
+    fn is_failed(&mut self, state: StateId, pos: usize) -> bool {
+        self.slot(pos).contains(state)
+    }
+
+    fn record_failure(&mut self, state: StateId, pos: usize) {
+        self.slot(pos).insert(state);
+    }
+}
+
 /// Decides whether the row at a physical position can be bound to a pattern variable, given the
 /// variables already bound to the earlier rows of the in-progress match. This is how `DEFINE`
 /// predicates are evaluated during matching: a predicate may reference the current row, its physical
@@ -444,6 +534,13 @@ impl Visited {
             }
         }
     }
+
+    fn contains(&self, s: StateId) -> bool {
+        match self {
+            Visited::Small(bits) => *bits & (1u64 << s) != 0,
+            Visited::Large(set) => set.contains(&s),
+        }
+    }
 }
 
 impl Nfa {
@@ -541,7 +638,11 @@ impl Nfa {
     ) -> StreamExecutorResult<Vec<LabeledMatch>> {
         let mut matches = Vec::new();
         let mut scan = MatchScan::new();
-        while let Some(m) = self.next_match(&mut scan, n_rows, matcher, skip).await? {
+        let mut budget = ScanBudget::unlimited();
+        while let Some(m) = self
+            .next_match(&mut scan, n_rows, matcher, skip, &mut budget, false)
+            .await?
+        {
             matches.push(m);
         }
         Ok(matches)
@@ -564,13 +665,28 @@ impl Nfa {
         n_rows: usize,
         matcher: &(impl CandidateMatcher + Sync),
         skip: &SkipMode,
+        budget: &mut ScanBudget,
+        memoize: bool,
     ) -> StreamExecutorResult<Option<LabeledMatch>> {
-        while scan.next_start < n_rows {
+        while scan.next_start < n_rows && !budget.hit {
             let i = scan.next_start;
             let mut path: Vec<String> = Vec::new();
             let mut visited = Visited::new(self.states.len());
+            // The memo is per START: within one start a verdict depends only on `(var, pos)`
+            // (given path-independence), so it must not leak across starts, where `labels.len()`
+            // differs for the same position.
+            let mut memo = memoize.then(|| Memo::new(i, n_rows, self.states.len()));
             let found = self
-                .preferred_from_dynamic(n_rows, self.start, i, &mut path, matcher, &mut visited)
+                .preferred_from_dynamic(
+                    n_rows,
+                    self.start,
+                    i,
+                    &mut path,
+                    matcher,
+                    &mut visited,
+                    budget,
+                    memo.as_mut(),
+                )
                 .await?;
             if let Some((end, labels)) = found
                 && end > i
@@ -605,11 +721,23 @@ impl Nfa {
         pos: usize,
         n_rows: usize,
         matcher: &(impl CandidateMatcher + Sync),
+        budget: &mut ScanBudget,
+        memoize: bool,
     ) -> StreamExecutorResult<bool> {
         let mut path: Vec<String> = Vec::new();
         let mut visited = Visited::new(self.states.len());
-        self.live_to_boundary(n_rows, self.start, pos, &mut path, matcher, &mut visited)
-            .await
+        let mut memo = memoize.then(|| Memo::new(pos, n_rows, self.states.len()));
+        self.live_to_boundary(
+            n_rows,
+            self.start,
+            pos,
+            &mut path,
+            matcher,
+            &mut visited,
+            budget,
+            memo.as_mut(),
+        )
+        .await
     }
 
     /// Whether the finder's *preferred* result for the match starting at `start` could change if
@@ -639,10 +767,13 @@ impl Nfa {
         start: usize,
         end: usize,
         matcher: &(impl CandidateMatcher + Sync),
+        budget: &mut ScanBudget,
+        memoize: bool,
     ) -> StreamExecutorResult<bool> {
         let mut path: Vec<String> = Vec::new();
         let mut visited = Visited::new(self.states.len());
         let mut blocked = false;
+        let mut memo = memoize.then(|| Memo::new(start, end, self.states.len()));
         let accepted = self
             .preferred_blocked_before_accept(
                 end,
@@ -652,8 +783,16 @@ impl Nfa {
                 matcher,
                 &mut visited,
                 &mut blocked,
+                budget,
+                memo.as_mut(),
             )
             .await?;
+        // A spent budget means the walk may have stopped before the preferred accept: `blocked`
+        // then under-approximates, and the only safe answer is "may extend" (hold — never emit on
+        // partial information).
+        if budget.hit {
+            return Ok(true);
+        }
         // Called for a match the finder produced over these same rows, so an accepting path within
         // `end` exists and `accepted` holds; if a caller ever probes a non-match, every explored
         // path is by definition higher-priority than the (absent) result, so `blocked` is still
@@ -679,9 +818,14 @@ impl Nfa {
         matcher: &(impl CandidateMatcher + Sync),
         visited: &mut Visited,
         blocked: &mut bool,
+        budget: &mut ScanBudget,
+        mut memo: Option<&mut Memo>,
     ) -> StreamExecutorResult<bool> {
         if state == self.accept {
             return Ok(true);
+        }
+        if budget.hit {
+            return Ok(false);
         }
         if !visited.insert(state) {
             return Ok(false);
@@ -690,7 +834,15 @@ impl Nfa {
             let accepted = match t {
                 Transition::Epsilon(next) => {
                     self.preferred_blocked_before_accept(
-                        end, *next, pos, path, matcher, visited, blocked,
+                        end,
+                        *next,
+                        pos,
+                        path,
+                        matcher,
+                        visited,
+                        blocked,
+                        budget,
+                        memo.as_deref_mut(),
                     )
                     .await?
                 }
@@ -704,22 +856,40 @@ impl Nfa {
                             *blocked = true;
                         }
                         false
-                    } else if matcher.matches(var, pos, path).await? {
-                        path.push(var.clone());
-                        let mut next_visited = Visited::new(self.states.len());
-                        let r = self
-                            .preferred_blocked_before_accept(
-                                end,
-                                *target,
-                                pos + 1,
-                                path,
-                                matcher,
-                                &mut next_visited,
-                                blocked,
-                            )
-                            .await?;
-                        path.pop();
-                        r
+                    } else if budget.charge() && matcher.matches(var, pos, path).await? {
+                        // Consumption boundary — memo as in `preferred_from_dynamic`. `blocked`
+                        // is monotone (set-only), so skipping a memoized-failed subtree cannot
+                        // lose it: the first, full exploration of that subtree already set it.
+                        if memo
+                            .as_deref_mut()
+                            .is_some_and(|m| m.is_failed(*target, pos + 1))
+                        {
+                            false
+                        } else {
+                            path.push(var.clone());
+                            let mut next_visited = Visited::new(self.states.len());
+                            let r = self
+                                .preferred_blocked_before_accept(
+                                    end,
+                                    *target,
+                                    pos + 1,
+                                    path,
+                                    matcher,
+                                    &mut next_visited,
+                                    blocked,
+                                    budget,
+                                    memo.as_deref_mut(),
+                                )
+                                .await?;
+                            path.pop();
+                            if !r
+                                && !budget.hit
+                                && let Some(m) = memo.as_deref_mut()
+                            {
+                                m.record_failure(*target, pos + 1);
+                            }
+                            r
+                        }
                     } else {
                         false
                     }
@@ -728,6 +898,9 @@ impl Nfa {
             if accepted {
                 visited.remove(state);
                 return Ok(true);
+            }
+            if budget.hit {
+                break;
             }
         }
         visited.remove(state);
@@ -741,6 +914,7 @@ impl Nfa {
     /// before the boundary is a complete (already-finalized) match, not a live partial one, so it
     /// does not by itself keep the start alive.
     #[async_recursion]
+    #[allow(clippy::too_many_arguments)]
     async fn live_to_boundary(
         &self,
         n_rows: usize,
@@ -749,11 +923,16 @@ impl Nfa {
         path: &mut Vec<String>,
         matcher: &(impl CandidateMatcher + Sync),
         visited: &mut Visited,
+        budget: &mut ScanBudget,
+        mut memo: Option<&mut Memo>,
     ) -> StreamExecutorResult<bool> {
         if pos == n_rows {
             return Ok(true);
         }
         if state == self.accept {
+            return Ok(false);
+        }
+        if budget.hit {
             return Ok(false);
         }
         if !visited.insert(state) {
@@ -762,25 +941,51 @@ impl Nfa {
         for t in &self.states[state] {
             let alive = match t {
                 Transition::Epsilon(next) => {
-                    self.live_to_boundary(n_rows, *next, pos, path, matcher, visited)
-                        .await?
+                    self.live_to_boundary(
+                        n_rows,
+                        *next,
+                        pos,
+                        path,
+                        matcher,
+                        visited,
+                        budget,
+                        memo.as_deref_mut(),
+                    )
+                    .await?
                 }
                 Transition::OnVar { var, target } => {
-                    if pos < n_rows && matcher.matches(var, pos, path).await? {
-                        path.push(var.clone());
-                        let mut next_visited = Visited::new(self.states.len());
-                        let r = self
-                            .live_to_boundary(
-                                n_rows,
-                                *target,
-                                pos + 1,
-                                path,
-                                matcher,
-                                &mut next_visited,
-                            )
-                            .await?;
-                        path.pop();
-                        r
+                    if pos < n_rows && budget.charge() && matcher.matches(var, pos, path).await? {
+                        // Consumption boundary — see `preferred_from_dynamic` for why the memo is
+                        // checked and recorded exactly here. The memoized outcome is "not alive".
+                        if memo
+                            .as_deref_mut()
+                            .is_some_and(|m| m.is_failed(*target, pos + 1))
+                        {
+                            false
+                        } else {
+                            path.push(var.clone());
+                            let mut next_visited = Visited::new(self.states.len());
+                            let r = self
+                                .live_to_boundary(
+                                    n_rows,
+                                    *target,
+                                    pos + 1,
+                                    path,
+                                    matcher,
+                                    &mut next_visited,
+                                    budget,
+                                    memo.as_deref_mut(),
+                                )
+                                .await?;
+                            path.pop();
+                            if !r
+                                && !budget.hit
+                                && let Some(m) = memo.as_deref_mut()
+                            {
+                                m.record_failure(*target, pos + 1);
+                            }
+                            r
+                        }
                     } else {
                         false
                     }
@@ -789,6 +994,9 @@ impl Nfa {
             if alive {
                 visited.remove(state);
                 return Ok(true);
+            }
+            if budget.hit {
+                break;
             }
         }
         visited.remove(state);
@@ -807,6 +1015,7 @@ impl Nfa {
     /// quantifier the exit edge precedes it (so the first accepting path is the shortest). This also
     /// gives alternation its standard ordered semantics (the first listed alternative that matches).
     #[async_recursion]
+    #[allow(clippy::too_many_arguments)]
     async fn preferred_from_dynamic(
         &self,
         n_rows: usize,
@@ -815,10 +1024,17 @@ impl Nfa {
         path: &mut Vec<String>,
         matcher: &(impl CandidateMatcher + Sync),
         visited: &mut Visited,
+        budget: &mut ScanBudget,
+        mut memo: Option<&mut Memo>,
     ) -> StreamExecutorResult<Option<(usize, Vec<String>)>> {
         // The single accept state is terminal: reaching it completes the match here.
         if state == self.accept {
             return Ok(Some((pos, path.clone())));
+        }
+        // A spent budget aborts the walk without a verdict; the caller must treat everything
+        // undecided conservatively (see `ScanBudget`).
+        if budget.hit {
+            return Ok(None);
         }
         if !visited.insert(state) {
             return Ok(None);
@@ -826,25 +1042,55 @@ impl Nfa {
         for t in &self.states[state] {
             let candidate = match t {
                 Transition::Epsilon(next) => {
-                    self.preferred_from_dynamic(n_rows, *next, pos, path, matcher, visited)
-                        .await?
+                    self.preferred_from_dynamic(
+                        n_rows,
+                        *next,
+                        pos,
+                        path,
+                        matcher,
+                        visited,
+                        budget,
+                        memo.as_deref_mut(),
+                    )
+                    .await?
                 }
                 Transition::OnVar { var, target } => {
-                    if pos < n_rows && matcher.matches(var, pos, path).await? {
-                        path.push(var.clone());
-                        let mut next_visited = Visited::new(self.states.len());
-                        let r = self
-                            .preferred_from_dynamic(
-                                n_rows,
-                                *target,
-                                pos + 1,
-                                path,
-                                matcher,
-                                &mut next_visited,
-                            )
-                            .await?;
-                        path.pop();
-                        r
+                    if pos < n_rows && budget.charge() && matcher.matches(var, pos, path).await? {
+                        // Consumption boundary: the recursion below starts with a fresh
+                        // visited-set, so its outcome is context-free — check and record the
+                        // failure memo exactly here (never at ε-level, where a failure can be a
+                        // cycle-cut artifact).
+                        if memo
+                            .as_deref_mut()
+                            .is_some_and(|m| m.is_failed(*target, pos + 1))
+                        {
+                            None
+                        } else {
+                            path.push(var.clone());
+                            let mut next_visited = Visited::new(self.states.len());
+                            let r = self
+                                .preferred_from_dynamic(
+                                    n_rows,
+                                    *target,
+                                    pos + 1,
+                                    path,
+                                    matcher,
+                                    &mut next_visited,
+                                    budget,
+                                    memo.as_deref_mut(),
+                                )
+                                .await?;
+                            path.pop();
+                            // A budget-aborted None is NOT a proven failure; memoizing it would
+                            // turn a transient abort into a permanent wrong verdict.
+                            if r.is_none()
+                                && !budget.hit
+                                && let Some(m) = memo.as_deref_mut()
+                            {
+                                m.record_failure(*target, pos + 1);
+                            }
+                            r
+                        }
                     } else {
                         None
                     }
@@ -853,6 +1099,9 @@ impl Nfa {
             if candidate.is_some() {
                 visited.remove(state);
                 return Ok(candidate);
+            }
+            if budget.hit {
+                break;
             }
         }
         visited.remove(state);
@@ -1479,7 +1728,14 @@ mod tests {
         let mut scan = MatchScan::new();
         let skip = SkipMode::PastLastRow;
         let first = nfa
-            .next_match(&mut scan, r.len(), &first_only, &skip)
+            .next_match(
+                &mut scan,
+                r.len(),
+                &first_only,
+                &skip,
+                &mut ScanBudget::unlimited(),
+                false,
+            )
             .await
             .unwrap()
             .expect("first match");
@@ -1504,10 +1760,155 @@ mod tests {
         let m = SetMatcher { rows: r.clone() };
         let mut scan = MatchScan::new();
         let mut pulled = Vec::new();
-        while let Some(mm) = nfa.next_match(&mut scan, r.len(), &m, &skip).await.unwrap() {
+        while let Some(mm) = nfa
+            .next_match(
+                &mut scan,
+                r.len(),
+                &m,
+                &skip,
+                &mut ScanBudget::unlimited(),
+                false,
+            )
+            .await
+            .unwrap()
+        {
             pulled.push(mm);
         }
         assert_eq!(pulled, collected);
+    }
+
+    /// The catastrophic-backtracking family: `(a? a? … a? b)` over a run of `a`-rows costs
+    /// exponentially many predicate evaluations per start unmemoized. The per-start `(state, pos)`
+    /// failure memo (sound for path-independent verdicts, recorded only at consumption boundaries)
+    /// must collapse that to polynomial — and must not change a single result.
+    #[tokio::test]
+    async fn memoization_defuses_catastrophic_backtracking() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct CountingMatcher {
+            rows: Vec<BTreeSet<String>>,
+            calls: AtomicUsize,
+        }
+        impl CandidateMatcher for CountingMatcher {
+            async fn matches(
+                &self,
+                var: &str,
+                pos: usize,
+                _labels: &[String],
+            ) -> StreamExecutorResult<bool> {
+                self.calls.fetch_add(1, Ordering::Relaxed);
+                Ok(self.rows[pos].contains(var))
+            }
+        }
+
+        // (a? ×16  b) over 20 `a`-rows and no `b`: every start fails, each exploring the
+        // exponential subset lattice of which optionals consumed which rows.
+        let mut parts: Vec<Pattern> = (0..16)
+            .map(|_| Pattern::Quantified(Box::new(vars("a")), Quantifier::Question, false))
+            .collect();
+        parts.push(vars("b"));
+        let nfa = Nfa::compile(&Pattern::Concat(parts));
+        let r = rows(&"a".repeat(20));
+
+        let run = |memoize: bool| {
+            let nfa = &nfa;
+            let r = r.clone();
+            async move {
+                let m = CountingMatcher {
+                    rows: r.clone(),
+                    calls: AtomicUsize::new(0),
+                };
+                let mut budget = ScanBudget::unlimited();
+                let mut scan = MatchScan::new();
+                let mut out = Vec::new();
+                while let Some(mm) = nfa
+                    .next_match(
+                        &mut scan,
+                        r.len(),
+                        &m,
+                        &SkipMode::PastLastRow,
+                        &mut budget,
+                        memoize,
+                    )
+                    .await
+                    .unwrap()
+                {
+                    out.push(mm);
+                }
+                (out, m.calls.load(Ordering::Relaxed))
+            }
+        };
+
+        let (plain_out, plain_calls) = run(false).await;
+        let (memo_out, memo_calls) = run(true).await;
+        assert_eq!(plain_out, memo_out);
+        assert!(
+            memo_calls * 20 < plain_calls,
+            "memoized scan ({memo_calls} evaluations) must be far below the backtracking scan \
+             ({plain_calls})"
+        );
+        // And the memoized cost is genuinely polynomial-small for this size.
+        assert!(memo_calls < 50_000, "memoized: {memo_calls}");
+    }
+
+    /// A spent [`ScanBudget`] stops the walks without verdicts: the finder yields no further
+    /// match (never a wrong one), the liveness walker answers "not alive" only alongside the
+    /// sticky `hit` flag (which the executor must check before believing it), and the extension
+    /// probe answers "may extend" (hold).
+    #[tokio::test]
+    async fn spent_budget_stops_without_verdicts() {
+        let nfa = Nfa::compile(&Pattern::Concat(vec![vars("a"), vars("b")]));
+        let r = rows("ab");
+        let m = SetMatcher { rows: r.clone() };
+
+        // Unlimited: the match is found.
+        let mut budget = ScanBudget::unlimited();
+        let mut scan = MatchScan::new();
+        let found = nfa
+            .next_match(
+                &mut scan,
+                r.len(),
+                &m,
+                &SkipMode::PastLastRow,
+                &mut budget,
+                false,
+            )
+            .await
+            .unwrap();
+        assert!(found.is_some());
+        assert!(!budget.hit);
+
+        // Zero budget: no match, hit latched.
+        let mut budget = ScanBudget::new(0);
+        let mut scan = MatchScan::new();
+        let found = nfa
+            .next_match(
+                &mut scan,
+                r.len(),
+                &m,
+                &SkipMode::PastLastRow,
+                &mut budget,
+                false,
+            )
+            .await
+            .unwrap();
+        assert!(found.is_none());
+        assert!(budget.hit);
+
+        // Liveness under zero budget: answers false with hit latched — the executor treats that
+        // as "undecided, retain", never as "dead".
+        let mut budget = ScanBudget::new(0);
+        let alive = nfa
+            .reaches_boundary_alive(0, 1, &m, &mut budget, false)
+            .await
+            .unwrap();
+        assert!(!alive);
+        assert!(budget.hit);
+
+        // Extension probe under zero budget: conservative "may extend".
+        let mut budget = ScanBudget::new(0);
+        assert!(nfa.may_extend(0, 2, &m, &mut budget, false).await.unwrap());
+        assert!(budget.hit);
     }
 
     #[tokio::test]
@@ -1538,7 +1939,12 @@ mod tests {
 
         // Fixed (a b): after consuming both, nothing can extend — terminal.
         let fixed = Nfa::compile(&Pattern::Concat(vec![vars("a"), vars("b")]));
-        assert!(!fixed.may_extend(0, 2, &m("ab")).await.unwrap());
+        assert!(
+            !fixed
+                .may_extend(0, 2, &m("ab"), &mut ScanBudget::unlimited(), false)
+                .await
+                .unwrap()
+        );
 
         // (a b+): the greedy loop's consume edge precedes its exit, so a future `b` would produce
         // a preferred (longer) result — held.
@@ -1546,7 +1952,11 @@ mod tests {
             vars("a"),
             Pattern::Quantified(Box::new(vars("b")), Quantifier::Plus, false),
         ]));
-        assert!(open.may_extend(0, 2, &m("ab")).await.unwrap());
+        assert!(
+            open.may_extend(0, 2, &m("ab"), &mut ScanBudget::unlimited(), false)
+                .await
+                .unwrap()
+        );
 
         // (a (b | b c)): ordered alternation — the first-listed `b` branch already accepted, and a
         // later `c` cannot override it. Terminal, matching what the finder would return.
@@ -1554,7 +1964,11 @@ mod tests {
             vars("a"),
             Pattern::Alt(vec![vars("b"), Pattern::Concat(vec![vars("b"), vars("c")])]),
         ]));
-        assert!(!alt.may_extend(0, 2, &m("ab")).await.unwrap());
+        assert!(
+            !alt.may_extend(0, 2, &m("ab"), &mut ScanBudget::unlimited(), false)
+                .await
+                .unwrap()
+        );
 
         // (a (b c | b)): the LONGER branch is listed first, so a future `c` would produce a
         // preferred result — held. Preference direction, not structure, decides.
@@ -1562,7 +1976,12 @@ mod tests {
             vars("a"),
             Pattern::Alt(vec![Pattern::Concat(vec![vars("b"), vars("c")]), vars("b")]),
         ]));
-        assert!(alt_rev.may_extend(0, 2, &m("ab")).await.unwrap());
+        assert!(
+            alt_rev
+                .may_extend(0, 2, &m("ab"), &mut ScanBudget::unlimited(), false)
+                .await
+                .unwrap()
+        );
 
         // (a b+?): reluctant — the exit edge precedes the consume edge, so the short result is the
         // preferred one and future `b`s cannot change it. Terminal.
@@ -1570,7 +1989,12 @@ mod tests {
             vars("a"),
             Pattern::Quantified(Box::new(vars("b")), Quantifier::Plus, true),
         ]));
-        assert!(!reluctant.may_extend(0, 2, &m("ab")).await.unwrap());
+        assert!(
+            !reluctant
+                .may_extend(0, 2, &m("ab"), &mut ScanBudget::unlimited(), false)
+                .await
+                .unwrap()
+        );
 
         // (a b{1,2}): one `b` leaves the range open; two exhaust it.
         let range = Nfa::compile(&Pattern::Concat(vec![
@@ -1584,16 +2008,34 @@ mod tests {
                 false,
             ),
         ]));
-        assert!(range.may_extend(0, 2, &m("ab")).await.unwrap());
-        assert!(!range.may_extend(0, 3, &m("abb")).await.unwrap());
+        assert!(
+            range
+                .may_extend(0, 2, &m("ab"), &mut ScanBudget::unlimited(), false)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !range
+                .may_extend(0, 3, &m("abb"), &mut ScanBudget::unlimited(), false)
+                .await
+                .unwrap()
+        );
 
         // (a b?): the optional tail extends a bare [a]; a consumed (a, b) is terminal.
         let opt = Nfa::compile(&Pattern::Concat(vec![
             vars("a"),
             Pattern::Quantified(Box::new(vars("b")), Quantifier::Question, false),
         ]));
-        assert!(opt.may_extend(0, 1, &m("a")).await.unwrap());
-        assert!(!opt.may_extend(0, 2, &m("ab")).await.unwrap());
+        assert!(
+            opt.may_extend(0, 1, &m("a"), &mut ScanBudget::unlimited(), false)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !opt.may_extend(0, 2, &m("ab"), &mut ScanBudget::unlimited(), false)
+                .await
+                .unwrap()
+        );
     }
 
     #[tokio::test]
@@ -1604,26 +2046,50 @@ mod tests {
         // `[a]` with the boundary right after it: the `a` is a live partial match — a future `b` may
         // complete it — so it must be retained.
         let m = SetMatcher { rows: rows("a") };
-        assert!(nfa.reaches_boundary_alive(0, 1, &m).await.unwrap());
+        assert!(
+            nfa.reaches_boundary_alive(0, 1, &m, &mut ScanBudget::unlimited(), false)
+                .await
+                .unwrap()
+        );
 
         // `[a, x]` and `[a, x, x]` (x satisfies neither `a` nor `b`): the `a` can still *begin* the
         // pattern, but the following safe rows already block it from completing, so it is dead and
         // must be evictable. This is the case the previous `can_begin_at`-based predicate retained
         // forever.
         let m = SetMatcher { rows: rows("ax") };
-        assert!(!nfa.reaches_boundary_alive(0, 2, &m).await.unwrap());
+        assert!(
+            !nfa.reaches_boundary_alive(0, 2, &m, &mut ScanBudget::unlimited(), false)
+                .await
+                .unwrap()
+        );
         let m = SetMatcher { rows: rows("axx") };
-        assert!(!nfa.reaches_boundary_alive(0, 3, &m).await.unwrap());
+        assert!(
+            !nfa.reaches_boundary_alive(0, 3, &m, &mut ScanBudget::unlimited(), false)
+                .await
+                .unwrap()
+        );
 
         // A later start can be the live one: in `[x, a]` row 0 is dead but row 1 (the `a`) is live.
         let m = SetMatcher { rows: rows("xa") };
-        assert!(!nfa.reaches_boundary_alive(0, 2, &m).await.unwrap());
-        assert!(nfa.reaches_boundary_alive(1, 2, &m).await.unwrap());
+        assert!(
+            !nfa.reaches_boundary_alive(0, 2, &m, &mut ScanBudget::unlimited(), false)
+                .await
+                .unwrap()
+        );
+        assert!(
+            nfa.reaches_boundary_alive(1, 2, &m, &mut ScanBudget::unlimited(), false)
+                .await
+                .unwrap()
+        );
 
         // A complete match sitting exactly at the boundary is not yet finalized (it needs a following
         // safe row to confirm maximality), so its start is still retained.
         let m = SetMatcher { rows: rows("ab") };
-        assert!(nfa.reaches_boundary_alive(0, 2, &m).await.unwrap());
+        assert!(
+            nfa.reaches_boundary_alive(0, 2, &m, &mut ScanBudget::unlimited(), false)
+                .await
+                .unwrap()
+        );
     }
 
     /// A path-dependent matcher: `b` only matches once an `a` has been bound earlier in the match.
