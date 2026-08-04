@@ -13,14 +13,14 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
-use std::sync::{Arc, RwLock, RwLockReadGuard};
+use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use rand::seq::IndexedRandom;
-use risingwave_common::bail;
 use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::id::{FragmentId, WorkerId};
 use risingwave_common::vnode_mapping::vnode_placement::place_vnode;
+use risingwave_common::{RW_VERSION, bail};
 use risingwave_pb::common::{WorkerNode, WorkerType};
 
 use crate::error::{BatchError, Result};
@@ -277,8 +277,18 @@ impl WorkerNodeManager {
         }
     }
 
-    fn worker_node_mask(&self) -> RwLockReadGuard<'_, HashSet<WorkerId>> {
+    #[cfg(test)]
+    fn worker_node_mask(&self) -> std::sync::RwLockReadGuard<'_, HashSet<WorkerId>> {
         self.worker_node_mask.read().unwrap()
+    }
+
+    fn effective_worker_node_mask(&self, serving_worker_nodes: &[WorkerNode]) -> HashSet<WorkerId> {
+        let mut mask = self.worker_node_mask.read().unwrap().clone();
+        mask.extend(serving_worker_nodes.iter().filter_map(|worker| {
+            (worker.resource.as_ref().map(|r| r.rw_version.as_str()) != Some(RW_VERSION))
+                .then_some(worker.id)
+        }));
+        mask
     }
 
     pub fn mask_worker_node(&self, worker_node_id: WorkerId, duration: Duration) {
@@ -366,12 +376,17 @@ impl WorkerNodeSelector {
                 );
                 self.manager.get_streaming_fragment_mapping(&fragment_id)
             })?;
+            let serving_worker_nodes = self.manager.list_serving_worker_nodes();
+            let worker_node_mask = self
+                .manager
+                .effective_worker_node_mask(&serving_worker_nodes);
 
             // Filter out unavailable workers.
-            if self.manager.worker_node_mask().is_empty() {
+            if worker_node_mask.is_empty() {
                 Ok(mapping)
             } else {
-                let workers = self.apply_worker_node_mask(self.manager.list_serving_worker_nodes());
+                let workers =
+                    Self::apply_worker_node_mask_inner(serving_worker_nodes, &worker_node_mask);
                 // If it's a singleton, set max_parallelism=1 for place_vnode.
                 let max_parallelism = mapping.to_single().map(|_| 1);
                 // TODO: use runtime parameter batch_parallelism
@@ -396,28 +411,37 @@ impl WorkerNodeSelector {
     }
 
     fn apply_worker_node_mask(&self, origin: Vec<WorkerNode>) -> Vec<WorkerNode> {
-        let mask = self.manager.worker_node_mask();
-        if origin.iter().all(|w| mask.contains(&w.id)) {
+        let worker_node_mask = self.manager.effective_worker_node_mask(&origin);
+        Self::apply_worker_node_mask_inner(origin, &worker_node_mask)
+    }
+
+    fn apply_worker_node_mask_inner(
+        origin: Vec<WorkerNode>,
+        worker_node_mask: &HashSet<WorkerId>,
+    ) -> Vec<WorkerNode> {
+        if origin.iter().all(|w| worker_node_mask.contains(&w.id)) {
             return origin;
         }
         origin
             .into_iter()
-            .filter(|w| !mask.contains(&w.id))
+            .filter(|w| !worker_node_mask.contains(&w.id))
             .collect()
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use itertools::Itertools;
     use risingwave_common::util::addr::HostAddr;
     use risingwave_pb::common::worker_node;
     use risingwave_pb::common::worker_node::Property;
 
+    use super::*;
+
     #[test]
     fn test_worker_node_manager() {
-        use super::*;
-
         let manager = WorkerNodeManager::mock(vec![]);
         assert_eq!(manager.list_serving_worker_nodes().len(), 0);
         assert_eq!(manager.list_streaming_worker_nodes().len(), 0);
@@ -476,5 +500,127 @@ mod tests {
                 .collect_vec(),
             worker_nodes.as_slice()[1..].to_vec()
         );
+    }
+
+    fn serving_worker(id: u32, rw_version: Option<&str>) -> WorkerNode {
+        WorkerNode {
+            id: id.into(),
+            r#type: WorkerType::ComputeNode as i32,
+            host: Some(
+                HostAddr::try_from(format!("127.0.0.1:{}", 1234 + id).as_str())
+                    .unwrap()
+                    .to_protobuf(),
+            ),
+            state: worker_node::State::Running as i32,
+            property: Some(Property {
+                is_serving: true,
+                parallelism: 1,
+                ..Default::default()
+            }),
+            transactional_id: Some(id),
+            resource: rw_version.map(|version| worker_node::Resource {
+                rw_version: version.to_owned(),
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    fn fragment_mapping_worker_ids(mapping: &WorkerSlotMapping) -> Vec<WorkerId> {
+        mapping
+            .iter_unique()
+            .map(|worker_slot_id| worker_slot_id.worker_id())
+            .collect_vec()
+    }
+
+    fn worker_slot_mapping(worker_ids: impl IntoIterator<Item = u32>) -> WorkerSlotMapping {
+        WorkerSlotMapping::new_uniform(
+            worker_ids
+                .into_iter()
+                .map(|worker_id| WorkerSlotId::new(worker_id.into(), 0))
+                .collect_vec()
+                .into_iter(),
+            4,
+        )
+    }
+
+    #[test]
+    fn test_fragment_mapping_masks_serving_workers_with_version_mismatch() {
+        let manager = Arc::new(WorkerNodeManager::mock(vec![
+            serving_worker(1, Some(RW_VERSION)),
+            serving_worker(2, Some("different-version")),
+        ]));
+        let selector = WorkerNodeSelector::new(manager.clone(), false);
+        manager
+            .set_serving_fragment_mapping(HashMap::from([(0.into(), worker_slot_mapping([1, 2]))]));
+
+        let mapping = selector.fragment_mapping(0.into()).unwrap();
+
+        assert_eq!(
+            fragment_mapping_worker_ids(&mapping),
+            vec![WorkerId::new(1)]
+        );
+    }
+
+    #[test]
+    fn test_fragment_mapping_keeps_serving_workers_with_current_version() {
+        let manager = Arc::new(WorkerNodeManager::mock(vec![
+            serving_worker(1, Some(RW_VERSION)),
+            serving_worker(2, Some(RW_VERSION)),
+        ]));
+        let selector = WorkerNodeSelector::new(manager.clone(), false);
+        manager
+            .set_serving_fragment_mapping(HashMap::from([(0.into(), worker_slot_mapping([1, 2]))]));
+
+        let mapping = selector.fragment_mapping(0.into()).unwrap();
+
+        assert_eq!(
+            fragment_mapping_worker_ids(&mapping),
+            vec![WorkerId::new(1), WorkerId::new(2)]
+        );
+    }
+
+    #[test]
+    fn test_fragment_mapping_masks_serving_workers_without_current_version() {
+        let manager = Arc::new(WorkerNodeManager::mock(vec![
+            serving_worker(1, Some(RW_VERSION)),
+            serving_worker(2, None),
+            serving_worker(3, Some("")),
+        ]));
+        let selector = WorkerNodeSelector::new(manager.clone(), false);
+        manager.set_serving_fragment_mapping(HashMap::from([(
+            0.into(),
+            worker_slot_mapping([1, 2, 3]),
+        )]));
+
+        let mapping = selector.fragment_mapping(0.into()).unwrap();
+
+        assert_eq!(
+            fragment_mapping_worker_ids(&mapping),
+            vec![WorkerId::new(1)]
+        );
+    }
+
+    #[tokio::test]
+    async fn test_fragment_mapping_version_mask_does_not_clear_temporary_mask() {
+        let manager = Arc::new(WorkerNodeManager::mock(vec![
+            serving_worker(1, Some(RW_VERSION)),
+            serving_worker(2, Some(RW_VERSION)),
+            serving_worker(3, Some("different-version")),
+        ]));
+        let selector = WorkerNodeSelector::new(manager.clone(), false);
+        manager.set_serving_fragment_mapping(HashMap::from([(
+            0.into(),
+            worker_slot_mapping([1, 2, 3]),
+        )]));
+        manager.mask_worker_node(2.into(), Duration::from_secs(60));
+
+        let mapping = selector.fragment_mapping(0.into()).unwrap();
+
+        assert_eq!(
+            fragment_mapping_worker_ids(&mapping),
+            vec![WorkerId::new(1)]
+        );
+        assert!(manager.worker_node_mask().contains(&WorkerId::new(2)));
     }
 }
