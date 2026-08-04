@@ -63,11 +63,7 @@ pub struct ClusterController {
     started_at: u64,
 }
 
-struct WorkerInfo(
-    worker::Model,
-    Option<worker_property::Model>,
-    WorkerExtraInfo,
-);
+struct WorkerInfo(worker::Model, Option<worker_property::Model>);
 
 impl From<WorkerInfo> for PbWorkerNode {
     fn from(info: WorkerInfo) -> Self {
@@ -88,7 +84,11 @@ impl From<WorkerInfo> for PbWorkerNode {
                 is_iceberg_compactor: p.is_iceberg_compactor,
             }),
             transactional_id: info.0.transaction_id.map(|id| id as _),
-            resource: Some(info.2.resource),
+            resource: info
+                .1
+                .as_ref()
+                .and_then(|property| property.resource.as_ref())
+                .map(|resource| resource.to_protobuf()),
             started_at: info
                 .1
                 .as_ref()
@@ -124,13 +124,13 @@ impl ClusterController {
     }
 
     /// Get the total resource of the cluster.
-    pub async fn cluster_resource(&self) -> ClusterResource {
-        self.inner.read().await.cluster_resource()
+    pub async fn cluster_resource(&self) -> MetaResult<ClusterResource> {
+        self.inner.read().await.cluster_resource().await
     }
 
     /// Get the total resource of the cluster, then update license manager and notify all other nodes.
     async fn update_cluster_resource_for_license(&self) -> MetaResult<()> {
-        let resource = self.cluster_resource().await;
+        let resource = self.cluster_resource().await?;
 
         // Update local license manager.
         LicenseManager::get().update_cluster_resource(resource);
@@ -449,21 +449,9 @@ impl StreamingClusterInfo {
 pub struct WorkerExtraInfo {
     // Unix timestamp that the worker will expire at.
     expire_at: Option<u64>,
-    // Cached from worker_property to calculate cluster resources without DB I/O.
-    resource: PbResource,
 }
 
 impl WorkerExtraInfo {
-    fn from_worker_property(property: Option<&worker_property::Model>) -> Self {
-        Self {
-            resource: property
-                .and_then(|property| property.resource.as_ref())
-                .map(|resource| resource.to_protobuf())
-                .unwrap_or_default(),
-            ..Default::default()
-        }
-    }
-
     fn update_ttl(&mut self, ttl: Duration) {
         let expire = cmp::max(
             self.expire_at.unwrap_or_default(),
@@ -522,25 +510,23 @@ impl ClusterControllerInner {
         disable_automatic_parallelism_control: bool,
     ) -> MetaResult<Self> {
         let workers = Worker::find()
-            .find_also_related(WorkerProperty)
+            .select_only()
+            .column(worker::Column::WorkerId)
+            .column(worker::Column::TransactionId)
+            .into_tuple::<(WorkerId, Option<TransactionId>)>()
             .all(&db)
             .await?;
         let inuse_txn_ids: HashSet<_> = workers
             .iter()
-            .filter_map(|(worker, _)| worker.transaction_id)
+            .filter_map(|(_, transaction_id)| *transaction_id)
             .collect();
         let available_transactional_ids = (0..Self::MAX_WORKER_REUSABLE_ID_COUNT as TransactionId)
             .filter(|id| !inuse_txn_ids.contains(id))
             .collect();
 
         let worker_extra_info = workers
-            .iter()
-            .map(|(worker, property)| {
-                (
-                    worker.worker_id,
-                    WorkerExtraInfo::from_worker_property(property.as_ref()),
-                )
-            })
+            .into_iter()
+            .map(|(worker_id, _)| (worker_id, WorkerExtraInfo::default()))
             .collect();
 
         Ok(Self {
@@ -581,22 +567,6 @@ impl ClusterControllerInner {
         }
     }
 
-    fn update_resource(&mut self, worker_id: WorkerId, resource: PbResource) -> MetaResult<()> {
-        if let Some(info) = self.worker_extra_info.get_mut(&worker_id) {
-            info.resource = resource;
-            Ok(())
-        } else {
-            Err(MetaError::invalid_worker(worker_id, "worker not found"))
-        }
-    }
-
-    fn get_extra_info_checked(&self, worker_id: WorkerId) -> MetaResult<WorkerExtraInfo> {
-        self.worker_extra_info
-            .get(&worker_id)
-            .cloned()
-            .ok_or_else(|| MetaError::invalid_worker(worker_id, "worker not found"))
-    }
-
     fn apply_transaction_id(&self, r#type: PbWorkerType) -> MetaResult<Option<TransactionId>> {
         match (self.available_transactional_ids.front(), r#type) {
             (None, _) => Err(MetaError::unavailable("no available reusable machine id")),
@@ -607,7 +577,7 @@ impl ClusterControllerInner {
     }
 
     /// Get the total resource of the cluster.
-    fn cluster_resource(&self) -> ClusterResource {
+    async fn cluster_resource(&self) -> MetaResult<ClusterResource> {
         // For each hostname, we only consider the maximum resource, in case a host has multiple nodes.
         let mut per_host = HashMap::new();
 
@@ -621,23 +591,28 @@ impl ClusterControllerInner {
             },
         );
 
-        for info in self.worker_extra_info.values() {
+        let worker_properties = WorkerProperty::find().all(&self.db).await?;
+        for resource in worker_properties
+            .into_iter()
+            .filter_map(|property| property.resource)
+            .map(|resource| resource.to_protobuf())
+        {
             let r = per_host
-                .entry(info.resource.hostname.clone())
+                .entry(resource.hostname.clone())
                 .or_insert_with(ClusterResource::default);
 
-            r.total_cpu_cores = max(r.total_cpu_cores, info.resource.total_cpu_cores);
-            r.total_memory_bytes = max(r.total_memory_bytes, info.resource.total_memory_bytes);
+            r.total_cpu_cores = max(r.total_cpu_cores, resource.total_cpu_cores);
+            r.total_memory_bytes = max(r.total_memory_bytes, resource.total_memory_bytes);
         }
 
         // For different hostnames, we sum up the resources.
-        per_host
+        Ok(per_host
             .into_values()
             .reduce(|a, b| ClusterResource {
                 total_cpu_cores: a.total_cpu_cores + b.total_cpu_cores,
                 total_memory_bytes: a.total_memory_bytes + b.total_memory_bytes,
             })
-            .unwrap_or_default()
+            .unwrap_or_default())
     }
 
     #[await_tree::instrument]
@@ -720,7 +695,6 @@ impl ClusterControllerInner {
                 WorkerProperty::update(property).exec(&txn).await?;
                 txn.commit().await?;
                 self.update_worker_ttl(worker.worker_id, ttl)?;
-                self.update_resource(worker.worker_id, resource)?;
                 Ok(worker.worker_id)
             } else if worker.worker_type == WorkerType::Frontend && property.is_none() {
                 let worker_property = worker_property::ActiveModel {
@@ -741,7 +715,6 @@ impl ClusterControllerInner {
                 WorkerProperty::insert(worker_property).exec(&txn).await?;
                 txn.commit().await?;
                 self.update_worker_ttl(worker.worker_id, ttl)?;
-                self.update_resource(worker.worker_id, resource)?;
                 Ok(worker.worker_id)
             } else if worker.worker_type == WorkerType::Compactor {
                 if let Some(property) = property {
@@ -774,7 +747,6 @@ impl ClusterControllerInner {
                 }
                 txn.commit().await?;
                 self.update_worker_ttl(worker.worker_id, ttl)?;
-                self.update_resource(worker.worker_id, resource)?;
                 Ok(worker.worker_id)
             } else {
                 if let Some(property) = property {
@@ -785,7 +757,6 @@ impl ClusterControllerInner {
                     txn.commit().await?;
                 }
                 self.update_worker_ttl(worker.worker_id, ttl)?;
-                self.update_resource(worker.worker_id, resource)?;
                 Ok(worker.worker_id)
             };
         }
@@ -846,10 +817,7 @@ impl ClusterControllerInner {
         if let Some(txn_id) = txn_id {
             self.available_transactional_ids.retain(|id| *id != txn_id);
         }
-        let extra_info = WorkerExtraInfo {
-            expire_at: None,
-            resource,
-        };
+        let extra_info = WorkerExtraInfo { expire_at: None };
         self.worker_extra_info.insert(worker_id, extra_info);
 
         Ok(worker_id)
@@ -866,8 +834,7 @@ impl ClusterControllerInner {
         let worker_property = WorkerProperty::find_by_id(worker.worker_id)
             .one(&self.db)
             .await?;
-        let extra_info = self.get_extra_info_checked(worker_id)?;
-        Ok(WorkerInfo(worker, worker_property, extra_info).into())
+        Ok(WorkerInfo(worker, worker_property).into())
     }
 
     pub async fn delete_worker(&mut self, host_addr: HostAddress) -> MetaResult<PbWorkerNode> {
@@ -891,11 +858,11 @@ impl ClusterControllerInner {
             return Err(MetaError::invalid_parameter("worker not found!"));
         }
 
-        let extra_info = self.worker_extra_info.remove(&worker.worker_id).unwrap();
+        self.worker_extra_info.remove(&worker.worker_id).unwrap();
         if let Some(txn_id) = &worker.transaction_id {
             self.available_transactional_ids.push_back(*txn_id);
         }
-        let worker: PbWorkerNode = WorkerInfo(worker, property, extra_info).into();
+        let worker: PbWorkerNode = WorkerInfo(worker, property).into();
 
         Ok(worker)
     }
@@ -906,26 +873,26 @@ impl ClusterControllerInner {
         ttl: Duration,
         resource: Option<PbResource>,
     ) -> MetaResult<()> {
-        let resource_to_update = {
-            let Some(worker_info) = self.worker_extra_info.get_mut(&worker_id) else {
-                return Err(MetaError::invalid_worker(worker_id, "worker not found"));
-            };
-
-            worker_info.update_ttl(ttl);
-            resource.filter(|resource| worker_info.resource != *resource)
+        let Some(worker_info) = self.worker_extra_info.get_mut(&worker_id) else {
+            return Err(MetaError::invalid_worker(worker_id, "worker not found"));
         };
 
-        if let Some(resource) = resource_to_update {
+        worker_info.update_ttl(ttl);
+
+        if let Some(resource) = resource {
             if let Some(property) = WorkerProperty::find_by_id(worker_id).one(&self.db).await? {
+                let needs_update = property
+                    .resource
+                    .as_ref()
+                    .map(|persisted| persisted.to_protobuf() != resource)
+                    .unwrap_or(true);
+                if !needs_update {
+                    return Ok(());
+                }
                 let mut property: worker_property::ActiveModel = property.into();
                 property.resource = Set(Some((&resource).into()));
                 WorkerProperty::update(property).exec(&self.db).await?;
             }
-            let worker_info = self
-                .worker_extra_info
-                .get_mut(&worker_id)
-                .expect("worker must exist after resource update");
-            worker_info.resource = resource;
         }
         Ok(())
     }
@@ -945,10 +912,7 @@ impl ClusterControllerInner {
         let workers = find.find_also_related(WorkerProperty).all(&self.db).await?;
         Ok(workers
             .into_iter()
-            .map(|(worker, property)| {
-                let extra_info = self.get_extra_info_checked(worker.worker_id).unwrap();
-                WorkerInfo(worker, property, extra_info).into()
-            })
+            .map(|(worker, property)| WorkerInfo(worker, property).into())
             .collect_vec())
     }
 
@@ -967,10 +931,7 @@ impl ClusterControllerInner {
 
         Ok(workers
             .into_iter()
-            .map(|(worker, property)| {
-                let extra_info = self.get_extra_info_checked(worker.worker_id).unwrap();
-                WorkerInfo(worker, property, extra_info).into()
-            })
+            .map(|(worker, property)| WorkerInfo(worker, property).into())
             .collect_vec())
     }
 
@@ -1007,10 +968,7 @@ impl ClusterControllerInner {
 
         Ok(workers
             .into_iter()
-            .map(|(worker, property)| {
-                let extra_info = self.get_extra_info_checked(worker.worker_id).unwrap();
-                WorkerInfo(worker, property, extra_info).into()
-            })
+            .map(|(worker, property)| WorkerInfo(worker, property).into())
             .collect_vec())
     }
 
@@ -1033,8 +991,7 @@ impl ClusterControllerInner {
         if worker.is_none() {
             return Ok(None);
         }
-        let extra_info = self.get_extra_info_checked(worker_id)?;
-        Ok(worker.map(|(w, p)| WorkerInfo(w, p, extra_info).into()))
+        Ok(worker.map(|(w, p)| WorkerInfo(w, p).into()))
     }
 
     pub fn get_worker_extra_info_by_id(&self, worker_id: WorkerId) -> Option<WorkerExtraInfo> {
