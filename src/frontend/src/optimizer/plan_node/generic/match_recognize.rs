@@ -20,7 +20,7 @@ use risingwave_sqlparser::ast::{AfterMatchSkip, MatchRecognizePattern, RowsPerMa
 use super::{DistillUnit, GenericPlanNode, GenericPlanRef};
 use crate::OptimizerContextRef;
 use crate::binder::{BoundMeasure, BoundSymbolDefinition, MeasureSlotKind};
-use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprVisitor};
+use crate::expr::{Expr, ExprDisplay, ExprImpl, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::ColIndexMapping;
 use crate::optimizer::plan_node::utils::childless_record;
 use crate::optimizer::property::FunctionalDependencySet;
@@ -165,10 +165,24 @@ impl<PlanRef> MatchRecognize<PlanRef> {
 
 impl<PlanRef: GenericPlanRef> DistillUnit for MatchRecognize<PlanRef> {
     fn distill_with_name<'a>(&self, name: impl Into<Str<'a>>) -> XmlNode<'a> {
+        // Schema-aware display (`t.ts`, not `$1`), like the sibling plan nodes.
+        let input_schema = self.input.schema();
+        let exprs = |es: &[ExprImpl]| {
+            Pretty::Array(
+                es.iter()
+                    .map(|e| {
+                        Pretty::display(&ExprDisplay {
+                            expr: e,
+                            input_schema,
+                        })
+                    })
+                    .collect(),
+            )
+        };
         let measure_names: Vec<_> = self.measures.iter().map(|m| m.name.as_str()).collect();
         let fields = vec![
-            ("partition_by", Pretty::debug(&self.partition_by)),
-            ("order_by", Pretty::debug(&self.order_by)),
+            ("partition_by", exprs(&self.partition_by)),
+            ("order_by", exprs(&self.order_by)),
             ("measures", Pretty::debug(&measure_names)),
             ("pattern", Pretty::display(&self.pattern)),
         ];

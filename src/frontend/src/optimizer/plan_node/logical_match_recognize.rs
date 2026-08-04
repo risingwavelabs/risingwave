@@ -14,7 +14,6 @@
 
 use fixedbitset::FixedBitSet;
 use itertools::Itertools;
-use risingwave_common::bail_not_implemented;
 use risingwave_expr::bail;
 use risingwave_sqlparser::ast::{AfterMatchSkip, MatchRecognizePattern, RowsPerMatch};
 
@@ -198,11 +197,21 @@ impl ToBatch for LogicalMatchRecognize {
 
 impl ToStream for LogicalMatchRecognize {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<super::StreamPlanRef> {
+        use super::{StreamFilter, StreamMatchRecognize, StreamWatermarkSort};
+        use crate::error::ErrorCode;
+        use crate::expr::{ExprType, FunctionCall, InputRef};
+        use crate::optimizer::property::RequiredDist;
+        use crate::utils::Condition;
         // v1 restrictions: PARTITION BY / ORDER BY must be plain columns, PARTITION BY non-empty.
+        // `NotSupported(cause, hint)` throughout, matching this feature's binder-side validation.
         if self.core.partition_key_indices().is_none() || self.core.order_key_indices().is_none() {
-            bail!(
-                "MATCH_RECOGNIZE currently supports only plain column references in PARTITION BY and ORDER BY"
-            );
+            return Err(ErrorCode::NotSupported(
+                "MATCH_RECOGNIZE with an expression in PARTITION BY or ORDER BY".to_owned(),
+                "use plain column references; compute the expression in a view below and \
+                 partition/order by the resulting column"
+                    .to_owned(),
+            )
+            .into());
         }
         if self
             .core
@@ -210,7 +219,13 @@ impl ToStream for LogicalMatchRecognize {
             .expect("checked above")
             .is_empty()
         {
-            bail!("MATCH_RECOGNIZE currently requires a non-empty PARTITION BY");
+            return Err(ErrorCode::NotSupported(
+                "MATCH_RECOGNIZE without a PARTITION BY".to_owned(),
+                "add PARTITION BY; for a global pattern, partition by a constant column computed \
+                 in a view below (all rows then match within one partition)"
+                    .to_owned(),
+            )
+            .into());
         }
         let order_indices = self.core.order_key_indices().expect("checked above");
         let Some(&time_col) = order_indices.first() else {
@@ -224,22 +239,75 @@ impl ToStream for LogicalMatchRecognize {
         // declares append-only output. Reject a non-append-only input during planning so the user
         // gets an error at `CREATE`, rather than the executor crashing on the first update/delete.
         if !stream_input.append_only() {
-            bail!(
-                "MATCH_RECOGNIZE requires an append-only input; updates and deletes are not supported"
-            );
+            return Err(ErrorCode::NotSupported(
+                "MATCH_RECOGNIZE over a non-append-only input (updates or deletes could revise \
+                 an already-emitted match)"
+                    .to_owned(),
+                "use an append-only source or table (e.g. CREATE TABLE ... APPEND ONLY)".to_owned(),
+            )
+            .into());
         }
         // Event-time contract: the executor buffers rows and finalises matches as the watermark on
         // the leading ORDER BY column advances, so that column must carry a watermark. This mirrors
         // Flink requiring a rowtime attribute on ORDER BY.
         if !stream_input.watermark_columns().contains(time_col) {
-            bail!(
-                "MATCH_RECOGNIZE requires a watermark on the leading ORDER BY column for streaming"
-            );
+            return Err(ErrorCode::NotSupported(
+                "MATCH_RECOGNIZE without a watermark on the leading ORDER BY column".to_owned(),
+                "declare one on the source or table, e.g. WATERMARK FOR ts AS ts - INTERVAL '5' \
+                 SECOND"
+                    .to_owned(),
+            )
+            .into());
         }
-        // Stream planning — the WatermarkSort insertion and the stream plan node — lands in the
-        // next change of the series; everything above (the validated, bindable core) is complete.
-        let _ = (stream_input, partition_key_indices);
-        bail_not_implemented!("MATCH_RECOGNIZE stream planning is not yet wired in this build")
+        // A NULL leading order key has no event time: no watermark can ever release it from the
+        // sort (whose cache key requires it non-null), and it cannot be ordered against other
+        // rows. Filter such rows out below the sort, exactly as event-time processing drops
+        // NULL-rowtime rows.
+        let ts_type = stream_input.schema().fields()[time_col].data_type();
+        let not_null: ExprImpl = FunctionCall::new(
+            ExprType::IsNotNull,
+            vec![InputRef::new(time_col, ts_type).into()],
+        )?
+        .into();
+        let filter_core = generic::Filter {
+            predicate: Condition::with_expr(not_null),
+            input: stream_input,
+        };
+        let stream_input: super::StreamPlanRef = StreamFilter::new(filter_core).into();
+
+        // Ordered-input planning: hash-shard by the PARTITION BY key, then a WatermarkSort over
+        // the full ORDER BY (leading watermark column plus secondary order columns) so the matcher
+        // receives rows already in ORDER BY order, strictly below each forwarded watermark. Sort
+        // and matcher stay in the same fragment -- no exchange between them, which would destroy
+        // the ordering the sort just established. The matcher itself then owns only NFA state and
+        // match finalization.
+        //
+        // The requirement is the EXACT hash distribution over the partition columns in PARTITION
+        // BY order -- not `shard_by_key`. The matcher's state table hashes its distribution key in
+        // PARTITION BY order, so the rows must be physically routed by that same column order;
+        // `shard_by_key` would accept any subset in any order (and its enforcing exchange hashes
+        // in ascending column-index order), letting the row's routed vnode disagree with the vnode
+        // its state-table key computes -- a "vnode should not be accessed" panic on the first
+        // insert for `PARTITION BY (b, a)` or a pre-sharded input.
+        let stream_input = RequiredDist::hash_shard(&partition_key_indices)
+            .streaming_enforce_if_not_satisfies(stream_input)?;
+        let secondary_order: Vec<usize> = order_indices[1..].to_vec();
+        let sorted_input: super::StreamPlanRef =
+            StreamWatermarkSort::with_secondary_order(stream_input, time_col, secondary_order)
+                .into();
+        let core = generic::MatchRecognize {
+            input: sorted_input,
+            partition_by: self.core.partition_by.clone(),
+            order_by: self.core.order_by.clone(),
+            measures: self.core.measures.clone(),
+            rows_per_match: self.core.rows_per_match.clone(),
+            after_match_skip: self.core.after_match_skip.clone(),
+            pattern: self.core.pattern.clone(),
+            defines: self.core.defines.clone(),
+            within: self.core.within.clone(),
+            within_deadline: self.core.within_deadline.clone(),
+        };
+        Ok(StreamMatchRecognize::new(core).into())
     }
 
     fn logical_rewrite_for_stream(
