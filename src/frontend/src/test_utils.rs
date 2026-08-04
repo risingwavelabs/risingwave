@@ -669,7 +669,7 @@ impl CatalogWriter for MockCatalogWriter {
                 let mut database = self
                     .catalog
                     .read()
-                    .get_database_by_id(database_id.into())?
+                    .get_database_by_id(database_id)?
                     .to_prost();
                 database.name = object_name.to_owned();
                 self.catalog.write().update_database(&database);
