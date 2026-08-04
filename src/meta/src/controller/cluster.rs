@@ -220,22 +220,10 @@ impl ClusterController {
         resource: Option<PbResource>,
     ) -> MetaResult<()> {
         tracing::trace!(target: "events::meta::server_heartbeat", %worker_id, "receive heartbeat");
-        let resource_changed =
-            self.inner
-                .write()
-                .await
-                .heartbeat(worker_id, self.max_heartbeat_interval, resource)?;
-        if resource_changed
-            && let Some(worker) = self.get_worker_by_id(worker_id).await?
-            && (worker.r#type() == PbWorkerType::ComputeNode
-                || worker.r#type() == PbWorkerType::Frontend)
-        {
-            self.env
-                .notification_manager()
-                .notify_frontend(Operation::Update, Info::Node(worker))
-                .await;
-        }
-        Ok(())
+        self.inner
+            .write()
+            .await
+            .heartbeat(worker_id, self.max_heartbeat_interval, resource)
     }
 
     pub fn start_heartbeat_checker(
@@ -895,15 +883,13 @@ impl ClusterControllerInner {
         worker_id: WorkerId,
         ttl: Duration,
         resource: Option<PbResource>,
-    ) -> MetaResult<bool> {
+    ) -> MetaResult<()> {
         if let Some(worker_info) = self.worker_extra_info.get_mut(&worker_id) {
             worker_info.update_ttl(ttl);
-            let mut resource_changed = false;
             if let Some(resource) = resource {
-                resource_changed = worker_info.resource != resource;
                 worker_info.resource = resource;
             }
-            Ok(resource_changed)
+            Ok(())
         } else {
             Err(MetaError::invalid_worker(worker_id, "worker not found"))
         }
@@ -1185,35 +1171,9 @@ mod tests {
             hostname: "host-v2".to_owned(),
         };
 
-        let (tx, mut rx) = unbounded_channel();
-        cluster_ctl.env.notification_manager().insert_sender(
-            risingwave_pb::meta::SubscribeType::Frontend,
-            WorkerKey(host.clone()),
-            tx,
-        );
-
         cluster_ctl
             .heartbeat(worker_id, Some(resource_v2.clone()))
             .await?;
-
-        let notified_worker = tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                let response = rx.recv().await.unwrap().unwrap();
-                if response.operation() == Operation::Update
-                    && let Some(Info::Node(worker)) = response.info
-                {
-                    break worker;
-                }
-            }
-        })
-        .await
-        .expect("expected worker node update");
-        assert_eq!(
-            notified_worker
-                .resource
-                .expect("worker resource should exist"),
-            resource_v2.clone()
-        );
 
         let worker = cluster_ctl
             .get_worker_by_id(worker_id)

@@ -115,18 +115,6 @@ impl WorkerNodeManager {
         write_guard.worker_nodes.insert(node.id, node);
     }
 
-    pub fn update_worker_node(&self, node: WorkerNode) {
-        let mut write_guard = self.inner.write().unwrap();
-        if let Some(worker_node) = write_guard.worker_nodes.get_mut(&node.id) {
-            *worker_node = node;
-        } else {
-            tracing::warn!(
-                worker_id = %node.id,
-                "Ignore worker node update for unknown worker"
-            );
-        }
-    }
-
     pub fn remove_worker_node(&self, node: WorkerNode) {
         let mut write_guard = self.inner.write().unwrap();
         write_guard.worker_nodes.remove(&node.id);
