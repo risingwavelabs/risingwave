@@ -172,14 +172,14 @@ hashbrown0_16 = { package = "hashbrown", version = "0.16.1", features = [
 ] }
 hytra = "0.1"
 # branch dev_rebase_main_20260303
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "6bd8e98fe920def857f80024f5a666c9631e80f4", features = [
+iceberg = { git = "https://github.com/Xuanwo/iceberg-rust.git", rev = "02b9a1bdf78008fb6236945c9a70bbc68c60b841", features = [
     "storage-s3",
     "storage-gcs",
     "storage-azblob",
     "storage-azdls",
 ] }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "6bd8e98fe920def857f80024f5a666c9631e80f4" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "6bd8e98fe920def857f80024f5a666c9631e80f4" }
+iceberg-catalog-glue = { git = "https://github.com/Xuanwo/iceberg-rust.git", rev = "02b9a1bdf78008fb6236945c9a70bbc68c60b841" }
+iceberg-catalog-rest = { git = "https://github.com/Xuanwo/iceberg-rust.git", rev = "02b9a1bdf78008fb6236945c9a70bbc68c60b841" }
 indexmap = { version = "2.12.0", features = ["serde"] }
 itertools = "0.14.0"
 jni = { version = "0.21.1", features = ["invocation"] }
@@ -193,7 +193,7 @@ mysql_async = { version = "0.36", features = [
     "native-tls-tls",
     "rust_decimal",
 ] }
-opendal = "0.55"
+opendal = "0.58.1"
 openssl = "0.10.80"
 opentelemetry = "0.31"
 opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic"] }
@@ -477,3 +477,11 @@ prost = { git = "https://github.com/risingwavelabs/prost.git", package = "prost"
 prost-derive = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-derive", rev = "040a192409e45069158300baec4f402ad1fe101a" }
 prost-build = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-build", rev = "040a192409e45069158300baec4f402ad1fe101a" }
 prost-types = { git = "https://github.com/risingwavelabs/prost.git", package = "prost-types", rev = "040a192409e45069158300baec4f402ad1fe101a" }
+
+# Temporary: point iceberg-compaction and other consumers at OpenDAL 0.58-ready iceberg-rust.
+# Track https://github.com/risingwavelabs/iceberg-rust/pull/204
+[patch."https://github.com/risingwavelabs/iceberg-rust.git"]
+iceberg = { git = "https://github.com/Xuanwo/iceberg-rust.git", rev = "02b9a1bdf78008fb6236945c9a70bbc68c60b841" }
+iceberg-catalog-glue = { git = "https://github.com/Xuanwo/iceberg-rust.git", rev = "02b9a1bdf78008fb6236945c9a70bbc68c60b841" }
+iceberg-catalog-rest = { git = "https://github.com/Xuanwo/iceberg-rust.git", rev = "02b9a1bdf78008fb6236945c9a70bbc68c60b841" }
+iceberg-datafusion = { git = "https://github.com/Xuanwo/iceberg-rust.git", rev = "02b9a1bdf78008fb6236945c9a70bbc68c60b841" }
