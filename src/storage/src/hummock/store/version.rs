@@ -697,7 +697,7 @@ impl HummockVersionReader {
         // Therefore, it is necessary to construct the `full_key` with `MAX_SPILL_TIMES`, otherwise, the iterator might skip keys with spill offset greater than 0.
         let full_key = FullKey::new_with_gap_epoch(
             table_id,
-            TableKey(table_key.clone()),
+            table_key.clone(),
             EpochWithGap::new(epoch, MAX_SPILL_TIMES),
         );
         let single_table_key_range = table_key.clone()..=table_key.clone();
@@ -710,7 +710,7 @@ impl HummockVersionReader {
             if let Some(iter) = get_from_sstable_info(
                 self.sstable_store.clone(),
                 local_sst,
-                full_key.to_ref(),
+                &full_key,
                 &read_options,
                 dist_key_hash,
                 local_stats,
@@ -769,7 +769,7 @@ impl HummockVersionReader {
                         if let Some(iter) = get_from_sstable_info(
                             self.sstable_store.clone(),
                             sstable_info,
-                            full_key.to_ref(),
+                            &full_key,
                             &read_options,
                             dist_key_hash,
                             local_stats,
@@ -835,7 +835,7 @@ impl HummockVersionReader {
                     if let Some(iter) = get_from_sstable_info(
                         self.sstable_store.clone(),
                         sstable_info,
-                        full_key.to_ref(),
+                        &full_key,
                         &read_options,
                         dist_key_hash,
                         local_stats,
@@ -1035,6 +1035,10 @@ impl HummockVersionReader {
             user_key_range.0.as_ref().map(UserKey::as_ref),
             user_key_range.1.as_ref().map(UserKey::as_ref),
         );
+        let user_key_range = (
+            user_key_range.0.map(|key| key.cloned()),
+            user_key_range.1.map(|key| key.cloned()),
+        );
         let mut staging_sst_iter_count = 0;
         // encode once
         let filter_prefix_hash = read_options
@@ -1042,7 +1046,7 @@ impl HummockVersionReader {
             .as_ref()
             .map(|hint| Sstable::hash_for_filter(hint, table_id.as_raw_id()));
         let mut sst_read_options = SstableIteratorReadOptions::from_read_options(&read_options);
-        sst_read_options.scan_end_user_key = Some(user_key_range.1.map(|key| key.cloned()));
+        sst_read_options.scan_user_key_range = Some(user_key_range);
         sst_read_options.prefetch = read_options.prefetch_options.prefetch;
         if sst_read_options.prefetch {
             sst_read_options.max_preload_retry_times = self.preload_retry_times;
@@ -1212,7 +1216,7 @@ impl HummockVersionReader {
         }
         let read_options = Arc::new(SstableIteratorReadOptions {
             cache_policy: Default::default(),
-            scan_end_user_key: None,
+            scan_user_key_range: None,
             prefetch: false,
             max_preload_retry_times: 0,
         });

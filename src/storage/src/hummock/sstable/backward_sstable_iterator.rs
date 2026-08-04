@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::cmp::Ordering::{Equal, Less};
+use std::ops::Range;
 use std::sync::Arc;
 
 use foyer::Hint;
@@ -20,7 +21,7 @@ use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
 use crate::hummock::iterator::{Backward, HummockIterator, ValueMeta};
-use crate::hummock::sstable::SstableIteratorReadOptions;
+use crate::hummock::sstable::{SstableIteratorReadOptions, scan_block_meta_range};
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
     BlockIterator, HummockResult, SstableIteratorType, SstableStoreRef, TableHolder,
@@ -42,14 +43,28 @@ pub struct BackwardSstableIterator {
 
     stats: StoreLocalStatistic,
 
-    // used for checking if the block is valid, filter out the block that is not in the table-id range
-    read_block_meta_range: (usize, usize),
+    // Used for checking if the block is valid, filter out blocks outside the read window.
+    read_block_meta_range: Range<usize>,
 }
 
 impl BackwardSstableIterator {
     pub fn new(
         sstable: TableHolder,
         sstable_store: SstableStoreRef,
+        sstable_info_ref: &SstableInfo,
+    ) -> Self {
+        Self::new_with_options(
+            sstable,
+            sstable_store,
+            Arc::new(SstableIteratorReadOptions::default()),
+            sstable_info_ref,
+        )
+    }
+
+    fn new_with_options(
+        sstable: TableHolder,
+        sstable_store: SstableStoreRef,
+        options: Arc<SstableIteratorReadOptions>,
         sstable_info_ref: &SstableInfo,
     ) -> Self {
         let mut start_idx = 0;
@@ -126,13 +141,22 @@ impl BackwardSstableIterator {
             block_meta_count
         );
 
+        let coarse = start_idx..end_idx + 1;
+        let read_block_meta_range = options
+            .scan_user_key_range
+            .as_ref()
+            .map(|user_key_range| {
+                scan_block_meta_range(&sstable.meta.block_metas, coarse.clone(), user_key_range)
+            })
+            .unwrap_or(coarse);
+
         Self {
             block_iter: None,
-            cur_idx: end_idx,
+            cur_idx: read_block_meta_range.end,
             sst: sstable,
             sstable_store,
             stats: StoreLocalStatistic::default(),
-            read_block_meta_range: (start_idx, end_idx),
+            read_block_meta_range,
         }
     }
 
@@ -142,7 +166,9 @@ impl BackwardSstableIterator {
         idx: isize,
         seek_key: Option<FullKey<&[u8]>>,
     ) -> HummockResult<()> {
-        if idx >= self.sst.block_count() as isize || idx < self.read_block_meta_range.0 as isize {
+        if idx >= self.read_block_meta_range.end as isize
+            || idx < self.read_block_meta_range.start as isize
+        {
             self.block_iter = None;
         } else {
             let block = self
@@ -200,23 +226,27 @@ impl HummockIterator for BackwardSstableIterator {
     /// Instead of setting idx to 0th block, a `BackwardSstableIterator` rewinds to the last block
     /// in the sstable.
     async fn rewind(&mut self) -> HummockResult<()> {
-        self.seek_idx(self.read_block_meta_range.1 as isize, None)
+        self.seek_idx(self.read_block_meta_range.end as isize - 1, None)
             .await
     }
 
     async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
-        let block_idx = self
-            .sst
-            .meta
-            .block_metas
-            .partition_point(|block_meta| {
-                // Compare by version comparator
-                // Note: we are comparing against the `smallest_key` of the `block`, thus the
-                // partition point should be `prev(<=)` instead of `<`.
-                let ord = FullKey::decode(&block_meta.smallest_key).cmp(&key);
-                ord == Less || ord == Equal
-            })
-            .saturating_sub(1); // considering the boundary of 0
+        if self.read_block_meta_range.is_empty() {
+            self.block_iter = None;
+            return Ok(());
+        }
+
+        let range = self.read_block_meta_range.clone();
+        let block_idx = range.start
+            + self.sst.meta.block_metas[range.clone()]
+                .partition_point(|block_meta| {
+                    // Compare by version comparator
+                    // Note: we are comparing against the `smallest_key` of the `block`, thus the
+                    // partition point should be `prev(<=)` instead of `<`.
+                    let ord = FullKey::decode(&block_meta.smallest_key).cmp(&key);
+                    ord == Less || ord == Equal
+                })
+                .saturating_sub(1); // considering the boundary of 0
         let block_idx = block_idx as isize;
 
         self.seek_idx(block_idx, Some(key)).await?;
@@ -244,16 +274,19 @@ impl SstableIteratorType for BackwardSstableIterator {
     fn create(
         sstable: TableHolder,
         sstable_store: SstableStoreRef,
-        _: Arc<SstableIteratorReadOptions>,
+        options: Arc<SstableIteratorReadOptions>,
         sstable_info_ref: &SstableInfo,
     ) -> Self {
-        BackwardSstableIterator::new(sstable, sstable_store, sstable_info_ref)
+        BackwardSstableIterator::new_with_options(sstable, sstable_store, options, sstable_info_ref)
     }
 }
 
 /// Mirror the tests used for `SstableIterator`
 #[cfg(test)]
 mod tests {
+    use std::collections::Bound;
+
+    use bytes::Bytes;
     use itertools::Itertools;
     use rand::prelude::*;
     use rand::rng as thread_rng;
@@ -261,11 +294,12 @@ mod tests {
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_hummock_sdk::EpochWithGap;
-    use risingwave_hummock_sdk::key::UserKey;
+    use risingwave_hummock_sdk::key::{TableKey, UserKey};
     use risingwave_hummock_sdk::sstable_info::SstableInfoInner;
 
     use super::*;
     use crate::assert_bytes_eq;
+    use crate::hummock::CachePolicy;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::test_utils::{
         TEST_KEYS_COUNT, default_builder_opt_for_test, gen_default_test_sstable,
@@ -296,6 +330,86 @@ mod tests {
         }
 
         assert_eq!(cnt, 0);
+    }
+
+    #[tokio::test]
+    async fn test_backward_scan_crossed_range_reads_no_blocks() {
+        let sstable_store = mock_sstable_store().await;
+        let (sstable, sstable_info) =
+            gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
+                .await;
+        let start = test_key_of(TEST_KEYS_COUNT / 2)
+            .user_key
+            .as_ref()
+            .copy_into::<Bytes>();
+        let end = test_key_of(TEST_KEYS_COUNT / 4)
+            .user_key
+            .as_ref()
+            .copy_into::<Bytes>();
+        let mut iter = BackwardSstableIterator::create(
+            sstable,
+            sstable_store,
+            Arc::new(SstableIteratorReadOptions {
+                cache_policy: CachePolicy::Disable,
+                scan_user_key_range: Some((Bound::Included(start), Bound::Excluded(end))),
+                prefetch: false,
+                max_preload_retry_times: 0,
+            }),
+            &sstable_info,
+        );
+        iter.rewind().await.unwrap();
+        assert!(!iter.is_valid());
+        let mut stats = StoreLocalStatistic::default();
+        iter.collect_local_statistic(&mut stats);
+        assert_eq!(stats.cache_data_block_total, 0);
+    }
+
+    #[tokio::test]
+    async fn test_backward_seek_stays_in_clipped_block_window() {
+        let sstable_store = mock_sstable_store().await;
+        let mut builder_options = default_builder_opt_for_test();
+        builder_options.block_capacity = 64;
+        let key = |table_key: &[u8], epoch: u64| {
+            FullKey::for_test(TableId::default(), table_key.to_vec(), test_epoch(epoch))
+        };
+        let value = b"01234567890123456789012345678901".to_vec();
+        let (sstable, sstable_info) = gen_test_sstable_with_table_ids(
+            builder_options,
+            12,
+            vec![
+                (key(b"a", 1), HummockValue::put(value.clone())),
+                (key(b"hot", 4), HummockValue::put(value.clone())),
+                (key(b"hot", 3), HummockValue::put(value.clone())),
+                (key(b"hot", 2), HummockValue::put(value.clone())),
+                (key(b"hot", 1), HummockValue::put(value.clone())),
+                (key(b"z", 1), HummockValue::put(value)),
+            ]
+            .into_iter(),
+            sstable_store.clone(),
+            vec![TableId::default().as_raw_id()],
+        )
+        .await;
+        let a = UserKey::new(TableId::default(), TableKey(Bytes::from_static(b"a")));
+        let hot = UserKey::new(TableId::default(), TableKey(Bytes::from_static(b"hot")));
+        let mut iter = BackwardSstableIterator::create(
+            sstable,
+            sstable_store,
+            Arc::new(SstableIteratorReadOptions {
+                cache_policy: CachePolicy::Disable,
+                scan_user_key_range: Some((Bound::Included(a), Bound::Excluded(hot))),
+                prefetch: false,
+                max_preload_retry_times: 0,
+            }),
+            &sstable_info,
+        );
+
+        assert_eq!(iter.read_block_meta_range, 0..1);
+        iter.seek(key(b"hot", 0).to_ref()).await.unwrap();
+        assert!(iter.is_valid());
+        assert_eq!(iter.key(), key(b"a", 1).to_ref());
+        let mut stats = StoreLocalStatistic::default();
+        iter.collect_local_statistic(&mut stats);
+        assert_eq!(stats.cache_data_block_total, 1);
     }
 
     #[tokio::test]
