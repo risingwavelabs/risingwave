@@ -1072,10 +1072,20 @@ mod test {
 
         rebuild_sink_tx.send(no_op_config_update()).unwrap();
 
+        // Give the consumer a chance to handle the no-op update. It should skip the update
+        // without rewinding or restarting the log reader.
         tokio::time::sleep(Duration::from_millis(50)).await;
 
-        assert_eq!(state.rewind_count.load(Ordering::SeqCst), 0);
-        assert_eq!(state.start_count.load(Ordering::SeqCst), 1);
+        assert_eq!(
+            state.rewind_count.load(Ordering::SeqCst),
+            0,
+            "no-op config update should not rewind the log reader"
+        );
+        assert_eq!(
+            state.start_count.load(Ordering::SeqCst),
+            1,
+            "no-op config update should not restart log consumption"
+        );
         drop(rate_limit_tx);
     }
 
