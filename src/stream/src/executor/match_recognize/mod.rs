@@ -14,9 +14,13 @@
 
 //! Streaming `MATCH_RECOGNIZE` (SQL:2016 row pattern recognition).
 //!
-//! This module currently carries the pattern-matching core — the Thompson-construction NFA, its
-//! preference-order walkers, the catastrophic-backtracking defenses (per-start failure memo and
-//! the per-visit scan budget) — shared by the executor that lands next in the series.
+//! The ordered-input matcher: the executor consumes rows already in `ORDER BY` order (see the
+//! planner's `WatermarkSort` insertion), feeding a per-partition incremental NFA matcher and
+//! emitting matches on completion. `nfa` carries the pattern-matching core with its
+//! catastrophic-backtracking defenses; `incremental` the appended-rows matcher; `proto` the
+//! structured pattern decoding.
 
+pub mod executor;
 pub mod incremental;
 pub mod nfa;
+pub mod proto;
