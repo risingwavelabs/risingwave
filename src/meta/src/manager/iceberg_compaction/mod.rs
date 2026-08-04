@@ -29,6 +29,7 @@ use risingwave_connector::sink::catalog::{SinkCatalog, SinkId};
 use risingwave_connector::sink::iceberg::{ICEBERG_SINK, IcebergConfig};
 use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_pb::iceberg_compaction::SubscribeIcebergCompactionEventRequest;
+use risingwave_pb::id::IcebergCompactionTaskId;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tonic::Streaming;
 
@@ -47,7 +48,7 @@ pub(crate) type CompactorChangeTx =
 pub(crate) type CompactorChangeRx =
     UnboundedReceiver<(WorkerId, Streaming<SubscribeIcebergCompactionEventRequest>)>;
 
-type ManualCompactionWaiter = tokio::sync::oneshot::Sender<MetaResult<u64>>;
+type ManualCompactionWaiter = tokio::sync::oneshot::Sender<MetaResult<IcebergCompactionTaskId>>;
 
 use schedule::CompactionTrack;
 pub use schedule::IcebergCompactionScheduleStatus;
