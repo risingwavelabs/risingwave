@@ -563,6 +563,7 @@ impl FrontendObserverNode {
 
         match operation {
             Operation::Add => self.worker_node_manager.add_worker_node(node),
+            Operation::Update => self.worker_node_manager.update_worker_node(node),
             Operation::Delete => self.worker_node_manager.remove_worker_node(node),
             _ => (),
         }

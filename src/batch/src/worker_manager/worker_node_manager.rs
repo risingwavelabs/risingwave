@@ -115,6 +115,18 @@ impl WorkerNodeManager {
         write_guard.worker_nodes.insert(node.id, node);
     }
 
+    pub fn update_worker_node(&self, node: WorkerNode) {
+        let mut write_guard = self.inner.write().unwrap();
+        if let Some(worker_node) = write_guard.worker_nodes.get_mut(&node.id) {
+            *worker_node = node;
+        } else {
+            tracing::warn!(
+                worker_id = %node.id,
+                "Ignore worker node update for unknown worker"
+            );
+        }
+    }
+
     pub fn remove_worker_node(&self, node: WorkerNode) {
         let mut write_guard = self.inner.write().unwrap();
         write_guard.worker_nodes.remove(&node.id);
@@ -282,13 +294,8 @@ impl WorkerNodeManager {
         self.worker_node_mask.read().unwrap()
     }
 
-    fn effective_worker_node_mask(&self, serving_worker_nodes: &[WorkerNode]) -> HashSet<WorkerId> {
-        let mut mask = self.worker_node_mask.read().unwrap().clone();
-        mask.extend(serving_worker_nodes.iter().filter_map(|worker| {
-            (worker.resource.as_ref().map(|r| r.rw_version.as_str()) != Some(RW_VERSION))
-                .then_some(worker.id)
-        }));
-        mask
+    fn worker_node_mask_snapshot(&self) -> HashSet<WorkerId> {
+        self.worker_node_mask.read().unwrap().clone()
     }
 
     pub fn mask_worker_node(&self, worker_node_id: WorkerId, duration: Duration) {
@@ -376,24 +383,30 @@ impl WorkerNodeSelector {
                 );
                 self.manager.get_streaming_fragment_mapping(&fragment_id)
             })?;
-            let serving_worker_nodes = self.manager.list_serving_worker_nodes();
-            let worker_node_mask = self
-                .manager
-                .effective_worker_node_mask(&serving_worker_nodes);
+            let workers = self.apply_worker_node_mask(self.manager.list_serving_worker_nodes());
 
             // Filter out unavailable workers.
-            if worker_node_mask.is_empty() {
-                Ok(mapping)
+            if workers.is_empty() {
+                Err(BatchError::EmptyWorkerNodes)
             } else {
-                let workers =
-                    Self::apply_worker_node_mask_inner(serving_worker_nodes, &worker_node_mask);
-                // If it's a singleton, set max_parallelism=1 for place_vnode.
-                let max_parallelism = mapping.to_single().map(|_| 1);
-                // TODO: use runtime parameter batch_parallelism
-                let masked_mapping =
-                    place_vnode(Some(&mapping), &workers, max_parallelism, mapping.len())
-                        .ok_or_else(|| BatchError::EmptyWorkerNodes)?;
-                Ok(masked_mapping)
+                let worker_ids = workers
+                    .iter()
+                    .map(|worker| worker.id)
+                    .collect::<HashSet<_>>();
+                let mapping_uses_only_available_workers = mapping
+                    .iter_unique()
+                    .all(|slot| worker_ids.contains(&slot.worker_id()));
+                if mapping_uses_only_available_workers {
+                    Ok(mapping)
+                } else {
+                    // If it's a singleton, set max_parallelism=1 for place_vnode.
+                    let max_parallelism = mapping.to_single().map(|_| 1);
+                    // TODO: use runtime parameter batch_parallelism
+                    let masked_mapping =
+                        place_vnode(Some(&mapping), &workers, max_parallelism, mapping.len())
+                            .ok_or_else(|| BatchError::EmptyWorkerNodes)?;
+                    Ok(masked_mapping)
+                }
             }
         }
     }
@@ -410,9 +423,20 @@ impl WorkerNodeSelector {
             .map(|w| (*w).clone())
     }
 
+    fn is_current_version_worker(worker: &WorkerNode) -> bool {
+        worker
+            .resource
+            .as_ref()
+            .is_some_and(|resource| resource.rw_version == RW_VERSION)
+    }
+
     fn apply_worker_node_mask(&self, origin: Vec<WorkerNode>) -> Vec<WorkerNode> {
-        let worker_node_mask = self.manager.effective_worker_node_mask(&origin);
-        Self::apply_worker_node_mask_inner(origin, &worker_node_mask)
+        let workers_with_current_version = origin
+            .into_iter()
+            .filter(Self::is_current_version_worker)
+            .collect::<Vec<_>>();
+        let worker_node_mask = self.manager.worker_node_mask_snapshot();
+        Self::apply_worker_node_mask_inner(workers_with_current_version, &worker_node_mask)
     }
 
     fn apply_worker_node_mask_inner(
@@ -592,6 +616,44 @@ mod tests {
             0.into(),
             worker_slot_mapping([1, 2, 3]),
         )]));
+
+        let mapping = selector.fragment_mapping(0.into()).unwrap();
+
+        assert_eq!(
+            fragment_mapping_worker_ids(&mapping),
+            vec![WorkerId::new(1)]
+        );
+    }
+
+    #[test]
+    fn test_fragment_mapping_errors_when_all_serving_workers_have_version_mismatch() {
+        let manager = Arc::new(WorkerNodeManager::mock(vec![
+            serving_worker(1, Some("different-version")),
+            serving_worker(2, None),
+            serving_worker(3, Some("")),
+        ]));
+        let selector = WorkerNodeSelector::new(manager.clone(), false);
+        manager.set_serving_fragment_mapping(HashMap::from([(
+            0.into(),
+            worker_slot_mapping([1, 2, 3]),
+        )]));
+
+        assert!(matches!(
+            selector.fragment_mapping(0.into()),
+            Err(BatchError::EmptyWorkerNodes)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_fragment_mapping_temporary_mask_fallback_keeps_version_filter() {
+        let manager = Arc::new(WorkerNodeManager::mock(vec![
+            serving_worker(1, Some(RW_VERSION)),
+            serving_worker(2, Some("different-version")),
+        ]));
+        let selector = WorkerNodeSelector::new(manager.clone(), false);
+        manager
+            .set_serving_fragment_mapping(HashMap::from([(0.into(), worker_slot_mapping([1, 2]))]));
+        manager.mask_worker_node(1.into(), Duration::from_secs(60));
 
         let mapping = selector.fragment_mapping(0.into()).unwrap();
 
