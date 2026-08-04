@@ -27,7 +27,8 @@ service TelemetryInfoService {
 
 message HeartbeatRequest {
   uint32 node_id = 1;
-  common.WorkerNode.Resource resource = 2;
+  reserved 2;
+  reserved "resource";
 }
 
 message HeartbeatResponse {

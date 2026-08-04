@@ -209,7 +209,7 @@ impl NotificationServiceImpl {
     }
 
     /// Get the total resource of the cluster.
-    async fn get_cluster_resource(&self) -> ClusterResource {
+    async fn get_cluster_resource(&self) -> MetaResult<ClusterResource> {
         self.metadata_manager
             .cluster_controller
             .cluster_resource()
@@ -218,7 +218,7 @@ impl NotificationServiceImpl {
 
     async fn compactor_subscribe(&self) -> MetaResult<MetaSnapshot> {
         let (tables, catalog_version) = self.get_tables_snapshot().await?;
-        let cluster_resource = self.get_cluster_resource().await;
+        let cluster_resource = self.get_cluster_resource().await?;
 
         Ok(MetaSnapshot {
             tables,
@@ -291,7 +291,7 @@ impl NotificationServiceImpl {
                 .context("failed to encode session params")?,
         });
 
-        let cluster_resource = self.get_cluster_resource().await;
+        let cluster_resource = self.get_cluster_resource().await?;
 
         Ok(MetaSnapshot {
             databases,
@@ -330,7 +330,7 @@ impl NotificationServiceImpl {
             .await;
         let hummock_write_limits = self.hummock_manager.write_limits().await;
         let meta_backup_manifest_id = self.backup_manager.manifest().await.manifest_id;
-        let cluster_resource = self.get_cluster_resource().await;
+        let cluster_resource = self.get_cluster_resource().await?;
 
         Ok(MetaSnapshot {
             tables,
@@ -352,7 +352,7 @@ impl NotificationServiceImpl {
 
     async fn compute_subscribe(&self) -> MetaResult<MetaSnapshot> {
         let (secrets, catalog_version) = self.get_decrypted_secret_snapshot().await?;
-        let cluster_resource = self.get_cluster_resource().await;
+        let cluster_resource = self.get_cluster_resource().await?;
 
         Ok(MetaSnapshot {
             secrets,
