@@ -41,6 +41,9 @@ statement ok
 set backfill_rate_limit=1;
 
 statement ok
+set streaming_use_snapshot_backfill=false;
+
+statement ok
 CREATE MATERIALIZED VIEW m2 as SELECT * FROM t;
 
 query T
@@ -65,3 +68,6 @@ set background_ddl=false;
 
 statement ok
 set backfill_rate_limit=default;
+
+statement ok
+set streaming_use_snapshot_backfill=default;
