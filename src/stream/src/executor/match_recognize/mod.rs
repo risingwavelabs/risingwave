@@ -18,4 +18,5 @@
 //! preference-order walkers, the catastrophic-backtracking defenses (per-start failure memo and
 //! the per-visit scan budget) — shared by the executor that lands next in the series.
 
+pub mod incremental;
 pub mod nfa;
