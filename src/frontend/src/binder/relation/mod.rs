@@ -17,7 +17,6 @@ use std::ops::Deref;
 
 use itertools::{EitherOrBoth, Itertools};
 use risingwave_common::bail;
-use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{Field, TableId};
 use risingwave_sqlparser::ast::{
     AsOf, Expr as ParserExpr, FunctionArg, FunctionArgExpr, Ident, ObjectName, TableAlias,
@@ -35,6 +34,7 @@ use crate::expr::{ExprImpl, InputRef};
 
 mod gap_fill;
 mod join;
+mod match_recognize;
 mod share;
 mod subquery;
 mod table_function;
@@ -44,6 +44,9 @@ mod window_table_function;
 
 pub use gap_fill::BoundGapFill;
 pub use join::BoundJoin;
+pub use match_recognize::{
+    BoundMatchRecognize, BoundMeasure, BoundSymbolDefinition, DefineSlotKind, MeasureSlotKind,
+};
 pub use share::{BoundShare, BoundShareInput};
 pub use subquery::BoundSubquery;
 pub use table_or_source::{
@@ -74,6 +77,7 @@ pub enum Relation {
     Watermark(Box<BoundWatermark>),
     Share(Box<BoundShare>),
     GapFill(Box<BoundGapFill>),
+    MatchRecognize(Box<BoundMatchRecognize>),
 }
 
 impl RewriteExprsRecursive for Relation {
@@ -628,11 +632,6 @@ impl Binder {
 
     pub(super) fn bind_table_factor(&mut self, table_factor: &TableFactor) -> Result<Relation> {
         match table_factor {
-            // Parsed but not yet bound in this commit: the binder lands in the next change of the
-            // series. Kept as an explicit rejection so the parser can merge independently.
-            TableFactor::MatchRecognize { .. } => {
-                bail_not_implemented!("MATCH_RECOGNIZE is not yet supported")
-            }
             TableFactor::Table { name, alias, as_of } => {
                 self.bind_relation_by_name(name, alias.as_ref(), as_of.as_ref(), true)
             }
@@ -675,6 +674,33 @@ impl Binder {
                 self.pop_and_merge_lateral_context()?;
                 Ok(bound_join)
             }
+            TableFactor::MatchRecognize {
+                table,
+                partition_by,
+                order_by,
+                measures,
+                rows_per_match,
+                after_match_skip,
+                pattern,
+                within,
+                subsets,
+                symbols,
+                alias,
+            } => Ok(Relation::MatchRecognize(Box::new(
+                self.bind_match_recognize(
+                    table,
+                    partition_by,
+                    order_by,
+                    measures,
+                    rows_per_match,
+                    after_match_skip,
+                    pattern,
+                    within,
+                    subsets,
+                    symbols,
+                    alias.as_ref(),
+                )?,
+            ))),
         }
     }
 }
