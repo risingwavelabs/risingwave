@@ -27,7 +27,9 @@ use risingwave_storage::StateStore;
 use super::super::sink::build_sink_param;
 use crate::common::table::state_table::{StateTableBuilder, StateTableOpConsistencyLevel};
 use crate::error::StreamResult;
-use crate::executor::{Executor, IcebergWriterImpl, StreamExecutorError, WriterExecutor};
+use crate::executor::{
+    CompactionApplyExecutor, Executor, IcebergWriterImpl, StreamExecutorError, WriterExecutor,
+};
 use crate::from_proto::ExecutorBuilder;
 use crate::task::ExecutorParams;
 
@@ -63,6 +65,28 @@ impl ExecutorBuilder for IcebergWithPkIndexWriterExecutorBuilder {
             .collect::<Vec<_>>();
         if pk_indices.is_empty() {
             return Err(anyhow!("missing downstream pk in iceberg sink desc").into());
+        }
+
+        if node.compaction_apply {
+            // A transient compaction-apply job replaces the streaming writer. The state table is
+            // rebuilt from the same plan-node catalog the writer handle uses, so the apply executor
+            // upserts into the latest committed version of the pk-index table.
+            let pk_index_state_table = StateTableBuilder::new(
+                node.get_pk_index_table()?,
+                store,
+                params.vnode_bitmap.clone().map(Arc::new),
+            )
+            .forbid_preload_all_rows()
+            .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)
+            .build()
+            .await;
+            let exec = CompactionApplyExecutor::new(
+                params.actor_context,
+                input,
+                pk_index_state_table,
+                sink_id,
+            );
+            return Ok((params.info, exec).into());
         }
 
         let (sink_param, _) = build_sink_param(sink_desc, properties_with_secret, ICEBERG_SINK)?;

@@ -174,6 +174,21 @@ message InjectSourceOffsetsMutation {
   map<string, string> split_offsets = 2;
 }
 
+// Gate only the ingress actors participating in a coordinated iceberg pk-index compaction.
+// The pause and resume mutations are carried by two adjacent checkpoint barriers.
+message IcebergPkIndexBarrierMutation {
+  enum Phase {
+    PHASE_UNSPECIFIED = 0;
+    PHASE_PAUSE = 1;
+    PHASE_RESUME = 2;
+  }
+
+  uint32 sink_id = 1;
+  uint64 task_id = 2;
+  repeated uint32 gated_actor_ids = 3;
+  Phase phase = 4;
+}
+
 message BarrierMutation {
   oneof mutation {
     // Add new dispatchers to some actors, used for creating materialized views.
@@ -211,6 +226,8 @@ message BarrierMutation {
     ResetSourceMutation reset_source = 18;
     // Inject specific offsets into source splits (UNSAFE)
     InjectSourceOffsetsMutation inject_source_offsets = 19;
+    // Gate the target ingress actors across an iceberg pk-index compaction checkpoint pair.
+    IcebergPkIndexBarrierMutation iceberg_pk_index_barrier = 20;
   }
 }
 
@@ -386,10 +403,23 @@ message SinkNode {
 message IcebergWithPkIndexWriterNode {
   SinkDesc sink_desc = 1;
   catalog.Table pk_index_table = 2;
+  // True only when it is a transient compaction-resolver job
+  bool compaction_apply = 3;
 }
 
 message IcebergWithPkIndexPositionDeleteMergerNode {
   SinkDesc sink_desc = 1;
+}
+
+// Leaf of a transient pk-index compaction pipeline
+message CompactionResolverNode {
+  SinkDesc sink_desc = 1;
+  catalog.Table pk_index_table = 2;
+  repeated string output_data_file_paths = 3;
+  repeated string input_data_file_paths = 4;
+  int64 read_snapshot_id = 5;
+  reserved 6;
+  reserved "resolver_id";
 }
 
 message ProjectNode {
@@ -1205,6 +1235,7 @@ message StreamNode {
     VectorIndexLookupJoinNode vector_index_lookup_join = 155;
     IcebergWithPkIndexWriterNode iceberg_with_pk_index_writer = 156;
     IcebergWithPkIndexPositionDeleteMergerNode iceberg_with_pk_index_position_delete_merger = 157;
+    CompactionResolverNode compaction_resolver = 159;
   }
   // The id for the operator. This is local per mview.
   // TODO: should better be a uint32.
