@@ -1,0 +1,102 @@
+control substitution on
+
+system ok
+rpk topic delete alter_creating_table || true
+
+system ok
+rpk topic create alter_creating_table -p 1
+
+statement ok
+create table alter_creating_table_seed (v int);
+
+statement ok
+insert into alter_creating_table_seed select * from generate_series(1, 1000);
+
+statement ok
+create sink alter_creating_table_sink
+from
+  alter_creating_table_seed with (
+    ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+    topic = 'alter_creating_table',
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+# Wait for the topic to be visible and populated.
+sleep 5s
+
+statement ok
+set background_ddl = true;
+
+statement ok
+set streaming_parallelism = 1;
+
+statement ok
+create table alter_creating_table (v int) with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'alter_creating_table',
+  scan.startup.mode = 'earliest',
+  source_rate_limit = 1
+) FORMAT PLAIN ENCODE JSON;
+
+statement count 1
+show jobs;
+
+statement ok
+alter table alter_creating_table set parallelism = 2;
+
+statement ok
+alter table alter_creating_table set backfill_parallelism = 2;
+
+statement ok
+alter table alter_creating_table set source_rate_limit = 1000;
+
+statement ok
+alter table alter_creating_table set config (
+    streaming.developer.chunk_size = 511
+);
+
+query I
+select count(*) from rw_streaming_job_config
+where name = 'alter_creating_table'
+  and key = 'streaming.developer.chunk_size'
+  and value = '511';
+----
+1
+
+statement ok
+alter table alter_creating_table reset config (
+    streaming.developer.chunk_size
+);
+
+query I
+select count(*) from rw_streaming_job_config
+where name = 'alter_creating_table';
+----
+0
+
+statement ok
+set background_ddl = false;
+
+statement count 0 retry 30 backoff 1s
+show jobs;
+
+query I
+select count(*) from alter_creating_table;
+----
+1000
+
+statement ok
+drop table alter_creating_table;
+
+statement ok
+drop sink alter_creating_table_sink;
+
+statement ok
+drop table alter_creating_table_seed;
+
+system ok
+rpk topic delete alter_creating_table || true
+
+statement ok
+set streaming_parallelism = default;
