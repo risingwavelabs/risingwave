@@ -84,6 +84,9 @@ pub struct Configuration {
     /// The number of compactor nodes.
     pub compactor_nodes: usize,
 
+    /// The number of dedicated Iceberg compactor nodes.
+    pub iceberg_compactor_nodes: usize,
+
     /// The number of CPU cores for each compute node.
     ///
     /// This determines `worker_node_parallelism`.
@@ -123,6 +126,7 @@ metrics_level = "Disabled"
             compute_nodes: 1,
             meta_nodes: 1,
             compactor_nodes: 1,
+            iceberg_compactor_nodes: 0,
             compute_node_cores: 1,
             per_session_queries: vec![].into(),
             compute_resource_groups: Default::default(),
@@ -247,6 +251,7 @@ default_parallelism = {default_parallelism}
             compute_nodes: 1,
             meta_nodes: 1,
             compactor_nodes: 1,
+            iceberg_compactor_nodes: 0,
             compute_node_cores: default_parallelism * 2,
             per_session_queries: vec![].into(),
             compute_resource_groups: Default::default(),
@@ -367,6 +372,7 @@ default_parallelism = {default_parallelism}
 /// | frontend-x       | 192.168.2.x   |
 /// | compute-x        | 192.168.3.x   |
 /// | compactor-x      | 192.168.4.x   |
+/// | iceberg-compactor-x | 192.168.5.x |
 /// | kafka-broker     | 192.168.11.1  |
 /// | kafka-producer   | 192.168.11.2  |
 /// | object_store_sim | 192.168.12.1  |
@@ -595,6 +601,28 @@ impl Cluster {
                 .build();
         }
 
+        // Iceberg compaction uses a different worker loop and registration
+        // stream from Hummock compaction, so it needs a dedicated node mode.
+        for i in 1..=conf.iceberg_compactor_nodes {
+            let opts = risingwave_compactor::CompactorOpts::parse_from([
+                "compactor-node",
+                "--config-path",
+                conf.config_path.as_str(),
+                "--listen-addr",
+                "0.0.0.0:6660",
+                "--advertise-addr",
+                &format!("192.168.5.{i}:6660"),
+                "--compactor-mode",
+                "dedicated-iceberg",
+            ]);
+            handle
+                .create_node()
+                .name(format!("iceberg-compactor-{i}"))
+                .ip([192, 168, 5, i as u8].into())
+                .init(move || risingwave_compactor::start(opts.clone(), CancellationToken::new()))
+                .build();
+        }
+
         // wait for the service to be ready
         tokio::time::sleep(Duration::from_secs(15)).await;
 
@@ -789,6 +817,9 @@ impl Cluster {
                 }
                 nodes.push(format!("compactor-{}", i));
             }
+            for i in 1..=self.config.iceberg_compactor_nodes {
+                nodes.push(format!("iceberg-compactor-{}", i));
+            }
         }
 
         self.kill_nodes(nodes, opts.restart_delay_secs).await
@@ -911,6 +942,9 @@ impl Cluster {
         }
         for i in 1..=self.config.compactor_nodes {
             nodes.push(format!("compactor-{i}"));
+        }
+        for i in 1..=self.config.iceberg_compactor_nodes {
+            nodes.push(format!("iceberg-compactor-{i}"));
         }
 
         tracing::info!("graceful shutdown");
