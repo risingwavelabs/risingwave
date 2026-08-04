@@ -903,6 +903,7 @@ impl PostCollectCommand {
                         new_sink_downstream,
                         Some(&resolved_split_assignment),
                         replace_sink.as_ref(),
+                        replace_sink.is_none(),
                     )
                     .await?;
 
@@ -971,6 +972,7 @@ impl PostCollectCommand {
                         None,
                         Some(&resolved_split_assignment),
                         None,
+                        false,
                     )
                     .await?;
 
@@ -985,6 +987,7 @@ impl PostCollectCommand {
                                 None, // no replace plan
                                 None, // no init split assignment
                                 None,
+                                false,
                             )
                             .await?;
                     }

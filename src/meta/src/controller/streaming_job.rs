@@ -46,7 +46,6 @@ use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::{StreamingJob as StreamingJobModel, *};
 use risingwave_meta_model::refresh_job::RefreshState;
 use risingwave_meta_model::streaming_job::BackfillOrders;
-use risingwave_meta_model::table::TableType;
 use risingwave_meta_model::user_privilege::Action;
 use risingwave_meta_model::*;
 use risingwave_pb::catalog::table::PbEngine;
@@ -57,7 +56,7 @@ use risingwave_pb::meta::alter_connector_props_request::AlterIcebergTableIds;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{
-    Info as NotificationInfo, Info, Operation as NotificationOperation, Operation,
+    Info as NotificationInfo, Operation as NotificationOperation, Operation,
 };
 use risingwave_pb::meta::{ObjectDependency as PbObjectDependency, PbObject, PbObjectGroup};
 use risingwave_pb::plan_common::PbColumnCatalog;
@@ -320,11 +319,11 @@ impl CatalogController {
         Ok(model)
     }
 
-    /// Create catalogs for the streaming job, then notify frontend about them if the job is a
-    /// materialized view.
+    /// Create the initial catalogs for the streaming job.
     ///
     /// Some of the fields in the given streaming job are placeholders, which will
-    /// be updated later in `prepare_streaming_job` and notify again in `finish_streaming_job`.
+    /// be updated later in `prepare_streaming_job`. The catalogs become visible to frontend after
+    /// the first barrier is collected in `post_collect_job_fragments`.
     #[expect(clippy::too_many_arguments)]
     #[await_tree::instrument]
     pub async fn create_job_catalog(
@@ -684,11 +683,11 @@ impl CatalogController {
         Ok(streaming_job_model)
     }
 
-    /// Create catalogs for internal tables, then notify frontend about them if the job is a
-    /// materialized view.
+    /// Create the initial catalogs for internal tables.
     ///
     /// Some of the fields in the given "incomplete" internal tables are placeholders, which will
-    /// be updated later in `prepare_streaming_job` and notify again in `finish_streaming_job`.
+    /// be updated later in `prepare_streaming_job`. The catalogs become visible to frontend after
+    /// the first barrier is collected in `post_collect_job_fragments`.
     ///
     /// Returns a mapping from the temporary table id to the actual global table id.
     pub async fn create_internal_table_catalog(
@@ -775,7 +774,8 @@ impl CatalogController {
     // TODO: In this function, we also update the `Table` model in the meta store.
     // Given that we've ensured the tables inside `TableFragments` are complete, shall we consider
     // making them the source of truth and performing a full replacement for those in the meta store?
-    /// Insert fragments and actors to meta store. Used both for creating new jobs and replacing jobs.
+    /// Insert fragments and actors into the meta store. Used both for creating new jobs and
+    /// replacing jobs. This does not make a new job visible to frontend.
     #[await_tree::instrument("prepare_streaming_job_for_{}", if for_replace { "replace" } else { "create" }
     )]
     pub async fn prepare_streaming_job<'a, I: Iterator<Item = &'a crate::model::Fragment> + 'a>(
@@ -791,12 +791,6 @@ impl CatalogController {
 
         let inner = self.inner.write().await;
 
-        let need_notify = creating_streaming_job
-            .map(|job| job.should_notify_creating())
-            .unwrap_or(false);
-        let definition = creating_streaming_job.map(|job| job.definition());
-
-        let mut objects_to_notify = vec![];
         let txn = inner.db.begin().await?;
 
         // Ensure the job exists.
@@ -852,39 +846,6 @@ impl CatalogController {
                 })
                 .exec(&txn)
                 .await?;
-
-                if need_notify {
-                    let mut table = table.clone();
-                    // In production, definition was replaced but still needed for notification.
-                    if cfg!(not(debug_assertions)) && table.id == job_id.as_raw_id() {
-                        table.definition = definition.clone().unwrap();
-                    }
-                    objects_to_notify.push(PbObject {
-                        object_info: Some(PbObjectInfo::Table(table)),
-                    });
-                }
-            }
-        }
-
-        // Add streaming job objects to notification
-        if need_notify {
-            match creating_streaming_job.unwrap() {
-                StreamingJob::Table(Some(source), ..) => {
-                    objects_to_notify.push(PbObject {
-                        object_info: Some(PbObjectInfo::Source(source.clone())),
-                    });
-                }
-                StreamingJob::Sink(sink) => {
-                    objects_to_notify.push(PbObject {
-                        object_info: Some(PbObjectInfo::Sink(sink.clone())),
-                    });
-                }
-                StreamingJob::Index(index, _) => {
-                    objects_to_notify.push(PbObject {
-                        object_info: Some(PbObjectInfo::Index(index.clone())),
-                    });
-                }
-                _ => {}
             }
         }
 
@@ -911,20 +872,6 @@ impl CatalogController {
         self.env
             .notification_manager()
             .notify_serving_fragment_mapping_update(inserted_fragment_ids);
-
-        // FIXME: there's a gap between the catalog creation and notification, which may lead to
-        // frontend receiving duplicate notifications if the frontend restarts right in this gap. We
-        // need to either forward the notification or filter catalogs without any fragments in the metastore.
-        if !objects_to_notify.is_empty() {
-            self.notify_frontend(
-                Operation::Add,
-                Info::ObjectGroup(PbObjectGroup {
-                    objects: objects_to_notify,
-                    dependencies: vec![],
-                }),
-            )
-            .await;
-        }
 
         Ok(())
     }
@@ -1066,19 +1013,12 @@ impl CatalogController {
 
         let internal_table_ids = get_internal_tables_by_id(job_id, &txn).await?;
 
-        // Get the notification info if the job is a materialized view or created in the background.
+        // A job becomes visible to frontend only after it enters the creating status.
         let mut objs = vec![];
         let table_obj = Table::find_by_id(job_id.as_mv_table_id()).one(&txn).await?;
-
-        let mut need_notify =
-            streaming_job.is_some_and(|job| job.create_type == CreateType::Background);
-        if !need_notify {
-            if let Some(table) = &table_obj {
-                need_notify = table.table_type == TableType::MaterializedView;
-            } else if original_obj_type == ObjectType::Sink {
-                need_notify = true;
-            }
-        }
+        let need_notify = streaming_job
+            .as_ref()
+            .is_some_and(|job| job.job_status != JobStatus::Initial);
 
         if is_cancelled {
             let dropped_tables = Table::find()
@@ -1134,6 +1074,22 @@ impl CatalogController {
             let obj =
                 obj.ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
             objs.push(obj);
+            if let Some(table) = &table_obj
+                && let Some(source_id) = table.optional_associated_source_id
+                && let Some(source_obj) = Object::find_by_id(source_id)
+                    .select_only()
+                    .columns([
+                        object::Column::Oid,
+                        object::Column::ObjType,
+                        object::Column::SchemaId,
+                        object::Column::DatabaseId,
+                    ])
+                    .into_partial_model()
+                    .one(&txn)
+                    .await?
+            {
+                objs.push(source_obj);
+            }
             let internal_table_objs: Vec<PartialObject> = Object::find()
                 .select_only()
                 .columns([
@@ -1212,6 +1168,103 @@ impl CatalogController {
         })
     }
 
+    async fn build_creating_streaming_job_objects(
+        txn: &DatabaseTransaction,
+        job_id: JobId,
+    ) -> MetaResult<Vec<PbObject>> {
+        let job_type = Object::find_by_id(job_id)
+            .select_only()
+            .column(object::Column::ObjType)
+            .into_tuple()
+            .one(txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
+        let streaming_job = StreamingJobModel::find_by_id(job_id)
+            .one(txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
+
+        let table_objs = Table::find()
+            .find_also_related(Object)
+            .filter(
+                table::Column::BelongsToJobId
+                    .eq(job_id)
+                    .or(table::Column::TableId.eq(job_id.as_mv_table_id())),
+            )
+            .all(txn)
+            .await?;
+        let associated_source_id = table_objs
+            .iter()
+            .find(|(table, _)| table.table_id == job_id.as_mv_table_id())
+            .and_then(|(table, _)| table.optional_associated_source_id);
+        let mut objects = table_objs
+            .into_iter()
+            .map(|(table, obj)| PbObject {
+                object_info: Some(PbObjectInfo::Table(
+                    ObjectModel(table, obj.unwrap(), Some(streaming_job.clone())).into(),
+                )),
+            })
+            .collect_vec();
+
+        match job_type {
+            ObjectType::Table => {
+                if let Some(source_id) = associated_source_id {
+                    let (source, obj) = Source::find_by_id(source_id)
+                        .find_also_related(Object)
+                        .one(txn)
+                        .await?
+                        .ok_or_else(|| MetaError::catalog_id_not_found("source", source_id))?;
+                    objects.push(PbObject {
+                        object_info: Some(PbObjectInfo::Source(
+                            ObjectModel(source, obj.unwrap(), None).into(),
+                        )),
+                    });
+                }
+            }
+            ObjectType::Sink => {
+                let (sink, obj) = Sink::find_by_id(job_id.as_sink_id())
+                    .find_also_related(Object)
+                    .one(txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("sink", job_id))?;
+                objects.push(PbObject {
+                    object_info: Some(PbObjectInfo::Sink(
+                        ObjectModel(sink, obj.unwrap(), Some(streaming_job)).into(),
+                    )),
+                });
+            }
+            ObjectType::Index => {
+                let (index, obj) = Index::find_by_id(job_id.as_index_id())
+                    .find_also_related(Object)
+                    .one(txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("index", job_id))?;
+                objects.push(PbObject {
+                    object_info: Some(PbObjectInfo::Index(
+                        ObjectModel(index, obj.unwrap(), Some(streaming_job)).into(),
+                    )),
+                });
+            }
+            ObjectType::Source => {
+                let (source, obj) = Source::find_by_id(job_id.as_shared_source_id())
+                    .find_also_related(Object)
+                    .one(txn)
+                    .await?
+                    .ok_or_else(|| MetaError::catalog_id_not_found("source", job_id))?;
+                objects.push(PbObject {
+                    object_info: Some(PbObjectInfo::Source(
+                        ObjectModel(source, obj.unwrap(), None).into(),
+                    )),
+                });
+            }
+            _ => unreachable!("invalid streaming job type: {job_type:?}"),
+        }
+
+        Ok(objects)
+    }
+
+    /// Mark a job as creating after its first barrier is collected and notify frontend to add its
+    /// creating catalogs.
     #[await_tree::instrument]
     pub async fn post_collect_job_fragments(
         &self,
@@ -1220,6 +1273,7 @@ impl CatalogController {
         new_sink_downstream: Option<FragmentDownstreamRelation>,
         split_assignment: Option<&SplitAssignment>,
         replace_sink: Option<&SinkId>,
+        notify_creating: bool,
     ) -> MetaResult<Option<Vec<TableId>>> {
         let mut inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -1386,7 +1440,24 @@ impl CatalogController {
             ));
         }
 
+        let creating_objects = if notify_creating {
+            Some(Self::build_creating_streaming_job_objects(&txn, job_id).await?)
+        } else {
+            None
+        };
+
         txn.commit().await?;
+
+        if let Some(objects) = creating_objects {
+            self.notify_frontend(
+                NotificationOperation::Add,
+                NotificationInfo::ObjectGroup(PbObjectGroup {
+                    objects,
+                    dependencies: vec![],
+                }),
+            )
+            .await;
+        }
 
         let Some((
             old_state_table_ids,
@@ -1625,14 +1696,6 @@ impl CatalogController {
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
 
-        let create_type: CreateType = StreamingJobModel::find_by_id(job_id)
-            .select_only()
-            .column(streaming_job::Column::CreateType)
-            .into_tuple()
-            .one(txn)
-            .await?
-            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
-
         // update `created_at` as now() and `created_at_cluster_version` as current cluster version.
         let res = Object::update_many()
             .col_expr(object::Column::CreatedAt, Expr::current_timestamp().into())
@@ -1669,11 +1732,7 @@ impl CatalogController {
                 )),
             })
             .collect_vec();
-        let mut notification_op = if create_type == CreateType::Background {
-            NotificationOperation::Update
-        } else {
-            NotificationOperation::Add
-        };
+        let notification_op = NotificationOperation::Update;
         let mut updated_user_info = vec![];
         let mut need_grant_default_privileges = true;
 
@@ -1684,10 +1743,6 @@ impl CatalogController {
                     .one(txn)
                     .await?
                     .ok_or_else(|| MetaError::catalog_id_not_found("table", job_id))?;
-                if table.table_type == TableType::MaterializedView {
-                    notification_op = NotificationOperation::Update;
-                }
-
                 if let Some(source_id) = table.optional_associated_source_id {
                     let (src, obj) = Source::find_by_id(source_id)
                         .find_also_related(Object)
@@ -1715,9 +1770,6 @@ impl CatalogController {
                 if sink.name.starts_with(ICEBERG_SINK_PREFIX) {
                     need_grant_default_privileges = false;
                 }
-                // If sinks were pre-notified during CREATING, we should use Update at finish
-                // to avoid duplicate Add notifications (align with MV behavior).
-                notification_op = NotificationOperation::Update;
                 objects.push(PbObject {
                     object_info: Some(PbObjectInfo::Sink(
                         ObjectModel(sink, obj.unwrap(), streaming_job).into(),
