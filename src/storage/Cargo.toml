@@ -13,6 +13,7 @@ repository = { workspace = true }
 test = ["risingwave_hummock_sdk/test"]
 failpoints = ["fail/failpoints"]
 hm-trace = []
+sync_point = ["sync-point/sync_point"]
 
 [dependencies]
 ahash = "0.8"

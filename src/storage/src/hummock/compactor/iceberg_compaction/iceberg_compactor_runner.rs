@@ -41,6 +41,7 @@ use risingwave_connector::sink::iceberg::{
 };
 use risingwave_pb::iceberg_compaction::IcebergCompactionTask;
 use risingwave_pb::iceberg_compaction::iceberg_compaction_task::TaskType;
+use risingwave_pb::id::IcebergCompactionTaskId;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
 
@@ -113,7 +114,7 @@ impl Debug for IcebergCompactionTaskStatistics {
 /// Compaction plan runner that executes a single compaction plan.
 #[derive(Debug)]
 pub struct IcebergCompactionPlanRunner {
-    pub task_id: u64,
+    pub task_id: IcebergCompactionTaskId,
     pub sink_id: u32,
     pub plan_index: usize,
 
@@ -206,7 +207,7 @@ impl IcebergCompactionPlanRunner {
                 tracing::info!(
                     iceberg_component = "compaction_worker",
                     iceberg_operation = "execute_plan",
-                    task_id = task_id,
+                    task_id = %task_id,
                     sink_id = sink_id,
                     plan_index = plan_index,
                     task_type = ?task_type,
@@ -223,7 +224,7 @@ impl IcebergCompactionPlanRunner {
                         tracing::info!(
                             iceberg_component = "compaction_worker",
                             iceberg_operation = "execute_plan",
-                            task_id = task_id,
+                            task_id = %task_id,
                             sink_id = sink_id,
                             plan_index = plan_index,
                             task_type = ?task_type,
@@ -240,7 +241,7 @@ impl IcebergCompactionPlanRunner {
                             iceberg_component = "compaction_worker",
                             iceberg_operation = "execute_plan",
                             error = %e.as_report(),
-                            task_id = task_id,
+                            task_id = %task_id,
                             sink_id = sink_id,
                             plan_index = plan_index,
                             task_type = ?task_type,
@@ -257,7 +258,7 @@ impl IcebergCompactionPlanRunner {
     }
 
     async fn compact_impl(
-        task_id: u64,
+        task_id: IcebergCompactionTaskId,
         plan_index: usize,
         catalog: Arc<dyn Catalog>,
         table_ident: TableIdent,
@@ -272,7 +273,7 @@ impl IcebergCompactionPlanRunner {
             tracing::info!(
                 iceberg_component = "compaction_worker",
                 iceberg_operation = "plan_compaction",
-                task_id,
+                task_id = %task_id,
                 plan_index,
                 task_type = ?task_type,
                 table = %table_ident,
@@ -309,7 +310,7 @@ impl IcebergCompactionPlanRunner {
         tracing::info!(
             iceberg_component = "compaction_worker",
             iceberg_operation = "execute_plan",
-            task_id = task_id,
+            task_id = %task_id,
             plan_index = plan_index,
             task_type = ?task_type,
             table = %table_ident,
@@ -608,7 +609,7 @@ pub async fn create_task_execution(
         tracing::info!(
             iceberg_component = "compaction_worker",
             iceberg_operation = "plan_task",
-            task_id = task_id,
+            task_id = %task_id,
             sink_id = sink_id,
             task_type = ?parsed_task_type,
             table = %table_ident,
@@ -642,7 +643,7 @@ pub async fn create_task_execution(
     tracing::info!(
         iceberg_component = "compaction_worker",
         iceberg_operation = "plan_task",
-        task_id = task_id,
+        task_id = %task_id,
         sink_id = sink_id,
         task_type = ?parsed_task_type,
         table = %table_ident,

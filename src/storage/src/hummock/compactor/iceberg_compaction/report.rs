@@ -18,6 +18,7 @@ use std::time::SystemTime;
 use risingwave_pb::iceberg_compaction::{
     SubscribeIcebergCompactionEventRequest, subscribe_iceberg_compaction_event_request,
 };
+use risingwave_pb::id::IcebergCompactionTaskId;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 
@@ -90,7 +91,7 @@ impl IcebergTaskTracker {
         self.failed_plans
     }
 
-    pub(crate) fn into_report(self, task_id: u64) -> IcebergTaskReport {
+    pub(crate) fn into_report(self, task_id: IcebergCompactionTaskId) -> IcebergTaskReport {
         let error_message = if self.successful_plans > 0 {
             None
         } else {
@@ -104,7 +105,7 @@ impl IcebergTaskTracker {
 }
 
 pub(crate) fn build_iceberg_task_report(
-    task_id: u64,
+    task_id: IcebergCompactionTaskId,
     sink_id: u32,
     error_message: Option<String>,
 ) -> IcebergTaskReport {
@@ -137,7 +138,7 @@ pub(crate) fn send_iceberg_task_report(
             iceberg_component = "compaction_worker",
             iceberg_operation = "report_task",
             error = %e.as_report(),
-            task_id = report_event.task_id,
+            task_id = %report_event.task_id,
             sink_id = report_event.sink_id,
             "iceberg_compaction_task_report_send_failed",
         );
@@ -183,7 +184,7 @@ mod tests {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         drop(rx);
 
-        let report = build_iceberg_task_report(7, 9, Some("send failure".to_owned()));
+        let report = build_iceberg_task_report(7.into(), 9, Some("send failure".to_owned()));
         let failed_report = send_iceberg_task_report(&tx, report.clone()).unwrap_err();
 
         assert_eq!(failed_report.task_id, report.task_id);
@@ -196,7 +197,7 @@ mod tests {
         let mut tracker = IcebergTaskTracker::new(9, 1);
         tracker.record_completion(None);
 
-        let report = tracker.into_report(7);
+        let report = tracker.into_report(7.into());
 
         assert_eq!(
             report.status,
@@ -211,7 +212,7 @@ mod tests {
         tracker.record_completion(Some("first failure".to_owned()));
         tracker.record_completion(Some("second failure".to_owned()));
 
-        let report = tracker.into_report(7);
+        let report = tracker.into_report(7.into());
 
         assert_eq!(
             report.status,
