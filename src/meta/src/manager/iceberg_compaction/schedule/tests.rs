@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use prometheus::Registry;
 use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event as IcebergResponseEvent;
+use risingwave_pb::id::IcebergCompactionTaskId;
 
 use super::*;
 use crate::controller::catalog::CatalogController;
@@ -67,15 +68,19 @@ fn new_track(
 
 fn start_in_flight_on(
     track: &mut CompactionTrack,
-    task_id: u64,
+    task_id: impl Into<IcebergCompactionTaskId>,
     compactor_context_id: HummockContextId,
     now: Instant,
 ) {
     track.start_processing();
-    track.mark_dispatched(task_id, compactor_context_id, now);
+    track.mark_dispatched(task_id.into(), compactor_context_id, now);
 }
 
-fn start_in_flight(track: &mut CompactionTrack, task_id: u64, now: Instant) {
+fn start_in_flight(
+    track: &mut CompactionTrack,
+    task_id: impl Into<IcebergCompactionTaskId>,
+    now: Instant,
+) {
     start_in_flight_on(track, task_id, 1.into(), now);
 }
 
@@ -246,7 +251,7 @@ async fn test_commit_update_freezes_gc_watermark_after_task_start() {
         .sink_schedules
         .get_mut(&sink_id)
         .unwrap()
-        .mark_dispatched(1, 1.into(), now);
+        .mark_dispatched(1.into(), 1.into(), now);
     let applied = manager.apply_sink_update(
         &mut guard,
         PreparedSinkUpdate {
@@ -456,10 +461,10 @@ fn test_mark_dispatched_records_task_id_for_stale_report_filtering() {
     let mut track = new_track(now, 120, 10, 5);
     track.start_processing();
     assert!(track.is_pending_dispatch());
-    track.mark_dispatched(42, 1.into(), now);
+    track.mark_dispatched(42.into(), 1.into(), now);
 
-    assert!(track.is_processing_task(42));
-    assert!(!track.is_processing_task(43));
+    assert!(track.is_processing_task(42.into()));
+    assert!(!track.is_processing_task(43.into()));
 }
 
 #[test]
@@ -831,7 +836,7 @@ async fn test_apply_sink_update_keeps_processing_track_when_compaction_is_disabl
     config.enable_compaction = false;
     let mut track = new_track(now, 300, 3, 0);
     track.start_processing();
-    track.mark_dispatched(task_id, 1.into(), now);
+    track.mark_dispatched(task_id.into(), 1.into(), now);
     let mut guard = empty_inner();
     guard.sink_schedules.insert(sink_id, track);
 
@@ -848,7 +853,7 @@ async fn test_apply_sink_update_keeps_processing_track_when_compaction_is_disabl
 
     assert!(matches!(
         guard.sink_schedules.get(&sink_id).unwrap().state,
-        CompactionTrackState::InFlight { task_id: 8, .. }
+        CompactionTrackState::InFlight { task_id, .. } if task_id.as_raw_id() == 8
     ));
 }
 
@@ -910,7 +915,7 @@ async fn test_apply_sink_update_rejects_temporary_manual_processing_track_withou
     assert_eq!(track.pending_commit_count, 1);
     assert!(matches!(
         track.state,
-        CompactionTrackState::InFlight { task_id: 8, .. }
+        CompactionTrackState::InFlight { task_id, .. } if task_id.as_raw_id() == 8
     ));
 }
 
@@ -946,7 +951,7 @@ async fn test_apply_sink_update_promotes_temporary_manual_track_when_compaction_
     }
 
     manager.handle_report_task(IcebergReportTask {
-        task_id,
+        task_id: task_id.into(),
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
@@ -1089,7 +1094,7 @@ async fn test_handle_report_task_success_consumes_backlog_and_resets_to_idle() {
     manager.inner.write().sink_schedules.insert(sink_id, track);
 
     manager.handle_report_task(IcebergReportTask {
-        task_id: 9,
+        task_id: 9.into(),
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
@@ -1109,7 +1114,7 @@ async fn test_handle_report_task_completes_manual_waiter_on_success() {
     let now = Instant::now();
     let mut track = new_track(now, 120, 10, 2);
     track.start_processing();
-    track.mark_dispatched(task_id, 1.into(), now);
+    track.mark_dispatched(task_id.into(), 1.into(), now);
     let (tx, rx) = tokio::sync::oneshot::channel();
     {
         let mut guard = manager.inner.write();
@@ -1118,7 +1123,7 @@ async fn test_handle_report_task_completes_manual_waiter_on_success() {
     }
 
     manager.handle_report_task(IcebergReportTask {
-        task_id,
+        task_id: task_id.into(),
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
@@ -1140,7 +1145,7 @@ async fn test_handle_report_task_completes_manual_waiter_on_failure() {
     let now = Instant::now();
     let mut track = new_track(now, 120, 10, 2);
     track.start_processing();
-    track.mark_dispatched(task_id, 1.into(), now);
+    track.mark_dispatched(task_id.into(), 1.into(), now);
     let (tx, rx) = tokio::sync::oneshot::channel();
     {
         let mut guard = manager.inner.write();
@@ -1149,7 +1154,7 @@ async fn test_handle_report_task_completes_manual_waiter_on_failure() {
     }
 
     manager.handle_report_task(IcebergReportTask {
-        task_id,
+        task_id: task_id.into(),
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Failed as i32,
         error_message: Some("boom".to_owned()),
@@ -1173,7 +1178,7 @@ async fn test_handle_report_task_removes_temporary_manual_track_on_success() {
     let mut track = new_track(now, 120, 10, 0);
     track.finish_action = CompactionTrackFinishAction::RemoveTrack;
     track.start_processing();
-    track.mark_dispatched(task_id, 1.into(), now);
+    track.mark_dispatched(task_id.into(), 1.into(), now);
     let (tx, rx) = tokio::sync::oneshot::channel();
     {
         let mut guard = manager.inner.write();
@@ -1182,7 +1187,7 @@ async fn test_handle_report_task_removes_temporary_manual_track_on_success() {
     }
 
     manager.handle_report_task(IcebergReportTask {
-        task_id,
+        task_id: task_id.into(),
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
@@ -1203,7 +1208,7 @@ async fn test_handle_report_task_removes_temporary_manual_track_on_failure() {
     let mut track = new_track(now, 120, 10, 0);
     track.finish_action = CompactionTrackFinishAction::RemoveTrack;
     track.start_processing();
-    track.mark_dispatched(task_id, 1.into(), now);
+    track.mark_dispatched(task_id.into(), 1.into(), now);
     let (tx, rx) = tokio::sync::oneshot::channel();
     {
         let mut guard = manager.inner.write();
@@ -1212,7 +1217,7 @@ async fn test_handle_report_task_removes_temporary_manual_track_on_failure() {
     }
 
     manager.handle_report_task(IcebergReportTask {
-        task_id,
+        task_id: task_id.into(),
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Failed as i32,
         error_message: Some("boom".to_owned()),
@@ -1313,10 +1318,10 @@ async fn test_manual_compaction_waiter_is_not_stolen_during_config_load() {
         let mut guard = manager.inner.write();
         let track = guard.sink_schedules.get_mut(&sink_id).unwrap();
         track.start_processing();
-        track.mark_dispatched(task_id, 1.into(), now);
+        track.mark_dispatched(task_id.into(), 1.into(), now);
     }
     manager.handle_report_task(IcebergReportTask {
-        task_id,
+        task_id: task_id.into(),
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
@@ -1441,7 +1446,7 @@ async fn test_trigger_manual_compaction_rejects_existing_task() {
     assert!(!guard.manual_compaction_waiters.contains_key(&sink_id));
     assert!(matches!(
         guard.sink_schedules.get(&sink_id).unwrap().state,
-        CompactionTrackState::InFlight { task_id: 9, .. }
+        CompactionTrackState::InFlight { task_id, .. } if task_id.as_raw_id() == 9
     ));
 }
 
@@ -1494,7 +1499,7 @@ async fn test_handle_report_task_failure_preserves_backlog_and_resets_to_idle() 
     manager.inner.write().sink_schedules.insert(sink_id, track);
 
     manager.handle_report_task(IcebergReportTask {
-        task_id: 9,
+        task_id: 9.into(),
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Failed as i32,
         error_message: Some("boom".to_owned()),
@@ -1521,7 +1526,7 @@ async fn test_handle_report_task_ignores_stale_task_id() {
     }
 
     manager.handle_report_task(IcebergReportTask {
-        task_id: 10,
+        task_id: 10.into(),
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
@@ -1532,7 +1537,7 @@ async fn test_handle_report_task_ignores_stale_task_id() {
     assert_eq!(track.pending_commit_count, 2);
     assert!(matches!(
         track.state,
-        CompactionTrackState::InFlight { task_id: 9, .. }
+        CompactionTrackState::InFlight { task_id, .. } if task_id.as_raw_id() == 9
     ));
     assert!(guard.manual_compaction_waiters.contains_key(&sink_id));
 }
