@@ -1761,8 +1761,7 @@ mod tests {
             &txn,
             ObjectType::Table,
             TEST_OWNER_ID,
-            Some(TEST_DATABASE_ID),
-            Some(TEST_SCHEMA_ID),
+            Some(TEST_SCHEMA_ID.as_object_id()),
         )
         .await?;
         let table_id = table_obj.oid.as_table_id();
