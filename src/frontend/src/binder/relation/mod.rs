@@ -17,6 +17,7 @@ use std::ops::Deref;
 
 use itertools::{EitherOrBoth, Itertools};
 use risingwave_common::bail;
+use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{Field, TableId};
 use risingwave_sqlparser::ast::{
     AsOf, Expr as ParserExpr, FunctionArg, FunctionArgExpr, Ident, ObjectName, TableAlias,
@@ -627,6 +628,11 @@ impl Binder {
 
     pub(super) fn bind_table_factor(&mut self, table_factor: &TableFactor) -> Result<Relation> {
         match table_factor {
+            // Parsed but not yet bound in this commit: the binder lands in the next change of the
+            // series. Kept as an explicit rejection so the parser can merge independently.
+            TableFactor::MatchRecognize { .. } => {
+                bail_not_implemented!("MATCH_RECOGNIZE is not yet supported")
+            }
             TableFactor::Table { name, alias, as_of } => {
                 self.bind_relation_by_name(name, alias.as_ref(), as_of.as_ref(), true)
             }
