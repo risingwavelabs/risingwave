@@ -1,0 +1,165 @@
+statement ok
+create secret pk_index_delete_reinsert_secret with (
+  backend = 'meta'
+) as 'hummockadmin';
+
+statement ok
+create connection pk_index_delete_reinsert_conn
+with (
+    type = 'iceberg',
+    warehouse.path = 's3://hummock001/iceberg_pk_index_delete_reinsert',
+    s3.access.key = secret pk_index_delete_reinsert_secret,
+    s3.secret.key = secret pk_index_delete_reinsert_secret,
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-west-2',
+    hosted_catalog = true
+);
+
+statement ok
+set iceberg_engine_connection = 'public.pk_index_delete_reinsert_conn';
+
+# Non-partitioned pk-index table: each insert below is flushed on its own
+# checkpoint, so the table accumulates several small data files before we
+# trigger compaction.
+statement ok
+create table t_pk_index_delete_reinsert(id int primary key, name varchar, v1 int)
+with(
+    commit_checkpoint_interval = 1,
+    format_version = 2,
+    enable_pk_index = 'true'
+) engine = iceberg;
+
+statement ok
+insert into t_pk_index_delete_reinsert values(1, 'alice', 100), (2, 'bob', 200);
+
+statement ok
+flush;
+
+sleep 1s
+
+statement ok
+insert into t_pk_index_delete_reinsert values(3, 'charlie', 300), (4, 'diana', 400);
+
+statement ok
+flush;
+
+query ??? rowsort retry 6 backoff 1s
+select * from t_pk_index_delete_reinsert;
+----
+1 alice 100
+2 bob 200
+3 charlie 300
+4 diana 400
+
+# Compact: rewrites all four rows into fewer output files. CompactionResolve
+# pauses the writer, rebuilds its pk-index at the new locations, co-commits
+# the overwrite, and resumes the writer.
+statement ok
+VACUUM FULL t_pk_index_delete_reinsert;
+
+# `VACUUM FULL` schedules the transient resolve asynchronously. `flush` waits
+# for its barrier hold to release and for the writer to reopen before DML.
+statement ok
+flush;
+
+query ??? rowsort retry 6 backoff 1s
+select * from t_pk_index_delete_reinsert;
+----
+1 alice 100
+2 bob 200
+3 charlie 300
+4 diana 400
+
+# Delete id = 3, whose only surviving location is the just-compacted output
+# file. This exercises the resumed writer's rebuilt pk-index: without the
+# resolve, the delete would target a removed pre-compaction input file and be
+# silently dropped, leaving id = 3 visible.
+statement ok
+delete from t_pk_index_delete_reinsert where id = 3;
+
+statement ok
+flush;
+
+query ??? rowsort retry 6 backoff 1s
+select * from t_pk_index_delete_reinsert;
+----
+1 alice 100
+2 bob 200
+4 diana 400
+
+# Reinsert the same primary key with a different value. The final read
+# must show the reinserted row, not a resurrected pre-delete value: if
+# stale pk-index bookkeeping from the earlier compaction leaked into how id = 3
+# is tracked, the old ('charlie', 300) row could come back instead of (or
+# alongside) the new one.
+statement ok
+insert into t_pk_index_delete_reinsert values(3, 'charlie2', 999);
+
+statement ok
+flush;
+
+query ??? rowsort retry 6 backoff 1s
+select * from t_pk_index_delete_reinsert;
+----
+1 alice 100
+2 bob 200
+3 charlie2 999
+4 diana 400
+
+# Compact again: the reinserted row is now part of the rewritten set. The
+# result must still reflect the reinserted value, and the table must
+# converge to a single compacted data file with no leftover delete files.
+statement ok
+VACUUM FULL t_pk_index_delete_reinsert;
+
+statement ok
+flush;
+
+query ??? rowsort retry 6 backoff 1s
+select * from t_pk_index_delete_reinsert;
+----
+1 alice 100
+2 bob 200
+3 charlie2 999
+4 diana 400
+
+query T retry 6 backoff 1s
+select count(*) = 1 from rw_iceberg_files
+where schema_name = 'public'
+  and source_name = '__iceberg_source_t_pk_index_delete_reinsert'
+  and content = 'Data';
+----
+t
+
+query T retry 6 backoff 1s
+select count(*) = 0 from rw_iceberg_files
+where schema_name = 'public'
+  and source_name = '__iceberg_source_t_pk_index_delete_reinsert'
+  and content in ('PositionDeletes', 'EqualityDeletes');
+----
+t
+
+# The table must remain fully usable afterwards.
+statement ok
+insert into t_pk_index_delete_reinsert values(5, 'eve', 500);
+
+statement ok
+flush;
+
+query ??? rowsort retry 6 backoff 1s
+select * from t_pk_index_delete_reinsert;
+----
+1 alice 100
+2 bob 200
+3 charlie2 999
+4 diana 400
+5 eve 500
+
+statement ok
+DROP TABLE t_pk_index_delete_reinsert;
+
+statement ok
+DROP CONNECTION pk_index_delete_reinsert_conn;
+
+statement ok
+DROP SECRET pk_index_delete_reinsert_secret;

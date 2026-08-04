@@ -28,7 +28,7 @@ use std::time::Duration;
 use anyhow::Result;
 use async_trait::async_trait;
 use iceberg::io::FileIO;
-use iceberg::spec::{Snapshot, TableMetadata, TableMetadataRef};
+use iceberg::spec::{DataContentType, SerializedDataFile, TableMetadata, TableMetadataRef};
 use iceberg::table::Table;
 use iceberg::{
     Catalog, Error as IcebergError, ErrorKind as IcebergErrorKind, Namespace, NamespaceIdent,
@@ -83,6 +83,11 @@ pub struct MockIcebergV3CatalogInner {
 #[derive(Clone)]
 pub struct MockIcebergV3Catalog {
     inner: Arc<Mutex<MockIcebergV3CatalogInner>>,
+    /// A single, process-shared in-memory `FileIO` handed to every `load_table` result.
+    ///
+    /// Unlike building a fresh `memory://` operator per `load_table`, this persists across calls
+    /// and lets all in-process users of the registered mock observe the same table files.
+    file_io: FileIO,
 }
 
 impl fmt::Debug for MockIcebergV3Catalog {
@@ -95,6 +100,11 @@ impl fmt::Debug for MockIcebergV3Catalog {
 
 impl MockIcebergV3Catalog {
     pub fn new(table_ident: TableIdent, initial_metadata: TableMetadata) -> Self {
+        // One shared in-memory store for the whole process (see the `file_io` field doc).
+        let file_io = FileIO::from_path("memory://")
+            .expect("build memory FileIO path")
+            .build()
+            .expect("build memory FileIO");
         Self {
             inner: Arc::new(Mutex::new(MockIcebergV3CatalogInner {
                 snapshots: BTreeMap::new(),
@@ -107,6 +117,7 @@ impl MockIcebergV3Catalog {
                 all_added_file_paths: HashSet::new(),
                 last_kill_event_idx: None,
             })),
+            file_io,
         }
     }
 
@@ -137,6 +148,55 @@ impl MockIcebergV3Catalog {
     /// Total snapshots successfully committed.
     pub fn committed_snapshot_count(&self) -> usize {
         self.inner().snapshots.len()
+    }
+
+    pub async fn current_data_files(
+        &self,
+    ) -> Result<(Vec<SerializedDataFile>, Vec<String>, i32, i32, i64)> {
+        let metadata = self.inner().current_metadata.clone();
+        let snapshot = metadata
+            .current_snapshot()
+            .cloned()
+            .ok_or_else(|| anyhow::anyhow!("mock table has no current snapshot"))?;
+        let manifest_list = snapshot
+            .load_manifest_list(&self.file_io, &metadata)
+            .await?;
+        let mut live_files = HashMap::new();
+        for manifest_file in manifest_list.entries().iter().rev() {
+            let manifest = manifest_file.load_manifest(&self.file_io).await?;
+            for entry in manifest.entries() {
+                if entry.content_type() != DataContentType::Data {
+                    continue;
+                }
+                let path = entry.data_file.file_path().to_owned();
+                if entry.is_alive() {
+                    live_files.insert(path, entry.data_file.clone());
+                } else {
+                    live_files.remove(&path);
+                }
+            }
+        }
+        let partition_type = metadata.default_partition_type();
+        let format_version = metadata.format_version();
+        let mut paths = live_files.keys().cloned().collect::<Vec<_>>();
+        paths.sort();
+        let files = paths
+            .iter()
+            .map(|path| {
+                SerializedDataFile::try_from(
+                    live_files.get(path).unwrap().clone(),
+                    partition_type,
+                    format_version,
+                )
+            })
+            .collect::<IcebergResult<Vec<_>>>()?;
+        Ok((
+            files,
+            paths,
+            metadata.current_schema_id(),
+            metadata.default_partition_spec_id(),
+            snapshot.snapshot_id(),
+        ))
     }
 
     /// Sum of `data_files_added` across all snapshots.
@@ -283,10 +343,8 @@ impl MockIcebergV3Catalog {
     // -------- internal helpers --------
 
     fn build_table_with_metadata(&self, metadata: TableMetadata) -> IcebergResult<Table> {
-        let file_io = FileIO::from_path("memory://")
-            .map_err(to_unexpected)?
-            .build()
-            .map_err(to_unexpected)?;
+        // Hand out the shared in-memory FileIO so every in-process consumer sees the same files.
+        let file_io = self.file_io.clone();
         let ident = self.inner().table_ident.clone();
         Table::builder()
             .metadata(TableMetadataRef::from(metadata))
@@ -342,14 +400,12 @@ impl Catalog for MockIcebergV3Catalog {
         // (added vs overwritten). V3 packs everything in one AddSnapshot update.
         let updates = commit.take_updates();
         let mut new_snapshot_id: Option<i64> = None;
-        let mut new_snapshot: Option<Snapshot> = None;
         let mut data_files_added: Vec<String> = Vec::new();
         let mut data_files_overwritten: Vec<String> = Vec::new();
 
         for update in &updates {
             if let TableUpdate::AddSnapshot { snapshot } = update {
                 new_snapshot_id = Some(snapshot.snapshot_id());
-                new_snapshot = Some(snapshot.clone());
                 // Note: the snapshot's summary may have "added-data-files",
                 // "deleted-data-files" properties; we use those to count files.
                 // Actual file_path strings come from the manifest_list, which
@@ -385,14 +441,21 @@ impl Catalog for MockIcebergV3Catalog {
             }
         }
 
-        let snapshot_id = new_snapshot_id.ok_or_else(|| {
-            IcebergError::new(
-                IcebergErrorKind::Unexpected,
-                "mock: TableCommit contained no AddSnapshot update",
-            )
-        })?;
-
         let mut inner = self.inner();
+
+        let Some(snapshot_id) = new_snapshot_id else {
+            // A coordinated no-op rewrite still passes through the catalog
+            // transaction boundary. Apply any metadata-only updates and return
+            // without manufacturing a snapshot or commit event.
+            let mut builder = inner.current_metadata.clone().into_builder(None);
+            for update in updates {
+                builder = update.apply(builder).map_err(to_unexpected)?;
+            }
+            let new_metadata = builder.build().map_err(to_unexpected)?.metadata;
+            inner.current_metadata = new_metadata.clone();
+            drop(inner);
+            return self.build_table_with_metadata(new_metadata);
+        };
 
         // Duplicate snapshot_id detection — V3 should have skipped via idempotency check.
         if !inner.seen_snapshot_ids.insert(snapshot_id) {
@@ -409,16 +472,14 @@ impl Catalog for MockIcebergV3Catalog {
             inner.all_added_file_paths.insert(path.clone());
         }
 
-        // Append the new snapshot to current_metadata using the builder.
-        let new_metadata = inner
-            .current_metadata
-            .clone()
-            .into_builder(None)
-            .add_snapshot(new_snapshot.unwrap())
-            .map_err(to_unexpected)?
-            .build()
-            .map_err(to_unexpected)?
-            .metadata;
+        // Apply the full transaction in order. In particular, retaining only
+        // AddSnapshot would drop SetSnapshotRef and leave readers planning
+        // against a stale branch head.
+        let mut builder = inner.current_metadata.clone().into_builder(None);
+        for update in updates {
+            builder = update.apply(builder).map_err(to_unexpected)?;
+        }
+        let new_metadata = builder.build().map_err(to_unexpected)?.metadata;
 
         inner.current_metadata = new_metadata.clone();
         inner.snapshots.insert(
