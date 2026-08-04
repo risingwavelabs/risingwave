@@ -494,6 +494,51 @@ impl PartialGraphManager {
         new_actors: Option<StreamJobActorsToCreate>,
         info: PartialGraphBarrierInfo,
     ) -> MetaResult<()> {
+        self.inject_barrier_inner(
+            partial_graph_id,
+            mutation,
+            node_actors,
+            table_ids_to_sync,
+            nodes_to_sync_table,
+            new_actors,
+            info,
+            false,
+        )
+    }
+
+    pub(super) fn inject_barrier_without_starting_table_epoch(
+        &mut self,
+        partial_graph_id: PartialGraphId,
+        mutation: Option<Mutation>,
+        node_actors: &HashMap<WorkerId, HashSet<ActorId>>,
+        table_ids_to_sync: impl Iterator<Item = TableId>,
+        nodes_to_sync_table: impl Iterator<Item = WorkerId>,
+        new_actors: Option<StreamJobActorsToCreate>,
+        info: PartialGraphBarrierInfo,
+    ) -> MetaResult<()> {
+        self.inject_barrier_inner(
+            partial_graph_id,
+            mutation,
+            node_actors,
+            table_ids_to_sync,
+            nodes_to_sync_table,
+            new_actors,
+            info,
+            true,
+        )
+    }
+
+    fn inject_barrier_inner(
+        &mut self,
+        partial_graph_id: PartialGraphId,
+        mutation: Option<Mutation>,
+        node_actors: &HashMap<WorkerId, HashSet<ActorId>>,
+        table_ids_to_sync: impl Iterator<Item = TableId>,
+        nodes_to_sync_table: impl Iterator<Item = WorkerId>,
+        new_actors: Option<StreamJobActorsToCreate>,
+        info: PartialGraphBarrierInfo,
+        table_epoch_already_started: bool,
+    ) -> MetaResult<()> {
         let graph = self
             .graphs
             .get_mut(&partial_graph_id)
@@ -506,6 +551,7 @@ impl PartialGraphManager {
             table_ids_to_sync,
             nodes_to_sync_table,
             new_actors,
+            table_epoch_already_started,
         )?;
         let PartialGraphStatus::Running(state) = graph else {
             panic!("should not inject barrier on non-running status: {graph:?}")
@@ -654,6 +700,7 @@ impl PartialGraphRecoverer<'_> {
             table_ids_to_sync,
             node_actors.keys().copied(),
             Some(new_actors),
+            false,
         )?;
         self.manager
             .graphs

@@ -76,6 +76,8 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
         pending().await
     }
 
+    fn set_database_barrier_hold(&self, _database_id: DatabaseId, _hold: bool) {}
+
     fn abort_and_mark_blocked(
         &self,
         database_id: Option<DatabaseId>,
@@ -184,6 +186,13 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
         _reports: Vec<
             risingwave_pb::stream_service::barrier_complete_response::IcebergPkIndexSinkMetadata,
         >,
+    ) -> MetaResult<Vec<SinkId>> {
+        unimplemented!()
+    }
+
+    async fn pre_commit_iceberg_pk_index_compaction_overwrites(
+        &self,
+        _overwrites: Vec<crate::barrier::complete_task::CompactionOverwrite>,
     ) -> MetaResult<Vec<SinkId>> {
         unimplemented!()
     }

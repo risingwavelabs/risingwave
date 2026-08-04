@@ -36,6 +36,7 @@ use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_reques
 use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::{
     Event as IcebergResponseEvent, PullTaskAck as IcebergPullTaskAck,
 };
+use risingwave_pb::id::IcebergCompactionTaskId;
 use rw_futures_util::pending_on_none;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
@@ -696,9 +697,9 @@ impl IcebergCompactionEventHandler {
                     handle
                         .send_compact_task(
                             compactor,
-                            next_compaction_task_id(&self.compaction_manager.env)
-                                .await?
-                                .into(),
+                            IcebergCompactionTaskId::new(
+                                next_compaction_task_id(&self.compaction_manager.env).await?,
+                            ),
                         )
                         .await
                 }
@@ -730,8 +731,11 @@ impl IcebergCompactionEventHandler {
         false
     }
 
-    fn apply_report_task_event(&self, report: IcebergReportTask) {
-        self.compaction_manager.handle_report_task(report);
+    async fn apply_report_task_event(&self, report: IcebergReportTask) {
+        // Report handling only resolves catalog metadata and enqueues a barrier
+        // command. The Iceberg commit happens later in CompleteBarrierTask, so
+        // preserve the event loop's original report ordering here.
+        self.compaction_manager.handle_report_task(report).await;
     }
 }
 
@@ -753,7 +757,8 @@ impl CompactionEventDispatcher for IcebergCompactionEventDispatcher {
             }
             IcebergRequestEvent::ReportTask(report) => {
                 self.compaction_event_handler
-                    .apply_report_task_event(report);
+                    .apply_report_task_event(report)
+                    .await;
                 return true;
             }
             _ => unreachable!(),

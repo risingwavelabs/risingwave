@@ -151,7 +151,7 @@ impl CheckpointControl {
         &mut self,
         partial_graph_manager: &mut PartialGraphManager,
         output: BarrierCompleteOutput,
-    ) {
+    ) -> MetaResult<()> {
         self.hummock_version_stats = output.hummock_version_stats;
         for (database_id, (command_prev_epoch, independent_job_epochs)) in output.epochs_to_ack {
             self.databases
@@ -162,8 +162,24 @@ impl CheckpointControl {
                     partial_graph_manager,
                     command_prev_epoch,
                     independent_job_epochs,
-                );
+                )?;
         }
+        Ok(())
+    }
+
+    pub(crate) fn compaction_blocked_databases(&self) -> HashSet<DatabaseId> {
+        let mut blocked_databases = HashSet::new();
+        for (&database_id, status) in &self.databases {
+            let Some(database) = status.running_state() else {
+                continue;
+            };
+            for job in database.independent_checkpoint_job_controls.values() {
+                if matches!(job, IndependentCheckpointJobControl::CompactionResolve(_)) {
+                    blocked_databases.insert(database_id);
+                }
+            }
+        }
+        blocked_databases
     }
 
     pub(crate) fn next_complete_barrier_task(
@@ -191,13 +207,17 @@ impl CheckpointControl {
         partial_graph_id: PartialGraphId,
         collected_barrier: CollectedBarrier<'_>,
         periodic_barriers: &mut PeriodicBarriers,
+        partial_graph_manager: &mut PartialGraphManager,
     ) -> MetaResult<()> {
         let (database_id, _) = from_partial_graph_id(partial_graph_id);
         let database_status = self.databases.get_mut(&database_id).expect("should exist");
         match database_status {
-            DatabaseCheckpointControlStatus::Running(database) => {
-                database.barrier_collected(partial_graph_id, collected_barrier, periodic_barriers)
-            }
+            DatabaseCheckpointControlStatus::Running(database) => database.barrier_collected(
+                partial_graph_id,
+                collected_barrier,
+                periodic_barriers,
+                partial_graph_manager,
+            ),
             DatabaseCheckpointControlStatus::Recovering(_) => {
                 if cfg!(debug_assertions) {
                     panic!(
@@ -340,7 +360,8 @@ impl CheckpointControl {
                     | Command::LoadFinish { .. }
                     | Command::ResetSource { .. }
                     | Command::ResumeBackfill { .. }
-                    | Command::InjectSourceOffsets { .. } => {
+                    | Command::InjectSourceOffsets { .. }
+                    | Command::CreateCompactionResolveJob { .. } => {
                         if cfg!(debug_assertions) {
                             panic!(
                                 "new database graph info can only be created for normal creating streaming job, but get command: {} {:?}",
@@ -614,6 +635,11 @@ impl CheckpointControl {
                     IndependentCheckpointJobControl::CreatingStreamingJob(_) => {
                         unreachable!("creating streaming job should not initialize when running")
                     }
+                    IndependentCheckpointJobControl::CompactionResolve(_) => {
+                        unreachable!(
+                            "pk-index compaction resolver job should not initialize when running"
+                        )
+                    }
                 }
             }
             DatabaseCheckpointControlStatus::Recovering(state) => {
@@ -759,7 +785,7 @@ pub(in crate::barrier) struct DatabaseCheckpointControl {
     /// The barrier that are completing.
     completing_barrier: Option<EpochPair>,
 
-    committed_epoch: Option<u64>,
+    pub(super) committed_epoch: Option<u64>,
 
     /// `None` while the database has no streaming job, so that a frozen timestamp does not
     /// render as an ever-growing barrier pending time.
@@ -838,6 +864,7 @@ impl DatabaseCheckpointControl {
         partial_graph_id: PartialGraphId,
         collected_barrier: CollectedBarrier<'_>,
         periodic_barriers: &mut PeriodicBarriers,
+        partial_graph_manager: &mut PartialGraphManager,
     ) -> MetaResult<()> {
         let prev_epoch = collected_barrier.epoch.prev;
         tracing::trace!(
@@ -852,7 +879,7 @@ impl DatabaseCheckpointControl {
                 .independent_checkpoint_job_controls
                 .get_mut(&independent_job_id)
                 .expect("should exist");
-            let should_force_checkpoint = job.collect(collected_barrier);
+            let should_force_checkpoint = job.collect(collected_barrier, partial_graph_manager)?;
             if should_force_checkpoint {
                 periodic_barriers.force_checkpoint_in_next_barrier(self.database_id);
             }
@@ -1022,6 +1049,7 @@ impl DatabaseCheckpointControl {
                             independent_jobs_task.push((*job_id, epoch, resps, info));
                         }
                     }
+                    IndependentCheckpointJobControl::CompactionResolve(_) => {}
                 }
             }
             if !finished_jobs.is_empty() {
@@ -1066,6 +1094,16 @@ impl DatabaseCheckpointControl {
                 );
             },
         ) {
+            let compaction_overwrites: Vec<_> = self
+                .independent_checkpoint_job_controls
+                .values_mut()
+                .filter_map(|job| match job {
+                    IndependentCheckpointJobControl::CompactionResolve(resolve_job) => {
+                        resolve_job.take_overwrite_for_main_epoch(epoch)
+                    }
+                    _ => None,
+                })
+                .collect();
             self.handle_refresh_table_info(task, &resps);
             self.database_info.apply_collected_command(
                 &info.post_collect_command,
@@ -1107,6 +1145,7 @@ impl DatabaseCheckpointControl {
                 task.commit_info
                     .truncate_tables
                     .extend(staging_commit_info.table_ids_to_truncate);
+                task.compaction_overwrites.extend(compaction_overwrites);
             }
         } else if observed_non_checkpoint
             && self.database_info.has_pending_finished_jobs()
@@ -1130,7 +1169,7 @@ impl DatabaseCheckpointControl {
         partial_graph_manager: &mut PartialGraphManager,
         command_prev_epoch: Option<u64>,
         independent_job_epochs: Vec<(JobId, u64)>,
-    ) {
+    ) -> MetaResult<()> {
         {
             if let Some(epoch) = self.completing_barrier.take() {
                 assert_eq!(command_prev_epoch, Some(epoch.prev));
@@ -1143,17 +1182,29 @@ impl DatabaseCheckpointControl {
                             .with_guarded_label_values(&[&self.database_id.to_string()])
                     })
                     .set(Epoch(epoch.curr).as_unix_secs() as i64);
+                let mut finished_compaction_jobs = Vec::new();
+                for (job_id, job) in &mut self.independent_checkpoint_job_controls {
+                    if let IndependentCheckpointJobControl::CompactionResolve(resolve_job) = job
+                        && resolve_job.on_main_graph_committed(partial_graph_manager, epoch.prev)?
+                    {
+                        finished_compaction_jobs.push(*job_id);
+                    }
+                }
+                for job_id in finished_compaction_jobs {
+                    self.independent_checkpoint_job_controls.remove(&job_id);
+                }
             } else {
                 assert_eq!(command_prev_epoch, None);
             };
             for (job_id, epoch) in independent_job_epochs {
                 if let Some(job) = self.independent_checkpoint_job_controls.get_mut(&job_id) {
-                    job.ack_completed(partial_graph_manager, epoch);
+                    job.ack_completed(partial_graph_manager, epoch)?;
                 }
                 // If the job is not found, it was dropped and already removed
                 // by `on_partial_graph_reset` while the completing task was running.
             }
         }
+        Ok(())
     }
 
     fn handle_refresh_table_info(
@@ -1355,8 +1406,12 @@ impl DatabaseCheckpointControl {
         span.record("epoch", barrier_info.curr_epoch());
 
         let epoch = barrier_info.epoch();
-        let ApplyCommandInfo { jobs_to_wait } = match self.apply_command(
+        let ApplyCommandInfo {
+            jobs_to_wait,
+            follow_up_barrier,
+        } = match self.apply_command(
             command,
+            None,
             &mut notifiers,
             barrier_info,
             partial_graph_manager,
@@ -1378,6 +1433,38 @@ impl DatabaseCheckpointControl {
 
         // Record the in-flight barrier.
         self.enqueue_command(epoch, jobs_to_wait);
+
+        if let Some(follow_up_mutation) = follow_up_barrier {
+            let curr_epoch = self.state.in_flight_prev_epoch().next();
+            let barrier_info = self.state.next_barrier_info(true, curr_epoch);
+            barrier_info.prev_epoch.span().in_scope(|| {
+                tracing::info!(
+                    target: "rw_tracing",
+                    epoch = barrier_info.curr_epoch(),
+                    "adjacent pk-index resolver barrier enqueued"
+                );
+            });
+            let epoch = barrier_info.epoch();
+            let mut follow_up_notifiers = vec![];
+            let ApplyCommandInfo {
+                jobs_to_wait,
+                follow_up_barrier,
+            } = self.apply_command(
+                None,
+                Some(follow_up_mutation),
+                &mut follow_up_notifiers,
+                barrier_info,
+                partial_graph_manager,
+                hummock_version_stats,
+                worker_nodes,
+            )?;
+            assert!(follow_up_notifiers.is_empty());
+            assert!(
+                follow_up_barrier.is_none(),
+                "internal B2 must not create another follow-up barrier"
+            );
+            self.enqueue_command(epoch, jobs_to_wait);
+        }
 
         Ok(())
     }

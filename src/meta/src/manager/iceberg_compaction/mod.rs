@@ -35,6 +35,7 @@ use tonic::Streaming;
 
 use super::MetaSrvEnv;
 use crate::MetaResult;
+use crate::barrier::BarrierScheduler;
 use crate::controller::streaming_job::AbortCreatingJobResult;
 use crate::hummock::IcebergCompactorManagerRef;
 use crate::manager::MetadataManager;
@@ -51,7 +52,7 @@ pub(crate) type CompactorChangeRx =
 type ManualCompactionWaiter = tokio::sync::oneshot::Sender<MetaResult<IcebergCompactionTaskId>>;
 
 use schedule::CompactionTrack;
-pub use schedule::IcebergCompactionScheduleStatus;
+pub use schedule::{CompactionResolveCompletion, IcebergCompactionScheduleStatus};
 
 pub struct IcebergCompactionManager {
     pub env: MetaSrvEnv,
@@ -59,6 +60,9 @@ pub struct IcebergCompactionManager {
 
     metadata_manager: MetadataManager,
     pub iceberg_compactor_manager: IcebergCompactorManagerRef,
+    /// Used to enqueue the transient compaction-resolver job after a coordinated compaction report
+    /// arrives; the job commits the overwrite inside the paused window.
+    barrier_scheduler: BarrierScheduler,
 
     compactor_streams_change_tx: CompactorChangeTx,
 
@@ -86,6 +90,7 @@ impl IcebergCompactionManager {
         metadata_manager: MetadataManager,
         iceberg_compactor_manager: IcebergCompactorManagerRef,
         metrics: Arc<MetaMetrics>,
+        barrier_scheduler: BarrierScheduler,
     ) -> (Arc<Self>, CompactorChangeRx) {
         let (compactor_streams_change_tx, compactor_streams_change_rx) =
             tokio::sync::mpsc::unbounded_channel();
@@ -100,6 +105,7 @@ impl IcebergCompactionManager {
                 })),
                 metadata_manager,
                 iceberg_compactor_manager,
+                barrier_scheduler,
                 compactor_streams_change_tx,
                 metrics,
             }),

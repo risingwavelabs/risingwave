@@ -752,6 +752,7 @@ impl PartialGraphState {
             barrier,
             request.actor_ids_to_collect.iter().copied(),
             table_ids,
+            request.table_epoch_already_started,
         );
 
         let mut new_actors = HashSet::new();
@@ -1486,10 +1487,13 @@ impl PartialGraphManagedBarrierState {
         barrier: &Barrier,
         actor_ids_to_collect: impl IntoIterator<Item = ActorId>,
         table_ids: HashSet<TableId>,
+        table_epoch_already_started: bool,
     ) {
         let timer = self.barrier_inflight_latency.start_timer();
 
-        if let Some(hummock) = self.state_store.as_hummock() {
+        if let Some(hummock) = self.state_store.as_hummock()
+            && !table_epoch_already_started
+        {
             hummock.start_epoch(barrier.epoch.curr, table_ids.clone());
         }
 
@@ -1584,9 +1588,24 @@ mod tests {
         let actor_ids_to_collect1 = HashSet::from([1.into(), 2.into()]);
         let actor_ids_to_collect2 = HashSet::from([1.into(), 2.into()]);
         let actor_ids_to_collect3 = HashSet::from([1.into(), 2.into(), 3.into()]);
-        managed_barrier_state.transform_to_issued(&barrier1, actor_ids_to_collect1, HashSet::new());
-        managed_barrier_state.transform_to_issued(&barrier2, actor_ids_to_collect2, HashSet::new());
-        managed_barrier_state.transform_to_issued(&barrier3, actor_ids_to_collect3, HashSet::new());
+        managed_barrier_state.transform_to_issued(
+            &barrier1,
+            actor_ids_to_collect1,
+            HashSet::new(),
+            false,
+        );
+        managed_barrier_state.transform_to_issued(
+            &barrier2,
+            actor_ids_to_collect2,
+            HashSet::new(),
+            false,
+        );
+        managed_barrier_state.transform_to_issued(
+            &barrier3,
+            actor_ids_to_collect3,
+            HashSet::new(),
+            false,
+        );
         managed_barrier_state.collect(1, barrier1.epoch);
         managed_barrier_state.collect(2, barrier1.epoch);
         assert_eq!(
@@ -1634,9 +1653,24 @@ mod tests {
         let actor_ids_to_collect1 = HashSet::from([1.into(), 2.into(), 3.into(), 4.into()]);
         let actor_ids_to_collect2 = HashSet::from([1.into(), 2.into(), 3.into()]);
         let actor_ids_to_collect3 = HashSet::from([1.into(), 2.into()]);
-        managed_barrier_state.transform_to_issued(&barrier1, actor_ids_to_collect1, HashSet::new());
-        managed_barrier_state.transform_to_issued(&barrier2, actor_ids_to_collect2, HashSet::new());
-        managed_barrier_state.transform_to_issued(&barrier3, actor_ids_to_collect3, HashSet::new());
+        managed_barrier_state.transform_to_issued(
+            &barrier1,
+            actor_ids_to_collect1,
+            HashSet::new(),
+            false,
+        );
+        managed_barrier_state.transform_to_issued(
+            &barrier2,
+            actor_ids_to_collect2,
+            HashSet::new(),
+            false,
+        );
+        managed_barrier_state.transform_to_issued(
+            &barrier3,
+            actor_ids_to_collect3,
+            HashSet::new(),
+            false,
+        );
 
         managed_barrier_state.collect(1, barrier1.epoch);
         managed_barrier_state.collect(1, barrier2.epoch);

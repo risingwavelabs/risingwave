@@ -164,6 +164,11 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         self.scheduled_barriers.next_scheduled().await
     }
 
+    fn set_database_barrier_hold(&self, database_id: DatabaseId, hold: bool) {
+        self.scheduled_barriers
+            .set_database_barrier_hold(database_id, hold);
+    }
+
     fn abort_and_mark_blocked(
         &self,
         database_id: Option<DatabaseId>,
@@ -478,6 +483,45 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
     }
 
     #[await_tree::instrument]
+    async fn pre_commit_iceberg_pk_index_compaction_overwrites(
+        &self,
+        overwrites: Vec<crate::barrier::complete_task::CompactionOverwrite>,
+    ) -> MetaResult<Vec<SinkId>> {
+        let success_ids = overwrites
+            .iter()
+            .map(|overwrite| overwrite.sink_id)
+            .collect();
+        let futs = FuturesUnordered::new();
+        for overwrite in overwrites {
+            let manager = &self.iceberg_pk_index_sink_manager;
+            futs.push(async move {
+                let sink_id = overwrite.sink_id;
+                let result = manager
+                    .pre_commit_compaction_overwrite(
+                        sink_id,
+                        overwrite.epoch,
+                        overwrite.output_files,
+                        overwrite.delete_reports,
+                        overwrite.input_file_paths,
+                        overwrite.read_snapshot_id,
+                    )
+                    .await;
+                (sink_id, result)
+            });
+        }
+        let results: Vec<(SinkId, anyhow::Result<()>)> = futs.collect().await;
+        let errs: Vec<_> = results
+            .into_iter()
+            .filter_map(|(id, result)| result.err().map(|error| (id, error)))
+            .collect();
+        if errs.is_empty() {
+            Ok(success_ids)
+        } else {
+            Err(aggregate_sink_errors("compaction pre-commit", errs).into())
+        }
+    }
+
+    #[await_tree::instrument]
     async fn commit_iceberg_pk_index_sink_metadata(&self, sink_ids: Vec<SinkId>) -> MetaResult<()> {
         let futs = FuturesUnordered::new();
         for sink_id in sink_ids {
@@ -490,11 +534,10 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
             .into_iter()
             .filter_map(|(id, r)| r.err().map(|e| (id, e)))
             .collect();
-        if errs.is_empty() {
-            Ok(())
-        } else {
-            Err(aggregate_sink_errors("commit", errs).into())
+        if !errs.is_empty() {
+            return Err(aggregate_sink_errors("commit", errs).into());
         }
+        Ok(())
     }
 
     fn advance_iceberg_pk_index_sink_committed_epochs(

@@ -19,11 +19,12 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use futures::future::try_join_all;
+use iceberg::spec::SerializedDataFile;
 use risingwave_common::id::JobId;
 use risingwave_common::must_match;
 use risingwave_common::util::deployment::Deployment;
 use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_pb::id::{DatabaseId, PartialGraphId};
+use risingwave_pb::id::{DatabaseId, PartialGraphId, SinkId};
 use risingwave_pb::stream_service::barrier_complete_response::{
     PbIcebergPkIndexSinkMetadata, PbListFinishedSource, PbLoadFinishedSource,
 };
@@ -73,6 +74,21 @@ pub(super) struct CompleteBarrierTask {
     pub(super) refresh_finished_table_job_ids: Vec<JobId>,
     /// Iceberg pk-index sink reports collected during this barrier
     pub(super) iceberg_pk_index_sink_metadata: Vec<PbIcebergPkIndexSinkMetadata>,
+    /// Compaction overwrites that must be persisted before the Hummock epoch commit and committed
+    /// to Iceberg afterwards, together with the resolver's pk-index state-table update.
+    pub(super) compaction_overwrites: Vec<CompactionOverwrite>,
+}
+
+#[derive(educe::Educe)]
+#[educe(Debug)]
+pub(super) struct CompactionOverwrite {
+    pub sink_id: SinkId,
+    pub epoch: u64,
+    #[educe(Debug(ignore))]
+    pub output_files: Vec<SerializedDataFile>,
+    pub delete_reports: Vec<PbIcebergPkIndexSinkMetadata>,
+    pub input_file_paths: Vec<String>,
+    pub read_snapshot_id: i64,
 }
 
 impl CompleteBarrierTask {
@@ -113,11 +129,21 @@ impl CompleteBarrierTask {
             //   4. advance_committed_epochs: advance the per-partial-graph committed epoch cursor.
             let mut iceberg_pk_index_commit_sink_ids = Vec::new();
             if !self.iceberg_pk_index_sink_metadata.is_empty() {
-                let res = context
+                iceberg_pk_index_commit_sink_ids = context
                     .pre_commit_iceberg_pk_index_sink_metadata(self.iceberg_pk_index_sink_metadata)
                     .await?;
-                iceberg_pk_index_commit_sink_ids = res;
             }
+            if !self.compaction_overwrites.is_empty() {
+                iceberg_pk_index_commit_sink_ids.extend(
+                    context
+                        .pre_commit_iceberg_pk_index_compaction_overwrites(
+                            self.compaction_overwrites,
+                        )
+                        .await?,
+                );
+            }
+            iceberg_pk_index_commit_sink_ids.sort_unstable();
+            iceberg_pk_index_commit_sink_ids.dedup();
 
             let version_stats = context.commit_epoch(self.commit_info).await?;
 

@@ -16,6 +16,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use anyhow::anyhow;
+use iceberg::spec::SerializedDataFile;
 use parking_lot::RwLock;
 use risingwave_common::id::PartialGraphId;
 use risingwave_connector::sink::catalog::SinkId;
@@ -111,6 +112,30 @@ impl IcebergPkIndexSinkManager {
             .lock()
             .await
             .pre_commit(prev_epoch, reports)
+            .await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn pre_commit_compaction_overwrite(
+        &self,
+        sink_id: SinkId,
+        prev_epoch: u64,
+        output_files: Vec<SerializedDataFile>,
+        delete_reports: Vec<PbIcebergPkIndexSinkMetadata>,
+        input_file_paths: Vec<String>,
+        read_snapshot_id: i64,
+    ) -> anyhow::Result<()> {
+        let coordinator = self.coordinator(sink_id)?;
+        coordinator
+            .lock()
+            .await
+            .pre_commit_compaction_overwrite(
+                prev_epoch,
+                output_files,
+                delete_reports,
+                input_file_paths,
+                read_snapshot_id,
+            )
             .await
     }
 

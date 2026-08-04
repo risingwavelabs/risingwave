@@ -36,7 +36,7 @@ use risingwave_connector::source::SplitImpl;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::{HostAddress, WorkerNode};
 use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_pb::id::PartialGraphId;
+use risingwave_pb::id::{IcebergCompactionTaskId, PartialGraphId};
 use risingwave_pb::source::{PbCdcTableSnapshotSplits, PbCdcTableSnapshotSplitsWithGeneration};
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -46,8 +46,9 @@ use risingwave_pb::stream_service::inject_barrier_request::{
     BuildActorInfo, FragmentBuildActorInfo,
 };
 use risingwave_pb::stream_service::streaming_control_stream_request::{
-    CreatePartialGraphRequest, PbCreatePartialGraphRequest, PbInitRequest,
-    RemovePartialGraphRequest, ResetPartialGraphsRequest,
+    ControlCompactionWriterRequest, CreatePartialGraphRequest, PbCreatePartialGraphRequest,
+    PbInitRequest, RemovePartialGraphRequest, ResetPartialGraphsRequest,
+    control_compaction_writer_request,
 };
 use risingwave_pb::stream_service::{
     InjectBarrierRequest, StreamingControlStreamRequest, streaming_control_stream_request,
@@ -119,6 +120,39 @@ pub(super) fn from_partial_graph_id(
         Some(JobId::new(raw_creating_job_id))
     };
     (database_id.into(), creating_job_id)
+}
+
+fn take_consistent_committed_epoch(
+    state_table_committed_epochs: &mut HashMap<TableId, u64>,
+    table_ids: impl IntoIterator<Item = TableId>,
+) -> u64 {
+    let mut epochs = table_ids.into_iter().map(|table_id| {
+        (
+            table_id,
+            state_table_committed_epochs
+                .remove(&table_id)
+                .expect("should exist"),
+        )
+    });
+    let (first_table_id, epoch) = epochs.next().expect("non-empty state table group");
+    for (table_id, other_epoch) in epochs {
+        assert_eq!(
+            epoch, other_epoch,
+            "{} has different committed epoch to {}",
+            first_table_id, table_id
+        );
+    }
+    epoch
+}
+
+fn resolve_database_committed_epoch(
+    state_table_committed_epochs: &mut HashMap<TableId, u64>,
+    job_table_ids: impl IntoIterator<Item = impl IntoIterator<Item = TableId>>,
+) -> u64 {
+    take_consistent_committed_epoch(
+        state_table_committed_epochs,
+        job_table_ids.into_iter().flatten(),
+    )
 }
 
 pub(super) fn build_locality_fragment_state_table_mapping(
@@ -683,28 +717,6 @@ impl PartialGraphRecoverer<'_> {
             })
         }
 
-        fn resolve_jobs_committed_epoch(
-            state_table_committed_epochs: &mut HashMap<TableId, u64>,
-            table_ids: impl Iterator<Item = TableId>,
-        ) -> u64 {
-            let mut epochs = table_ids.map(|table_id| {
-                (
-                    table_id,
-                    state_table_committed_epochs
-                        .remove(&table_id)
-                        .expect("should exist"),
-                )
-            });
-            let (first_table_id, prev_epoch) = epochs.next().expect("non-empty");
-            for (table_id, epoch) in epochs {
-                assert_eq!(
-                    prev_epoch, epoch,
-                    "{} has different committed epoch to {}",
-                    first_table_id, table_id
-                );
-            }
-            prev_epoch
-        }
         fn job_backfill_orders(
             job_extra_info: &HashMap<JobId, StreamingJobExtraInfo>,
             job_id: JobId,
@@ -792,11 +804,11 @@ impl PartialGraphRecoverer<'_> {
             })
             .collect();
 
-        let prev_epoch = resolve_jobs_committed_epoch(
+        let prev_epoch = resolve_database_committed_epoch(
             state_table_committed_epochs,
-            InflightFragmentInfo::existing_table_ids(
-                database_jobs.values().flat_map(|(job, _)| job.values()),
-            ),
+            database_jobs.values().map(|(job, _)| {
+                InflightFragmentInfo::existing_table_ids(job.values()).collect_vec()
+            }),
         );
         let prev_epoch = TracedEpoch::new(Epoch(prev_epoch));
         // Use a different `curr_epoch` for each recovery attempt.
@@ -809,7 +821,7 @@ impl PartialGraphRecoverer<'_> {
 
         let mut ongoing_snapshot_backfill_jobs: HashMap<JobId, _> = HashMap::new();
         for (job_id, fragment_infos) in snapshot_backfill_jobs {
-            let committed_epoch = resolve_jobs_committed_epoch(
+            let committed_epoch = take_consistent_committed_epoch(
                 state_table_committed_epochs,
                 InflightFragmentInfo::existing_table_ids(fragment_infos.values()),
             );
@@ -1127,7 +1139,7 @@ impl PartialGraphRecoverer<'_> {
             debug!(%job_id, "recovered batch refresh job");
 
             // Resolve committed epoch from state tables.
-            let committed_epoch = resolve_jobs_committed_epoch(
+            let committed_epoch = take_consistent_committed_epoch(
                 state_table_committed_epochs,
                 InflightFragmentInfo::existing_table_ids(render_result.fragment_infos.values()),
             );
@@ -1258,6 +1270,7 @@ impl ControlStreamManager {
         table_ids_to_sync: impl Iterator<Item = TableId>,
         nodes_to_sync_table: impl Iterator<Item = WorkerId>,
         mut new_actors: Option<StreamJobActorsToCreate>,
+        table_epoch_already_started: bool,
     ) -> MetaResult<NodeToCollect> {
         fail_point!("inject_barrier_err", |_| risingwave_common::bail!(
             "inject_barrier_err"
@@ -1314,6 +1327,7 @@ impl ControlStreamManager {
                                         actor_ids_to_collect: actor_ids_to_collect.iter().copied().collect(),
                                         table_ids_to_sync,
                                         partial_graph_id,
+                                        table_epoch_already_started,
                                         actors_to_build: new_actors
                                             .as_mut()
                                             .map(|new_actors| new_actors.remove(worker_id))
@@ -1383,6 +1397,51 @@ impl ControlStreamManager {
                     .add_event_logs(vec![event_log::Event::InjectBarrierFail(event)]);
             })?;
         Ok(node_need_collect)
+    }
+
+    pub(super) fn control_compaction_writer(
+        &self,
+        partial_graph_id: PartialGraphId,
+        sink_id: risingwave_pb::id::SinkId,
+        task_id: IcebergCompactionTaskId,
+        epoch: u64,
+        stage: control_compaction_writer_request::Stage,
+        node_actors: &HashMap<WorkerId, Vec<ActorId>>,
+    ) -> MetaResult<()> {
+        for (worker_id, actor_ids) in node_actors {
+            let node = self
+                .workers
+                .get(worker_id)
+                .and_then(|(_, state)| match state {
+                    WorkerNodeState::Connected { control_stream, .. } => Some(control_stream),
+                    WorkerNodeState::Reconnecting(_) => None,
+                })
+                .ok_or_else(|| anyhow!("unconnected worker node {worker_id}"))?;
+            node.handle
+                .request_sender
+                .send(StreamingControlStreamRequest {
+                    request: Some(
+                        streaming_control_stream_request::Request::ControlCompactionWriter(
+                            ControlCompactionWriterRequest {
+                                partial_graph_id,
+                                sink_id,
+                                task_id,
+                                epoch,
+                                actor_ids: actor_ids.clone(),
+                                stage: stage.into(),
+                            },
+                        ),
+                    ),
+                })
+                .map_err(|_| {
+                    MetaError::from(anyhow!(
+                        "failed to send pk-index writer control on worker {} {:?}",
+                        node.worker_id,
+                        node.host
+                    ))
+                })?;
+        }
+        Ok(())
     }
 
     pub(super) fn add_partial_graph(&mut self, partial_graph_id: PartialGraphId) {
@@ -1528,7 +1587,13 @@ pub(super) fn merge_node_rpc_errors<E: Error + Send + Sync + 'static>(
 
 #[cfg(test)]
 mod test_partial_graph_id {
-    use crate::barrier::rpc::{from_partial_graph_id, to_partial_graph_id};
+    use std::collections::HashMap;
+
+    use risingwave_common::catalog::TableId;
+
+    use crate::barrier::rpc::{
+        from_partial_graph_id, resolve_database_committed_epoch, to_partial_graph_id,
+    };
 
     #[test]
     fn test_partial_graph_id_conversion() {
@@ -1541,6 +1606,36 @@ mod test_partial_graph_id {
         assert_eq!(
             (database_id, Some(job_id)),
             from_partial_graph_id(to_partial_graph_id(database_id, Some(job_id)))
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "different committed epoch")]
+    fn test_recovery_rejects_different_epochs_across_jobs() {
+        let mut committed_epochs = HashMap::from([
+            (TableId::new(1), 100),
+            (TableId::new(2), 100),
+            (TableId::new(3), 200),
+            (TableId::new(4), 200),
+        ]);
+
+        resolve_database_committed_epoch(
+            &mut committed_epochs,
+            [
+                vec![TableId::new(1), TableId::new(2)],
+                vec![TableId::new(3), TableId::new(4)],
+            ],
+        );
+    }
+
+    #[test]
+    #[should_panic(expected = "different committed epoch")]
+    fn test_recovery_rejects_different_epochs_within_job() {
+        let mut committed_epochs = HashMap::from([(TableId::new(1), 100), (TableId::new(2), 200)]);
+
+        resolve_database_committed_epoch(
+            &mut committed_epochs,
+            [vec![TableId::new(1), TableId::new(2)]],
         );
     }
 }
