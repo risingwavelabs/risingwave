@@ -38,4 +38,30 @@ statement ok
 DROP MATERIALIZED VIEW m1;
 
 statement ok
-DROP TABLE t;
+set backfill_rate_limit=1;
+
+statement ok
+CREATE MATERIALIZED VIEW m2 as SELECT * FROM t;
+
+query T
+select status from rw_catalog.rw_materialized_views where name='m2';
+----
+Creating
+
+# Dropping an upstream object with CASCADE cancels creating downstream jobs.
+statement ok
+DROP TABLE t CASCADE;
+
+query I
+select count(*) from rw_catalog.rw_materialized_views where name='m2';
+----
+0
+
+statement count 0
+show jobs;
+
+statement ok
+set background_ddl=false;
+
+statement ok
+set backfill_rate_limit=default;
