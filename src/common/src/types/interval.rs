@@ -1542,16 +1542,10 @@ mod tests {
 
         // Space allowed between negative sign and following digit (issue #22018).
         let interval = "1 month - 1 day".parse::<Interval>().unwrap();
-        assert_eq!(
-            interval,
-            Interval::from_month(1) + Interval::from_days(-1)
-        );
+        assert_eq!(interval, Interval::from_month(1) + Interval::from_days(-1));
 
         let interval = "1 month -1 day".parse::<Interval>().unwrap();
-        assert_eq!(
-            interval,
-            Interval::from_month(1) + Interval::from_days(-1)
-        );
+        assert_eq!(interval, Interval::from_month(1) + Interval::from_days(-1));
 
         let interval = "- 1 year + 2 months".parse::<Interval>().unwrap();
         assert_eq!(
