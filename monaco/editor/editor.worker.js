@@ -1,0 +1,1 @@
+define("vs/editor/editor.worker",["exports","../initialize-DL0l1TGY"],(function(i,e){"use strict";self.onmessage=()=>{e.isWorkerInitialized()||e.start(()=>({}))},i.initialize=e.initialize,Object.defineProperty(i,Symbol.toStringTag,{value:"Module"})}));
