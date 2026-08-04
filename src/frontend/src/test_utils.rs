@@ -665,6 +665,16 @@ impl CatalogWriter for MockCatalogWriter {
         object_name: &str,
     ) -> Result<()> {
         match object_id {
+            alter_name_request::Object::DatabaseId(database_id) => {
+                let mut database = self
+                    .catalog
+                    .read()
+                    .get_database_by_id(database_id)?
+                    .to_prost();
+                database.name = object_name.to_owned();
+                self.catalog.write().update_database(&database);
+                Ok(())
+            }
             alter_name_request::Object::TableId(table_id) => {
                 self.catalog
                     .write()
