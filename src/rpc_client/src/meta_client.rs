@@ -82,7 +82,7 @@ use risingwave_pb::iceberg_compaction::{
     SubscribeIcebergCompactionEventRequest, SubscribeIcebergCompactionEventResponse,
     subscribe_iceberg_compaction_event_request,
 };
-use risingwave_pb::id::{ActorId, FragmentId, HummockSstableId, SourceId};
+use risingwave_pb::id::{ActorId, FragmentId, HummockSstableId, IcebergCompactionTaskId, SourceId};
 use risingwave_pb::meta::alter_connector_props_request::{
     AlterConnectorPropsObject, AlterIcebergTableIds, ExtraOptions,
 };
@@ -905,7 +905,7 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn compact_iceberg_table(&self, sink_id: SinkId) -> Result<u64> {
+    pub async fn compact_iceberg_table(&self, sink_id: SinkId) -> Result<IcebergCompactionTaskId> {
         let request = CompactIcebergTableRequest { sink_id };
         let resp = self.inner.compact_iceberg_table(request).await?;
         Ok(resp.task_id)

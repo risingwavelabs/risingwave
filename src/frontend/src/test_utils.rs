@@ -58,7 +58,7 @@ use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
 };
-use risingwave_pb::id::ActorId;
+use risingwave_pb::id::{ActorId, IcebergCompactionTaskId};
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
@@ -1463,8 +1463,8 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(())
     }
 
-    async fn compact_iceberg_table(&self, _sink_id: SinkId) -> RpcResult<u64> {
-        Ok(1)
+    async fn compact_iceberg_table(&self, _sink_id: SinkId) -> RpcResult<IcebergCompactionTaskId> {
+        Ok(1.into())
     }
 
     async fn rewrite_iceberg_table_manifests(&self, _sink_id: SinkId) -> RpcResult<()> {
