@@ -139,8 +139,8 @@ impl HummockManager {
             pinned_snapshot_object_ids.extend(resolved.replay_version.get_object_ids());
             for delta in resolved.deltas {
                 pinned_delta_ids.insert(delta.id);
-                pinned_snapshot_sst_ids.extend(delta.newly_added_sst_ids(true));
-                pinned_snapshot_object_ids.extend(delta.newly_added_object_ids(true));
+                pinned_snapshot_sst_ids.extend(delta.newly_added_sst_ids());
+                pinned_snapshot_object_ids.extend(delta.newly_added_object_ids());
             }
         }
 
@@ -312,7 +312,7 @@ impl HummockManager {
                 let delta_to_delete = IncompleteHummockVersionDelta::from_persisted_protobuf_owned(
                     delta_to_delete.version_delta.to_protobuf(),
                 );
-                let new_sst_ids = delta_to_delete.newly_added_sst_ids(true);
+                let new_sst_ids = delta_to_delete.newly_added_sst_ids();
                 // The SST ids added and then deleted by compaction between the 2 versions.
                 sst_ids_to_delete.extend(&new_sst_ids - &retained_snapshot_sst_ids);
                 if sst_ids_to_delete.len() >= delete_sst_batch_size {
@@ -323,7 +323,7 @@ impl HummockManager {
                     )
                     .await?;
                 }
-                let new_object_ids = delta_to_delete.newly_added_object_ids(true);
+                let new_object_ids = delta_to_delete.newly_added_object_ids();
                 object_ids_to_delete.extend(&new_object_ids - &retained_snapshot_object_ids);
             }
         }
@@ -501,8 +501,7 @@ impl HummockManager {
                     let version_delta = HummockVersionDelta::from_persisted_protobuf_owned(
                         model.version_delta.to_protobuf(),
                     );
-                    // set exclude_table_change_log to true because in time travel delta we ignore the table change log
-                    for object_id in version_delta.newly_added_object_ids(true) {
+                    for object_id in version_delta.newly_added_object_ids() {
                         result.remove(&object_id);
                     }
                     next_prev_version_id = Some(model.version_id);
@@ -759,7 +758,7 @@ impl HummockManager {
             return Ok(version_sst_ids);
         }
         let written = write_sstable_infos(
-            delta.newly_added_sst_infos(true).filter(|s| {
+            delta.newly_added_sst_infos().filter(|s| {
                 !skip_sst_ids.contains(&s.sst_id)
                     && s.table_ids
                         .iter()
