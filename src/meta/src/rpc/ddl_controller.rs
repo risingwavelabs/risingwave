@@ -1399,32 +1399,15 @@ impl DdlController {
         }
 
         let backfill_orders = ctx.fragment_backfill_ordering.to_meta_model();
-        // Replacement sinks use a temporary catalog name before cutover, so do not notify
-        // frontend about their creating catalog.
-        let notify_creating = replace_sink.is_none();
-        if notify_creating {
-            self.metadata_manager
-                .catalog_controller
-                .prepare_stream_job_fragments(
-                    &stream_job_fragments,
-                    streaming_job,
-                    false,
-                    Some(backfill_orders),
-                )
-                .await?;
-        } else {
-            self.metadata_manager
-                .catalog_controller
-                .prepare_streaming_job(
-                    stream_job_fragments.stream_job_id(),
-                    || stream_job_fragments.fragments.values(),
-                    &stream_job_fragments.downstreams,
-                    false,
-                    None,
-                    Some(backfill_orders),
-                )
-                .await?;
-        }
+        self.metadata_manager
+            .catalog_controller
+            .prepare_stream_job_fragments(
+                &stream_job_fragments,
+                streaming_job,
+                false,
+                Some(backfill_orders),
+            )
+            .await?;
 
         Ok((stream_job_fragments, ctx))
     }
