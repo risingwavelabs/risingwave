@@ -52,8 +52,24 @@ pub struct V3TestHandle {
 /// upstream `TABLE -> MV -> SINK` chain. Once this returns, the streaming
 /// graph is live and ready to accept `INSERT INTO test_v3_table` writes.
 pub async fn start_v3_test_cluster_with_sink(parallelism: usize) -> Result<V3TestHandle> {
+    start_v3_test_cluster(parallelism, false).await
+}
+
+/// Start the same V3 topology with automatic Iceberg compaction enabled.
+pub async fn start_v3_test_cluster_with_compaction(parallelism: usize) -> Result<V3TestHandle> {
+    start_v3_test_cluster(parallelism, true).await
+}
+
+async fn start_v3_test_cluster(
+    parallelism: usize,
+    enable_compaction: bool,
+) -> Result<V3TestHandle> {
     // 1. Start the simulation cluster.
-    let mut cluster = crate::sink::utils::start_sink_test_cluster().await?;
+    let mut cluster = if enable_compaction {
+        crate::sink::utils::start_sink_test_cluster_with_iceberg_compactor().await?
+    } else {
+        crate::sink::utils::start_sink_test_cluster().await?
+    };
 
     // 2. Build a minimal iceberg TableMetadata for schema (id int, name varchar).
     let schema = Schema::builder()
@@ -100,8 +116,15 @@ pub async fn start_v3_test_cluster_with_sink(parallelism: usize) -> Result<V3Tes
         )
         .await?;
 
+    let compaction_options = if enable_compaction {
+        "enable_compaction = 'true', \
+         compaction_interval_sec = '1', \
+         compaction.trigger_snapshot_count = '1000', "
+    } else {
+        ""
+    };
     session
-        .run(
+        .run(&format!(
             "CREATE SINK test_v3_sink FROM test_v3_mv \
              WITH ( \
                connector = 'iceberg', \
@@ -112,9 +135,10 @@ pub async fn start_v3_test_cluster_with_sink(parallelism: usize) -> Result<V3Tes
                is_exactly_once = 'true', \
                enable_pk_index = 'true', \
                format_version = '3', \
+               {compaction_options} \
                type = 'upsert' \
-             )",
-        )
+             )"
+        ))
         .await?;
 
     Ok(V3TestHandle {
