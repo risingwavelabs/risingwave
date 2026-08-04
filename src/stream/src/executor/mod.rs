@@ -95,6 +95,7 @@ pub(crate) mod iceberg_with_pk_index;
 mod join;
 pub mod locality_provider;
 mod lookup;
+pub mod match_recognize;
 mod lookup_union;
 mod merge;
 mod mview;
