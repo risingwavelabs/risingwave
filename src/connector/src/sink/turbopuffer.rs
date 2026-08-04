@@ -385,17 +385,13 @@ impl LogSinker for TurbopufferLogSinker {
                     }
                 }
                 LogStoreReadItem::Barrier {
-                    new_vnode_bitmap,
                     is_stop,
                     schema_change,
                     ..
                 } => {
                     let offset = TruncateOffset::Barrier { epoch };
-                    let should_flush = should_force_commit_on_checkpoint_barrier(
-                        new_vnode_bitmap.is_some(),
-                        is_stop,
-                        schema_change.is_some(),
-                    );
+                    let should_flush =
+                        should_force_commit_on_checkpoint_barrier(is_stop, schema_change.is_some());
                     if self.writer.is_empty() {
                         log_reader.truncate(offset)?;
                     } else if should_flush {
@@ -892,8 +888,6 @@ mod tests {
     #[cfg(not(madsim))]
     use risingwave_common::array::stream_chunk::StreamChunkTestExt as _;
     use risingwave_common::array::{ListValue, VectorVal};
-    #[cfg(not(madsim))]
-    use risingwave_common::bitmap::Bitmap;
     use risingwave_common::catalog::Field;
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{ListType, ScalarImpl, Timestamp, Timestamptz};
@@ -1208,7 +1202,6 @@ mod tests {
                     2,
                     LogStoreReadItem::Barrier {
                         is_checkpoint: false,
-                        new_vnode_bitmap: None,
                         is_stop: false,
                         schema_change: None,
                     },
@@ -1267,53 +1260,6 @@ mod tests {
                 epoch: 1,
                 chunk_id: 7
             }]
-        );
-    }
-
-    #[cfg(not(madsim))]
-    #[tokio::test]
-    async fn test_log_sinker_flushes_on_vnode_bitmap_change() {
-        let (base_url, request_rx, server_thread) = spawn_mock_http_server(1);
-        let writer = new_test_static_writer(base_url, DEFAULT_WRITE_BATCH_SIZE);
-        let truncates = Arc::new(Mutex::new(Vec::new()));
-        let reader = TestSinkLogReader::new(
-            vec![
-                (
-                    1,
-                    LogStoreReadItem::StreamChunk {
-                        chunk: StreamChunk::from_pretty(
-                            "  T  T
-                            + id body",
-                        ),
-                        chunk_id: 0,
-                    },
-                ),
-                (
-                    2,
-                    LogStoreReadItem::Barrier {
-                        is_checkpoint: false,
-                        new_vnode_bitmap: Some(Arc::new(Bitmap::ones(1))),
-                        is_stop: false,
-                        schema_change: None,
-                    },
-                ),
-            ],
-            truncates.clone(),
-        );
-        let err = TurbopufferLogSinker::new(writer, SinkWriterMetrics::for_test())
-            .consume_log_and_sink(reader)
-            .await
-            .unwrap_err();
-        assert!(err.to_string().contains("done"));
-
-        let request = request_rx.recv().unwrap();
-        server_thread.join().unwrap();
-        let body = request.split("\r\n\r\n").nth(1).unwrap();
-        let body: Value = serde_json::from_str(body).unwrap();
-        assert_eq!(body["upsert_rows"].as_array().unwrap().len(), 1);
-        assert_eq!(
-            *truncates.lock().unwrap(),
-            vec![TruncateOffset::Barrier { epoch: 2 }]
         );
     }
 

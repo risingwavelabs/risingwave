@@ -685,7 +685,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         log_reader: R,
         columns: Vec<ColumnCatalog>,
         mut sink_param: SinkParam,
-        sink_writer_param: SinkWriterParam,
+        mut sink_writer_param: SinkWriterParam,
         non_append_only_behavior: Option<NonAppendOnlyBehavior>,
         actor_context: ActorContextRef,
         rate_limit_rx: UnboundedReceiver<RateLimit>,
@@ -982,7 +982,6 @@ mod test {
         type Writer = BoundedInMemLogStoreWriter;
 
         const ALLOW_REWIND: bool = CAN_REWIND;
-        const REBUILD_SINK_ON_UPDATE_VNODE_BITMAP: bool = false;
 
         async fn build(self) -> (Self::Reader, Self::Writer) {
             unreachable!()
@@ -1073,21 +1072,10 @@ mod test {
 
         rebuild_sink_tx.send(no_op_config_update()).unwrap();
 
-        // Messages are handled in order, so an acknowledged rebuild proves the consumer survived
-        // the no-op update.
-        let (notify_tx, notify_rx) = oneshot::channel();
-        rebuild_sink_tx
-            .send(RebuildSinkMessage::RebuildSink(
-                Arc::new(Bitmap::ones(1)),
-                notify_tx,
-            ))
-            .unwrap();
-        tokio::select! {
-            result = &mut consume_log => panic!("log consumer exited unexpectedly: {result:?}"),
-            result = notify_rx => result.expect("rebuild sink should be acknowledged"),
-        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
 
         assert_eq!(state.rewind_count.load(Ordering::SeqCst), 0);
+        assert_eq!(state.start_count.load(Ordering::SeqCst), 1);
         drop(rate_limit_tx);
     }
 

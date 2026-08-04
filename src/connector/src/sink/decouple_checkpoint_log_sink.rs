@@ -61,11 +61,10 @@ impl<W> DecoupleCheckpointLogSinkerOf<W> {
 }
 
 pub(crate) fn should_force_commit_on_checkpoint_barrier(
-    vnode_bitmap_updated: bool,
     is_stop: bool,
     has_schema_change: bool,
 ) -> bool {
-    vnode_bitmap_updated || is_stop || has_schema_change
+    is_stop || has_schema_change
 }
 
 #[async_trait]
@@ -171,17 +170,8 @@ mod tests {
 
     #[test]
     fn test_should_force_commit_on_checkpoint_barrier() {
-        assert!(!should_force_commit_on_checkpoint_barrier(
-            false, false, false
-        ));
-        assert!(should_force_commit_on_checkpoint_barrier(
-            true, false, false
-        ));
-        assert!(should_force_commit_on_checkpoint_barrier(
-            false, true, false
-        ));
-        assert!(should_force_commit_on_checkpoint_barrier(
-            false, false, true
-        ));
+        assert!(!should_force_commit_on_checkpoint_barrier(false, false));
+        assert!(should_force_commit_on_checkpoint_barrier(true, false));
+        assert!(should_force_commit_on_checkpoint_barrier(false, true));
     }
 }

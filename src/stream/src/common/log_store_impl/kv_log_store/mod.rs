@@ -2343,7 +2343,6 @@ mod tests {
             epoch2,
             FlushCurrentEpochOptions {
                 is_checkpoint: true,
-                new_vnode_bitmap: None,
                 is_stop: true,
                 schema_change: None,
                 wait_log_store_flush: true,
@@ -2380,8 +2379,7 @@ mod tests {
             item => unreachable!("{:?}", item),
         }
 
-        let post_flush = flush_future.await.unwrap();
-        post_flush.post_yield_barrier().await.unwrap();
+        flush_future.await.unwrap();
     }
 
     #[tokio::test]
