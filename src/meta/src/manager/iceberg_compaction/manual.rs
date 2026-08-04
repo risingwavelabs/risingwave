@@ -16,7 +16,6 @@ use anyhow::anyhow;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_request::ReportTask as IcebergReportTask;
 use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_request::report_task::Status as IcebergReportTaskStatus;
-use risingwave_pb::id::IcebergCompactionTaskId;
 
 use super::*;
 

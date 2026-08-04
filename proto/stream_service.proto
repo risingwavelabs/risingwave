@@ -26,6 +26,11 @@ message InjectBarrierRequest {
   repeated uint32 actor_ids_to_collect = 4;
   repeated uint32 table_ids_to_sync = 5;
   uint64 partial_graph_id = 6;
+  reserved 10, 11, 12;
+  reserved "reuse_existing_table_epoch", "skip_start_table_epoch", "table_ids_to_handoff";
+  // The main graph already started this epoch. Used only by the resolver partial graph, whose
+  // barriers declare an empty sync-table set and never own Hummock sync.
+  bool table_epoch_already_started = 13;
 
   message FragmentBuildActorInfo {
     uint32 fragment_id = 1;

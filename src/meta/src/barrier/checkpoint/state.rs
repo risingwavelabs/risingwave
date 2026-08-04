@@ -39,6 +39,10 @@ use risingwave_pb::stream_plan::{
 use tracing::warn;
 
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
+use crate::barrier::checkpoint::independent_job::{
+    CompactionResolveJobControl, ResolveOverwriteInput, build_resolver_stream_node,
+    output_file_paths, render_resolver_fragment,
+};
 use crate::barrier::checkpoint::{
     BatchRefreshJobCheckpointControl, BatchRefreshLogicalFragments, CreatingStreamingJobControl,
     DatabaseCheckpointControl, IndependentCheckpointJobControl,
@@ -158,6 +162,7 @@ impl BarrierWorkerState {
 
 pub(super) struct ApplyCommandInfo {
     pub jobs_to_wait: HashSet<JobId>,
+    pub follow_up_barrier: Option<Mutation>,
 }
 
 /// Result tuple of `apply_command`: mutation, table IDs to commit, actors to create,
@@ -412,6 +417,7 @@ impl DatabaseCheckpointControl {
     pub(super) fn apply_command(
         &mut self,
         command: Option<Command>,
+        injected_mutation: Option<Mutation>,
         notifiers: &mut Vec<Notifier>,
         barrier_info: BarrierInfo,
         partial_graph_manager: &mut PartialGraphManager,
@@ -477,10 +483,9 @@ impl DatabaseCheckpointControl {
             Ok(resolved)
         }
 
-        // Throttle data for creating jobs (set only in the Throttle arm). Creating jobs live
-        // outside `database_info`, so they need both the compute mutation and the stream-node
-        // pre-apply.
+        // Throttle data for creating jobs (set only in the Throttle arm)
         let mut throttle_for_creating_jobs: Option<ThrottleForCreatingJobs> = None;
+        let mut follow_up_barrier = None;
 
         // Each variant handles its own pre-apply, edge building, mutation generation,
         // collect base info, and post-apply. The match produces values consumed by the
@@ -1484,6 +1489,136 @@ impl DatabaseCheckpointControl {
                 ));
                 self.apply_simple_command(mutation, "InjectSourceOffsets")
             }
+
+            Some(Command::CreateCompactionResolveJob {
+                database_id: _,
+                sink_id,
+                task_id,
+                writer_fragment_id,
+                pk_index_table_id,
+                overwrite,
+                completion,
+            }) => {
+                let job_id = CompactionResolveJobControl::job_id_for_sink(sink_id);
+
+                // A duplicate compaction report can enqueue a second resolve for the same sink while
+                // the first is still live. Drop the redundant command and inject a no-op barrier.
+                if self
+                    .independent_checkpoint_job_controls
+                    .contains_key(&job_id)
+                {
+                    tracing::warn!(
+                        %sink_id,
+                        %job_id,
+                        %task_id,
+                        "dropping duplicate CreateCompactionResolveJob; a resolve is already live for this sink"
+                    );
+                    let (table_ids, node_actors) = self.collect_base_info();
+                    (
+                        None,
+                        table_ids,
+                        None,
+                        node_actors,
+                        PostCollectCommand::barrier(),
+                    )
+                } else {
+                    let job_state_table_ids = self
+                        .database_info
+                        .existing_table_ids_by_fragment(writer_fragment_id)?;
+                    assert!(
+                        job_state_table_ids.contains(&pk_index_table_id),
+                        "pk-index table {pk_index_table_id} is not part of the writer job"
+                    );
+                    let writer_fragment = self.database_info.fragment(writer_fragment_id);
+                    let mut writer_node_actors: HashMap<WorkerId, Vec<ActorId>> = HashMap::new();
+                    for (&actor_id, actor) in &writer_fragment.actors {
+                        writer_node_actors
+                            .entry(actor.worker_id)
+                            .or_default()
+                            .push(actor_id);
+                    }
+                    let env = partial_graph_manager.control_stream_manager().env.clone();
+                    let actor_id_generator = env.actor_id_generator();
+                    let resolver_fragment_id = FragmentId::new(
+                        env.id_gen_manager()
+                            .generate::<{ crate::controller::id::IdCategory::Fragment }>()
+                            as u32,
+                    );
+                    let apply_fragment_id = FragmentId::new(
+                        env.id_gen_manager()
+                            .generate::<{ crate::controller::id::IdCategory::Fragment }>()
+                            as u32,
+                    );
+                    let partial_graph_id = to_partial_graph_id(self.database_id, Some(job_id));
+                    let output_paths = output_file_paths(&overwrite.output_files)?;
+                    let resolver_node = build_resolver_stream_node(
+                        writer_fragment,
+                        resolver_fragment_id,
+                        output_paths,
+                        overwrite.input_file_paths.clone(),
+                        overwrite.read_snapshot_id,
+                    )?;
+                    let render_result = render_resolver_fragment(
+                        writer_fragment,
+                        resolver_fragment_id,
+                        apply_fragment_id,
+                        pk_index_table_id,
+                        resolver_node,
+                        partial_graph_id,
+                        worker_nodes,
+                        actor_id_generator,
+                        "iceberg pk-index compaction resolver",
+                    )?;
+                    let overwrite_input = ResolveOverwriteInput {
+                        sink_id,
+                        output_files: overwrite.output_files,
+                        input_file_paths: overwrite.input_file_paths,
+                        read_snapshot_id: overwrite.read_snapshot_id,
+                    };
+                    let gated_actor_ids = self
+                        .database_info
+                        .transitive_upstream_actor_ids(writer_fragment_id)?;
+                    follow_up_barrier = Some(Command::iceberg_pk_index_barrier_to_mutation(
+                        sink_id,
+                        task_id,
+                        gated_actor_ids.iter().copied(),
+                        risingwave_pb::stream_plan::iceberg_pk_index_barrier_mutation::Phase::Resume,
+                    ));
+                    let job = IndependentCheckpointJobControl::CompactionResolve(
+                        CompactionResolveJobControl::new(
+                            self.database_id,
+                            sink_id,
+                            task_id,
+                            completion,
+                            writer_node_actors,
+                            barrier_info.clone(),
+                            overwrite_input,
+                            job_state_table_ids,
+                            render_result,
+                        ),
+                    );
+
+                    let (table_ids, node_actors) = self.collect_base_info();
+
+                    self.independent_checkpoint_job_controls.insert(job_id, job);
+
+                    // B1 closes only the target writer ingress while the rest of the database
+                    // continues through the adjacent checkpoint pair.
+                    let mutation = Some(Command::iceberg_pk_index_barrier_to_mutation(
+                        sink_id,
+                        task_id,
+                        gated_actor_ids,
+                        risingwave_pb::stream_plan::iceberg_pk_index_barrier_mutation::Phase::Pause,
+                    ));
+                    (
+                        mutation,
+                        table_ids,
+                        None,
+                        node_actors,
+                        PostCollectCommand::barrier(),
+                    )
+                }
+            }
         };
 
         let mut finished_snapshot_backfill_jobs = HashSet::new();
@@ -1722,10 +1857,18 @@ impl DatabaseCheckpointControl {
                 }
             }
         };
+        let mutation = match (mutation, injected_mutation) {
+            (None, injected_mutation) => injected_mutation,
+            (mutation, None) => mutation,
+            (Some(_), Some(_)) => {
+                bail!("cannot combine an internal follow-up mutation with another barrier mutation")
+            }
+        };
 
         // Forward barrier to independent job controls
         for (job_id, job) in &mut self.independent_checkpoint_job_controls {
             match job {
+                IndependentCheckpointJobControl::CompactionResolve(_) => {}
                 IndependentCheckpointJobControl::CreatingStreamingJob(creating_job) => {
                     if !finished_snapshot_backfill_jobs.contains(job_id) {
                         let throttle_mutation = if let Some((ref jobs, ref config)) =
@@ -1771,11 +1914,12 @@ impl DatabaseCheckpointControl {
             }
         }
 
+        let table_ids_to_sync: Vec<TableId> = self.database_info.existing_table_ids().collect();
         partial_graph_manager.inject_barrier(
             to_partial_graph_id(self.database_id, None),
             mutation,
             &node_actors,
-            InflightFragmentInfo::existing_table_ids(self.database_info.fragment_infos()),
+            table_ids_to_sync.into_iter(),
             InflightFragmentInfo::workers(self.database_info.fragment_infos()),
             actors_to_create,
             PartialGraphBarrierInfo::new(
@@ -1788,6 +1932,7 @@ impl DatabaseCheckpointControl {
 
         Ok(ApplyCommandInfo {
             jobs_to_wait: finished_snapshot_backfill_jobs,
+            follow_up_barrier,
         })
     }
 }

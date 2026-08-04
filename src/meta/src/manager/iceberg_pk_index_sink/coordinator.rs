@@ -34,13 +34,13 @@
 //! meta-recovery path drops the coordinator, re-registers it (re-running `init`), and retries from the
 //! persisted `pending_sink_state` rows.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Context, Result, anyhow, bail};
 use iceberg::Catalog;
-use iceberg::spec::{DataFile, ManifestContentType, SerializedDataFile};
+use iceberg::spec::{DataContentType, DataFile, ManifestContentType, SerializedDataFile};
 use iceberg::table::Table;
 use iceberg::transaction::{ApplyTransactionAction, FastAppendAction, Transaction};
 use prost::Message;
@@ -48,7 +48,7 @@ use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::iceberg::commit_retry::{self, CommitError, CommitRetryLogContext};
 use risingwave_connector::sink::iceberg::{
     IcebergCommitResult, IcebergConfig, IcebergPositionDeleteCommitResult, commit_branch,
-    resolve_partition_type,
+    resolve_partition_type, serialize_data_files_default_spec,
 };
 use risingwave_meta_model::pending_sink_state::SinkState;
 use risingwave_pb::connector_service::PbIcebergPkIndexPreCommitState;
@@ -166,6 +166,44 @@ impl IcebergPkIndexSinkCoordinator {
                 prev_epoch
             );
         }
+        self.stage_pre_commit(prev_epoch, merged).await
+    }
+
+    /// Stage a resolver-driven compaction overwrite in the same durable pending-epoch protocol used
+    /// by ordinary writer/position-delete reports.
+    pub async fn pre_commit_compaction_overwrite(
+        &mut self,
+        prev_epoch: u64,
+        output_files: Vec<SerializedDataFile>,
+        delete_reports: Vec<PbIcebergPkIndexSinkMetadata>,
+        input_file_paths: Vec<String>,
+        read_snapshot_id: i64,
+    ) -> Result<()> {
+        let overwrite_files = self
+            .resolve_compaction_overwrite_files(&input_file_paths)
+            .await
+            .with_context(|| {
+                format!(
+                    "resolve pk-index compaction inputs at read snapshot {}",
+                    read_snapshot_id
+                )
+            })?;
+        let delete_files = decode_compaction_resolver_delete_reports(delete_reports)?;
+        let merged = IcebergPkIndexSinkAggResult {
+            schema_id: self.table.metadata().current_schema_id(),
+            partition_spec_id: self.table.metadata().default_partition_spec_id(),
+            data_files: output_files,
+            delete_files,
+            overwrite_files,
+        };
+        self.stage_pre_commit(prev_epoch, merged).await
+    }
+
+    async fn stage_pre_commit(
+        &mut self,
+        prev_epoch: u64,
+        merged: IcebergPkIndexSinkAggResult,
+    ) -> Result<()> {
         let (merged, materialized_add_files) = self.backfill_delete_file_partitions(merged).await?;
         let merged = Arc::new(merged);
 
@@ -180,6 +218,62 @@ impl IcebergPkIndexSinkCoordinator {
             materialized_add_files,
         });
         Ok(())
+    }
+
+    async fn resolve_compaction_overwrite_files(
+        &self,
+        input_file_paths: &[String],
+    ) -> Result<Vec<SerializedDataFile>> {
+        let input_paths: HashSet<&str> = input_file_paths.iter().map(String::as_str).collect();
+        let mut required_live_data = input_paths.clone();
+        let mut removed: HashMap<String, DataFile> = HashMap::new();
+
+        if let Some(snapshot) = self.table.metadata().snapshot_for_ref(&self.target_branch) {
+            let manifest_list = snapshot
+                .load_manifest_list(self.table.file_io(), self.table.metadata())
+                .await
+                .context("load manifest list for compaction pre-commit")?;
+            for manifest_file in manifest_list.entries() {
+                let manifest = manifest_file
+                    .load_manifest(self.table.file_io())
+                    .await
+                    .context("load manifest for compaction pre-commit")?;
+                for entry in manifest.entries() {
+                    let data_file = entry.data_file();
+                    let path = data_file.file_path();
+                    let is_delete = matches!(
+                        data_file.content_type(),
+                        DataContentType::PositionDeletes | DataContentType::EqualityDeletes
+                    );
+                    if is_delete && input_paths.contains(path) {
+                        required_live_data.remove(path);
+                    }
+                    if !entry.is_alive() {
+                        continue;
+                    }
+                    if input_paths.contains(path) {
+                        required_live_data.remove(path);
+                        removed.insert(path.to_owned(), data_file.clone());
+                    }
+                    if data_file.content_type() == DataContentType::PositionDeletes
+                        && let Some(referenced) = data_file.referenced_data_file()
+                        && input_paths.contains(referenced.as_str())
+                    {
+                        removed.insert(path.to_owned(), data_file.clone());
+                    }
+                }
+            }
+        }
+
+        if !required_live_data.is_empty() {
+            bail!(
+                "pk-index compaction overwrite: {} input data files are no longer live on branch {}",
+                required_live_data.len(),
+                self.target_branch
+            );
+        }
+        serialize_data_files_default_spec(&self.table, removed.into_values().collect())
+            .map_err(Into::into)
     }
 
     pub async fn commit(&mut self) -> Result<()> {
@@ -591,10 +685,7 @@ fn aggregate_reports(
                 data_files.extend(commit_result.data_files);
             }
             PbIcebergPkIndexSinkRole::PositionDeleteMerger => {
-                let commit_result =
-                    IcebergPositionDeleteCommitResult::try_from(meta).map_err(|e| {
-                        anyhow!(e).context("decode pk-index sink position-delete merger metadata")
-                    })?;
+                let commit_result = IcebergPositionDeleteCommitResult::try_from(meta)?;
                 align_report_id(
                     commit_result.schema_id,
                     commit_result.partition_spec_id,
@@ -604,7 +695,14 @@ fn aggregate_reports(
                 delete_files.extend(commit_result.delete_files);
                 overwrite_files.extend(commit_result.overwrite_files);
             }
-            _ => unreachable!(),
+            PbIcebergPkIndexSinkRole::CompactionResolver => {
+                bail!(
+                    "compaction resolver reports should be aggregated via pre_commit_compaction_overwrite"
+                );
+            }
+            PbIcebergPkIndexSinkRole::Unspecified => {
+                bail!("iceberg pk-index sink report has unspecified role");
+            }
         }
     }
 
@@ -615,6 +713,33 @@ fn aggregate_reports(
         delete_files,
         overwrite_files,
     })
+}
+
+fn decode_compaction_resolver_delete_reports(
+    reports: impl IntoIterator<Item = PbIcebergPkIndexSinkMetadata>,
+) -> Result<Vec<SerializedDataFile>> {
+    let mut delete_files = Vec::new();
+    for report in reports {
+        if PbIcebergPkIndexSinkRole::try_from(report.role)
+            != Ok(PbIcebergPkIndexSinkRole::CompactionResolver)
+        {
+            bail!(
+                "compaction resolver reported unexpected sink role {}",
+                report.role
+            );
+        }
+        let metadata = report
+            .metadata
+            .as_ref()
+            .context("compaction resolver delete report missing metadata")?;
+        let result = IcebergPositionDeleteCommitResult::try_from(metadata)
+            .map_err(|error| anyhow!(error).context("decode compaction resolver delete report"))?;
+        if !result.overwrite_files.is_empty() {
+            bail!("compaction resolver delete report should not contain overwrite_files");
+        }
+        delete_files.extend(result.delete_files);
+    }
+    Ok(delete_files)
 }
 
 fn align_report_id(

@@ -106,6 +106,8 @@ pub(super) struct GlobalBarrierWorker<C> {
     active_streaming_nodes: ActiveStreamingWorkerNodes,
 
     partial_graph_manager: PartialGraphManager,
+
+    held_compaction_databases: HashSet<DatabaseId>,
 }
 
 #[cfg(test)]
@@ -183,6 +185,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             request_rx,
             active_streaming_nodes,
             partial_graph_manager,
+            held_compaction_databases: Default::default(),
         }
     }
 }
@@ -465,9 +468,10 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         // Complete any inflight command first so the committed upstream epoch and
         // table changelog view used for since_timestamp resolution cannot be stale.
         match self.completing_task.wait_completing_task().await {
-            Ok(Some(output)) => self
-                .checkpoint_control
-                .ack_completed(&mut self.partial_graph_manager, output),
+            Ok(Some(output)) => {
+                self.checkpoint_control
+                    .ack_completed(&mut self.partial_graph_manager, output)?;
+            }
             Ok(None) => {}
             Err(err) => {
                 error!(
@@ -515,6 +519,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
 
         // Start the event loop.
         loop {
+            self.sync_compaction_barrier_holds();
             tokio::select! {
                 biased;
 
@@ -619,7 +624,12 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 ) => {
                     match complete_result {
                         Ok(output) => {
-                            self.checkpoint_control.ack_completed(&mut self.partial_graph_manager, output);
+                            if let Err(e) = self.checkpoint_control.ack_completed(
+                                &mut self.partial_graph_manager,
+                                output,
+                            ) {
+                                self.failure_recovery(e).await;
+                            }
                         }
                         Err(e) => {
                             self.failure_recovery(e).await;
@@ -756,7 +766,19 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 let (database_id, _creating_job_id) = from_partial_graph_id(partial_graph_id);
                                 match event {
                                     PartialGraphEvent::BarrierCollected(collected_barrier) => {
-                                        self.checkpoint_control.barrier_collected(partial_graph_id, collected_barrier, &mut self.periodic_barriers)?;
+                                        let epoch = collected_barrier.epoch;
+                                        let resps = collected_barrier.resps.clone();
+                                        let pending_barrier_num = collected_barrier.pending_barrier_num;
+                                        self.checkpoint_control.barrier_collected(
+                                            partial_graph_id,
+                                            crate::barrier::partial_graph::CollectedBarrier {
+                                                epoch,
+                                                resps: &resps,
+                                                pending_barrier_num,
+                                            },
+                                            &mut self.periodic_barriers,
+                                            &mut self.partial_graph_manager,
+                                        )?;
                                     }
                                     PartialGraphEvent::Error(worker_id) => {
                                         if !self.enable_recovery {
@@ -864,6 +886,23 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
             }
         }
     }
+
+    fn sync_compaction_barrier_holds(&mut self) {
+        let blocked_databases = self.checkpoint_control.compaction_blocked_databases();
+
+        for database_id in blocked_databases.difference(&self.held_compaction_databases) {
+            self.periodic_barriers.hold_database(*database_id);
+            self.context.set_database_barrier_hold(*database_id, true);
+        }
+        for database_id in self
+            .held_compaction_databases
+            .difference(&blocked_databases)
+        {
+            self.periodic_barriers.release_database(*database_id);
+            self.context.set_database_barrier_hold(*database_id, false);
+        }
+        self.held_compaction_databases = blocked_databases;
+    }
 }
 
 impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
@@ -889,13 +928,18 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         );
                     }
                     Ok(Ok(hummock_version_stats)) => {
-                        self.checkpoint_control.ack_completed(
+                        if let Err(e) = self.checkpoint_control.ack_completed(
                             &mut self.partial_graph_manager,
                             BarrierCompleteOutput {
                                 epochs_to_ack,
                                 hummock_version_stats,
                             },
-                        );
+                        ) {
+                            warn!(
+                                err = %e.as_report(),
+                                "failed to acknowledge completed barrier during recovery"
+                            );
+                        }
                     }
                 }
             }

@@ -1281,6 +1281,7 @@ pub(crate) mod barrier_test_utils {
                             actor_ids_to_collect: actor_to_collect.into_iter().collect(),
                             table_ids_to_sync: vec![],
                             partial_graph_id: TEST_PARTIAL_GRAPH_ID,
+                            table_epoch_already_started: false,
                             actors_to_build: vec![],
                         },
                     )),

@@ -54,6 +54,12 @@ pub(super) struct NewBarrier {
 struct Inner {
     queue: Mutex<ScheduledQueue>,
 
+    /// Databases whose scheduled and periodic barriers are temporarily held.
+    ///
+    /// Unlike [`QueueStatus::Blocked`], holding a database does not reject or abort queued
+    /// commands.
+    held_databases: Mutex<HashSet<DatabaseId>>,
+
     /// When `queue` is not empty anymore, all subscribers of this watcher will be notified.
     changed_tx: watch::Sender<()>,
 }
@@ -155,6 +161,7 @@ impl BarrierScheduler {
                 queue: Default::default(),
                 status: QueueStatus::Ready,
             }),
+            held_databases: Default::default(),
             changed_tx: watch::channel(()).0,
         });
 
@@ -341,6 +348,7 @@ pub struct PeriodicBarriers {
     /// `StreamMap` will yield `(DatabaseId, Instant)` when a timer ticks.
     timer_streams: StreamMap<DatabaseId, IntervalStream>,
     force_checkpoint_databases: HashSet<DatabaseId>,
+    held_databases: HashSet<DatabaseId>,
 }
 
 impl PeriodicBarriers {
@@ -375,7 +383,16 @@ impl PeriodicBarriers {
             databases,
             timer_streams,
             force_checkpoint_databases: Default::default(),
+            held_databases: Default::default(),
         }
+    }
+
+    pub(super) fn hold_database(&mut self, database_id: DatabaseId) {
+        self.held_databases.insert(database_id);
+    }
+
+    pub(super) fn release_database(&mut self, database_id: DatabaseId) {
+        self.held_databases.remove(&database_id);
     }
 
     // Create a new interval stream with the specified duration.
@@ -489,45 +506,55 @@ impl PeriodicBarriers {
         &mut self,
         context: &impl GlobalBarrierWorkerContext,
     ) -> NewBarrier {
-        let force_checkpoint_database = self.force_checkpoint_databases.extract_if(|_| true).next();
-        let new_barrier = if let Some(database_id) = force_checkpoint_database {
-            self.reset_database_timer(database_id);
-            NewBarrier {
-                database_id,
-                command: None,
-                span: tracing_span(),
-                checkpoint: true,
-            }
-        } else {
-            select! {
-                biased;
-                scheduled = context.next_scheduled() => {
-                    let database_id = scheduled.database_id;
-                    self.reset_database_timer(database_id);
-                    let checkpoint = scheduled.command.need_checkpoint() || self.try_get_checkpoint(database_id);
-                    NewBarrier {
-                        database_id: scheduled.database_id,
-                        command: Some((scheduled.command, scheduled.notifiers)),
-                        span: scheduled.span,
-                        checkpoint,
-                    }
-                },
-                // If there is no database, we won't wait for `Interval`, but only wait for command.
-                // Normally it will not return None, because there is always at least one database.
-                (database_id, _instant) = pending_on_none(self.timer_streams.next()) => {
-                    let checkpoint = self.try_get_checkpoint(database_id);
-                    NewBarrier {
-                        database_id,
-                        command: None,
-                        span: tracing_span(),
-                        checkpoint,
+        loop {
+            let force_checkpoint_database = self
+                .force_checkpoint_databases
+                .iter()
+                .find(|database_id| !self.held_databases.contains(*database_id))
+                .copied();
+            let new_barrier = if let Some(database_id) = force_checkpoint_database {
+                self.force_checkpoint_databases.remove(&database_id);
+                self.reset_database_timer(database_id);
+                NewBarrier {
+                    database_id,
+                    command: None,
+                    span: tracing_span(),
+                    checkpoint: true,
+                }
+            } else {
+                select! {
+                    biased;
+                    scheduled = context.next_scheduled() => {
+                        let database_id = scheduled.database_id;
+                        self.reset_database_timer(database_id);
+                        let checkpoint = scheduled.command.need_checkpoint() || self.try_get_checkpoint(database_id);
+                        NewBarrier {
+                            database_id: scheduled.database_id,
+                            command: Some((scheduled.command, scheduled.notifiers)),
+                            span: scheduled.span,
+                            checkpoint,
+                        }
+                    },
+                    // If there is no database, we won't wait for `Interval`, but only wait for command.
+                    // Normally it will not return None, because there is always at least one database.
+                    (database_id, _instant) = pending_on_none(self.timer_streams.next()) => {
+                        if self.held_databases.contains(&database_id) {
+                            continue;
+                        }
+                        let checkpoint = self.try_get_checkpoint(database_id);
+                        NewBarrier {
+                            database_id,
+                            command: None,
+                            span: tracing_span(),
+                            checkpoint,
+                        }
                     }
                 }
-            }
-        };
-        self.update_num_uncheckpointed_barrier(new_barrier.database_id, new_barrier.checkpoint);
+            };
+            self.update_num_uncheckpointed_barrier(new_barrier.database_id, new_barrier.checkpoint);
 
-        new_barrier
+            return new_barrier;
+        }
     }
 
     /// Whether the barrier(checkpoint = true) should be injected.
@@ -551,16 +578,28 @@ impl PeriodicBarriers {
 }
 
 impl ScheduledBarriers {
+    pub(super) fn set_database_barrier_hold(&self, database_id: DatabaseId, hold: bool) {
+        let changed = if hold {
+            self.inner.held_databases.lock().insert(database_id)
+        } else {
+            self.inner.held_databases.lock().remove(&database_id)
+        };
+        if changed && !hold {
+            self.inner.changed_tx.send(()).ok();
+        }
+    }
+
     pub(super) async fn next_scheduled(&self) -> Scheduled {
         'outer: loop {
             let mut rx = self.inner.changed_tx.subscribe();
             {
                 let mut queue = self.inner.queue.lock();
+                let held_databases = self.inner.held_databases.lock();
                 if queue.status.is_blocked() {
                     continue;
                 }
                 for (database_id, queue) in &mut queue.queue {
-                    if queue.status.is_blocked() {
+                    if queue.status.is_blocked() || held_databases.contains(database_id) {
                         continue;
                     }
                     if let Some(item) = queue.queue.pop_front() {
@@ -785,7 +824,7 @@ impl ScheduledBarriers {
 #[cfg(test)]
 mod tests {
     use futures::FutureExt;
-    use risingwave_meta_model::PartialGraphId;
+    use risingwave_common::id::PartialGraphId;
 
     use super::*;
 
@@ -824,6 +863,8 @@ mod tests {
         async fn next_scheduled(&self) -> Scheduled {
             self.scheduled_rx.lock().await.recv().await.unwrap()
         }
+
+        fn set_database_barrier_hold(&self, _database_id: DatabaseId, _hold: bool) {}
 
         async fn commit_epoch(
             &self,
@@ -939,6 +980,13 @@ mod tests {
             unimplemented!()
         }
 
+        async fn pre_commit_iceberg_pk_index_compaction_overwrites(
+            &self,
+            _overwrites: Vec<crate::barrier::complete_task::CompactionOverwrite>,
+        ) -> MetaResult<Vec<risingwave_meta_model::SinkId>> {
+            unimplemented!()
+        }
+
         async fn commit_iceberg_pk_index_sink_metadata(
             &self,
             _sink_ids: Vec<risingwave_meta_model::SinkId>,
@@ -952,6 +1000,83 @@ mod tests {
         ) {
             unimplemented!()
         }
+    }
+
+    #[tokio::test]
+    async fn test_scheduled_barrier_hold_keeps_command_queued() {
+        let database_id = DatabaseId::new(1);
+        let other_database_id = DatabaseId::new(2);
+        let inner = Arc::new(Inner {
+            queue: Mutex::new(ScheduledQueue {
+                queue: Default::default(),
+                status: QueueStatus::Ready,
+            }),
+            held_databases: Default::default(),
+            changed_tx: watch::channel(()).0,
+        });
+        let scheduled_barriers = ScheduledBarriers { inner };
+        {
+            let mut queue = scheduled_barriers.inner.queue.lock();
+            for id in [database_id, other_database_id] {
+                let database_queue = queue
+                    .queue
+                    .entry(id)
+                    .or_insert_with(|| DatabaseScheduledQueue::new(QueueStatus::Ready));
+                database_queue.queue.push_back(ScheduledQueueItem {
+                    command: Command::Flush,
+                    notifiers: vec![],
+                    span: tracing::Span::none(),
+                });
+            }
+        }
+
+        scheduled_barriers.set_database_barrier_hold(database_id, true);
+        let other = scheduled_barriers
+            .next_scheduled()
+            .now_or_never()
+            .expect("another database must remain schedulable");
+        assert_eq!(other.database_id, other_database_id);
+        assert!(
+            scheduled_barriers.next_scheduled().now_or_never().is_none(),
+            "held database command must stay queued"
+        );
+
+        scheduled_barriers.set_database_barrier_hold(database_id, false);
+        let scheduled = scheduled_barriers
+            .next_scheduled()
+            .now_or_never()
+            .expect("released command should be immediately available");
+        assert_eq!(scheduled.database_id, database_id);
+        assert!(matches!(scheduled.command, Command::Flush));
+    }
+
+    #[tokio::test]
+    async fn test_forced_checkpoint_waits_for_periodic_hold_release() {
+        let database_id = DatabaseId::new(1);
+        let databases = vec![
+            create_test_database(1, Some(1000), Some(10)),
+            create_test_database(2, Some(1000), Some(10)),
+        ];
+        let mut periodic = PeriodicBarriers::new(Duration::from_millis(1000), 10, databases);
+        let (context, _tx) = MockGlobalBarrierWorkerContext::new();
+
+        periodic.hold_database(database_id);
+        periodic.force_checkpoint_in_next_barrier(database_id);
+        let other = periodic.next_barrier(&context).await;
+        assert_eq!(other.database_id, DatabaseId::new(2));
+        assert!(
+            periodic.force_checkpoint_databases.contains(&database_id),
+            "forced checkpoint must remain pending while the database is held"
+        );
+
+        periodic.release_database(database_id);
+        let barrier = periodic
+            .next_barrier(&context)
+            .now_or_never()
+            .expect("forced checkpoint should run immediately after release");
+        assert_eq!(barrier.database_id, database_id);
+        assert!(barrier.checkpoint);
+        assert!(barrier.command.is_none());
     }
 
     #[tokio::test(start_paused = true)]

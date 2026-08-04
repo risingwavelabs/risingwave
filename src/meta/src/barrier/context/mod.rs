@@ -34,6 +34,7 @@ use risingwave_rpc_client::StreamingControlHandle;
 use crate::MetaResult;
 use crate::barrier::checkpoint::independent_job::BatchRefreshJobTriggerContext;
 use crate::barrier::command::{PostCollectCommand, SinceTimestampResolvedEpoch};
+use crate::barrier::complete_task::CompactionOverwrite;
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::schedule::{MarkReadyOptions, ScheduledBarriers};
 use crate::barrier::{
@@ -91,6 +92,7 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
     ) -> impl Future<Output = MetaResult<HummockVersionStats>> + Send + '_;
 
     async fn next_scheduled(&self) -> Scheduled;
+    fn set_database_barrier_hold(&self, database_id: DatabaseId, hold: bool);
     fn abort_and_mark_blocked(
         &self,
         database_id: Option<DatabaseId>,
@@ -170,6 +172,11 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
     fn pre_commit_iceberg_pk_index_sink_metadata(
         &self,
         reports: Vec<PbIcebergPkIndexSinkMetadata>,
+    ) -> impl Future<Output = MetaResult<Vec<SinkId>>> + Send + '_;
+
+    fn pre_commit_iceberg_pk_index_compaction_overwrites(
+        &self,
+        overwrites: Vec<CompactionOverwrite>,
     ) -> impl Future<Output = MetaResult<Vec<SinkId>>> + Send + '_;
 
     fn commit_iceberg_pk_index_sink_metadata(

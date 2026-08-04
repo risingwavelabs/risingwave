@@ -88,6 +88,12 @@ pub struct MetaSrvEnv {
     pub opts: Arc<MetaOpts>,
 
     actor_id_generator: Arc<AtomicU32>,
+
+    /// Shared iceberg pk-index sink commit coordinator manager. Held here so the barrier control
+    /// loop (which only carries `env`) can reach it to commit a compaction overwrite inside the
+    /// paused resolve window; every service shares this one instance (registrations are visible to
+    /// all).
+    iceberg_pk_index_sink_manager: crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager,
 }
 
 /// Options shared by all meta service instances
@@ -518,7 +524,17 @@ impl MetaSrvEnv {
             // Await trees on the meta node is lightweight, thus always enabled.
             await_tree_reg: await_tree::Registry::new(Default::default()),
             actor_id_generator: Arc::new(AtomicU32::new(0)),
+            iceberg_pk_index_sink_manager:
+                crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager::new(
+                    meta_store_impl.conn.clone(),
+                ),
         })
+    }
+
+    pub fn iceberg_pk_index_sink_manager(
+        &self,
+    ) -> &crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager {
+        &self.iceberg_pk_index_sink_manager
     }
 
     pub fn meta_store(&self) -> SqlMetaStore {

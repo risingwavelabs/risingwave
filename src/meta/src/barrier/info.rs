@@ -24,7 +24,7 @@ use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, FragmentTypeMask, TableId};
 use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::stream_graph_visitor::visit_stream_node_mut;
+use risingwave_common::util::stream_graph_visitor::{visit_stream_node, visit_stream_node_mut};
 use risingwave_connector::source::{SplitImpl, SplitMetaData};
 use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::fragment::DistributionType;
@@ -470,6 +470,20 @@ impl InflightDatabaseInfo {
         self.fragment_location.get(&fragment_id).copied()
     }
 
+    pub(super) fn existing_table_ids_by_fragment(
+        &self,
+        fragment_id: FragmentId,
+    ) -> MetaResult<HashSet<TableId>> {
+        let job_id = self.job_id_by_fragment(fragment_id).ok_or_else(|| {
+            MetaError::invalid_parameter(format!("fragment {} not found", fragment_id))
+        })?;
+        let job = self
+            .jobs
+            .get(&job_id)
+            .expect("fragment location should reference an existing job");
+        Ok(InflightFragmentInfo::existing_table_ids(job.fragment_infos()).collect())
+    }
+
     pub fn fragment(&self, fragment_id: FragmentId) -> &InflightFragmentInfo {
         let job_id = self.fragment_location[&fragment_id];
         self.jobs
@@ -478,6 +492,65 @@ impl InflightDatabaseInfo {
             .fragment_infos
             .get(&fragment_id)
             .expect("should exist")
+    }
+
+    /// Return actors in the target fragment and every fragment reachable by following its
+    /// upstream merge edges. Downstream siblings are intentionally excluded.
+    pub(super) fn transitive_upstream_actor_ids(
+        &self,
+        target_fragment_id: FragmentId,
+    ) -> MetaResult<HashSet<ActorId>> {
+        fn visit_fragment(
+            info: &InflightDatabaseInfo,
+            fragment_id: FragmentId,
+            visited: &mut HashSet<FragmentId>,
+            actor_ids: &mut HashSet<ActorId>,
+        ) -> MetaResult<()> {
+            if visited.contains(&fragment_id) {
+                return Ok(());
+            }
+            let job_id = info.job_id_by_fragment(fragment_id).ok_or_else(|| {
+                MetaError::invalid_parameter(format!(
+                    "upstream fragment {} referenced by pk-index compaction target is not inflight",
+                    fragment_id
+                ))
+            })?;
+            let fragment = info.jobs[&job_id]
+                .fragment_infos
+                .get(&fragment_id)
+                .expect("fragment location should reference an existing fragment");
+            visited.insert(fragment_id);
+            actor_ids.extend(fragment.actors.keys().copied());
+
+            let mut upstream_fragment_ids = HashSet::new();
+            visit_stream_node(&fragment.nodes, |node| match node.node_body.as_ref() {
+                Some(NodeBody::Merge(merge)) => {
+                    upstream_fragment_ids.insert(merge.upstream_fragment_id);
+                }
+                Some(NodeBody::UpstreamSinkUnion(union)) => {
+                    upstream_fragment_ids.extend(
+                        union
+                            .init_upstreams
+                            .iter()
+                            .map(|upstream| upstream.upstream_fragment_id),
+                    );
+                }
+                _ => {}
+            });
+            for upstream_fragment_id in upstream_fragment_ids {
+                visit_fragment(info, upstream_fragment_id, visited, actor_ids)?;
+            }
+            Ok(())
+        }
+
+        let mut actor_ids = HashSet::new();
+        visit_fragment(
+            self,
+            target_fragment_id,
+            &mut HashSet::new(),
+            &mut actor_ids,
+        )?;
+        Ok(actor_ids)
     }
 
     pub(super) fn backfill_fragment_ids_for_job(
@@ -1444,5 +1517,108 @@ impl InflightDatabaseInfo {
 
     pub fn existing_table_ids(&self) -> impl Iterator<Item = TableId> + '_ {
         InflightFragmentInfo::existing_table_ids(self.fragment_infos())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use risingwave_common::catalog::FragmentTypeMask;
+    use risingwave_pb::stream_plan::{MergeNode, PbStreamNode, PbUpstreamSinkUnionNode};
+
+    use super::*;
+    use crate::controller::SqlMetaStore;
+    use crate::manager::NotificationManager;
+
+    fn fragment(
+        fragment_id: u32,
+        actor_id: u32,
+        node_body: Option<NodeBody>,
+    ) -> InflightFragmentInfo {
+        InflightFragmentInfo {
+            fragment_id: FragmentId::new(fragment_id),
+            distribution_type: DistributionType::Single,
+            fragment_type_mask: FragmentTypeMask::empty(),
+            vnode_count: 1,
+            nodes: PbStreamNode {
+                node_body,
+                ..Default::default()
+            },
+            actors: HashMap::from([(
+                ActorId::new(actor_id),
+                InflightActorInfo {
+                    worker_id: 1.into(),
+                    vnode_bitmap: None,
+                    splits: vec![],
+                },
+            )]),
+            state_table_ids: HashSet::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn test_transitive_upstream_actor_ids_excludes_unrelated_downstreams() {
+        let fragments = HashMap::from([
+            (FragmentId::new(1), fragment(1, 10, None)),
+            (
+                FragmentId::new(2),
+                fragment(
+                    2,
+                    20,
+                    Some(NodeBody::Merge(Box::new(MergeNode {
+                        upstream_fragment_id: FragmentId::new(1),
+                        ..Default::default()
+                    }))),
+                ),
+            ),
+            (
+                FragmentId::new(3),
+                fragment(
+                    3,
+                    30,
+                    Some(NodeBody::UpstreamSinkUnion(Box::new(
+                        PbUpstreamSinkUnionNode {
+                            init_upstreams: vec![PbUpstreamSinkInfo {
+                                upstream_fragment_id: FragmentId::new(2),
+                                ..Default::default()
+                            }],
+                        },
+                    ))),
+                ),
+            ),
+            (
+                FragmentId::new(4),
+                fragment(
+                    4,
+                    40,
+                    Some(NodeBody::Merge(Box::new(MergeNode {
+                        upstream_fragment_id: FragmentId::new(1),
+                        ..Default::default()
+                    }))),
+                ),
+            ),
+            (FragmentId::new(5), fragment(5, 50, None)),
+        ]);
+        let notification_manager =
+            Arc::new(NotificationManager::new(SqlMetaStore::for_test().await).await);
+        let info = InflightDatabaseInfo::recover(
+            DatabaseId::new(1),
+            [InflightStreamingJobInfo {
+                job_id: JobId::new(1),
+                fragment_infos: fragments,
+                subscribers: HashMap::new(),
+                status: CreateStreamingJobStatus::Created,
+                cdc_table_backfill_tracker: None,
+            }]
+            .into_iter(),
+            SharedActorInfos::new(notification_manager),
+        );
+
+        assert_eq!(
+            info.transitive_upstream_actor_ids(FragmentId::new(3))
+                .unwrap(),
+            HashSet::from([ActorId::new(10), ActorId::new(20), ActorId::new(30)])
+        );
     }
 }

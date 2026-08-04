@@ -251,8 +251,13 @@ impl DatabaseStatusAction<'_, EnterReset> {
         partial_graph_manager: &mut PartialGraphManager,
     ) {
         let event_log_manager_ref = self.control.env.event_log_manager_ref();
-        if let Some(output) = barrier_complete_output {
-            self.control.ack_completed(partial_graph_manager, output);
+        if let Some(output) = barrier_complete_output
+            && let Err(err) = self.control.ack_completed(partial_graph_manager, output)
+        {
+            warn!(
+                err = %err.as_report(),
+                "failed to acknowledge completed barrier while entering recovery"
+            );
         }
         let database_status = self
             .control
