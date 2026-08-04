@@ -218,16 +218,12 @@ impl ClusterController {
     }
 
     /// Invoked when it receives a heartbeat from a worker node.
-    pub async fn heartbeat(
-        &self,
-        worker_id: WorkerId,
-        resource: Option<PbResource>,
-    ) -> MetaResult<()> {
+    pub async fn heartbeat(&self, worker_id: WorkerId) -> MetaResult<()> {
         tracing::trace!(target: "events::meta::server_heartbeat", %worker_id, "receive heartbeat");
-        let mut inner = self.inner.write().await;
-        inner
-            .heartbeat(worker_id, self.max_heartbeat_interval, resource)
+        self.inner
+            .write()
             .await
+            .heartbeat(worker_id, self.max_heartbeat_interval)
     }
 
     pub fn start_heartbeat_checker(
@@ -867,33 +863,12 @@ impl ClusterControllerInner {
         Ok(worker)
     }
 
-    pub async fn heartbeat(
-        &mut self,
-        worker_id: WorkerId,
-        ttl: Duration,
-        resource: Option<PbResource>,
-    ) -> MetaResult<()> {
+    pub fn heartbeat(&mut self, worker_id: WorkerId, ttl: Duration) -> MetaResult<()> {
         let Some(worker_info) = self.worker_extra_info.get_mut(&worker_id) else {
             return Err(MetaError::invalid_worker(worker_id, "worker not found"));
         };
 
         worker_info.update_ttl(ttl);
-
-        if let Some(resource) = resource {
-            if let Some(property) = WorkerProperty::find_by_id(worker_id).one(&self.db).await? {
-                let needs_update = property
-                    .resource
-                    .as_ref()
-                    .map(|persisted| persisted.to_protobuf() != resource)
-                    .unwrap_or(true);
-                if !needs_update {
-                    return Ok(());
-                }
-                let mut property: worker_property::ActiveModel = property.into();
-                property.resource = Set(Some((&resource).into()));
-                WorkerProperty::update(property).exec(&self.db).await?;
-            }
-        }
         Ok(())
     }
 
@@ -1126,7 +1101,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_heartbeat_updates_resource() -> MetaResult<()> {
+    async fn test_heartbeat_does_not_update_resource() -> MetaResult<()> {
         let env = MetaSrvEnv::for_test().await;
         let cluster_ctl = ClusterController::new(env.clone(), Duration::from_secs(1)).await?;
 
@@ -1152,19 +1127,11 @@ mod tests {
                 PbWorkerType::ComputeNode,
                 host.clone(),
                 property,
-                resource_v1,
+                resource_v1.clone(),
             )
             .await?;
 
-        let resource_v2 = PbResource {
-            rw_version: "rw-v2".to_owned(),
-            total_memory_bytes: 2048,
-            total_cpu_cores: 8,
-            hostname: "host-v2".to_owned(),
-        };
-        cluster_ctl
-            .heartbeat(worker_id, Some(resource_v2.clone()))
-            .await?;
+        cluster_ctl.heartbeat(worker_id).await?;
 
         let worker = cluster_ctl
             .get_worker_by_id(worker_id)
@@ -1172,7 +1139,7 @@ mod tests {
             .expect("worker should exist");
         assert_eq!(
             worker.resource.expect("worker resource should exist"),
-            resource_v2
+            resource_v1
         );
 
         let recovered_cluster_ctl = ClusterController::new(env, Duration::from_secs(1)).await?;
@@ -1182,7 +1149,7 @@ mod tests {
             .expect("worker should exist");
         assert_eq!(
             worker.resource.expect("worker resource should be restored"),
-            resource_v2
+            resource_v1
         );
 
         recovered_cluster_ctl.delete_worker(host).await?;
