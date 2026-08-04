@@ -129,7 +129,6 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for DecoupleCheckpointLogSink
                 }
                 LogStoreReadItem::Barrier {
                     is_checkpoint,
-                    new_vnode_bitmap,
                     is_stop,
                     schema_change,
                 } => {
@@ -141,7 +140,6 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for DecoupleCheckpointLogSink
                         current_checkpoint += 1;
                         if current_checkpoint >= commit_checkpoint_interval.get()
                             || should_force_commit_on_checkpoint_barrier(
-                                new_vnode_bitmap.is_some(),
                                 is_stop,
                                 schema_change.is_some(),
                             )
@@ -158,7 +156,6 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for DecoupleCheckpointLogSink
                             sink_writer.barrier(false).await?;
                         }
                     } else {
-                        assert!(new_vnode_bitmap.is_none());
                         sink_writer.barrier(false).await?;
                     }
                     state = LogConsumerState::BarrierReceived { prev_epoch }

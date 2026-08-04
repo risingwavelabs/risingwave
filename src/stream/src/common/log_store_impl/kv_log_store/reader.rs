@@ -38,7 +38,6 @@ use risingwave_storage::store::timeout_auto_rebuild::{
     TimeoutAutoRebuildIter, iter_with_timeout_rebuild,
 };
 use risingwave_storage::store::{PrefetchOptions, ReadOptions, StateStoreRead};
-use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::{OwnedSemaphorePermit, Semaphore, oneshot, watch};
 use tokio::time::sleep;
 use tokio_stream::StreamExt;
@@ -176,7 +175,6 @@ pub struct KvLogStoreReader<S: StateStoreRead> {
 
     rx: LogStoreBufferReceiver,
     init_epoch_rx: Option<oneshot::Receiver<EpochPair>>,
-    update_vnode_bitmap_rx: UnboundedReceiver<(Arc<Bitmap>, u64)>,
 
     /// The first epoch that newly written by the log writer
     first_write_epoch: Option<u64>,
@@ -201,12 +199,10 @@ pub struct KvLogStoreReader<S: StateStoreRead> {
 }
 
 impl<S: StateStoreRead> KvLogStoreReader<S> {
-    #[expect(clippy::too_many_arguments)]
     pub(crate) fn new(
         state: LogStoreReadState<S>,
         rx: LogStoreBufferReceiver,
         init_epoch_rx: oneshot::Receiver<EpochPair>,
-        update_vnode_bitmap_rx: UnboundedReceiver<(Arc<Bitmap>, u64)>,
         metrics: KvLogStoreMetrics,
         is_paused: watch::Receiver<bool>,
         identity: String,
@@ -217,7 +213,6 @@ impl<S: StateStoreRead> KvLogStoreReader<S> {
             state,
             rx,
             init_epoch_rx: Some(init_epoch_rx),
-            update_vnode_bitmap_rx,
             first_write_epoch: None,
             future_state: KvLogStoreReaderFutureState::Empty,
             latest_offset: None,
@@ -318,26 +313,20 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
     }
 
     async fn init(&mut self) -> LogStoreResult<()> {
-        if let Some(init_epoch_rx) = self.init_epoch_rx.take() {
-            let init_epoch = init_epoch_rx
-                .await
-                .map_err(|_| anyhow!("should get the first epoch"))?;
-            let first_write_epoch = init_epoch.curr;
+        let init_epoch_rx = self
+            .init_epoch_rx
+            .take()
+            .ok_or_else(|| anyhow!("log reader should not init twice"))?;
+        let init_epoch = init_epoch_rx
+            .await
+            .map_err(|_| anyhow!("should get the first epoch"))?;
+        let first_write_epoch = init_epoch.curr;
 
-            assert_eq!(
-                self.first_write_epoch.replace(first_write_epoch),
-                None,
-                "should not init twice"
-            );
-        } else {
-            let (new_vnode_bitmap, write_epoch) = self
-                .update_vnode_bitmap_rx
-                .recv()
-                .await
-                .ok_or_else(|| anyhow!("failed to receive update vnode"))?;
-            self.state.serde.update_vnode_bitmap(new_vnode_bitmap);
-            self.first_write_epoch = Some(write_epoch);
-        };
+        assert_eq!(
+            self.first_write_epoch.replace(first_write_epoch),
+            None,
+            "should not init twice"
+        );
 
         self.future_state = KvLogStoreReaderFutureState::Reset;
         self.latest_offset = None;
@@ -382,7 +371,6 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                                 self.latest_offset = Some(TruncateOffset::Barrier { epoch });
                                 LogStoreReadItem::Barrier {
                                     is_checkpoint,
-                                    new_vnode_bitmap: None,
                                     is_stop: false,
                                     schema_change: None,
                                 }
@@ -501,7 +489,6 @@ impl<S: StateStoreRead> LogReader for KvLogStoreReader<S> {
                     item_epoch,
                     LogStoreReadItem::Barrier {
                         is_checkpoint,
-                        new_vnode_bitmap: None,
                         is_stop,
                         schema_change,
                     },
@@ -703,7 +690,6 @@ mod tests {
         KeyValueFn, ReadOptions, StateStoreGet, StateStoreIter, StateStoreKeyedRowRef,
         StateStoreRead, StorageFuture,
     };
-    use tokio::sync::mpsc::unbounded_channel;
     use tokio::sync::{Semaphore, oneshot, watch};
     use tokio::time::timeout;
 
@@ -839,7 +825,6 @@ mod tests {
         };
         let (tx, rx) = new_log_store_buffer(1024, 1024, KvLogStoreMetrics::for_test());
         let (init_epoch_tx, init_epoch_rx) = oneshot::channel();
-        let (_update_vnode_bitmap_tx, update_vnode_bitmap_rx) = unbounded_channel();
         let (_pause_tx, pause_rx) = watch::channel(false);
         init_epoch_tx
             .send(EpochPair::new_test_epoch(epoch))
@@ -849,7 +834,6 @@ mod tests {
                 read_state,
                 rx,
                 init_epoch_rx,
-                update_vnode_bitmap_rx,
                 KvLogStoreMetrics::for_test(),
                 pause_rx,
                 identity.to_owned(),

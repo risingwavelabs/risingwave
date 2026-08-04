@@ -239,14 +239,9 @@ message CoordinateRequest {
     stream_plan.SinkSchemaChange schema_change = 3;
   }
 
-  message UpdateVnodeBitmapRequest {
-    common.Buffer vnode_bitmap = 1;
-  }
-
   oneof msg {
     StartCoordinationRequest start_request = 1;
     CommitRequest commit_request = 2;
-    UpdateVnodeBitmapRequest update_vnode_request = 3;
     bool stop = 4;
     uint64 align_initial_epoch_request = 5;
   }

@@ -436,22 +436,17 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                                             &barrier,
                                             &mut pause_stream,
                                         );
-                                        let write_state_post_write_barrier =
-                                            SyncedKvLogStoreExecutor::<S>::write_barrier(
-                                                actor_id,
-                                                &mut write_state,
-                                                barrier.clone(),
-                                                &log_store_config.metrics,
-                                                progress.take(),
-                                                &mut buffer,
-                                            )
-                                            .await?;
+                                        SyncedKvLogStoreExecutor::<S>::write_barrier(
+                                            actor_id,
+                                            &mut write_state,
+                                            barrier.clone(),
+                                            &log_store_config.metrics,
+                                            progress.take(),
+                                            &mut buffer,
+                                        )
+                                        .await?;
                                         seq_id = FIRST_SEQ_ID;
                                         barrier.assume_no_update_vnode_bitmap(actor_id)?;
-
-                                        write_state_post_write_barrier
-                                            .post_yield_barrier(None)
-                                            .await?;
 
                                         let is_stop_barrier = barrier.is_stop(actor_id);
                                         if is_stop_barrier {

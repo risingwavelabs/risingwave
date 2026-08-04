@@ -14,13 +14,12 @@
 
 use anyhow::{Context, anyhow};
 use await_tree::InstrumentAwait;
-use futures::FutureExt;
 use futures::future::BoxFuture;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::util::epoch::{EpochExt, EpochPair, INVALID_EPOCH};
 use risingwave_connector::sink::log_store::{
     FlushCurrentEpochOptions, LogReader, LogStoreFactory, LogStoreReadItem, LogStoreResult,
-    LogWriter, LogWriterPostFlushCurrentEpoch, TruncateBarrierLogReader, TruncateOffset,
+    LogWriter, TruncateBarrierLogReader, TruncateOffset,
 };
 use tokio::sync::mpsc::{
     Receiver, Sender, UnboundedReceiver, UnboundedSender, channel, unbounded_channel,
@@ -115,7 +114,7 @@ impl BoundedInMemLogStoreFactory {
     pub fn for_test(bound: usize) -> Self {
         Self {
             bound,
-            wait_init_epoch: Box::new(|_x| std::future::ready(Ok(())).boxed()),
+            wait_init_epoch: Box::new(|_x| Box::pin(std::future::ready(Ok(())))),
         }
     }
 }
@@ -125,7 +124,6 @@ impl LogStoreFactory for BoundedInMemLogStoreFactory {
     type Writer = BoundedInMemLogStoreWriter;
 
     const ALLOW_REWIND: bool = false;
-    const REBUILD_SINK_ON_UPDATE_VNODE_BITMAP: bool = false;
 
     async fn build(self) -> (Self::Reader, Self::Writer) {
         let (init_epoch_tx, init_epoch_rx) = oneshot::channel();
@@ -216,7 +214,6 @@ impl LogReader for BoundedInMemLogStoreReader {
                             current_epoch,
                             LogStoreReadItem::Barrier {
                                 is_checkpoint: options.is_checkpoint,
-                                new_vnode_bitmap: options.new_vnode_bitmap,
                                 is_stop: options.is_stop,
                                 schema_change: options.schema_change,
                             },
@@ -305,7 +302,7 @@ impl LogWriter for BoundedInMemLogStoreWriter {
         &mut self,
         next_epoch: u64,
         options: FlushCurrentEpochOptions,
-    ) -> LogStoreResult<LogWriterPostFlushCurrentEpoch<'_>> {
+    ) -> LogStoreResult<()> {
         let is_checkpoint = options.is_checkpoint;
         self.item_tx
             .send(InMemLogStoreItem::Barrier {
@@ -331,9 +328,7 @@ impl LogWriter for BoundedInMemLogStoreWriter {
             assert_eq!(truncated_epoch, prev_epoch);
         }
 
-        Ok(LogWriterPostFlushCurrentEpoch::new(move || {
-            async move { Ok(()) }.boxed()
-        }))
+        Ok(())
     }
 
     fn pause(&mut self) -> LogStoreResult<()> {

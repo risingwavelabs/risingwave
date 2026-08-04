@@ -91,8 +91,7 @@ use crate::common::log_store_impl::kv_log_store::serde::{
     KvLogStoreItem, LogStoreItemMergeStream, LogStoreRowSerde,
 };
 use crate::common::log_store_impl::kv_log_store::state::{
-    LogStorePostSealCurrentEpoch, LogStoreReadState, LogStoreStateWriteChunkFuture,
-    LogStoreWriteState, new_log_store_state,
+    LogStoreReadState, LogStoreStateWriteChunkFuture, LogStoreWriteState, new_log_store_state,
 };
 use crate::common::log_store_impl::kv_log_store::{
     Epoch, FIRST_SEQ_ID, FlushInfo, LogStoreVnodeProgress, SeqId,
@@ -624,11 +623,9 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                     let mut progress = LogStoreVnodeProgress::None;
                     progress.apply_aligned(read_state.vnodes().clone(), barrier.epoch.prev, None);
                     // Truncate the logstore.
-                    let post_seal =
-                        initial_write_state.seal_current_epoch(barrier.epoch.curr, progress.take());
+                    initial_write_state.seal_current_epoch(barrier.epoch.curr, progress.take());
                     barrier.assume_no_update_vnode_bitmap(actor_id)?;
                     yield Message::Barrier(barrier);
-                    post_seal.post_yield_barrier(None).await?;
                     if !realigned_logstore && is_checkpoint {
                         realigned_logstore = true;
                         tracing::info!("realigned logstore");
@@ -840,7 +837,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                     self.logstore_context.metrics.unclean_state.inc();
                                 } else {
                                     Self::apply_pause_resume_mutation(&barrier, &mut pause_stream);
-                                    let write_state_post_write_barrier = Self::write_barrier(
+                                    Self::write_barrier(
                                         self.actor_context.id,
                                         &mut write_state,
                                         barrier.clone(),
@@ -853,10 +850,6 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                     barrier.assume_no_update_vnode_bitmap(self.actor_context.id)?;
 
                                     yield Message::Barrier(barrier);
-
-                                    write_state_post_write_barrier
-                                        .post_yield_barrier(None)
-                                        .await?;
 
                                     write_future_state =
                                         WriteFuture::receive_from_upstream(stream, write_state);
@@ -1066,14 +1059,14 @@ impl<S: StateStoreRead> ReadFuture<S> {
 
 // Write methods
 impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
-    pub(crate) async fn write_barrier<'a>(
+    pub(crate) async fn write_barrier(
         actor_id: ActorId,
-        write_state: &'a mut LogStoreWriteState<S::Local>,
+        write_state: &mut LogStoreWriteState<S::Local>,
         barrier: Barrier,
         metrics: &SyncedKvLogStoreMetrics,
         progress: LogStoreVnodeProgress,
         buffer: &mut SyncedLogStoreBuffer,
-    ) -> StreamExecutorResult<LogStorePostSealCurrentEpoch<'a, S::Local>> {
+    ) -> StreamExecutorResult<()> {
         tracing::trace!(%actor_id, ?progress, "applying truncation");
         // TODO(kwannoel): As an optimization we can also change flushed chunks to be flushed items
         // to reduce memory consumption of logstore.
@@ -1115,7 +1108,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         metrics
             .storage_write_size
             .inc_by(flush_info.flush_size as _);
-        let post_seal = write_state.seal_current_epoch(barrier.epoch.curr, progress);
+        write_state.seal_current_epoch(barrier.epoch.curr, progress);
 
         // Add to buffer
         buffer.buffer.push_back((
@@ -1130,7 +1123,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         buffer.next_chunk_id = 0;
         buffer.update_buffer_metrics();
 
-        Ok(post_seal)
+        Ok(())
     }
 }
 

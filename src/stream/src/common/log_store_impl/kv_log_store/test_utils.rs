@@ -235,20 +235,16 @@ pub(crate) trait LogWriterTestExt: LogWriter {
         next_epoch: u64,
         is_checkpoint: bool,
     ) -> LogStoreResult<()> {
-        let post_flush = self
-            .flush_current_epoch(
-                next_epoch,
-                FlushCurrentEpochOptions {
-                    is_checkpoint,
-                    new_vnode_bitmap: None,
-                    is_stop: false,
-                    schema_change: None,
-                    wait_log_store_flush: false,
-                },
-            )
-            .await?;
-        (post_flush).post_yield_barrier().await?;
-        Ok(())
+        self.flush_current_epoch(
+            next_epoch,
+            FlushCurrentEpochOptions {
+                is_checkpoint,
+                is_stop: false,
+                schema_change: None,
+                wait_log_store_flush: false,
+            },
+        )
+        .await
     }
 }
 

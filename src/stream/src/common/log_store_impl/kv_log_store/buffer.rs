@@ -245,14 +245,6 @@ impl LogStoreBufferInner {
         }
         self.update_buffer_metrics();
     }
-
-    fn clear(&mut self) {
-        self.consumed_queue.clear();
-        self.unconsumed_queue.clear();
-        self.next_chunk_id = 0;
-        self.truncation_list.clear();
-        self.row_count = 0;
-    }
 }
 
 struct SharedMutex<T>(Arc<Mutex<T>>);
@@ -406,10 +398,6 @@ impl LogStoreBufferSender {
             }
         }
         Ok(())
-    }
-
-    pub(crate) fn clear(&mut self) {
-        self.buffer.inner().clear();
     }
 }
 

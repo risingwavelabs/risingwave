@@ -267,10 +267,6 @@ impl LogStoreRowSerde {
         }
     }
 
-    pub(crate) fn update_vnode_bitmap(&mut self, vnodes: Arc<Bitmap>) {
-        self.vnodes = vnodes;
-    }
-
     pub(crate) fn vnodes(&self) -> &Arc<Bitmap> {
         &self.vnodes
     }
