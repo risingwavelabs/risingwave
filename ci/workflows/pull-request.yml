@@ -894,6 +894,7 @@ steps:
           - "3"
           - "4"
     timeout_in_minutes: 25
+    retry: *auto-retry
 
   # Sqlsmith differential testing
   - label: "Sqlsmith Differential Testing"
