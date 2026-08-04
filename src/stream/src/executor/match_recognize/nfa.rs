@@ -34,6 +34,21 @@ use async_recursion::async_recursion;
 
 use crate::executor::error::StreamExecutorResult;
 
+/// Cursor for [`Nfa::next_match`]: the next start position the scan will try. A fresh scan starts
+/// at 0; [`Nfa::next_match`] advances it by the `AFTER MATCH SKIP` mode on every match returned
+/// (or by one row past a non-matching start), so pulling repeatedly enumerates exactly the match
+/// sequence [`Nfa::find_matches_dynamic`] would collect.
+#[derive(Debug, Default)]
+pub struct MatchScan {
+    next_start: usize,
+}
+
+impl MatchScan {
+    pub fn new() -> Self {
+        Self::default()
+    }
+}
+
 /// Decides whether the row at a physical position can be bound to a pattern variable, given the
 /// variables already bound to the earlier rows of the in-progress match. This is how `DEFINE`
 /// predicates are evaluated during matching: a predicate may reference the current row, its physical
@@ -525,8 +540,33 @@ impl Nfa {
         skip: &SkipMode,
     ) -> StreamExecutorResult<Vec<LabeledMatch>> {
         let mut matches = Vec::new();
-        let mut i = 0;
-        while i < n_rows {
+        let mut scan = MatchScan::new();
+        while let Some(m) = self.next_match(&mut scan, n_rows, matcher, skip).await? {
+            matches.push(m);
+        }
+        Ok(matches)
+    }
+
+    /// Pull the next match at or after `scan`'s cursor, advancing the cursor by the skip mode.
+    /// Returns `None` once the cursor passes `n_rows`.
+    ///
+    /// This is the streaming form of [`Nfa::find_matches_dynamic`], which is a thin collect over
+    /// it. The executor's emit loop pulls instead of collecting so that stopping — at the first
+    /// boundary match that must be held for maximality — stops the *scan*, not just the emission:
+    /// nothing past the held match is computed (it would be recomputed from scratch on the next
+    /// watermark anyway) and at most one match is resident at a time. Collecting is worst-case
+    /// quadratic in live rows: under an overlapping skip mode a greedy `(a+)` over `n` qualifying
+    /// rows yields `n` matches whose label vectors sum to `O(n^2)` strings, all materialized before
+    /// the first one is examined.
+    pub async fn next_match(
+        &self,
+        scan: &mut MatchScan,
+        n_rows: usize,
+        matcher: &(impl CandidateMatcher + Sync),
+        skip: &SkipMode,
+    ) -> StreamExecutorResult<Option<LabeledMatch>> {
+        while scan.next_start < n_rows {
+            let i = scan.next_start;
             let mut path: Vec<String> = Vec::new();
             let mut visited = Visited::new(self.states.len());
             let found = self
@@ -535,18 +575,20 @@ impl Nfa {
             if let Some((end, labels)) = found
                 && end > i
             {
-                let start = i;
                 // The diagnostic is dropped here on purpose: the executor recomputes the resume
                 // position for the matches it actually *emits* and reports from there, so a match
                 // that this scan finds but the emit path holds back or skips is not reported twice
                 // (nor reported at all until it is emitted).
-                (i, _) = skip.next_pos(start, end, &labels);
-                matches.push(LabeledMatch { start, end, labels });
-            } else {
-                i += 1;
+                (scan.next_start, _) = skip.next_pos(i, end, &labels);
+                return Ok(Some(LabeledMatch {
+                    start: i,
+                    end,
+                    labels,
+                }));
             }
+            scan.next_start += 1;
         }
-        Ok(matches)
+        Ok(None)
     }
 
     /// Whether a match starting at `pos` is still *live* at the safe boundary `n_rows`: there exists
@@ -1400,6 +1442,72 @@ mod tests {
         ) -> StreamExecutorResult<bool> {
             Ok(self.rows[pos].contains(var))
         }
+    }
+
+    /// [`Nfa::next_match`] is lazy: pulling one match must not evaluate predicates past that
+    /// match's scan region, and pulling to exhaustion must enumerate exactly what
+    /// [`Nfa::find_matches_dynamic`] collects. The emit loop relies on the first property to stop
+    /// scanning at a held boundary match without paying for (or materializing) the rest.
+    #[tokio::test]
+    async fn next_match_is_lazy_and_equivalent() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct CountingMatcher {
+            rows: Vec<BTreeSet<String>>,
+            calls: AtomicUsize,
+        }
+        impl CandidateMatcher for CountingMatcher {
+            async fn matches(
+                &self,
+                var: &str,
+                pos: usize,
+                _labels: &[String],
+            ) -> StreamExecutorResult<bool> {
+                self.calls.fetch_add(1, Ordering::Relaxed);
+                Ok(self.rows[pos].contains(var))
+            }
+        }
+
+        let nfa = Nfa::compile(&Pattern::Concat(vec![vars("a"), vars("b")]));
+        let r = rows("ababab");
+
+        // Pull ONE match, then compare predicate-evaluation counts against a full collect.
+        let first_only = CountingMatcher {
+            rows: r.clone(),
+            calls: AtomicUsize::new(0),
+        };
+        let mut scan = MatchScan::new();
+        let skip = SkipMode::PastLastRow;
+        let first = nfa
+            .next_match(&mut scan, r.len(), &first_only, &skip)
+            .await
+            .unwrap()
+            .expect("first match");
+        assert_eq!((first.start, first.end), (0, 2));
+        let one_pull = first_only.calls.load(Ordering::Relaxed);
+
+        let full = CountingMatcher {
+            rows: r.clone(),
+            calls: AtomicUsize::new(0),
+        };
+        let collected = nfa
+            .find_matches_dynamic(r.len(), &full, &skip)
+            .await
+            .unwrap();
+        let full_scan = full.calls.load(Ordering::Relaxed);
+        assert!(
+            one_pull < full_scan,
+            "one pull ({one_pull} evaluations) must cost less than the full scan ({full_scan})"
+        );
+
+        // Pulling to exhaustion enumerates exactly the collected sequence.
+        let m = SetMatcher { rows: r.clone() };
+        let mut scan = MatchScan::new();
+        let mut pulled = Vec::new();
+        while let Some(mm) = nfa.next_match(&mut scan, r.len(), &m, &skip).await.unwrap() {
+            pulled.push(mm);
+        }
+        assert_eq!(pulled, collected);
     }
 
     #[tokio::test]

@@ -81,7 +81,7 @@ use risingwave_pb::stream_plan::{
 use risingwave_storage::StateStore;
 use risingwave_storage::store::PrefetchOptions;
 
-use super::nfa::{CandidateMatcher, Nfa, SkipDegradation, SkipMode};
+use super::nfa::{CandidateMatcher, MatchScan, Nfa, SkipDegradation, SkipMode};
 use crate::common::table::state_table::StateTable;
 use crate::executor::prelude::*;
 use crate::task::ActorEvalErrorReport;
@@ -1015,9 +1015,17 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                 defines: &defines,
                                 within: within.as_ref(),
                             };
-                            let found = nfa.find_matches_dynamic(safe_len, &matcher, &skip).await?;
+                            // Pull matches one at a time instead of collecting them: `break` below
+                            // (a boundary match held for maximality) then stops the *scan* too, so
+                            // nothing past the held match is computed only to be thrown away and
+                            // recomputed next watermark — and at most one match's labels are
+                            // resident, instead of a worst-case O(rows²) collected vector under an
+                            // overlapping skip mode (see `Nfa::next_match`).
+                            let mut scan = MatchScan::new();
                             let mut cursor = 0usize;
-                            for m in found {
+                            while let Some(m) =
+                                nfa.next_match(&mut scan, safe_len, &matcher, &skip).await?
+                            {
                                 if m.start < cursor {
                                     continue;
                                 }
