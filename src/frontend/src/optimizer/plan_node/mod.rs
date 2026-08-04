@@ -1097,6 +1097,7 @@ mod stream_iceberg_with_pk_index_writer;
 mod stream_join_common;
 mod stream_local_approx_percentile;
 mod stream_locality_provider;
+mod stream_match_recognize;
 mod stream_materialize;
 mod stream_materialized_exprs;
 mod stream_now;
@@ -1247,6 +1248,7 @@ pub use stream_iceberg_with_pk_index_writer::StreamIcebergWithPkIndexWriter;
 use stream_join_common::StreamJoinCommon;
 pub use stream_local_approx_percentile::StreamLocalApproxPercentile;
 pub use stream_locality_provider::StreamLocalityProvider;
+pub use stream_match_recognize::StreamMatchRecognize;
 pub use stream_materialize::StreamMaterialize;
 pub use stream_materialized_exprs::StreamMaterializedExprs;
 pub use stream_now::StreamNow;
@@ -1410,6 +1412,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Dedup }
             , { Stream, EowcOverWindow }
             , { Stream, WatermarkSort }
+            , { Stream, MatchRecognize }
             , { Stream, OverWindow }
             , { Stream, FsFetch }
             , { Stream, ChangeLog }
