@@ -103,7 +103,10 @@ fn build_file_cache_spawner(
     }
     builder.thread_name(format!("{name}-unified"));
     let runtime = builder.enable_all().build().map_err(|error| {
-        HummockError::other(format!("failed to build {name} dedicated runtime: {error}"))
+        HummockError::other(format!(
+            "failed to build {name} dedicated runtime: {}",
+            error.as_report()
+        ))
     })?;
     Ok(Some(runtime.into()))
 }
