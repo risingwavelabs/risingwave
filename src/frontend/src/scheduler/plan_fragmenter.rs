@@ -1049,6 +1049,13 @@ impl BatchPlanFragmenter {
         let mut has_lookup_join = false;
         let parallelism = match root.distribution() {
             Distribution::Single => {
+                // A lookup join on a lookup table with a singleton distribution is gathered
+                // into a single task. Mark `has_lookup_join` so that epoch unpin is delayed
+                // until the end of the query.
+                has_lookup_join = self
+                    .collect_stage_lookup_join_parallelism(root.clone())?
+                    .is_some();
+
                 if let Some(info) = &mut table_scan_info {
                     if let Some(partitions) = &mut info.partitions {
                         if partitions.len() != 1 {
