@@ -45,6 +45,7 @@ use risingwave_connector::source::SplitImpl;
 use risingwave_expr::expr::NonStrictExpression;
 use risingwave_pb::data::PbEpoch;
 use risingwave_pb::expr::PbInputRef;
+use risingwave_pb::id::IcebergCompactionTaskId;
 use risingwave_pb::stream_plan::add_mutation::PbNewUpstreamSink;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation as PbMutation;
@@ -155,7 +156,8 @@ pub use gap_fill::{GapFillExecutor, GapFillExecutorArgs};
 pub use hash_join::*;
 pub use hop_window::HopWindowExecutor;
 pub use iceberg_with_pk_index::{
-    IcebergWriterImpl, PositionDeleteHandlerImpl, PositionDeleteMergerExecutor, WriterExecutor,
+    CompactionApplyExecutor, CompactionResolverExecutor, IcebergWriterImpl,
+    PositionDeleteHandlerImpl, PositionDeleteMergerExecutor, WriterExecutor,
 };
 pub use join::asof_join::{AsOfCpuEncoding, AsOfMemoryEncoding};
 pub use join::row::{CachedJoinRow, CpuEncoding, JoinEncoding, MemoryEncoding};
@@ -356,6 +358,15 @@ pub struct StopMutation {
 /// See [`PbMutation`] for the semantics of each mutation.
 #[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
 #[derive(Debug, Clone)]
+pub struct IcebergPkIndexBarrierMutation {
+    pub sink_id: SinkId,
+    pub task_id: IcebergCompactionTaskId,
+    pub phase: IcebergPkIndexBarrierPhase,
+    pub gated_actor_ids: HashSet<ActorId>,
+}
+
+#[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
+#[derive(Debug, Clone)]
 pub enum Mutation {
     Stop(StopMutation),
     Update(UpdateMutation),
@@ -390,6 +401,15 @@ pub enum Mutation {
         /// Split ID -> offset (JSON-encoded based on connector type)
         split_offsets: HashMap<String, String>,
     },
+    /// Gates only the target ingress actors across the adjacent checkpoint barrier pair used for
+    /// coordinated iceberg pk-index compaction.
+    IcebergPkIndexBarrier(IcebergPkIndexBarrierMutation),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IcebergPkIndexBarrierPhase {
+    Pause,
+    Resume,
 }
 
 /// The generic type `M` is the mutation type of the barrier.
@@ -400,6 +420,8 @@ pub enum Mutation {
 pub struct BarrierInner<M> {
     pub epoch: EpochPair,
     pub mutation: M,
+    /// The original target-scoped mutation retained after actor-local projection.
+    pub iceberg_pk_index_barrier: Option<Arc<IcebergPkIndexBarrierMutation>>,
     pub kind: BarrierKind,
 
     /// Tracing context for the **current** epoch of this barrier.
@@ -418,6 +440,7 @@ impl<M: Default> BarrierInner<M> {
             kind: BarrierKind::Checkpoint,
             tracing_context: TracingContext::none(),
             mutation: Default::default(),
+            iceberg_pk_index_barrier: None,
         }
     }
 
@@ -427,15 +450,49 @@ impl<M: Default> BarrierInner<M> {
             kind: BarrierKind::Checkpoint,
             tracing_context: TracingContext::none(),
             mutation: Default::default(),
+            iceberg_pk_index_barrier: None,
         }
     }
 }
 
 impl Barrier {
+    /// Return the effective barrier delivered to `actor_id`.
+    ///
+    /// Target-scoped pk-index barriers reuse the existing executor-level pause and resume
+    /// semantics. Unrelated actors still receive and collect the barrier, but do not observe a
+    /// pause or resume mutation.
+    pub fn project_for_actor(&self, actor_id: ActorId) -> Self {
+        let Some(context) = self.iceberg_pk_index_barrier().cloned() else {
+            return self.clone();
+        };
+
+        let mutation = context.gated_actor_ids.contains(&actor_id).then(|| {
+            Arc::new(match context.phase {
+                IcebergPkIndexBarrierPhase::Pause => Mutation::Pause,
+                IcebergPkIndexBarrierPhase::Resume => Mutation::Resume,
+            })
+        });
+        Self {
+            mutation,
+            iceberg_pk_index_barrier: Some(Arc::new(context)),
+            ..self.clone()
+        }
+    }
+
+    pub fn iceberg_pk_index_barrier(&self) -> Option<&IcebergPkIndexBarrierMutation> {
+        self.iceberg_pk_index_barrier.as_deref().or_else(|| {
+            let Mutation::IcebergPkIndexBarrier(context) = self.mutation.as_deref()? else {
+                return None;
+            };
+            Some(context)
+        })
+    }
+
     pub fn into_dispatcher(self) -> DispatcherBarrier {
         DispatcherBarrier {
             epoch: self.epoch,
             mutation: (),
+            iceberg_pk_index_barrier: None,
             kind: self.kind,
             tracing_context: self.tracing_context,
         }
@@ -566,7 +623,8 @@ impl Barrier {
             | Mutation::ListFinish { .. }
             | Mutation::LoadFinish { .. }
             | Mutation::ResetSource { .. }
-            | Mutation::InjectSourceOffsets { .. } => false,
+            | Mutation::InjectSourceOffsets { .. }
+            | Mutation::IcebergPkIndexBarrier(_) => false,
         }
     }
 
@@ -977,6 +1035,23 @@ impl Mutation {
                     split_offsets: split_offsets.clone(),
                 },
             ),
+            Mutation::IcebergPkIndexBarrier(IcebergPkIndexBarrierMutation {
+                sink_id,
+                task_id,
+                phase,
+                gated_actor_ids,
+            }) => PbMutation::IcebergPkIndexBarrier(
+                risingwave_pb::stream_plan::IcebergPkIndexBarrierMutation {
+                    sink_id: *sink_id,
+                    task_id: *task_id,
+                    gated_actor_ids: gated_actor_ids.iter().copied().collect(),
+                    phase: match phase {
+                        IcebergPkIndexBarrierPhase::Pause => risingwave_pb::stream_plan::iceberg_pk_index_barrier_mutation::Phase::Pause,
+                        IcebergPkIndexBarrierPhase::Resume => risingwave_pb::stream_plan::iceberg_pk_index_barrier_mutation::Phase::Resume,
+                    }
+                    .into(),
+                },
+            ),
         }
     }
 
@@ -1155,6 +1230,22 @@ impl Mutation {
                 source_id: SourceId::from(inject.source_id),
                 split_offsets: inject.split_offsets.clone(),
             },
+            PbMutation::IcebergPkIndexBarrier(barrier) => Mutation::IcebergPkIndexBarrier(IcebergPkIndexBarrierMutation {
+                sink_id: SinkId::from(barrier.sink_id),
+                task_id: barrier.task_id,
+                phase: match barrier.phase() {
+                    risingwave_pb::stream_plan::iceberg_pk_index_barrier_mutation::Phase::Unspecified => {
+                        return Err(anyhow::anyhow!("iceberg pk-index barrier phase is unspecified").into());
+                    }
+                    risingwave_pb::stream_plan::iceberg_pk_index_barrier_mutation::Phase::Pause => IcebergPkIndexBarrierPhase::Pause,
+                    risingwave_pb::stream_plan::iceberg_pk_index_barrier_mutation::Phase::Resume => IcebergPkIndexBarrierPhase::Resume,
+                },
+                gated_actor_ids: barrier
+                    .gated_actor_ids
+                    .iter()
+                    .copied()
+                    .collect(),
+            }),
         };
         Ok(mutation)
     }
@@ -1195,6 +1286,7 @@ impl<M> BarrierInner<M> {
             mutation: mutation_from_pb(
                 (prost.mutation.as_ref()).and_then(|mutation| mutation.mutation.as_ref()),
             )?,
+            iceberg_pk_index_barrier: None,
             tracing_context: TracingContext::from_protobuf(&prost.tracing_context),
         })
     }
@@ -1203,6 +1295,7 @@ impl<M> BarrierInner<M> {
         BarrierInner {
             epoch: self.epoch,
             mutation: f(self.mutation),
+            iceberg_pk_index_barrier: self.iceberg_pk_index_barrier,
             kind: self.kind,
             tracing_context: self.tracing_context,
         }
@@ -1910,6 +2003,30 @@ impl DispatchBarrierBuffer {
             Some(fut)
         } else {
             None
+        }
+    }
+}
+
+#[cfg(test)]
+mod mutation_proto_roundtrip_tests {
+    use super::*;
+
+    #[test]
+    fn test_iceberg_pk_index_barrier_mutation_roundtrip() {
+        let gated_actor_ids = HashSet::from([ActorId::new(3), ActorId::new(4)]);
+
+        for phase in [
+            IcebergPkIndexBarrierPhase::Pause,
+            IcebergPkIndexBarrierPhase::Resume,
+        ] {
+            let mutation = Mutation::IcebergPkIndexBarrier(IcebergPkIndexBarrierMutation {
+                sink_id: SinkId::new(1),
+                task_id: 11.into(),
+                phase,
+                gated_actor_ids: gated_actor_ids.clone(),
+            });
+            let pb = mutation.to_protobuf();
+            assert_eq!(Mutation::from_protobuf(&pb).unwrap(), mutation);
         }
     }
 }
