@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::DerefMut;
 use std::sync::{Arc, LazyLock};
@@ -34,7 +35,7 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ReportTask};
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::safe_epoch_table_watermarks_impl;
-use risingwave_hummock_sdk::level::Levels;
+use risingwave_hummock_sdk::level::{Level, Levels};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{
     PbTableStatsMap, add_prost_table_stats_map, purge_prost_table_stats,
@@ -43,12 +44,13 @@ use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::{GroupDelta, IntraLevelDelta};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockSstableId,
-    HummockSstableObjectId, HummockVersionId, compact_task_to_string, statistics_compact_task,
+    HummockSstableObjectId, HummockVersionId, can_concat, compact_task_to_string,
+    statistics_compact_task,
 };
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
-    CompactTaskAssignment, CompactionConfig, PbCompactStatus, PbCompactTaskAssignment,
+    CompactTaskAssignment, CompactionConfig, PbCompactStatus, PbCompactTaskAssignment, PbLevelType,
     SubscribeCompactionEventRequest, TableOption, compact_task,
 };
 use thiserror_ext::AsReport;
@@ -137,7 +139,116 @@ enum BuiltCompactTask {
     PendingAssignment(CompactTask),
 }
 
+// Mirror the fast path in `level_insert_ssts`, but reject its unexpected per-SST insertion
+// fallback before applying the version delta.
+fn can_concat_after_compact_task(
+    target_level: &Level,
+    delete_sst_ids: &HashSet<HummockSstableId>,
+    insert_table_infos: &[SstableInfo],
+) -> bool {
+    if insert_table_infos.is_empty() {
+        return true;
+    }
+
+    let mut target_ssts = target_level
+        .table_infos
+        .iter()
+        .filter(|sst| !delete_sst_ids.contains(&sst.sst_id))
+        .collect_vec();
+
+    if target_level.level_type == PbLevelType::Overlapping {
+        // An overlapping target is normally a whole L0 sub-level selected by tier or manual L0
+        // compaction, so removing task inputs usually leaves it empty. Preserve and validate any
+        // remaining SSTs because the actual apply path retains them before converting the target
+        // level to non-overlapping.
+        target_ssts.extend(insert_table_infos);
+        target_ssts.sort_by(|left, right| left.key_range.cmp(&right.key_range));
+        return can_concat(&target_ssts);
+    }
+
+    let sorted_insert = insert_table_infos
+        .iter()
+        .sorted_by(|left, right| left.key_range.cmp(&right.key_range))
+        .collect_vec();
+    let first = sorted_insert[0];
+    let last = sorted_insert[sorted_insert.len() - 1];
+    let pos =
+        target_ssts.partition_point(|sst| sst.key_range.cmp(&first.key_range) == Ordering::Less);
+
+    // The sorted outputs fit in the fast path only if the whole batch precedes its successor.
+    // Absence of a successor means "level end" only when `pos` is exactly the vector length.
+    let fits_before_next = target_ssts
+        .get(pos)
+        .map_or(pos == target_ssts.len(), |next| {
+            last.key_range.cmp(&next.key_range) == Ordering::Less
+        });
+
+    if !fits_before_next {
+        // A valid task replaces a contiguous target range, so all sorted outputs must fit into a
+        // single gap. Reject interleaved output instead of using `level_insert_ssts`' fallback.
+        warn!(
+            insert = ?insert_table_infos,
+            level = ?target_ssts,
+            "rejecting interleaved compaction output"
+        );
+        return false;
+    }
+
+    // Match the neighborhood validated after `level_insert_ssts` inserts the outputs: the
+    // previous target SST, all outputs, and the next target SST.
+    let mut validate_range = Vec::with_capacity(sorted_insert.len() + 2);
+    if let Some(previous) = pos
+        .checked_sub(1)
+        .and_then(|index| target_ssts.get(index))
+        .copied()
+    {
+        validate_range.push(previous);
+    }
+    validate_range.extend(sorted_insert.iter().copied());
+    if let Some(next) = target_ssts.get(pos).copied() {
+        validate_range.push(next);
+    }
+    can_concat(&validate_range)
+}
+
 impl HummockVersionTransaction<'_> {
+    fn can_apply_compact_task(&self, compact_task: &CompactTask) -> bool {
+        if compact_task.sorted_output_ssts.is_empty() {
+            return true;
+        }
+
+        let Some(levels) = self
+            .latest_version()
+            .levels
+            .get(&compact_task.compaction_group_id)
+        else {
+            return false;
+        };
+        let target_level = if compact_task.target_level == 0 {
+            levels
+                .l0
+                .sub_levels
+                .iter()
+                .find(|level| level.sub_level_id == compact_task.target_sub_level_id)
+        } else {
+            levels.levels.get(compact_task.target_level as usize - 1)
+        };
+        let Some(target_level) = target_level else {
+            return false;
+        };
+        let input_sst_ids = compact_task
+            .input_ssts
+            .iter()
+            .flat_map(|level| &level.table_infos)
+            .map(|sst| sst.sst_id)
+            .collect::<HashSet<_>>();
+        can_concat_after_compact_task(
+            target_level,
+            &input_sst_ids,
+            &compact_task.sorted_output_ssts,
+        )
+    }
+
     fn apply_compact_task(&mut self, compact_task: &CompactTask) {
         let mut version_delta = self.new_delta();
         let trivial_move = compact_task.is_trivial_move_task();
@@ -865,6 +976,19 @@ impl HummockManager {
                 }
             } else {
                 false
+            };
+            let is_success = if is_success && !version.can_apply_compact_task(&compact_task) {
+                compact_task.task_status = TaskStatus::InputOutdatedCanceled;
+                warn!(
+                    task_id = compact_task.task_id,
+                    compaction_group_id = %compact_task.compaction_group_id,
+                    target_level = compact_task.target_level,
+                    target_sub_level_id = compact_task.target_sub_level_id,
+                    "rejecting stale compaction task because its output conflicts with the current target level"
+                );
+                false
+            } else {
+                is_success
             };
             if is_success {
                 success_count += 1;
@@ -1753,6 +1877,180 @@ impl GroupStateValidator {
         }
 
         Self::check_single_group_emergency(levels, compaction_config)
+    }
+}
+
+#[cfg(test)]
+mod compact_task_apply_tests {
+    use risingwave_common::catalog::TableId;
+    use risingwave_common::hash::VirtualNode;
+    use risingwave_hummock_sdk::key::{FullKey, gen_key_from_str};
+    use risingwave_pb::hummock::{KeyRange as PbKeyRange, SstableInfo as PbSstableInfo};
+
+    use super::*;
+
+    fn test_key(key: &str) -> Vec<u8> {
+        FullKey::for_test(TableId::new(1), gen_key_from_str(VirtualNode::ZERO, key), 0).encode()
+    }
+
+    fn test_sst(sst_id: u64, left: &str, right: &str) -> SstableInfo {
+        PbSstableInfo {
+            object_id: sst_id.into(),
+            sst_id: sst_id.into(),
+            key_range: Some(PbKeyRange {
+                left: test_key(left),
+                right: test_key(right),
+                right_exclusive: true,
+            }),
+            ..Default::default()
+        }
+        .into()
+    }
+
+    #[test]
+    fn test_can_concat_after_compact_task_at_level_end() {
+        let target = Level {
+            level_type: PbLevelType::Nonoverlapping,
+            table_infos: vec![test_sst(1, "a", "b")],
+            ..Default::default()
+        };
+        let outputs = vec![test_sst(2, "d", "e"), test_sst(3, "g", "h")];
+
+        assert!(can_concat_after_compact_task(
+            &target,
+            &HashSet::new(),
+            &outputs,
+        ));
+    }
+
+    #[test]
+    fn test_can_concat_after_compact_task_at_level_start() {
+        let target = Level {
+            level_type: PbLevelType::Nonoverlapping,
+            table_infos: vec![test_sst(1, "g", "h")],
+            ..Default::default()
+        };
+        let outputs = vec![test_sst(2, "a", "b"), test_sst(3, "d", "e")];
+
+        assert!(can_concat_after_compact_task(
+            &target,
+            &HashSet::new(),
+            &outputs,
+        ));
+    }
+
+    #[test]
+    fn test_can_concat_after_compact_task_with_empty_level() {
+        let target = Level {
+            level_type: PbLevelType::Nonoverlapping,
+            ..Default::default()
+        };
+        let outputs = vec![test_sst(1, "a", "b"), test_sst(2, "d", "e")];
+
+        assert!(can_concat_after_compact_task(
+            &target,
+            &HashSet::new(),
+            &outputs,
+        ));
+    }
+
+    #[test]
+    fn test_can_concat_after_compact_task_between_target_ssts() {
+        let target = Level {
+            level_type: PbLevelType::Nonoverlapping,
+            table_infos: vec![test_sst(1, "a", "b"), test_sst(2, "m", "n")],
+            ..Default::default()
+        };
+        let outputs = vec![test_sst(3, "g", "h"), test_sst(4, "d", "e")];
+
+        assert!(can_concat_after_compact_task(
+            &target,
+            &HashSet::new(),
+            &outputs,
+        ));
+    }
+
+    #[test]
+    fn test_can_concat_after_compact_task_rejects_interleaved_outputs() {
+        let target = Level {
+            level_type: PbLevelType::Nonoverlapping,
+            table_infos: vec![test_sst(1, "f", "g")],
+            ..Default::default()
+        };
+        let outputs = vec![test_sst(2, "h", "i"), test_sst(3, "d", "e")];
+
+        assert!(!can_concat_after_compact_task(
+            &target,
+            &HashSet::new(),
+            &outputs,
+        ));
+    }
+
+    #[test]
+    fn test_can_concat_after_compact_task_rejects_overlap() {
+        let target = Level {
+            level_type: PbLevelType::Nonoverlapping,
+            table_infos: vec![test_sst(1, "a", "e")],
+            ..Default::default()
+        };
+
+        assert!(!can_concat_after_compact_task(
+            &target,
+            &HashSet::new(),
+            &[test_sst(2, "c", "d")],
+        ));
+    }
+
+    #[test]
+    fn test_can_concat_after_compact_task_rejects_overlap_with_next_sst() {
+        let target = Level {
+            level_type: PbLevelType::Nonoverlapping,
+            table_infos: vec![test_sst(1, "g", "j")],
+            ..Default::default()
+        };
+
+        assert!(!can_concat_after_compact_task(
+            &target,
+            &HashSet::new(),
+            &[test_sst(2, "a", "h")],
+        ));
+    }
+
+    #[test]
+    fn test_can_concat_after_compact_task_rejects_overlapping_outputs() {
+        let target = Level {
+            level_type: PbLevelType::Nonoverlapping,
+            table_infos: vec![test_sst(1, "a", "b"), test_sst(2, "m", "n")],
+            ..Default::default()
+        };
+        let outputs = vec![test_sst(3, "d", "h"), test_sst(4, "g", "j")];
+
+        assert!(!can_concat_after_compact_task(
+            &target,
+            &HashSet::new(),
+            &outputs,
+        ));
+    }
+
+    #[test]
+    fn test_can_concat_after_compact_task_removes_inputs_first() {
+        let target = Level {
+            level_type: PbLevelType::Overlapping,
+            table_infos: vec![test_sst(1, "a", "z")],
+            ..Default::default()
+        };
+        let outputs = vec![test_sst(2, "a", "b"), test_sst(3, "d", "e")];
+
+        assert!(!can_concat_after_compact_task(
+            &target,
+            &HashSet::new(),
+            &outputs,
+        ));
+        assert!(can_concat_after_compact_task(
+            &target,
+            &HashSet::from([1.into()]),
+            &outputs,
+        ));
     }
 }
 

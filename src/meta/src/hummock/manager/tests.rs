@@ -3677,42 +3677,40 @@ async fn test_time_travel_vacuum_with_cross_database_epoch_order() {
 
     let mut version_10 = HummockVersion::default();
     version_10.id = 10.into();
-    version_10.state_table_info =
-        HummockVersionStateTableInfo::from_protobuf(&HashMap::from([
-            (
-                table_a,
-                StateTableInfo {
-                    committed_epoch: 300,
-                    compaction_group_id: 1.into(),
-                },
-            ),
-            (
-                table_b,
-                StateTableInfo {
-                    committed_epoch: 100,
-                    compaction_group_id: 1.into(),
-                },
-            ),
-        ]));
+    version_10.state_table_info = HummockVersionStateTableInfo::from_protobuf(&HashMap::from([
+        (
+            table_a,
+            StateTableInfo {
+                committed_epoch: 300,
+                compaction_group_id: 1.into(),
+            },
+        ),
+        (
+            table_b,
+            StateTableInfo {
+                committed_epoch: 100,
+                compaction_group_id: 1.into(),
+            },
+        ),
+    ]));
     let mut version_11 = version_10.clone();
     version_11.id = 11.into();
-    version_11.state_table_info =
-        HummockVersionStateTableInfo::from_protobuf(&HashMap::from([
-            (
-                table_a,
-                StateTableInfo {
-                    committed_epoch: 300,
-                    compaction_group_id: 1.into(),
-                },
-            ),
-            (
-                table_b,
-                StateTableInfo {
-                    committed_epoch: 200,
-                    compaction_group_id: 1.into(),
-                },
-            ),
-        ]));
+    version_11.state_table_info = HummockVersionStateTableInfo::from_protobuf(&HashMap::from([
+        (
+            table_a,
+            StateTableInfo {
+                committed_epoch: 300,
+                compaction_group_id: 1.into(),
+            },
+        ),
+        (
+            table_b,
+            StateTableInfo {
+                committed_epoch: 200,
+                compaction_group_id: 1.into(),
+            },
+        ),
+    ]));
     for version in [&version_10, &version_11] {
         hummock_time_travel_version::Entity::insert(hummock_time_travel_version::ActiveModel {
             version_id: Set(version.id),
