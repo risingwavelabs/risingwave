@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::future::{Future, poll_fn};
 use std::iter::once;
 use std::pin::pin;
@@ -20,9 +21,200 @@ use std::task::Poll;
 use futures::FutureExt;
 use futures::future::join_all;
 use risingwave_common::util::epoch::{EpochExt, test_epoch};
+use risingwave_pb::id::IcebergCompactionTaskId;
+use risingwave_pb::stream_service::streaming_control_stream_request::{
+    ControlCompactionWriterRequest, control_compaction_writer_request,
+};
+use risingwave_pb::stream_service::{
+    StreamingControlStreamRequest, streaming_control_stream_request,
+};
 
 use super::*;
+use crate::executor::{IcebergPkIndexBarrierPhase, Mutation};
+use crate::task::TEST_PARTIAL_GRAPH_ID;
 use crate::task::barrier_test_utils::LocalBarrierTestEnv;
+
+#[tokio::test]
+async fn test_actor_local_compaction_gate_projection() {
+    let test_env = LocalBarrierTestEnv::for_test().await;
+    let target_actor_id = ActorId::new(233);
+    let unrelated_actor_id = ActorId::new(234);
+    let actor_ids = vec![target_actor_id, unrelated_actor_id];
+
+    let pause = Barrier::new_test_barrier(test_epoch(2)).with_mutation(
+        Mutation::IcebergPkIndexBarrier(crate::executor::IcebergPkIndexBarrierMutation {
+            sink_id: risingwave_common::id::SinkId::new(7),
+            task_id: IcebergCompactionTaskId::new(42),
+            phase: IcebergPkIndexBarrierPhase::Pause,
+            gated_actor_ids: HashSet::from([target_actor_id]),
+        }),
+    );
+    let resume = Barrier::new_test_barrier(test_epoch(3)).with_mutation(
+        Mutation::IcebergPkIndexBarrier(crate::executor::IcebergPkIndexBarrierMutation {
+            sink_id: risingwave_common::id::SinkId::new(7),
+            task_id: IcebergCompactionTaskId::new(42),
+            phase: IcebergPkIndexBarrierPhase::Resume,
+            gated_actor_ids: HashSet::from([target_actor_id]),
+        }),
+    );
+
+    let database_pause = Barrier::new_test_barrier(test_epoch(4)).with_mutation(Mutation::Pause);
+
+    test_env.inject_barrier(&pause, actor_ids.clone());
+    test_env.inject_barrier(&resume, actor_ids.clone());
+    test_env.inject_barrier(&database_pause, actor_ids);
+    test_env.flush_all_events().await;
+
+    let mut target_rx = test_env
+        .local_barrier_manager
+        .subscribe_barrier(target_actor_id);
+    let mut unrelated_rx = test_env
+        .local_barrier_manager
+        .subscribe_barrier(unrelated_actor_id);
+
+    let target_pause = target_rx.recv().await.unwrap();
+    let target_resume = target_rx.recv().await.unwrap();
+    let target_database_pause = target_rx.recv().await.unwrap();
+    let unrelated_pause = unrelated_rx.recv().await.unwrap();
+    let unrelated_resume = unrelated_rx.recv().await.unwrap();
+    let unrelated_database_pause = unrelated_rx.recv().await.unwrap();
+
+    assert!(matches!(
+        target_pause.mutation.as_deref(),
+        Some(Mutation::Pause)
+    ));
+    assert!(matches!(
+        target_resume.mutation.as_deref(),
+        Some(Mutation::Resume)
+    ));
+    assert!(unrelated_pause.mutation.is_none());
+    assert!(unrelated_resume.mutation.is_none());
+    assert_eq!(target_pause.epoch, unrelated_pause.epoch);
+    assert_eq!(target_resume.epoch, unrelated_resume.epoch);
+    assert!(matches!(
+        target_database_pause.mutation.as_deref(),
+        Some(Mutation::Pause)
+    ));
+    assert!(matches!(
+        unrelated_database_pause.mutation.as_deref(),
+        Some(Mutation::Pause)
+    ));
+    assert!(target_database_pause.iceberg_pk_index_barrier().is_none());
+    assert!(
+        unrelated_database_pause
+            .iceberg_pk_index_barrier()
+            .is_none()
+    );
+    for barrier in [
+        &target_pause,
+        &target_resume,
+        &unrelated_pause,
+        &unrelated_resume,
+    ] {
+        let context = barrier
+            .iceberg_pk_index_barrier()
+            .expect("actor-local barrier should retain raw pk-index context");
+        assert_eq!(context.sink_id, risingwave_common::id::SinkId::new(7));
+        assert_eq!(context.task_id, IcebergCompactionTaskId::new(42));
+        assert_eq!(context.gated_actor_ids, HashSet::from([target_actor_id]));
+    }
+}
+
+#[tokio::test]
+async fn test_compaction_writer_control_routes_both_stages_to_target_actor_and_sink() {
+    let test_env = LocalBarrierTestEnv::for_test().await;
+    let actor_id = ActorId::new(233);
+    let sink_id = risingwave_common::id::SinkId::new(7);
+    let mut control_rx = test_env
+        .local_barrier_manager
+        .subscribe_iceberg_pk_index_writer_control(actor_id, sink_id);
+    test_env.flush_all_events().await;
+
+    for (stage, expected) in [
+        (
+            control_compaction_writer_request::Stage::SealReady,
+            IcebergPkIndexWriterControl::SealReady {
+                task_id: IcebergCompactionTaskId::new(42),
+                epoch: 100,
+            },
+        ),
+        (
+            control_compaction_writer_request::Stage::Committed,
+            IcebergPkIndexWriterControl::Committed {
+                task_id: IcebergCompactionTaskId::new(42),
+                epoch: 100,
+            },
+        ),
+    ] {
+        test_env
+            .request_tx
+            .send(Ok(StreamingControlStreamRequest {
+                request: Some(
+                    streaming_control_stream_request::Request::ControlCompactionWriter(
+                        ControlCompactionWriterRequest {
+                            partial_graph_id: TEST_PARTIAL_GRAPH_ID,
+                            sink_id,
+                            task_id: IcebergCompactionTaskId::new(42),
+                            epoch: 100,
+                            actor_ids: vec![actor_id],
+                            stage: stage.into(),
+                        },
+                    ),
+                ),
+            }))
+            .unwrap();
+
+        let control = control_rx
+            .recv()
+            .await
+            .expect("writer control should arrive");
+        assert_eq!(control, expected);
+    }
+}
+
+#[tokio::test]
+async fn test_compaction_writer_control_does_not_panic_for_suspended_graph() {
+    let mut test_env = LocalBarrierTestEnv::for_test().await;
+    let actor_id = ActorId::new(233);
+    let sink_id = risingwave_common::id::SinkId::new(7);
+    let mut control_rx = test_env
+        .local_barrier_manager
+        .subscribe_iceberg_pk_index_writer_control(actor_id, sink_id);
+    test_env.flush_all_events().await;
+
+    test_env
+        .local_barrier_manager
+        .notify_failure(actor_id, StreamError::from(anyhow!("actor failed")));
+    let failure = test_env.response_rx.recv().await.unwrap().unwrap();
+    assert!(matches!(
+        failure.response,
+        Some(streaming_control_stream_response::Response::ReportPartialGraphFailure(_))
+    ));
+
+    test_env
+        .request_tx
+        .send(Ok(StreamingControlStreamRequest {
+            request: Some(
+                streaming_control_stream_request::Request::ControlCompactionWriter(
+                    ControlCompactionWriterRequest {
+                        partial_graph_id: TEST_PARTIAL_GRAPH_ID,
+                        sink_id,
+                        task_id: IcebergCompactionTaskId::new(42),
+                        epoch: 100,
+                        actor_ids: vec![actor_id],
+                        stage: control_compaction_writer_request::Stage::SealReady.into(),
+                    },
+                ),
+            ),
+        }))
+        .unwrap();
+    test_env.flush_all_events().await;
+
+    assert!(matches!(
+        control_rx.try_recv(),
+        Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+    ));
+}
 
 #[tokio::test]
 async fn test_managed_barrier_collection() -> StreamResult<()> {

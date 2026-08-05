@@ -47,7 +47,8 @@ use crate::task::LocalBarrierManager;
 use crate::task::managed_state::{BarrierToComplete, ResetPartialGraphOutput};
 use crate::task::{
     ActorId, AtomicU64Ref, CONFIG_OVERRIDE_CACHE_DEFAULT_CAPACITY, ConfigOverrideCache, FragmentId,
-    PartialGraphId, StreamActorManager, StreamEnvironment, UpDownActorIds,
+    IcebergPkIndexWriterControl, PartialGraphId, StreamActorManager, StreamEnvironment,
+    UpDownActorIds,
 };
 pub mod managed_state;
 #[cfg(test)]
@@ -57,7 +58,7 @@ use risingwave_common::metrics::LabelGuardedHistogram;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::{LocalSstableInfo, SyncResult};
 use risingwave_pb::stream_service::streaming_control_stream_request::{
-    InitRequest, Request, ResetPartialGraphsRequest,
+    ControlCompactionWriterRequest, InitRequest, Request, ResetPartialGraphsRequest,
 };
 use risingwave_pb::stream_service::streaming_control_stream_response::{
     InitResponse, ReportPartialGraphFailureResponse, ResetPartialGraphResponse, Response,
@@ -500,6 +501,12 @@ impl LocalBarrierWorker {
             }
             Request::ResetPartialGraphs(req) => {
                 self.reset_partial_graphs(req);
+                Ok(())
+            }
+            Request::ControlCompactionWriter(req) => {
+                let partial_graph_id = req.partial_graph_id;
+                self.control_compaction_writer(req)
+                    .map_err(|e| (partial_graph_id, e))?;
                 Ok(())
             }
             Request::Init(_) => {
@@ -1030,6 +1037,41 @@ impl LocalBarrierWorker {
             partial_graph_id,
             reset_output.and_then(|output| output.root_err),
         );
+    }
+
+    fn control_compaction_writer(
+        &mut self,
+        req: ControlCompactionWriterRequest,
+    ) -> StreamResult<()> {
+        use risingwave_pb::stream_service::streaming_control_stream_request::control_compaction_writer_request::Stage;
+        let partial_graph_id = req.partial_graph_id;
+        let partial_graph_status = self
+            .state
+            .partial_graphs
+            .get_mut(&partial_graph_id)
+            .ok_or_else(|| anyhow!("partial graph {partial_graph_id} does not exist"))?;
+        let PartialGraphStatus::Running(partial_graph_state) = partial_graph_status else {
+            warn!(
+                %partial_graph_id,
+                "ignoring pk-index writer control for non-running partial graph"
+            );
+            return Ok(());
+        };
+        let control = match req.stage() {
+            Stage::Unspecified => {
+                return Err(anyhow!("pk-index writer control stage is unspecified").into());
+            }
+            Stage::SealReady => IcebergPkIndexWriterControl::SealReady {
+                task_id: req.task_id,
+                epoch: req.epoch,
+            },
+            Stage::Committed => IcebergPkIndexWriterControl::Committed {
+                task_id: req.task_id,
+                epoch: req.epoch,
+            },
+        };
+        partial_graph_state.control_compaction_writer(req.sink_id, control, req.actor_ids)?;
+        Ok(())
     }
 
     /// When some other failure happens (like failed to send barrier), the error is reported using
