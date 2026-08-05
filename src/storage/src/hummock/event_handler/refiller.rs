@@ -1027,9 +1027,7 @@ impl CacheRefillTask {
 
                     GLOBAL_CACHE_REFILL_METRICS.data_refill_started_total.inc();
 
-                    let timer = GLOBAL_CACHE_REFILL_METRICS
-                        .data_refill_success_duration
-                        .start_timer();
+                    let now = Instant::now();
 
                     let data = sstable_store
                         .store()
@@ -1059,8 +1057,10 @@ impl CacheRefillTask {
                         .await
                         .map_err(HummockError::file_cache)?;
 
+                    GLOBAL_CACHE_REFILL_METRICS
+                        .data_refill_success_duration
+                        .observe(now.elapsed().as_secs_f64());
                     drop(permit);
-                    drop(timer);
 
                     Ok::<_, HummockError>(())
                 };
