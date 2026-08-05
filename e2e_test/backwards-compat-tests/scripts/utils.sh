@@ -18,8 +18,8 @@
 
 # Maximum duration to wait for recovery (seconds)
 RECOVERY_TIMEOUT=300
-# `rw_recovery_status()` was introduced in this version.
-RECOVERY_STATUS_MIN_VERSION=2.0.0
+# The `RECOVER` command was introduced in this version.
+RECOVER_COMMAND_MIN_VERSION=1.9.0
 
 # Setup test directory
 TEST_DIR=.risingwave/e2e_test/backwards-compat-tests/
@@ -99,21 +99,21 @@ run_sql_scalar_db() {
 wait_for_recovery() {
   local version="$1"
   local deadline=$((SECONDS + RECOVERY_TIMEOUT))
-  local recovery_status
+  local recover_output=""
 
-  echo "--- Wait for recovery on version ${version}"
+  echo "--- Wait for a successful RECOVER command on version ${version}"
   while (( SECONDS < deadline )); do
-    if recovery_status=$(run_sql_scalar "SELECT rw_recovery_status();" 2>/dev/null); then
-      echo "Recovery status on version ${version}: ${recovery_status}"
-      if [[ "$recovery_status" == "RUNNING" ]]; then
-        echo "--- Recovery succeeded on version ${version}"
-        return
-      fi
+    if recover_output=$(run_sql "RECOVER;" 2>&1); then
+      echo "$recover_output"
+      echo "--- RECOVER succeeded on version ${version}"
+      return
     fi
+    echo "RECOVER is not ready on version ${version}; retry in 1 second"
     sleep 1
   done
 
-  echo "Timed out after ${RECOVERY_TIMEOUT}s waiting for recovery on version ${version}"
+  echo "$recover_output"
+  echo "Timed out after ${RECOVERY_TIMEOUT}s waiting for RECOVER on version ${version}"
   return 1
 }
 
@@ -620,7 +620,7 @@ seed_old_cluster() {
   # `ENABLE_PYTHON_UDF` and `ENABLE_JS_UDF` are set for backwards-compartibility
   ENABLE_PYTHON_UDF=1 ENABLE_JS_UDF=1 ENABLE_UDF=1 ./risedev d full-without-monitoring && rm .risingwave/log/*
 
-  if version_le "$RECOVERY_STATUS_MIN_VERSION" "$OLD_VERSION"; then
+  if version_le "$RECOVER_COMMAND_MIN_VERSION" "$OLD_VERSION"; then
     wait_for_recovery "$OLD_VERSION"
   fi
   check_version "$OLD_VERSION"

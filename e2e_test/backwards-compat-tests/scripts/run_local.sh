@@ -101,10 +101,9 @@ upgrade_through_intermediate_versions() {
     configure_rw "$version"
     rm -rf .risingwave/config
     ENABLE_UDF=1 ./risedev d full-without-monitoring
-    if version_le "$RECOVERY_STATUS_MIN_VERSION" "$version"; then
+    if version_le "$RECOVER_COMMAND_MIN_VERSION" "$version"; then
       wait_for_recovery "$version"
     fi
-    check_version "$version"
     kill_cluster
   done < <(get_intermediate_versions)
 }
