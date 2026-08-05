@@ -22,20 +22,21 @@ use anyhow::{Context, Result, anyhow};
 use clap::Parser;
 use itertools::Itertools;
 use madsim::net::ipvs::ServiceAddr;
+use risingwave_batch::rpc::service::madsim_test_utils::{
+    create_task_count, reset_create_task_counts,
+};
+use risingwave_common::RW_VERSION;
 use risingwave_common::config::RwConfig;
-use risingwave_common::id::{TableId, WorkerId};
+use risingwave_common::id::TableId;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
-use risingwave_common::{RW_VERSION, bail};
-use risingwave_meta_model::{worker, worker_property};
 use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::{WorkerNode, WorkerType};
 use risingwave_rpc_client::MetaClient;
 use risingwave_simulation::client::RisingWave;
 use risingwave_simulation::cluster::{Cluster, Configuration};
-use sea_orm::{ActiveModelTrait, ColumnTrait, Database, EntityTrait, QueryFilter, Set};
 use sqllogictest::{AsyncDB, DBOutput};
 use tokio::time::sleep;
 
@@ -43,7 +44,30 @@ const WAIT_TIMEOUT: Duration = Duration::from_secs(100);
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
 const FRONTEND_HOSTS: [&str; 2] = ["192.168.2.1", "192.168.2.2"];
 const COMPUTE_HOSTS: [&str; 2] = ["192.168.3.1", "192.168.3.2"];
-const MISMATCHED_VERSION: &str = "rw-version-from-previous-binary";
+const UPGRADED_VERSION: &str = "rw-version-from-newer-binary";
+const SIMULATED_RW_VERSION_ENV: &str = "RW_SIMULATED_RW_VERSION";
+const SIMULATED_RW_VERSION_NODES_ENV: &str = "RW_SIMULATED_RW_VERSION_NODES";
+
+struct SimulatedRwVersionGuard;
+
+impl SimulatedRwVersionGuard {
+    fn enable(version: &str, nodes: &[&str]) -> Self {
+        unsafe {
+            std::env::set_var(SIMULATED_RW_VERSION_ENV, version);
+            std::env::set_var(SIMULATED_RW_VERSION_NODES_ENV, nodes.join(","));
+        }
+        Self
+    }
+}
+
+impl Drop for SimulatedRwVersionGuard {
+    fn drop(&mut self) {
+        unsafe {
+            std::env::remove_var(SIMULATED_RW_VERSION_ENV);
+            std::env::remove_var(SIMULATED_RW_VERSION_NODES_ENV);
+        }
+    }
+}
 
 fn serving_mapping_config() -> Configuration {
     let mut config = Configuration::default();
@@ -210,6 +234,53 @@ async fn wait_batch_query_on_all_frontends(cluster: &Cluster, table_name: &str) 
     Ok(())
 }
 
+async fn wait_batch_query_on_frontend(
+    cluster: &Cluster,
+    frontend_host: &str,
+    table_name: &str,
+) -> Result<()> {
+    let sql = format!("SELECT count(*), sum(v) FROM {table_name};");
+    wait_frontend_result(cluster, frontend_host, &sql, "1000 500500").await
+}
+
+async fn wait_frontend_schedules_batch_query_to_same_version_compute(
+    cluster: &Cluster,
+    frontend_host: &str,
+    table_name: &str,
+    expected_compute: &str,
+    mismatched_compute: &str,
+) -> Result<()> {
+    tokio::time::timeout(WAIT_TIMEOUT, async {
+        loop {
+            reset_create_task_counts();
+            wait_batch_query_on_frontend(cluster, frontend_host, table_name).await?;
+
+            let expected_count = create_task_count(expected_compute);
+            let mismatched_count = create_task_count(mismatched_compute);
+            if expected_count > 0 && mismatched_count == 0 {
+                return Ok(());
+            }
+
+            tracing::info!(
+                frontend_host,
+                expected_compute,
+                expected_count,
+                mismatched_compute,
+                mismatched_count,
+                "frontend scheduler has not applied rw_version filter yet"
+            );
+            sleep(POLL_INTERVAL).await;
+        }
+    })
+    .await
+    .map_err(|_| {
+        anyhow!(
+            "{frontend_host} did not schedule batch tasks only to same-version {expected_compute}; \
+             mismatched compute {mismatched_compute} was still used"
+        )
+    })?
+}
+
 async fn create_test_table(cluster: &mut Cluster, table_name: &str) -> Result<u32> {
     cluster
         .run(format!("CREATE TABLE {table_name}(v int);"))
@@ -345,37 +416,6 @@ async fn assert_serving_cluster(cluster: &mut Cluster, table_name: &str) -> Resu
     wait_batch_query_on_all_frontends(cluster, table_name).await
 }
 
-async fn set_compute_worker_version(
-    cluster: &Cluster,
-    compute_host: &str,
-    rw_version: &str,
-) -> Result<WorkerId> {
-    let url = format!("sqlite://{}?mode=rw", cluster.meta_sqlite_path().display());
-    let db = Database::connect(&url)
-        .await
-        .with_context(|| format!("failed to open meta sqlite at {url}"))?;
-    let worker = worker::Entity::find()
-        .filter(worker::Column::Host.eq(compute_host))
-        .one(&db)
-        .await?
-        .with_context(|| format!("worker with host {compute_host} not found"))?;
-    let property = worker_property::Entity::find_by_id(worker.worker_id)
-        .one(&db)
-        .await?
-        .with_context(|| format!("worker property {} not found", worker.worker_id.as_raw_id()))?;
-    let mut resource = property
-        .resource
-        .clone()
-        .context("worker resource should be persisted")?
-        .to_protobuf();
-    resource.rw_version = rw_version.to_owned();
-
-    let mut active: worker_property::ActiveModel = property.into();
-    active.resource = Set(Some((&resource).into()));
-    active.update(&db).await?;
-    Ok(worker.worker_id)
-}
-
 async fn wait_worker_hosts_registered(
     cluster: &Cluster,
     expected_hosts: &[&str],
@@ -477,14 +517,14 @@ async fn test_serving_mapping_masks_worker_with_mismatched_version() -> Result<(
     let table_id = create_test_table(&mut cluster, "serve_version_mask").await?;
     wait_for_expected_serving_mapping(&cluster, table_id, &COMPUTE_HOSTS).await?;
 
-    let mismatched_worker_id =
-        set_compute_worker_version(&cluster, COMPUTE_HOSTS[1], MISMATCHED_VERSION).await?;
+    let _version_guard =
+        SimulatedRwVersionGuard::enable(UPGRADED_VERSION, &["meta-1", "frontend-1", "compute-1"]);
     cluster
-        .simple_kill_nodes(["frontend-1", "frontend-2"])
+        .simple_kill_nodes(["meta-1", "frontend-1", "compute-1"])
         .await;
     sleep(Duration::from_secs(5)).await;
     cluster
-        .simple_restart_nodes(["frontend-1", "frontend-2"])
+        .simple_restart_nodes(["meta-1", "frontend-1", "compute-1"])
         .await;
 
     let version_sql = format!(
@@ -496,30 +536,32 @@ async fn test_serving_mapping_masks_worker_with_mismatched_version() -> Result<(
              'WORKER_TYPE_FRONTEND', \
              'WORKER_TYPE_COMPUTE_NODE'\
          );",
-        RW_VERSION, MISMATCHED_VERSION
+        RW_VERSION, UPGRADED_VERSION
     );
     for host in FRONTEND_HOSTS {
-        wait_frontend_result(&cluster, host, &version_sql, "5 4 1").await?;
+        wait_frontend_result(&cluster, host, &version_sql, "5 2 3").await?;
     }
 
-    let active_serving_workers = wait_worker_hosts_registered(&cluster, &COMPUTE_HOSTS).await?;
-    let current_version_serving_worker_hosts = active_serving_workers
-        .into_iter()
-        .filter(|worker| worker.id != mismatched_worker_id)
-        .filter(|worker| {
-            worker
-                .resource
-                .as_ref()
-                .is_some_and(|resource| resource.rw_version == RW_VERSION)
-        })
-        .filter_map(|worker| worker.host.map(|host| host.host))
-        .collect::<HashSet<_>>();
-    if current_version_serving_worker_hosts != HashSet::from([COMPUTE_HOSTS[0].to_owned()]) {
-        bail!(
-            "expected only compute-1 to remain eligible for serving, got {:?}",
-            current_version_serving_worker_hosts
-        );
-    }
+    wait_worker_hosts_registered(&cluster, &COMPUTE_HOSTS).await?;
+    wait_for_expected_serving_mapping(&cluster, table_id, &COMPUTE_HOSTS).await?;
+    wait_batch_query_on_all_frontends(&cluster, "serve_version_mask").await?;
+
+    wait_frontend_schedules_batch_query_to_same_version_compute(
+        &cluster,
+        FRONTEND_HOSTS[0],
+        "serve_version_mask",
+        "compute-1",
+        "compute-2",
+    )
+    .await?;
+    wait_frontend_schedules_batch_query_to_same_version_compute(
+        &cluster,
+        FRONTEND_HOSTS[1],
+        "serve_version_mask",
+        "compute-2",
+        "compute-1",
+    )
+    .await?;
 
     wait_batch_query_on_all_frontends(&cluster, "serve_version_mask").await
 }

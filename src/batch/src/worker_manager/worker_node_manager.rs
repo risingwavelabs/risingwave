@@ -17,10 +17,11 @@ use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
 use rand::seq::IndexedRandom;
+use risingwave_common::bail;
 use risingwave_common::hash::{WorkerSlotId, WorkerSlotMapping};
 use risingwave_common::id::{FragmentId, WorkerId};
+use risingwave_common::util::version::current_rw_version;
 use risingwave_common::vnode_mapping::vnode_placement::place_vnode;
-use risingwave_common::{RW_VERSION, bail};
 use risingwave_pb::common::{WorkerNode, WorkerType};
 
 use crate::error::{BatchError, Result};
@@ -416,17 +417,18 @@ impl WorkerNodeSelector {
             .map(|w| (*w).clone())
     }
 
-    fn is_current_version_worker(worker: &WorkerNode) -> bool {
+    fn is_current_version_worker(worker: &WorkerNode, current_rw_version: &str) -> bool {
         worker
             .resource
             .as_ref()
-            .is_some_and(|resource| resource.rw_version == RW_VERSION)
+            .is_some_and(|resource| resource.rw_version == current_rw_version)
     }
 
     fn apply_worker_node_mask(&self, origin: Vec<WorkerNode>) -> Vec<WorkerNode> {
+        let current_rw_version = current_rw_version();
         let workers_with_current_version = origin
             .into_iter()
-            .filter(Self::is_current_version_worker)
+            .filter(|worker| Self::is_current_version_worker(worker, &current_rw_version))
             .collect::<Vec<_>>();
         let worker_node_mask = self.manager.worker_node_mask_snapshot();
         Self::apply_worker_node_mask_inner(workers_with_current_version, &worker_node_mask)
@@ -451,6 +453,7 @@ mod tests {
     use std::sync::Arc;
 
     use itertools::Itertools;
+    use risingwave_common::RW_VERSION;
     use risingwave_common::util::addr::HostAddr;
     use risingwave_pb::common::worker_node;
     use risingwave_pb::common::worker_node::Property;

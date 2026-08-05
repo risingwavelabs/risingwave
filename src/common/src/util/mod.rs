@@ -42,6 +42,7 @@ pub mod sort_util;
 pub mod stream_graph_visitor;
 pub mod tracing;
 pub mod value_encoding;
+pub mod version;
 pub mod worker_util;
 pub use tokio_util;
 pub mod cluster_limit;
