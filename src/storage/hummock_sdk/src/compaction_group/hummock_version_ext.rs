@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::borrow::Borrow;
 use std::cmp::Ordering;
 use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
@@ -1073,6 +1072,25 @@ impl Levels {
         level_delta: &IntraLevelDeltaCommon<SstableInfo>,
         member_table_ids: &BTreeSet<TableId>,
     ) {
+        assert!(
+            self.try_apply_compact_ssts(level_delta, member_table_ids),
+            "sstable ids: {:?}",
+            level_delta
+                .inserted_table_infos
+                .iter()
+                .map(|sst| sst.sst_id)
+                .collect_vec()
+        );
+    }
+
+    /// Applies a compaction delta and returns false when it breaks a non-overlapping level.
+    /// The caller must discard this `Levels` value after a false return because it may be partially
+    /// updated.
+    pub fn try_apply_compact_ssts(
+        &mut self,
+        level_delta: &IntraLevelDeltaCommon<SstableInfo>,
+        member_table_ids: &BTreeSet<TableId>,
+    ) -> bool {
         let IntraLevelDeltaCommon {
             level_idx,
             l0_sub_level_id,
@@ -1099,7 +1117,7 @@ impl Levels {
                 ?delete_sst_ids_set,
                 "This VersionDelta may be committed by an expired compact task. Please check it."
             );
-            return;
+            return true;
         }
         if !delete_sst_ids_set.is_empty() {
             if *level_idx == 0 {
@@ -1143,7 +1161,9 @@ impl Levels {
                     // Only change vnode_partition_count for level which update all sst files in this compact task.
                     l0.sub_levels[index].vnode_partition_count = new_vnode_partition_count;
                 }
-                level_insert_ssts(&mut l0.sub_levels[index], insert_table_infos);
+                if !level_insert_ssts(&mut l0.sub_levels[index], insert_table_infos) {
+                    return false;
+                }
             } else {
                 let idx = insert_sst_level_id as usize - 1;
                 if self.levels[idx].table_infos.is_empty()
@@ -1158,9 +1178,12 @@ impl Levels {
                 {
                     self.levels[idx].vnode_partition_count = 0;
                 }
-                level_insert_ssts(&mut self.levels[idx], insert_table_infos);
+                if !level_insert_ssts(&mut self.levels[idx], insert_table_infos) {
+                    return false;
+                }
             }
         }
+        true
     }
 
     /// Prune specified table ids from all SST metadata, remove emptied SSTs and sub-levels,
@@ -1467,13 +1490,7 @@ impl OverlappingLevel {
     }
 }
 
-fn level_insert_ssts(operand: &mut Level, insert_table_infos: &Vec<SstableInfo>) {
-    fn display_sstable_infos(ssts: &[impl Borrow<SstableInfo>]) -> String {
-        format!(
-            "sstable ids: {:?}",
-            ssts.iter().map(|s| s.borrow().sst_id).collect_vec()
-        )
-    }
+fn level_insert_ssts(operand: &mut Level, insert_table_infos: &Vec<SstableInfo>) -> bool {
     operand.total_file_size += insert_table_infos
         .iter()
         .map(|sst| sst.sst_size)
@@ -1490,11 +1507,9 @@ fn level_insert_ssts(operand: &mut Level, insert_table_infos: &Vec<SstableInfo>)
         operand
             .table_infos
             .sort_by(|sst1, sst2| sst1.key_range.cmp(&sst2.key_range));
-        assert!(
-            can_concat(&operand.table_infos),
-            "{}",
-            display_sstable_infos(&operand.table_infos)
-        );
+        if !can_concat(&operand.table_infos) {
+            return false;
+        }
     } else if !insert_table_infos.is_empty() {
         let sorted_insert: Vec<_> = insert_table_infos
             .iter()
@@ -1517,11 +1532,9 @@ fn level_insert_ssts(operand: &mut Level, insert_table_infos: &Vec<SstableInfo>)
                 .skip(pos.saturating_sub(1))
                 .take(insert_table_infos.len() + 2)
                 .collect_vec();
-            assert!(
-                can_concat(&validate_range),
-                "{}",
-                display_sstable_infos(&validate_range),
-            );
+            if !can_concat(&validate_range) {
+                return false;
+            }
         } else {
             // If this branch is reached, it indicates some unexpected behavior in compaction.
             // Here we issue a warning and fall back to insert one by one.
@@ -1532,13 +1545,12 @@ fn level_insert_ssts(operand: &mut Level, insert_table_infos: &Vec<SstableInfo>)
                     .partition_point(|b| b.key_range.cmp(&i.key_range) == Ordering::Less);
                 operand.table_infos.insert(pos, i.clone());
             }
-            assert!(
-                can_concat(&operand.table_infos),
-                "{}",
-                display_sstable_infos(&operand.table_infos)
-            );
+            if !can_concat(&operand.table_infos) {
+                return false;
+            }
         }
     }
+    true
 }
 
 pub fn object_size_map(version: &HummockVersion) -> HashMap<HummockObjectId, u64> {
@@ -1902,6 +1914,56 @@ mod tests {
                 ]),
                 ..Default::default()
             }
+        );
+    }
+
+    #[test]
+    fn test_try_apply_compact_ssts_rejects_overlap_on_candidate() {
+        let old_sst = gen_sstable_info(1, vec![1], test_epoch(1));
+        let mut levels = build_initial_compaction_group_levels(
+            1,
+            &CompactionConfig {
+                max_level: 1,
+                ..Default::default()
+            },
+        );
+        levels.levels[0] = Level {
+            level_idx: 1,
+            level_type: LevelType::Nonoverlapping,
+            table_infos: vec![old_sst.clone()],
+            total_file_size: old_sst.sst_size,
+            ..Default::default()
+        };
+        let version = HummockVersion {
+            id: HummockVersionId::new(0),
+            levels: HashMap::from([(1.into(), levels)]),
+            ..Default::default()
+        };
+        let mut candidate = version.get_compaction_group_levels(1.into()).clone();
+        assert!(candidate.try_apply_compact_ssts(
+            &IntraLevelDelta::new(1, 0, HashSet::from([old_sst.sst_id]), vec![], 0, 0,),
+            &Default::default(),
+        ));
+        assert!(!candidate.try_apply_compact_ssts(
+            &IntraLevelDelta::new(
+                1,
+                0,
+                HashSet::new(),
+                vec![
+                    gen_sstable_info(2, vec![1], test_epoch(1)),
+                    gen_sstable_info(3, vec![1], test_epoch(1)),
+                ],
+                0,
+                0,
+            ),
+            &Default::default(),
+        ));
+        assert_eq!(
+            version
+                .get_compaction_group_levels(1.into())
+                .get_level(1)
+                .table_infos,
+            vec![old_sst]
         );
     }
 

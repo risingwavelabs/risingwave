@@ -138,8 +138,17 @@ enum BuiltCompactTask {
 }
 
 impl HummockVersionTransaction<'_> {
-    fn apply_compact_task(&mut self, compact_task: &CompactTask) {
+    fn apply_compact_task(&mut self, compact_task: &CompactTask) -> bool {
         let mut version_delta = self.new_delta();
+        let mut candidate_levels = version_delta
+            .latest_version()
+            .get_compaction_group_levels(compact_task.compaction_group_id)
+            .clone();
+        let member_table_ids = version_delta
+            .latest_version()
+            .state_table_info
+            .compaction_group_member_table_ids(compact_task.compaction_group_id)
+            .clone();
         let trivial_move = compact_task.is_trivial_move_task();
         version_delta.trivial_move = trivial_move;
 
@@ -183,7 +192,16 @@ impl HummockVersionTransaction<'_> {
         ));
 
         group_deltas.push(group_delta);
+        if !group_deltas.iter().all(|group_delta| {
+            let GroupDelta::IntraLevel(level_delta) = group_delta else {
+                unreachable!("compaction task should only produce intra-level deltas")
+            };
+            candidate_levels.try_apply_compact_ssts(level_delta, &member_table_ids)
+        }) {
+            return false;
+        }
         version_delta.pre_apply();
+        true
     }
 }
 
@@ -483,7 +501,13 @@ impl HummockManager {
                             ])
                             .inc();
 
-                        version.apply_compact_task(&compact_task);
+                        if !version.apply_compact_task(&compact_task) {
+                            return Err(anyhow::anyhow!(
+                                "meta-finished compaction task {} produced overlapping output",
+                                compact_task.task_id
+                            )
+                            .into());
+                        }
                         trivial_tasks.push(compact_task);
                         if trivial_tasks.len() >= self.env.opts.max_trivial_move_task_count_per_loop
                         {
@@ -866,9 +890,21 @@ impl HummockManager {
             } else {
                 false
             };
+            let is_success = if is_success && !version.apply_compact_task(&compact_task) {
+                compact_task.task_status = TaskStatus::InputOutdatedCanceled;
+                warn!(
+                    task_id = compact_task.task_id,
+                    compaction_group_id = %compact_task.compaction_group_id,
+                    target_level = compact_task.target_level,
+                    target_sub_level_id = compact_task.target_sub_level_id,
+                    "failed to apply compaction task because its output overlaps the target level"
+                );
+                false
+            } else {
+                is_success
+            };
             if is_success {
                 success_count += 1;
-                version.apply_compact_task(&compact_task);
                 if purge_prost_table_stats(
                     &mut version_stats.table_stats,
                     version.latest_version(),
