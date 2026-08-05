@@ -19,14 +19,14 @@ use std::time::Duration;
 
 use enum_as_inner::EnumAsInner;
 use foyer::{
-    BlockEngineBuilder, CacheBuilder, DeviceBuilder, FifoPicker, FsDeviceBuilder,
-    HybridCacheBuilder,
+    BlockEngineConfig, CacheBuilder, DeviceBuilder, FifoPicker, FsDeviceBuilder, HybridCacheBuilder,
 };
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::Role;
+use risingwave_common::config::storage::{FileCacheRuntimeConfig, FileCacheTokioRuntimeConfig};
 use risingwave_common::license::Feature;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::RpcNotificationClient;
@@ -53,6 +53,72 @@ use crate::monitor::{
     ObjectStoreMetrics,
 };
 use crate::opts::StorageOpts;
+
+fn merge_runtime_limit(read: usize, write: usize) -> usize {
+    if read == 0 || write == 0 {
+        0
+    } else {
+        read.max(write)
+    }
+}
+
+fn build_file_cache_spawner(
+    name: &str,
+    config: &FileCacheRuntimeConfig,
+) -> StorageResult<Option<foyer::Spawner>> {
+    let config = match config {
+        FileCacheRuntimeConfig::Disabled => return Ok(None),
+        FileCacheRuntimeConfig::Unified(config) => config.clone(),
+        FileCacheRuntimeConfig::Separated {
+            read_runtime_options,
+            write_runtime_options,
+        } => {
+            tracing::warn!(
+                cache = name,
+                "Foyer 0.22 uses one spawner; merging the legacy separated runtime configuration"
+            );
+            FileCacheTokioRuntimeConfig {
+                worker_threads: merge_runtime_limit(
+                    read_runtime_options.worker_threads,
+                    write_runtime_options.worker_threads,
+                ),
+                max_blocking_threads: merge_runtime_limit(
+                    read_runtime_options.max_blocking_threads,
+                    write_runtime_options.max_blocking_threads,
+                ),
+            }
+        }
+    };
+
+    let mut builder = tokio::runtime::Builder::new_multi_thread();
+    #[cfg(madsim)]
+    let _ = &config;
+    #[cfg(not(madsim))]
+    if config.worker_threads != 0 {
+        builder.worker_threads(config.worker_threads);
+    }
+    #[cfg(not(madsim))]
+    if config.max_blocking_threads != 0 {
+        builder.max_blocking_threads(config.max_blocking_threads);
+    }
+    builder.thread_name(format!("{name}-unified"));
+    let runtime = builder.enable_all().build().map_err(|error| {
+        HummockError::other(format!("failed to build {name} dedicated runtime: {error}"))
+    })?;
+    Ok(Some(runtime.into()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::merge_runtime_limit;
+
+    #[test]
+    fn test_merge_runtime_limit() {
+        assert_eq!(merge_runtime_limit(4, 8), 8);
+        assert_eq!(merge_runtime_limit(0, 8), 0);
+        assert_eq!(merge_runtime_limit(4, 0), 0);
+    }
+}
 
 static FOYER_METRICS_REGISTRY: LazyLock<Box<PrometheusMetricsRegistry>> = LazyLock::new(|| {
     Box::new(PrometheusMetricsRegistry::new(
@@ -720,7 +786,7 @@ impl StateStoreImpl {
                         .with_throttle(opts.meta_file_cache_throttle.clone())
                         .build()
                         .map_err(HummockError::foyer_error)?;
-                    let engine_builder = BlockEngineBuilder::new(device)
+                    let engine_builder = BlockEngineConfig::new(device)
                         .with_block_size(opts.meta_file_cache_file_capacity_mb * MB)
                         .with_indexer_shards(opts.meta_file_cache_indexer_shards)
                         .with_flushers(opts.meta_file_cache_flushers)
@@ -740,8 +806,13 @@ impl StateStoreImpl {
                     builder = builder
                         .with_engine_config(engine_builder)
                         .with_recover_mode(opts.meta_file_cache_recover_mode)
-                        .with_compression(opts.meta_file_cache_compression)
-                        .with_runtime_options(opts.meta_file_cache_runtime_config.clone());
+                        .with_compression(opts.meta_file_cache_compression);
+                    if let Some(spawner) = build_file_cache_spawner(
+                        "foyer.meta",
+                        &opts.meta_file_cache_runtime_config,
+                    )? {
+                        builder = builder.with_spawner(spawner);
+                    }
                 }
             }
 
@@ -772,7 +843,7 @@ impl StateStoreImpl {
                         .with_throttle(opts.data_file_cache_throttle.clone())
                         .build()
                         .map_err(HummockError::foyer_error)?;
-                    let engine_builder = BlockEngineBuilder::new(device)
+                    let engine_builder = BlockEngineConfig::new(device)
                         .with_block_size(opts.data_file_cache_file_capacity_mb * MB)
                         .with_indexer_shards(opts.data_file_cache_indexer_shards)
                         .with_flushers(opts.data_file_cache_flushers)
@@ -792,8 +863,13 @@ impl StateStoreImpl {
                     builder = builder
                         .with_engine_config(engine_builder)
                         .with_recover_mode(opts.data_file_cache_recover_mode)
-                        .with_compression(opts.data_file_cache_compression)
-                        .with_runtime_options(opts.data_file_cache_runtime_config.clone());
+                        .with_compression(opts.data_file_cache_compression);
+                    if let Some(spawner) = build_file_cache_spawner(
+                        "foyer.data",
+                        &opts.data_file_cache_runtime_config,
+                    )? {
+                        builder = builder.with_spawner(spawner);
+                    }
                 }
             }
 
