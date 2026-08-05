@@ -20,9 +20,11 @@ mod tests {
     use risingwave_meta_model::table::HandleConflictBehavior;
     use risingwave_pb::catalog::subscription::SubscriptionState;
     use risingwave_pb::catalog::{PbSinkType, StreamSourceInfo};
-    use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType, worker_node};
+    use risingwave_pb::common::{HostAddress, PbObjectType, WorkerNode, WorkerType, worker_node};
     use risingwave_pb::meta::SubscribeType;
     use risingwave_pb::stream_plan::PbStreamNode;
+    use risingwave_pb::user::grant_privilege::PbActionWithGrantOption;
+    use risingwave_pb::user::{PbAction, PbGrantPrivilege};
     use tokio::sync::{mpsc, oneshot};
 
     use crate::controller::catalog::*;
@@ -558,6 +560,221 @@ mod tests {
         let (operation, _, _, _) = mgr.finish_streaming_job_inner(&txn, sink_job_id).await?;
         assert_eq!(operation, NotificationOperation::Update);
         txn.commit().await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_finish_index_with_existing_state_table_privileges() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        mgr.create_user(PbUserInfo {
+            name: "index_reader".to_owned(),
+            ..Default::default()
+        })
+        .await?;
+        let grantee = mgr.get_user_by_name("index_reader").await?;
+
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let (_primary_job_id, Some(primary_table_id), _) =
+            insert_test_streaming_job(&txn, "primary_table", true, None).await?
+        else {
+            unreachable!()
+        };
+        let index_job_id = CatalogController::create_object(
+            &txn,
+            ObjectType::Index,
+            TEST_OWNER_ID,
+            Some(TEST_DATABASE_ID),
+            Some(TEST_SCHEMA_ID),
+        )
+        .await?
+        .oid
+        .as_job_id();
+        let index_table_id = index_job_id.as_mv_table_id();
+        insert_test_table(
+            &txn,
+            index_table_id,
+            "creating_index",
+            TableType::Index,
+            None,
+            "",
+        )
+        .await?;
+        let state_table_id = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(TEST_DATABASE_ID),
+            Some(TEST_SCHEMA_ID),
+        )
+        .await?
+        .oid
+        .as_table_id();
+        insert_test_table(
+            &txn,
+            state_table_id,
+            "creating_index_state",
+            TableType::Internal,
+            Some(index_job_id),
+            "",
+        )
+        .await?;
+        index::ActiveModel {
+            index_id: Set(index_job_id.as_index_id()),
+            name: Set("creating_index".to_owned()),
+            index_table_id: Set(index_table_id),
+            primary_table_id: Set(primary_table_id),
+            index_items: Set(vec![].into()),
+            index_column_properties: Set(None),
+            index_columns_len: Set(0),
+        }
+        .insert(&txn)
+        .await?;
+        insert_test_streaming_job_model(&txn, index_job_id, None).await?;
+        streaming_job::ActiveModel {
+            job_id: Set(index_job_id),
+            job_status: Set(JobStatus::Creating),
+            ..Default::default()
+        }
+        .update(&txn)
+        .await?;
+        txn.commit().await?;
+        drop(inner);
+
+        mgr.grant_privilege(
+            vec![grantee.user_id],
+            &[PbGrantPrivilege {
+                object: Some(primary_table_id.into()),
+                action_with_opts: vec![PbActionWithGrantOption {
+                    action: PbAction::Select as _,
+                    ..Default::default()
+                }],
+            }],
+            TEST_OWNER_ID,
+            false,
+        )
+        .await?;
+
+        // GRANT propagates privileges to state tables even while the index is still creating.
+        {
+            let inner = mgr.inner.read().await;
+            let state_table_privilege_count = UserPrivilege::find()
+                .filter(user_privilege::Column::UserId.eq(grantee.user_id))
+                .filter(
+                    user_privilege::Column::Oid
+                        .is_in([index_table_id.as_object_id(), state_table_id.as_object_id()]),
+                )
+                .filter(user_privilege::Column::Action.eq(user_privilege::Action::Select))
+                .count(&inner.db)
+                .await?;
+            assert_eq!(state_table_privilege_count, 2);
+        }
+
+        // Finishing the index must tolerate both the preexisting privileges and a replay.
+        for _ in 0..2 {
+            let inner = mgr.inner.write().await;
+            let txn = inner.db.begin().await?;
+            mgr.finish_streaming_job_inner(&txn, index_job_id).await?;
+            txn.commit().await?;
+        }
+
+        let inner = mgr.inner.read().await;
+        let state_table_privilege_count = UserPrivilege::find()
+            .filter(user_privilege::Column::UserId.eq(grantee.user_id))
+            .filter(
+                user_privilege::Column::Oid
+                    .is_in([index_table_id.as_object_id(), state_table_id.as_object_id()]),
+            )
+            .filter(user_privilege::Column::Action.eq(user_privilege::Action::Select))
+            .count(&inner.db)
+            .await?;
+        assert_eq!(state_table_privilege_count, 2);
+
+        let job_status = StreamingJob::find_by_id(index_job_id)
+            .select_only()
+            .column(streaming_job::Column::JobStatus)
+            .into_tuple::<JobStatus>()
+            .one(&inner.db)
+            .await?;
+        assert_eq!(job_status, Some(JobStatus::Created));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_grant_default_privileges_with_existing_privileges() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        mgr.create_user(PbUserInfo {
+            name: "default_privilege_reader".to_owned(),
+            ..Default::default()
+        })
+        .await?;
+        let grantee = mgr.get_user_by_name("default_privilege_reader").await?;
+
+        mgr.grant_default_privileges(
+            vec![TEST_OWNER_ID],
+            TEST_DATABASE_ID,
+            vec![TEST_SCHEMA_ID],
+            TEST_OWNER_ID,
+            vec![PbAction::Select],
+            PbObjectType::Mview,
+            vec![grantee.user_id],
+            true,
+        )
+        .await?;
+
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let (job_id, Some(table_id), internal_table_id) =
+            insert_test_streaming_job(&txn, "default_privilege_mv", true, None).await?
+        else {
+            unreachable!()
+        };
+        txn.commit().await?;
+        drop(inner);
+
+        // Simulate an explicit GRANT after the new object is visible but before its default
+        // privileges are applied.
+        mgr.grant_privilege(
+            vec![grantee.user_id],
+            &[PbGrantPrivilege {
+                object: Some(table_id.into()),
+                action_with_opts: vec![PbActionWithGrantOption {
+                    action: PbAction::Select as _,
+                    ..Default::default()
+                }],
+            }],
+            TEST_OWNER_ID,
+            false,
+        )
+        .await?;
+
+        // Reapplying defaults must be idempotent and still upgrade the grant option.
+        for _ in 0..2 {
+            let inner = mgr.inner.write().await;
+            let txn = inner.db.begin().await?;
+            grant_default_privileges_automatically(&txn, job_id).await?;
+            txn.commit().await?;
+        }
+
+        let inner = mgr.inner.read().await;
+        let privileges = UserPrivilege::find()
+            .filter(user_privilege::Column::UserId.eq(grantee.user_id))
+            .filter(
+                user_privilege::Column::Oid
+                    .is_in([table_id.as_object_id(), internal_table_id.as_object_id()]),
+            )
+            .filter(user_privilege::Column::Action.eq(user_privilege::Action::Select))
+            .all(&inner.db)
+            .await?;
+        assert_eq!(privileges.len(), 2);
+        assert!(
+            privileges
+                .iter()
+                .all(|privilege| privilege.with_grant_option)
+        );
 
         Ok(())
     }
