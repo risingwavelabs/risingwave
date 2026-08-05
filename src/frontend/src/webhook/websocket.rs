@@ -137,13 +137,15 @@ impl TryFrom<RawDmlRequest> for DmlRequest {
     fn try_from(raw: RawDmlRequest) -> Result<Self, Self::Error> {
         let op = match raw.op.as_deref() {
             None => {
-                return Err("missing `op`; expected `upsert` or `delete`".to_owned());
+                return Err(
+                    "missing `op`; expected `upsert`, `insert`, `update`, or `delete`".to_owned(),
+                );
             }
             Some("upsert" | "insert" | "update") => DmlOp::Upsert,
             Some("delete") => DmlOp::Delete,
             Some(other) => {
                 return Err(format!(
-                    "unknown `op` value `{other}`; expected `upsert` or `delete`"
+                    "unknown `op` value `{other}`; expected `upsert`, `insert`, `update`, or `delete`"
                 ));
             }
         };
@@ -691,7 +693,10 @@ mod tests {
     #[test]
     fn test_dml_request_requires_op() {
         let err = DmlRequest::try_from(raw_req(None, r#"{"id":1}"#)).unwrap_err();
-        assert_eq!(err, "missing `op`; expected `upsert` or `delete`");
+        assert_eq!(
+            err,
+            "missing `op`; expected `upsert`, `insert`, `update`, or `delete`"
+        );
     }
 
     #[test]

@@ -63,7 +63,7 @@ pub enum MetaErrorInner {
         RpcError,
     ),
 
-    #[error("Permission denied: {0}")]
+    #[error("{0}")]
     PermissionDenied(String),
 
     #[error("Invalid worker: {0}, {1}")]
