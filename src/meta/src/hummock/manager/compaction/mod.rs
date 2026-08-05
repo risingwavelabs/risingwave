@@ -170,7 +170,7 @@ fn can_concat_after_compact_task(
     let pos =
         target_ssts.partition_point(|sst| sst.key_range.cmp(&first.key_range) == Ordering::Less);
 
-    if pos >= target_ssts.len() || last.key_range.cmp(&target_ssts[pos].key_range) == Ordering::Less
+    if pos == target_ssts.len() || last.key_range.cmp(&target_ssts[pos].key_range) == Ordering::Less
     {
         let validate_range = target_ssts[..pos]
             .iter()
@@ -194,20 +194,28 @@ fn can_concat_after_compact_task(
 
 impl HummockVersionTransaction<'_> {
     fn can_apply_compact_task(&self, compact_task: &CompactTask) -> bool {
-        let levels = self
+        if compact_task.sorted_output_ssts.is_empty() {
+            return true;
+        }
+
+        let Some(levels) = self
             .latest_version()
             .levels
             .get(&compact_task.compaction_group_id)
-            .unwrap();
+        else {
+            return false;
+        };
         let target_level = if compact_task.target_level == 0 {
             levels
                 .l0
                 .sub_levels
                 .iter()
                 .find(|level| level.sub_level_id == compact_task.target_sub_level_id)
-                .unwrap()
         } else {
-            levels.get_level(compact_task.target_level as usize)
+            levels.levels.get(compact_task.target_level as usize - 1)
+        };
+        let Some(target_level) = target_level else {
+            return false;
         };
         let input_sst_ids = compact_task
             .input_ssts
@@ -1850,6 +1858,86 @@ impl GroupStateValidator {
         }
 
         Self::check_single_group_emergency(levels, compaction_config)
+    }
+}
+
+#[cfg(test)]
+mod compact_task_apply_tests {
+    use risingwave_common::catalog::TableId;
+    use risingwave_common::hash::VirtualNode;
+    use risingwave_hummock_sdk::key::{FullKey, gen_key_from_str};
+    use risingwave_pb::hummock::{KeyRange as PbKeyRange, SstableInfo as PbSstableInfo};
+
+    use super::*;
+
+    fn test_key(key: &str) -> Vec<u8> {
+        FullKey::for_test(TableId::new(1), gen_key_from_str(VirtualNode::ZERO, key), 0).encode()
+    }
+
+    fn test_sst(sst_id: u64, left: &str, right: &str) -> SstableInfo {
+        PbSstableInfo {
+            object_id: sst_id.into(),
+            sst_id: sst_id.into(),
+            key_range: Some(PbKeyRange {
+                left: test_key(left),
+                right: test_key(right),
+                right_exclusive: true,
+            }),
+            ..Default::default()
+        }
+        .into()
+    }
+
+    #[test]
+    fn test_can_concat_after_compact_task_at_level_end() {
+        let target = Level {
+            level_type: PbLevelType::Nonoverlapping,
+            table_infos: vec![test_sst(1, "a", "b")],
+            ..Default::default()
+        };
+        let outputs = vec![test_sst(2, "d", "e"), test_sst(3, "g", "h")];
+
+        assert!(can_concat_after_compact_task(
+            &target,
+            &HashSet::new(),
+            &outputs,
+        ));
+    }
+
+    #[test]
+    fn test_can_concat_after_compact_task_rejects_overlap() {
+        let target = Level {
+            level_type: PbLevelType::Nonoverlapping,
+            table_infos: vec![test_sst(1, "a", "e")],
+            ..Default::default()
+        };
+
+        assert!(!can_concat_after_compact_task(
+            &target,
+            &HashSet::new(),
+            &[test_sst(2, "c", "d")],
+        ));
+    }
+
+    #[test]
+    fn test_can_concat_after_compact_task_removes_inputs_first() {
+        let target = Level {
+            level_type: PbLevelType::Overlapping,
+            table_infos: vec![test_sst(1, "a", "z")],
+            ..Default::default()
+        };
+        let outputs = vec![test_sst(2, "a", "b"), test_sst(3, "d", "e")];
+
+        assert!(!can_concat_after_compact_task(
+            &target,
+            &HashSet::new(),
+            &outputs,
+        ));
+        assert!(can_concat_after_compact_task(
+            &target,
+            &HashSet::from([1.into()]),
+            &outputs,
+        ));
     }
 }
 
