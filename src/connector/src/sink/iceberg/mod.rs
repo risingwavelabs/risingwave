@@ -23,6 +23,7 @@ mod engine_options;
 mod metadata;
 #[cfg(any(test, madsim))]
 pub mod mock_v3_catalog_registry;
+mod position_delete;
 mod prometheus;
 mod writer;
 
@@ -37,6 +38,7 @@ pub use create_table::*;
 pub use engine_options::*;
 use iceberg::table::Table;
 pub use metadata::*;
+pub use position_delete::*;
 use risingwave_common::bail;
 use tokio::sync::mpsc::UnboundedSender;
 pub use writer::*;
