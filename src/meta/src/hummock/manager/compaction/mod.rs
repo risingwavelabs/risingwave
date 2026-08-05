@@ -183,18 +183,20 @@ fn can_concat_after_compact_task(
         });
 
     if fits_before_next {
-        // This is the same neighborhood validated after `level_insert_ssts` splices the sorted
-        // outputs at `pos`. Only three kinds of adjacency can be newly introduced: the previous
-        // target SST to the first output, adjacent outputs, and the last output to the next target
-        // SST. Build exactly that view without indexing `target_ssts` or moving its remaining SSTs.
-        let validate_range = pos
+        // Match the neighborhood validated after `level_insert_ssts` inserts the outputs: the
+        // previous target SST, all outputs, and the next target SST.
+        let mut validate_range = Vec::with_capacity(sorted_insert.len() + 2);
+        if let Some(previous) = pos
             .checked_sub(1)
-            .and_then(|prev| target_ssts.get(prev))
+            .and_then(|index| target_ssts.get(index))
             .copied()
-            .into_iter()
-            .chain(sorted_insert.iter().copied())
-            .chain(target_ssts.get(pos).copied())
-            .collect_vec();
+        {
+            validate_range.push(previous);
+        }
+        validate_range.extend(sorted_insert.iter().copied());
+        if let Some(next) = target_ssts.get(pos).copied() {
+            validate_range.push(next);
+        }
         can_concat(&validate_range)
     } else {
         for sst in insert_table_infos {
