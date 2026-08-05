@@ -43,7 +43,8 @@ use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::{GroupDelta, IntraLevelDelta};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockCompactionTaskId, HummockContextId, HummockSstableId,
-    HummockSstableObjectId, HummockVersionId, compact_task_to_string, statistics_compact_task,
+    HummockSstableObjectId, HummockVersionId, can_concat, compact_task_to_string,
+    statistics_compact_task,
 };
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
@@ -138,17 +139,40 @@ enum BuiltCompactTask {
 }
 
 impl HummockVersionTransaction<'_> {
-    fn apply_compact_task(&mut self, compact_task: &CompactTask) -> bool {
+    fn can_apply_compact_task(&self, compact_task: &CompactTask) -> bool {
+        let levels = self
+            .latest_version()
+            .levels
+            .get(&compact_task.compaction_group_id)
+            .unwrap();
+        let target_level = if compact_task.target_level == 0 {
+            levels
+                .l0
+                .sub_levels
+                .iter()
+                .find(|level| level.sub_level_id == compact_task.target_sub_level_id)
+                .unwrap()
+        } else {
+            levels.get_level(compact_task.target_level as usize)
+        };
+        let input_sst_ids = compact_task
+            .input_ssts
+            .iter()
+            .flat_map(|level| &level.table_infos)
+            .map(|sst| sst.sst_id)
+            .collect::<HashSet<_>>();
+        let mut target_ssts = target_level
+            .table_infos
+            .iter()
+            .filter(|sst| !input_sst_ids.contains(&sst.sst_id))
+            .chain(&compact_task.sorted_output_ssts)
+            .collect_vec();
+        target_ssts.sort_by(|left, right| left.key_range.cmp(&right.key_range));
+        can_concat(&target_ssts)
+    }
+
+    fn apply_compact_task(&mut self, compact_task: &CompactTask) {
         let mut version_delta = self.new_delta();
-        let mut candidate_levels = version_delta
-            .latest_version()
-            .get_compaction_group_levels(compact_task.compaction_group_id)
-            .clone();
-        let member_table_ids = version_delta
-            .latest_version()
-            .state_table_info
-            .compaction_group_member_table_ids(compact_task.compaction_group_id)
-            .clone();
         let trivial_move = compact_task.is_trivial_move_task();
         version_delta.trivial_move = trivial_move;
 
@@ -192,16 +216,7 @@ impl HummockVersionTransaction<'_> {
         ));
 
         group_deltas.push(group_delta);
-        if !group_deltas.iter().all(|group_delta| {
-            let GroupDelta::IntraLevel(level_delta) = group_delta else {
-                unreachable!("compaction task should only produce intra-level deltas")
-            };
-            candidate_levels.try_apply_compact_ssts(level_delta, &member_table_ids)
-        }) {
-            return false;
-        }
         version_delta.pre_apply();
-        true
     }
 }
 
@@ -501,13 +516,7 @@ impl HummockManager {
                             ])
                             .inc();
 
-                        if !version.apply_compact_task(&compact_task) {
-                            return Err(anyhow::anyhow!(
-                                "meta-finished compaction task {} produced overlapping output",
-                                compact_task.task_id
-                            )
-                            .into());
-                        }
+                        version.apply_compact_task(&compact_task);
                         trivial_tasks.push(compact_task);
                         if trivial_tasks.len() >= self.env.opts.max_trivial_move_task_count_per_loop
                         {
@@ -890,7 +899,7 @@ impl HummockManager {
             } else {
                 false
             };
-            let is_success = if is_success && !version.apply_compact_task(&compact_task) {
+            let is_success = if is_success && !version.can_apply_compact_task(&compact_task) {
                 compact_task.task_status = TaskStatus::InputOutdatedCanceled;
                 warn!(
                     task_id = compact_task.task_id,
@@ -905,6 +914,7 @@ impl HummockManager {
             };
             if is_success {
                 success_count += 1;
+                version.apply_compact_task(&compact_task);
                 if purge_prost_table_stats(
                     &mut version_stats.table_stats,
                     version.latest_version(),
