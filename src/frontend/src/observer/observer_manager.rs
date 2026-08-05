@@ -549,6 +549,7 @@ impl FrontendObserverNode {
 
     /// `update_worker_node_manager` is called in `start` method.
     /// It calls `add_worker_node` and `remove_worker_node` of `WorkerNodeManager`.
+    /// Node updates refresh volatile fields such as reported resources.
     fn update_worker_node_manager(&self, operation: Operation, node: WorkerNode) {
         tracing::debug!(
             "Update worker nodes, operation: {:?}, node: {:?}",
@@ -557,7 +558,7 @@ impl FrontendObserverNode {
         );
 
         match operation {
-            Operation::Add => self.worker_node_manager.add_worker_node(node),
+            Operation::Add | Operation::Update => self.worker_node_manager.add_worker_node(node),
             Operation::Delete => self.worker_node_manager.remove_worker_node(node),
             _ => (),
         }

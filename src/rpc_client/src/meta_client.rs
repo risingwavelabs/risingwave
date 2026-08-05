@@ -28,7 +28,6 @@ use futures::stream::BoxStream;
 use list_rate_limits_response::RateLimitInfo;
 use lru::LruCache;
 use replace_job_plan::ReplaceJob;
-use risingwave_common::RW_VERSION;
 use risingwave_common::catalog::{
     AlterDatabaseParam, FunctionId, IndexId, ObjectId, SecretId, TableId,
 };
@@ -46,6 +45,7 @@ use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::hostname;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
+use risingwave_common::util::version::current_rw_version;
 use risingwave_error::bail;
 use risingwave_error::tonic::ErrorIsFromTonicServerImpl;
 use risingwave_hummock_sdk::change_log::{TableChangeLog, TableChangeLogs};
@@ -307,7 +307,7 @@ impl MetaClient {
                         host: Some(addr.to_protobuf()),
                         property: Some(property.clone()),
                         resource: Some(risingwave_pb::common::worker_node::Resource {
-                            rw_version: RW_VERSION.to_owned(),
+                            rw_version: current_rw_version(),
                             total_memory_bytes: system_memory_available_bytes() as _,
                             total_cpu_cores: total_cpu_available() as _,
                             hostname: hostname(),
@@ -381,7 +381,7 @@ impl MetaClient {
         let request = HeartbeatRequest {
             node_id: self.worker_id,
             resource: Some(risingwave_pb::common::worker_node::Resource {
-                rw_version: RW_VERSION.to_owned(),
+                rw_version: current_rw_version(),
                 total_memory_bytes: system_memory_available_bytes() as _,
                 total_cpu_cores: total_cpu_available() as _,
                 hostname: hostname(),

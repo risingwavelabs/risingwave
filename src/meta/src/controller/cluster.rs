@@ -19,12 +19,12 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use itertools::Itertools;
-use risingwave_common::RW_VERSION;
 use risingwave_common::hash::WorkerSlotId;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::hostname;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
+use risingwave_common::util::version::current_rw_version;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_license::LicenseManager;
 use risingwave_meta_model::prelude::{Worker, WorkerProperty};
@@ -220,10 +220,38 @@ impl ClusterController {
         resource: Option<PbResource>,
     ) -> MetaResult<()> {
         tracing::trace!(target: "events::meta::server_heartbeat", %worker_id, "receive heartbeat");
-        self.inner
-            .write()
-            .await
-            .heartbeat(worker_id, self.max_heartbeat_interval, resource)
+        let worker_to_notify = {
+            let mut inner = self.inner.write().await;
+            let should_notify_frontend = resource.as_ref().is_some_and(|resource| {
+                inner
+                    .get_worker_extra_info_by_id(worker_id)
+                    .is_some_and(|info| info.resource != *resource)
+            });
+
+            inner.heartbeat(worker_id, self.max_heartbeat_interval, resource)?;
+
+            if should_notify_frontend {
+                // Resource is volatile and rebuilt as default after meta restart. Notify frontends
+                // once heartbeat restores it, so schedulers see the worker's reported version.
+                inner.get_worker_by_id(worker_id).await?
+            } else {
+                None
+            }
+        };
+
+        if let Some(worker) = worker_to_notify
+            && matches!(
+                worker.r#type(),
+                PbWorkerType::ComputeNode | PbWorkerType::Frontend
+            )
+        {
+            self.env
+                .notification_manager()
+                .notify_frontend(Operation::Update, Info::Node(worker))
+                .await;
+        }
+
+        Ok(())
     }
 
     pub fn start_heartbeat_checker(
@@ -484,7 +512,7 @@ fn meta_node_info(host: &str, started_at: Option<u64>) -> PbWorkerNode {
         property: None,
         transactional_id: None,
         resource: Some(risingwave_pb::common::worker_node::Resource {
-            rw_version: RW_VERSION.to_owned(),
+            rw_version: current_rw_version(),
             total_memory_bytes: system_memory_available_bytes() as _,
             total_cpu_cores: total_cpu_available() as _,
             hostname: hostname(),
