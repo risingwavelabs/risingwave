@@ -223,9 +223,10 @@ const ALLOWED_JWT_ALGORITHMS: &[Algorithm] = &[
     Algorithm::PS512,
 ];
 const RSA_JWK_KEY_TYPE: &str = "RSA";
-/// Optional expected JWT `aud`; matched case-insensitively because SQL folds unquoted
-/// identifiers.
-const OAUTH_ALLOWED_AUDIENCE_KEY: &str = "allowedAudience";
+/// Optional expected JWT `aud`, overriding the cluster-id-derived default. Lowercase
+/// snake_case like other OAuth options, so the unquoted SQL option name folds to
+/// exactly this key.
+const OAUTH_ALLOWED_AUDIENCE_KEY: &str = "allowed_audience";
 
 async fn validate_jwt(
     jwt: &str,
@@ -246,10 +247,7 @@ fn oauth_allowed_audience(
     metadata: &HashMap<String, String>,
     cluster_id: &str,
 ) -> Result<String, BoxedError> {
-    let Some((_, configured_audience)) = metadata
-        .iter()
-        .find(|(key, _)| key.eq_ignore_ascii_case(OAUTH_ALLOWED_AUDIENCE_KEY))
-    else {
+    let Some(configured_audience) = metadata.get(OAUTH_ALLOWED_AUDIENCE_KEY) else {
         return Ok(audience_from_cluster_id(cluster_id));
     };
 
@@ -320,7 +318,7 @@ fn validate_jwt_with_jwks(
     // 4. Check if the metadata in the token matches.
     if !metadata
         .iter()
-        .filter(|(key, _)| !key.eq_ignore_ascii_case(OAUTH_ALLOWED_AUDIENCE_KEY))
+        .filter(|(key, _)| key.as_str() != OAUTH_ALLOWED_AUDIENCE_KEY)
         .all(
             |(key, value)| matches!(token_data.claims.get(key), Some(serde_json::Value::String(claim)) if claim == value),
         )
@@ -821,7 +819,7 @@ mod tests {
 
             let mut metadata = HashMap::new();
             metadata.insert(
-                OAUTH_ALLOWED_AUDIENCE_KEY.to_ascii_lowercase(),
+                OAUTH_ALLOWED_AUDIENCE_KEY.to_owned(),
                 "urn:sn:cloud:o-for6u".to_owned(),
             );
 
