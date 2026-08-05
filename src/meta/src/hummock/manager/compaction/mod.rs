@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cmp::Ordering;
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ops::DerefMut;
 use std::sync::{Arc, LazyLock};
@@ -34,7 +35,7 @@ use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compact_task::{CompactTask, ReportTask};
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::safe_epoch_table_watermarks_impl;
-use risingwave_hummock_sdk::level::Levels;
+use risingwave_hummock_sdk::level::{Level, Levels};
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{
     PbTableStatsMap, add_prost_table_stats_map, purge_prost_table_stats,
@@ -49,7 +50,7 @@ use risingwave_hummock_sdk::{
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
-    CompactTaskAssignment, CompactionConfig, PbCompactStatus, PbCompactTaskAssignment,
+    CompactTaskAssignment, CompactionConfig, PbCompactStatus, PbCompactTaskAssignment, PbLevelType,
     SubscribeCompactionEventRequest, TableOption, compact_task,
 };
 use thiserror_ext::AsReport;
@@ -138,6 +139,59 @@ enum BuiltCompactTask {
     PendingAssignment(CompactTask),
 }
 
+// Keep this check in sync with `level_insert_ssts` in `hummock_version_ext.rs`.
+fn can_concat_after_compact_task(
+    target_level: &Level,
+    delete_sst_ids: &HashSet<HummockSstableId>,
+    insert_table_infos: &[SstableInfo],
+) -> bool {
+    if insert_table_infos.is_empty() {
+        return true;
+    }
+
+    let mut target_ssts = target_level
+        .table_infos
+        .iter()
+        .filter(|sst| !delete_sst_ids.contains(&sst.sst_id))
+        .collect_vec();
+
+    if target_level.level_type == PbLevelType::Overlapping {
+        target_ssts.extend(insert_table_infos);
+        target_ssts.sort_by(|left, right| left.key_range.cmp(&right.key_range));
+        return can_concat(&target_ssts);
+    }
+
+    let sorted_insert = insert_table_infos
+        .iter()
+        .sorted_by(|left, right| left.key_range.cmp(&right.key_range))
+        .collect_vec();
+    let first = sorted_insert[0];
+    let last = sorted_insert[sorted_insert.len() - 1];
+    let pos =
+        target_ssts.partition_point(|sst| sst.key_range.cmp(&first.key_range) == Ordering::Less);
+
+    if pos >= target_ssts.len() || last.key_range.cmp(&target_ssts[pos].key_range) == Ordering::Less
+    {
+        let validate_range = target_ssts[..pos]
+            .iter()
+            .copied()
+            .chain(sorted_insert.iter().copied())
+            .chain(target_ssts[pos..].iter().copied())
+            .skip(pos.saturating_sub(1))
+            .take(insert_table_infos.len() + 2)
+            .collect_vec();
+        can_concat(&validate_range)
+    } else {
+        for sst in insert_table_infos {
+            let pos = target_ssts.partition_point(|target_sst| {
+                target_sst.key_range.cmp(&sst.key_range) == Ordering::Less
+            });
+            target_ssts.insert(pos, sst);
+        }
+        can_concat(&target_ssts)
+    }
+}
+
 impl HummockVersionTransaction<'_> {
     fn can_apply_compact_task(&self, compact_task: &CompactTask) -> bool {
         let levels = self
@@ -161,14 +215,11 @@ impl HummockVersionTransaction<'_> {
             .flat_map(|level| &level.table_infos)
             .map(|sst| sst.sst_id)
             .collect::<HashSet<_>>();
-        let mut target_ssts = target_level
-            .table_infos
-            .iter()
-            .filter(|sst| !input_sst_ids.contains(&sst.sst_id))
-            .chain(&compact_task.sorted_output_ssts)
-            .collect_vec();
-        target_ssts.sort_by(|left, right| left.key_range.cmp(&right.key_range));
-        can_concat(&target_ssts)
+        can_concat_after_compact_task(
+            target_level,
+            &input_sst_ids,
+            &compact_task.sorted_output_ssts,
+        )
     }
 
     fn apply_compact_task(&mut self, compact_task: &CompactTask) {
@@ -906,7 +957,7 @@ impl HummockManager {
                     compaction_group_id = %compact_task.compaction_group_id,
                     target_level = compact_task.target_level,
                     target_sub_level_id = compact_task.target_sub_level_id,
-                    "failed to apply compaction task because its output overlaps the target level"
+                    "rejecting stale compaction task because its output conflicts with the current target level"
                 );
                 false
             } else {
