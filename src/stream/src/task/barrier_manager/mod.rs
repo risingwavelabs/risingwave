@@ -21,7 +21,7 @@ pub use progress::CreateMviewProgressReporter;
 use risingwave_common::id::{SourceId, TableId};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::connector_service::SinkMetadata;
-use risingwave_pb::id::{FragmentId, PartialGraphId, SinkId};
+use risingwave_pb::id::{FragmentId, IcebergCompactionTaskId, PartialGraphId, SinkId};
 use risingwave_pb::stream_service::PbIcebergPkIndexSinkRole;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
@@ -33,6 +33,21 @@ use crate::executor::{Barrier, BarrierInner};
 use crate::task::barrier_manager::progress::BackfillState;
 use crate::task::cdc_progress::CdcTableBackfillState;
 use crate::task::{ActorId, StreamEnvironment};
+
+/// Ephemeral two-stage control for one coordinated pk-index compaction.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum IcebergPkIndexWriterControl {
+    /// Resolver actors have sealed their local state at `epoch`; the writer may release B2.
+    SealReady {
+        task_id: IcebergCompactionTaskId,
+        epoch: u64,
+    },
+    /// Main B2 has committed; the writer may reopen its state table and consume epoch E2.
+    Committed {
+        task_id: IcebergCompactionTaskId,
+        epoch: u64,
+    },
+}
 
 /// Events sent from actors via [`LocalBarrierManager`] to [`super::barrier_worker::managed_state::PartialGraphState`].
 ///
@@ -69,6 +84,11 @@ pub(super) enum LocalBarrierEvent {
     RegisterBarrierSender {
         actor_id: ActorId,
         barrier_sender: mpsc::UnboundedSender<Barrier>,
+    },
+    RegisterIcebergPkIndexWriterControl {
+        actor_id: ActorId,
+        sink_id: SinkId,
+        sender: mpsc::UnboundedSender<IcebergPkIndexWriterControl>,
     },
     RegisterLocalUpstreamOutput {
         actor_id: ActorId,
@@ -161,6 +181,20 @@ impl LocalBarrierManager {
         self.send_event(LocalBarrierEvent::RegisterBarrierSender {
             actor_id,
             barrier_sender: tx,
+        });
+        rx
+    }
+
+    pub fn subscribe_iceberg_pk_index_writer_control(
+        &self,
+        actor_id: ActorId,
+        sink_id: SinkId,
+    ) -> UnboundedReceiver<IcebergPkIndexWriterControl> {
+        let (tx, rx) = mpsc::unbounded_channel();
+        self.send_event(LocalBarrierEvent::RegisterIcebergPkIndexWriterControl {
+            actor_id,
+            sink_id,
+            sender: tx,
         });
         rx
     }

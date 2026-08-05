@@ -16,18 +16,23 @@ use anyhow::Context;
 use iceberg::writer::PositionDeleteInput;
 use risingwave_common::array::DataChunk;
 use risingwave_common::array::stream_record::Record;
+use risingwave_common::bail;
 use risingwave_common::id::SinkId;
 use risingwave_common::row::{Project, RowExt};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::connector_service::SinkMetadata;
+use risingwave_pb::id::IcebergCompactionTaskId;
 use risingwave_pb::stream_service::PbIcebergPkIndexSinkRole;
 use risingwave_storage::StateStore;
+use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::common::change_buffer::output_kind;
 use crate::common::compact_chunk::{InconsistencyBehavior, compact_chunk_inline};
+use crate::executor::IcebergPkIndexBarrierPhase;
 use crate::executor::prelude::*;
-use crate::task::LocalBarrierManager;
+use crate::task::{IcebergPkIndexWriterControl, LocalBarrierManager};
 
 type PkRow<'a> = Project<'a, RowRef<'a>>;
 
@@ -40,6 +45,29 @@ fn append_row(builder: &mut DataChunkBuilder, file_path: &str, position: i64) ->
         Some(ScalarRefImpl::Utf8(file_path)),
         Some(ScalarRefImpl::Int64(position)),
     ])
+}
+
+/// Rebuilds the writer's pk-index [`StateTable`] when it resumes from a pause.
+///
+/// During a pause the writer relinquishes its own `StateTable` handle while the compaction resolve
+/// job updates the same table. On resume the writer needs a *fresh* handle so that `init_epoch`
+/// re-reads committed storage, because `init_epoch` can be called only once per handle (it asserts a
+/// table is not init'd twice). This factory produces that fresh handle. Abstracting it as a trait
+/// lets the writer be unit-tested with an in-memory store.
+#[async_trait::async_trait]
+pub trait PkIndexStateTableFactory<S: StateStore>: Send + 'static {
+    /// Build a new `StateTable` for the writer's `table_id` and this actor's vnode shard, opened at
+    /// the latest committed version (the caller `init_epoch`s it afterwards).
+    async fn build(&self) -> StateTable<S>;
+}
+
+/// Self-targeted pause control signal carried on a barrier mutation.
+#[derive(Clone, Copy)]
+enum PauseSignal {
+    /// The pause half of the pk-index barrier pair addressed to this writer actor.
+    Pause(IcebergCompactionTaskId),
+    /// No self-targeted signal on this barrier.
+    None,
 }
 
 /// Trait abstracting the Iceberg data file writing for testability.
@@ -83,11 +111,21 @@ where
     pk_indices: Vec<usize>,
     /// State table storing the PK index: `pk_columns` -> (`file_path`, `position`).
     /// Schema: [`pk_col_0`, ..., `pk_col_n`, `file_path`: Varchar, `position`: Int64]
-    pk_index_state_table: StateTable<S>,
+    ///
+    /// `None` only while the writer is paused: the handle is relinquished so a transient
+    /// compaction-apply executor can be the sole writer of `table_id`, and rebuilt on resume.
+    pk_index_state_table: Option<StateTable<S>>,
+    /// Rebuilds [`Self::pk_index_state_table`] on resume from a pause.
+    state_table_factory: Box<dyn PkIndexStateTableFactory<S>>,
     /// The Iceberg data file writer.
     writer: W,
     /// Buffer for accumulating delete position messages before the next barrier flush.
     delete_position_buffer: Option<DataChunkBuilder>,
+    /// Whether the writer is paused: its pk-index state table handle is relinquished while the
+    /// compaction-resolver job rebuilds the table. Receiving a chunk in this state is an invariant
+    /// violation.
+    paused: bool,
+    writer_control_rx: UnboundedReceiver<IcebergPkIndexWriterControl>,
     chunk_size: usize,
     sink_id: SinkId,
     local_barrier_manager: LocalBarrierManager,
@@ -104,22 +142,35 @@ where
         input: Executor,
         pk_indices: Vec<usize>,
         pk_index_state_table: StateTable<S>,
+        state_table_factory: Box<dyn PkIndexStateTableFactory<S>>,
         writer: W,
         chunk_size: usize,
         sink_id: SinkId,
         local_barrier_manager: LocalBarrierManager,
+        writer_control_rx: UnboundedReceiver<IcebergPkIndexWriterControl>,
     ) -> Self {
         Self {
             ctx,
             input: Some(input),
             pk_indices,
-            pk_index_state_table,
+            pk_index_state_table: Some(pk_index_state_table),
+            state_table_factory,
             writer,
             delete_position_buffer: None,
+            paused: false,
+            writer_control_rx,
             chunk_size,
             sink_id,
             local_barrier_manager,
         }
+    }
+
+    /// The pk-index state table. Panics if called while paused (the handle is relinquished then),
+    /// which never happens: `process_chunk`/commit paths run only while the writer is running.
+    fn state_table_mut(&mut self) -> &mut StateTable<S> {
+        self.pk_index_state_table
+            .as_mut()
+            .expect("pk-index state table must be present while the writer is running")
     }
 
     async fn delete_existing_row(
@@ -127,7 +178,7 @@ where
         pk_row: PkRow<'_>,
         delete_position_buffer: &mut DataChunkBuilder,
     ) -> StreamExecutorResult<Option<DataChunk>> {
-        let Some(index_row) = self.pk_index_state_table.get_row(pk_row).await? else {
+        let Some(index_row) = self.state_table_mut().get_row(pk_row).await? else {
             return Ok(None);
         };
 
@@ -141,7 +192,7 @@ where
             .context("position should not be null")?
             .into_int64();
         let chunk = append_row(delete_position_buffer, file_path, position);
-        self.pk_index_state_table.delete(index_row);
+        self.state_table_mut().delete(index_row);
         Ok(chunk)
     }
 
@@ -227,12 +278,12 @@ where
                 }
                 index_row_data.push(Some(ScalarRefImpl::Utf8(&pos.path)));
                 index_row_data.push(Some(ScalarRefImpl::Int64(pos.pos)));
-                self.pk_index_state_table.insert(index_row_data.as_slice());
+                self.state_table_mut().insert(index_row_data.as_slice());
             }
         }
 
         self.delete_position_buffer = Some(delete_position_buffer);
-        self.pk_index_state_table.try_flush().await?;
+        self.state_table_mut().try_flush().await?;
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -242,15 +293,18 @@ where
         // Consume the first barrier.
         let barrier = expect_first_barrier(&mut input).await?;
         let first_epoch = barrier.epoch;
-
         yield Message::Barrier(barrier);
-        self.pk_index_state_table.init_epoch(first_epoch).await?;
+        self.state_table_mut().init_epoch(first_epoch).await?;
 
-        #[for_await]
-        for msg in input {
+        while let Some(msg) = input.next().await {
             match msg? {
-                Message::Chunk(chunk) =>
-                {
+                Message::Chunk(chunk) => {
+                    if self.paused {
+                        bail!(
+                            "iceberg pk-index writer {} received chunk while paused",
+                            self.sink_id
+                        );
+                    }
                     #[for_await]
                     for data_chunk in self.process_chunk(chunk) {
                         yield Message::Chunk(data_chunk?.into());
@@ -258,7 +312,18 @@ where
                 }
                 Message::Barrier(barrier) => {
                     barrier.assume_no_update_vnode_bitmap(self.ctx.id)?;
+                    let epoch = barrier.epoch;
+                    let signal = self.pause_signal(&barrier);
 
+                    if self.paused {
+                        bail!(
+                            "iceberg pk-index writer {} unexpectedly returned to its input loop while paused",
+                            self.sink_id
+                        );
+                    }
+
+                    // Running: the normal per-barrier path. `commit` runs every barrier; the
+                    // delete-buffer drain + iceberg flush are checkpoint-gated.
                     let mut metadata = None;
                     if barrier.is_checkpoint() {
                         if let Some(chunk) = self
@@ -271,10 +336,9 @@ where
                         metadata = self.writer.flush().await?;
                     }
 
-                    self.pk_index_state_table
+                    self.state_table_mut()
                         .commit_assert_no_update_vnode_bitmap(barrier.epoch)
                         .await?;
-
                     if let Some(metadata) = metadata
                         && metadata.metadata.is_some()
                     {
@@ -287,14 +351,127 @@ where
                                 Some(metadata),
                             );
                     }
-
                     yield Message::Barrier(barrier);
+
+                    if let PauseSignal::Pause(task_id) = signal {
+                        #[for_await]
+                        for msg in self.wait_compaction_resolve(&mut input, task_id, epoch) {
+                            yield msg?;
+                        }
+                    }
                 }
                 Message::Watermark(w) => {
                     yield Message::Watermark(w);
                 }
             }
         }
+    }
+
+    fn pause_signal(&self, barrier: &Barrier) -> PauseSignal {
+        match barrier.iceberg_pk_index_barrier() {
+            Some(context)
+                if context.sink_id == self.sink_id
+                    && context.phase == IcebergPkIndexBarrierPhase::Pause
+                    && context.gated_actor_ids.contains(&self.ctx.id) =>
+            {
+                PauseSignal::Pause(context.task_id)
+            }
+            _ => PauseSignal::None,
+        }
+    }
+
+    #[try_stream(ok = Message, error = StreamExecutorError)]
+    async fn wait_compaction_resolve<'a>(
+        &'a mut self,
+        input: &'a mut BoxedMessageStream,
+        task_id: IcebergCompactionTaskId,
+        epoch: EpochPair,
+    ) {
+        let seal_epoch = epoch.curr;
+        self.pk_index_state_table = None;
+        self.paused = true;
+
+        let seal_control = self.writer_control_rx.recv().await.ok_or_else(|| {
+            StreamExecutorError::channel_closed(
+                "pk-index writer control channel closed while waiting for SealReady",
+            )
+        })?;
+        match seal_control {
+            IcebergPkIndexWriterControl::SealReady {
+                task_id: received_task_id,
+                epoch: received_epoch,
+            } if received_task_id == task_id && received_epoch == seal_epoch => {}
+            _ => bail!(
+                "iceberg pk-index writer {} expected SealReady({}, {}) but received {:?}",
+                self.sink_id,
+                task_id,
+                seal_epoch,
+                seal_control
+            ),
+        }
+
+        let next_message = input.next().await.ok_or_else(|| {
+            StreamExecutorError::channel_closed(
+                "pk-index writer input closed while waiting for the second compaction barrier",
+            )
+        })??;
+        let b2 = match next_message {
+            Message::Barrier(barrier) => barrier,
+            Message::Chunk(_) => bail!(
+                "iceberg pk-index writer {} received chunk between compaction barriers",
+                self.sink_id
+            ),
+            Message::Watermark(_) => bail!(
+                "iceberg pk-index writer {} received watermark between compaction barriers",
+                self.sink_id
+            ),
+        };
+        if !b2.is_checkpoint() || b2.epoch.prev != seal_epoch {
+            bail!(
+                "iceberg pk-index writer {} expected checkpoint starting at {}, got {:?}",
+                self.sink_id,
+                seal_epoch,
+                b2
+            );
+        }
+        match b2.iceberg_pk_index_barrier() {
+            Some(context)
+                if context.sink_id == self.sink_id
+                    && context.task_id == task_id
+                    && context.phase == IcebergPkIndexBarrierPhase::Resume
+                    && context.gated_actor_ids.contains(&self.ctx.id) => {}
+            _ => bail!(
+                "iceberg pk-index writer {} expected matching Resume mutation on the second compaction barrier, got {:?}",
+                self.sink_id,
+                b2
+            ),
+        }
+        let b2_epoch = b2.epoch;
+        yield Message::Barrier(b2);
+
+        let committed_control = self.writer_control_rx.recv().await.ok_or_else(|| {
+            StreamExecutorError::channel_closed(
+                "pk-index writer control channel closed while waiting for Committed",
+            )
+        })?;
+        match committed_control {
+            IcebergPkIndexWriterControl::Committed {
+                task_id: received_task_id,
+                epoch: received_epoch,
+            } if received_task_id == task_id && received_epoch == seal_epoch => {}
+            _ => bail!(
+                "iceberg pk-index writer {} received unexpected control {:?} while waiting for Committed({}, {})",
+                self.sink_id,
+                committed_control,
+                task_id,
+                seal_epoch
+            ),
+        }
+
+        let mut state_table = self.state_table_factory.build().await;
+        state_table.init_epoch(b2_epoch).await?;
+        self.pk_index_state_table = Some(state_table);
+        self.paused = false;
     }
 }
 

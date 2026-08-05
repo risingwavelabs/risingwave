@@ -52,8 +52,11 @@ use super::position_delete_staging::StagingVersion;
 /// loads the table from the catalog (retrying until it reflects the committed
 /// snapshot) and seeds the per-shard delete state in [`StagingVersion`] from the
 /// delete manifests. The seeded state is awaited lazily at the first flush; the
-/// table handle is kept for object-store I/O and cached metadata and never
-/// reloaded afterwards.
+/// table handle is kept for object-store I/O and cached metadata.
+///
+/// `start_seed` is also called again after each compaction commit. That restart drops the whole
+/// [`SeededState`] — table handle, resident delete vectors and all — and repeats the sequence
+/// against the post-compaction snapshot.
 pub struct PositionDeleteHandlerImpl {
     config: IcebergConfig,
     actor_id: ActorId,
@@ -229,6 +232,16 @@ impl PositionDeleteHandlerImpl {
 #[async_trait::async_trait]
 impl PositionDeleteHandler for PositionDeleteHandlerImpl {
     fn start_seed(&mut self, wait_epoch: u64) {
+        // Restart (post-compaction re-seed): drop everything the previous seed produced. Replacing
+        // `self.inner` below drops any `SeededState`, and with it the whole resident delete-vector
+        // cache; abort a still-running previous seed first so it does not linger as a detached task
+        // pinning the meta wait RPC and catalog-reload retries.
+        if let HandlerInner::Seeding(handle) =
+            std::mem::replace(&mut self.inner, HandlerInner::Unseeded)
+        {
+            handle.abort();
+        }
+
         let config = self.config.clone();
         let actor_id = self.actor_id;
         let vnode_bitmap = self.vnode_bitmap.clone();
