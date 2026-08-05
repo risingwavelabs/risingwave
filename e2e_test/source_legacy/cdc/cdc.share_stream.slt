@@ -389,6 +389,8 @@ CREATE TABLE parallelized_cdc.text_pk_binary_ordering_test (
     payload TEXT,
     PRIMARY KEY (id, seq)
 );
+CREATE INDEX ON parallelized_cdc.text_pk_binary_ordering_test
+    (id COLLATE \"C\", seq);
 INSERT INTO parallelized_cdc.text_pk_binary_ordering_test VALUES
     ('B', 1, 'uppercase'),
     ('a', 2, 'lowercase'),

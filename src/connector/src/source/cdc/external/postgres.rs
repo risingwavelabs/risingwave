@@ -155,6 +155,15 @@ pub struct PostgresExternalTableReader {
     schema_table_name: SchemaTableName,
 }
 
+#[derive(Debug, Clone)]
+struct PostgresIndexKey {
+    column_name: Option<String>,
+    collation_schema: Option<String>,
+    collation_name: Option<String>,
+    descending: bool,
+    default_opclass: bool,
+}
+
 impl ExternalTableReader for PostgresExternalTableReader {
     async fn current_cdc_offset(&self) -> ConnectorResult<CdcOffset> {
         let mut client = self.client.lock().await;
@@ -343,84 +352,103 @@ impl PostgresExternalTableReader {
         }
     }
 
-    /// Warn when the primary-key index itself cannot satisfy the explicit
-    /// `COLLATE pg_catalog."C"` ordering and PostgreSQL may need a sort.
-    ///
-    /// This does not affect correctness: snapshot SQL always uses the explicit collation,
-    /// and [`Self::validate_server_encoding`] separately rejects non-UTF8 servers. A separate
-    /// matching btree/expression index may satisfy the query.
-    async fn warn_if_primary_key_index_may_require_sort(
+    /// Require an index that can satisfy every paginated snapshot query without rescanning and
+    /// sorting the remaining table. The explicit C-collated expressions cannot use a
+    /// locale-collated primary-key index, but a matching secondary index is sufficient.
+    async fn validate_cdc_ordering_index(
         client: &tokio_postgres::Client,
         table_name: &SchemaTableName,
+        primary_keys: &[String],
         binary_collated_columns: &HashSet<String>,
-    ) {
-        let rows = match client
+    ) -> ConnectorResult<()> {
+        let rows = client
             .query(
-                "SELECT a.attname, coll_ns.nspname, coll.collname \
+                "SELECT idx.indexrelid, a.attname, coll_ns.nspname, coll.collname, \
+                        (idx.indoption[key.pos] & 1::smallint) <> 0 AS descending, \
+                        opc.opcdefault \
                  FROM pg_index idx \
                  JOIN pg_class tbl ON tbl.oid = idx.indrelid \
                  JOIN pg_namespace ns ON ns.oid = tbl.relnamespace \
+                 JOIN pg_class index_rel ON index_rel.oid = idx.indexrelid \
+                 JOIN pg_am am ON am.oid = index_rel.relam \
                  JOIN LATERAL generate_subscripts(idx.indkey, 1) AS key(pos) ON TRUE \
-                 JOIN pg_attribute a ON a.attrelid = idx.indrelid \
+                 LEFT JOIN pg_attribute a ON a.attrelid = idx.indrelid \
                    AND a.attnum = idx.indkey[key.pos] \
+                 JOIN pg_opclass opc ON opc.oid = idx.indclass[key.pos] \
                  LEFT JOIN pg_collation coll \
                    ON coll.oid = idx.indcollation[key.pos] \
                  LEFT JOIN pg_namespace coll_ns ON coll_ns.oid = coll.collnamespace \
-                 WHERE ns.nspname = $1 AND tbl.relname = $2 AND idx.indisprimary \
-                 ORDER BY key.pos",
+                 WHERE ns.nspname = $1 AND tbl.relname = $2 \
+                   AND am.amname = 'btree' \
+                   AND idx.indisvalid AND idx.indisready AND idx.indislive \
+                   AND idx.indpred IS NULL \
+                   AND key.pos < array_lower(idx.indkey, 1) + idx.indnkeyatts \
+                 ORDER BY idx.indexrelid, key.pos",
                 &[&table_name.schema_name, &table_name.table_name],
             )
             .await
-        {
-            Ok(rows) => rows,
-            Err(error) => {
-                tracing::warn!(
-                    error = %error.as_report(),
-                    schema = %table_name.schema_name,
-                    table = %table_name.table_name,
-                    "failed to inspect PostgreSQL primary-key index collation"
-                );
-                return;
-            }
-        };
+            .with_context(|| {
+                format!(
+                    "failed to validate PostgreSQL CDC ordering indexes for table {}",
+                    Self::get_normalized_table_name(table_name)
+                )
+            })?;
 
-        let mut compatible_columns = HashSet::new();
-        let mut incompatible_columns = Vec::new();
+        let mut indexes = HashMap::<u32, Vec<PostgresIndexKey>>::new();
         for row in rows {
-            let column_name: String = row.get(0);
-            if !binary_collated_columns.contains(&column_name) {
-                continue;
-            }
-            let collation_schema: Option<String> = row.get(1);
-            let collation_name: Option<String> = row.get(2);
-            if collation_schema.as_deref() == Some("pg_catalog")
-                && collation_name.as_deref() == Some("C")
-            {
-                compatible_columns.insert(column_name);
-            } else {
-                incompatible_columns.push((column_name, collation_schema, collation_name));
-            }
-        }
-        for column in binary_collated_columns.difference(&compatible_columns) {
-            if !incompatible_columns
-                .iter()
-                .any(|(incompatible, _, _)| incompatible == column)
-            {
-                incompatible_columns.push((column.clone(), None, None));
-            }
+            let index_oid: u32 = row.get(0);
+            indexes
+                .entry(index_oid)
+                .or_default()
+                .push(PostgresIndexKey {
+                    column_name: row.get(1),
+                    collation_schema: row.get(2),
+                    collation_name: row.get(3),
+                    descending: row.get(4),
+                    default_opclass: row.get(5),
+                });
         }
 
-        if !incompatible_columns.is_empty() {
-            tracing::warn!(
-                schema = %table_name.schema_name,
-                table = %table_name.table_name,
-                ?incompatible_columns,
-                "PostgreSQL CDC uses explicit COLLATE pg_catalog.\"C\" for TEXT/VARCHAR \
-                 primary-key ordering; the primary-key index has a different collation, so \
-                 snapshot scans may require a sort. Consider a matching btree/expression index \
-                 using COLLATE pg_catalog.\"C\" and verify it with EXPLAIN"
-            );
+        if indexes.values().any(|index| {
+            Self::index_supports_cdc_ordering(index, primary_keys, binary_collated_columns)
+        }) {
+            return Ok(());
         }
+
+        let table = Self::get_normalized_table_name(table_name);
+        let required_order =
+            Self::get_order_key_with_collation(primary_keys, binary_collated_columns);
+        Err(anyhow::anyhow!(
+            "PostgreSQL CDC TEXT/VARCHAR primary-key ordering requires a valid, ready, \
+             non-partial B-tree index whose leading keys are ({required_order}), but table \
+             {table} has no such index; create one before starting CDC, for example: \
+             CREATE INDEX ON {table} ({required_order})"
+        )
+        .into())
+    }
+
+    fn index_supports_cdc_ordering(
+        index: &[PostgresIndexKey],
+        primary_keys: &[String],
+        binary_collated_columns: &HashSet<String>,
+    ) -> bool {
+        let Some(index_prefix) = index.get(..primary_keys.len()) else {
+            return false;
+        };
+        let Some(first_key) = index_prefix.first() else {
+            return false;
+        };
+        index_prefix
+            .iter()
+            .zip_eq_fast(primary_keys)
+            .all(|(index_key, primary_key)| {
+                index_key.column_name.as_deref() == Some(primary_key)
+                    && index_key.default_opclass
+                    && index_key.descending == first_key.descending
+                    && (!binary_collated_columns.contains(primary_key)
+                        || (index_key.collation_schema.as_deref() == Some("pg_catalog")
+                            && index_key.collation_name.as_deref() == Some("C")))
+            })
     }
 
     pub async fn new(
@@ -448,12 +476,13 @@ impl PostgresExternalTableReader {
         .await?;
         if !binary_collated_pk_columns.is_empty() {
             Self::validate_server_encoding(&client).await?;
-            Self::warn_if_primary_key_index_may_require_sort(
+            Self::validate_cdc_ordering_index(
                 &client,
                 &schema_table_name,
+                &pk_column_names,
                 &binary_collated_pk_columns,
             )
-            .await;
+            .await?;
         }
 
         // Discover user-defined composite columns and arrays of composites.
@@ -1263,7 +1292,9 @@ mod tests {
     use tokio_postgres::types::Type as PgType;
 
     use crate::connector_common::PostgresExternalTable;
-    use crate::source::cdc::external::postgres::{PostgresExternalTableReader, PostgresOffset};
+    use crate::source::cdc::external::postgres::{
+        PostgresExternalTableReader, PostgresIndexKey, PostgresOffset,
+    };
     use crate::source::cdc::external::{ExternalTableConfig, ExternalTableReader, SchemaTableName};
 
     #[ignore]
@@ -1537,6 +1568,87 @@ mod tests {
             PostgresExternalTableReader::get_order_key_with_collation(&cols, &binary_columns),
             "\"v1\" COLLATE pg_catalog.\"C\",\"v2\",\"v3\" COLLATE pg_catalog.\"C\""
         );
+    }
+
+    #[test]
+    fn test_postgres_cdc_ordering_index_policy() {
+        fn key(
+            column_name: Option<&str>,
+            collation: Option<(&str, &str)>,
+            descending: bool,
+            default_opclass: bool,
+        ) -> PostgresIndexKey {
+            PostgresIndexKey {
+                column_name: column_name.map(str::to_owned),
+                collation_schema: collation.map(|(schema, _)| schema.to_owned()),
+                collation_name: collation.map(|(_, name)| name.to_owned()),
+                descending,
+                default_opclass,
+            }
+        }
+
+        let primary_keys = vec!["tenant_id".to_owned(), "id".to_owned()];
+        let binary_columns = HashSet::from(["id".to_owned()]);
+        let compatible = vec![
+            key(Some("tenant_id"), None, false, true),
+            key(Some("id"), Some(("pg_catalog", "C")), false, true),
+        ];
+        assert!(PostgresExternalTableReader::index_supports_cdc_ordering(
+            &compatible,
+            &primary_keys,
+            &binary_columns,
+        ));
+
+        let mut locale_collated = compatible.clone();
+        locale_collated[1].collation_name = Some("en-x-icu".to_owned());
+        assert!(!PostgresExternalTableReader::index_supports_cdc_ordering(
+            &locale_collated,
+            &primary_keys,
+            &binary_columns,
+        ));
+        assert!(!PostgresExternalTableReader::index_supports_cdc_ordering(
+            &compatible[..1],
+            &primary_keys,
+            &binary_columns,
+        ));
+
+        let mixed_direction = vec![
+            key(Some("tenant_id"), None, false, true),
+            key(Some("id"), Some(("pg_catalog", "C")), true, true),
+        ];
+        assert!(!PostgresExternalTableReader::index_supports_cdc_ordering(
+            &mixed_direction,
+            &primary_keys,
+            &binary_columns,
+        ));
+        let all_descending = vec![
+            key(Some("tenant_id"), None, true, true),
+            key(Some("id"), Some(("pg_catalog", "C")), true, true),
+        ];
+        assert!(PostgresExternalTableReader::index_supports_cdc_ordering(
+            &all_descending,
+            &primary_keys,
+            &binary_columns,
+        ));
+
+        let non_default_opclass = vec![
+            key(Some("tenant_id"), None, false, true),
+            key(Some("id"), Some(("pg_catalog", "C")), false, false),
+        ];
+        assert!(!PostgresExternalTableReader::index_supports_cdc_ordering(
+            &non_default_opclass,
+            &primary_keys,
+            &binary_columns,
+        ));
+        let expression_key = vec![
+            key(Some("tenant_id"), None, false, true),
+            key(None, Some(("pg_catalog", "C")), false, true),
+        ];
+        assert!(!PostgresExternalTableReader::index_supports_cdc_ordering(
+            &expression_key,
+            &primary_keys,
+            &binary_columns,
+        ));
     }
 
     #[test]
