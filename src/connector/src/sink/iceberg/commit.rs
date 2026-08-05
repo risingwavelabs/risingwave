@@ -159,14 +159,14 @@ impl<'a> TryFrom<&'a IcebergCommitResult> for Vec<u8> {
 }
 
 #[derive(Default, Clone, Serialize, Deserialize)]
-pub struct IcebergPositionDeleteMergerCommitResult {
+pub struct IcebergPositionDeleteCommitResult {
     pub schema_id: i32,
     pub partition_spec_id: i32,
     pub delete_files: Vec<SerializedDataFile>,
     pub overwrite_files: Vec<SerializedDataFile>,
 }
 
-impl<'a> TryFrom<&'a SinkMetadata> for IcebergPositionDeleteMergerCommitResult {
+impl<'a> TryFrom<&'a SinkMetadata> for IcebergPositionDeleteCommitResult {
     type Error = SinkError;
 
     fn try_from(value: &'a SinkMetadata) -> Result<Self> {
@@ -179,10 +179,10 @@ impl<'a> TryFrom<&'a SinkMetadata> for IcebergPositionDeleteMergerCommitResult {
     }
 }
 
-impl<'a> TryFrom<&'a IcebergPositionDeleteMergerCommitResult> for SinkMetadata {
+impl<'a> TryFrom<&'a IcebergPositionDeleteCommitResult> for SinkMetadata {
     type Error = SinkError;
 
-    fn try_from(value: &'a IcebergPositionDeleteMergerCommitResult) -> Result<SinkMetadata> {
+    fn try_from(value: &'a IcebergPositionDeleteCommitResult) -> Result<SinkMetadata> {
         let bytes = serde_json::to_vec(value)
             .context("Can't serialize iceberg dv merger commit result to metadata")?;
         Ok(SinkMetadata {

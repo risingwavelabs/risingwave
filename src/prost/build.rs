@@ -260,6 +260,9 @@ for_all_wrapped_id_fields! (
         CompactIcebergTableRequest {
             sink_id: SinkId,
         }
+        CompactIcebergTableResponse {
+            task_id: IcebergCompactionTaskId,
+        }
         CreateConnectionRequest {
             database_id: DatabaseId,
             schema_id: SchemaId,
@@ -557,8 +560,17 @@ for_all_wrapped_id_fields! (
         }
     }
     iceberg_compaction {
+        CancelCompactTask {
+            task_id: IcebergCompactionTaskId,
+        }
+        IcebergCompactionTask {
+            task_id: IcebergCompactionTaskId,
+        }
         SubscribeIcebergCompactionEventRequest.Register {
             context_id: WorkerId,
+        }
+        SubscribeIcebergCompactionEventRequest.ReportTask {
+            task_id: IcebergCompactionTaskId,
         }
     }
     meta {

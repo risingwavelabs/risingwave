@@ -82,7 +82,7 @@ use risingwave_pb::iceberg_compaction::{
     SubscribeIcebergCompactionEventRequest, SubscribeIcebergCompactionEventResponse,
     subscribe_iceberg_compaction_event_request,
 };
-use risingwave_pb::id::{ActorId, FragmentId, HummockSstableId, SourceId};
+use risingwave_pb::id::{ActorId, FragmentId, HummockSstableId, IcebergCompactionTaskId, SourceId};
 use risingwave_pb::meta::alter_connector_props_request::{
     AlterConnectorPropsObject, AlterIcebergTableIds, ExtraOptions,
 };
@@ -380,12 +380,6 @@ impl MetaClient {
     pub async fn send_heartbeat(&self) -> Result<()> {
         let request = HeartbeatRequest {
             node_id: self.worker_id,
-            resource: Some(risingwave_pb::common::worker_node::Resource {
-                rw_version: RW_VERSION.to_owned(),
-                total_memory_bytes: system_memory_available_bytes() as _,
-                total_cpu_cores: total_cpu_available() as _,
-                hostname: hostname(),
-            }),
         };
         let resp = self.inner.heartbeat(request).await?;
         if let Some(status) = resp.status
@@ -911,7 +905,7 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn compact_iceberg_table(&self, sink_id: SinkId) -> Result<u64> {
+    pub async fn compact_iceberg_table(&self, sink_id: SinkId) -> Result<IcebergCompactionTaskId> {
         let request = CompactIcebergTableRequest { sink_id };
         let resp = self.inner.compact_iceberg_table(request).await?;
         Ok(resp.task_id)
