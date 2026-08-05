@@ -44,6 +44,7 @@ const WAIT_TIMEOUT: Duration = Duration::from_secs(100);
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
 const FRONTEND_HOSTS: [&str; 2] = ["192.168.2.1", "192.168.2.2"];
 const COMPUTE_HOSTS: [&str; 2] = ["192.168.3.1", "192.168.3.2"];
+const COMPUTE_NODES: [&str; 2] = ["compute-1", "compute-2"];
 const UPGRADED_VERSION: &str = "rw-version-from-newer-binary";
 const SIMULATED_RW_VERSION_ENV: &str = "RW_SIMULATED_RW_VERSION";
 const SIMULATED_RW_VERSION_NODES_ENV: &str = "RW_SIMULATED_RW_VERSION_NODES";
@@ -226,14 +227,6 @@ async fn wait_worker_versions_on_all_frontends(cluster: &Cluster, expected: &str
     Ok(())
 }
 
-async fn wait_batch_query_on_all_frontends(cluster: &Cluster, table_name: &str) -> Result<()> {
-    let sql = format!("SELECT count(*), sum(v) FROM {table_name};");
-    for host in FRONTEND_HOSTS {
-        wait_frontend_result(cluster, host, &sql, "1000 500500").await?;
-    }
-    Ok(())
-}
-
 async fn wait_batch_query_on_frontend(
     cluster: &Cluster,
     frontend_host: &str,
@@ -247,26 +240,32 @@ async fn wait_frontend_schedules_batch_query_to_same_version_compute(
     cluster: &Cluster,
     frontend_host: &str,
     table_name: &str,
-    expected_compute: &str,
-    mismatched_compute: &str,
+    expected_computes: &[&str],
+    mismatched_computes: &[&str],
 ) -> Result<()> {
     tokio::time::timeout(WAIT_TIMEOUT, async {
         loop {
             reset_create_task_counts();
             wait_batch_query_on_frontend(cluster, frontend_host, table_name).await?;
 
-            let expected_count = create_task_count(expected_compute);
-            let mismatched_count = create_task_count(mismatched_compute);
-            if expected_count > 0 && mismatched_count == 0 {
+            let expected_counts = expected_computes
+                .iter()
+                .map(|compute| (*compute, create_task_count(compute)))
+                .collect_vec();
+            let mismatched_counts = mismatched_computes
+                .iter()
+                .map(|compute| (*compute, create_task_count(compute)))
+                .collect_vec();
+            if expected_counts.iter().all(|(_, count)| *count > 0)
+                && mismatched_counts.iter().all(|(_, count)| *count == 0)
+            {
                 return Ok(());
             }
 
             tracing::info!(
                 frontend_host,
-                expected_compute,
-                expected_count,
-                mismatched_compute,
-                mismatched_count,
+                ?expected_counts,
+                ?mismatched_counts,
                 "frontend scheduler has not applied rw_version filter yet"
             );
             sleep(POLL_INTERVAL).await;
@@ -275,10 +274,28 @@ async fn wait_frontend_schedules_batch_query_to_same_version_compute(
     .await
     .map_err(|_| {
         anyhow!(
-            "{frontend_host} did not schedule batch tasks only to same-version {expected_compute}; \
-             mismatched compute {mismatched_compute} was still used"
+            "{frontend_host} did not schedule batch tasks only to same-version computes: \
+             expected {expected_computes:?}, mismatched {mismatched_computes:?}"
         )
     })?
+}
+
+async fn wait_frontends_schedule_batch_query_to_same_version_computes(
+    cluster: &Cluster,
+    table_name: &str,
+    frontend_compute_sets: &[(&str, &[&str], &[&str])],
+) -> Result<()> {
+    for (frontend_host, expected_computes, mismatched_computes) in frontend_compute_sets {
+        wait_frontend_schedules_batch_query_to_same_version_compute(
+            cluster,
+            frontend_host,
+            table_name,
+            expected_computes,
+            mismatched_computes,
+        )
+        .await?;
+    }
+    Ok(())
 }
 
 async fn create_test_table(cluster: &mut Cluster, table_name: &str) -> Result<u32> {
@@ -413,7 +430,15 @@ async fn assert_serving_cluster(cluster: &mut Cluster, table_name: &str) -> Resu
     wait_for_cluster_ready(cluster).await?;
     let table_id = create_test_table(cluster, table_name).await?;
     wait_for_expected_serving_mapping(cluster, table_id, &COMPUTE_HOSTS).await?;
-    wait_batch_query_on_all_frontends(cluster, table_name).await
+    wait_frontends_schedule_batch_query_to_same_version_computes(
+        cluster,
+        table_name,
+        &[
+            (FRONTEND_HOSTS[0], &COMPUTE_NODES, &[]),
+            (FRONTEND_HOSTS[1], &COMPUTE_NODES, &[]),
+        ],
+    )
+    .await
 }
 
 async fn wait_worker_hosts_registered(
@@ -504,7 +529,15 @@ async fn test_serving_mapping_after_meta_restart() -> Result<()> {
         .parse()
         .context("failed to parse serve_meta_restart table id")?;
     wait_for_expected_serving_mapping(&cluster, table_id, &COMPUTE_HOSTS).await?;
-    wait_batch_query_on_all_frontends(&cluster, "serve_meta_restart").await
+    wait_frontends_schedule_batch_query_to_same_version_computes(
+        &cluster,
+        "serve_meta_restart",
+        &[
+            (FRONTEND_HOSTS[0], &COMPUTE_NODES, &[]),
+            (FRONTEND_HOSTS[1], &COMPUTE_NODES, &[]),
+        ],
+    )
+    .await
 }
 
 #[tokio::test]
@@ -544,24 +577,13 @@ async fn test_serving_mapping_masks_worker_with_mismatched_version() -> Result<(
 
     wait_worker_hosts_registered(&cluster, &COMPUTE_HOSTS).await?;
     wait_for_expected_serving_mapping(&cluster, table_id, &COMPUTE_HOSTS).await?;
-    wait_batch_query_on_all_frontends(&cluster, "serve_version_mask").await?;
-
-    wait_frontend_schedules_batch_query_to_same_version_compute(
+    wait_frontends_schedule_batch_query_to_same_version_computes(
         &cluster,
-        FRONTEND_HOSTS[0],
         "serve_version_mask",
-        "compute-1",
-        "compute-2",
+        &[
+            (FRONTEND_HOSTS[0], &["compute-1"], &["compute-2"]),
+            (FRONTEND_HOSTS[1], &["compute-2"], &["compute-1"]),
+        ],
     )
-    .await?;
-    wait_frontend_schedules_batch_query_to_same_version_compute(
-        &cluster,
-        FRONTEND_HOSTS[1],
-        "serve_version_mask",
-        "compute-2",
-        "compute-1",
-    )
-    .await?;
-
-    wait_batch_query_on_all_frontends(&cluster, "serve_version_mask").await
+    .await
 }
