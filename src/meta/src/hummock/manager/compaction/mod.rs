@@ -186,6 +186,11 @@ fn can_concat_after_compact_task(
     if !fits_before_next {
         // A valid task replaces a contiguous target range, so all sorted outputs must fit into a
         // single gap. Reject interleaved output instead of using `level_insert_ssts`' fallback.
+        warn!(
+            insert = ?insert_table_infos,
+            level = ?target_ssts,
+            "rejecting interleaved compaction output"
+        );
         return false;
     }
 
