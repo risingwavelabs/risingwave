@@ -441,6 +441,11 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::flush_buffer_threshold_mb")]
     pub flush_buffer_threshold_mb: Option<usize>,
 
+    /// Maximum estimated size of cache entries waiting in the flusher submit queues. New cache
+    /// entries are ignored when the pending size exceeds this threshold.
+    #[serde(default = "default::file_cache::submit_queue_size_threshold_mb")]
+    pub submit_queue_size_threshold_mb: usize,
+
     #[serde(default = "default::file_cache::throttle")]
     pub throttle: Throttle,
 
@@ -1226,6 +1231,10 @@ pub mod default {
 
         pub fn flush_buffer_threshold_mb() -> Option<usize> {
             None
+        }
+
+        pub fn submit_queue_size_threshold_mb() -> usize {
+            16
         }
 
         pub fn fifo_probation_ratio() -> f64 {

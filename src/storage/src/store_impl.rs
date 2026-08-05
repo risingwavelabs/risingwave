@@ -722,7 +722,10 @@ impl StateStoreImpl {
                         .with_indexer_shards(opts.meta_file_cache_indexer_shards)
                         .with_flushers(opts.meta_file_cache_flushers)
                         .with_reclaimers(opts.meta_file_cache_reclaimers)
-                        .with_buffer_pool_size(opts.meta_file_cache_flush_buffer_threshold_mb * MB) // 128 MiB
+                        .with_buffer_pool_size(opts.meta_file_cache_flush_buffer_threshold_mb * MB)
+                        .with_submit_queue_size_threshold(
+                            opts.meta_file_cache_submit_queue_size_threshold_mb * MB,
+                        )
                         .with_clean_block_threshold(
                             opts.meta_file_cache_reclaimers + opts.meta_file_cache_reclaimers / 2,
                         )
@@ -772,7 +775,10 @@ impl StateStoreImpl {
                         .with_indexer_shards(opts.data_file_cache_indexer_shards)
                         .with_flushers(opts.data_file_cache_flushers)
                         .with_reclaimers(opts.data_file_cache_reclaimers)
-                        .with_buffer_pool_size(opts.data_file_cache_flush_buffer_threshold_mb * MB) // 128 MiB
+                        .with_buffer_pool_size(opts.data_file_cache_flush_buffer_threshold_mb * MB)
+                        .with_submit_queue_size_threshold(
+                            opts.data_file_cache_submit_queue_size_threshold_mb * MB,
+                        )
                         .with_clean_block_threshold(
                             opts.data_file_cache_reclaimers + opts.data_file_cache_reclaimers / 2,
                         )
