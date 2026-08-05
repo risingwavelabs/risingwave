@@ -156,6 +156,10 @@ fn can_concat_after_compact_task(
         .collect_vec();
 
     if target_level.level_type == PbLevelType::Overlapping {
+        // An overlapping target is normally a whole L0 sub-level selected by tier or manual L0
+        // compaction, so removing task inputs usually leaves it empty. Preserve and validate any
+        // remaining SSTs because the actual apply path retains them before converting the target
+        // level to non-overlapping.
         target_ssts.extend(insert_table_infos);
         target_ssts.sort_by(|left, right| left.key_range.cmp(&right.key_range));
         return can_concat(&target_ssts);
