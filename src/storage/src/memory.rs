@@ -1735,7 +1735,10 @@ mod tests {
                 .iter_log(
                     (epoch1, epoch1),
                     (Unbounded, Unbounded),
-                    ReadLogOptions { table_id },
+                    ReadLogOptions {
+                        table_id,
+                        table_change_log_prefetch_limit: DEFAULT_CHANGE_LOG_PREFETCH_LIMIT,
+                    },
                 )
                 .await
                 .unwrap();
@@ -1778,7 +1781,10 @@ mod tests {
                 .iter_log(
                     (epoch2, epoch2),
                     (Unbounded, Unbounded),
-                    ReadLogOptions { table_id },
+                    ReadLogOptions {
+                        table_id,
+                        table_change_log_prefetch_limit: DEFAULT_CHANGE_LOG_PREFETCH_LIMIT,
+                    },
                 )
                 .await
                 .unwrap();
@@ -1801,7 +1807,10 @@ mod tests {
                 .iter_log(
                     (epoch1, epoch1),
                     (Unbounded, Unbounded),
-                    ReadLogOptions { table_id },
+                    ReadLogOptions {
+                        table_id,
+                        table_change_log_prefetch_limit: DEFAULT_CHANGE_LOG_PREFETCH_LIMIT,
+                    },
                 )
                 .await
                 .unwrap();
@@ -1818,7 +1827,10 @@ mod tests {
                 .iter_log(
                     (epoch1, epoch2),
                     (Unbounded, Unbounded),
-                    ReadLogOptions { table_id },
+                    ReadLogOptions {
+                        table_id,
+                        table_change_log_prefetch_limit: DEFAULT_CHANGE_LOG_PREFETCH_LIMIT,
+                    },
                 )
                 .await
                 .unwrap();
