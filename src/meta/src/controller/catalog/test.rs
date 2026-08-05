@@ -1363,11 +1363,19 @@ mod tests {
 
         let mut inner = mgr.inner.write().await;
         let txn = inner.db.begin().await?;
+        let obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(TEST_SCHEMA_ID.as_object_id()),
+        )
+        .await?;
+        let job_id = obj.oid.as_job_id();
         let source_obj = CatalogController::create_object(
             &txn,
             ObjectType::Source,
             TEST_OWNER_ID,
-            Some(TEST_SCHEMA_ID.as_object_id()),
+            Some(job_id.as_object_id()),
         )
         .await?;
         Source::insert(source::ActiveModel::from(PbSource {
@@ -1380,14 +1388,6 @@ mod tests {
         }))
         .exec(&txn)
         .await?;
-        let obj = CatalogController::create_object(
-            &txn,
-            ObjectType::Table,
-            TEST_OWNER_ID,
-            Some(TEST_SCHEMA_ID.as_object_id()),
-        )
-        .await?;
-        let job_id = obj.oid.as_job_id();
 
         table::ActiveModel {
             table_id: Set(obj.oid.as_table_id()),
