@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::config::storage::FileCacheRuntimeConfig;
 use risingwave_common::config::{
     EvictionConfig, ObjectStoreConfig, RwConfig, StorageMemoryConfig, extract_storage_memory_config,
 };
@@ -99,7 +100,7 @@ pub struct StorageOpts {
     pub data_file_cache_submit_queue_size_threshold_mb: usize,
     pub data_file_cache_fifo_probation_ratio: f64,
     pub data_file_cache_blob_index_size_kb: usize,
-    pub data_file_cache_runtime_config: foyer::RuntimeOptions,
+    pub data_file_cache_runtime_config: FileCacheRuntimeConfig,
     pub data_file_cache_throttle: foyer::Throttle,
 
     pub cache_refill_data_refill_levels: Vec<u32>,
@@ -126,7 +127,7 @@ pub struct StorageOpts {
     pub meta_file_cache_submit_queue_size_threshold_mb: usize,
     pub meta_file_cache_fifo_probation_ratio: f64,
     pub meta_file_cache_blob_index_size_kb: usize,
-    pub meta_file_cache_runtime_config: foyer::RuntimeOptions,
+    pub meta_file_cache_runtime_config: FileCacheRuntimeConfig,
     pub meta_file_cache_throttle: foyer::Throttle,
     pub sst_skip_bloom_filter_in_serde: bool,
 
