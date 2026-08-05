@@ -139,7 +139,8 @@ enum BuiltCompactTask {
     PendingAssignment(CompactTask),
 }
 
-// Keep this check in sync with `level_insert_ssts` in `hummock_version_ext.rs`.
+// Mirror the fast path in `level_insert_ssts`, but reject its unexpected per-SST insertion
+// fallback before applying the version delta.
 fn can_concat_after_compact_task(
     target_level: &Level,
     delete_sst_ids: &HashSet<HummockSstableId>,
@@ -182,31 +183,27 @@ fn can_concat_after_compact_task(
             last.key_range.cmp(&next.key_range) == Ordering::Less
         });
 
-    if fits_before_next {
-        // Match the neighborhood validated after `level_insert_ssts` inserts the outputs: the
-        // previous target SST, all outputs, and the next target SST.
-        let mut validate_range = Vec::with_capacity(sorted_insert.len() + 2);
-        if let Some(previous) = pos
-            .checked_sub(1)
-            .and_then(|index| target_ssts.get(index))
-            .copied()
-        {
-            validate_range.push(previous);
-        }
-        validate_range.extend(sorted_insert.iter().copied());
-        if let Some(next) = target_ssts.get(pos).copied() {
-            validate_range.push(next);
-        }
-        can_concat(&validate_range)
-    } else {
-        for sst in insert_table_infos {
-            let pos = target_ssts.partition_point(|target_sst| {
-                target_sst.key_range.cmp(&sst.key_range) == Ordering::Less
-            });
-            target_ssts.insert(pos, sst);
-        }
-        can_concat(&target_ssts)
+    if !fits_before_next {
+        // A valid task replaces a contiguous target range, so all sorted outputs must fit into a
+        // single gap. Reject interleaved output instead of using `level_insert_ssts`' fallback.
+        return false;
     }
+
+    // Match the neighborhood validated after `level_insert_ssts` inserts the outputs: the
+    // previous target SST, all outputs, and the next target SST.
+    let mut validate_range = Vec::with_capacity(sorted_insert.len() + 2);
+    if let Some(previous) = pos
+        .checked_sub(1)
+        .and_then(|index| target_ssts.get(index))
+        .copied()
+    {
+        validate_range.push(previous);
+    }
+    validate_range.extend(sorted_insert.iter().copied());
+    if let Some(next) = target_ssts.get(pos).copied() {
+        validate_range.push(next);
+    }
+    can_concat(&validate_range)
 }
 
 impl HummockVersionTransaction<'_> {
@@ -1962,6 +1959,22 @@ mod compact_task_apply_tests {
         let outputs = vec![test_sst(3, "g", "h"), test_sst(4, "d", "e")];
 
         assert!(can_concat_after_compact_task(
+            &target,
+            &HashSet::new(),
+            &outputs,
+        ));
+    }
+
+    #[test]
+    fn test_can_concat_after_compact_task_rejects_interleaved_outputs() {
+        let target = Level {
+            level_type: PbLevelType::Nonoverlapping,
+            table_infos: vec![test_sst(1, "f", "g")],
+            ..Default::default()
+        };
+        let outputs = vec![test_sst(2, "h", "i"), test_sst(3, "d", "e")];
+
+        assert!(!can_concat_after_compact_task(
             &target,
             &HashSet::new(),
             &outputs,
