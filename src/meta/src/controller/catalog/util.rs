@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_common::catalog::FragmentTypeMask;
+use risingwave_pb::stream_plan::PbStreamNode;
 
 use super::*;
 use crate::controller::fragment::FragmentTypeMaskExt;
@@ -56,7 +57,224 @@ pub(crate) async fn update_internal_tables(
 impl CatalogController {
     pub(crate) async fn init(&self) -> MetaResult<()> {
         self.table_catalog_cdc_table_id_update().await?;
+        let migrated_jobs = self.cdc_resnapshot_table_desc_update().await?;
+        if !migrated_jobs.is_empty() {
+            info!(
+                ?migrated_jobs,
+                "filled missing CDC resnapshot table descriptors before recovery"
+            );
+        }
         Ok(())
+    }
+
+    /// Fill the materialized result-table descriptor added to `StreamCdcScanNode` for legacy CDC
+    /// jobs. This must run before bootstrap recovery renders actors: unfinished parallel initial
+    /// backfills need the descriptor to diff already-committed output after a restart.
+    ///
+    /// The migration is intentionally idempotent and only fills missing fields. A future old meta
+    /// leader may decode and re-encode the plan without the new protobuf field, so this startup
+    /// repair must not be a one-shot schema migration.
+    pub(crate) async fn cdc_resnapshot_table_desc_update(&self) -> MetaResult<Vec<JobId>> {
+        fn has_missing_desc(stream_node: &PbStreamNode) -> bool {
+            let mut missing = false;
+            visit_stream_node_cont(stream_node, |node| {
+                if let Some(NodeBody::StreamCdcScan(node)) = &node.node_body
+                    && node.resnapshot_table_desc.is_none()
+                {
+                    missing = true;
+                }
+                true
+            });
+            missing
+        }
+
+        fn fill_missing_desc(
+            stream_node: &mut PbStreamNode,
+            table_desc: &StorageTableDesc,
+        ) -> bool {
+            let mut changed = false;
+            visit_stream_node_cont_mut(stream_node, |node| {
+                if let Some(NodeBody::StreamCdcScan(cdc_scan)) = &mut node.node_body
+                    && cdc_scan.resnapshot_table_desc.is_none()
+                {
+                    cdc_scan.resnapshot_table_desc = Some(table_desc.clone());
+                    changed = true;
+                }
+                true
+            });
+            changed
+        }
+
+        let inner = self.inner.read().await;
+        let txn = inner.db.begin().await?;
+
+        // Historical singleton CDC scans use StreamScan, while parallel scans use
+        // StreamCdcScan. Filter by both flags and then inspect the actual recursive node body.
+        let scan_fragments: Vec<(FragmentId, JobId, StreamNode)> = Fragment::find()
+            .select_only()
+            .columns([
+                fragment::Column::FragmentId,
+                fragment::Column::JobId,
+                fragment::Column::StreamNode,
+            ])
+            .filter(FragmentTypeMask::intersects_any([
+                FragmentTypeFlag::StreamScan,
+                FragmentTypeFlag::StreamCdcScan,
+            ]))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+
+        let mut legacy_fragments = Vec::new();
+        let mut candidate_job_ids = HashSet::new();
+        for (fragment_id, job_id, stream_node) in scan_fragments {
+            let stream_node = stream_node.to_protobuf();
+            if has_missing_desc(&stream_node) {
+                candidate_job_ids.insert(job_id);
+                legacy_fragments.push((fragment_id, job_id, stream_node));
+            }
+        }
+        if legacy_fragments.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Dirty foreground/Initial jobs are removed later by bootstrap recovery and may
+        // legitimately have fragments without a result-table catalog row. Only jobs that recovery
+        // can retain should participate in this migration.
+        let recoverable_job_ids: HashSet<JobId> = StreamingJob::find()
+            .filter(streaming_job::Column::JobId.is_in(candidate_job_ids))
+            .all(&txn)
+            .await?
+            .into_iter()
+            .filter_map(|job| {
+                (job.job_status == JobStatus::Created
+                    || job.job_status == JobStatus::Creating
+                        && job.create_type == CreateType::Background)
+                    .then_some(job.job_id)
+            })
+            .collect();
+        legacy_fragments.retain(|(_, job_id, _)| recoverable_job_ids.contains(job_id));
+        if legacy_fragments.is_empty() {
+            return Ok(vec![]);
+        }
+
+        // Resolve the real result table through each job's unique Materialize result-table ID. In
+        // particular, StreamCdcScan.table_id identifies the upstream external table and must not
+        // be used as the RisingWave storage table id.
+        let job_fragments: Vec<(JobId, StreamNode)> = Fragment::find()
+            .select_only()
+            .columns([fragment::Column::JobId, fragment::Column::StreamNode])
+            .filter(fragment::Column::JobId.is_in(recoverable_job_ids.clone()))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+        let mut materialized_table_ids: HashMap<JobId, HashSet<TableId>> = HashMap::new();
+        for (job_id, stream_node) in job_fragments {
+            let stream_node = stream_node.to_protobuf();
+            visit_stream_node_cont(&stream_node, |stream_node| {
+                if let Some(NodeBody::Materialize(node)) = &stream_node.node_body {
+                    materialized_table_ids
+                        .entry(job_id)
+                        .or_default()
+                        .insert(node.table_id);
+                }
+                true
+            });
+        }
+
+        let migrated_job_ids: HashSet<JobId> = legacy_fragments
+            .iter()
+            .map(|(_, job_id, _)| *job_id)
+            .collect();
+        let mut result_table_by_job = HashMap::new();
+        for job_id in &migrated_job_ids {
+            let table_ids = materialized_table_ids.get(job_id).ok_or_else(|| {
+                anyhow!(
+                    "recoverable legacy CDC job {} has no materialized result table",
+                    job_id
+                )
+            })?;
+            if table_ids.len() != 1 {
+                return Err(anyhow!(
+                    "recoverable legacy CDC job {} has {} materialized result tables: {:?}",
+                    job_id,
+                    table_ids.len(),
+                    table_ids
+                )
+                .into());
+            }
+            result_table_by_job.insert(*job_id, *table_ids.iter().next().unwrap());
+        }
+
+        let result_table_ids = result_table_by_job.values().copied().collect_vec();
+        let table_objs = Table::find()
+            .find_also_related(Object)
+            .filter(table::Column::TableId.is_in(result_table_ids))
+            .all(&txn)
+            .await?;
+        let streaming_jobs =
+            load_streaming_jobs_by_ids(&txn, table_objs.iter().map(|(table, _)| table.job_id()))
+                .await?;
+        let mut table_descs = HashMap::new();
+        for (table, object) in table_objs {
+            if table.table_type != TableType::Table {
+                return Err(anyhow!(
+                    "legacy CDC result table {} has unexpected table type {:?}",
+                    table.table_id,
+                    table.table_type
+                )
+                .into());
+            }
+            let table_id = table.table_id;
+            let table_job = streaming_jobs.get(&table.job_id()).cloned();
+            let pb_table: PbTable = ObjectModel(
+                table,
+                object.ok_or_else(|| {
+                    anyhow!("legacy CDC result table {} has no catalog object", table_id)
+                })?,
+                table_job,
+            )
+            .into();
+            if pb_table.vnode_count_inner().value_opt().is_none() {
+                return Err(anyhow!(
+                    "legacy CDC result table {} still has a placeholder vnode count",
+                    table_id
+                )
+                .into());
+            }
+            let table_desc = TableDesc::from_pb_table(&pb_table)
+                .try_to_protobuf()
+                .with_context(|| {
+                    format!(
+                        "failed to build resnapshot descriptor for legacy CDC result table {}",
+                        table_id
+                    )
+                })?;
+            table_descs.insert(table_id, table_desc);
+        }
+
+        for (fragment_id, job_id, mut stream_node) in legacy_fragments {
+            let table_id = result_table_by_job[&job_id];
+            let table_desc = table_descs.get(&table_id).ok_or_else(|| {
+                anyhow!(
+                    "recoverable legacy CDC job {} refers to missing result table {}",
+                    job_id,
+                    table_id
+                )
+            })?;
+            if fill_missing_desc(&mut stream_node, table_desc) {
+                Fragment::update(fragment::ActiveModel {
+                    fragment_id: Set(fragment_id),
+                    stream_node: Set(StreamNode::from(&stream_node)),
+                    ..Default::default()
+                })
+                .exec(&txn)
+                .await?;
+            }
+        }
+
+        txn.commit().await?;
+        Ok(migrated_job_ids.into_iter().sorted_unstable().collect())
     }
 
     /// Fill in the `cdc_table_id` field for Table with empty `cdc_table_id` and parent Source job.

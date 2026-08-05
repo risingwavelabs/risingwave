@@ -17,12 +17,14 @@ mod tests {
     use risingwave_common::hash::VirtualNode;
     use risingwave_meta_model::FragmentId;
     use risingwave_meta_model::fragment::DistributionType;
-    use risingwave_meta_model::table::HandleConflictBehavior;
+    use risingwave_meta_model::table::{CdcTableType, HandleConflictBehavior};
     use risingwave_pb::catalog::subscription::SubscriptionState;
     use risingwave_pb::catalog::{PbSinkType, StreamSourceInfo};
     use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType, worker_node};
     use risingwave_pb::meta::SubscribeType;
-    use risingwave_pb::stream_plan::PbStreamNode;
+    use risingwave_pb::plan_common::StorageTableDesc;
+    use risingwave_pb::stream_plan::stream_node::NodeBody;
+    use risingwave_pb::stream_plan::{MaterializeNode, PbStreamNode, StreamCdcScanNode};
     use tokio::sync::{mpsc, oneshot};
 
     use crate::controller::catalog::*;
@@ -90,12 +92,31 @@ mod tests {
         job_id: JobId,
         state_table_ids: TableIdArray,
     ) -> MetaResult<()> {
+        insert_test_fragment_with_node(
+            txn,
+            fragment_id,
+            job_id,
+            0,
+            PbStreamNode::default(),
+            state_table_ids,
+        )
+        .await
+    }
+
+    async fn insert_test_fragment_with_node(
+        txn: &DatabaseTransaction,
+        fragment_id: FragmentId,
+        job_id: JobId,
+        fragment_type_mask: i32,
+        stream_node: PbStreamNode,
+        state_table_ids: TableIdArray,
+    ) -> MetaResult<()> {
         fragment::ActiveModel {
             fragment_id: Set(fragment_id),
             job_id: Set(job_id),
-            fragment_type_mask: Set(0),
+            fragment_type_mask: Set(fragment_type_mask),
             distribution_type: Set(fragment::DistributionType::Hash),
-            stream_node: Set(StreamNode::from(&PbStreamNode::default())),
+            stream_node: Set(StreamNode::from(&stream_node)),
             state_table_ids: Set(state_table_ids),
             upstream_fragment_id: Set(I32Array::default()),
             vnode_count: Set(1),
@@ -104,6 +125,20 @@ mod tests {
         .insert(txn)
         .await?;
         Ok(())
+    }
+
+    fn legacy_cdc_scan_node(
+        upstream_table_id: TableId,
+        resnapshot_table_desc: Option<StorageTableDesc>,
+    ) -> PbStreamNode {
+        PbStreamNode {
+            node_body: Some(NodeBody::StreamCdcScan(Box::new(StreamCdcScanNode {
+                table_id: upstream_table_id,
+                resnapshot_table_desc,
+                ..Default::default()
+            }))),
+            ..Default::default()
+        }
     }
 
     async fn insert_test_streaming_job(
@@ -633,6 +668,199 @@ mod tests {
             )])
         );
 
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_init_migrates_legacy_cdc_resnapshot_table_desc() -> MetaResult<()> {
+        let env = MetaSrvEnv::for_test().await;
+        let mgr = CatalogController::new(env.clone()).await?;
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let (job_id, Some(result_table_id), _internal_table_id) =
+            insert_test_streaming_job(&txn, "legacy_cdc", true, None).await?
+        else {
+            unreachable!()
+        };
+        Table::update(table::ActiveModel {
+            table_id: Set(result_table_id),
+            table_type: Set(TableType::Table),
+            cdc_table_type: Set(Some(CdcTableType::Postgres)),
+            ..Default::default()
+        })
+        .exec(&txn)
+        .await?;
+        StreamingJob::update(streaming_job::ActiveModel {
+            job_id: Set(job_id),
+            job_status: Set(JobStatus::Creating),
+            create_type: Set(CreateType::Background),
+            ..Default::default()
+        })
+        .exec(&txn)
+        .await?;
+
+        let upstream_table_id = TableId::new(99_001);
+        let singleton_fragment_id = FragmentId::new(201);
+        let parallel_fragment_id = FragmentId::new(202);
+        let existing_fragment_id = FragmentId::new(203);
+        let materialize_fragment_id = FragmentId::new(204);
+        for (fragment_id, fragment_type_mask) in [
+            (singleton_fragment_id, FragmentTypeFlag::StreamScan as i32),
+            (parallel_fragment_id, FragmentTypeFlag::StreamCdcScan as i32),
+        ] {
+            insert_test_fragment_with_node(
+                &txn,
+                fragment_id,
+                job_id,
+                fragment_type_mask,
+                legacy_cdc_scan_node(upstream_table_id, None),
+                TableIdArray::default(),
+            )
+            .await?;
+        }
+
+        let existing_desc = StorageTableDesc {
+            table_id: TableId::new(99_002),
+            ..Default::default()
+        };
+        insert_test_fragment_with_node(
+            &txn,
+            existing_fragment_id,
+            job_id,
+            FragmentTypeFlag::StreamCdcScan as i32,
+            legacy_cdc_scan_node(upstream_table_id, Some(existing_desc.clone())),
+            TableIdArray::default(),
+        )
+        .await?;
+        insert_test_fragment_with_node(
+            &txn,
+            materialize_fragment_id,
+            job_id,
+            FragmentTypeFlag::Mview as i32,
+            PbStreamNode {
+                node_body: Some(NodeBody::Materialize(Box::new(MaterializeNode {
+                    table_id: result_table_id,
+                    ..Default::default()
+                }))),
+                ..Default::default()
+            },
+            TableIdArray::default(),
+        )
+        .await?;
+        txn.commit().await?;
+        drop(inner);
+        drop(mgr);
+
+        // Recreating the controller simulates a new meta leader. Its init migration must persist
+        // the descriptor before bootstrap recovery renders actors.
+        let mgr = CatalogController::new(env).await?;
+        let expected_desc = TableDesc::from_pb_table(&mgr.get_table_by_id(result_table_id).await?)
+            .try_to_protobuf()?;
+        for fragment_id in [singleton_fragment_id, parallel_fragment_id] {
+            let fragment = Fragment::find_by_id(fragment_id)
+                .one(&mgr.inner.read().await.db)
+                .await?
+                .unwrap();
+            let stream_node = fragment.stream_node.to_protobuf();
+            let Some(NodeBody::StreamCdcScan(cdc_scan)) = stream_node.node_body else {
+                unreachable!()
+            };
+            assert_eq!(cdc_scan.table_id, upstream_table_id);
+            assert_eq!(cdc_scan.resnapshot_table_desc, Some(expected_desc.clone()));
+        }
+
+        let fragment = Fragment::find_by_id(existing_fragment_id)
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+        let stream_node = fragment.stream_node.to_protobuf();
+        let Some(NodeBody::StreamCdcScan(cdc_scan)) = stream_node.node_body else {
+            unreachable!()
+        };
+        assert_eq!(cdc_scan.resnapshot_table_desc, Some(existing_desc));
+
+        // The repair is idempotent and does not rewrite already-populated descriptors.
+        assert!(mgr.cdc_resnapshot_table_desc_update().await?.is_empty());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_init_skips_dirty_legacy_cdc_job_without_result_table() -> MetaResult<()> {
+        let env = MetaSrvEnv::for_test().await;
+        let mgr = CatalogController::new(env.clone()).await?;
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let job_id = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(TEST_DATABASE_ID),
+            Some(TEST_SCHEMA_ID),
+        )
+        .await?
+        .oid
+        .as_job_id();
+        StreamingJob::insert(streaming_job::ActiveModel {
+            job_id: Set(job_id),
+            job_status: Set(JobStatus::Initial),
+            create_type: Set(CreateType::Foreground),
+            timezone: Set(None),
+            config_override: Set(None),
+            adaptive_parallelism_strategy: Set(None),
+            parallelism: Set(StreamingParallelism::Adaptive),
+            backfill_parallelism: Set(None),
+            backfill_adaptive_parallelism_strategy: Set(None),
+            backfill_orders: Set(None),
+            max_parallelism: Set(1),
+            specific_resource_group: Set(None),
+            is_serverless_backfill: Set(false),
+            refresh_interval_sec: Set(None),
+        })
+        .exec(&txn)
+        .await?;
+        let fragment_id = FragmentId::new(205);
+        insert_test_fragment_with_node(
+            &txn,
+            fragment_id,
+            job_id,
+            FragmentTypeFlag::StreamCdcScan as i32,
+            legacy_cdc_scan_node(TableId::new(99_003), None),
+            TableIdArray::default(),
+        )
+        .await?;
+        let incomplete_fragment_id = FragmentId::new(206);
+        insert_test_fragment_with_node(
+            &txn,
+            incomplete_fragment_id,
+            job_id,
+            FragmentTypeFlag::StreamCdcScan as i32,
+            PbStreamNode::default(),
+            TableIdArray::default(),
+        )
+        .await?;
+        txn.commit().await?;
+        drop(inner);
+        drop(mgr);
+
+        // Dirty foreground/Initial jobs are cleaned by bootstrap recovery. Their deliberately
+        // incomplete catalogs, including a missing node body, must not make meta startup fail
+        // before cleanup can run.
+        let mgr = CatalogController::new(env).await?;
+        let fragment = Fragment::find_by_id(fragment_id)
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+        let stream_node = fragment.stream_node.to_protobuf();
+        let Some(NodeBody::StreamCdcScan(cdc_scan)) = stream_node.node_body else {
+            unreachable!()
+        };
+        assert!(cdc_scan.resnapshot_table_desc.is_none());
+        assert!(
+            Fragment::find_by_id(incomplete_fragment_id)
+                .one(&mgr.inner.read().await.db)
+                .await?
+                .is_some()
+        );
         Ok(())
     }
 

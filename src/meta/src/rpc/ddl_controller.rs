@@ -24,7 +24,7 @@ use await_tree::InstrumentAwait;
 use either::Either;
 use itertools::Itertools;
 use risingwave_common::catalog::{
-    AlterDatabaseParam, ColumnCatalog, ColumnId, Field, FragmentTypeFlag,
+    AlterDatabaseParam, ColumnCatalog, ColumnId, Field, FragmentTypeFlag, TableDesc,
 };
 use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::id::{JobId, TableId};
@@ -1995,12 +1995,14 @@ impl DdlController {
         // and the context that contains all information needed for building the
         // actors on the compute nodes.
 
-        let stream_job_fragments =
+        let mut stream_job_fragments =
             StreamJobFragments::new(id, graph, stream_ctx.clone(), max_parallelism.get());
 
         if let Some(mview_fragment) = stream_job_fragments.mview_fragment() {
             stream_job.set_table_vnode_count(mview_fragment.vnode_count());
         }
+
+        Self::fill_cdc_resnapshot_table_desc(&stream_job, &mut stream_job_fragments)?;
 
         let new_upstream_sink = if let StreamingJob::Sink(sink) = &stream_job
             && let Ok(table_id) = sink.get_target_table()
@@ -2250,8 +2252,10 @@ impl DdlController {
         // 3. Build the table fragments structure that will be persisted in the stream manager, and
         // the context that contains all information needed for building the actors on the compute
         // nodes.
-        let stream_job_fragments =
+        let mut stream_job_fragments =
             StreamJobFragments::new(tmp_job_id, graph, stream_ctx, old_fragments.max_parallelism);
+
+        Self::fill_cdc_resnapshot_table_desc(stream_job, &mut stream_job_fragments)?;
 
         if let Some(sinks) = &auto_refresh_schema_sinks {
             for sink in sinks {
@@ -2283,6 +2287,24 @@ impl DdlController {
                 downstreams: downstream_fragment_relations,
             },
         ))
+    }
+
+    fn fill_cdc_resnapshot_table_desc(
+        stream_job: &StreamingJob,
+        stream_job_fragments: &mut StreamJobFragments,
+    ) -> MetaResult<()> {
+        if let StreamingJob::Table(None, table, TableJobType::SharedCdcSource) = stream_job {
+            let table_desc = TableDesc::from_pb_table(table).try_to_protobuf()?;
+            for fragment in stream_job_fragments.fragments.values_mut() {
+                visit_stream_node_cont_mut(&mut fragment.nodes, |node| {
+                    if let Some(NodeBody::StreamCdcScan(stream_cdc_scan)) = &mut node.node_body {
+                        stream_cdc_scan.resnapshot_table_desc = Some(table_desc.clone());
+                    }
+                    true
+                });
+            }
+        }
+        Ok(())
     }
 
     async fn alter_name(

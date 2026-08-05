@@ -34,7 +34,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_internal_tables;
 use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_pb::id::{LocalOperatorId, StreamNodeLocalOperatorId};
-use risingwave_pb::plan_common::JoinType;
+use risingwave_pb::plan_common::{JoinType, StorageTableDesc};
 use risingwave_pb::stream_plan::{
     BackfillOrder, DispatchStrategy, DispatcherType, ExchangeNode, NoOpNode,
     PbDispatchOutputMapping, StreamContext, StreamFragmentGraph as StreamFragmentGraphProto,
@@ -81,6 +81,8 @@ pub struct BuildFragmentGraphState {
     has_snapshot_backfill: bool,
     has_cross_db_snapshot_backfill: bool,
     has_any_backfill: bool,
+
+    cdc_resnapshot_table_desc: Option<StorageTableDesc>,
 }
 
 impl BuildFragmentGraphState {
@@ -107,6 +109,14 @@ impl BuildFragmentGraphState {
     /// Generate an table id
     pub fn gen_table_id_wrapped(&mut self) -> TableId {
         TableId::new(self.gen_table_id())
+    }
+
+    pub fn cdc_resnapshot_table_desc(&self) -> Option<&StorageTableDesc> {
+        self.cdc_resnapshot_table_desc.as_ref()
+    }
+
+    pub fn set_cdc_resnapshot_table_desc(&mut self, table_desc: Option<StorageTableDesc>) {
+        self.cdc_resnapshot_table_desc = table_desc;
     }
 
     pub fn add_share_stream_node(

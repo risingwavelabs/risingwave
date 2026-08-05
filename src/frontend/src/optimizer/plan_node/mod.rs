@@ -925,12 +925,19 @@ impl dyn StreamPlanNode {
                 return stream_share.adhoc_to_stream_prost(state);
             }
 
+            let previous_cdc_resnapshot_table_desc = state.cdc_resnapshot_table_desc().cloned();
+            if let Some(stream_materialize) = self.as_stream_materialize() {
+                state.set_cdc_resnapshot_table_desc(Some(
+                    stream_materialize.table().table_desc().try_to_protobuf()?,
+                ));
+            }
             let node = Some(self.try_to_stream_prost_body(state)?);
             let input = self
                 .inputs()
                 .into_iter()
                 .map(|plan| plan.to_stream_prost(state))
                 .try_collect()?;
+            state.set_cdc_resnapshot_table_desc(previous_cdc_resnapshot_table_desc);
             // TODO: support pk_indices and operator_id
             Ok(PbStreamPlan {
                 input,

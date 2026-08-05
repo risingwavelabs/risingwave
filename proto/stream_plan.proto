@@ -887,6 +887,10 @@ message StreamCdcScanNode {
   bool disable_backfill = 7;
 
   StreamCdcScanOptions options = 8;
+
+  // The real materialized CDC table desc used to read existing table state during resnapshot diff.
+  // Old fragments may not have this field and are repaired by meta before recovery.
+  plan_common.StorageTableDesc resnapshot_table_desc = 9;
 }
 
 // BatchPlanNode is used for mv on mv snapshot read.
