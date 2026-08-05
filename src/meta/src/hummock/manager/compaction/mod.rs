@@ -170,15 +170,26 @@ fn can_concat_after_compact_task(
     let pos =
         target_ssts.partition_point(|sst| sst.key_range.cmp(&first.key_range) == Ordering::Less);
 
-    if pos == target_ssts.len() || last.key_range.cmp(&target_ssts[pos].key_range) == Ordering::Less
-    {
-        let validate_range = target_ssts[..pos]
-            .iter()
+    // The sorted outputs fit in the fast path only if the whole batch precedes its successor.
+    // Absence of a successor means "level end" only when `pos` is exactly the vector length.
+    let fits_before_next = target_ssts
+        .get(pos)
+        .map_or(pos == target_ssts.len(), |next| {
+            last.key_range.cmp(&next.key_range) == Ordering::Less
+        });
+
+    if fits_before_next {
+        // This is the same neighborhood validated after `level_insert_ssts` splices the sorted
+        // outputs at `pos`. Only three kinds of adjacency can be newly introduced: the previous
+        // target SST to the first output, adjacent outputs, and the last output to the next target
+        // SST. Build exactly that view without indexing `target_ssts` or moving its remaining SSTs.
+        let validate_range = pos
+            .checked_sub(1)
+            .and_then(|prev| target_ssts.get(prev))
             .copied()
+            .into_iter()
             .chain(sorted_insert.iter().copied())
-            .chain(target_ssts[pos..].iter().copied())
-            .skip(pos.saturating_sub(1))
-            .take(insert_table_infos.len() + 2)
+            .chain(target_ssts.get(pos).copied())
             .collect_vec();
         can_concat(&validate_range)
     } else {
@@ -1905,6 +1916,53 @@ mod compact_task_apply_tests {
     }
 
     #[test]
+    fn test_can_concat_after_compact_task_at_level_start() {
+        let target = Level {
+            level_type: PbLevelType::Nonoverlapping,
+            table_infos: vec![test_sst(1, "g", "h")],
+            ..Default::default()
+        };
+        let outputs = vec![test_sst(2, "a", "b"), test_sst(3, "d", "e")];
+
+        assert!(can_concat_after_compact_task(
+            &target,
+            &HashSet::new(),
+            &outputs,
+        ));
+    }
+
+    #[test]
+    fn test_can_concat_after_compact_task_with_empty_level() {
+        let target = Level {
+            level_type: PbLevelType::Nonoverlapping,
+            ..Default::default()
+        };
+        let outputs = vec![test_sst(1, "a", "b"), test_sst(2, "d", "e")];
+
+        assert!(can_concat_after_compact_task(
+            &target,
+            &HashSet::new(),
+            &outputs,
+        ));
+    }
+
+    #[test]
+    fn test_can_concat_after_compact_task_between_target_ssts() {
+        let target = Level {
+            level_type: PbLevelType::Nonoverlapping,
+            table_infos: vec![test_sst(1, "a", "b"), test_sst(2, "m", "n")],
+            ..Default::default()
+        };
+        let outputs = vec![test_sst(3, "g", "h"), test_sst(4, "d", "e")];
+
+        assert!(can_concat_after_compact_task(
+            &target,
+            &HashSet::new(),
+            &outputs,
+        ));
+    }
+
+    #[test]
     fn test_can_concat_after_compact_task_rejects_overlap() {
         let target = Level {
             level_type: PbLevelType::Nonoverlapping,
@@ -1916,6 +1974,37 @@ mod compact_task_apply_tests {
             &target,
             &HashSet::new(),
             &[test_sst(2, "c", "d")],
+        ));
+    }
+
+    #[test]
+    fn test_can_concat_after_compact_task_rejects_overlap_with_next_sst() {
+        let target = Level {
+            level_type: PbLevelType::Nonoverlapping,
+            table_infos: vec![test_sst(1, "g", "j")],
+            ..Default::default()
+        };
+
+        assert!(!can_concat_after_compact_task(
+            &target,
+            &HashSet::new(),
+            &[test_sst(2, "a", "h")],
+        ));
+    }
+
+    #[test]
+    fn test_can_concat_after_compact_task_rejects_overlapping_outputs() {
+        let target = Level {
+            level_type: PbLevelType::Nonoverlapping,
+            table_infos: vec![test_sst(1, "a", "b"), test_sst(2, "m", "n")],
+            ..Default::default()
+        };
+        let outputs = vec![test_sst(3, "d", "h"), test_sst(4, "g", "j")];
+
+        assert!(!can_concat_after_compact_task(
+            &target,
+            &HashSet::new(),
+            &outputs,
         ));
     }
 
