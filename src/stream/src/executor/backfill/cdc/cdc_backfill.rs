@@ -15,6 +15,7 @@
 use std::collections::BTreeMap;
 use std::future::Future;
 use std::pin::Pin;
+use std::time::Duration;
 
 use either::Either;
 use futures::stream::select_with_strategy;
@@ -53,7 +54,7 @@ use crate::executor::backfill::utils::{
 use crate::executor::monitor::CdcBackfillMetrics;
 use crate::executor::prelude::*;
 use crate::executor::source::get_infinite_backoff_strategy;
-use crate::task::CreateMviewProgressReporter;
+use crate::task::cdc_progress::CdcProgressReporter;
 
 /// `split_id`, `is_finished`, `row_count`, `cdc_offset` all occupy 1 column each.
 const METADATA_STATE_LEN: usize = 4;
@@ -127,9 +128,7 @@ pub struct CdcBackfillExecutor<S: StateStore> {
     /// State table of the `CdcBackfill` executor
     state_impl: CdcBackfillState<S>,
 
-    // TODO: introduce a CdcBackfillProgress to report finish to Meta
-    // This object is just a stub right now
-    progress: Option<CreateMviewProgressReporter>,
+    progress: Option<CdcProgressReporter>,
 
     metrics: CdcBackfillMetrics,
 
@@ -149,7 +148,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         upstream: Executor,
         output_indices: Vec<usize>,
         output_columns: Vec<ColumnDesc>,
-        progress: Option<CreateMviewProgressReporter>,
+        progress: Option<CdcProgressReporter>,
         metrics: Arc<StreamingMetrics>,
         state_table: StateTable<S>,
         rate_limit_rps: Option<u32>,
@@ -353,6 +352,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         .boxed()
         .peekable();
         let mut last_binlog_offset = state.last_cdc_offset.clone();
+        let mut estimated_row_count = None;
 
         // CDC Backfill Algorithm:
         //
@@ -407,6 +407,15 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                             Message::Barrier(barrier) => {
                                 // commit state to bump the epoch of state table
                                 state_impl.commit_state(barrier.epoch).await?;
+                                if let Some(progress) = &self.progress {
+                                    progress.update_rows(
+                                        self.actor_ctx.fragment_id,
+                                        self.actor_ctx.id,
+                                        barrier.epoch,
+                                        total_snapshot_row_count,
+                                        None,
+                                    );
+                                }
                                 yield Message::Barrier(barrier);
                             }
                             Message::Chunk(_) => {
@@ -432,6 +441,32 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 self.external_table.clone(),
                 table_reader.expect("table reader must created"),
             );
+
+            estimated_row_count = match tokio::time::timeout(
+                Duration::from_secs(5),
+                upstream_table_reader.estimated_row_count(),
+            )
+            .await
+            {
+                Ok(Ok(estimate)) => estimate,
+                Ok(Err(error)) => {
+                    tracing::warn!(
+                        error = %error.as_report(),
+                        %table_id,
+                        upstream_table_name,
+                        "failed to estimate upstream table row count"
+                    );
+                    None
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        %table_id,
+                        upstream_table_name,
+                        "timed out estimating upstream table row count"
+                    );
+                    None
+                }
+            };
 
             if last_binlog_offset.is_none() {
                 // Limit concurrent CDC connections globally to 10 using a semaphore.
@@ -506,6 +541,15 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                         }
                         // commit state just to bump the epoch of state table
                         state_impl.commit_state(barrier.epoch).await?;
+                        if let Some(progress) = &self.progress {
+                            progress.update_rows(
+                                self.actor_ctx.fragment_id,
+                                self.actor_ctx.id,
+                                barrier.epoch,
+                                total_snapshot_row_count,
+                                estimated_row_count,
+                            );
+                        }
                         yield Message::Barrier(barrier);
                         break;
                     }
@@ -676,6 +720,16 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                             .await?;
 
                                         state_impl.commit_state(barrier.epoch).await?;
+
+                                        if let Some(progress) = &self.progress {
+                                            progress.update_rows(
+                                                self.actor_ctx.fragment_id,
+                                                self.actor_ctx.id,
+                                                barrier.epoch,
+                                                total_snapshot_row_count,
+                                                estimated_row_count,
+                                            );
+                                        }
 
                                         // emit barrier and continue consume the backfill stream
                                         yield Message::Barrier(barrier);
@@ -893,6 +947,15 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     .await?;
 
                 state_impl.commit_state(pending_barrier.epoch).await?;
+                if let Some(progress) = &self.progress {
+                    progress.update_rows(
+                        self.actor_ctx.fragment_id,
+                        self.actor_ctx.id,
+                        pending_barrier.epoch,
+                        total_snapshot_row_count,
+                        estimated_row_count,
+                    );
+                }
                 yield Message::Barrier(pending_barrier);
             }
             upstream_table_reader.disconnect().await?;
@@ -938,8 +1001,14 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     state_impl.commit_state(barrier.epoch).await?;
 
                     // mark progress as finished
-                    if let Some(progress) = self.progress.as_mut() {
-                        progress.finish(barrier.epoch, total_snapshot_row_count);
+                    if let Some(progress) = &self.progress {
+                        progress.finish_rows(
+                            self.actor_ctx.fragment_id,
+                            self.actor_ctx.id,
+                            barrier.epoch,
+                            total_snapshot_row_count,
+                            estimated_row_count,
+                        );
                     }
                     yield msg;
                     // break after the state have been saved
@@ -1105,6 +1174,7 @@ impl<S: StateStore> Execute for CdcBackfillExecutor<S> {
 mod tests {
     use std::collections::BTreeMap;
     use std::str::FromStr;
+    use std::time::Duration;
 
     use futures::{StreamExt, pin_mut};
     use risingwave_common::array::{Array, DataChunk, Op, StreamChunk};
@@ -1371,6 +1441,78 @@ mod tests {
         let state = restored_state.restore_state().await.unwrap();
         assert!(state.is_finished);
         assert_eq!(state.last_cdc_offset, None);
+    }
+
+    #[tokio::test]
+    async fn test_finished_cdc_backfill_forwards_without_table_reader() {
+        let memory_state_store = MemoryStateStore::new();
+        let mut state_writer = CdcBackfillState::new(
+            TableId::new(1234),
+            create_cdc_state_table(memory_state_store.clone()).await,
+            5,
+        );
+        state_writer
+            .init_epoch(Barrier::new_test_barrier(test_epoch(1)).epoch)
+            .await
+            .unwrap();
+        state_writer
+            .mutate_state(None, None, 42, true)
+            .await
+            .unwrap();
+        state_writer
+            .commit_state(Barrier::new_test_barrier(test_epoch(2)).epoch)
+            .await
+            .unwrap();
+
+        let external_storage_table = ExternalStorageTable::new(
+            TableId::new(1234),
+            SchemaTableName {
+                schema_name: "public".to_owned(),
+                table_name: "orders".to_owned(),
+            },
+            "db".to_owned(),
+            ExternalTableConfig::default(),
+            ExternalCdcTableType::Undefined,
+            Schema::new(vec![Field::with_name(DataType::Int64, "id")]),
+            vec![OrderType::ascending()],
+            vec![0],
+        );
+        let schema = Schema::new(vec![
+            Field::unnamed(DataType::Jsonb),
+            Field::unnamed(DataType::Varchar),
+            Field::unnamed(DataType::Varchar),
+        ]);
+        let (tx, source) = MockSource::channel();
+        let source = source.into_executor(schema, vec![1]);
+        let cdc = CdcBackfillExecutor::new(
+            ActorContext::for_test(1),
+            external_storage_table,
+            source,
+            vec![0],
+            vec![ColumnDesc::named("id", ColumnId::new(1), DataType::Int64)],
+            None,
+            StreamingMetrics::unused().into(),
+            create_cdc_state_table(memory_state_store).await,
+            None,
+            CdcScanOptions::default(),
+            BTreeMap::default(),
+        );
+        let executor = cdc.execute_inner();
+        pin_mut!(executor);
+
+        tx.send_barrier(Barrier::new_test_barrier(test_epoch(3)));
+        assert!(matches!(
+            executor.next().await.unwrap().unwrap(),
+            Message::Barrier(_)
+        ));
+
+        tx.send_barrier(Barrier::new_test_barrier(test_epoch(4)));
+        let next = tokio::time::timeout(Duration::from_secs(1), executor.next())
+            .await
+            .expect("finished backfill must not wait for an external table reader")
+            .unwrap()
+            .unwrap();
+        assert!(matches!(next, Message::Barrier(_)));
     }
 
     #[tokio::test]

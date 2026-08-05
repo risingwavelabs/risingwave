@@ -268,6 +268,31 @@ impl ExternalTableReader for SqlServerExternalTableReader {
         }))
     }
 
+    async fn estimated_row_count(
+        &self,
+        table_name: &SchemaTableName,
+    ) -> ConnectorResult<Option<u64>> {
+        let mut query = Query::new(
+            "SELECT SUM(row_count) \
+             FROM sys.dm_db_partition_stats \
+             WHERE object_id = OBJECT_ID(@P1) AND index_id IN (0, 1)",
+        );
+        let normalized_table_name = Self::get_normalized_table_name(table_name);
+        query.bind(normalized_table_name.as_str());
+
+        let mut client = self.client.lock().await;
+        let row = query
+            .query(&mut client.inner_client)
+            .await?
+            .into_row()
+            .await?;
+        let Some(row) = row else {
+            return Ok(None);
+        };
+        let estimate = row.try_get::<i64, usize>(0)?;
+        Ok(estimate.and_then(|row_count| u64::try_from(row_count).ok()))
+    }
+
     fn snapshot_read(
         &self,
         table_name: SchemaTableName,
