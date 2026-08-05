@@ -22,7 +22,7 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Format;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::bail_not_implemented;
-use risingwave_common::catalog::{FunctionId, Schema, SecretId};
+use risingwave_common::catalog::{FunctionId, Schema, SecretId, TableId};
 use risingwave_common::id::ObjectId;
 use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::{DataType, Datum};
@@ -447,10 +447,35 @@ pub struct BatchPlanFragmenterResult {
     pub(crate) query_mode: QueryMode,
     pub(crate) schema: Schema,
     pub(crate) stmt_type: StatementType,
-    /// Relation IDs (typically table/MV ids) the query reads from. Forwarded from
-    /// [`RwBatchQueryPlanResult`] so the executor can attribute serving-latency metrics
-    /// to each contributing materialized view.
-    pub(crate) dependent_relations: Vec<ObjectId>,
+    /// The base relation read by a single-relation serving query.
+    ///
+    /// An index scan is attributed to its base table/MV because binding records the base relation
+    /// in `dependent_relations`, while the physical-plan visitor additionally records the index.
+    pub(crate) serving_relation_id: Option<TableId>,
+}
+
+fn single_serving_relation_id(
+    session: &SessionImpl,
+    stmt_type: StatementType,
+    dependent_relations: &[ObjectId],
+) -> Option<TableId> {
+    if stmt_type.is_dml() {
+        return None;
+    }
+
+    let catalog_reader = session.env().catalog_reader().read_guard();
+    dependent_relations
+        .iter()
+        .filter_map(|object_id| {
+            let table = catalog_reader
+                .get_any_table_by_id(object_id.as_table_id())
+                .ok()?;
+            // Index dependencies are excluded here so an index scan is attributed to the
+            // base table/MV included during binding. Internal-state tables are excluded too.
+            (table.is_user_table() || table.is_mview()).then_some(table.id)
+        })
+        .exactly_one()
+        .ok()
 }
 
 pub fn gen_batch_plan_fragmenter(
@@ -465,6 +490,8 @@ pub fn gen_batch_plan_fragmenter(
         dependent_relations,
         ..
     } = plan_result;
+
+    let serving_relation_id = single_serving_relation_id(session, stmt_type, &dependent_relations);
 
     tracing::trace!(
         "Generated query plan: {:?}, query_mode:{:?}",
@@ -487,7 +514,7 @@ pub fn gen_batch_plan_fragmenter(
         query_mode,
         schema,
         stmt_type,
-        dependent_relations,
+        serving_relation_id,
     })
 }
 
@@ -560,31 +587,10 @@ async fn execute_risingwave_plan(
     let first_field_format = formats.first().copied().unwrap_or(Format::Text);
     let query_mode = plan_fragmenter_result.query_mode;
     let stmt_type = plan_fragmenter_result.stmt_type;
-    // Take dependent relations before consuming `plan_fragmenter_result` so the post-query
-    // callback can attribute serving latency per MV. Skip for DML — issue #25914 scopes this
-    // metric to the read path only.
-    let mv_table_id_labels: Vec<String> = if stmt_type.is_dml() {
-        Vec::new()
-    } else {
-        let catalog_reader = session.env().catalog_reader().read_guard();
-        plan_fragmenter_result
-            .dependent_relations
-            .iter()
-            .filter_map(|object_id| {
-                let table = catalog_reader
-                    .get_any_table_by_id(object_id.as_table_id())
-                    .ok()?;
-                // Only user-facing tables / MVs / indexes. This excludes internal-state tables
-                // and never includes rw_catalog / pg_catalog (those live in the system catalog
-                // and are not reachable via `get_any_table_by_id`).
-                if table.is_user_table() || table.is_mview() || table.is_index() {
-                    Some(table.id.to_string())
-                } else {
-                    None
-                }
-            })
-            .collect()
-    };
+    // Take the label before consuming `plan_fragmenter_result` in `create_stream`.
+    let serving_relation_id_label = plan_fragmenter_result
+        .serving_relation_id
+        .map(|relation_id| relation_id.to_string());
 
     let query_start_time = Instant::now();
     let (row_stream, pg_descs) =
@@ -606,10 +612,10 @@ async fn execute_risingwave_plan(
                 let metrics = &session.env().frontend_metrics;
                 metrics.latency_local_execution.observe(elapsed);
                 metrics.query_counter_local_execution.inc();
-                for table_id_label in &mv_table_id_labels {
+                if let Some(relation_id_label) = &serving_relation_id_label {
                     metrics
-                        .latency_local_execution_per_mv
-                        .with_guarded_label_values(&[table_id_label.as_str()])
+                        .latency_local_execution_per_relation
+                        .with_label_values(&[relation_id_label.as_str()])
                         .observe(elapsed);
                 }
             }
@@ -617,10 +623,10 @@ async fn execute_risingwave_plan(
                 let metrics = &session.env().query_manager().query_metrics;
                 metrics.query_latency.observe(elapsed);
                 metrics.completed_query_counter.inc();
-                for table_id_label in &mv_table_id_labels {
+                if let Some(relation_id_label) = &serving_relation_id_label {
                     metrics
-                        .query_latency_per_mv
-                        .with_guarded_label_values(&[table_id_label.as_str()])
+                        .query_latency_per_relation
+                        .with_label_values(&[relation_id_label.as_str()])
                         .observe(elapsed);
                 }
             }
@@ -685,4 +691,86 @@ pub async fn local_execute(
     );
 
     Ok(execution.stream_rows())
+}
+
+#[cfg(test)]
+mod tests {
+    use pgwire::pg_response::StatementType;
+    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+
+    use super::single_serving_relation_id;
+    use crate::catalog::root_catalog::SchemaPath;
+    use crate::test_utils::LocalFrontend;
+
+    #[tokio::test]
+    async fn test_single_serving_relation_id() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        frontend
+            .run_sql("create table t1 (v1 int primary key)")
+            .await
+            .unwrap();
+        frontend
+            .run_sql("create table t2 (v1 int primary key)")
+            .await
+            .unwrap();
+        frontend
+            .run_sql("create index idx on t1(v1)")
+            .await
+            .unwrap();
+
+        let session = frontend.session_ref();
+        let (t1_id, t2_id, index_table_id) = {
+            let catalog_reader = session.env().catalog_reader().read_guard();
+            let t1_id = catalog_reader
+                .get_created_table_by_name(
+                    DEFAULT_DATABASE_NAME,
+                    SchemaPath::Name(DEFAULT_SCHEMA_NAME),
+                    "t1",
+                )
+                .unwrap()
+                .0
+                .id;
+            let t2_id = catalog_reader
+                .get_created_table_by_name(
+                    DEFAULT_DATABASE_NAME,
+                    SchemaPath::Name(DEFAULT_SCHEMA_NAME),
+                    "t2",
+                )
+                .unwrap()
+                .0
+                .id;
+            let index_table_id = catalog_reader
+                .get_index_by_name(
+                    DEFAULT_DATABASE_NAME,
+                    SchemaPath::Name(DEFAULT_SCHEMA_NAME),
+                    "idx",
+                )
+                .unwrap()
+                .0
+                .index_table()
+                .id;
+            (t1_id, t2_id, index_table_id)
+        };
+
+        assert_eq!(
+            single_serving_relation_id(
+                &session,
+                StatementType::SELECT,
+                &[t1_id.as_object_id(), index_table_id.as_object_id()],
+            ),
+            Some(t1_id)
+        );
+        assert_eq!(
+            single_serving_relation_id(
+                &session,
+                StatementType::SELECT,
+                &[t1_id.as_object_id(), t2_id.as_object_id()],
+            ),
+            None
+        );
+        assert_eq!(
+            single_serving_relation_id(&session, StatementType::INSERT, &[t1_id.as_object_id()],),
+            None
+        );
+    }
 }

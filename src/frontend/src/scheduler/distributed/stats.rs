@@ -16,13 +16,11 @@ use std::sync::LazyLock;
 
 use prometheus::core::{AtomicU64, GenericCounter};
 use prometheus::{
-    Histogram, IntGauge, Registry, exponential_buckets, histogram_opts,
-    register_histogram_with_registry, register_int_counter_with_registry,
-    register_int_gauge_with_registry,
+    Histogram, HistogramVec, IntGauge, Registry, exponential_buckets, histogram_opts,
+    register_histogram_vec_with_registry, register_histogram_with_registry,
+    register_int_counter_with_registry, register_int_gauge_with_registry,
 };
-use risingwave_common::metrics::LabelGuardedHistogramVec;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
-use risingwave_common::register_guarded_histogram_vec_with_registry;
 
 #[derive(Clone)]
 pub struct DistributedQueryMetrics {
@@ -30,9 +28,8 @@ pub struct DistributedQueryMetrics {
     pub rejected_query_counter: GenericCounter<AtomicU64>,
     pub completed_query_counter: GenericCounter<AtomicU64>,
     pub query_latency: Histogram,
-    /// Per-MV serving latency for distributed-execution queries, labeled by `table_id`.
-    /// Labels are reclaimed after each scrape via the guarded-metric pattern.
-    pub query_latency_per_mv: LabelGuardedHistogramVec,
+    /// Single-relation serving latency for distributed-execution queries.
+    pub query_latency_per_relation: HistogramVec,
 }
 
 pub static GLOBAL_DISTRIBUTED_QUERY_METRICS: LazyLock<DistributedQueryMetrics> =
@@ -69,11 +66,11 @@ impl DistributedQueryMetrics {
 
         let query_latency = register_histogram_with_registry!(opts, registry).unwrap();
 
-        let query_latency_per_mv = register_guarded_histogram_vec_with_registry!(
-            "distributed_query_latency_per_mv",
-            "Per-table_id latency of distributed-execution queries. Label is reclaimed each \
-             scrape so cardinality is bounded by recently queried MVs.",
-            &["table_id"],
+        let query_latency_per_relation = register_histogram_vec_with_registry!(
+            "distributed_query_latency_per_relation",
+            "Per-relation latency of single-relation serving queries in distributed execution \
+             mode.",
+            &["relation_id"],
             exponential_buckets(0.01, 2.0, 23).unwrap(),
             registry
         )
@@ -84,7 +81,7 @@ impl DistributedQueryMetrics {
             rejected_query_counter,
             completed_query_counter,
             query_latency,
-            query_latency_per_mv,
+            query_latency_per_relation,
         }
     }
 
