@@ -333,6 +333,86 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn test_finish_streaming_job_cache_refill_policy_notifies_hummock() -> MetaResult<()> {
+        let env = MetaSrvEnv::for_test().await;
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        env.notification_manager().insert_sender(
+            SubscribeType::Hummock,
+            WorkerKey(HostAddress {
+                host: "localhost".to_owned(),
+                port: 1234,
+            }),
+            tx,
+        );
+        let mgr = CatalogController::new(env).await?;
+
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let (job_id, Some(result_table_id), internal_table_id) = insert_test_streaming_job(
+            &txn,
+            "mv_initial_cache_refill",
+            true,
+            Some(CacheRefillPolicy::Both),
+        )
+        .await?
+        else {
+            unreachable!()
+        };
+        streaming_job::ActiveModel {
+            job_id: Set(job_id),
+            job_status: Set(JobStatus::Initial),
+            ..Default::default()
+        }
+        .update(&txn)
+        .await?;
+        CatalogController::finish_streaming_job_inner(&txn, job_id).await?;
+        txn.commit().await?;
+
+        mgr.notify_hummock_table_cache_refill_policy_if_explicit(&inner, job_id)
+            .await?;
+        drop(inner);
+
+        let response = rx
+            .recv()
+            .await
+            .expect("should receive hummock notification")
+            .expect("notification should be ok");
+        assert_eq!(response.operation(), NotificationOperation::Update);
+        let info = response.info;
+        let Some(NotificationInfo::TableRefillRuntimeConfig(config)) = info else {
+            panic!("unexpected notification: {:?}", info);
+        };
+        assert!(config.serving_table_vnode_mappings.is_none());
+        let policies = config
+            .table_cache_refill_policies
+            .expect("policy snapshot should be present");
+        assert_eq!(
+            policies
+                .table_policies
+                .into_iter()
+                .map(|policy| (policy.table_id, policy.policy))
+                .collect::<HashMap<_, _>>(),
+            HashMap::from([(
+                result_table_id.as_raw_id(),
+                CacheRefillPolicy::Both.to_protobuf() as i32,
+            )])
+        );
+        assert_eq!(
+            policies
+                .internal_table_policies
+                .into_iter()
+                .map(|policy| (policy.table_id, policy.policy))
+                .collect::<HashMap<_, _>>(),
+            HashMap::from([(
+                internal_table_id.as_raw_id(),
+                CacheRefillPolicy::Both.to_protobuf() as i32,
+            )])
+        );
+
+        Ok(())
+    }
+
     async fn insert_dirty_creating_job_with_fragment(
         mgr: &CatalogController,
         fragment_id: FragmentId,

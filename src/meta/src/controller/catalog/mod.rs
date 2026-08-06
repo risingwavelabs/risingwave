@@ -185,6 +185,25 @@ fn explicit_cache_refill_policy(config_override: &str) -> MetaResult<Option<Cach
 }
 
 impl CatalogControllerInner {
+    pub(crate) async fn table_cache_refill_policies_snapshot_if_job_has_explicit_policy(
+        &self,
+        job_id: JobId,
+    ) -> MetaResult<Option<PbTableCacheRefillPolicies>> {
+        let config_override: Option<String> = StreamingJob::find_by_id(job_id)
+            .select_only()
+            .column(streaming_job::Column::ConfigOverride)
+            .into_tuple()
+            .one(&self.db)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
+
+        if explicit_cache_refill_policy(&config_override.unwrap_or_default())?.is_none() {
+            return Ok(None);
+        }
+
+        Ok(Some(self.table_cache_refill_policies_snapshot().await?))
+    }
+
     pub async fn table_cache_refill_policies_snapshot(
         &self,
     ) -> MetaResult<PbTableCacheRefillPolicies> {
@@ -261,6 +280,29 @@ impl CatalogControllerInner {
 }
 
 impl CatalogController {
+    pub(crate) async fn notify_hummock_table_cache_refill_policy_if_explicit(
+        &self,
+        inner: &CatalogControllerInner,
+        job_id: JobId,
+    ) -> MetaResult<()> {
+        if let Some(policies) = inner
+            .table_cache_refill_policies_snapshot_if_job_has_explicit_policy(job_id)
+            .await?
+        {
+            self.env
+                .notification_manager()
+                .notify_hummock(
+                    NotificationOperation::Update,
+                    NotificationInfo::TableRefillRuntimeConfig(PbTableRefillRuntimeConfig {
+                        table_cache_refill_policies: Some(policies),
+                        ..Default::default()
+                    }),
+                )
+                .await;
+        }
+        Ok(())
+    }
+
     pub async fn table_cache_refill_policies_snapshot(
         &self,
     ) -> MetaResult<PbTableCacheRefillPolicies> {
