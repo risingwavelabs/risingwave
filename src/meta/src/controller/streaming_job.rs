@@ -866,15 +866,15 @@ impl CatalogController {
 
         txn.commit().await?;
 
-        self.notify_hummock_table_cache_refill_policy_if_explicit(&inner, job_id)
-            .await?;
-
         // Notify serving module about newly inserted fragments so it can establish
         // serving vnode mappings. This is driven by the fragment model insertion,
         // decoupled from the barrier-driven streaming mapping notifications.
         self.env
             .notification_manager()
             .notify_serving_fragment_mapping_update(inserted_fragment_ids);
+
+        self.notify_hummock_table_cache_refill_policy_if_explicit(&inner, job_id)
+            .await?;
 
         Ok(())
     }

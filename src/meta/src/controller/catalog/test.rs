@@ -657,6 +657,9 @@ mod tests {
             }),
             tx,
         );
+        let (local_notification_tx, mut local_notification_rx) = mpsc::unbounded_channel();
+        env.notification_manager()
+            .insert_local_sender(local_notification_tx);
         let mgr = CatalogController::new(env).await?;
 
         let inner = mgr.inner.write().await;
@@ -711,6 +714,18 @@ mod tests {
             None,
         )
         .await?;
+
+        let local_notification = local_notification_rx
+            .try_recv()
+            .expect("should receive serving fragment mapping notification");
+        let LocalNotification::ServingFragmentMappingsUpsert(fragment_ids) = local_notification
+        else {
+            panic!(
+                "unexpected local notification before hummock notification: {:?}",
+                local_notification
+            );
+        };
+        assert_eq!(fragment_ids, vec![FragmentId::new(300).as_raw_id()]);
 
         let response = rx
             .recv()
