@@ -1046,7 +1046,9 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                     if !buffering {
                         rows_in_epoch += chunk.cardinality() as u64;
                         if sort_buffer_active && rows_in_epoch > activate_threshold {
-                            tracing::debug!(
+                            tracing::info!(
+                                actor_id = %self.actor_id,
+                                fragment_id = %self.fragment_id,
                                 rows_in_epoch,
                                 activate_threshold,
                                 "locality provider sort buffer activated for this epoch"
