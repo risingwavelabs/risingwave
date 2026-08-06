@@ -580,10 +580,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                     == Op::Insert.to_i16();
 
                 let same_key = match &cur_key {
-                    Some(key) => (&row)
-                        .project(&group_key_indices)
-                        .iter()
-                        .eq(key.iter()),
+                    Some(key) => (&row).project(&group_key_indices).iter().eq(key.iter()),
                     None => false,
                 };
                 if !same_key {
@@ -610,7 +607,6 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
         }
     }
 }
-
 
 impl<S: StateStore> Execute for LocalityProviderExecutor<S> {
     fn execute(self: Box<Self>) -> BoxedMessageStream {
@@ -1246,13 +1242,7 @@ mod tests {
         let order_types = vec![OrderType::ascending(); 4];
 
         let mut table = StateTable::from_table_catalog(
-            &gen_pbtable(
-                TableId::new(1),
-                column_descs,
-                order_types,
-                pk_indices,
-                0,
-            ),
+            &gen_pbtable(TableId::new(1), column_descs, order_types, pk_indices, 0),
             MemoryStateStore::new(),
             None,
         )
@@ -1279,10 +1269,7 @@ mod tests {
              - 3 1 100",
         );
         LocalityProviderExecutor::<MemoryStateStore>::write_chunk_to_sort_buffer(
-            &mut table,
-            &chunk,
-            generation,
-            &mut seq,
+            &mut table, &chunk, generation, &mut seq,
         );
         assert_eq!(seq, 6);
 

@@ -194,11 +194,9 @@ impl StreamLocalityProvider {
             catalog_builder.add_column(field);
         }
 
-        let gen_col_idx =
-            catalog_builder.add_column(&Field::with_name(DataType::Int64, "_rw_gen"));
+        let gen_col_idx = catalog_builder.add_column(&Field::with_name(DataType::Int64, "_rw_gen"));
         catalog_builder.add_column(&Field::with_name(DataType::Int16, "_rw_op"));
-        let seq_col_idx =
-            catalog_builder.add_column(&Field::with_name(DataType::Int64, "_rw_seq"));
+        let seq_col_idx = catalog_builder.add_column(&Field::with_name(DataType::Int64, "_rw_seq"));
 
         // Primary key: gen + locality columns + stream key + seq
         catalog_builder.add_order_column(gen_col_idx, OrderType::ascending());
