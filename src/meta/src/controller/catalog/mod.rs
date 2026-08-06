@@ -211,6 +211,15 @@ impl CatalogControllerInner {
             .select_only()
             .column(streaming_job::Column::JobId)
             .column(streaming_job::Column::ConfigOverride)
+            .filter(
+                streaming_job::Column::JobId.in_subquery(
+                    Query::select()
+                        .distinct()
+                        .column(fragment::Column::JobId)
+                        .from(Fragment)
+                        .to_owned(),
+                ),
+            )
             .into_tuple::<(JobId, Option<String>)>()
             .all(&self.db)
             .await?;

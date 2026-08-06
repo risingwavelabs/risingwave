@@ -612,6 +612,9 @@ impl CatalogController {
 
         txn.commit().await?;
 
+        self.notify_hummock_table_cache_refill_policy_if_explicit(&inner, job_id)
+            .await?;
+
         // FIXME: there's a gap between the catalog creation and notification, which may lead to
         // frontend receiving duplicate notifications if the frontend restarts right in this gap. We
         // need to either forward the notification or filter catalogs without any fragments in the metastore.
@@ -624,6 +627,13 @@ impl CatalogController {
             )
             .await;
         }
+
+        // Notify serving module about newly inserted fragments so it can establish
+        // serving vnode mappings. This is driven by the fragment model insertion,
+        // decoupled from the barrier-driven streaming mapping notifications.
+        self.env
+            .notification_manager()
+            .notify_serving_fragment_mapping_update(inserted_fragment_ids);
 
         Ok(())
     }
@@ -1080,9 +1090,6 @@ impl CatalogController {
         if !updated_user_info.is_empty() {
             version = self.notify_users_update(updated_user_info).await;
         }
-
-        self.notify_hummock_table_cache_refill_policy_if_explicit(&inner, job_id)
-            .await?;
 
         inner
             .creating_table_finish_notifier
