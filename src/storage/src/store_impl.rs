@@ -20,7 +20,7 @@ use std::time::Duration;
 use enum_as_inner::EnumAsInner;
 use foyer::{
     BlockEngineBuilder, CacheBuilder, DeviceBuilder, FifoPicker, FsDeviceBuilder,
-    HybridCacheBuilder,
+    HybridCacheBuilder, StorageFilter,
 };
 use futures::FutureExt;
 use futures::future::BoxFuture;
@@ -43,8 +43,8 @@ use crate::hummock::none::NoneRecentFilter;
 use crate::hummock::sharded::ShardedRecentFilter;
 use crate::hummock::simple::SimpleRecentFilter;
 use crate::hummock::{
-    Block, BlockCacheEventListener, HummockError, HummockStorage, Sstable, SstableBlockIndex,
-    SstableStore, SstableStoreConfig,
+    Block, BlockCacheEventListener, HummockError, HummockStorage, LiveSstFilter, LiveSsts, Sstable,
+    SstableBlockHashBuilder, SstableBlockIndex, SstableStore, SstableStoreConfig,
 };
 use crate::memory::MemoryStateStore;
 use crate::memory::sled::SledStateStore;
@@ -748,6 +748,7 @@ impl StateStoreImpl {
             builder.build().await.map_err(HummockError::foyer_error)?
         };
 
+        let live_ssts = LiveSsts::default();
         let block_cache = {
             let mut builder = HybridCacheBuilder::new()
                 .with_name("foyer.data")
@@ -756,6 +757,7 @@ impl StateStoreImpl {
                     state_store_metrics.clone(),
                 )))
                 .memory(opts.block_cache_capacity_mb * MB)
+                .with_hash_builder(SstableBlockHashBuilder::default())
                 .with_shards(opts.block_cache_shard_num)
                 .with_eviction_config(opts.block_cache_eviction_config.clone())
                 .with_weighter(|_: &SstableBlockIndex, value: &Box<Block>| {
@@ -786,6 +788,14 @@ impl StateStoreImpl {
                         )
                         .with_recover_concurrency(opts.data_file_cache_recover_concurrency)
                         .with_blob_index_size(opts.data_file_cache_blob_index_size_kb * KB)
+                        .with_admission_filter(
+                            StorageFilter::new()
+                                .with_condition(LiveSstFilter::new(live_ssts.clone())),
+                        )
+                        .with_reinsertion_filter(
+                            StorageFilter::new()
+                                .with_condition(LiveSstFilter::new(live_ssts.clone())),
+                        )
                         .with_eviction_pickers(vec![Box::new(FifoPicker::new(
                             opts.data_file_cache_fifo_probation_ratio,
                         ))]);
@@ -859,6 +869,7 @@ impl StateStoreImpl {
 
                     meta_cache,
                     block_cache,
+                    live_ssts,
                     vector_meta_cache,
                     vector_block_cache,
                 }));

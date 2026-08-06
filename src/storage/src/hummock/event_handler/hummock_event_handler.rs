@@ -57,7 +57,7 @@ use crate::hummock::event_handler::{
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::local_version::recent_versions::RecentVersions;
 use crate::hummock::store::version::{HummockReadVersion, StagingSstableInfo, VersionUpdate};
-use crate::hummock::{HummockResult, MemoryLimiter, ObjectIdManager, SstableStoreRef};
+use crate::hummock::{HummockResult, LiveSsts, MemoryLimiter, ObjectIdManager, SstableStoreRef};
 use crate::mem_table::ImmutableMemtable;
 use crate::monitor::HummockStateStoreMetrics;
 use crate::opts::StorageOpts;
@@ -336,6 +336,7 @@ pub(crate) struct HummockEventHandler {
 
     version_update_notifier_tx: Arc<tokio::sync::watch::Sender<PinnedVersion>>,
     recent_versions: Arc<ArcSwap<RecentVersions>>,
+    live_ssts: LiveSsts,
 
     uploader: HummockUploader,
     refiller: CacheRefiller,
@@ -497,6 +498,8 @@ impl HummockEventHandler {
                 .with_label_values(&["apply_table_refill_runtime_config"]),
         };
 
+        let live_ssts = sstable_store.live_ssts().clone();
+        live_ssts.replace_from_version(recent_versions.latest_version());
         let uploader = HummockUploader::new(
             state_store_metrics,
             recent_versions.latest_version().clone(),
@@ -511,6 +514,7 @@ impl HummockEventHandler {
             observer_event_rx,
             version_update_notifier_tx,
             recent_versions: Arc::new(ArcSwap::from_pointee(recent_versions)),
+            live_ssts,
             read_version_mapping,
             local_read_versions: Default::default(),
             uploader,
@@ -726,6 +730,9 @@ impl HummockEventHandler {
             version_payload,
             Some(&mut sst_delta_infos),
         ) {
+            // The refiller uses force insertion after its explicit storage-filter check, so publish
+            // the target version's live SSTs before starting refill tasks.
+            self.live_ssts.replace_from_version(&new_pinned_version);
             self.refiller
                 .start_cache_refill(sst_delta_infos, pinned_version, new_pinned_version);
         }
