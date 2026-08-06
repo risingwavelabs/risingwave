@@ -96,7 +96,7 @@ type HybridBlockGetOrFetch =
 
 #[derive(Clone)]
 pub struct LiveSsts {
-    inner: Arc<ArcSwap<HashSet<HummockObjectId>>>,
+    inner: Arc<ArcSwap<HashSet<HummockSstableObjectId>>>,
 }
 
 impl Default for LiveSsts {
@@ -117,17 +117,23 @@ impl std::fmt::Debug for LiveSsts {
 
 impl LiveSsts {
     pub fn replace_from_version(&self, version: &LocalHummockVersion) {
-        self.replace(version.get_object_ids());
+        self.replace(version.get_object_ids().filter_map(|object_id| {
+            if let HummockObjectId::Sstable(object_id) = object_id {
+                Some(object_id)
+            } else {
+                None
+            }
+        }));
     }
 
-    fn replace(&self, object_ids: impl IntoIterator<Item = HummockObjectId>) {
+    fn replace(&self, object_ids: impl IntoIterator<Item = HummockSstableObjectId>) {
         let next = HashSet::from_iter(object_ids);
         if self.inner.load().as_ref() != &next {
             self.inner.store(Arc::new(next));
         }
     }
 
-    fn contains(&self, object_id: &HummockObjectId) -> bool {
+    fn contains(&self, object_id: &HummockSstableObjectId) -> bool {
         self.inner.load().contains(object_id)
     }
 }
@@ -147,9 +153,7 @@ impl LiveSstFilter {
             return false;
         }
         self.live_ssts
-            .contains(&HummockObjectId::Sstable(HummockSstableObjectId::new(
-                hash >> BLOCK_INDEX_BITS,
-            )))
+            .contains(&HummockSstableObjectId::new(hash >> BLOCK_INDEX_BITS))
     }
 }
 
@@ -259,7 +263,7 @@ mod tests {
     use risingwave_hummock_sdk::level::{LevelCommon, LevelsCommon};
     use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
     use risingwave_hummock_sdk::version::{HummockVersion, LocalHummockVersion};
-    use risingwave_hummock_sdk::{HummockObjectId, HummockSstableObjectId, HummockVersionId};
+    use risingwave_hummock_sdk::{HummockSstableObjectId, HummockVersionId};
 
     use super::{
         BLOCK_INDEX_LIMIT, INVALID_HASH_BIT, LiveSstFilter, LiveSsts, SST_ID_LIMIT,
@@ -319,7 +323,7 @@ mod tests {
             (live.as_raw_id() << super::BLOCK_INDEX_BITS) | 3
         );
 
-        live_ssts.replace([HummockObjectId::Sstable(live)]);
+        live_ssts.replace([live]);
         assert!(filter.is_admitted(hash(SstableBlockIndex {
             sst_id: live,
             block_idx: 3,
