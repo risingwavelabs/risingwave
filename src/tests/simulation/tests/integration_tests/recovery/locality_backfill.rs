@@ -29,6 +29,28 @@ const ALTER_RATE_LIMIT_DEFAULT: &str =
 const WAIT: &str = "WAIT;";
 const WAIT_INTERNAL_STATE_SECS: u64 = 60;
 
+async fn wait_internal_table_name(
+    session: &mut Session,
+    table_name_pattern: &str,
+    context: &str,
+) -> Result<String> {
+    for _ in 0..WAIT_INTERNAL_STATE_SECS * 10 {
+        let table_name = session
+            .run(&format!(
+                "SELECT name FROM rw_internal_tables WHERE name LIKE '{}' LIMIT 1;",
+                table_name_pattern
+            ))
+            .await?;
+        if !table_name.is_empty() {
+            return Ok(table_name);
+        }
+
+        sleep(Duration::from_millis(100)).await;
+    }
+
+    bail!("Internal table should exist {}", context);
+}
+
 async fn wait_internal_state_table_non_empty(
     session: &mut Session,
     state_table_name: &str,
@@ -78,18 +100,18 @@ async fn test_locality_backfill_recovery_internal_tables() -> Result<()> {
     session.run(CREATE_MV).await?;
 
     // Step 5: Find the internal table names for locality provider
-    let state_table_name = session
-        .run("SELECT name FROM rw_internal_tables WHERE name LIKE '%localityproviderstate%';")
-        .await?;
-    let progress_table_name = session
-        .run("SELECT name FROM rw_internal_tables WHERE name LIKE '%localityproviderprogress%';")
-        .await?;
-
-    assert!(!state_table_name.is_empty(), "State table should exist");
-    assert!(
-        !progress_table_name.is_empty(),
-        "Progress table should exist"
-    );
+    let state_table_name = wait_internal_table_name(
+        &mut session,
+        "%localityproviderstate%",
+        "for locality provider state",
+    )
+    .await?;
+    let progress_table_name = wait_internal_table_name(
+        &mut session,
+        "%localityproviderprogress%",
+        "for locality provider progress",
+    )
+    .await?;
 
     // Step 6: Check internal tables before recovery
     // State table should be non-empty (contains vnode positions during backfill)

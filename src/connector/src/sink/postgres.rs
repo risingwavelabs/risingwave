@@ -241,6 +241,7 @@ impl Sink for PostgresSink {
                 &self.config.schema,
                 &self.config.table,
                 self.is_append_only,
+                None,
             )
             .await
             .context(format!(

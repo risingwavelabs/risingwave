@@ -18,8 +18,8 @@ mod tests {
     use risingwave_meta_model::FragmentId;
     use risingwave_meta_model::fragment::DistributionType;
     use risingwave_meta_model::table::HandleConflictBehavior;
-    use risingwave_pb::catalog::StreamSourceInfo;
     use risingwave_pb::catalog::subscription::SubscriptionState;
+    use risingwave_pb::catalog::{PbSinkType, StreamSourceInfo};
     use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType, worker_node};
     use risingwave_pb::meta::SubscribeType;
     use risingwave_pb::stream_plan::PbStreamNode;
@@ -27,6 +27,7 @@ mod tests {
 
     use crate::controller::catalog::*;
     use crate::manager::{LocalNotification, WorkerKey};
+    use crate::model::FragmentDownstreamRelation;
     use crate::serving::ServingVnodeMapping;
 
     const TEST_DATABASE_ID: DatabaseId = DatabaseId::new(1);
@@ -151,6 +152,16 @@ mod tests {
         )
         .await?;
 
+        insert_test_streaming_job_model(txn, job_id, policy).await?;
+
+        Ok((job_id, result_table_id, internal_table_id))
+    }
+
+    async fn insert_test_streaming_job_model(
+        txn: &DatabaseTransaction,
+        job_id: JobId,
+        policy: Option<CacheRefillPolicy>,
+    ) -> MetaResult<()> {
         streaming_job::ActiveModel {
             job_id: Set(job_id),
             job_status: Set(JobStatus::Created),
@@ -175,7 +186,7 @@ mod tests {
         .insert(txn)
         .await?;
 
-        Ok((job_id, result_table_id, internal_table_id))
+        Ok(())
     }
 
     #[tokio::test]
@@ -256,6 +267,297 @@ mod tests {
                 ),
             ])
         );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_foreground_creating_catalog_lifecycle() -> MetaResult<()> {
+        let env = MetaSrvEnv::for_test().await;
+        let (tx, mut notification_rx) = mpsc::unbounded_channel();
+        env.notification_manager().insert_sender(
+            SubscribeType::Frontend,
+            WorkerKey(HostAddress {
+                host: "localhost".to_owned(),
+                port: 1234,
+            }),
+            tx,
+        );
+        let mgr = CatalogController::new(env).await?;
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        // A foreground table and its internal table are both visible while creating.
+        let (job_id, Some(table_id), internal_table_id) =
+            insert_test_streaming_job(&txn, "creating_table", true, None).await?
+        else {
+            unreachable!()
+        };
+        let associated_source_id = CatalogController::create_object(
+            &txn,
+            ObjectType::Source,
+            TEST_OWNER_ID,
+            Some(TEST_DATABASE_ID),
+            Some(TEST_SCHEMA_ID),
+        )
+        .await?
+        .oid
+        .as_source_id();
+        Source::insert(source::ActiveModel::from(PbSource {
+            id: associated_source_id,
+            schema_id: TEST_SCHEMA_ID,
+            database_id: TEST_DATABASE_ID,
+            name: "creating_table_source".to_owned(),
+            owner: TEST_OWNER_ID as _,
+            optional_associated_table_id: Some(
+                risingwave_pb::catalog::source::OptionalAssociatedTableId::AssociatedTableId(
+                    table_id,
+                ),
+            ),
+            ..Default::default()
+        }))
+        .exec(&txn)
+        .await?;
+        table::ActiveModel {
+            table_id: Set(table_id),
+            table_type: Set(TableType::Table),
+            optional_associated_source_id: Set(Some(associated_source_id)),
+            ..Default::default()
+        }
+        .update(&txn)
+        .await?;
+        streaming_job::ActiveModel {
+            job_id: Set(job_id),
+            job_status: Set(JobStatus::Initial),
+            ..Default::default()
+        }
+        .update(&txn)
+        .await?;
+
+        // A foreground index and its index table are both visible while creating.
+        let (_primary_job_id, Some(primary_table_id), _) =
+            insert_test_streaming_job(&txn, "primary_table", true, None).await?
+        else {
+            unreachable!()
+        };
+        let index_job_id = CatalogController::create_object(
+            &txn,
+            ObjectType::Index,
+            TEST_OWNER_ID,
+            Some(TEST_DATABASE_ID),
+            Some(TEST_SCHEMA_ID),
+        )
+        .await?
+        .oid
+        .as_job_id();
+        let index_table_id = index_job_id.as_mv_table_id();
+        insert_test_table(
+            &txn,
+            index_table_id,
+            "creating_index",
+            TableType::Index,
+            None,
+            "",
+        )
+        .await?;
+        index::ActiveModel {
+            index_id: Set(index_job_id.as_index_id()),
+            name: Set("creating_index".to_owned()),
+            index_table_id: Set(index_table_id),
+            primary_table_id: Set(primary_table_id),
+            index_items: Set(vec![].into()),
+            index_column_properties: Set(None),
+            index_columns_len: Set(0),
+        }
+        .insert(&txn)
+        .await?;
+        insert_test_streaming_job_model(&txn, index_job_id, None).await?;
+        streaming_job::ActiveModel {
+            job_id: Set(index_job_id),
+            job_status: Set(JobStatus::Initial),
+            ..Default::default()
+        }
+        .update(&txn)
+        .await?;
+
+        // A creating shared source is included in restart snapshots as well.
+        let source_job_id = CatalogController::create_object(
+            &txn,
+            ObjectType::Source,
+            TEST_OWNER_ID,
+            Some(TEST_DATABASE_ID),
+            Some(TEST_SCHEMA_ID),
+        )
+        .await?
+        .oid
+        .as_job_id();
+        Source::insert(source::ActiveModel::from(PbSource {
+            id: source_job_id.as_shared_source_id(),
+            schema_id: TEST_SCHEMA_ID,
+            database_id: TEST_DATABASE_ID,
+            name: "creating_shared_source".to_owned(),
+            owner: TEST_OWNER_ID as _,
+            info: Some(StreamSourceInfo {
+                cdc_source_job: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }))
+        .exec(&txn)
+        .await?;
+        insert_test_streaming_job_model(&txn, source_job_id, None).await?;
+        streaming_job::ActiveModel {
+            job_id: Set(source_job_id),
+            job_status: Set(JobStatus::Initial),
+            ..Default::default()
+        }
+        .update(&txn)
+        .await?;
+
+        let sink_job_id = CatalogController::create_object(
+            &txn,
+            ObjectType::Sink,
+            TEST_OWNER_ID,
+            Some(TEST_DATABASE_ID),
+            Some(TEST_SCHEMA_ID),
+        )
+        .await?
+        .oid
+        .as_job_id();
+        Sink::insert(sink::ActiveModel::from(PbSink {
+            id: sink_job_id.as_sink_id(),
+            schema_id: TEST_SCHEMA_ID,
+            database_id: TEST_DATABASE_ID,
+            name: "creating_sink".to_owned(),
+            owner: TEST_OWNER_ID as _,
+            sink_type: PbSinkType::AppendOnly as i32,
+            ..Default::default()
+        }))
+        .exec(&txn)
+        .await?;
+        insert_test_streaming_job_model(&txn, sink_job_id, None).await?;
+        streaming_job::ActiveModel {
+            job_id: Set(sink_job_id),
+            job_status: Set(JobStatus::Initial),
+            ..Default::default()
+        }
+        .update(&txn)
+        .await?;
+
+        txn.commit().await?;
+
+        let (catalog, _) = inner.snapshot().await?;
+        assert!(!catalog.2.iter().any(|table| table.id == table_id));
+        assert!(!catalog.2.iter().any(|table| table.id == internal_table_id));
+        assert!(!catalog.2.iter().any(|table| table.id == index_table_id));
+        assert!(
+            !catalog
+                .3
+                .iter()
+                .any(|source| source.id == associated_source_id)
+        );
+        assert!(
+            !catalog
+                .3
+                .iter()
+                .any(|source| source.id == source_job_id.as_shared_source_id())
+        );
+        assert!(
+            !catalog
+                .6
+                .iter()
+                .any(|index| index.id == index_job_id.as_index_id())
+        );
+        assert!(
+            !catalog
+                .4
+                .iter()
+                .any(|sink| sink.id == sink_job_id.as_sink_id())
+        );
+
+        drop(inner);
+
+        let downstreams = FragmentDownstreamRelation::new();
+        let mut add_notifications = vec![];
+        for creating_job_id in [job_id, index_job_id, source_job_id, sink_job_id] {
+            mgr.post_collect_job_fragments(creating_job_id, &downstreams, None, None, None, true)
+                .await?;
+            let notification = notification_rx
+                .recv()
+                .await
+                .expect("frontend should receive a creating notification")
+                .expect("creating notification should be valid");
+            assert_eq!(notification.operation(), NotificationOperation::Add);
+            let object_group = match notification.info {
+                Some(NotificationInfo::ObjectGroup(object_group)) => object_group,
+                other => panic!("unexpected notification: {other:?}"),
+            };
+            add_notifications.push(object_group);
+        }
+
+        assert!(add_notifications[0].objects.iter().any(|object| matches!(
+            &object.object_info,
+            Some(PbObjectInfo::Table(table)) if table.id == table_id
+        )));
+        assert!(add_notifications[0].objects.iter().any(|object| matches!(
+            &object.object_info,
+            Some(PbObjectInfo::Table(table)) if table.id == internal_table_id
+        )));
+        assert!(add_notifications[0].objects.iter().any(|object| matches!(
+            &object.object_info,
+            Some(PbObjectInfo::Source(source)) if source.id == associated_source_id
+        )));
+        assert!(add_notifications[1].objects.iter().any(|object| matches!(
+            &object.object_info,
+            Some(PbObjectInfo::Table(table)) if table.id == index_table_id
+        )));
+        assert!(add_notifications[1].objects.iter().any(|object| matches!(
+            &object.object_info,
+            Some(PbObjectInfo::Index(index)) if index.id == index_job_id.as_index_id()
+        )));
+        assert!(add_notifications[2].objects.iter().any(|object| matches!(
+            &object.object_info,
+            Some(PbObjectInfo::Source(source)) if source.id == source_job_id.as_shared_source_id()
+        )));
+        assert!(add_notifications[3].objects.iter().any(|object| matches!(
+            &object.object_info,
+            Some(PbObjectInfo::Sink(sink)) if sink.id == sink_job_id.as_sink_id()
+        )));
+
+        let inner = mgr.inner.write().await;
+        let (catalog, _) = inner.snapshot().await?;
+        assert!(catalog.2.iter().any(|table| table.id == table_id));
+        assert!(catalog.2.iter().any(|table| table.id == internal_table_id));
+        assert!(catalog.2.iter().any(|table| table.id == index_table_id));
+        assert!(
+            catalog
+                .3
+                .iter()
+                .any(|source| source.id == source_job_id.as_shared_source_id())
+        );
+        assert!(
+            catalog
+                .6
+                .iter()
+                .any(|index| index.id == index_job_id.as_index_id())
+        );
+        assert!(
+            catalog
+                .4
+                .iter()
+                .any(|sink| sink.id == sink_job_id.as_sink_id())
+        );
+
+        let txn = inner.db.begin().await?;
+        let (operation, _, _, _) = mgr.finish_streaming_job_inner(&txn, job_id).await?;
+        assert_eq!(operation, NotificationOperation::Update);
+        let (operation, _, _, _) = mgr.finish_streaming_job_inner(&txn, index_job_id).await?;
+        assert_eq!(operation, NotificationOperation::Update);
+        let (operation, _, _, _) = mgr.finish_streaming_job_inner(&txn, source_job_id).await?;
+        assert_eq!(operation, NotificationOperation::Update);
+        let (operation, _, _, _) = mgr.finish_streaming_job_inner(&txn, sink_job_id).await?;
+        assert_eq!(operation, NotificationOperation::Update);
+        txn.commit().await?;
 
         Ok(())
     }
@@ -675,11 +977,39 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_abort_initial_materialized_view_reports_cancellation() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+    async fn test_cancel_creating_table_deletes_associated_source() -> MetaResult<()> {
+        let env = MetaSrvEnv::for_test().await;
+        let (tx, mut notification_rx) = mpsc::unbounded_channel();
+        env.notification_manager().insert_sender(
+            SubscribeType::Frontend,
+            WorkerKey(HostAddress {
+                host: "localhost".to_owned(),
+                port: 1234,
+            }),
+            tx,
+        );
+        let mgr = CatalogController::new(env).await?;
 
         let mut inner = mgr.inner.write().await;
         let txn = inner.db.begin().await?;
+        let source_obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Source,
+            TEST_OWNER_ID,
+            Some(TEST_DATABASE_ID),
+            Some(TEST_SCHEMA_ID),
+        )
+        .await?;
+        Source::insert(source::ActiveModel::from(PbSource {
+            id: source_obj.oid.as_source_id(),
+            schema_id: TEST_SCHEMA_ID,
+            database_id: TEST_DATABASE_ID,
+            name: "source_abort_initial".to_owned(),
+            owner: TEST_OWNER_ID as _,
+            ..Default::default()
+        }))
+        .exec(&txn)
+        .await?;
         let obj = CatalogController::create_object(
             &txn,
             ObjectType::Table,
@@ -692,9 +1022,9 @@ mod tests {
 
         table::ActiveModel {
             table_id: Set(obj.oid.as_table_id()),
-            name: Set("mv_abort_initial".to_owned()),
-            optional_associated_source_id: Set(None),
-            table_type: Set(TableType::MaterializedView),
+            name: Set("table_abort_initial".to_owned()),
+            optional_associated_source_id: Set(Some(source_obj.oid.as_source_id())),
+            table_type: Set(TableType::Table),
             belongs_to_job_id: Set(None),
             columns: Set(vec![].into()),
             pk: Set(vec![].into()),
@@ -705,7 +1035,7 @@ mod tests {
             vnode_col_index: Set(None),
             row_id_index: Set(None),
             value_indices: Set(Vec::<i32>::new().into()),
-            definition: Set("CREATE MATERIALIZED VIEW mv_abort_initial AS SELECT 1".to_owned()),
+            definition: Set("CREATE TABLE table_abort_initial (v1 INT)".to_owned()),
             handle_pk_conflict_behavior: Set(HandleConflictBehavior::NoCheck),
             version_column_indices: Set(None),
             read_prefix_len_hint: Set(0),
@@ -732,7 +1062,7 @@ mod tests {
 
         streaming_job::ActiveModel {
             job_id: Set(job_id),
-            job_status: Set(JobStatus::Initial),
+            job_status: Set(JobStatus::Creating),
             create_type: Set(CreateType::Foreground),
             timezone: Set(None),
             config_override: Set(None),
@@ -761,7 +1091,7 @@ mod tests {
         let err = rx
             .await
             .expect("finish notifier should be notified")
-            .expect_err("initial job drop should cancel the create wait");
+            .expect_err("creating job cancellation should fail the create wait");
         assert!(err.contains("cancelled"));
 
         let db = &mgr.inner.read().await.db;
@@ -773,6 +1103,31 @@ mod tests {
                 .await?
                 .is_none()
         );
+        assert!(
+            Source::find_by_id(source_obj.oid.as_source_id())
+                .one(db)
+                .await?
+                .is_none()
+        );
+
+        let notification = notification_rx
+            .recv()
+            .await
+            .expect("frontend should receive an abort notification")
+            .expect("abort notification should be valid");
+        assert_eq!(notification.operation(), NotificationOperation::Delete);
+        let object_group = match notification.info {
+            Some(NotificationInfo::ObjectGroup(object_group)) => object_group,
+            other => panic!("unexpected notification: {other:?}"),
+        };
+        assert!(object_group.objects.iter().any(|object| matches!(
+            &object.object_info,
+            Some(PbObjectInfo::Table(table)) if table.id == job_id.as_mv_table_id()
+        )));
+        assert!(object_group.objects.iter().any(|object| matches!(
+            &object.object_info,
+            Some(PbObjectInfo::Source(source)) if source.id == source_obj.oid.as_source_id()
+        )));
 
         Ok(())
     }
@@ -979,6 +1334,76 @@ mod tests {
         assert!(
             Subscription::find_by_id(pb_subscription.id)
                 .one(&mgr.inner.read().await.db)
+                .await?
+                .is_none()
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_drop_table_cascade_drops_dependent_subscription() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let table_obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(TEST_DATABASE_ID),
+            Some(TEST_SCHEMA_ID),
+        )
+        .await?;
+        let table_id = table_obj.oid.as_table_id();
+        insert_test_table(
+            &txn,
+            table_id,
+            "subscription_dep_table",
+            TableType::Table,
+            None,
+            "CREATE TABLE subscription_dep_table (v1 INT)",
+        )
+        .await?;
+        txn.commit().await?;
+        drop(inner);
+
+        let mut pb_subscription = PbSubscription {
+            name: "subscription_to_drop_with_table".to_owned(),
+            definition:
+                "CREATE SUBSCRIPTION subscription_to_drop_with_table FROM subscription_dep_table"
+                    .to_owned(),
+            retention_seconds: 86400,
+            database_id: TEST_DATABASE_ID,
+            schema_id: TEST_SCHEMA_ID,
+            dependent_table_id: table_id,
+            owner: TEST_OWNER_ID as _,
+            subscription_state: SubscriptionState::Created as _,
+            ..Default::default()
+        };
+        mgr.create_subscription_catalog(&mut pb_subscription)
+            .await?;
+
+        mgr.drop_object(ObjectType::Table, table_id, DropMode::Cascade)
+            .await?;
+
+        let db = &mgr.inner.read().await.db;
+        assert!(Table::find_by_id(table_id).one(db).await?.is_none());
+        assert!(
+            Object::find_by_id(table_id.as_object_id())
+                .one(db)
+                .await?
+                .is_none()
+        );
+        assert!(
+            Subscription::find_by_id(pb_subscription.id)
+                .one(db)
+                .await?
+                .is_none()
+        );
+        assert!(
+            Object::find_by_id(pb_subscription.id.as_object_id())
+                .one(db)
                 .await?
                 .is_none()
         );

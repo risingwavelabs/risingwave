@@ -27,6 +27,7 @@ pretty_assertions = "1"
 rand = { workspace = true }
 rand_chacha = { version = "0.9" }
 rdkafka = { workspace = true }
+risingwave_batch = { workspace = true }
 risingwave_batch_executors = { workspace = true }
 risingwave_common = { workspace = true }
 risingwave_compactor = { workspace = true }
