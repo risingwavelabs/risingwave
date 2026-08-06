@@ -1018,7 +1018,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
     }
 }
 
-impl<T> HummockVersionCommon<T>
+impl<T, L> HummockVersionCommon<T, L>
 where
     T: SstableIdReader + ObjectIdReader,
 {

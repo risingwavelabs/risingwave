@@ -24,8 +24,8 @@ use foyer::{
     StorageFilterResult,
 };
 use risingwave_common::config::EvictionConfig;
-use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_hummock_sdk::version::LocalHummockVersion;
+use risingwave_hummock_sdk::{HummockObjectId, HummockSstableObjectId};
 use serde::{Deserialize, Serialize};
 use xxhash_rust::xxh64::xxh64;
 
@@ -96,7 +96,7 @@ type HybridBlockGetOrFetch =
 
 #[derive(Clone)]
 pub struct LiveSsts {
-    inner: Arc<ArcSwap<HashSet<HummockSstableObjectId>>>,
+    inner: Arc<ArcSwap<HashSet<HummockObjectId>>>,
 }
 
 impl Default for LiveSsts {
@@ -117,22 +117,18 @@ impl std::fmt::Debug for LiveSsts {
 
 impl LiveSsts {
     pub fn replace_from_version(&self, version: &LocalHummockVersion) {
-        self.replace(
-            version
-                .levels
-                .values()
-                .flat_map(|levels| levels.l0.sub_levels.iter().chain(levels.levels.iter()))
-                .flat_map(|level| level.table_infos.iter())
-                .map(|sst| sst.object_id),
-        );
+        self.replace(version.get_object_ids());
     }
 
-    fn replace(&self, sst_ids: impl IntoIterator<Item = HummockSstableObjectId>) {
-        self.inner.store(Arc::new(sst_ids.into_iter().collect()));
+    fn replace(&self, object_ids: impl IntoIterator<Item = HummockObjectId>) {
+        let next = HashSet::from_iter(object_ids);
+        if self.inner.load().as_ref() != &next {
+            self.inner.store(Arc::new(next));
+        }
     }
 
-    fn contains(&self, sst_id: &HummockSstableObjectId) -> bool {
-        self.inner.load().contains(sst_id)
+    fn contains(&self, object_id: &HummockObjectId) -> bool {
+        self.inner.load().contains(object_id)
     }
 }
 
@@ -151,7 +147,9 @@ impl LiveSstFilter {
             return false;
         }
         self.live_ssts
-            .contains(&HummockSstableObjectId::new(hash >> BLOCK_INDEX_BITS))
+            .contains(&HummockObjectId::Sstable(HummockSstableObjectId::new(
+                hash >> BLOCK_INDEX_BITS,
+            )))
     }
 }
 
@@ -256,11 +254,12 @@ impl BlockResponse {
 mod tests {
     use std::collections::HashMap;
     use std::hash::BuildHasher;
+    use std::sync::Arc;
 
     use risingwave_hummock_sdk::level::{LevelCommon, LevelsCommon};
     use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
     use risingwave_hummock_sdk::version::{HummockVersion, LocalHummockVersion};
-    use risingwave_hummock_sdk::{HummockSstableObjectId, HummockVersionId};
+    use risingwave_hummock_sdk::{HummockObjectId, HummockSstableObjectId, HummockVersionId};
 
     use super::{
         BLOCK_INDEX_LIMIT, INVALID_HASH_BIT, LiveSstFilter, LiveSsts, SST_ID_LIMIT,
@@ -277,7 +276,7 @@ mod tests {
             .map(|sst_id| {
                 SstableInfoInner {
                     object_id: (*sst_id).into(),
-                    sst_id: (*sst_id).into(),
+                    sst_id: (*sst_id + 1000).into(),
                     ..Default::default()
                 }
                 .into()
@@ -320,7 +319,7 @@ mod tests {
             (live.as_raw_id() << super::BLOCK_INDEX_BITS) | 3
         );
 
-        live_ssts.replace([live]);
+        live_ssts.replace([HummockObjectId::Sstable(live)]);
         assert!(filter.is_admitted(hash(SstableBlockIndex {
             sst_id: live,
             block_idx: 3,
@@ -345,6 +344,9 @@ mod tests {
         };
 
         live_ssts.replace_from_version(&version_with_ssts(&[7, 8]));
+        let first = live_ssts.inner.load_full();
+        live_ssts.replace_from_version(&version_with_ssts(&[7, 8]));
+        assert!(Arc::ptr_eq(&first, &live_ssts.inner.load_full()));
         assert!(filter.is_admitted(hash(sst_7)));
         assert!(filter.is_admitted(hash(sst_8)));
 

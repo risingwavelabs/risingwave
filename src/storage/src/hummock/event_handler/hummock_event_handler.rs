@@ -718,6 +718,17 @@ impl HummockEventHandler {
             .metrics
             .event_handler_on_recv_version_update
             .start_timer();
+        let may_change_live_objects = match &version_payload {
+            HummockVersionUpdate::VersionDeltas(version_deltas) => {
+                // The data block filter only queries SST object IDs. SST level membership can only
+                // change through group deltas; table metadata and vector-only deltas do not affect
+                // its decisions.
+                version_deltas
+                    .iter()
+                    .any(|version_delta| !version_delta.group_deltas.is_empty())
+            }
+            HummockVersionUpdate::PinnedVersion(_) => true,
+        };
         let pinned_version = self
             .refiller
             .last_new_pinned_version()
@@ -730,9 +741,11 @@ impl HummockEventHandler {
             version_payload,
             Some(&mut sst_delta_infos),
         ) {
-            // The refiller uses force insertion after its explicit storage-filter check, so publish
-            // the target version's live SSTs before starting refill tasks.
-            self.live_ssts.replace_from_version(&new_pinned_version);
+            if may_change_live_objects {
+                // The refiller uses force insertion after its explicit storage-filter check, so
+                // publish the target version's live objects before starting refill tasks.
+                self.live_ssts.replace_from_version(&new_pinned_version);
+            }
             self.refiller
                 .start_cache_refill(sst_delta_infos, pinned_version, new_pinned_version);
         }
