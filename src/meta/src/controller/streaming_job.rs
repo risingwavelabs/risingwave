@@ -86,7 +86,7 @@ use crate::controller::utils::{
     list_user_info_by_ids, try_get_iceberg_table_by_downstream_sink,
 };
 use crate::error::MetaErrorInner;
-use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
+use crate::manager::{LocalNotification, NotificationVersion, StreamingJob, StreamingJobType};
 use crate::model::{
     FragmentDownstreamRelation, FragmentReplaceUpstream, StreamContext, StreamJobFragments,
     StreamJobFragmentsToCreate,
@@ -528,6 +528,10 @@ impl CatalogController {
             .iter()
             .flat_map(|fragment| fragment.state_table_ids.inner_ref().clone())
             .collect_vec();
+        let inserted_fragment_ids = fragments
+            .iter()
+            .map(|fragment| fragment.fragment_id)
+            .collect_vec();
 
         if !fragments.is_empty() {
             let fragment_models = fragments
@@ -612,6 +616,13 @@ impl CatalogController {
 
         txn.commit().await?;
 
+        // Notify serving module about newly inserted fragments so it can establish
+        // serving vnode mappings. This is driven by the fragment model insertion,
+        // decoupled from the barrier-driven streaming mapping notifications.
+        self.env.notification_manager().notify_local_subscribers(
+            LocalNotification::FragmentMappingsUpsert(inserted_fragment_ids),
+        );
+
         // FIXME: there's a gap between the catalog creation and notification, which may lead to
         // frontend receiving duplicate notifications if the frontend restarts right in this gap. We
         // need to either forward the notification or filter catalogs without any fragments in the metastore.
@@ -624,6 +635,9 @@ impl CatalogController {
             )
             .await;
         }
+
+        self.notify_hummock_table_cache_refill_policy_if_explicit(&inner, job_id)
+            .await?;
 
         Ok(())
     }
