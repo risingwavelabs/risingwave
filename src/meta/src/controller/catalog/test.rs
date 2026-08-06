@@ -30,7 +30,7 @@ mod tests {
 
     use crate::controller::catalog::*;
     use crate::manager::{LocalNotification, WorkerKey};
-    use crate::model::{Fragment, FragmentDownstreamRelation};
+    use crate::model::{Fragment, FragmentDownstreamRelation, StreamActor};
     use crate::serving::ServingVnodeMapping;
 
     const TEST_DATABASE_ID: DatabaseId = DatabaseId::new(1);
@@ -355,6 +355,9 @@ mod tests {
             }),
             tx,
         );
+        let (local_notification_tx, mut local_notification_rx) = mpsc::unbounded_channel();
+        env.notification_manager()
+            .insert_local_sender(local_notification_tx);
         let mgr = CatalogController::new(env).await?;
 
         let inner = mgr.inner.write().await;
@@ -395,7 +398,15 @@ mod tests {
         let fragments = [Fragment {
             fragment_id: FragmentId::new(300),
             fragment_type_mask: FragmentTypeMask::default(),
-            distribution_type: PbFragmentDistributionType::Hash,
+            distribution_type: PbFragmentDistributionType::Single,
+            actors: vec![StreamActor {
+                actor_id: 3000.into(),
+                fragment_id: FragmentId::new(300),
+                vnode_bitmap: None,
+                mview_definition: "".to_owned(),
+                expr_context: None,
+                config_override: "".into(),
+            }],
             state_table_ids: vec![],
             maybe_vnode_count: Some(1),
             nodes: PbStreamNode::default(),
@@ -409,6 +420,17 @@ mod tests {
             None,
         )
         .await?;
+
+        let local_notification = local_notification_rx
+            .try_recv()
+            .expect("should receive serving fragment mapping notification");
+        let LocalNotification::FragmentMappingsUpsert(fragment_ids) = local_notification else {
+            panic!(
+                "unexpected local notification before hummock notification: {:?}",
+                local_notification
+            );
+        };
+        assert_eq!(fragment_ids, vec![FragmentId::new(300).as_raw_id()]);
 
         let response = rx
             .recv()
