@@ -2430,7 +2430,7 @@ impl CatalogController {
         &self,
         source_id: SourceId,
         rate_limit: Option<u32>,
-    ) -> MetaResult<(HashSet<JobId>, HashMap<FragmentId, PbStreamNode>)> {
+    ) -> MetaResult<HashMap<FragmentId, PbStreamNode>> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
@@ -2535,13 +2535,10 @@ impl CatalogController {
             "source id should be used by at least one fragment"
         );
 
-        let (fragment_nodes, job_ids): (HashMap<FragmentId, PbStreamNode>, HashSet<JobId>) =
-            fragments
-                .iter()
-                .map(|(fragment_id, job_id, _, stream_node)| {
-                    ((*fragment_id, stream_node.clone()), *job_id)
-                })
-                .unzip();
+        let fragment_nodes = fragments
+            .iter()
+            .map(|(fragment_id, _, _, stream_node)| (*fragment_id, stream_node.clone()))
+            .collect();
 
         for (fragment_id, _, fragment_type_mask, stream_node) in fragments {
             Fragment::update(fragment::ActiveModel {
@@ -2569,7 +2566,7 @@ impl CatalogController {
             )
             .await;
 
-        Ok((job_ids, fragment_nodes))
+        Ok(fragment_nodes)
     }
 
     // edit the content of fragments in given `table_id`

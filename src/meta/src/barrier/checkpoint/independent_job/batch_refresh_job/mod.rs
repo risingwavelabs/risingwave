@@ -45,11 +45,11 @@ use tracing::{debug, info};
 
 use crate::MetaResult;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
-use crate::barrier::command::PostCollectCommand;
+use crate::barrier::command::{PostCollectCommand, ThrottleConfigMap, extract_throttle_config};
 use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
 use crate::barrier::edge_builder::{EdgeBuilderFragmentInfo, FragmentEdgeBuilder};
 use crate::barrier::info::BarrierInfo;
-use crate::barrier::notifier::Notifier;
+use crate::barrier::notifier::{CollectionNotifier, NotifierStart};
 use crate::barrier::partial_graph::{
     CollectedBarrier, PartialGraphBarrierInfo, PartialGraphManager, PartialGraphStat,
 };
@@ -177,7 +177,7 @@ enum BatchRefreshJobStatus {
         target_upstream_epoch: u64,
     },
     /// The partial graph is being reset (for drop).
-    Resetting { notifiers: Vec<Notifier> },
+    Resetting { notifiers: Vec<CollectionNotifier> },
 }
 
 // ── Complete type ─────────────────────────────────────────────────────────────
@@ -474,7 +474,7 @@ impl BatchRefreshJobCheckpointControl {
         database_id: DatabaseId,
         job_id: JobId,
         create_info: CreateSnapshotBackfillJobCommandInfo,
-        notifiers: Vec<Notifier>,
+        notifier: Option<&mut NotifierStart>,
         snapshot_backfill_upstream_tables: HashSet<TableId>,
         snapshot_epoch: u64,
         version_stat: &HummockVersionStats,
@@ -545,7 +545,7 @@ impl BatchRefreshJobCheckpointControl {
             initial_barrier_info,
             Some(render_result.actors_to_create),
             Some(initial_partial_graph_mutation),
-            notifiers,
+            notifier,
             Some(create_info),
             false,
         ) {
@@ -691,7 +691,7 @@ impl BatchRefreshJobCheckpointControl {
         barrier_info: BarrierInfo,
         new_actors: Option<StreamJobActorsToCreate>,
         mutation: Option<Mutation>,
-        notifiers: Vec<Notifier>,
+        notifier: Option<&mut NotifierStart>,
         first_create_info: Option<CreateSnapshotBackfillJobCommandInfo>,
         is_stop: bool,
     ) -> MetaResult<()> {
@@ -719,7 +719,7 @@ impl BatchRefreshJobCheckpointControl {
                     CreateSnapshotBackfillJobCommandInfo::into_post_collect,
                 ),
                 barrier_info,
-                notifiers,
+                notifier.map(NotifierStart::add_notify),
                 state_table_ids.clone(),
             ),
         )?;
@@ -734,18 +734,17 @@ impl BatchRefreshJobCheckpointControl {
         &mut self,
         partial_graph_manager: &mut PartialGraphManager,
         barrier_info: &BarrierInfo,
-        mutation: Option<(Mutation, Vec<Notifier>)>,
+        mutation: Option<(Mutation, Option<&mut NotifierStart>)>,
     ) -> MetaResult<()> {
         if !matches!(self.status, BatchRefreshJobStatus::ConsumingSnapshot { .. }) {
             // ConsumingLogStore has all barriers pre-injected; no forwarding needed.
             // Idle and Resetting have no partial graph.
             return Ok(());
         }
-        let (mut mutation, mut notifiers) = match mutation {
-            Some((mutation, notifiers)) => (Some(mutation), notifiers),
-            None => (None, vec![]),
+        let (mutation, notifier) = match mutation {
+            Some((mutation, notifier)) => (Some(mutation), notifier),
+            None => (None, None),
         };
-
         // Check if snapshot consumption is finished and we need to inject stop barriers.
         let is_finished = matches!(
             &self.status,
@@ -754,9 +753,6 @@ impl BatchRefreshJobCheckpointControl {
         );
 
         if is_finished {
-            // Discard the upstream mutation — not needed for stop barriers.
-            mutation.take();
-
             // Take the status out to destructure and transition to `FinishingSnapshot`.
             // Use a placeholder; will be overwritten below.
             let old_status = replace(
@@ -810,7 +806,7 @@ impl BatchRefreshJobCheckpointControl {
                 final_checkpoint,
                 None,
                 None,
-                take(&mut notifiers),
+                notifier,
                 None,
                 false,
             )?;
@@ -825,7 +821,7 @@ impl BatchRefreshJobCheckpointControl {
                     actors: stop_actors,
                     dropped_sink_fragments: vec![],
                 })),
-                vec![],
+                None,
                 None,
                 true,
             )?;
@@ -849,7 +845,7 @@ impl BatchRefreshJobCheckpointControl {
             };
 
             // Forward a fake barrier to the partial graph.
-            let mutation = mutation.take().or_else(|| {
+            let mutation = mutation.or_else(|| {
                 let pending_backfill_nodes = create_mview_tracker
                     .take_pending_backfill_nodes()
                     .collect_vec();
@@ -882,13 +878,11 @@ impl BatchRefreshJobCheckpointControl {
                 barrier_to_inject,
                 None,
                 mutation,
-                take(&mut notifiers),
+                notifier,
                 None,
                 false,
             )?;
         }
-        assert!(mutation.is_none(), "must have consumed mutation");
-        assert!(notifiers.is_empty(), "must consumed notifiers");
         Ok(())
     }
 
@@ -1140,6 +1134,32 @@ impl BatchRefreshJobCheckpointControl {
         }
     }
 
+    pub(crate) fn pre_apply_throttle(
+        &mut self,
+        config: &mut ThrottleConfigMap,
+    ) -> Option<Mutation> {
+        let BatchRefreshJobStatus::ConsumingSnapshot {
+            fragment_infos,
+            create_mview_tracker,
+            ..
+        } = &mut self.status
+        else {
+            return None;
+        };
+        if create_mview_tracker.is_finished() {
+            return None;
+        }
+
+        extract_throttle_config(config, |fragment_id, stream_node| {
+            if let Some(fragment_info) = fragment_infos.get_mut(&fragment_id) {
+                fragment_info.nodes = stream_node.clone();
+                true
+            } else {
+                false
+            }
+        })
+    }
+
     /// Whether this idle job should start a refresh run.
     ///
     /// Returns `true` if the job is idle and the upstream committed epoch is
@@ -1361,7 +1381,7 @@ impl BatchRefreshJobCheckpointControl {
                 barrier,
                 None,
                 mutation,
-                vec![],
+                None,
                 None,
                 is_stop_barrier,
             )?;
@@ -1468,7 +1488,7 @@ impl BatchRefreshJobCheckpointControl {
     /// Drop this batch refresh job.
     pub(super) fn drop(
         &mut self,
-        notifiers: &mut Vec<Notifier>,
+        notifier: Option<&mut NotifierStart>,
         partial_graph_manager: &mut PartialGraphManager,
     ) -> bool {
         match &mut self.status {
@@ -1476,34 +1496,31 @@ impl BatchRefreshJobCheckpointControl {
                 notifiers: existing_notifiers,
                 ..
             } => {
-                for notifier in &mut *notifiers {
-                    notifier.notify_started();
-                }
-                existing_notifiers.append(notifiers);
+                existing_notifiers.extend(notifier.map(NotifierStart::add_notify));
                 true
             }
             BatchRefreshJobStatus::ConsumingSnapshot { .. }
             | BatchRefreshJobStatus::FinishingSnapshot { .. }
             | BatchRefreshJobStatus::InitializingBatchRefresh { .. }
             | BatchRefreshJobStatus::ConsumingLogStore { .. } => {
-                for notifier in &mut *notifiers {
-                    notifier.notify_started();
-                }
                 partial_graph_manager.reset_partial_graphs([self.partial_graph_id]);
                 self.status = BatchRefreshJobStatus::Resetting {
-                    notifiers: take(notifiers),
+                    notifiers: notifier
+                        .map(NotifierStart::add_notify)
+                        .into_iter()
+                        .collect(),
                 };
                 true
             }
             BatchRefreshJobStatus::Idle { .. } => {
                 // Idle has no running partial graph, but we still go through
                 // the reset flow so the cleanup path is uniform.
-                for notifier in &mut *notifiers {
-                    notifier.notify_started();
-                }
                 partial_graph_manager.reset_partial_graphs([self.partial_graph_id]);
                 self.status = BatchRefreshJobStatus::Resetting {
-                    notifiers: take(notifiers),
+                    notifiers: notifier
+                        .map(NotifierStart::add_notify)
+                        .into_iter()
+                        .collect(),
                 };
                 true
             }
