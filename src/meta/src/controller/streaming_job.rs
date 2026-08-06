@@ -1663,6 +1663,9 @@ impl CatalogController {
             version = self.notify_users_update(updated_user_info).await;
         }
 
+        self.notify_hummock_table_cache_refill_policy_if_explicit(&inner, job_id)
+            .await?;
+
         inner
             .creating_table_finish_notifier
             .values_mut()
