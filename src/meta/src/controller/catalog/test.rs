@@ -14,6 +14,7 @@
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::catalog::FragmentTypeMask;
     use risingwave_common::hash::VirtualNode;
     use risingwave_meta_model::FragmentId;
     use risingwave_meta_model::fragment::DistributionType;
@@ -22,12 +23,13 @@ mod tests {
     use risingwave_pb::catalog::{PbSinkType, StreamSourceInfo};
     use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType, worker_node};
     use risingwave_pb::meta::SubscribeType;
+    use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
     use risingwave_pb::stream_plan::PbStreamNode;
     use tokio::sync::{mpsc, oneshot};
 
     use crate::controller::catalog::*;
     use crate::manager::{LocalNotification, WorkerKey};
-    use crate::model::FragmentDownstreamRelation;
+    use crate::model::{Fragment, FragmentDownstreamRelation};
     use crate::serving::ServingVnodeMapping;
 
     const TEST_DATABASE_ID: DatabaseId = DatabaseId::new(1);
@@ -583,6 +585,13 @@ mod tests {
         else {
             unreachable!()
         };
+        insert_test_fragment(
+            &txn,
+            FragmentId::new(200),
+            result_table_id.as_job_id(),
+            TableIdArray(vec![result_table_id, internal_table_id]),
+        )
+        .await?;
         txn.commit().await?;
         drop(inner);
 
@@ -637,7 +646,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_finish_streaming_job_cache_refill_policy_notifies_hummock() -> MetaResult<()> {
+    async fn test_prepare_streaming_job_cache_refill_policy_notifies_hummock() -> MetaResult<()> {
         let env = MetaSrvEnv::for_test().await;
         let (tx, mut rx) = mpsc::unbounded_channel();
         env.notification_manager().insert_sender(
@@ -662,19 +671,46 @@ mod tests {
         else {
             unreachable!()
         };
-        streaming_job::ActiveModel {
-            job_id: Set(job_id),
-            job_status: Set(JobStatus::Initial),
-            ..Default::default()
-        }
-        .update(&txn)
-        .await?;
-        mgr.finish_streaming_job_inner(&txn, job_id).await?;
-        txn.commit().await?;
-
-        mgr.notify_hummock_table_cache_refill_policy_if_explicit(&inner, job_id)
+        let (unprepared_job_id, Some(unprepared_result_table_id), unprepared_internal_table_id) =
+            insert_test_streaming_job(
+                &txn,
+                "mv_unprepared_cache_refill",
+                true,
+                Some(CacheRefillPolicy::Serving),
+            )
+            .await?
+        else {
+            unreachable!()
+        };
+        for job_id in [job_id, unprepared_job_id] {
+            streaming_job::ActiveModel {
+                job_id: Set(job_id),
+                job_status: Set(JobStatus::Initial),
+                ..Default::default()
+            }
+            .update(&txn)
             .await?;
+        }
+        txn.commit().await?;
         drop(inner);
+
+        let fragments = [Fragment {
+            fragment_id: FragmentId::new(300),
+            fragment_type_mask: FragmentTypeMask::default(),
+            distribution_type: PbFragmentDistributionType::Hash,
+            state_table_ids: vec![],
+            maybe_vnode_count: Some(1),
+            nodes: PbStreamNode::default(),
+        }];
+        mgr.prepare_streaming_job(
+            job_id,
+            || fragments.iter(),
+            &FragmentDownstreamRelation::default(),
+            true,
+            None,
+            None,
+        )
+        .await?;
 
         let response = rx
             .recv()
@@ -690,28 +726,32 @@ mod tests {
         let policies = config
             .table_cache_refill_policies
             .expect("policy snapshot should be present");
+        let table_policies = policies
+            .table_policies
+            .into_iter()
+            .map(|policy| (policy.table_id, policy.policy))
+            .collect::<HashMap<_, _>>();
         assert_eq!(
-            policies
-                .table_policies
-                .into_iter()
-                .map(|policy| (policy.table_id, policy.policy))
-                .collect::<HashMap<_, _>>(),
+            table_policies,
             HashMap::from([(
                 result_table_id.as_raw_id(),
                 CacheRefillPolicy::Both.to_protobuf() as i32,
             )])
         );
+        assert!(!table_policies.contains_key(&unprepared_result_table_id.as_raw_id()));
+        let internal_table_policies = policies
+            .internal_table_policies
+            .into_iter()
+            .map(|policy| (policy.table_id, policy.policy))
+            .collect::<HashMap<_, _>>();
         assert_eq!(
-            policies
-                .internal_table_policies
-                .into_iter()
-                .map(|policy| (policy.table_id, policy.policy))
-                .collect::<HashMap<_, _>>(),
+            internal_table_policies,
             HashMap::from([(
                 internal_table_id.as_raw_id(),
                 CacheRefillPolicy::Both.to_protobuf() as i32,
             )])
         );
+        assert!(!internal_table_policies.contains_key(&unprepared_internal_table_id.as_raw_id()));
 
         Ok(())
     }
