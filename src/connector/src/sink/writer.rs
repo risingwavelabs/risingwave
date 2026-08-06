@@ -183,11 +183,7 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for LogSinkerOf<W> {
                         return Err(e);
                     }
                 }
-                LogStoreReadItem::Barrier {
-                    is_checkpoint,
-                    new_vnode_bitmap,
-                    ..
-                } => {
+                LogStoreReadItem::Barrier { is_checkpoint, .. } => {
                     let prev_epoch = match state {
                         LogConsumerState::EpochBegun { curr_epoch } => curr_epoch,
                         _ => unreachable!("epoch must have begun before handling barrier"),
@@ -205,7 +201,6 @@ impl<W: SinkWriter<CommitMetadata = ()>> LogSinker for LogSinkerOf<W> {
                             .observe(start_time.elapsed().as_secs_f64());
                         log_reader.truncate(TruncateOffset::Barrier { epoch })?;
                     } else {
-                        assert!(new_vnode_bitmap.is_none());
                         sink_writer
                             .barrier(false)
                             .instrument_await(await_tree::span!(

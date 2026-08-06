@@ -17,16 +17,13 @@ use std::collections::VecDeque;
 use std::fmt::Debug;
 use std::future::{Future, pending, poll_fn};
 use std::pin::pin;
-use std::sync::Arc;
 use std::task::Poll;
 use std::time::Instant;
 
 use await_tree::InstrumentAwait;
-use futures::future::BoxFuture;
 use futures::{TryFuture, TryFutureExt};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
-use risingwave_common::bitmap::Bitmap;
 use risingwave_common::metrics::{LabelGuardedIntCounter, LabelGuardedIntGauge};
 use risingwave_common::util::epoch::{EpochPair, INVALID_EPOCH};
 use risingwave_common_estimate_size::EstimateSize;
@@ -124,32 +121,13 @@ pub enum LogStoreReadItem {
     },
     Barrier {
         is_checkpoint: bool,
-        new_vnode_bitmap: Option<Arc<Bitmap>>,
         is_stop: bool,
         schema_change: Option<PbSinkSchemaChange>,
     },
 }
 
-pub trait LogWriterPostFlushCurrentEpochFn<'a> = FnOnce() -> BoxFuture<'a, LogStoreResult<()>>;
-
-#[must_use]
-pub struct LogWriterPostFlushCurrentEpoch<'a>(
-    Box<dyn LogWriterPostFlushCurrentEpochFn<'a> + Send + 'a>,
-);
-
-impl<'a> LogWriterPostFlushCurrentEpoch<'a> {
-    pub fn new(f: impl LogWriterPostFlushCurrentEpochFn<'a> + Send + 'a) -> Self {
-        Self(Box::new(f))
-    }
-
-    pub async fn post_yield_barrier(self) -> LogStoreResult<()> {
-        self.0().await
-    }
-}
-
 pub struct FlushCurrentEpochOptions {
     pub is_checkpoint: bool,
-    pub new_vnode_bitmap: Option<Arc<Bitmap>>,
     pub is_stop: bool,
     pub schema_change: Option<PbSinkSchemaChange>,
     pub wait_log_store_flush: bool,
@@ -174,7 +152,7 @@ pub trait LogWriter: Send {
         &mut self,
         next_epoch: u64,
         options: FlushCurrentEpochOptions,
-    ) -> impl Future<Output = LogStoreResult<LogWriterPostFlushCurrentEpoch<'_>>> + Send + '_;
+    ) -> impl Future<Output = LogStoreResult<()>> + Send + '_;
 
     fn pause(&mut self) -> LogStoreResult<()>;
 
@@ -210,7 +188,6 @@ pub trait LogReader: Send + Sized + 'static {
 
 pub trait LogStoreFactory: Send + 'static {
     const ALLOW_REWIND: bool;
-    const REBUILD_SINK_ON_UPDATE_VNODE_BITMAP: bool;
     type Reader: LogReader;
     type Writer: LogWriter;
 
@@ -740,12 +717,12 @@ impl<W: LogWriter> LogWriter for MonitoredLogWriter<W> {
         &mut self,
         next_epoch: u64,
         options: FlushCurrentEpochOptions,
-    ) -> LogStoreResult<LogWriterPostFlushCurrentEpoch<'_>> {
-        let post_flush = self.inner.flush_current_epoch(next_epoch, options).await?;
+    ) -> LogStoreResult<()> {
+        self.inner.flush_current_epoch(next_epoch, options).await?;
         self.metrics
             .log_store_latest_write_epoch
             .set(next_epoch as _);
-        Ok(post_flush)
+        Ok(())
     }
 
     fn pause(&mut self) -> LogStoreResult<()> {
@@ -1305,7 +1282,6 @@ mod tests {
                 1,
                 LogStoreReadItem::Barrier {
                     is_checkpoint: false,
-                    new_vnode_bitmap: None,
                     is_stop: false,
                     schema_change: None,
                 },
@@ -1314,7 +1290,6 @@ mod tests {
                 2,
                 LogStoreReadItem::Barrier {
                     is_checkpoint: false,
-                    new_vnode_bitmap: None,
                     is_stop: false,
                     schema_change: None,
                 },
@@ -1346,7 +1321,6 @@ mod tests {
                 1,
                 LogStoreReadItem::Barrier {
                     is_checkpoint: false,
-                    new_vnode_bitmap: None,
                     is_stop: false,
                     schema_change: None,
                 },
@@ -1362,7 +1336,6 @@ mod tests {
                 2,
                 LogStoreReadItem::Barrier {
                     is_checkpoint: false,
-                    new_vnode_bitmap: None,
                     is_stop: false,
                     schema_change: None,
                 },

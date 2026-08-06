@@ -21,7 +21,6 @@ use futures::{FutureExt, TryFutureExt, TryStreamExt};
 use itertools::Itertools;
 use risingwave_common::array::Op;
 use risingwave_common::array::stream_chunk::StreamChunkMut;
-use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedIntGauge};
 use risingwave_common_estimate_size::EstimateSize;
@@ -43,7 +42,6 @@ use risingwave_pb::stream_plan::stream_node::StreamKind;
 use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
-use tokio::sync::oneshot;
 
 use crate::common::change_buffer::{OutputKind, output_kind};
 use crate::common::compact_chunk::{
@@ -462,7 +460,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     yield Message::Chunk(chunk);
                 }
                 Message::Barrier(barrier) => {
-                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(actor_id);
+                    barrier.assume_no_update_vnode_bitmap(actor_id)?;
                     let schema_change = barrier.as_sink_schema_change(sink_id);
                     let wait_log_store_flush = barrier.should_flush_sink_log_store(sink_id);
                     if let Some(schema_change) = &schema_change {
@@ -471,12 +469,11 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     if wait_log_store_flush {
                         info!(%sink_id, "sink wait for log store flush");
                     }
-                    let post_flush = log_writer
+                    log_writer
                         .flush_current_epoch(
                             barrier.epoch.curr,
                             FlushCurrentEpochOptions {
                                 is_checkpoint: barrier.kind.is_checkpoint(),
-                                new_vnode_bitmap: update_vnode_bitmap.clone(),
                                 is_stop: barrier.is_stop(actor_id),
                                 schema_change,
                                 wait_log_store_flush,
@@ -486,17 +483,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 
                     let mutation = barrier.mutation.clone();
                     yield Message::Barrier(barrier);
-                    if F::REBUILD_SINK_ON_UPDATE_VNODE_BITMAP
-                        && let Some(new_vnode_bitmap) = update_vnode_bitmap.clone()
-                    {
-                        let (tx, rx) = oneshot::channel();
-                        rebuild_sink_tx
-                            .send(RebuildSinkMessage::RebuildSink(new_vnode_bitmap, tx))
-                            .map_err(|_| anyhow!("fail to send rebuild sink to reader"))?;
-                        rx.await
-                            .map_err(|_| anyhow!("fail to wait rebuild sink finish"))?;
-                    }
-                    post_flush.post_yield_barrier().await?;
 
                     if let Some(mutation) = mutation.as_deref() {
                         match mutation {
@@ -857,13 +843,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             };
             drop(future);
             match message {
-                RebuildSinkMessage::RebuildSink(new_vnode, notify) => {
-                    sink_writer_param.vnode_bitmap = Some((*new_vnode).clone());
-                    if notify.send(()).is_err() {
-                        warn!("failed to notify rebuild sink");
-                    }
-                    log_reader.init().await?;
-                }
                 RebuildSinkMessage::UpdateConfig(config) => {
                     if F::ALLOW_REWIND {
                         match log_reader.rewind().await {
@@ -898,7 +877,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
 }
 
 enum RebuildSinkMessage {
-    RebuildSink(Arc<Bitmap>, oneshot::Sender<()>),
     UpdateConfig(HashMap<String, String>),
 }
 
@@ -1004,7 +982,6 @@ mod test {
         type Writer = BoundedInMemLogStoreWriter;
 
         const ALLOW_REWIND: bool = CAN_REWIND;
-        const REBUILD_SINK_ON_UPDATE_VNODE_BITMAP: bool = false;
 
         async fn build(self) -> (Self::Reader, Self::Writer) {
             unreachable!()
@@ -1095,21 +1072,20 @@ mod test {
 
         rebuild_sink_tx.send(no_op_config_update()).unwrap();
 
-        // Messages are handled in order, so an acknowledged rebuild proves the consumer survived
-        // the no-op update.
-        let (notify_tx, notify_rx) = oneshot::channel();
-        rebuild_sink_tx
-            .send(RebuildSinkMessage::RebuildSink(
-                Arc::new(Bitmap::ones(1)),
-                notify_tx,
-            ))
-            .unwrap();
-        tokio::select! {
-            result = &mut consume_log => panic!("log consumer exited unexpectedly: {result:?}"),
-            result = notify_rx => result.expect("rebuild sink should be acknowledged"),
-        }
+        // Give the consumer a chance to handle the no-op update. It should skip the update
+        // without rewinding or restarting the log reader.
+        tokio::time::sleep(Duration::from_millis(50)).await;
 
-        assert_eq!(state.rewind_count.load(Ordering::SeqCst), 0);
+        assert_eq!(
+            state.rewind_count.load(Ordering::SeqCst),
+            0,
+            "no-op config update should not rewind the log reader"
+        );
+        assert_eq!(
+            state.start_count.load(Ordering::SeqCst),
+            1,
+            "no-op config update should not restart log consumption"
+        );
         drop(rate_limit_tx);
     }
 

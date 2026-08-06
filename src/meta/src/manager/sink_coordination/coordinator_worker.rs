@@ -350,7 +350,6 @@ impl CoordinationHandleManager {
 
 enum CoordinationHandleManagerEvent {
     NewHandle,
-    UpdateVnodeBitmap,
     Stop,
     CommitRequest {
         epoch: u64,
@@ -364,7 +363,6 @@ impl CoordinationHandleManagerEvent {
     fn name(&self) -> &'static str {
         match self {
             CoordinationHandleManagerEvent::NewHandle => "NewHandle",
-            CoordinationHandleManagerEvent::UpdateVnodeBitmap => "UpdateVnodeBitmap",
             CoordinationHandleManagerEvent::Stop => "Stop",
             CoordinationHandleManagerEvent::CommitRequest { .. } => "CommitRequest",
             CoordinationHandleManagerEvent::AlignInitialEpoch(_) => "AlignInitialEpoch",
@@ -397,9 +395,6 @@ impl CoordinationHandleManager {
                     }
                     coordinate_request::Msg::AlignInitialEpochRequest(epoch) => {
                         CoordinationHandleManagerEvent::AlignInitialEpoch(epoch)
-                    }
-                    coordinate_request::Msg::UpdateVnodeRequest(_) => {
-                        CoordinationHandleManagerEvent::UpdateVnodeBitmap
                     }
                     coordinate_request::Msg::Stop(_) => {
                         CoordinationHandleManagerEvent::Stop
@@ -462,10 +457,6 @@ impl CoordinationHandleManager {
             let (handle_id, event) = self.next_event().await?;
             match event {
                 CoordinationHandleManagerEvent::NewHandle => {
-                    requests.add_new_request(handle_id, (), self.vnode_bitmap(handle_id))?;
-                }
-                CoordinationHandleManagerEvent::UpdateVnodeBitmap => {
-                    assert!(remaining_handles.remove(&handle_id));
                     requests.add_new_request(handle_id, (), self.vnode_bitmap(handle_id))?;
                 }
                 CoordinationHandleManagerEvent::Stop => {
@@ -687,15 +678,6 @@ impl CoordinatorWorker {
                 CoordinatorWorkerEvent::HandleManagerEvent(handle_id, event) => match event {
                     CoordinationHandleManagerEvent::NewHandle => {
                         pending_new_handles.push(handle_id);
-                        continue;
-                    }
-                    CoordinationHandleManagerEvent::UpdateVnodeBitmap => {
-                        running_handles = self
-                            .handle_manager
-                            .alter_parallelisms(pending_new_handles.drain(..).chain([handle_id]))
-                            .await?;
-                        self.try_handle_init_requests(&running_handles, &mut two_phase_handler)
-                            .await?;
                         continue;
                     }
                     CoordinationHandleManagerEvent::Stop => {

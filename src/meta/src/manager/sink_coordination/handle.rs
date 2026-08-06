@@ -138,15 +138,6 @@ impl SinkWriterCoordinationHandle {
                     };
                     self.prev_epoch = Some(request.epoch);
                 }
-                coordinate_request::Msg::UpdateVnodeRequest(request) => {
-                    let bitmap = Bitmap::from(
-                        request
-                            .vnode_bitmap
-                            .as_ref()
-                            .ok_or_else(|| anyhow!("empty vnode bitmap"))?,
-                    );
-                    self.vnode_bitmap = bitmap;
-                }
             };
             request
         };

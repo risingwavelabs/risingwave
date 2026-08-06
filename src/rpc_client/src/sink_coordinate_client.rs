@@ -18,7 +18,7 @@ use anyhow::anyhow;
 use futures::{Stream, TryStreamExt};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_pb::connector_service::coordinate_request::{
-    CommitRequest, StartCoordinationRequest, UpdateVnodeBitmapRequest,
+    CommitRequest, StartCoordinationRequest,
 };
 use risingwave_pb::connector_service::coordinate_response::StartCoordinationResponse;
 use risingwave_pb::connector_service::{
@@ -112,27 +112,6 @@ impl CoordinatorStreamHandle {
                 msg: Some(coordinate_response::Msg::CommitResponse(_)),
             } => Ok(()),
             msg => Err(anyhow!("should get commit response but get {:?}", msg)),
-        }
-    }
-
-    pub async fn update_vnode_bitmap(&mut self, vnode_bitmap: &Bitmap) -> anyhow::Result<u64> {
-        self.send_request(CoordinateRequest {
-            msg: Some(coordinate_request::Msg::UpdateVnodeRequest(
-                UpdateVnodeBitmapRequest {
-                    vnode_bitmap: Some(vnode_bitmap.to_protobuf()),
-                },
-            )),
-        })
-        .await?;
-        match self.next_response().await? {
-            CoordinateResponse {
-                msg:
-                    Some(coordinate_response::Msg::StartResponse(StartCoordinationResponse {
-                        log_store_rewind_start_epoch,
-                    })),
-            } => Ok(log_store_rewind_start_epoch
-                .ok_or_else(|| anyhow!("should get start epoch after update vnode bitmap"))?),
-            msg => Err(anyhow!("should get start response but get {:?}", msg)),
         }
     }
 
