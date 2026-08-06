@@ -441,9 +441,7 @@ pub enum FileCacheRuntimeConfig {
     Unified(FileCacheTokioRuntimeConfig),
     /// Legacy configuration for separate read and write runtimes.
     ///
-    /// Foyer 0.22 uses one spawner, so RisingWave merges these limits into one dedicated runtime.
-    /// Each merged limit uses the larger explicit value, or the Tokio default if either value is
-    /// `0`.
+    /// Foyer 0.22 uses one spawner, so this configuration is no longer supported.
     Separated {
         read_runtime_options: FileCacheTokioRuntimeConfig,
         write_runtime_options: FileCacheTokioRuntimeConfig,

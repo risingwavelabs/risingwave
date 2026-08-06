@@ -26,7 +26,7 @@ use futures::future::BoxFuture;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::Role;
-use risingwave_common::config::storage::{FileCacheRuntimeConfig, FileCacheTokioRuntimeConfig};
+use risingwave_common::config::storage::FileCacheRuntimeConfig;
 use risingwave_common::license::Feature;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::RpcNotificationClient;
@@ -54,39 +54,18 @@ use crate::monitor::{
 };
 use crate::opts::StorageOpts;
 
-fn merge_runtime_limit(read: usize, write: usize) -> usize {
-    if read == 0 || write == 0 {
-        0
-    } else {
-        read.max(write)
-    }
-}
-
 fn build_file_cache_spawner(
     name: &str,
     config: &FileCacheRuntimeConfig,
-) -> StorageResult<Option<foyer::Spawner>> {
+) -> StorageResult<foyer::Spawner> {
     let config = match config {
-        FileCacheRuntimeConfig::Disabled => return Ok(None),
+        FileCacheRuntimeConfig::Disabled => return Ok(foyer::Spawner::current()),
         FileCacheRuntimeConfig::Unified(config) => config.clone(),
-        FileCacheRuntimeConfig::Separated {
-            read_runtime_options,
-            write_runtime_options,
-        } => {
-            tracing::warn!(
-                cache = name,
-                "Foyer 0.22 uses one spawner; merging the legacy separated runtime configuration"
-            );
-            FileCacheTokioRuntimeConfig {
-                worker_threads: merge_runtime_limit(
-                    read_runtime_options.worker_threads,
-                    write_runtime_options.worker_threads,
-                ),
-                max_blocking_threads: merge_runtime_limit(
-                    read_runtime_options.max_blocking_threads,
-                    write_runtime_options.max_blocking_threads,
-                ),
-            }
+        FileCacheRuntimeConfig::Separated { .. } => {
+            return Err(HummockError::other(format!(
+                "{name} runtime_config.Separated is unsupported with Foyer 0.22; use runtime_config.Unified instead"
+            ))
+            .into());
         }
     };
 
@@ -108,19 +87,7 @@ fn build_file_cache_spawner(
             error.as_report()
         ))
     })?;
-    Ok(Some(runtime.into()))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::merge_runtime_limit;
-
-    #[test]
-    fn test_merge_runtime_limit() {
-        assert_eq!(merge_runtime_limit(4, 8), 8);
-        assert_eq!(merge_runtime_limit(0, 8), 0);
-        assert_eq!(merge_runtime_limit(4, 0), 0);
-    }
+    Ok(runtime.into())
 }
 
 static FOYER_METRICS_REGISTRY: LazyLock<Box<PrometheusMetricsRegistry>> = LazyLock::new(|| {
@@ -810,12 +777,10 @@ impl StateStoreImpl {
                         .with_engine_config(engine_builder)
                         .with_recover_mode(opts.meta_file_cache_recover_mode)
                         .with_compression(opts.meta_file_cache_compression);
-                    if let Some(spawner) = build_file_cache_spawner(
+                    builder = builder.with_spawner(build_file_cache_spawner(
                         "foyer.meta",
                         &opts.meta_file_cache_runtime_config,
-                    )? {
-                        builder = builder.with_spawner(spawner);
-                    }
+                    )?);
                 }
             }
 
@@ -867,12 +832,10 @@ impl StateStoreImpl {
                         .with_engine_config(engine_builder)
                         .with_recover_mode(opts.data_file_cache_recover_mode)
                         .with_compression(opts.data_file_cache_compression);
-                    if let Some(spawner) = build_file_cache_spawner(
+                    builder = builder.with_spawner(build_file_cache_spawner(
                         "foyer.data",
                         &opts.data_file_cache_runtime_config,
-                    )? {
-                        builder = builder.with_spawner(spawner);
-                    }
+                    )?);
                 }
             }
 
