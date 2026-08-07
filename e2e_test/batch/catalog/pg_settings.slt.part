@@ -47,6 +47,7 @@ user enable_mv_selection
 user enable_serverless_backfill
 user enable_share_plan
 user enable_two_phase_agg
+user explain_column_width
 user extra_float_digits
 user force_split_distinct_agg
 user force_two_phase_agg

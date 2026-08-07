@@ -44,3 +44,12 @@
     explain create table t (v1 int, v2 varchar primary key) append only with ( connector = 'kafka', kafka.topic = 'kafka_3_partition_topic', kafka.brokers = '127.0.0.1:1234', kafka.scan.startup.mode='earliest'  ) FORMAT PLAIN ENCODE JSON;
   expected_outputs:
   - explain_output
+- name: explain_column_width controls the pretty-print wrapping width
+  sql: |
+    create table t1(v1 int);
+    create table t2(v2 int);
+    explain (logical) select * from t1 join t2 on v1=v2;
+  with_config_map:
+    EXPLAIN_COLUMN_WIDTH: '20'
+  expected_outputs:
+  - explain_output

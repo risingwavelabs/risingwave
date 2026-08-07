@@ -264,3 +264,20 @@
       │ └─StreamDml { columns: [v1, v2] }
       │   └─StreamSource
       └─StreamUpstreamSinkUnion
+- name: explain_column_width controls the pretty-print wrapping width
+  sql: |
+    create table t1(v1 int);
+    create table t2(v2 int);
+    explain (logical) select * from t1 join t2 on v1=v2;
+  explain_output: |
+    LogicalJoin
+    ├─type: Inner
+    ├─on: (t1.v1 = t2.v2)
+    ├─LogicalScan
+    │ ├─table: t1
+    │ └─columns: [v1]
+    └─LogicalScan
+      ├─table: t2
+      └─columns: [v2]
+  with_config_map:
+    EXPLAIN_COLUMN_WIDTH: '20'
