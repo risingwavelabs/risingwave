@@ -520,7 +520,7 @@ impl TableFunction {
 
                     let mut rw_types = vec![];
 
-                    for column in statement.columns() {
+                    for column in statement.columns().iter() {
                         let name = column.name_str().to_string();
                         let data_type = match column.column_type() {
                             // Boolean types
