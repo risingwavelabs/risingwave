@@ -18,14 +18,27 @@ impl MigrationTrait for Migration {
         let backend = manager.get_database_backend();
         match backend {
             DatabaseBackend::MySql | DatabaseBackend::Postgres => {
-                manager
-                    .get_connection()
-                    .execute(Statement::from_string(
-                        backend,
+                let cleanup_statement = match backend {
+                    DatabaseBackend::MySql => {
+                        // MySQL rejects deleting from a table that is also read by a nested
+                        // subquery (error 1093). A multi-table delete keeps both object roles
+                        // explicit and avoids that restriction.
+                        "DELETE subscription_object FROM object AS subscription_object \
+                         JOIN subscription ON subscription_object.oid = subscription.subscription_id \
+                         LEFT JOIN object AS dependent_object \
+                         ON subscription.dependent_table_id = dependent_object.oid \
+                         WHERE dependent_object.oid IS NULL"
+                    }
+                    DatabaseBackend::Postgres => {
                         "DELETE FROM object WHERE oid IN (\
                          SELECT subscription_id FROM subscription \
-                         WHERE dependent_table_id NOT IN (SELECT oid FROM object))",
-                    ))
+                         WHERE dependent_table_id NOT IN (SELECT oid FROM object))"
+                    }
+                    DatabaseBackend::Sqlite => unreachable!(),
+                };
+                manager
+                    .get_connection()
+                    .execute(Statement::from_string(backend, cleanup_statement))
                     .await?;
                 manager
                     .alter_table(
