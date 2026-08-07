@@ -347,12 +347,10 @@ impl CreatingStreamingJobStatus {
         &mut self,
         config: &mut ThrottleConfigMap,
     ) -> Option<Mutation> {
-        let (fragment_infos, inject_mutation) = match self {
-            CreatingStreamingJobStatus::ConsumingSnapshot { info, .. } => {
-                (&mut info.fragment_infos, true)
-            }
-            CreatingStreamingJobStatus::ConsumingLogStore { info, .. } => {
-                (&mut info.fragment_infos, false)
+        let fragment_infos = match self {
+            CreatingStreamingJobStatus::ConsumingSnapshot { info, .. }
+            | CreatingStreamingJobStatus::ConsumingLogStore { info, .. } => {
+                &mut info.fragment_infos
             }
             CreatingStreamingJobStatus::Finishing(..)
             | CreatingStreamingJobStatus::Resetting(..) => return None,
@@ -361,15 +359,14 @@ impl CreatingStreamingJobStatus {
             }
         };
 
-        let mutation = extract_throttle_config(config, |fragment_id, stream_node| {
+        extract_throttle_config(config, |fragment_id, stream_node| {
             if let Some(fragment_info) = fragment_infos.get_mut(&fragment_id) {
                 fragment_info.nodes = stream_node.clone();
                 true
             } else {
                 false
             }
-        });
-        if inject_mutation { mutation } else { None }
+        })
     }
 }
 

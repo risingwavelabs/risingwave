@@ -30,7 +30,7 @@ pub(crate) use batch_refresh_job::{
 pub(crate) use creating_job::CreatingStreamingJobControl;
 
 use crate::barrier::info::BarrierInfo;
-use crate::barrier::notifier::NotifierStart;
+use crate::barrier::notifier::NotifierStarter;
 use crate::barrier::partial_graph::{CollectedBarrier, PartialGraphManager};
 use crate::barrier::{BackfillProgress, BarrierKind, FragmentBackfillProgress, TracedEpoch};
 use crate::controller::fragment::InflightFragmentInfo;
@@ -134,7 +134,7 @@ impl IndependentCheckpointJobControl {
 
     pub(crate) fn drop(
         &mut self,
-        notifier: Option<&mut NotifierStart>,
+        notifier: Option<&mut NotifierStarter>,
         partial_graph_manager: &mut PartialGraphManager,
     ) -> bool {
         match self {

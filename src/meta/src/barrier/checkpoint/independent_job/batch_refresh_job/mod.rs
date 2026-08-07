@@ -49,7 +49,7 @@ use crate::barrier::command::{PostCollectCommand, ThrottleConfigMap, extract_thr
 use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
 use crate::barrier::edge_builder::{EdgeBuilderFragmentInfo, FragmentEdgeBuilder};
 use crate::barrier::info::BarrierInfo;
-use crate::barrier::notifier::{CollectionNotifier, NotifierStart};
+use crate::barrier::notifier::{CollectionNotifier, NotifierStarter};
 use crate::barrier::partial_graph::{
     CollectedBarrier, PartialGraphBarrierInfo, PartialGraphManager, PartialGraphStat,
 };
@@ -474,7 +474,7 @@ impl BatchRefreshJobCheckpointControl {
         database_id: DatabaseId,
         job_id: JobId,
         create_info: CreateSnapshotBackfillJobCommandInfo,
-        notifier: Option<&mut NotifierStart>,
+        notifier: Option<&mut NotifierStarter>,
         snapshot_backfill_upstream_tables: HashSet<TableId>,
         snapshot_epoch: u64,
         version_stat: &HummockVersionStats,
@@ -691,7 +691,7 @@ impl BatchRefreshJobCheckpointControl {
         barrier_info: BarrierInfo,
         new_actors: Option<StreamJobActorsToCreate>,
         mutation: Option<Mutation>,
-        notifier: Option<&mut NotifierStart>,
+        notifier: Option<&mut NotifierStarter>,
         first_create_info: Option<CreateSnapshotBackfillJobCommandInfo>,
         is_stop: bool,
     ) -> MetaResult<()> {
@@ -719,7 +719,7 @@ impl BatchRefreshJobCheckpointControl {
                     CreateSnapshotBackfillJobCommandInfo::into_post_collect,
                 ),
                 barrier_info,
-                notifier.map(NotifierStart::add_notify),
+                notifier,
                 state_table_ids.clone(),
             ),
         )?;
@@ -734,7 +734,7 @@ impl BatchRefreshJobCheckpointControl {
         &mut self,
         partial_graph_manager: &mut PartialGraphManager,
         barrier_info: &BarrierInfo,
-        mutation: Option<(Mutation, Option<&mut NotifierStart>)>,
+        mutation: Option<(Mutation, Option<&mut NotifierStarter>)>,
     ) -> MetaResult<()> {
         if !matches!(self.status, BatchRefreshJobStatus::ConsumingSnapshot { .. }) {
             // ConsumingLogStore has all barriers pre-injected; no forwarding needed.
@@ -1488,7 +1488,7 @@ impl BatchRefreshJobCheckpointControl {
     /// Drop this batch refresh job.
     pub(super) fn drop(
         &mut self,
-        notifier: Option<&mut NotifierStart>,
+        notifier: Option<&mut NotifierStarter>,
         partial_graph_manager: &mut PartialGraphManager,
     ) -> bool {
         match &mut self.status {
@@ -1496,7 +1496,7 @@ impl BatchRefreshJobCheckpointControl {
                 notifiers: existing_notifiers,
                 ..
             } => {
-                existing_notifiers.extend(notifier.map(NotifierStart::add_notify));
+                existing_notifiers.extend(notifier.map(NotifierStarter::add_notify));
                 true
             }
             BatchRefreshJobStatus::ConsumingSnapshot { .. }
@@ -1506,7 +1506,7 @@ impl BatchRefreshJobCheckpointControl {
                 partial_graph_manager.reset_partial_graphs([self.partial_graph_id]);
                 self.status = BatchRefreshJobStatus::Resetting {
                     notifiers: notifier
-                        .map(NotifierStart::add_notify)
+                        .map(NotifierStarter::add_notify)
                         .into_iter()
                         .collect(),
                 };
@@ -1518,7 +1518,7 @@ impl BatchRefreshJobCheckpointControl {
                 partial_graph_manager.reset_partial_graphs([self.partial_graph_id]);
                 self.status = BatchRefreshJobStatus::Resetting {
                     notifiers: notifier
-                        .map(NotifierStart::add_notify)
+                        .map(NotifierStarter::add_notify)
                         .into_iter()
                         .collect(),
                 };

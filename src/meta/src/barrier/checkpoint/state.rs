@@ -51,7 +51,7 @@ use crate::barrier::info::{
     BarrierInfo, CreateStreamingJobStatus, InflightDatabaseInfo, InflightStreamingJobInfo,
     SubscriberType,
 };
-use crate::barrier::notifier::NotifierStart;
+use crate::barrier::notifier::NotifierStarter;
 use crate::barrier::partial_graph::{PartialGraphBarrierInfo, PartialGraphManager};
 use crate::barrier::rpc::to_partial_graph_id;
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
@@ -408,7 +408,7 @@ impl DatabaseCheckpointControl {
     pub(super) fn apply_command(
         &mut self,
         command: Option<Command>,
-        notifier: &mut Option<NotifierStart>,
+        notifier: &mut Option<NotifierStarter>,
         barrier_info: BarrierInfo,
         partial_graph_manager: &mut PartialGraphManager,
         hummock_version_stats: &HummockVersionStats,
@@ -1750,7 +1750,7 @@ impl DatabaseCheckpointControl {
         }
 
         let database_notifier = if notify_database_graph {
-            notifier.as_mut().map(NotifierStart::add_notify)
+            notifier.as_mut()
         } else {
             None
         };

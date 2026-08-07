@@ -37,7 +37,7 @@ use crate::barrier::BarrierKind;
 use crate::barrier::command::PostCollectCommand;
 use crate::barrier::context::GlobalBarrierWorkerContext;
 use crate::barrier::info::BarrierInfo;
-use crate::barrier::notifier::CollectionNotifier;
+use crate::barrier::notifier::{CollectionNotifier, NotifierStarter};
 use crate::barrier::rpc::{ControlStreamManager, WorkerNodeEvent};
 use crate::barrier::utils::{BarrierItemCollector, NodeToCollect, is_valid_after_worker_err};
 use crate::manager::MetaSrvEnv;
@@ -57,14 +57,14 @@ impl PartialGraphBarrierInfo {
     pub(super) fn new(
         post_collect_command: PostCollectCommand,
         barrier_info: BarrierInfo,
-        notifier: Option<CollectionNotifier>,
+        notifier: Option<&mut NotifierStarter>,
         table_ids_to_commit: HashSet<TableId>,
     ) -> Self {
         Self {
             enqueue_time: Instant::now(),
             post_collect_command,
             barrier_info,
-            notifier,
+            notifier: notifier.map(NotifierStarter::add_notify),
             table_ids_to_commit,
         }
     }

@@ -52,8 +52,8 @@ impl Notifier {
         (Self { started }, receiver)
     }
 
-    pub fn start(self) -> NotifierStart {
-        NotifierStart {
+    pub fn start(self) -> NotifierStarter {
+        NotifierStarter {
             started: self.started,
             pending_collection: vec![],
         }
@@ -66,12 +66,12 @@ impl Notifier {
 
 /// Builds the set of collection notifications before publishing that the command has started.
 #[derive(Debug)]
-pub(crate) struct NotifierStart {
+pub(crate) struct NotifierStarter {
     started: oneshot::Sender<MetaResult<Vec<CollectionReceiver>>>,
     pending_collection: Vec<CollectionReceiver>,
 }
 
-impl NotifierStart {
+impl NotifierStarter {
     pub fn add_notify(&mut self) -> CollectionNotifier {
         let (collected, receiver) = oneshot::channel();
         self.pending_collection.push(receiver);

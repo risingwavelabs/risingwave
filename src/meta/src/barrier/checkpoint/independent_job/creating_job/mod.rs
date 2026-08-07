@@ -48,7 +48,7 @@ use crate::barrier::command::{
 use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
-use crate::barrier::notifier::NotifierStart;
+use crate::barrier::notifier::NotifierStarter;
 use crate::barrier::partial_graph::{
     CollectedBarrier, PartialGraphBarrierInfo, PartialGraphManager, PartialGraphRecoverer,
 };
@@ -102,7 +102,7 @@ impl CreatingStreamingJobControl {
     pub(crate) fn new<'a>(
         entry: hash_map::VacantEntry<'a, JobId, IndependentCheckpointJobControl>,
         create_info: CreateSnapshotBackfillJobCommandInfo,
-        notifier: Option<&mut NotifierStart>,
+        notifier: Option<&mut NotifierStarter>,
         snapshot_backfill_upstream_tables: HashSet<TableId>,
         snapshot_epoch: u64,
         since_timestamp_upstream_log_epochs: Option<(&TableLogEpochs, PartialGraphId, u64)>,
@@ -809,7 +809,7 @@ impl CreatingStreamingJobControl {
         barrier_info: BarrierInfo,
         new_actors: Option<StreamJobActorsToCreate>,
         mutation: Option<Mutation>,
-        notifier: Option<&mut NotifierStart>,
+        notifier: Option<&mut NotifierStarter>,
         first_create_info: Option<CreateSnapshotBackfillJobCommandInfo>,
     ) -> MetaResult<()> {
         let (table_ids_to_sync, nodes_to_sync_table) = if !is_finishing {
@@ -830,7 +830,7 @@ impl CreatingStreamingJobControl {
                     CreateSnapshotBackfillJobCommandInfo::into_post_collect,
                 ),
                 barrier_info,
-                notifier.map(NotifierStart::add_notify),
+                notifier,
                 state_table_ids.clone(),
             ),
         )?;
@@ -875,7 +875,7 @@ impl CreatingStreamingJobControl {
         &mut self,
         partial_graph_manager: &mut PartialGraphManager,
         barrier_info: &BarrierInfo,
-        mutation: Option<(Mutation, Option<&mut NotifierStart>)>,
+        mutation: Option<(Mutation, Option<&mut NotifierStarter>)>,
     ) -> MetaResult<()> {
         let progress_epoch = if let Some(max_committed_epoch) = self.max_committed_epoch {
             max(max_committed_epoch, self.snapshot_epoch)
@@ -1105,12 +1105,12 @@ impl CreatingStreamingJobControl {
     /// to mean that the job has been dropped.
     pub(super) fn drop(
         &mut self,
-        notifier: Option<&mut NotifierStart>,
+        notifier: Option<&mut NotifierStarter>,
         partial_graph_manager: &mut PartialGraphManager,
     ) -> bool {
         match &mut self.status {
             CreatingStreamingJobStatus::Resetting(existing_notifiers) => {
-                existing_notifiers.extend(notifier.map(NotifierStart::add_notify));
+                existing_notifiers.extend(notifier.map(NotifierStarter::add_notify));
                 true
             }
             CreatingStreamingJobStatus::ConsumingSnapshot { .. }
@@ -1118,7 +1118,7 @@ impl CreatingStreamingJobControl {
                 partial_graph_manager.reset_partial_graphs([self.partial_graph_id]);
                 self.status = CreatingStreamingJobStatus::Resetting(
                     notifier
-                        .map(NotifierStart::add_notify)
+                        .map(NotifierStarter::add_notify)
                         .into_iter()
                         .collect(),
                 );
