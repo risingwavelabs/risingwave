@@ -18,6 +18,9 @@ package com.risingwave.connector.cdc.debezium.converters;
 
 import io.debezium.spi.converter.CustomConverter;
 import io.debezium.spi.converter.RelationalColumn;
+import java.math.BigDecimal;
+import java.math.MathContext;
+import java.math.RoundingMode;
 import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.sql.Types;
@@ -25,8 +28,13 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
 import org.apache.kafka.connect.data.SchemaBuilder;
+import org.postgresql.geometric.PGpoint;
+import org.postgresql.geometric.PGpolygon;
 
-/** Converts PostgreSQL composite values (and arrays of composites) into plain strings. */
+/**
+ * Converts PostgreSQL composite values (and arrays of composites) into plain strings, and narrowly
+ * handles the built-in polygon scalar/array case.
+ */
 public class PgCompositeToStringConverter
         implements CustomConverter<SchemaBuilder, RelationalColumn> {
 
@@ -68,6 +76,23 @@ public class PgCompositeToStringConverter
             registration.register(SchemaBuilder.string().optional(), this::convertScalar);
             return;
         }
+        if (isPostgresPolygonScalar(column)) {
+            // Built-in geometric polygon arrives as JDBC Types.OTHER. Render
+            // it as text (e.g. `(0,0),(1,1)`) matching the RW VARCHAR column.
+            // This must stay narrow: geometry/geography and other geometric
+            // types (point/box/circle/...) are left to Debezium's handlers.
+            registration.register(SchemaBuilder.string().optional(), this::convertPolygonScalar);
+            return;
+        }
+        if (isPostgresPolygonArray(column)) {
+            // Built-in polygon[] reports an element OID below the user type
+            // threshold, so it is not caught by isUserDefinedArray. Render it
+            // as an array of text to match the RW `List(VARCHAR)` column.
+            var elementSchema = SchemaBuilder.string().optional().build();
+            registration.register(
+                    SchemaBuilder.array(elementSchema).optional(), this::convertPolygonArray);
+            return;
+        }
         if (isUserDefinedArray(column)) {
             var elementSchema = SchemaBuilder.string().optional().build();
             registration.register(
@@ -94,6 +119,35 @@ public class PgCompositeToStringConverter
 
     private static boolean isDebeziumNativeExtensionArray(RelationalColumn column) {
         return isPostgresArrayOf(column, "geometry") || isPostgresArrayOf(column, "geography");
+    }
+
+    private static boolean isPostgresPolygonScalar(RelationalColumn column) {
+        // Scalar polygon arrives as JDBC Types.OTHER with a built-in OID below
+        // PG_FIRST_USER_OID, so it is not a user-defined type. Match only the
+        // `polygon` type name / expression; never geometry/geography or other
+        // geometric types.
+        return column.jdbcType() == Types.OTHER
+                && (isPostgresTypeRef(column.typeName(), "polygon")
+                        || isPostgresTypeRef(column.typeExpression(), "polygon"));
+    }
+
+    private static boolean isPostgresPolygonArray(RelationalColumn column) {
+        // polygon[] is a built-in array (`_polygon` / `polygon[]`) and would
+        // otherwise be skipped by isUserDefinedArray because its element OID is
+        // below the user threshold. Require JDBC ARRAY first so a non-array
+        // RelationalColumn with misleading type metadata is never registered
+        // with an array schema.
+        return column.jdbcType() == Types.ARRAY
+                && (isPostgresArrayTypeName(column.typeName(), "polygon")
+                        || isPostgresArrayTypeExpression(column.typeExpression(), "polygon"));
+    }
+
+    private static boolean isPostgresTypeRef(String typeRef, String typeName) {
+        if (typeRef == null) {
+            return false;
+        }
+        var normalized = unquoteAndUnqualify(typeRef.toLowerCase().trim());
+        return normalized.equals(typeName);
     }
 
     private static boolean isPostgresArrayOf(RelationalColumn column, String elementTypeName) {
@@ -160,6 +214,124 @@ public class PgCompositeToStringConverter
         // PG textual array form `{"(a,b)","(c,d)"}` as bytes / string.
         // Split it into individual element strings.
         return parsePgTextArray(elementToString(value));
+    }
+
+    /**
+     * Renders a polygon scalar as text in the form {@code ((x0,y0),...,(xn,yn))}, matching how
+     * RisingWave's VARCHAR column stores the value. Null passes through unchanged; non-PGpolygon
+     * values (byte / ByteBuffer / already-text) fall back to the generic scalar conversion.
+     */
+    private String convertPolygonScalar(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof PGpolygon polygon) {
+            StringBuilder sb = new StringBuilder();
+            sb.append('(');
+            for (int i = 0; i < polygon.points.length; i++) {
+                if (i > 0) {
+                    sb.append(',');
+                }
+                PGpoint p = polygon.points[i];
+                sb.append('(')
+                        .append(formatDouble(p.x))
+                        .append(',')
+                        .append(formatDouble(p.y))
+                        .append(')');
+            }
+            sb.append(')');
+            return sb.toString();
+        }
+        return convertScalar(value);
+    }
+
+    /**
+     * Renders a polygon[] array as a {@code List<String>} of polygon scalars. A pre-decoded {@code
+     * List} maps each element through polygon conversion while preserving nulls; the Debezium
+     * unavailable sentinel keeps the current placeholder behavior; raw textual arrays are parsed
+     * through the existing {@link #parsePgTextArray} parser without normalizing strings.
+     */
+    private List<String> convertPolygonArray(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof List<?> list) {
+            var out = new ArrayList<String>(list.size());
+            for (Object el : list) {
+                out.add(convertPolygonScalar(el));
+            }
+            return out;
+        }
+        if (isDebeziumUnavailableValueObject(value)) {
+            return List.of(UNAVAILABLE_VALUE_PLACEHOLDER);
+        }
+        return parsePgTextArray(elementToString(value));
+    }
+
+    /**
+     * Formats a double the way PostgreSQL renders coordinates with {@code extra_float_digits > 0}
+     * (shortest representation that round-trips). {@code NaN}, the infinities and {@code 0.0} /
+     * {@code -0.0} are preserved explicitly. Finite non-zero values are rendered by progressively
+     * reducing the {@link BigDecimal} precision (1..17 significant digits, {@link
+     * RoundingMode#HALF_EVEN}) until {@code doubleValue()} bitwise round-trips back to the original
+     * {@code double}, then emitting either plain notation (decimal exponent in [-4, 14]) or
+     * PostgreSQL-style scientific notation for everything else. This mirrors upstream {@code
+     * float8out} rather than {@link Double#toString} (which emits {@code 1.0E7} / {@code 1.0E-4} /
+     * {@code 4.9E-324}).
+     */
+    static String formatDouble(double value) {
+        if (Double.isNaN(value)) {
+            return "NaN";
+        }
+        if (value == Double.POSITIVE_INFINITY) {
+            return "Infinity";
+        }
+        if (value == Double.NEGATIVE_INFINITY) {
+            return "-Infinity";
+        }
+        if (value == 0.0) {
+            // +0.0 and -0.0 compare equal; detect the sign via the reciprocal.
+            return 1.0 / value < 0 ? "-0" : "0";
+        }
+        BigDecimal original = BigDecimal.valueOf(value);
+        for (int precision = 1; precision <= 17; precision++) {
+            BigDecimal candidate =
+                    original.round(new MathContext(precision, RoundingMode.HALF_EVEN));
+            if (candidate.doubleValue() == value) {
+                return formatBigDecimal(candidate.stripTrailingZeros());
+            }
+        }
+        return formatBigDecimal(original.stripTrailingZeros());
+    }
+
+    /**
+     * Renders a finite, non-zero {@link BigDecimal} with PostgreSQL {@code float8out} semantics.
+     * Decimal exponent = precision - scale - 1; plain notation when it is in [-4, 14], otherwise
+     * shortest scientific notation ({@code d.ddde±XX}, lowercase {@code e}, mandatory {@code +}
+     * sign on non-negative exponents, and a two-digit minimum for the exponent magnitude).
+     */
+    private static String formatBigDecimal(BigDecimal value) {
+        int exponent = value.precision() - value.scale() - 1;
+        if (exponent >= -4 && exponent <= 14) {
+            // e.g. 1e-4 -> "0.0001", 1e7 -> "10000000".
+            return value.toPlainString();
+        }
+        // e.g. 1e-5 -> "1e-05", 1e20 -> "1e+20", 5e-324 -> "5e-324".
+        String digits = value.unscaledValue().abs().toString();
+        StringBuilder sb = new StringBuilder();
+        if (value.signum() < 0) {
+            sb.append('-');
+        }
+        sb.append(digits.charAt(0));
+        if (digits.length() > 1) {
+            sb.append('.').append(digits.substring(1));
+        }
+        sb.append('e');
+        int absExponent = Math.abs(exponent);
+        sb.append(exponent >= 0 ? '+' : '-')
+                .append(absExponent < 10 ? "0" : "")
+                .append(absExponent);
+        return sb.toString();
     }
 
     /**

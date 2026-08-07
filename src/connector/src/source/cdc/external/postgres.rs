@@ -244,14 +244,15 @@ impl PostgresExternalTableReader {
         // No TCP keepalive for CDC source
         let client = create_pg_client(&config.pg_connection_config()?, None).await?;
 
-        // Discover user-defined composite columns and arrays of composites.
-        // tokio-postgres cannot decode composite values natively, so for these
-        // columns we cast to text in the snapshot SELECT. Scalar composites
-        // become `(a,b,c)`; arrays become `text[]` so tokio-postgres can
-        // decode them directly as `Vec<Option<String>>` matching the RW
-        // `List(Varchar)` column. Other varchar columns stay as-is to
-        // preserve RW's own text rendering (e.g. numeric -> "NaN").
-        let composite_columns = client
+        // Discover columns that must be text-cast in the snapshot SELECT
+        // because tokio-postgres cannot decode them natively: user-defined
+        // composite columns, arrays of composites, and the geometric polygon
+        // type (scalar and array). Scalar values become `(a,b,c)` / polygon
+        // text; arrays become `text[]` so tokio-postgres can decode them
+        // directly as `Vec<Option<String>>` matching the RW `List(Varchar)`
+        // column. Other varchar columns stay as-is to preserve RW's own text
+        // rendering (e.g. numeric -> "NaN").
+        let text_cast_columns = client
             .query(
                 "SELECT a.attname, (t.typcategory = 'A') AS is_array \
                  FROM pg_attribute a \
@@ -264,7 +265,9 @@ impl PostgresExternalTableReader {
                    AND a.attnum > 0 \
                    AND NOT a.attisdropped \
                    AND (t.typtype = 'c' \
-                        OR (t.typcategory = 'A' AND t_elem.typtype = 'c'))",
+                         OR t.typname = 'polygon' \
+                         OR (t.typcategory = 'A' \
+                             AND (t_elem.typtype = 'c' OR t_elem.typname = 'polygon')))",
                 &[
                     &schema_table_name.schema_name,
                     &schema_table_name.table_name,
@@ -281,7 +284,7 @@ impl PostgresExternalTableReader {
                     error = %err.as_report(),
                     schema = %schema_table_name.schema_name,
                     table = %schema_table_name.table_name,
-                    "failed to discover postgres composite columns; falling back to no text cast"
+                    "failed to discover postgres text-cast columns; falling back to no text cast"
                 );
                 std::collections::HashMap::new()
             });
@@ -291,7 +294,7 @@ impl PostgresExternalTableReader {
             .iter()
             .map(|f| {
                 let quoted = Self::quote_column(&f.name);
-                match composite_columns.get(&f.name) {
+                match text_cast_columns.get(&f.name) {
                     Some(false) if matches!(f.data_type, DataType::Varchar) => {
                         format!("{quoted}::text AS {quoted}")
                     }
@@ -856,7 +859,7 @@ pub fn type_name_to_pg_type(ty_name: &str) -> Option<PgType> {
             "numeric" => Some(PgType::NUMERIC_ARRAY),
             "bool" => Some(PgType::BOOL_ARRAY),
             "xml" | "macaddr" | "macaddr8" | "cidr" | "inet" | "int4range" | "int8range"
-            | "numrange" | "tsrange" | "tstzrange" | "daterange" | "citext" => {
+            | "numrange" | "tsrange" | "tstzrange" | "daterange" | "citext" | "polygon" => {
                 Some(PgType::VARCHAR_ARRAY)
             }
             "varchar" => Some(PgType::VARCHAR_ARRAY),
@@ -891,7 +894,7 @@ pub fn type_name_to_pg_type(ty_name: &str) -> Option<PgType> {
             "boolean" | "bool" => Some(PgType::BOOL),
             "inet" | "xml" | "varchar" | "character varying" | "int4range" | "int8range"
             | "numrange" | "tsrange" | "tstzrange" | "daterange" | "macaddr" | "macaddr8"
-            | "cidr" => Some(PgType::VARCHAR),
+            | "cidr" | "polygon" => Some(PgType::VARCHAR),
             "char" | "character" | "bpchar" => Some(PgType::BPCHAR),
             "citext" | "text" => Some(PgType::TEXT),
             "bytea" => Some(PgType::BYTEA),
@@ -1172,6 +1175,26 @@ mod tests {
         assert!(result.is_err());
         let error_msg = result.unwrap_err().to_string();
         assert!(error_msg.contains("invalid postgres lsn_proc"));
+    }
+
+    #[test]
+    fn test_type_name_to_pg_type_polygon() {
+        use tokio_postgres::types::Type as PgType;
+
+        let polygon = super::type_name_to_pg_type("polygon").unwrap();
+        let polygon_array = super::type_name_to_pg_type("_polygon").unwrap();
+        assert_eq!(polygon, PgType::VARCHAR);
+        assert_eq!(polygon_array, PgType::VARCHAR_ARRAY);
+
+        // Polygon (scalar and array) renders as RW Varchar / List(Varchar).
+        assert_eq!(
+            super::pg_type_to_rw_type(&polygon).unwrap(),
+            DataType::Varchar
+        );
+        assert_eq!(
+            super::pg_type_to_rw_type(&polygon_array).unwrap(),
+            DataType::Varchar.list()
+        );
     }
 
     #[test]
