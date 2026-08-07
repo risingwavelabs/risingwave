@@ -20,7 +20,7 @@ use risingwave_common::array::Finite32;
 use risingwave_common::catalog::Schema;
 use risingwave_common::log::LogSuppressor;
 use risingwave_common::row::OwnedRow;
-use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl, VectorVal};
+use risingwave_common::types::{DataType, Datum, Decimal, ScalarImpl, StructValue, VectorVal};
 use thiserror_ext::AsReport;
 use tokio_postgres::types::{FromSql, Type};
 
@@ -67,6 +67,47 @@ impl PgVectorAdapter {
     }
 }
 
+/// Adapter for the PostgreSQL built-in `point` type in CDC snapshot reads.
+/// It parses the 16-byte binary format: two `float8` values in network
+/// (big-endian) byte order, `x` followed by `y`.
+struct PgPointAdapter {
+    x: f64,
+    y: f64,
+}
+
+impl<'a> FromSql<'a> for PgPointAdapter {
+    fn accepts(ty: &Type) -> bool {
+        ty == &Type::POINT
+    }
+
+    fn from_sql(
+        _ty: &Type,
+        raw: &'a [u8],
+    ) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+        Self::parse_binary(raw)
+    }
+}
+
+impl PgPointAdapter {
+    fn parse_binary(raw: &[u8]) -> Result<Self, Box<dyn std::error::Error + Sync + Send>> {
+        if raw.len() != 2 * std::mem::size_of::<f64>() {
+            return Err("invalid point binary payload length".into());
+        }
+        let mut buf = raw;
+        let x = buf.get_f64();
+        let y = buf.get_f64();
+        Ok(Self { x, y })
+    }
+
+    /// Convert the adapter into a `ScalarImpl::Struct` with `x` and `y` `Float64` fields.
+    fn into_scalar_impl(self) -> ScalarImpl {
+        ScalarImpl::Struct(StructValue::new(vec![
+            Some(ScalarImpl::Float64(self.x.into())),
+            Some(ScalarImpl::Float64(self.y.into())),
+        ]))
+    }
+}
+
 macro_rules! try_handle_data_type {
     ($row:expr, $i:expr, $name:expr, $type:ty) => {{
         $row.try_get::<_, Option<$type>>($i)
@@ -107,6 +148,25 @@ pub fn postgres_row_to_owned_row_with_strict_pk(
             postgres_cell_to_scalar_impl_strict(&row, &field.data_type, index, &field.name)
         },
         |name, err| log_error!(name, err, "parse column failed"),
+    )
+}
+
+/// Returns true if `data_type` is the struct used to represent a PostgreSQL built-in
+/// `point`: exactly two fields named `x` and `y`, both `Float64`.
+fn is_point_struct_type(data_type: &DataType) -> bool {
+    let DataType::Struct(t) = data_type else {
+        return false;
+    };
+    if t.len() != 2 {
+        return false;
+    }
+    let mut fields = t.iter();
+    matches!(
+        (fields.next(), fields.next()),
+        (
+            Some(("x", &DataType::Float64)),
+            Some(("y", &DataType::Float64))
+        )
     )
 }
 
@@ -217,7 +277,24 @@ pub fn postgres_cell_to_scalar_impl_strict(
                 }
             }
         },
-        DataType::Struct(_) | DataType::Serial | DataType::Map(_) | DataType::Variant => {
+        DataType::Struct(_) => {
+            // PostgreSQL built-in `point` maps to `STRUCT<x FLOAT64, y FLOAT64>`.
+            // Decode it only when the requested struct fields are exactly `x`/`y` `Float64`
+            // and the actual row column type is `POINT`.
+            if is_point_struct_type(data_type) && matches!(row.columns()[i].type_(), &Type::POINT) {
+                match row
+                    .try_get::<_, Option<PgPointAdapter>>(i)
+                    .with_context(|| {
+                        format!("failed to decode PostgreSQL snapshot point column `{name}`")
+                    })? {
+                    Some(point) => Ok(Some(point.into_scalar_impl())),
+                    None => Ok(None),
+                }
+            } else {
+                bail!("unsupported PostgreSQL snapshot data type {data_type} for column `{name}`")
+            }
+        }
+        DataType::Serial | DataType::Map(_) | DataType::Variant => {
             bail!("unsupported PostgreSQL snapshot data type {data_type} for column `{name}`")
         }
     }
@@ -225,9 +302,10 @@ pub fn postgres_cell_to_scalar_impl_strict(
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::types::{ScalarImpl, StructValue};
     use tokio_postgres::NoTls;
 
-    use crate::parser::postgres::PgVectorAdapter;
+    use crate::parser::postgres::{PgPointAdapter, PgVectorAdapter};
     use crate::parser::scalar_adapter::EnumString;
     const DB: &str = "postgres";
     const USER: &str = "kexiang";
@@ -245,6 +323,34 @@ mod tests {
 
         let v = PgVectorAdapter::parse_binary(&raw).unwrap();
         assert_eq!(v.0, vec![1.5, -2.25, 3.0]);
+    }
+
+    #[test]
+    fn test_pg_point_adapter_parse_binary() {
+        // Two float64 values, x then y, in network (big-endian) byte order.
+        let mut raw = vec![];
+        raw.extend_from_slice(&1.5f64.to_be_bytes());
+        raw.extend_from_slice(&(-2.25f64).to_be_bytes());
+        assert_eq!(raw.len(), 16);
+
+        let p = PgPointAdapter::parse_binary(&raw).unwrap();
+        assert_eq!(p.x, 1.5);
+        assert_eq!(p.y, -2.25);
+
+        let scalar = p.into_scalar_impl();
+        assert_eq!(
+            scalar,
+            ScalarImpl::Struct(StructValue::new(vec![
+                Some(ScalarImpl::Float64(1.5.into())),
+                Some(ScalarImpl::Float64((-2.25).into())),
+            ]))
+        );
+    }
+
+    #[test]
+    fn test_pg_point_adapter_invalid_length() {
+        let raw = vec![0u8; 15];
+        assert!(PgPointAdapter::parse_binary(&raw).is_err());
     }
 
     #[ignore]

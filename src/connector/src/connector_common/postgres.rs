@@ -698,8 +698,8 @@ pub fn sea_type_to_rw_type(col_type: &SeaType) -> ConnectorResult<DataType> {
         SeaType::Interval(_) => DataType::Interval,
         SeaType::Boolean => DataType::Boolean,
         SeaType::Point => DataType::Struct(StructType::new(vec![
-            ("x", DataType::Float32),
-            ("y", DataType::Float32),
+            ("x", DataType::Float64),
+            ("y", DataType::Float64),
         ])),
         SeaType::Uuid => DataType::Varchar,
         SeaType::Xml => DataType::Varchar,

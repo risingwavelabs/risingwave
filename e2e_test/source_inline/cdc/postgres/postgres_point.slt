@@ -1,0 +1,340 @@
+control substitution on
+
+# Test that Postgres CDC correctly handles PostgreSQL's built-in `point` type with full
+# double-precision (float64) fidelity.
+#
+# Covers:
+#   1. explicit_rw : a point column explicitly mapped to struct<x DOUBLE PRECISION, y DOUBLE PRECISION>,
+#      with a backfill check followed by separate INSERT and UPDATE checks that compare
+#      (location).x / (location).y against exact float64 literals.
+#   2. auto_rw      : `point` columns derived via (*), including a NULL scalar row, then INSERT
+#      and UPDATE checks.
+#   3. schema_rw    : ALTER TABLE ADD COLUMN location point after source creation, updating the old
+#      row and inserting a new row, verified via describe and exact coordinate checks.
+#
+# A single postgres-cdc source with auto.schema.change is shared by all three tables. Coordinates
+# are chosen to be unrepresentable in f32 (e.g. 1.23456789012345), so any precision loss to real
+# would make the exact double-precision comparisons fail.
+
+# --- Conditional cleanup of a leftover slot and upstream tables (idempotent) ---
+system ok
+psql -c "
+    SELECT pg_terminate_backend(active_pid)
+    FROM pg_replication_slots
+    WHERE slot_name = 'point_issue_25517_slot' AND active_pid IS NOT NULL;
+    SELECT pg_sleep(1);
+    SELECT pg_drop_replication_slot(slot_name)
+    FROM pg_replication_slots
+    WHERE slot_name = 'point_issue_25517_slot';
+    DROP TABLE IF EXISTS public.upstream_point_explicit CASCADE;
+    DROP TABLE IF EXISTS public.upstream_point_auto CASCADE;
+    DROP TABLE IF EXISTS public.upstream_point_schema CASCADE;
+"
+
+statement ok
+drop table if exists explicit_rw;
+
+statement ok
+drop table if exists auto_rw;
+
+statement ok
+drop table if exists schema_rw;
+
+statement ok
+drop source if exists point_source;
+
+# One source shared by all three reading tables.
+statement ok
+create source point_source with (
+  connector = 'postgres-cdc',
+  hostname = '${PGHOST:localhost}',
+  port = '${PGPORT:5432}',
+  username = '${PGUSER:$USER}',
+  password = '${PGPASSWORD:}',
+  database.name = '${PGDATABASE:postgres}',
+  schema.name = 'public',
+  slot.name = 'point_issue_25517_slot',
+  auto.schema.change = 'true',
+  debezium.include.unknown.datatypes = 'true'
+);
+
+# ===========================================================================
+# 1. explicit_rw : explicit struct mapping with full double precision
+# ===========================================================================
+system ok
+psql -c "
+    CREATE TABLE public.upstream_point_explicit (
+        id int PRIMARY KEY,
+        name varchar,
+        location point
+    );
+    INSERT INTO public.upstream_point_explicit (id, name, location) VALUES
+        (1, 'seed', point(1.23456789012345, -9.87654321098765)),
+        (3, 'sci-backfill', point(-1.23456789012345, 9.87654321098765));
+"
+
+statement ok
+create table explicit_rw (
+    id int primary key,
+    name varchar,
+    location struct<x DOUBLE PRECISION, y DOUBLE PRECISION>
+) from point_source table 'public.upstream_point_explicit';
+
+# Backfill check: compare against exact float64 literals via a literal table so output is stable.
+query ITT retry 10 backoff 1s
+select ours.id, ours.name,
+    (ours.location).x = exp.x and (ours.location).y = exp.y as loc_ok
+from explicit_rw ours
+join (
+    values (1, 'seed', 1.23456789012345::double precision, -9.87654321098765::double precision),
+           (3, 'sci-backfill', -1.23456789012345::double precision, 9.87654321098765::double precision)
+) as exp(id, name, x, y)
+on ours.id = exp.id and ours.name = exp.name
+where ours.id in (1, 3)
+order by ours.id;
+----
+1 seed t
+3 sci-backfill t
+
+# Separate INSERT exact-coordinate check.
+system ok
+psql -c "
+    INSERT INTO public.upstream_point_explicit (id, name, location) VALUES
+        (2, 'inserted', point(3.333333333333333, 4.444444444444444));
+"
+
+query ITT retry 10 backoff 1s
+select e.id, e.name,
+    (e.location).x = 3.333333333333333::double precision and
+    (e.location).y = 4.444444444444444::double precision as loc_ok
+from explicit_rw e
+where e.id = 2
+order by id;
+----
+2 inserted t
+
+# Separate UPDATE, plus an extra inserted row.
+system ok
+psql -c "
+    UPDATE public.upstream_point_explicit SET
+        name = 'updated',
+        location = point(9.999999999999999, -8.888888888888888)
+    WHERE id = 1;
+    INSERT INTO public.upstream_point_explicit (id, name, location) VALUES
+        (4, 'sci-incremental', point(6.666666666666666, -5.555555555555555));
+"
+
+query ITT retry 10 backoff 1s
+select e.id, e.name,
+    (e.location).x = 9.999999999999999::double precision and
+    (e.location).y = -8.888888888888888::double precision as loc_ok
+from explicit_rw e
+where e.id = 1
+order by id;
+----
+1 updated t
+
+query ITT retry 10 backoff 1s
+select e.id, e.name,
+    (e.location).x = 6.666666666666666::double precision and
+    (e.location).y = -5.555555555555555::double precision as loc_ok
+from explicit_rw e
+where e.id = 4
+order by id;
+----
+4 sci-incremental t
+
+# ===========================================================================
+# 2. auto_rw : auto-derive `point` via (*), NULL preserved
+# ===========================================================================
+system ok
+psql -c "
+    CREATE TABLE public.upstream_point_auto (
+        id int PRIMARY KEY,
+        scalar point
+    );
+    INSERT INTO public.upstream_point_auto (id, scalar) VALUES
+        (1, point(1.23456789012345, -9.87654321098765)),
+        (2, NULL),
+        (3, point(7.777777777777777, -8.888888888888888));
+"
+
+statement ok
+create table auto_rw (*)
+from point_source table 'public.upstream_point_auto';
+
+# Type assertion: point -> struct<x,y> of double precision.
+query TTTT retry 10 backoff 1s
+describe auto_rw;
+----
+id integer false NULL
+"scalar" struct false NULL
+"scalar".x double precision false NULL
+"scalar".y double precision false NULL
+_rw_timestamp timestamp with time zone true NULL
+primary key id NULL NULL
+distribution key id NULL NULL
+table description auto_rw NULL NULL
+
+# Backfill check: scalar matches exact float64 coordinates.
+query IT retry 10 backoff 1s
+select id,
+    (scalar).x = 1.23456789012345::double precision and (scalar).y = -9.87654321098765::double precision as scalar_ok
+from auto_rw
+where id = 1
+order by id;
+----
+1 t
+
+# NULL backfill row: scalar stays NULL.
+query IT retry 10 backoff 1s
+select id, scalar is null as scalar_null
+from auto_rw
+where id = 2
+order by id;
+----
+2 t
+
+# Backfill row 3 scalar coordinates intact.
+query IT retry 10 backoff 1s
+select id,
+    (scalar).x = 7.777777777777777::double precision and (scalar).y = -8.888888888888888::double precision as scalar_ok
+from auto_rw
+where id = 3
+order by id;
+----
+3 t
+
+# INSERT and UPDATE exact float64 scalar.
+system ok
+psql -c "
+    INSERT INTO public.upstream_point_auto (id, scalar) VALUES
+        (4, point(6.666666666666666, -5.555555555555555));
+    UPDATE public.upstream_point_auto SET
+        scalar = point(8.888888888888888, -7.777777777777777)
+    WHERE id = 1;
+"
+
+query IT retry 10 backoff 1s
+select id,
+    (scalar).x = 8.888888888888888::double precision and (scalar).y = -7.777777777777777::double precision as scalar_ok
+from auto_rw
+where id = 1
+order by id;
+----
+1 t
+
+query IT retry 10 backoff 1s
+select id,
+    (scalar).x = 6.666666666666666::double precision and (scalar).y = -5.555555555555555::double precision as scalar_ok
+from auto_rw
+where id = 4
+order by id;
+----
+4 t
+
+# NULL row still untouched after incremental events.
+query IT retry 10 backoff 1s
+select id, scalar is null as scalar_null
+from auto_rw
+where id = 2
+order by id;
+----
+2 t
+
+# ===========================================================================
+# 3. schema_rw : ALTER TABLE ADD COLUMN point after source creation
+# ===========================================================================
+system ok
+psql -c "
+    CREATE TABLE public.upstream_point_schema (
+        id int PRIMARY KEY,
+        note varchar
+    );
+    INSERT INTO public.upstream_point_schema (id, note) VALUES
+        (1, 'baseline');
+"
+
+statement ok
+create table schema_rw (*)
+from point_source table 'public.upstream_point_schema';
+
+# Baseline row backfill (no point column yet).
+query IT retry 10 backoff 1s
+select id, note from schema_rw where id = 1 order by id;
+----
+1 baseline
+
+# Add the point column upstream; update the old row and insert a new row.
+system ok
+psql -c "
+    ALTER TABLE public.upstream_point_schema ADD COLUMN location point;
+    UPDATE public.upstream_point_schema SET
+        location = point(1.23456789012345, -9.87654321098765)
+    WHERE id = 1;
+    INSERT INTO public.upstream_point_schema (id, note, location) VALUES
+        (2, 'added', point(-4.444444444444444, 5.555555555555555));
+"
+
+# The added column is derived as struct with double-precision x/y via schema change.
+query TTTT retry 10 backoff 1s
+describe schema_rw;
+----
+id integer false NULL
+note character varying false NULL
+"location" struct false NULL
+"location".x double precision false NULL
+"location".y double precision false NULL
+_rw_timestamp timestamp with time zone true NULL
+primary key id NULL NULL
+distribution key id NULL NULL
+table description schema_rw NULL NULL
+
+# Exact coordinate checks for both rows.
+query ITT retry 10 backoff 1s
+select s.id, s.note,
+    (s.location).x = 1.23456789012345::double precision and (s.location).y = -9.87654321098765::double precision as loc_ok
+from schema_rw s
+where s.id = 1
+order by s.id;
+----
+1 baseline t
+
+query ITT retry 10 backoff 1s
+select s.id, s.note,
+    (s.location).x = -4.444444444444444::double precision and (s.location).y = 5.555555555555555::double precision as loc_ok
+from schema_rw s
+where s.id = 2
+order by s.id;
+----
+2 added t
+
+# ===========================================================================
+# Cleanup: drop RW tables, drop source with cascade, drop upstream tables and
+# conditionally drop the replication slot.
+# ===========================================================================
+statement ok
+drop table explicit_rw;
+
+statement ok
+drop table auto_rw;
+
+statement ok
+drop table schema_rw;
+
+statement ok
+drop source point_source cascade;
+
+system ok
+psql -c "
+    SELECT pg_terminate_backend(active_pid)
+    FROM pg_replication_slots
+    WHERE slot_name = 'point_issue_25517_slot' AND active_pid IS NOT NULL;
+    SELECT pg_sleep(1);
+    SELECT pg_drop_replication_slot(slot_name)
+    FROM pg_replication_slots
+    WHERE slot_name = 'point_issue_25517_slot';
+    DROP TABLE IF EXISTS public.upstream_point_explicit CASCADE;
+    DROP TABLE IF EXISTS public.upstream_point_auto CASCADE;
+    DROP TABLE IF EXISTS public.upstream_point_schema CASCADE;
+"
