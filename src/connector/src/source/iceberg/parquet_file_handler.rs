@@ -120,8 +120,7 @@ pub fn new_s3_operator(
         .disable_config_load();
     let op: Operator = Operator::new(builder)?
         .layer(LoggingLayer::default())
-        .layer(RetryLayer::default())
-        .finish();
+        .layer(RetryLayer::default());
 
     Ok(op)
 }
@@ -132,8 +131,7 @@ pub fn new_gcs_operator(credential: String, bucket: String) -> ConnectorResult<O
 
     let operator: Operator = Operator::new(builder)?
         .layer(LoggingLayer::default())
-        .layer(RetryLayer::default())
-        .finish();
+        .layer(RetryLayer::default());
     Ok(operator)
 }
 
@@ -153,8 +151,7 @@ pub fn new_azblob_operator(
 
     let operator: Operator = Operator::new(builder)?
         .layer(LoggingLayer::default())
-        .layer(RetryLayer::default())
-        .finish();
+        .layer(RetryLayer::default());
     Ok(operator)
 }
 

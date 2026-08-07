@@ -40,9 +40,11 @@ opendal = { workspace = true, features = [
     "services-webhdfs",
     "services-azfile",
 ] }
+# Custom HTTP client for S3 keepalive/nodelay settings.
+opendal-http-transport-reqwest = "0.58.1"
 pin-project-lite = { workspace = true }
 prometheus = { version = "0.14", features = ["process"] }
-reqwest = "0.12.2" # required by opendal
+reqwest = "0.13" # required by opendal HTTP transport
 risingwave_common = { workspace = true }
 spin = "0.10"
 thiserror = { workspace = true }

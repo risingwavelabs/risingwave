@@ -60,8 +60,7 @@ impl<S: OpendalSinkBackend> FileSink<S> {
             .root(&config.common.path);
 
         let operator: Operator = Operator::new(builder)?
-            .layer(LoggingLayer::default())
-            .finish();
+            .layer(LoggingLayer::default());
 
         Ok(operator)
     }

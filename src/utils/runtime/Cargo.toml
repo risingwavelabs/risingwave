@@ -24,7 +24,8 @@ risingwave_variables = { workspace = true }
 rlimit = "0.10"
 rustls = "0.23.5"
 # Explicitly specify the tokio version used in RisingWave runtime
-rw-tokio = { version = "=1.49.0", package = "tokio" }
+# OpenDAL 0.58 requires tokio ^1.52.
+rw-tokio = { version = "=1.52.0", package = "tokio" }
 thiserror-ext = { workspace = true }
 time = { version = "0.3", features = ["formatting", "local-offset"] }
 tokio = { workspace = true, features = ["fs"] }

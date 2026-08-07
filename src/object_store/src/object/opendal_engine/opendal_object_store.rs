@@ -77,7 +77,7 @@ impl OpendalObjectStore {
     pub fn test_new_memory_engine() -> ObjectResult<Self> {
         // Create memory backend builder.
         let builder = Memory::default();
-        let op: Operator = Operator::new(builder)?.finish();
+        let op: Operator = Operator::new(builder)?;
 
         Ok(Self {
             op,
@@ -124,7 +124,7 @@ impl ObjectStore for OpendalObjectStore {
     }
 
     async fn streaming_upload(&self, path: &str) -> ObjectResult<Self::StreamingUploader> {
-        if self.op.info().native_capability().write_can_multi {
+        if self.op.info().capability().write_can_multi {
             Ok(OpendalStreamingUploader::Native(Box::new(
                 OpendalNativeStreamingUploader::new(
                     self.op.clone(),
@@ -374,10 +374,10 @@ impl OpendalNativeStreamingUploader {
     ) -> ObjectResult<Self> {
         let monitored_execute = OpendalStreamingUploaderExecute::new(metrics, media_type);
         let executor = Executor::with(monitored_execute);
-        op.update_executor(|_| executor);
+        let ctx = op.context().with_executor(executor);
+        let op = op.with_context(ctx);
 
         let writer = op
-            .clone()
             .layer(TimeoutLayer::new().with_io_timeout(Duration::from_millis(
                 config.retry.streaming_upload_attempt_timeout_ms,
             )))
