@@ -475,16 +475,14 @@ impl CatalogController {
                 streaming_job_model
             }
             StreamingJob::Sink(sink) => {
-                if let Some(target_table_id) = sink.target_table {
-                    if check_sink_into_table_cycle(
+                if let Some(target_table_id) = sink.target_table
+                    && check_sink_into_table_cycle(
                         target_table_id.into(),
                         dependencies.iter().cloned().collect(),
                         &txn,
                     )
                     .await? {
-                        bail!("Creating such a sink will result in circular dependency.");
-                    }
-                    dependencies.insert(target_table_id.into());
+                    bail!("Creating such a sink will result in circular dependency.");
                 }
 
                 let streaming_job_model = Self::create_streaming_job_obj(

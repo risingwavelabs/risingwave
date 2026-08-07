@@ -151,8 +151,7 @@ impl CatalogController {
                 )));
             }
 
-            // Fixed in issue#26413, this is now only for backward compatibility so we don't need
-            // to do the data repair for previous sinks that are missing object_dependency edge
+            // TODO: record dependency info in object_dependency table for sink into table.
             let removed_sink_objs: Vec<PartialObject> = Object::find()
                 .filter(object::Column::Oid.is_in(incoming_sink_ids))
                 .into_partial_model()
