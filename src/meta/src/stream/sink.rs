@@ -92,25 +92,20 @@ mod tests {
 
     #[test]
     fn test_reject_variant_sink() {
-        let cases = [
-            ("kafka", DataType::Variant),
-            ("doris", DataType::Variant),
-            ("jdbc", DataType::Variant),
-            ("mongodb", DataType::Variant),
-            ("kafka", DataType::list(DataType::Variant)),
-            (
-                "kafka",
+        for connector in ["kafka", "doris", "jdbc", "mongodb"] {
+            for data_type in [
+                DataType::Variant,
+                DataType::list(DataType::Variant),
                 DataType::Struct(StructType::new(vec![("v", DataType::Variant)])),
-            ),
-        ];
-        for (connector, data_type) in cases {
-            let sink = make_sink(connector, data_type.clone());
-            let err = reject_variant_sink(&sink).unwrap_err();
-            assert!(
-                err.to_string()
-                    .contains("sinking VARIANT columns is not supported yet: column `payload`"),
-                "{connector} / {data_type:?}: {err:?}"
-            );
+            ] {
+                let sink = make_sink(connector, data_type.clone());
+                let err = reject_variant_sink(&sink).unwrap_err();
+                assert!(
+                    err.to_string()
+                        .contains("sinking VARIANT columns is not supported yet: column `payload`"),
+                    "{connector} / {data_type:?}: {err:?}"
+                );
+            }
         }
     }
 

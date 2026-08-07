@@ -2126,14 +2126,14 @@ pub async fn create_iceberg_engine_table(
 
     // Create iceberg sink table, used for iceberg source column binding. See `bind_columns_from_source_for_non_cdc` for more details.
     // TODO: We can derive the columns directly from table definition in the future, so that we don't need to pre-create the table catalog.
-    let (iceberg_catalog, table_identifier) = {
+    let (iceberg_catalog, table_identifier, table_created) = {
         let sink_param = SinkParam::try_from_sink_catalog(sink_catalog.clone())?;
         let iceberg_sink = IcebergSink::try_from(sink_param)?;
-        iceberg_sink.create_table_if_not_exists().await?;
+        let table_created = iceberg_sink.create_table_if_not_exists().await?;
 
         let iceberg_catalog = iceberg_sink.config.create_catalog().await?;
         let table_identifier = iceberg_sink.config.full_table_name()?;
-        (iceberg_catalog, table_identifier)
+        (iceberg_catalog, table_identifier, table_created)
     };
 
     let create_source_type = CreateSourceType::for_newly_created(&session, &*with_properties);
@@ -2197,16 +2197,20 @@ pub async fn create_iceberg_engine_table(
     .await;
 
     if res.is_err() {
-        let _ = iceberg_catalog
-            .drop_table(&table_identifier)
-            .await
-            .inspect_err(|err| {
-                tracing::error!(
-                    "failed to drop iceberg table {} after create iceberg engine table failed: {}",
-                    table_identifier,
-                    err.as_report()
-                );
-            });
+        // Only clean up an iceberg table this statement created; a pre-existing
+        // external table must survive a failed CREATE.
+        if table_created {
+            let _ = iceberg_catalog
+                .drop_table(&table_identifier)
+                .await
+                .inspect_err(|err| {
+                    tracing::error!(
+                        "failed to drop iceberg table {} after create iceberg engine table failed: {}",
+                        table_identifier,
+                        err.as_report()
+                    );
+                });
+        }
         res?
     }
 
