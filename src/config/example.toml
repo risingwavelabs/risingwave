@@ -268,6 +268,7 @@ over_window_cache_policy = "full"
 enable_state_table_vnode_stats_pruning = false
 enable_locality_sort_buffer = true
 locality_sort_buffer_activate_threshold = 65536
+locality_sort_buffer_burst_multiplier = 4.0
 cache_refill_policy = "enabled"
 enable_vnode_key_stats_for_materialize = false
 max_concurrent_kv_log_store_historical_read = 0

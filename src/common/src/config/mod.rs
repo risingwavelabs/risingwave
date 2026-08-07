@@ -485,6 +485,10 @@ pub mod default {
             65536
         }
 
+        pub fn locality_sort_buffer_burst_multiplier() -> f64 {
+            4.0
+        }
+
         pub fn cache_refill_policy() -> CacheRefillPolicy {
             CacheRefillPolicy::Enabled
         }

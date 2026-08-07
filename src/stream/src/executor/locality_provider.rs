@@ -50,6 +50,71 @@ pub struct SortBufferSettings {
     pub enabled: bool,
     /// The number of input rows within one epoch after which buffering activates.
     pub activate_threshold: u64,
+    /// Multiplier over the EWMA baseline of per-epoch row counts above which an epoch is
+    /// considered an amplification burst. Non-positive values disable burst detection, making
+    /// activation depend on `activate_threshold` alone.
+    pub burst_multiplier: f64,
+}
+
+/// Distinguishes amplification bursts from steady high-throughput workloads by maintaining an
+/// EWMA baseline of per-epoch input row counts.
+///
+/// A fixed row-count threshold alone cannot tell a steady stream that happens to carry more than
+/// the threshold every epoch (where buffering every epoch would add constant latency and storage
+/// traffic) from a sudden amplification spike over an otherwise moderate baseline (where
+/// buffering is exactly what we want). The detector activates buffering only when the current
+/// epoch exceeds both the absolute threshold and `burst_multiplier` times the baseline.
+///
+/// The baseline update is clamped to `max(burst_multiplier * ewma, activate_threshold)`, so a
+/// burst can never lift the baseline to its own level in one step and thereby suppress the
+/// detection of subsequent bursts. A genuine sustained rate shift still adapts geometrically:
+/// after a bounded number of epochs the new rate becomes the baseline and the stream returns to
+/// pass-through.
+#[derive(Debug)]
+struct BurstDetector {
+    activate_threshold: u64,
+    burst_multiplier: f64,
+    /// EWMA of (clamped) per-epoch input row counts. Starts at zero: an idle or fresh actor
+    /// treats any epoch above `activate_threshold` as a burst, preserving the plain-threshold
+    /// behavior until a baseline is established.
+    ewma: f64,
+}
+
+impl BurstDetector {
+    /// Smoothing factor of the EWMA: one epoch contributes 10%, so the baseline roughly reflects
+    /// the last few dozen epochs.
+    const ALPHA: f64 = 0.1;
+
+    fn new(settings: &SortBufferSettings) -> Self {
+        Self {
+            activate_threshold: settings.activate_threshold,
+            burst_multiplier: settings.burst_multiplier,
+            ewma: 0.0,
+        }
+    }
+
+    /// The number of input rows within the current epoch above which buffering activates.
+    /// Constant within an epoch, as the baseline only advances at barriers.
+    fn activate_rows(&self) -> u64 {
+        let burst_rows = (self.burst_multiplier * self.ewma) as u64;
+        self.activate_threshold.max(burst_rows)
+    }
+
+    /// The current EWMA baseline, for logging.
+    fn baseline(&self) -> u64 {
+        self.ewma as u64
+    }
+
+    /// Feed the total input row count of a finished epoch at its barrier.
+    fn finish_epoch(&mut self, rows: u64) {
+        if self.burst_multiplier <= 0.0 {
+            // Burst detection disabled: no need to maintain the baseline.
+            return;
+        }
+        let cap = (self.burst_multiplier * self.ewma).max(self.activate_threshold as f64);
+        let sample = (rows as f64).min(cap);
+        self.ewma = Self::ALPHA * sample + (1.0 - Self::ALPHA) * self.ewma;
+    }
 }
 
 /// Op code of a buffered change, stored in the `_rw_op` column of the sort buffer table.
@@ -1014,7 +1079,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
         // changes with much better cache locality, while the buffer memory stays bounded by the
         // shared buffer (spillable to L0).
         let sort_buffer_active = sort_buffer_table.is_some() && self.sort_buffer_settings.enabled;
-        let activate_threshold = self.sort_buffer_settings.activate_threshold;
+        let mut burst_detector = BurstDetector::new(&self.sort_buffer_settings);
 
         // The group key (locality columns + stream key) for per-key compaction during replay.
         // It equals the pk of the buffer state table (which is `gen` + group key + `seq`) without
@@ -1043,18 +1108,22 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
 
             match msg {
                 Message::Chunk(chunk) => {
-                    if !buffering {
-                        rows_in_epoch += chunk.cardinality() as u64;
-                        if sort_buffer_active && rows_in_epoch > activate_threshold {
-                            tracing::info!(
-                                actor_id = %self.actor_id,
-                                fragment_id = %self.fragment_id,
-                                rows_in_epoch,
-                                activate_threshold,
-                                "locality provider sort buffer activated for this epoch"
-                            );
-                            buffering = true;
-                        }
+                    // Count all rows of the epoch, including the buffered suffix, so that the
+                    // burst baseline reflects the actual epoch size.
+                    rows_in_epoch += chunk.cardinality() as u64;
+                    if !buffering
+                        && sort_buffer_active
+                        && rows_in_epoch > burst_detector.activate_rows()
+                    {
+                        tracing::info!(
+                            actor_id = %self.actor_id,
+                            fragment_id = %self.fragment_id,
+                            rows_in_epoch,
+                            activate_rows = burst_detector.activate_rows(),
+                            baseline = burst_detector.baseline(),
+                            "locality provider sort buffer activated for this epoch"
+                        );
+                        buffering = true;
                     }
                     if buffering {
                         let chunk = chunk.compact_vis();
@@ -1137,6 +1206,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                     }
 
                     cur_gen = barrier.epoch.curr;
+                    burst_detector.finish_epoch(rows_in_epoch);
                     buffering = false;
                     rows_in_epoch = 0;
                     seq = 0;
@@ -1218,6 +1288,68 @@ mod tests {
             parts(take_compacted_record(&mut slot)),
             Some(("insert", vec![row([1])]))
         );
+    }
+
+    fn detector(activate_threshold: u64, burst_multiplier: f64) -> BurstDetector {
+        BurstDetector::new(&SortBufferSettings {
+            enabled: true,
+            activate_threshold,
+            burst_multiplier,
+        })
+    }
+
+    #[test]
+    fn test_burst_detector_disabled() {
+        // Non-positive multiplier disables burst detection: activation depends on the absolute
+        // threshold alone, regardless of history.
+        let mut d = detector(100, 0.0);
+        assert_eq!(d.activate_rows(), 100);
+        for _ in 0..100 {
+            d.finish_epoch(1_000_000);
+            assert_eq!(d.activate_rows(), 100);
+        }
+    }
+
+    #[test]
+    fn test_burst_detector_idle_baseline_keeps_activating() {
+        // Idle-then-burst pattern: bursts must not lift the baseline to their own level, so that
+        // every burst over a quiet baseline keeps activating at the absolute threshold.
+        let mut d = detector(100, 4.0);
+        for _ in 0..50 {
+            // Mostly-idle epochs with a huge burst every 10th epoch.
+            for _ in 0..9 {
+                d.finish_epoch(10);
+            }
+            assert_eq!(d.activate_rows(), 100);
+            d.finish_epoch(1_000_000);
+            // The clamped update keeps the baseline at most at the absolute threshold, far below
+            // the burst level.
+            assert!(d.baseline() <= 100);
+        }
+    }
+
+    #[test]
+    fn test_burst_detector_consecutive_bursts_keep_activating() {
+        // A burst lasting many consecutive epochs keeps activating: the clamped baseline adapts
+        // only geometrically, never jumping to the burst level in one step.
+        let mut d = detector(100, 4.0);
+        for _ in 0..10 {
+            assert!(d.activate_rows() < 1_000_000);
+            d.finish_epoch(1_000_000);
+        }
+    }
+
+    #[test]
+    fn test_burst_detector_steady_rate_adapts_to_pass_through() {
+        // A steady rate above the absolute threshold is not a burst: the baseline converges to
+        // the steady rate and the activation bar rises above it, returning to pass-through.
+        let mut d = detector(100, 4.0);
+        for _ in 0..100 {
+            d.finish_epoch(1000);
+        }
+        assert!(d.activate_rows() > 1000);
+        // A real burst over the new baseline still activates.
+        assert!(d.activate_rows() < 100_000);
     }
 
     /// Write interleaved changes of one epoch into the sort buffer table, commit, and replay.

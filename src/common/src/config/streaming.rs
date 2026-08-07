@@ -343,6 +343,16 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::locality_sort_buffer_activate_threshold")]
     pub locality_sort_buffer_activate_threshold: u64,
 
+    /// Multiplier over the EWMA baseline of per-epoch input row counts above which an epoch is
+    /// considered an amplification burst by the sort buffer of `LocalityProviderExecutor`.
+    /// Buffering activates only when an epoch exceeds both
+    /// `locality_sort_buffer_activate_threshold` and this multiple of the baseline, so that a
+    /// steady high-throughput stream is not buffered every epoch while amplification spikes
+    /// still are. Non-positive values disable burst detection, making activation depend on the
+    /// absolute threshold alone.
+    #[serde(default = "default::developer::locality_sort_buffer_burst_multiplier")]
+    pub locality_sort_buffer_burst_multiplier: f64,
+
     /// Cache refill policy for streaming cache refill feature.
     /// Can be `enabled`, `disabled`, `streaming`, `serving` or `both`.
     #[serde(default = "default::developer::cache_refill_policy")]
