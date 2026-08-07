@@ -1,0 +1,19 @@
+statement ok
+create table t (id int, p int, v int);
+
+statement ok
+insert into t values (1,1,10),(2,1,null),(3,1,30),(4,2,null);
+
+statement ok
+flush;
+
+query iiii
+select id, p, lag(v,1,99) over (partition by p order by id), lead(v,1,88) over (partition by p order by id) from t order by p, id;
+----
+1 1 99 NULL
+2 1 10 30
+3 1 NULL 88
+4 2 99 88
+
+statement ok
+drop table t;

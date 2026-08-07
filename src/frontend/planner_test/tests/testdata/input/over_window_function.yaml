@@ -73,6 +73,22 @@
     - logical_plan
     - stream_plan
     - batch_plan
+- id: lag with default argument
+  sql: |
+    create table t(x int, y int);
+    select x, y, lag(x, 0, 5) over(PARTITION BY y ORDER BY x) from t;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
+- id: lead with default argument
+  sql: |
+    create table t(x int, y int);
+    select x, y, lead(x, 2, 5) over(PARTITION BY y ORDER BY x) from t;
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+    - batch_plan
 - id: lag with over clause, ignoring frame definition
   sql: |
     create table t(x int, y int);
