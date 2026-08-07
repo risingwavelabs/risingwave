@@ -1412,6 +1412,10 @@ impl BatchPlanRef {
             || self.node_type() == BatchPlanNodeType::BatchIcebergScan
     }
 
+    fn is_lookup_join(&self) -> bool {
+        self.node_type() == BatchPlanNodeType::BatchLookupJoin
+    }
+
     fn is_insert(&self) -> bool {
         self.node_type() == BatchPlanNodeType::BatchInsert
     }
@@ -1438,6 +1442,10 @@ fn require_additional_exchange_on_root_in_distributed_mode(plan: BatchPlanRef) -
             || plan.is_insert()
             || plan.is_update()
             || plan.is_delete()
+            // A lookup join on a singleton lookup table may be already in `Single`
+            // distribution and reads from the state store, so it must not be executed
+            // in the root stage on the frontend.
+            || plan.is_lookup_join()
     })
 }
 
