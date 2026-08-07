@@ -926,8 +926,8 @@ pub fn pg_type_to_rw_type(pg_type: &PgType) -> ConnectorResult<DataType> {
         PgType::TIME => DataType::Time,
         PgType::TIMETZ => DataType::Time,
         PgType::POINT => DataType::Struct(risingwave_common::types::StructType::new(vec![
-            ("x", DataType::Float32),
-            ("y", DataType::Float32),
+            ("x", DataType::Float64),
+            ("y", DataType::Float64),
         ])),
         PgType::TIMESTAMP => DataType::Timestamp,
         PgType::TIMESTAMPTZ => DataType::Timestamptz,
