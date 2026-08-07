@@ -740,7 +740,9 @@ pub fn sea_type_to_rw_type(col_type: &SeaType) -> ConnectorResult<DataType> {
             bail!("{:?} type not supported", col_type);
         }
         SeaType::Unknown(name) => {
-            if let Some(dim) = parse_pgvector_dimension(name)? {
+            if name.eq_ignore_ascii_case("geography") {
+                DataType::Bytea
+            } else if let Some(dim) = parse_pgvector_dimension(name)? {
                 DataType::Vector(dim)
             } else {
                 // NOTES: user-defined enum type is classified as `Unknown`
@@ -871,9 +873,11 @@ fn sea_type_to_pg_type(sea_type: &SeaType) -> ConnectorResult<tokio_postgres::ty
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::types::DataType;
+
     use super::{
-        format_grant_table_privilege, format_grant_usage, format_pg_table_name,
-        format_required_table_grants, parse_pgvector_dimension,
+        SeaType, format_grant_table_privilege, format_grant_usage, format_pg_table_name,
+        format_required_table_grants, parse_pgvector_dimension, sea_type_to_rw_type,
     };
 
     #[test]
@@ -887,6 +891,18 @@ mod tests {
     fn test_parse_pgvector_dimension_requires_size() {
         let err = parse_pgvector_dimension("vector").unwrap_err();
         assert!(err.to_string().contains("missing dimension"));
+    }
+
+    #[test]
+    fn test_unknown_type_geography_maps_to_bytea() {
+        assert_eq!(
+            sea_type_to_rw_type(&SeaType::Unknown("geography".to_owned())).unwrap(),
+            DataType::Bytea
+        );
+        assert_eq!(
+            sea_type_to_rw_type(&SeaType::Unknown("GEOGRAPHY".to_owned())).unwrap(),
+            DataType::Bytea
+        );
     }
 
     #[test]
