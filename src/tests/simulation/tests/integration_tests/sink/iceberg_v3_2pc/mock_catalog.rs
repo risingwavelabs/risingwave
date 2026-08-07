@@ -22,7 +22,7 @@
 
 use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, LazyLock, Mutex, MutexGuard};
 use std::time::Duration;
 
 use anyhow::Result;
@@ -36,6 +36,12 @@ use iceberg::{
 };
 use rand::Rng;
 use tokio::time::sleep;
+
+static ICEBERG_RUNTIME: LazyLock<rw_tokio::runtime::Runtime> = LazyLock::new(|| {
+    rw_tokio::runtime::Builder::new_current_thread()
+        .build()
+        .expect("failed to build the Iceberg test runtime")
+});
 
 /// Snapshot data tracked by the mock (file-level only).
 #[derive(Debug, Default, Clone)]
@@ -289,7 +295,7 @@ impl MockIcebergV3Catalog {
             .metadata(TableMetadataRef::from(metadata))
             .identifier(ident)
             .file_io(file_io)
-            .runtime(Runtime::try_current()?)
+            .runtime(Runtime::new(&ICEBERG_RUNTIME))
             .build()
             .map_err(to_unexpected)
     }

@@ -14182,6 +14182,7 @@ dependencies = [
  "sqllogictest",
  "tempfile",
  "tikv-jemallocator",
+ "tokio",
  "tokio-postgres",
  "tracing",
  "tracing-subscriber",

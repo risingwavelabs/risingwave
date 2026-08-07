@@ -52,6 +52,8 @@ shell-words = "1.1.0"
 sqllogictest = "0.29.1"
 tempfile = "3"
 tikv-jemallocator = { workspace = true }
+# Iceberg uses the real Tokio runtime rather than madsim-tokio.
+rw-tokio = { version = "=1.53.1", package = "tokio", features = ["rt"] }
 tokio = { workspace = true }
 tokio-postgres = "0.7"
 tonic = { workspace = true }
