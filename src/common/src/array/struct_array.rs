@@ -34,7 +34,7 @@ use crate::types::{
 };
 use crate::util::iter_util::{ZipEqDebug, ZipEqFast};
 use crate::util::memcmp_encoding;
-use crate::util::value_encoding::estimate_serialize_datum_size;
+use crate::util::value_encoding::estimate_struct_field_size;
 
 macro_rules! iter_fields_ref {
     ($self:expr, $it:ident, { $($body:tt)* }) => {
@@ -446,7 +446,7 @@ impl<'a> StructRef<'a> {
     pub fn estimate_serialize_size_inner(self) -> usize {
         iter_fields_ref!(self, it, {
             it.fold(0, |acc, datum_ref| {
-                acc + estimate_serialize_datum_size(datum_ref)
+                acc + estimate_struct_field_size(datum_ref)
             })
         })
     }
