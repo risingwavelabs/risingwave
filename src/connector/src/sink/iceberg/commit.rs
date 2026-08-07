@@ -21,7 +21,7 @@ use iceberg::Catalog;
 use iceberg::arrow::schema_to_arrow_schema;
 use iceberg::spec::{DataFile, Operation, SerializedDataFile, TableMetadata};
 use iceberg::table::Table;
-use iceberg::transaction::{ApplyTransactionAction, FastAppendAction, Transaction};
+use iceberg::transaction::{AddColumn, ApplyTransactionAction, FastAppendAction, Transaction};
 use itertools::Itertools;
 use risingwave_common::array::arrow::arrow_schema_iceberg::{
     DataType as ArrowDataType, Field as ArrowField, Fields as ArrowFields,
@@ -919,8 +919,6 @@ impl IcebergSinkCommitter {
     /// This function uses Transaction API to atomically update the table schema
     /// with optimistic locking to prevent concurrent conflicts.
     async fn commit_schema_change_impl(&mut self, schema_change: PbSinkSchemaChange) -> Result<()> {
-        use iceberg::spec::NestedField;
-
         // Step 1: Get current table metadata
         let metadata = self.table.metadata();
         let mut next_field_id = metadata.last_column_id() + 1;
@@ -954,14 +952,7 @@ impl IcebergSinkCommitter {
                             )
                         })?;
 
-                    // Create NestedField with the next available field ID
-                    let nested_field = Arc::new(NestedField::optional(
-                        next_field_id,
-                        &field.name,
-                        iceberg_type,
-                    ));
-
-                    new_fields.push(nested_field);
+                    new_fields.push(AddColumn::optional(&field.name, iceberg_type));
                     tracing::info!("Prepared field '{}' with ID {}", field.name, next_field_id);
                     next_field_id += 1;
                 }
@@ -987,10 +978,13 @@ impl IcebergSinkCommitter {
 
         let txn = Transaction::new(&self.table);
         let action_fields_added = new_fields.len();
-        let action = txn
-            .update_schema()
-            .add_fields(new_fields)
-            .drop_fields(drop_column_names.clone());
+        let mut action = txn.update_schema();
+        for field in new_fields {
+            action = action.add_column(field);
+        }
+        for column_name in &drop_column_names {
+            action = action.delete_column(column_name);
+        }
 
         let updated_table = action
             .apply(txn)

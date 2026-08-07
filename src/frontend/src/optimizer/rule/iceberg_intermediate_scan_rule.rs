@@ -136,9 +136,8 @@ impl FallibleRule<Logical> for IcebergIntermediateScanRule {
                 }
                 FormatVersion::V3 => {
                     for file in &mut data_files {
-                        file.deletes.retain(|delete| {
-                            delete.data_file_content == DataContentType::PositionDeletes
-                        });
+                        file.deletes
+                            .retain(|delete| delete.file_type == DataContentType::PositionDeletes);
                     }
                 }
             }

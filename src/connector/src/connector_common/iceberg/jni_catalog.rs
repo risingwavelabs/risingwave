@@ -25,13 +25,14 @@ use std::sync::Arc;
 
 use anyhow::Context;
 use async_trait::async_trait;
-use iceberg::io::FileIO;
+use iceberg::io::FileIOBuilder;
 use iceberg::spec::{Schema, SortOrder, TableMetadata, UnboundPartitionSpec};
 use iceberg::table::Table;
 use iceberg::{
     Catalog, Namespace, NamespaceIdent, TableCommit, TableCreation, TableIdent, TableRequirement,
     TableUpdate,
 };
+use iceberg_storage_opendal::OpenDalResolvingStorageFactory;
 use itertools::Itertools;
 use jni::objects::{GlobalRef, JObject};
 use risingwave_common::global_jvm::Jvm;
@@ -308,7 +309,7 @@ impl Catalog for JniCatalog {
 
                 let resp: LoadTableResponse = serde_json::from_str(&rust_json_str)?;
 
-                let metadata_location = resp.metadata_location.ok_or_else(|| {
+                let _metadata_location = resp.metadata_location.ok_or_else(|| {
                     iceberg::Error::new(
                         iceberg::ErrorKind::FeatureUnsupported,
                         "Loading uncommitted table is not supported!",
@@ -317,9 +318,10 @@ impl Catalog for JniCatalog {
 
                 let table_metadata = resp.metadata;
 
-                let file_io = FileIO::from_path(&metadata_location)?
+                let file_io =
+                    FileIOBuilder::new(Arc::new(OpenDalResolvingStorageFactory::new()))
                     .with_props(file_io_props.iter())
-                    .build()?;
+                    .build();
 
                 Ok(Table::builder()
                     .file_io(file_io)
@@ -371,9 +373,9 @@ impl Catalog for JniCatalog {
 
                 let table_metadata = resp.metadata;
 
-                let file_io = FileIO::from_path(&metadata_location)?
+                let file_io = FileIOBuilder::new(Arc::new(OpenDalResolvingStorageFactory::new()))
                     .with_props(file_io_props.iter())
-                    .build()?;
+                    .build();
 
                 Ok(Table::builder()
                     .file_io(file_io)
@@ -417,6 +419,12 @@ impl Catalog for JniCatalog {
             )
             .with_source(e)
         })
+    }
+
+    async fn purge_table(&self, table: &TableIdent) -> iceberg::Result<()> {
+        let table_info = self.load_table(table).await?;
+        self.drop_table(table).await?;
+        iceberg::drop_table_data(&table_info).await
     }
 
     async fn register_table(
@@ -503,9 +511,9 @@ impl Catalog for JniCatalog {
 
                 let table_metadata = response.metadata;
 
-                let file_io = FileIO::from_path(&response.metadata_location)?
+                let file_io = FileIOBuilder::new(Arc::new(OpenDalResolvingStorageFactory::new()))
                     .with_props(file_io_props.iter())
-                    .build()?;
+                    .build();
 
                 Ok(Table::builder()
                     .file_io(file_io)
