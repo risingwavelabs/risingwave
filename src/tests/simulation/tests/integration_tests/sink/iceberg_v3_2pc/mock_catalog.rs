@@ -283,10 +283,7 @@ impl MockIcebergV3Catalog {
     // -------- internal helpers --------
 
     fn build_table_with_metadata(&self, metadata: TableMetadata) -> IcebergResult<Table> {
-        let file_io = FileIO::from_path("memory://")
-            .map_err(to_unexpected)?
-            .build()
-            .map_err(to_unexpected)?;
+        let file_io = FileIO::new_with_memory();
         let ident = self.inner().table_ident.clone();
         Table::builder()
             .metadata(TableMetadataRef::from(metadata))
@@ -483,6 +480,10 @@ impl Catalog for MockIcebergV3Catalog {
 
     async fn drop_table(&self, _t: &TableIdent) -> IcebergResult<()> {
         unimplemented!("mock V3 catalog: drop_table should not be called by V3")
+    }
+
+    async fn purge_table(&self, _t: &TableIdent) -> IcebergResult<()> {
+        unimplemented!("mock V3 catalog: purge_table should not be called by V3")
     }
 
     async fn table_exists(&self, _t: &TableIdent) -> IcebergResult<bool> {
