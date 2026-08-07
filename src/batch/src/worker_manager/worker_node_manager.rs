@@ -355,7 +355,11 @@ impl WorkerNodeSelector {
             .sum()
     }
 
-    pub fn fragment_mapping(&self, fragment_id: FragmentId) -> Result<WorkerSlotMapping> {
+    pub fn fragment_mapping(
+        &self,
+        fragment_id: FragmentId,
+        batch_parallelism: usize,
+    ) -> Result<WorkerSlotMapping> {
         if self.enable_barrier_read {
             self.manager.get_streaming_fragment_mapping(&fragment_id)
         } else {
@@ -373,8 +377,8 @@ impl WorkerNodeSelector {
             } else {
                 let workers = self.apply_worker_node_mask(self.manager.list_serving_worker_nodes());
                 // If it's a singleton, set max_parallelism=1 for place_vnode.
-                let max_parallelism = mapping.to_single().map(|_| 1);
-                // TODO: use runtime parameter batch_parallelism
+                // Otherwise, cap re-placement by the query's effective batch parallelism.
+                let max_parallelism = mapping.to_single().map(|_| 1).or(Some(batch_parallelism));
                 let masked_mapping =
                     place_vnode(Some(&mapping), &workers, max_parallelism, mapping.len())
                         .ok_or_else(|| BatchError::EmptyWorkerNodes)?;
@@ -475,6 +479,55 @@ mod tests {
                 .sorted_by_key(|w| w.id)
                 .collect_vec(),
             worker_nodes.as_slice()[1..].to_vec()
+        );
+    }
+
+    #[test]
+    fn test_fragment_mapping_respects_batch_parallelism_with_masked_workers() {
+        use super::*;
+
+        let worker_nodes = vec![
+            WorkerNode {
+                id: 1.into(),
+                r#type: WorkerType::ComputeNode as i32,
+                state: worker_node::State::Running as i32,
+                property: Some(Property {
+                    parallelism: 8,
+                    is_serving: true,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+            WorkerNode {
+                id: 2.into(),
+                r#type: WorkerType::ComputeNode as i32,
+                state: worker_node::State::Running as i32,
+                property: Some(Property {
+                    parallelism: 8,
+                    is_serving: true,
+                    ..Default::default()
+                }),
+                ..Default::default()
+            },
+        ];
+        let manager = Arc::new(WorkerNodeManager::mock(worker_nodes));
+        let selector = WorkerNodeSelector::new(manager.clone(), false);
+        let fragment_id = 1.into();
+        let worker_slot_ids = (0..8)
+            .map(|slot| WorkerSlotId::new(1.into(), slot))
+            .chain((0..8).map(|slot| WorkerSlotId::new(2.into(), slot)))
+            .collect_vec();
+        let mapping = WorkerSlotMapping::build_from_ids(&worker_slot_ids, 32);
+        manager.set_serving_fragment_mapping([(fragment_id, mapping)].into_iter().collect());
+
+        manager.worker_node_mask.write().unwrap().insert(1.into());
+
+        let masked_mapping = selector.fragment_mapping(fragment_id, 3).unwrap();
+        assert_eq!(masked_mapping.iter_unique().count(), 3);
+        assert!(
+            masked_mapping
+                .iter_unique()
+                .all(|worker_slot_id| worker_slot_id.worker_id() == WorkerId::new(2))
         );
     }
 }
