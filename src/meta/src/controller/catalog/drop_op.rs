@@ -127,7 +127,6 @@ impl CatalogController {
         let mut removed_object_ids: HashSet<_> =
             removed_objects.iter().map(|obj| obj.oid).collect();
 
-        // TODO: record dependency info in object_dependency table for sink into table.
         // Special handling for 'sink into table'.
         let incoming_sink_ids: Vec<SinkId> = Sink::find()
             .select_only()
@@ -152,6 +151,8 @@ impl CatalogController {
                 )));
             }
 
+            // Fixed in issue#26413, this is now only for backward compatibility so we don't need
+            // to do the data repair for previous sinks that are missing object_dependency edge
             let removed_sink_objs: Vec<PartialObject> = Object::find()
                 .filter(object::Column::Oid.is_in(incoming_sink_ids))
                 .into_partial_model()
