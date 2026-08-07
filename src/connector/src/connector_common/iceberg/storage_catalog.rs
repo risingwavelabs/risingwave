@@ -31,8 +31,8 @@ use iceberg::io::{
 use iceberg::spec::{TableMetadata, TableMetadataBuilder, TableProperties};
 use iceberg::table::Table;
 use iceberg::{
-    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, TableCommit, TableCreation,
-    TableIdent,
+    Catalog, Error, ErrorKind, Namespace, NamespaceIdent, Result, Runtime, TableCommit,
+    TableCreation, TableIdent,
 };
 use iceberg_storage_opendal::OpenDalStorageFactory;
 use thiserror_ext::AsReport;
@@ -312,6 +312,7 @@ impl Catalog for StorageCatalog {
             .metadata(table_metadata.metadata)
             .identifier(table_ident)
             .file_io(self.file_io.clone())
+            .runtime(Runtime::try_current()?)
             .build()
     }
 
@@ -336,6 +337,7 @@ impl Catalog for StorageCatalog {
             .metadata(table_metadata)
             .identifier(table.clone())
             .file_io(self.file_io.clone())
+            .runtime(Runtime::try_current()?)
             // Only support readonly table for storage catalog now.
             .readonly(true)
             .build()

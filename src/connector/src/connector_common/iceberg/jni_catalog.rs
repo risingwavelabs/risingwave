@@ -29,8 +29,8 @@ use iceberg::io::FileIOBuilder;
 use iceberg::spec::{Schema, SortOrder, TableMetadata, UnboundPartitionSpec};
 use iceberg::table::Table;
 use iceberg::{
-    Catalog, Namespace, NamespaceIdent, TableCommit, TableCreation, TableIdent, TableRequirement,
-    TableUpdate,
+    Catalog, Namespace, NamespaceIdent, Runtime, TableCommit, TableCreation, TableIdent,
+    TableRequirement, TableUpdate,
 };
 use iceberg_storage_opendal::OpenDalResolvingStorageFactory;
 use itertools::Itertools;
@@ -288,6 +288,7 @@ impl Catalog for JniCatalog {
     ) -> iceberg::Result<Table> {
         let inner = self.inner.clone();
         let file_io_props = self.file_io_props.clone();
+        let runtime = Runtime::try_current()?;
         let namespace = namespace.clone();
         execute_blocking_jni(move || {
             execute_with_jni_env(inner.jvm, |env| {
@@ -327,6 +328,7 @@ impl Catalog for JniCatalog {
                     .file_io(file_io)
                     .identifier(TableIdent::new(namespace, creation.name))
                     .metadata(table_metadata)
+                    .runtime(runtime)
                     .build())
             })
         })
@@ -344,6 +346,7 @@ impl Catalog for JniCatalog {
     async fn load_table(&self, table: &TableIdent) -> iceberg::Result<Table> {
         let inner = self.inner.clone();
         let file_io_props = self.file_io_props.clone();
+        let runtime = Runtime::try_current()?;
         let table = table.clone();
         execute_blocking_jni(move || {
             execute_with_jni_env(inner.jvm, |env| {
@@ -381,6 +384,7 @@ impl Catalog for JniCatalog {
                     .file_io(file_io)
                     .identifier(table)
                     .metadata(table_metadata)
+                    .runtime(runtime)
                     .build())
             })
         })
@@ -477,6 +481,7 @@ impl Catalog for JniCatalog {
     async fn update_table(&self, mut commit: TableCommit) -> iceberg::Result<Table> {
         let inner = self.inner.clone();
         let file_io_props = self.file_io_props.clone();
+        let runtime = Runtime::try_current()?;
         execute_blocking_jni(move || {
             execute_with_jni_env(inner.jvm, |env| {
                 let requirements = commit.take_requirements();
@@ -519,6 +524,7 @@ impl Catalog for JniCatalog {
                     .file_io(file_io)
                     .identifier(commit.identifier().clone())
                     .metadata(table_metadata)
+                    .runtime(runtime)
                     .build()?)
             })
         })

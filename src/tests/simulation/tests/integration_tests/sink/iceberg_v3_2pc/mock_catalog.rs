@@ -32,7 +32,7 @@ use iceberg::spec::{Snapshot, TableMetadata, TableMetadataRef};
 use iceberg::table::Table;
 use iceberg::{
     Catalog, Error as IcebergError, ErrorKind as IcebergErrorKind, Namespace, NamespaceIdent,
-    Result as IcebergResult, TableCommit, TableCreation, TableIdent, TableUpdate,
+    Result as IcebergResult, Runtime, TableCommit, TableCreation, TableIdent, TableUpdate,
 };
 use rand::Rng;
 use tokio::time::sleep;
@@ -292,6 +292,7 @@ impl MockIcebergV3Catalog {
             .metadata(TableMetadataRef::from(metadata))
             .identifier(ident)
             .file_io(file_io)
+            .runtime(Runtime::try_current()?)
             .build()
             .map_err(to_unexpected)
     }

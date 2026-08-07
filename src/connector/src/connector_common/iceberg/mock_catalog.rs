@@ -22,7 +22,8 @@ use iceberg::spec::{
 };
 use iceberg::table::Table;
 use iceberg::{
-    Catalog as CatalogV2, Namespace, NamespaceIdent, TableCommit, TableCreation, TableIdent,
+    Catalog as CatalogV2, Namespace, NamespaceIdent, Runtime, TableCommit, TableCreation,
+    TableIdent,
 };
 
 /// A mock catalog for iceberg used for plan test.
@@ -52,6 +53,7 @@ impl MockCatalog {
                 name.to_owned(),
             ))
             .file_io(file_io)
+            .runtime(Runtime::try_current().unwrap())
             .metadata(
                 TableMetadataBuilder::from_table_creation(table_creation)
                     .unwrap()
