@@ -21,6 +21,7 @@ async-recursion = "1.1.0"
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
+await-tree = { workspace = true }
 axum = { workspace = true }
 axum-server = { version = "0.8", features = ["tls-openssl"] }
 base64 = "0.22"
