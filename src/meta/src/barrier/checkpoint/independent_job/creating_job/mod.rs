@@ -820,6 +820,7 @@ impl CreatingStreamingJobControl {
         partial_graph_manager.inject_barrier(
             partial_graph_id,
             mutation,
+            None,
             node_actors,
             table_ids_to_sync.into_iter().flatten().copied(),
             nodes_to_sync_table.into_iter().flatten(),
