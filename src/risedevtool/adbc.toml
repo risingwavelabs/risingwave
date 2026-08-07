@@ -1,11 +1,11 @@
 extend = "common.toml"
 
 [env]
-ADBC_VERSION = { value = "21", condition = { env_not_set = [
+ADBC_VERSION = { value = "23", condition = { env_not_set = [
     "ADBC_VERSION",
 ] } }
-# Driver version in wheel filename (e.g., 1.9.0 for ADBC release 21)
-ADBC_DRIVER_VERSION = { value = "1.9.0", condition = { env_not_set = [
+# Driver version in wheel filename (e.g., 1.11.0 for ADBC release 23)
+ADBC_DRIVER_VERSION = { value = "1.11.0", condition = { env_not_set = [
     "ADBC_DRIVER_VERSION",
 ] } }
 ADBC_LIB_SUFFIX = { source = "${OS}", mapping = { linux = "so", darwin = "dylib" } }
