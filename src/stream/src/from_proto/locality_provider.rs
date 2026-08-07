@@ -92,6 +92,10 @@ impl ExecutorBuilder for LocalityProviderBuilder {
                 .config
                 .developer
                 .locality_sort_buffer_activate_threshold,
+            burst_multiplier: params
+                .config
+                .developer
+                .locality_sort_buffer_burst_multiplier,
         };
 
         let exec = LocalityProviderExecutor::new(
