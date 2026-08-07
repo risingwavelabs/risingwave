@@ -291,6 +291,11 @@ impl MockIcebergV3Catalog {
     fn build_table_with_metadata(&self, metadata: TableMetadata) -> IcebergResult<Table> {
         let file_io = FileIO::new_with_memory();
         let ident = self.inner().table_ident.clone();
+        // This mock uses `Table` only as a metadata container, but `TableBuilder` requires an
+        // Iceberg runtime. Simulation runs on madsim-tokio while Iceberg uses crates.io Tokio,
+        // so `Runtime::try_current()` cannot see the simulator runtime. This real Tokio handle
+        // is a test-only shim; do not use it to spawn work because the current-thread runtime is
+        // not driven by the test.
         Table::builder()
             .metadata(TableMetadataRef::from(metadata))
             .identifier(ident)

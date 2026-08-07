@@ -45,7 +45,6 @@ risingwave_pb = { workspace = true }
 risingwave_rpc_client = { workspace = true }
 risingwave_sqlparser = { workspace = true }
 risingwave_sqlsmith = { workspace = true }
-# Iceberg uses the real Tokio runtime rather than madsim-tokio.
 rw-tokio = { version = "=1.53.1", package = "tokio", features = ["rt"] }
 sea-orm = { workspace = true }
 serde = { workspace = true }
