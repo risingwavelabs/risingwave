@@ -170,6 +170,23 @@ impl IcebergFileScanTask {
         let first_task = self.tasks().first()?;
         first_task.predicate.as_ref()
     }
+
+    fn strip_non_serializable_planning_context(&mut self) {
+        let tasks = match self {
+            IcebergFileScanTask::Data(tasks)
+            | IcebergFileScanTask::EqualityDelete(tasks)
+            | IcebergFileScanTask::PositionDelete(tasks) => tasks,
+        };
+
+        for task in tasks {
+            // These fields are deliberately not serializable in Iceberg. The previous
+            // Iceberg dependency skipped them during serde, so retain that split format.
+            task.partition = None;
+            task.partition_spec = None;
+            task.name_mapping = None;
+            task.unified_partition_type = None;
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -211,7 +228,9 @@ impl SplitMetaData for IcebergSplit {
     }
 
     fn encode_to_json(&self) -> JsonbVal {
-        serde_json::to_value(self.clone())
+        let mut split = self.clone();
+        split.task.strip_non_serializable_planning_context();
+        serde_json::to_value(split)
             .expect("iceberg split serialization should not fail")
             .into()
     }
@@ -683,7 +702,7 @@ mod tests {
     use iceberg::scan::FileScanTask;
     use iceberg::spec::{
         FormatVersion, MAIN_BRANCH, NestedField, Operation, PrimitiveType, Schema, Snapshot,
-        SortOrder, Summary, TableMetadataBuilder, Type, UnboundPartitionSpec,
+        SortOrder, Struct, Summary, TableMetadataBuilder, Type, UnboundPartitionSpec,
     };
 
     use super::*;
@@ -811,6 +830,26 @@ mod tests {
             case_sensitive: true,
             key_metadata: None,
         }
+    }
+
+    #[test]
+    fn test_split_serialization_strips_iceberg_planning_context() {
+        let mut task = create_file_scan_task(100, 1);
+        task.partition = Some(Struct::empty());
+        task.partition_spec = Some(Arc::new(iceberg::spec::PartitionSpec::unpartition_spec()));
+
+        let split = IcebergSplit {
+            split_id: 1,
+            task: IcebergFileScanTask::Data(vec![task]),
+            limit: None,
+        };
+        let restored = IcebergSplit::restore_from_json(split.encode_to_json()).unwrap();
+        let task = &restored.task.tasks()[0];
+
+        assert!(task.partition.is_none());
+        assert!(task.partition_spec.is_none());
+        assert!(task.name_mapping.is_none());
+        assert!(task.unified_partition_type.is_none());
     }
 
     #[test]
