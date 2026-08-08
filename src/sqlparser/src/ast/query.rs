@@ -28,7 +28,7 @@ pub struct Query {
     ///
     /// `ROW` and `ROWS` are noise words that don't influence the effect of the clause.
     /// They are provided for ANSI compatibility.
-    pub offset: Option<String>,
+    pub offset: Option<Expr>,
     /// `FETCH { FIRST | NEXT } <N> [ PERCENT ] { ROW | ROWS } | { ONLY | WITH TIES }`
     ///
     /// `ROW` and `ROWS` as well as `FIRST` and `NEXT` are noise words that don't influence the
