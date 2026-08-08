@@ -884,8 +884,11 @@ pub async fn build_remote_object_store(
     tracing::debug!(config=?config, "object store {ident}");
     match url {
         s3 if s3.starts_with("s3://") => {
+            let bucket = s3.strip_prefix("s3://").unwrap();
+            if let Err(e) = crate::object::s3::validate_s3_bucket_name(bucket) {
+                panic!("Invalid object store configuration: {e}");
+            }
             if config.s3.developer.use_opendal {
-                let bucket = s3.strip_prefix("s3://").unwrap();
                 tracing::info!("Using OpenDAL to access s3, bucket is {}", bucket);
                 ObjectStoreImpl::Opendal(
                     OpendalObjectStore::new_s3_engine(
@@ -898,13 +901,9 @@ pub async fn build_remote_object_store(
                 )
             } else {
                 ObjectStoreImpl::S3(
-                    S3ObjectStore::new_with_config(
-                        s3.strip_prefix("s3://").unwrap().to_owned(),
-                        metrics.clone(),
-                        config.clone(),
-                    )
-                    .await
-                    .monitored(metrics, config),
+                    S3ObjectStore::new_with_config(bucket.to_owned(), metrics.clone(), config.clone())
+                        .await
+                        .monitored(metrics, config),
                 )
             }
         }
@@ -1179,6 +1178,27 @@ mod tests {
         let mut output = vec![];
         let err = reader.read_to_end(&mut output).await.unwrap_err();
         assert!(err.to_string().contains("injected stream error"));
+    }
+
+    /// Integration test for issue #20263: an invalid bucket name (e.g. containing an
+    /// underscore) must be rejected eagerly with a clear panic message, instead of
+    /// surfacing as an opaque request error only when the store is first accessed.
+    #[tokio::test]
+    #[should_panic(expected = "Invalid object store configuration")]
+    async fn test_build_remote_object_store_rejects_invalid_bucket_name() {
+        use std::sync::Arc;
+
+        use risingwave_common::config::ObjectStoreConfig;
+
+        use super::{ObjectStoreMetrics, build_remote_object_store};
+
+        build_remote_object_store(
+            "s3://rw_data",
+            Arc::new(ObjectStoreMetrics::unused()),
+            "test",
+            Arc::new(ObjectStoreConfig::default()),
+        )
+        .await;
     }
 }
 
