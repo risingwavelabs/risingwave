@@ -1,0 +1,142 @@
+control substitution on
+
+# Verify that every record is decoded with its exact writer schema, references,
+# and message indexes rather than the schema loaded when the source starts.
+
+statement ok
+drop source if exists pb_writer_schema_source;
+
+statement ok
+drop source if exists pb_writer_schema_latest_source;
+
+system ok
+rpk topic delete 'test-pb-writer-schema' || true; \
+curl --silent --request DELETE "$RISEDEV_SCHEMA_REGISTRY_URL/subjects/test-pb-writer-schema-value" > /dev/null; \
+curl --silent --request DELETE "$RISEDEV_SCHEMA_REGISTRY_URL/subjects/test-pb-writer-schema-value?permanent=true" > /dev/null; \
+curl --silent --request DELETE "$RISEDEV_SCHEMA_REGISTRY_URL/subjects/test-pb-writer-schema-common.proto" > /dev/null; \
+curl --silent --request DELETE "$RISEDEV_SCHEMA_REGISTRY_URL/subjects/test-pb-writer-schema-common.proto?permanent=true" > /dev/null;
+
+system ok
+rpk topic create 'test-pb-writer-schema'
+
+# Register reference version 1.
+system ok
+rpk registry schema create 'test-pb-writer-schema-common.proto' --schema /dev/stdin --type protobuf << EOF
+syntax = "proto3";
+package writer_schema_common;
+enum Status {
+  STATUS_UNSPECIFIED = 0;
+  STARTED = 1;
+}
+EOF
+
+# Envelope is the second top-level message and Event is its first nested message,
+# so the Confluent message-index array for test.Envelope.Event is [1, 0].
+system ok
+rpk registry schema create 'test-pb-writer-schema-value' --schema /dev/stdin --type protobuf --references 'test-pb-writer-schema-common.proto:test-pb-writer-schema-common.proto:1' << EOF
+syntax = "proto3";
+package test;
+import "test-pb-writer-schema-common.proto";
+message Metadata { string source = 1; }
+message Envelope {
+  message Event {
+    int32 id = 1;
+    writer_schema_common.Status status = 2;
+  }
+}
+EOF
+
+# The source starts with root schema version 1 and reference version 1 in its cache.
+statement ok
+create source pb_writer_schema_source with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test-pb-writer-schema',
+  scan.startup.mode = 'earliest')
+format plain encode protobuf (
+  schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
+  message = 'test.Envelope.Event');
+
+system ok
+echo '{"id":1,"status":"STARTED"}' | rpk topic produce 'test-pb-writer-schema' --schema-id=topic --schema-type='test.Envelope.Event'
+
+query IT retry 10 backoff 1s
+select id, status from pb_writer_schema_source order by id;
+----
+1 STARTED
+
+# Evolve the referenced enum and register root version 2 against reference version 2.
+system ok
+rpk registry schema create 'test-pb-writer-schema-common.proto' --schema /dev/stdin --type protobuf << EOF
+syntax = "proto3";
+package writer_schema_common;
+enum Status {
+  STATUS_UNSPECIFIED = 0;
+  STARTED = 1;
+  FINISHED = 2;
+}
+EOF
+
+system ok
+rpk registry schema create 'test-pb-writer-schema-value' --schema /dev/stdin --type protobuf --references 'test-pb-writer-schema-common.proto:test-pb-writer-schema-common.proto:2' << EOF
+syntax = "proto3";
+package test;
+import "test-pb-writer-schema-common.proto";
+message Metadata { string source = 1; }
+message Envelope {
+  message Event {
+    int32 id = 1;
+    writer_schema_common.Status status = 2;
+  }
+}
+EOF
+
+# The first version-2 record causes a cache miss and loads the exact root and reference versions.
+# The second one reuses the newly cached writer schema.
+system ok
+echo '{"id":2,"status":"FINISHED"}' | rpk topic produce 'test-pb-writer-schema' --schema-id=topic --schema-type='test.Envelope.Event'; \
+echo '{"id":3,"status":"FINISHED"}' | rpk topic produce 'test-pb-writer-schema' --schema-id=topic --schema-type='test.Envelope.Event'
+
+# Produce another version-1 record after version 2 is latest. This verifies that writer schema
+# selection is per record and that the initially cached schema remains usable.
+system ok
+writer_schema_id=$(curl --silent "$RISEDEV_SCHEMA_REGISTRY_URL/subjects/test-pb-writer-schema-value/versions/1" | jq -r '.id'); \
+echo '{"id":4,"status":"STARTED"}' | rpk topic produce 'test-pb-writer-schema' --schema-id="$writer_schema_id" --schema-type='test.Envelope.Event'
+
+query IT retry 10 backoff 1s
+select id, status from pb_writer_schema_source order by id;
+----
+1 STARTED
+2 FINISHED
+3 FINISHED
+4 STARTED
+
+# A source initialized from version 2 must also decode historical version-1 records.
+statement ok
+create source pb_writer_schema_latest_source with (
+  ${RISEDEV_KAFKA_WITH_OPTIONS_COMMON},
+  topic = 'test-pb-writer-schema',
+  scan.startup.mode = 'earliest')
+format plain encode protobuf (
+  schema.registry = '${RISEDEV_SCHEMA_REGISTRY_URL}',
+  message = 'test.Envelope.Event');
+
+query IT retry 10 backoff 1s
+select id, status from pb_writer_schema_latest_source order by id;
+----
+1 STARTED
+2 FINISHED
+3 FINISHED
+4 STARTED
+
+statement ok
+drop source pb_writer_schema_source;
+
+statement ok
+drop source pb_writer_schema_latest_source;
+
+system ok
+rpk topic delete 'test-pb-writer-schema'; \
+curl --silent --request DELETE "$RISEDEV_SCHEMA_REGISTRY_URL/subjects/test-pb-writer-schema-value" > /dev/null; \
+curl --silent --request DELETE "$RISEDEV_SCHEMA_REGISTRY_URL/subjects/test-pb-writer-schema-value?permanent=true" > /dev/null; \
+curl --silent --request DELETE "$RISEDEV_SCHEMA_REGISTRY_URL/subjects/test-pb-writer-schema-common.proto" > /dev/null; \
+curl --silent --request DELETE "$RISEDEV_SCHEMA_REGISTRY_URL/subjects/test-pb-writer-schema-common.proto?permanent=true" > /dev/null;

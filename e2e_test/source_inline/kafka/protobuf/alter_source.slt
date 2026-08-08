@@ -119,7 +119,7 @@ ALTER TABLE t_user REFRESH SCHEMA;
 query ???? retry 3 backoff 5s
 SELECT COUNT(*), MAX(age), MIN(age), SUM(age) FROM mv_user_more;
 ----
-25	104	0	510
+25	104	100	510
 
 query ????
 SELECT COUNT(*), MAX(age), MIN(age), SUM(age) FROM t_user;
