@@ -24,13 +24,20 @@
 //! 2. **Position-delete merger executor** (Stateless): Consumes the Writer's (`file_path`, `position`)
 //!    messages, merges delete positions with historical deletes, and reports the resulting delete
 //!    files to meta.
+//!
+//! 3. **Compaction-apply executor** (Stateful): Consumes survivor rows from a transient compaction
+//!    resolver pipeline and upserts their new (`file_path`, `position`) into the PK index.
 
+mod compaction_apply;
+mod compaction_resolver;
 mod position_delete_handler_impl;
 mod position_delete_merger;
 mod position_delete_staging;
 mod writer;
 mod writer_impl;
 
+pub use compaction_apply::CompactionApplyExecutor;
+pub use compaction_resolver::CompactionResolverExecutor;
 pub use position_delete_handler_impl::PositionDeleteHandlerImpl;
 pub use position_delete_merger::PositionDeleteMergerExecutor;
 pub use writer::WriterExecutor;

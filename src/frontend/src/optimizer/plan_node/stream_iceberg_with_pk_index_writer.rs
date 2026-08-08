@@ -156,6 +156,7 @@ impl StreamNode for StreamIcebergWithPkIndexWriter {
         NodeBody::IcebergWithPkIndexWriter(Box::new(IcebergWithPkIndexWriterNode {
             sink_desc: Some(self.sink_desc.to_proto()),
             pk_index_table: Some(pk_index_table.to_internal_table_prost()),
+            compaction_apply: false,
         }))
     }
 }
