@@ -78,6 +78,20 @@ use crate::stream::{
 };
 use crate::{MetaError, MetaResult};
 
+pub(crate) type ThrottleConfigMap = HashMap<FragmentId, (ThrottleConfig, PbStreamNode)>;
+
+pub(crate) fn extract_throttle_config(
+    config: &mut ThrottleConfigMap,
+    mut apply: impl FnMut(FragmentId, &PbStreamNode) -> bool,
+) -> Option<Mutation> {
+    let fragment_throttle = config
+        .extract_if(|fragment_id, (_, stream_node)| apply(*fragment_id, stream_node))
+        .map(|(fragment_id, (throttle_config, _))| (fragment_id, throttle_config))
+        .collect::<HashMap<_, _>>();
+    (!fragment_throttle.is_empty())
+        .then_some(Mutation::Throttle(ThrottleMutation { fragment_throttle }))
+}
+
 /// [`Reschedule`] describes per-fragment changes in a resolved reschedule plan,
 /// used for actor scaling or migration.
 #[derive(Debug, Clone)]
@@ -519,8 +533,7 @@ pub enum Command {
     /// `Throttle` command generates a `Throttle` barrier with the given throttle config to change
     /// the `rate_limit` of executors. `throttle_type` specifies which executor kinds should apply it.
     Throttle {
-        jobs: HashSet<JobId>,
-        config: HashMap<FragmentId, (ThrottleConfig, PbStreamNode)>,
+        config: ThrottleConfigMap,
     },
 
     /// `CreateSubscription` command generates a `CreateSubscriptionMutation` to notify
@@ -989,22 +1002,6 @@ impl Command {
 
                 Mutation::Splits(SourceChangeSplitMutation {
                     actor_splits: build_actor_connector_splits(&diff),
-                })
-            }
-        }
-    }
-
-    /// Build the `Throttle` mutation.
-    pub(super) fn throttle_to_mutation(
-        config: &HashMap<FragmentId, (ThrottleConfig, PbStreamNode)>,
-    ) -> Mutation {
-        {
-            {
-                Mutation::Throttle(ThrottleMutation {
-                    fragment_throttle: config
-                        .iter()
-                        .map(|(fragment_id, (throttle_config, _))| (*fragment_id, *throttle_config))
-                        .collect(),
                 })
             }
         }

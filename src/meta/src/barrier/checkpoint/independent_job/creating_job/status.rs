@@ -22,16 +22,17 @@ use risingwave_common::hash::ActorId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::{FragmentId, PartialGraphId};
+use risingwave_pb::stream_plan::StartFragmentBackfillMutation;
 use risingwave_pb::stream_plan::barrier::PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
-use risingwave_pb::stream_plan::{PbStreamNode, StartFragmentBackfillMutation};
 use risingwave_pb::stream_service::barrier_complete_response::{
     CreateMviewProgress, PbCreateMviewProgress,
 };
 use tracing::warn;
 
 use crate::barrier::checkpoint::independent_job::creating_job::CreatingJobInfo;
-use crate::barrier::notifier::Notifier;
+use crate::barrier::command::{ThrottleConfigMap, extract_throttle_config};
+use crate::barrier::notifier::CollectionNotifier;
 use crate::barrier::partial_graph::PartialGraphManager;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
 use crate::barrier::{BarrierInfo, BarrierKind, TracedEpoch};
@@ -131,7 +132,7 @@ pub(super) enum CreatingStreamingJobStatus {
     /// will be finished when all previously injected barriers have been collected
     /// Store the `prev_epoch` that will finish at.
     Finishing(u64, TrackingJob),
-    Resetting(Vec<Notifier>),
+    Resetting(Vec<CollectionNotifier>),
     PlaceHolder,
 }
 
@@ -342,27 +343,30 @@ impl CreatingStreamingJobStatus {
         }
     }
 
-    pub(super) fn pre_apply_throttle<'a>(
+    pub(super) fn pre_apply_throttle(
         &mut self,
-        fragment_nodes: impl IntoIterator<Item = (FragmentId, &'a PbStreamNode)>,
-    ) {
+        config: &mut ThrottleConfigMap,
+    ) -> Option<Mutation> {
         let fragment_infos = match self {
             CreatingStreamingJobStatus::ConsumingSnapshot { info, .. }
             | CreatingStreamingJobStatus::ConsumingLogStore { info, .. } => {
                 &mut info.fragment_infos
             }
             CreatingStreamingJobStatus::Finishing(..)
-            | CreatingStreamingJobStatus::Resetting(..) => return,
+            | CreatingStreamingJobStatus::Resetting(..) => return None,
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
             }
         };
 
-        for (fragment_id, stream_node) in fragment_nodes {
+        extract_throttle_config(config, |fragment_id, stream_node| {
             if let Some(fragment_info) = fragment_infos.get_mut(&fragment_id) {
                 fragment_info.nodes = stream_node.clone();
+                true
+            } else {
+                false
             }
-        }
+        })
     }
 }
 
