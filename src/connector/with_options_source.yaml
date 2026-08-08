@@ -1460,3 +1460,41 @@ TestSourceProperties:
   - name: properties
     field_type: BTreeMap<String,String>
     required: true
+WebsocketProperties:
+  fields:
+  - name: url
+    field_type: String
+    comments: |-
+      The `WebSocket` server URL to connect to,
+      e.g. `ws://localhost:8080/stream` or `wss://example.com/feed`.
+      Must be prefixed with either `ws://` or `wss://`.
+    required: true
+  - name: init.message
+    field_type: String
+    comments: |-
+      Optional text message sent to the server right after the connection is
+      established, e.g. a subscribe request. It is sent again after every reconnection.
+    required: false
+  - name: headers
+    field_type: String
+    comments: |-
+      Optional additional HTTP headers for the connection handshake request,
+      encoded as a JSON object of string pairs,
+      e.g. `{"Authorization": "Bearer secret-token"}`.
+    required: false
+  - name: ping.interval.secs
+    field_type: u64
+    comments: |-
+      Interval in seconds between keep-alive pings sent to the server.
+      Defaults to 30. Set to 0 to disable pings.
+    required: false
+    default: '30'
+  - name: idle.timeout.secs
+    field_type: u64
+    comments: |-
+      If no data message is received within this many seconds, the connection is
+      considered stale and is re-established (the init message is sent again).
+      This guards against servers that silently stop delivering subscription data
+      while keeping the underlying connection (and ping/pong) alive.
+      Disabled by default. Control frames do not reset the timer.
+    required: false

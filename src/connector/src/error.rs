@@ -81,6 +81,7 @@ def_anyhow_newtype! {
     rumqttc::v5::OptionError => "MQTT Option error",
     rumqttc::v5::ConnectionError => "MQTT Connection error",
     MqttError => "MQTT Source error",
+    tokio_tungstenite::tungstenite::Error => "WebSocket error",
     mongodb::error::Error => "Mongodb error",
 
     openssl::error::ErrorStack => "OpenSSL error",
