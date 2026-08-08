@@ -41,6 +41,31 @@ SELECT to_char(timestamp '2006-01-02 15:04:05.3', 'yyyy-mm-dd hh24:mi:ss.us');
 ----
 2006-01-02 15:04:05.300000
 
+query T
+SELECT to_char('0001-01-01'::date - interval '1' second, 'YYYY');
+----
+0001
+
+query T
+SELECT to_char('0001-01-01'::date - interval '1' second, 'YYYY BC');
+----
+0001 BC
+
+query T
+SELECT to_char('0001-01-01'::date - interval '1' second, 'YYYY AD');
+----
+0001 BC
+
+query T
+SELECT to_char('0001-01-01'::date + interval '1' second, 'YYYY BC');
+----
+0001 AD
+
+query T
+SELECT to_char('0001-01-01'::date + interval '1' second, 'YYYY AD');
+----
+0001 AD
+
 statement ok
 create table t (tsz timestamptz);
 
