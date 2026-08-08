@@ -50,12 +50,17 @@ impl Rule<Logical> for DistinctAggRule {
         }
 
         if !agg_calls.iter().all(|c| {
+            let vector_avg = matches!(
+                (&c.agg_type, &c.return_type),
+                (AggType::Builtin(PbAggKind::Avg), DataType::Vector(_))
+            );
             assert!(
-                !matches!(c.agg_type, agg_types::rewritten!()),
+                vector_avg || !matches!(c.agg_type, agg_types::rewritten!()),
                 "We shouldn't see agg kind {} here",
                 c.agg_type
             );
-            let agg_type_ok = !matches!(c.agg_type, agg_types::simply_cannot_two_phase!());
+            let agg_type_ok =
+                !vector_avg && !matches!(c.agg_type, agg_types::simply_cannot_two_phase!());
             let order_ok = matches!(
                 c.agg_type,
                 agg_types::result_unaffected_by_order_by!()

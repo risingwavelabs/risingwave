@@ -620,9 +620,12 @@ impl LogicalAggBuilder {
         agg_call: AggCall,
         mut push_agg_call: impl FnMut(AggCall) -> Result<InputRef>,
     ) -> Result<ExprImpl> {
-        match agg_call.agg_type {
+        match agg_call.agg_type.clone() {
             // Rewrite avg to cast(sum as avg_return_type) / count.
             AggType::Builtin(PbAggKind::Avg) => {
+                if matches!(agg_call.return_type(), DataType::Vector(_)) {
+                    return Ok(ExprImpl::from(push_agg_call(agg_call)?));
+                }
                 assert_eq!(agg_call.args.len(), 1);
                 let return_type = agg_call.return_type();
 
