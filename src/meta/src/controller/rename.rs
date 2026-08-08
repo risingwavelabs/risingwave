@@ -24,11 +24,21 @@ use risingwave_sqlparser::ast::{
 };
 use risingwave_sqlparser::parser::Parser;
 
-/// `alter_relation_rename` renames a relation to a new name in its `Create` statement, and returns
-/// the updated definition raw sql. Note that the `definition` must be a `Create` statement and the
-/// `new_name` must be a valid identifier, it should be validated before calling this function. To
-/// update all relations that depend on the renamed one, use `alter_relation_rename_refs`.
-pub fn alter_relation_rename(definition: &str, new_name: &str) -> String {
+#[derive(Clone, Copy)]
+pub enum RenameOperation<'a> {
+    RelationName {
+        from_schema: Option<&'a str>,
+        from: &'a str,
+        to: &'a str,
+    },
+    SchemaName {
+        from: &'a str,
+        to: &'a str,
+    },
+}
+
+/// Updates the name of a relation or schema in the target of a relation's `Create` statement.
+pub fn alter_relation_rename(definition: &str, operation: RenameOperation<'_>) -> String {
     // This happens when we try to rename a table that's created by `CREATE TABLE AS`. Remove it
     // when we support `SHOW CREATE TABLE` for `CREATE TABLE AS`.
     if definition.is_empty() {
@@ -38,6 +48,8 @@ pub fn alter_relation_rename(definition: &str, new_name: &str) -> String {
     let ast = Parser::parse_sql(definition).expect("failed to parse relation definition");
     let mut stmt =
         Itertools::exactly_one(ast.into_iter()).expect("should contains only one statement");
+    let original_stmt =
+        matches!(operation, RenameOperation::SchemaName { .. }).then(|| stmt.clone());
 
     match &mut stmt {
         Statement::CreateTable { name, .. }
@@ -59,19 +71,36 @@ pub fn alter_relation_rename(definition: &str, new_name: &str) -> String {
             stmt: CreateSinkStatement {
                 sink_name: name, ..
             },
-        } => replace_table_name(name, new_name),
+        } => {
+            rewrite_create_target(name, operation);
+        }
+        Statement::Query(_) if matches!(operation, RenameOperation::SchemaName { .. }) => {
+            // Views store only the query body, so there is no create target to rewrite here.
+            // Schema references in the query are handled by `alter_relation_rename_refs`.
+        }
         _ => unreachable!(),
     };
 
-    stmt.to_string()
+    if original_stmt.as_ref() == Some(&stmt) {
+        definition.into()
+    } else {
+        stmt.to_string()
+    }
 }
 
 /// `alter_relation_rename_refs` updates all references of renamed-relation in the definition of
 /// target relation's `Create` statement.
-pub fn alter_relation_rename_refs(definition: &str, from: &str, to: &str) -> String {
+pub fn alter_relation_rename_refs(definition: &str, operation: RenameOperation<'_>) -> String {
+    if definition.is_empty() {
+        return definition.into();
+    }
     let ast = Parser::parse_sql(definition).expect("failed to parse relation definition");
-    let mut stmt =
-        Itertools::exactly_one(ast.into_iter()).expect("should contains only one statement");
+    let mut stmt = ast
+        .into_iter()
+        .exactly_one()
+        .expect("should contains only one statement");
+    let original_stmt =
+        matches!(operation, RenameOperation::SchemaName { .. }).then(|| stmt.clone());
 
     match &mut stmt {
         Statement::CreateTable {
@@ -87,7 +116,7 @@ pub fn alter_relation_rename_refs(definition: &str, from: &str, to: &str) -> Str
                 ..
             },
         } => {
-            QueryRewriter::rewrite_query(query, from, to);
+            QueryRewriter::rewrite_query(query, operation);
         }
         Statement::CreateIndex { table_name, .. }
         | Statement::CreateSink {
@@ -110,7 +139,9 @@ pub fn alter_relation_rename_refs(definition: &str, from: &str, to: &str) -> Str
                 ..
             }),
             ..
-        } => replace_table_name(table_name, to),
+        } => {
+            rewrite_reference_name(table_name, operation);
+        }
         Statement::CreateSink {
             stmt: CreateSinkStatement {
                 sink_from,
@@ -118,19 +149,33 @@ pub fn alter_relation_rename_refs(definition: &str, from: &str, to: &str) -> Str
                 ..
             }
         } => {
-            let idx = table_name.0.len() - 1;
-            if table_name.0[idx].real_value() == from {
-                table_name.0[idx] = Ident::from_real_value(to);
+            if matches!(operation, RenameOperation::SchemaName { .. }) {
+                rewrite_reference_name(table_name, operation);
+                match sink_from {
+                    CreateSink::From(table_name) => {
+                        rewrite_reference_name(table_name, operation);
+                    }
+                    CreateSink::AsQuery(query) => QueryRewriter::rewrite_query(query, operation),
+                }
+            } else if rewrite_reference_name(table_name, operation) {
+                // The target table was renamed.
             } else {
                 match sink_from {
-                    CreateSink::From(table_name) => replace_table_name(table_name, to),
-                    CreateSink::AsQuery(query) => QueryRewriter::rewrite_query(query, from, to),
+                    CreateSink::From(table_name) => {
+                        rewrite_reference_name(table_name, operation);
+                    }
+                    CreateSink::AsQuery(query) => QueryRewriter::rewrite_query(query, operation),
                 }
             }
         }
+        _ if matches!(operation, RenameOperation::SchemaName { .. }) => {}
         _ => unreachable!(),
     };
-    stmt.to_string()
+    if original_stmt.as_ref() == Some(&stmt) {
+        definition.into()
+    } else {
+        stmt.to_string()
+    }
 }
 
 /// Replace the last ident in the `table_name` with the given name, the object name is ensured to be
@@ -140,16 +185,61 @@ fn replace_table_name(table_name: &mut ObjectName, to: &str) {
     table_name.0[idx] = Ident::from_real_value(to);
 }
 
+fn replace_schema_name(name: &mut ObjectName, from: &str, to: &str) -> bool {
+    if name.0.len() < 2 {
+        return false;
+    }
+    let idx = name.0.len() - 2;
+    if name.0[idx].real_value() != from {
+        return false;
+    }
+    name.0[idx] = Ident::from_real_value(to);
+    true
+}
+
+fn rewrite_create_target(name: &mut ObjectName, operation: RenameOperation<'_>) -> bool {
+    match operation {
+        RenameOperation::RelationName { to, .. } => {
+            replace_table_name(name, to);
+            true
+        }
+        RenameOperation::SchemaName { from, to } => replace_schema_name(name, from, to),
+    }
+}
+
+fn rewrite_reference_name(name: &mut ObjectName, operation: RenameOperation<'_>) -> bool {
+    match operation {
+        RenameOperation::RelationName {
+            from_schema,
+            from,
+            to,
+        } => {
+            let idx = name.0.len() - 1;
+            if name.0[idx].real_value() != from {
+                return false;
+            }
+            if name.0.len() >= 2
+                && let Some(from_schema) = from_schema
+                && name.0[idx - 1].real_value() != from_schema
+            {
+                return false;
+            }
+            name.0[idx] = Ident::from_real_value(to);
+            true
+        }
+        RenameOperation::SchemaName { from, to } => replace_schema_name(name, from, to),
+    }
+}
+
 /// `QueryRewriter` is a visitor that updates all references of relation named `from` to `to` in the
 /// given query, which is the part of create statement of `relation`.
 struct QueryRewriter<'a> {
-    from: &'a str,
-    to: &'a str,
+    operation: RenameOperation<'a>,
 }
 
 impl QueryRewriter<'_> {
-    fn rewrite_query(query: &mut Query, from: &str, to: &str) {
-        let rewriter = QueryRewriter { from, to };
+    fn rewrite_query(query: &mut Query, operation: RenameOperation<'_>) {
+        let rewriter = QueryRewriter { operation };
         rewriter.visit_query(query)
     }
 
@@ -160,10 +250,7 @@ impl QueryRewriter<'_> {
                 match &mut cte_table.cte_inner {
                     risingwave_sqlparser::ast::CteInner::Query(query) => self.visit_query(query),
                     risingwave_sqlparser::ast::CteInner::ChangeLog(name) => {
-                        let idx = name.0.len() - 1;
-                        if name.0[idx].real_value() == self.from {
-                            replace_table_name(name, self.to);
-                        }
+                        rewrite_reference_name(name, self.operation);
                     }
                 }
             }
@@ -188,15 +275,14 @@ impl QueryRewriter<'_> {
     fn visit_table_factor(&self, table_factor: &mut TableFactor) {
         match table_factor {
             TableFactor::Table { name, alias, .. } => {
-                let idx = name.0.len() - 1;
-                if name.0[idx].real_value() == self.from {
-                    if alias.is_none() {
-                        *alias = Some(TableAlias {
-                            name: Ident::from_real_value(self.from),
-                            columns: vec![],
-                        });
-                    }
-                    name.0[idx] = Ident::from_real_value(self.to);
+                if rewrite_reference_name(name, self.operation)
+                    && let RenameOperation::RelationName { from, .. } = self.operation
+                    && alias.is_none()
+                {
+                    *alias = Some(TableAlias {
+                        name: Ident::from_real_value(from),
+                        columns: vec![],
+                    });
                 }
             }
             TableFactor::Derived { subquery, .. } => self.visit_query(subquery),
@@ -268,9 +354,17 @@ impl QueryRewriter<'_> {
                 FunctionArgExpr::Expr(expr) | FunctionArgExpr::ExprQualifiedWildcard(expr, _) => {
                     self.visit_expr(expr)
                 }
-                FunctionArgExpr::QualifiedWildcard(_, None) | FunctionArgExpr::Wildcard(None) => {}
-                FunctionArgExpr::QualifiedWildcard(_, Some(exprs))
-                | FunctionArgExpr::Wildcard(Some(exprs)) => {
+                FunctionArgExpr::QualifiedWildcard(name, None) => {
+                    self.rewrite_schema_reference_name(name);
+                }
+                FunctionArgExpr::Wildcard(None) => {}
+                FunctionArgExpr::QualifiedWildcard(name, Some(exprs)) => {
+                    self.rewrite_schema_reference_name(name);
+                    for expr in exprs {
+                        self.visit_expr(expr);
+                    }
+                }
+                FunctionArgExpr::Wildcard(Some(exprs)) => {
                     for expr in exprs {
                         self.visit_expr(expr);
                     }
@@ -411,9 +505,19 @@ impl QueryRewriter<'_> {
 
             Expr::LambdaFunction { body, args: _ } => self.visit_expr(body),
 
+            Expr::CompoundIdentifier(idents) => {
+                if let RenameOperation::SchemaName { from, to } = self.operation
+                    && idents.len() >= 3
+                {
+                    let schema_idx = idents.len() - 3;
+                    if idents[schema_idx].real_value() == from {
+                        idents[schema_idx] = Ident::from_real_value(to);
+                    }
+                }
+            }
+
             // No need to visit.
             Expr::Identifier(_)
-            | Expr::CompoundIdentifier(_)
             | Expr::Collate { .. }
             | Expr::Value(_)
             | Expr::Parameter { .. }
@@ -428,12 +532,27 @@ impl QueryRewriter<'_> {
             SelectItem::UnnamedExpr(expr)
             | SelectItem::ExprQualifiedWildcard(expr, _)
             | SelectItem::ExprWithAlias { expr, .. } => self.visit_expr(expr),
-            SelectItem::QualifiedWildcard(_, None) | SelectItem::Wildcard(None) => {}
-            SelectItem::QualifiedWildcard(_, Some(exprs)) | SelectItem::Wildcard(Some(exprs)) => {
+            SelectItem::QualifiedWildcard(name, None) => {
+                self.rewrite_schema_reference_name(name);
+            }
+            SelectItem::Wildcard(None) => {}
+            SelectItem::QualifiedWildcard(name, Some(exprs)) => {
+                self.rewrite_schema_reference_name(name);
                 for expr in exprs {
                     self.visit_expr(expr);
                 }
             }
+            SelectItem::Wildcard(Some(exprs)) => {
+                for expr in exprs {
+                    self.visit_expr(expr);
+                }
+            }
+        }
+    }
+
+    fn rewrite_schema_reference_name(&self, name: &mut ObjectName) {
+        if matches!(self.operation, RenameOperation::SchemaName { .. }) {
+            rewrite_reference_name(name, self.operation);
         }
     }
 }
@@ -506,12 +625,76 @@ impl IndexItemRewriter {
 mod tests {
     use super::*;
 
+    fn relation_rename<'a>(from: &'a str, to: &'a str) -> RenameOperation<'a> {
+        RenameOperation::RelationName {
+            from_schema: None,
+            from,
+            to,
+        }
+    }
+
     #[test]
     fn test_alter_table_rename() {
         let definition = "CREATE TABLE foo (a int, b int)";
         let new_name = "bar";
         let expected = "CREATE TABLE bar (a INT, b INT)";
-        let actual = alter_relation_rename(definition, new_name);
+        let actual = alter_relation_rename(
+            definition,
+            RenameOperation::RelationName {
+                from_schema: None,
+                from: "foo",
+                to: new_name,
+            },
+        );
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn test_alter_schema_rename_create_target() {
+        let definition = "CREATE MATERIALIZED VIEW foo.mv AS SELECT * FROM foo.t";
+        let expected = "CREATE MATERIALIZED VIEW fizz.mv AS SELECT * FROM foo.t";
+        let actual = alter_relation_rename(
+            definition,
+            RenameOperation::SchemaName {
+                from: "foo",
+                to: "fizz",
+            },
+        );
+        assert_eq!(expected, actual);
+
+        let expected = "CREATE TABLE fizz.t (id INT)";
+        let actual = alter_relation_rename_refs(
+            expected,
+            RenameOperation::SchemaName {
+                from: "foo",
+                to: "fizz",
+            },
+        );
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn test_alter_schema_rename_refs() {
+        let definition = "CREATE MATERIALIZED VIEW other.mv AS SELECT foo.t.v, foo.t.* FROM foo.t";
+        let expected = "CREATE MATERIALIZED VIEW other.mv AS SELECT fizz.t.v, fizz.t.* FROM fizz.t";
+        let actual = alter_relation_rename_refs(
+            definition,
+            RenameOperation::SchemaName {
+                from: "foo",
+                to: "fizz",
+            },
+        );
+        assert_eq!(expected, actual);
+
+        let view_definition = "SELECT foo.t.v FROM foo.t";
+        let expected = "SELECT fizz.t.v FROM fizz.t";
+        let actual = alter_relation_rename_refs(
+            view_definition,
+            RenameOperation::SchemaName {
+                from: "foo",
+                to: "fizz",
+            },
+        );
         assert_eq!(expected, actual);
     }
 
@@ -521,7 +704,23 @@ mod tests {
         let from = "foo";
         let to = "bar";
         let expected = "CREATE INDEX idx1 ON bar(v1 DESC, v2)";
-        let actual = alter_relation_rename_refs(definition, from, to);
+        let actual = alter_relation_rename_refs(definition, relation_rename(from, to));
+        assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn test_rename_relation_refs_with_schema() {
+        let definition =
+            "CREATE MATERIALIZED VIEW mv AS SELECT * FROM a.foo UNION ALL SELECT * FROM b.foo";
+        let expected = "CREATE MATERIALIZED VIEW mv AS SELECT * FROM a.bar AS foo UNION ALL SELECT * FROM b.foo";
+        let actual = alter_relation_rename_refs(
+            definition,
+            RenameOperation::RelationName {
+                from_schema: Some("a"),
+                from: "foo",
+                to: "bar",
+            },
+        );
         assert_eq!(expected, actual);
     }
 
@@ -533,7 +732,7 @@ mod tests {
         let to = "bar";
         let expected =
             "CREATE SINK sink_t FROM bar WITH (connector = 'kafka', format = 'append_only')";
-        let actual = alter_relation_rename_refs(definition, from, to);
+        let actual = alter_relation_rename_refs(definition, relation_rename(from, to));
         assert_eq!(expected, actual);
     }
 
@@ -545,17 +744,22 @@ mod tests {
         let to = "bar";
         let expected =
             "CREATE MATERIALIZED VIEW mv1 AS SELECT foo.v1 AS m1v, foo.v2 AS m2v FROM bar AS foo";
-        let actual = alter_relation_rename_refs(definition, from, to);
+        let actual = alter_relation_rename_refs(definition, relation_rename(from, to));
+        assert_eq!(expected, actual);
+
+        let definition = "CREATE MATERIALIZED VIEW mv1 AS SELECT foo.* FROM foo";
+        let expected = "CREATE MATERIALIZED VIEW mv1 AS SELECT foo.* FROM bar AS foo";
+        let actual = alter_relation_rename_refs(definition, relation_rename(from, to));
         assert_eq!(expected, actual);
 
         let definition = "CREATE MATERIALIZED VIEW mv1 AS SELECT foo.v1 AS m1v, (foo.v2).v3 AS m2v FROM foo WHERE foo.v1 = 1 AND (foo.v2).v3 IS TRUE";
         let expected = "CREATE MATERIALIZED VIEW mv1 AS SELECT foo.v1 AS m1v, (foo.v2).v3 AS m2v FROM bar AS foo WHERE foo.v1 = 1 AND (foo.v2).v3 IS TRUE";
-        let actual = alter_relation_rename_refs(definition, from, to);
+        let actual = alter_relation_rename_refs(definition, relation_rename(from, to));
         assert_eq!(expected, actual);
 
         let definition = "CREATE MATERIALIZED VIEW mv1 AS SELECT bar.v1 AS m1v, (bar.v2).v3 AS m2v FROM foo AS bar WHERE bar.v1 = 1";
         let expected = "CREATE MATERIALIZED VIEW mv1 AS SELECT bar.v1 AS m1v, (bar.v2).v3 AS m2v FROM bar AS bar WHERE bar.v1 = 1";
-        let actual = alter_relation_rename_refs(definition, from, to);
+        let actual = alter_relation_rename_refs(definition, relation_rename(from, to));
         assert_eq!(expected, actual);
     }
 
@@ -579,7 +783,7 @@ mod tests {
                             (SELECT first_value(foo.v4) OVER (PARTITION BY (SELECT foo.v5 FROM bar AS foo) ORDER BY (SELECT foo.v6 FROM bar AS foo)) FROM bar AS foo)\
                           ) \
                         FROM bar AS foo";
-        let actual = alter_relation_rename_refs(definition, from, to);
+        let actual = alter_relation_rename_refs(definition, relation_rename(from, to));
         assert_eq!(expected, actual);
     }
 }
