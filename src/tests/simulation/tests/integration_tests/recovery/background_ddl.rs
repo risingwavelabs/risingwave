@@ -780,9 +780,9 @@ async fn test_high_barrier_latency_cancel_for_no_shuffle() -> Result<()> {
     test_high_barrier_latency_cancel(Configuration::for_scale_no_shuffle()).await
 }
 
-// When cluster stop, foreground ddl job must be cancelled.
+// A foreground DDL request fails when recovery starts, but its creating job is recovered.
 #[tokio::test]
-async fn test_foreground_ddl_no_recovery() -> Result<()> {
+async fn test_foreground_ddl_recovery() -> Result<()> {
     init_logger();
     let mut cluster = Cluster::start(Configuration::for_background_ddl()).await?;
     let mut session = cluster.start_session();
@@ -791,20 +791,32 @@ async fn test_foreground_ddl_no_recovery() -> Result<()> {
     session.flush().await?;
 
     let mut session2 = cluster.start_session();
-    tokio::spawn(async move {
+    let create_handle = tokio::spawn(async move {
         session2.run(SET_RATE_LIMIT_2).await.unwrap();
-        let result = create_mv(&mut session2).await;
-        assert!(result.is_err());
+        create_mv(&mut session2).await
     });
 
     // Wait for job to start
     sleep(Duration::from_secs(2)).await;
 
-    // Kill CN should stop the job
+    // Killing a CN fails the foreground request, while recovery preserves the creating job.
     kill_cn_and_wait_recover(&mut cluster).await;
+    assert!(create_handle.await?.is_err());
 
-    // Create MV should succeed, since the previous foreground job should be cancelled.
+    // The preserved job still owns the relation name.
     session.run(SET_RATE_LIMIT_2).await?;
+    let err = create_mv(&mut session)
+        .await
+        .expect_err("duplicate CREATE should observe the recovered job");
+    assert!(
+        err.to_string().contains("exists but under creation"),
+        "unexpected duplicate CREATE error: {err}"
+    );
+
+    // Explicit cancellation still removes the job and allows it to be recreated.
+    assert_eq!(cancel_stream_jobs(&mut session).await?.len(), 1);
+    wait_for_jobs_cleared(&mut session).await?;
+    session.run(RESET_RATE_LIMIT).await?;
     create_mv(&mut session).await?;
 
     session.run(DROP_MV1).await?;

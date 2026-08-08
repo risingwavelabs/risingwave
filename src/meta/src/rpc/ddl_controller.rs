@@ -1209,8 +1209,6 @@ impl DdlController {
             StreamingJob::Table(Some(src), _, _) | StreamingJob::Source(src) => Some(src.id),
             _ => None,
         };
-        // Generate streaming job metadata and issue the create command in two steps, so that the
-        // error phase is classified at the barrier command boundary.
         let create_result = match self
             .generate_streaming_job(
                 ctx,
@@ -1223,17 +1221,17 @@ impl DdlController {
             )
             .await
         {
-            Ok((stream_job_fragments, ctx)) => self
-                .stream_manager
-                .create_streaming_job(stream_job_fragments, ctx, permit)
-                .await
-                .map_err(|err| (err, true)),
-            Err(err) => Err((err, false)),
+            Ok((stream_job_fragments, ctx)) => {
+                self.stream_manager
+                    .create_streaming_job(stream_job_fragments, ctx, permit)
+                    .await
+            }
+            Err(err) => Err(err),
         };
 
         match create_result {
             Ok(version) => Ok(version),
-            Err((err, is_cancelled)) => {
+            Err(err) => {
                 tracing::error!(id = %job_id, error = %err.as_report(), "failed to create streaming job");
                 let event = risingwave_pb::meta::event_log::EventCreateStreamJobFail {
                     id: job_id,
@@ -1247,12 +1245,12 @@ impl DdlController {
                 let abort_result = self
                     .metadata_manager
                     .catalog_controller
-                    .try_abort_creating_streaming_job(job_id, is_cancelled)
+                    .try_abort_creating_streaming_job(job_id, false)
                     .await?;
                 self.iceberg_compaction_manager
                     .clear_maintenance_for_aborted_job(&abort_result);
                 if abort_result.aborted {
-                    tracing::warn!(id = %job_id, is_cancelled, "aborted streaming job");
+                    tracing::warn!(id = %job_id, "aborted streaming job");
                     // FIXME: might also need other cleanup here
                     if let Some(source_id) = source_id {
                         self.source_manager
@@ -2408,12 +2406,12 @@ impl DdlController {
         let timeout_ms = 2 * 60 * 60 * 1000;
         let poll_interval = Duration::from_millis(100);
         for _ in 0..(timeout_ms / poll_interval.as_millis() as usize) {
-            let background_jobs = self
+            let creating_jobs = self
                 .metadata_manager
                 .catalog_controller
-                .list_background_creating_jobs(true, None)
+                .list_creating_jobs(true, None)
                 .await?;
-            if background_jobs.is_empty() {
+            if creating_jobs.is_empty() {
                 let catalog_version = self
                     .metadata_manager
                     .catalog_controller
