@@ -78,8 +78,9 @@ use risingwave_pb::plan_common::{EncodeType, FormatType, SourceRefreshMode};
 use risingwave_pb::stream_plan::PbStreamFragmentGraph;
 use risingwave_pb::telemetry::TelemetryDatabaseObject;
 use risingwave_sqlparser::ast::{
-    AstString, ColumnDef, ColumnOption, CreateSourceStatement, Encode, Format, FormatEncodeOptions,
-    ObjectName, SourceWatermark, SqlOptionValue, TableConstraint, Value, get_delimiter,
+    AstString, ColumnDef, ColumnOption, CompatibleFormatEncode, CreateSourceStatement, Encode,
+    Format, FormatEncodeOptions, ObjectName, SourceWatermark, SqlOptionValue, Statement,
+    TableConstraint, Value, get_delimiter,
 };
 use risingwave_sqlparser::parser::{IncludeOption, IncludeOptionItem};
 use thiserror_ext::AsReport;
@@ -111,6 +112,7 @@ use crate::utils::{
 use crate::{OptimizerContext, WithOptions, WithOptionsSecResolved, bind_data_type, build_graph};
 
 mod external_schema;
+use external_schema::resolve_pulsar_auto_encode;
 pub use external_schema::{
     bind_columns_from_source, get_schema_location, schema_has_schema_registry,
 };
@@ -1182,7 +1184,18 @@ pub async fn handle_create_source(
         )));
     }
 
-    let format_encode = stmt.format_encode.into_v2_with_warning();
+    let mut resolved_stmt = stmt.clone();
+    let mut format_encode = stmt.format_encode.into_v2_with_warning();
+    let was_auto = format_encode.row_encode == Encode::Auto;
+    resolve_pulsar_auto_encode(&session, &mut format_encode, &handler_args.with_options).await?;
+    if was_auto {
+        resolved_stmt.if_not_exists = false;
+        resolved_stmt.format_encode = CompatibleFormatEncode::V2(format_encode.clone());
+        handler_args.normalized_sql = Statement::CreateSource {
+            stmt: resolved_stmt,
+        }
+        .to_string();
+    }
     let (with_properties, refresh_mode) =
         bind_connector_props(&handler_args, &format_encode, true)?;
     if let Some(connector) = with_properties.get_connector() {

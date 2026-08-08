@@ -22,14 +22,15 @@ use risingwave_pb::catalog::{PbSchemaRegistryNameStrategy, StreamSourceInfo};
 use super::unified::json::BigintUnsignedHandlingMode;
 use super::utils::get_kafka_topic;
 use super::{DebeziumProps, TimeHandling, TimestampHandling, TimestamptzHandling};
-use crate::WithOptionsSecResolved;
 use crate::connector_common::AwsAuthProps;
 use crate::error::ConnectorResult;
 use crate::parser::PROTOBUF_MESSAGES_AS_JSONB;
 use crate::schema::AWS_GLUE_SCHEMA_ARN_KEY;
+use crate::schema::pulsar_schema_registry::PulsarSchemaRegistryConfig;
 use crate::schema::schema_registry::SchemaRegistryConfig;
 use crate::source::cdc::CDC_MONGODB_STRONG_SCHEMA_KEY;
 use crate::source::{SourceColumnDesc, SourceEncode, SourceFormat, extract_source_struct};
+use crate::{WithOptionsSecResolved, WithPropertiesExt};
 
 pub const PARQUET_CASE_INSENSITIVE_KEY: &str = "parquet.case_insensitive";
 
@@ -194,6 +195,12 @@ impl SpecificParserConfig {
                             .get("aws.glue.mock_config")
                             .cloned(),
                     }
+                } else if info.use_schema_registry && options_with_secret.is_pulsar_connector() {
+                    SchemaLocation::Pulsar(PulsarSchemaRegistryConfig::new(
+                        info.row_schema_location,
+                        &format_encode_options_with_secret,
+                        &options_with_secret,
+                    )?)
                 } else if info.use_schema_registry {
                     SchemaLocation::Confluent {
                         urls: info.row_schema_location.clone(),
@@ -237,7 +244,15 @@ impl SpecificParserConfig {
                     messages_as_jsonb,
                     ..Default::default()
                 };
-                config.schema_location = if info.use_schema_registry {
+                config.schema_location = if info.use_schema_registry
+                    && options_with_secret.is_pulsar_connector()
+                {
+                    SchemaLocation::Pulsar(PulsarSchemaRegistryConfig::new(
+                        info.row_schema_location,
+                        &format_encode_options_with_secret,
+                        &options_with_secret,
+                    )?)
+                } else if info.use_schema_registry {
                     SchemaLocation::Confluent {
                         urls: info.row_schema_location.clone(),
                         client_config: SchemaRegistryConfig::from(
@@ -348,6 +363,9 @@ pub enum SchemaLocation {
         // When `Some(_)`, ignore AWS and load schemas from provided config
         mock_config: Option<String>,
     },
+    /// Pulsar admin schema endpoint. The URL still comes from `schema.registry`, but the API and
+    /// payload framing are Pulsar-specific rather than Confluent-compatible.
+    Pulsar(PulsarSchemaRegistryConfig),
 }
 
 // TODO: `SpecificParserConfig` shall not `impl`/`derive` a `Default`
