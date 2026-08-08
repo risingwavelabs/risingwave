@@ -96,6 +96,7 @@ mod join;
 pub mod locality_provider;
 mod lookup;
 mod lookup_union;
+mod match_recognize;
 mod merge;
 mod mview;
 mod nested_loop_temporal_join;
@@ -162,6 +163,10 @@ pub use join::row::{CachedJoinRow, CpuEncoding, JoinEncoding, MemoryEncoding};
 pub use join::{AsOfDesc, AsOfJoinType, JoinType};
 pub use lookup::*;
 pub use lookup_union::LookupUnionExecutor;
+pub use match_recognize::{
+    CompiledDefine, CompiledMeasure, MatchRecognizeExecutor, MatchRecognizeExecutorArgs, Nfa,
+    SkipMode, pattern_from_protobuf,
+};
 pub use merge::MergeExecutor;
 pub(crate) use merge::{MergeExecutorInput, MergeExecutorUpstream};
 pub use mview::{MaterializeExecutor, RefreshableMaterializeArgs};
@@ -1230,6 +1235,14 @@ impl Barrier {
     }
 }
 
+/// A watermark on `col_idx`: a promise that no future record in this stream will have a value
+/// *smaller* than `val` in that column.
+///
+/// The bound is **not strict** — a future record may still carry exactly `val`. So an operator that
+/// treats data as complete must compare strictly: `col < val` is final, `col == val` is not.
+/// `WatermarkFilterExecutor` matches this by forwarding rows with `col >= val`, and the in-tree
+/// consumers follow it (EOWC's sort buffer emits keys `< val`; hash join and dynamic filter clean
+/// state on `<`).
 #[derive(Debug, PartialEq, Eq, Clone, EstimateSize)]
 pub struct Watermark {
     pub col_idx: usize,

@@ -287,6 +287,15 @@ pub fn visit_stream_node_tables_inner<F>(
                 always!(node.state_table, "GapFillStateTable");
             }
 
+            NodeBody::MatchRecognize(node) => {
+                always!(node.state_table, "MatchRecognizeStateTable");
+                always!(node.frontier_meta_table, "MatchRecognizeFrontierMetaTable");
+                always!(
+                    node.frontier_index_table,
+                    "MatchRecognizeFrontierIndexTable"
+                );
+            }
+
             // Note: add internal tables for new nodes here.
             NodeBody::Materialize(node) => {
                 if !internal_tables_only {
