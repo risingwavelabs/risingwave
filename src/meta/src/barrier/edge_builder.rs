@@ -19,7 +19,7 @@ use anyhow::anyhow;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::fragment::DistributionType;
-use risingwave_pb::common::{ActorInfo, HostAddress, WorkerNode};
+use risingwave_pb::common::{ActorInfo, HostAddress};
 use risingwave_pb::id::{PartialGraphId, SubscriberId};
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{AddMutation, PbDispatcher, StreamNode, UpdateMutation};
@@ -76,37 +76,6 @@ impl EdgeBuilderFragmentInfo {
                 (
                     (actor_id, actor.vnode_bitmap.clone()),
                     (actor_id, control_stream_manager.host_addr(actor.worker_id)),
-                )
-            })
-            .unzip();
-        Self {
-            distribution_type: info.distribution_type,
-            actors,
-            actor_location,
-            partial_graph_id,
-        }
-    }
-
-    /// Build from an already-inflight fragment using worker node map for host resolution.
-    ///
-    /// Unlike [`from_inflight`](Self::from_inflight), this does not require a
-    /// `ControlStreamManager` and can be used when only worker node metadata is available
-    /// (e.g., during `render_runtime_info` before the control streams are fully set up).
-    pub(crate) fn from_inflight_with_worker_nodes(
-        info: &InflightFragmentInfo,
-        partial_graph_id: PartialGraphId,
-        worker_nodes: &HashMap<WorkerId, WorkerNode>,
-    ) -> Self {
-        let (actors, actor_location) = info
-            .actors
-            .iter()
-            .map(|(&actor_id, actor)| {
-                (
-                    (actor_id, actor.vnode_bitmap.clone()),
-                    (
-                        actor_id,
-                        worker_nodes[&actor.worker_id].host.clone().unwrap(),
-                    ),
                 )
             })
             .unzip();
@@ -254,7 +223,7 @@ impl FragmentEdgeBuildResult {
                 let dispatchers = self
                     .dispatchers
                     .get_mut(&fragment_id)
-                    .and_then(|upstreams| upstreams.remove(&actor.actor_id))
+                    .and_then(|dispatchers| dispatchers.remove(&actor.actor_id))
                     .unwrap_or_default();
                 actors_to_create
                     .entry(worker_id)
@@ -363,6 +332,60 @@ impl FragmentEdgeBuilder<AddingRelations> {
                 self.add_edge(*fragment_id, relation)?;
             }
         }
+        Ok(())
+    }
+
+    /// Materialize logical relations whose two endpoint fragments already exist at runtime.
+    pub(crate) fn add_new_relations(
+        &mut self,
+        relations: &FragmentDownstreamRelation,
+    ) -> MetaResult<()> {
+        for (fragment_id, relations) in relations {
+            for relation in relations {
+                self.add_new_edge(*fragment_id, relation)?;
+            }
+        }
+        Ok(())
+    }
+
+    fn add_new_edge(
+        &mut self,
+        fragment_id: FragmentId,
+        downstream: &DownstreamFragmentRelation,
+    ) -> MetaResult<()> {
+        let Some(FragmentStatus::Existing(fragment)) = self.fragments.get(&fragment_id) else {
+            return Err(anyhow!(
+                "new runtime edge source fragment {fragment_id} must already exist"
+            )
+            .into());
+        };
+        let Some(FragmentStatus::Existing(downstream_fragment)) =
+            self.fragments.get(&downstream.downstream_fragment_id)
+        else {
+            return Err(anyhow!(
+                "new runtime edge target fragment {} must already exist",
+                downstream.downstream_fragment_id
+            )
+            .into());
+        };
+
+        let (dispatchers, upstreams, no_shuffle_map) =
+            Self::compose_edge(fragment_id, fragment, downstream, downstream_fragment);
+        Self::add_no_shuffle_mapping(
+            &mut self.result,
+            fragment_id,
+            downstream.downstream_fragment_id,
+            no_shuffle_map,
+        );
+        Self::add_dispatchers(&mut self.result.dispatchers, fragment_id, dispatchers);
+        Self::add_merge_updates(
+            &mut self.result.merge_updates,
+            fragment_id,
+            downstream.downstream_fragment_id,
+            downstream_fragment,
+            upstreams,
+            HashMap::new(),
+        );
         Ok(())
     }
 
@@ -971,6 +994,38 @@ mod tests {
             mutation.actor_dispatchers[&actor(1)].dispatchers[0].downstream_actor_id,
             vec![actor(11)]
         );
+    }
+
+    #[test]
+    fn test_attach_new_relation_between_existing_fragments() {
+        let source = fragment(1);
+        let target = fragment(2);
+        let mut builder = FragmentEdgeBuilder::from_existing_fragments([
+            (source, single_info(1)),
+            (target, single_info(11)),
+        ])
+        .finish_fragments();
+        builder
+            .add_new_relations(&HashMap::from([(
+                source,
+                vec![relation(target, DispatcherType::Broadcast)],
+            )]))
+            .unwrap();
+        let mut mutation = UpdateMutation::default();
+
+        builder.build().apply_to_update_mutation(&mut mutation);
+
+        assert!(mutation.dispatcher_update.is_empty());
+        assert_eq!(
+            mutation.actor_new_dispatchers[&actor(1)].dispatchers[0].downstream_actor_id,
+            vec![actor(11)]
+        );
+        assert_eq!(mutation.merge_update.len(), 1);
+        let merge_update = &mutation.merge_update[0];
+        assert_eq!(merge_update.actor_id, actor(11));
+        assert_eq!(merge_update.upstream_fragment_id, source);
+        assert_eq!(merge_update.added_upstream_actors[0].actor_id, actor(1));
+        assert!(merge_update.removed_upstream_actor_id.is_empty());
     }
 
     #[test]

@@ -54,7 +54,7 @@ use crate::barrier::partial_graph::{
     CollectedBarrier, PartialGraphBarrierInfo, PartialGraphManager, PartialGraphStat,
 };
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob, collect_done_fragments};
-use crate::barrier::rpc::to_partial_graph_id;
+use crate::barrier::rpc::{ControlStreamManager, to_partial_graph_id};
 use crate::barrier::{
     BackfillOrderState, BackfillProgress, BarrierKind, FragmentBackfillProgress, TracedEpoch,
 };
@@ -214,6 +214,7 @@ impl BatchRefreshJobCheckpointControl {
         // Actor rendering context:
         actor_id_generator: &AtomicU32,
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
+        control_stream_manager: &ControlStreamManager,
         database_resource_group: &str,
         streaming_job_model: &streaming_job::Model,
         // Edge building context:
@@ -338,11 +339,7 @@ impl BatchRefreshJobCheckpointControl {
         builder.add_new_fragments(fragment_infos.values().map(|f| {
             (
                 f.fragment_id,
-                EdgeBuilderFragmentInfo::from_inflight_with_worker_nodes(
-                    f,
-                    partial_graph_id,
-                    worker_nodes,
-                ),
+                EdgeBuilderFragmentInfo::from_inflight(f, partial_graph_id, control_stream_manager),
             )
         }));
         let mut builder = builder.finish_fragments();
@@ -496,6 +493,7 @@ impl BatchRefreshJobCheckpointControl {
             &create_info.info.definition,
             actor_id_generator,
             worker_nodes,
+            partial_graph_manager.control_stream_manager(),
             &create_info.info.database_resource_group,
             &create_info.info.streaming_job_model,
             partial_graph_id,
@@ -1218,6 +1216,7 @@ impl BatchRefreshJobCheckpointControl {
             &context.definition,
             actor_id_counter,
             worker_nodes,
+            partial_graph_manager.control_stream_manager(),
             &context.database_resource_group,
             &context.streaming_job_model,
             self.partial_graph_id,
