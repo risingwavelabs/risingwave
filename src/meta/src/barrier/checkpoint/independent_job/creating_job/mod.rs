@@ -44,13 +44,12 @@ use super::{
     snapshot_backfill_max_pending_barrier_num,
 };
 use crate::MetaResult;
-use crate::barrier::checkpoint::independent_job::creating_job::status::CreateMviewLogStoreProgressTracker;
 use crate::barrier::command::{
     PostCollectCommand, TableLogEpochs, ThrottleConfigMap, UpstreamTableLogEpochs,
 };
 use crate::barrier::context::CreateIndependentStreamingJobCommandInfo;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
-use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
+use crate::barrier::info::BarrierInfo;
 use crate::barrier::partial_graph::{
     CollectedBarrier, PartialGraphBarrierInfo, PartialGraphManager, PartialGraphRecoverer,
 };
@@ -120,8 +119,6 @@ impl CreatingStreamingJobControl {
                 split_assignment,
             )
             .collect();
-        let snapshot_backfill_actors: HashSet<ActorId> =
-            InflightStreamingJobInfo::snapshot_backfill_actor_ids(&fragment_infos).collect();
         let actors_to_create = Command::create_streaming_job_actors_to_create(
             &info,
             edges,
@@ -240,24 +237,15 @@ impl CreatingStreamingJobControl {
                 .collect(),
         };
         if let Some(log_store_barriers_to_inject) = log_store_barriers_to_inject {
-            let upstream_lag = log_store_barriers_to_inject
-                .last()
-                .map(|info| info.prev_epoch().saturating_sub(snapshot_epoch))
-                .unwrap_or(0);
             job.status = CreatingStreamingJobStatus::ConsumingLogStore {
                 tracking_job: TrackingJob::recovered(job_id, &job_info.fragment_infos),
                 info: job_info,
-                log_store_progress_tracker: CreateMviewLogStoreProgressTracker::new(
-                    snapshot_backfill_actors.iter().cloned(),
-                    upstream_lag,
-                ),
                 pending_barriers: log_store_barriers_to_inject.into(),
             };
         } else {
             job.status = CreatingStreamingJobStatus::ConsumingSnapshot {
                 snapshot: snapshot.expect("snapshot phase should be initialized"),
                 pending_upstream_barriers: vec![],
-                snapshot_backfill_actors,
                 info: job_info,
             };
         }
@@ -290,7 +278,8 @@ impl CreatingStreamingJobControl {
             CreatingStreamingJobStatus::ConsumingSnapshot { snapshot, info, .. } => snapshot
                 .create_mview_tracker
                 .collect_fragment_progress(&info.fragment_infos, true),
-            CreatingStreamingJobStatus::ConsumingLogStore { info, .. } => {
+            CreatingStreamingJobStatus::ConsumingLogStore { info, .. }
+            | CreatingStreamingJobStatus::ConsumingUpstream { info, .. } => {
                 collect_done_fragments(self.control.info.job_id, &info.fragment_infos)
             }
             CreatingStreamingJobStatus::Finishing(_, _)
@@ -538,10 +527,6 @@ impl CreatingStreamingJobControl {
                     snapshot_epoch,
                     upstream_barrier_info,
                 )?,
-                snapshot_backfill_actors: InflightStreamingJobInfo::snapshot_backfill_actor_ids(
-                    &info.fragment_infos,
-                )
-                .collect(),
                 info,
             },
             barrier_info,
@@ -571,13 +556,6 @@ impl CreatingStreamingJobControl {
         Ok((
             CreatingStreamingJobStatus::ConsumingLogStore {
                 tracking_job: TrackingJob::recovered(job_id, &info.fragment_infos),
-                log_store_progress_tracker: CreateMviewLogStoreProgressTracker::new(
-                    InflightStreamingJobInfo::snapshot_backfill_actor_ids(&info.fragment_infos),
-                    pending_barriers
-                        .back()
-                        .map(|info| info.prev_epoch() - committed_epoch)
-                        .unwrap_or(0),
-                ),
                 pending_barriers,
                 info,
             },
@@ -634,7 +612,6 @@ impl CreatingStreamingJobControl {
                     .map(|relation| (*fragment_id, relation.clone()))
             })
             .collect();
-
         let info = CreatingJobInfo {
             fragment_infos,
             upstream_fragment_downstreams,
@@ -718,14 +695,9 @@ impl CreatingStreamingJobControl {
                 }
             }
             CreatingStreamingJobStatus::ConsumingLogStore {
-                log_store_progress_tracker,
-                ..
-            } => {
-                format!(
-                    "LogStore [{}]",
-                    log_store_progress_tracker.gen_backfill_progress()
-                )
-            }
+                pending_barriers, ..
+            } => format!("LogStore [pending barriers: {}]", pending_barriers.len()),
+            CreatingStreamingJobStatus::ConsumingUpstream { .. } => "Upstream".to_owned(),
             CreatingStreamingJobStatus::Finishing(finish_epoch, ..) => {
                 let committed_epoch = self
                     .control
@@ -789,15 +761,27 @@ impl CreatingStreamingJobControl {
 
     pub(crate) fn start_consume_upstream(
         &mut self,
+        barrier_info: &BarrierInfo,
+    ) -> &CreatingJobInfo {
+        info!(
+            job_id = %self.control.info.job_id,
+            prev_epoch = barrier_info.prev_epoch(),
+            "start consuming upstream"
+        );
+        self.status.start_consume_upstream(barrier_info)
+    }
+
+    pub(crate) fn start_finishing(
+        &mut self,
         partial_graph_manager: &mut PartialGraphManager,
         barrier_info: &BarrierInfo,
     ) -> MetaResult<CreatingJobInfo> {
         info!(
             job_id = %self.control.info.job_id,
             prev_epoch = barrier_info.prev_epoch(),
-            "start consuming upstream"
+            "start merging into database graph"
         );
-        let info = self.status.start_consume_upstream(barrier_info);
+        let info = self.status.start_finishing(barrier_info);
         Self::inject_barrier(
             self.control.info.partial_graph_id,
             partial_graph_manager,
@@ -882,34 +866,37 @@ impl CreatingStreamingJobControl {
                 .values()
                 .flat_map(|resp| &resp.create_mview_progress),
         );
-        self.is_ready_to_merge() && pending_barrier_num <= self.max_lagged_barrier_num
+        self.is_ready_to_consume_upstream() && pending_barrier_num <= self.max_lagged_barrier_num
     }
 
-    fn is_ready_to_merge(&self) -> bool {
+    fn is_ready_to_consume_upstream(&self) -> bool {
         if let CreatingStreamingJobStatus::ConsumingLogStore {
-            log_store_progress_tracker,
-            pending_barriers,
-            ..
+            pending_barriers, ..
         } = &self.status
-            && pending_barriers.is_empty()
-            && log_store_progress_tracker.is_finished()
         {
-            true
+            pending_barriers.is_empty()
         } else {
             false
         }
     }
 
-    pub(crate) fn should_merge_to_upstream(
+    pub(crate) fn is_consuming_upstream(&self) -> bool {
+        matches!(
+            &self.status,
+            CreatingStreamingJobStatus::ConsumingUpstream { .. }
+        )
+    }
+
+    pub(crate) fn should_start_consume_upstream(
         &self,
         partial_graph_manager: &PartialGraphManager,
     ) -> bool {
-        if !self.is_ready_to_merge() {
+        if !self.is_ready_to_consume_upstream() {
             return false;
         }
 
-        // A job that is ready to merge has finished initialization and is not resetting, so its
-        // partial graph must be running.
+        // A job that is ready to consume upstream has finished initialization and is not resetting,
+        // so its partial graph must be running.
         partial_graph_manager.pending_barrier_num(self.control.info.partial_graph_id)
             <= self.max_lagged_barrier_num
     }
@@ -940,7 +927,8 @@ impl CreatingStreamingJobControl {
                 (Some(*finish_at_epoch), epoch_end_bound)
             }
             CreatingStreamingJobStatus::ConsumingSnapshot { .. }
-            | CreatingStreamingJobStatus::ConsumingLogStore { .. } => (
+            | CreatingStreamingJobStatus::ConsumingLogStore { .. }
+            | CreatingStreamingJobStatus::ConsumingUpstream { .. } => (
                 None,
                 min_upstream_inflight_epoch
                     .map(Excluded)
@@ -985,6 +973,7 @@ impl CreatingStreamingJobControl {
         match &self.status {
             CreatingStreamingJobStatus::ConsumingSnapshot { .. }
             | CreatingStreamingJobStatus::ConsumingLogStore { .. }
+            | CreatingStreamingJobStatus::ConsumingUpstream { .. }
             | CreatingStreamingJobStatus::Finishing(_, _) => {
                 partial_graph_manager
                     .ack_completed(self.control.info.partial_graph_id, completed_epoch);
@@ -1004,6 +993,7 @@ impl CreatingStreamingJobControl {
         match self.status {
             CreatingStreamingJobStatus::ConsumingSnapshot { .. }
             | CreatingStreamingJobStatus::ConsumingLogStore { .. }
+            | CreatingStreamingJobStatus::ConsumingUpstream { .. }
             | CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!("expect finish")
             }
@@ -1018,7 +1008,8 @@ impl CreatingStreamingJobControl {
     pub(super) fn can_drop_independently(&self) -> bool {
         match &self.status {
             CreatingStreamingJobStatus::ConsumingSnapshot { .. }
-            | CreatingStreamingJobStatus::ConsumingLogStore { .. } => true,
+            | CreatingStreamingJobStatus::ConsumingLogStore { .. }
+            | CreatingStreamingJobStatus::ConsumingUpstream { .. } => true,
             CreatingStreamingJobStatus::Finishing(_, _) => false,
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
