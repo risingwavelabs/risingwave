@@ -126,8 +126,7 @@ impl CatalogController {
         removed_objects.push(obj);
         let mut removed_object_ids: HashSet<_> =
             removed_objects.iter().map(|obj| obj.oid).collect();
-
-        // TODO: record dependency info in object_dependency table for sink into table.
+        
         // Issue#26143: recording dependency for sink into table could cause circular issue,
         // so here we only fix it by check whether it's restrict or not
         // Special handling for 'sink into table'.

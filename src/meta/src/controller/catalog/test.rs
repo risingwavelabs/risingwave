@@ -190,6 +190,119 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_create_multiple_sinks_into_same_table_and_drop_table() -> MetaResult<()> {
+        let mut mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let (_, Some(target_table_id), _) =
+            insert_test_streaming_job(&txn, "mvt", true, None).await?
+        else {
+            unreachable!()
+        };
+        let (mv1_id, Some(_), _) = insert_test_streaming_job(&txn, "mv1", true, None).await? else {
+            unreachable!()
+        };
+        let (mv2_id, Some(_), _) = insert_test_streaming_job(&txn, "mv2", true, None).await? else {
+            unreachable!()
+        };
+        txn.commit().await?;
+        drop(inner);
+
+        let mut sink_ids = Vec::new();
+        let test_sink_tuples = [("s1", mv1_id), ("s2", mv2_id)];
+        for (name, source) in test_sink_tuples {
+            let mut job = crate::manager::StreamingJob::Sink(PbSink {
+                name: name.to_owned(),
+                database_id: TEST_DATABASE_ID,
+                schema_id: TEST_SCHEMA_ID,
+                owner: TEST_OWNER_ID as _,
+                target_table: Some(target_table_id),
+                sink_type: PbSinkType::AppendOnly as i32,
+                ..Default::default()
+            });
+            // Use create_job_catalog to trigger construct_sink_cycle_check_query for regression
+            // testing purpose to ensure no circular issue causing infinite recursion when
+            // cte_referencing
+            tokio::time::timeout(
+                std::time::Duration::from_secs(3),
+                mgr.create_job_catalog(
+                    &mut job,
+                    &crate::model::StreamContext::default(),
+                    &None,
+                    1,
+                    HashSet::from([source.as_object_id()]),
+                    risingwave_pb::ddl_service::streaming_job_resource_type::ResourceType::Regular(
+                        true,
+                    ),
+                    &None,
+                    None,
+                    None,
+                    None,
+                    None,
+                ),
+            )
+            .await
+            .expect("creating a second sink into the same table should not hang")?;
+            sink_ids.push(job.id().as_object_id());
+        }
+        // Ensure the test sinks were created
+        assert_eq!(sink_ids.len(), test_sink_tuples.len());
+
+        let inner = mgr.inner.read().await;
+        for sink_id in &sink_ids {
+            streaming_job::ActiveModel {
+                job_id: Set(sink_id.as_job_id()),
+                job_status: Set(JobStatus::Created),
+                ..Default::default()
+            }
+            .update(&inner.db)
+            .await?;
+        }
+        // Ensure no object_dependency created for (target_table, sink) which could cause circular
+        // issue
+        let object_dependency_count = ObjectDependency::find()
+            .filter(object_dependency::Column::Oid.eq(target_table_id.as_object_id()))
+            .filter(object_dependency::Column::UsedBy.is_in(sink_ids.clone()))
+            .count(&inner.db)
+            .await?;
+        assert_eq!(object_dependency_count, 0);
+        drop(inner);
+
+        std::sync::Arc::make_mut(&mut mgr.env.opts).protect_drop_table_with_incoming_sink = true;
+        mgr.drop_object(ObjectType::Table, target_table_id, DropMode::Restrict)
+            .await
+            .expect_err("protected RESTRICT drop should fail for a table with incoming sinks");
+        mgr.drop_object(ObjectType::Table, target_table_id, DropMode::Cascade)
+            .await
+            .expect_err("protected CASCADE drop should fail for a table with incoming sinks");
+
+        std::sync::Arc::make_mut(&mut mgr.env.opts).protect_drop_table_with_incoming_sink = false;
+        mgr.drop_object(ObjectType::Table, target_table_id, DropMode::Restrict)
+            .await
+            .expect_err("unprotected RESTRICT drop should fail for a table with incoming sinks");
+        mgr.drop_object(ObjectType::Table, target_table_id, DropMode::Cascade)
+            .await
+            .expect("unprotected CASCADE drop should succeed");
+
+        let inner = mgr.inner.read().await;
+        let db = &inner.db;
+        // Check that the unprotected cascade drop successfully dropped
+        assert!(Object::find_by_id(target_table_id).one(db).await?.is_none());
+        assert_eq!(
+            Object::find()
+                .filter(object::Column::Oid.is_in(sink_ids))
+                .count(db)
+                .await?,
+            0
+        );
+        // Sanity checks that sources were not dropped
+        assert!(Object::find_by_id(mv1_id).one(db).await?.is_some());
+        assert!(Object::find_by_id(mv2_id).one(db).await?.is_some());
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_table_refill_catalog_snapshot_classifies_table_identity() -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let inner = mgr.inner.write().await;
