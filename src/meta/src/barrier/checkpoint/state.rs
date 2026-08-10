@@ -1490,6 +1490,16 @@ impl DatabaseCheckpointControl {
                             job
                             && creating_job.should_merge_to_upstream(partial_graph_manager)
                         {
+                            // The independent actors will stop on this barrier. Apply throttle to
+                            // the in-memory plan used to create the database-graph actors, and let
+                            // the database barrier own the collection notification.
+                            if throttle_config
+                                .as_mut()
+                                .and_then(|config| creating_job.pre_apply_throttle(config))
+                                .is_some()
+                            {
+                                notify_database_graph = true;
+                            }
                             let info = creating_job
                                 .start_consume_upstream(partial_graph_manager, &barrier_info)?;
                             finished_snapshot_backfill_job_info

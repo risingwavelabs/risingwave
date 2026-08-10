@@ -913,8 +913,6 @@ impl CreatingStreamingJobControl {
                 None,
             )?;
         }
-        assert!(mutation.is_none(), "must have consumed mutation");
-        assert!(notifier.is_none(), "must consume notifier");
         Ok(())
     }
 

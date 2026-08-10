@@ -301,14 +301,19 @@ impl CreatingStreamingJobStatus {
             }
             CreatingStreamingJobStatus::ConsumingLogStore {
                 pending_barriers, ..
-            } => drain_pending_barriers(
-                pending_barriers,
-                barrier_info.clone(),
-                resolve_initial_barrier_num_to_inject(),
-            )
-            .into_iter()
-            .map(|barrier_info| (barrier_info, None))
-            .collect(),
+            } => {
+                // Throttle has no effect on the snapshot executor after it starts consuming the
+                // log store. The updated fragment plan is kept for the actors created on merge,
+                // so the mutation does not need to be forwarded in this phase.
+                drain_pending_barriers(
+                    pending_barriers,
+                    barrier_info.clone(),
+                    resolve_initial_barrier_num_to_inject(),
+                )
+                .into_iter()
+                .map(|barrier_info| (barrier_info, None))
+                .collect()
+            }
             CreatingStreamingJobStatus::Finishing { .. }
             | CreatingStreamingJobStatus::Resetting(..) => vec![],
             CreatingStreamingJobStatus::PlaceHolder => {
@@ -382,6 +387,8 @@ fn drain_pending_barriers(
 
 #[cfg(test)]
 mod tests {
+    use risingwave_pb::stream_plan::PbStreamNode;
+
     use super::*;
 
     fn barrier(prev_epoch: u64, curr_epoch: u64) -> BarrierInfo {
@@ -454,5 +461,66 @@ mod tests {
         );
 
         assert!(injected.is_empty());
+    }
+
+    #[test]
+    fn test_pre_apply_throttle_before_merge() {
+        let job_id = risingwave_common::id::JobId::new(1);
+        let fragment_id = FragmentId::new(1);
+        let old_node = PbStreamNode {
+            identity: "old".to_owned(),
+            ..Default::default()
+        };
+        let new_node = PbStreamNode {
+            identity: "new".to_owned(),
+            ..Default::default()
+        };
+        let fragment_infos = HashMap::from([(
+            fragment_id,
+            InflightFragmentInfo {
+                fragment_id,
+                distribution_type: risingwave_meta_model::fragment::DistributionType::Single,
+                fragment_type_mask: Default::default(),
+                vnode_count: 1,
+                nodes: old_node,
+                actors: Default::default(),
+                state_table_ids: Default::default(),
+            },
+        )]);
+        let mut status = CreatingStreamingJobStatus::ConsumingLogStore {
+            tracking_job: TrackingJob::recovered(job_id, &fragment_infos),
+            info: CreatingJobInfo {
+                fragment_infos,
+                upstream_fragment_downstreams: Default::default(),
+                downstreams: Default::default(),
+                snapshot_backfill_upstream_tables: Default::default(),
+                stream_actors: Default::default(),
+            },
+            log_store_progress_tracker: CreateMviewLogStoreProgressTracker::new(
+                std::iter::empty(),
+                0,
+            ),
+            pending_barriers: Default::default(),
+        };
+        let mut config = HashMap::from([(
+            fragment_id,
+            (
+                risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig {
+                    rate_limit: Some(1_000),
+                    throttle_type: Default::default(),
+                },
+                new_node.clone(),
+            ),
+        )]);
+
+        assert!(status.pre_apply_throttle(&mut config).is_some());
+        assert!(config.is_empty());
+
+        let info = status.start_consume_upstream(&BarrierInfo {
+            prev_epoch: TracedEpoch::new(Epoch(1)),
+            curr_epoch: TracedEpoch::new(Epoch(2)),
+            kind: BarrierKind::Checkpoint(vec![1]),
+        });
+        assert_eq!(info.fragment_infos[&fragment_id].nodes, new_node);
     }
 }
