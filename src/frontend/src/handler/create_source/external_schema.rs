@@ -76,13 +76,15 @@ fn pulsar_schema_type_to_encode(schema_type: PulsarSchemaType) -> Result<Encode>
     }
 }
 
-pub(super) async fn resolve_pulsar_auto_encode(
+/// Resolve the transient `AUTO` encoding through the connector-specific schema backend.
+/// Returns `None` when the statement already contains a concrete encoding.
+pub(super) async fn resolve_auto_encode(
     session: &SessionImpl,
-    format_encode: &mut FormatEncodeOptions,
+    format_encode: &FormatEncodeOptions,
     source_options: &WithOptions,
-) -> Result<()> {
+) -> Result<Option<Encode>> {
     if format_encode.row_encode != Encode::Auto {
-        return Ok(());
+        return Ok(None);
     }
     if format_encode.format != Format::Plain {
         return Err(RwError::from(ProtocolError(
@@ -95,6 +97,16 @@ pub(super) async fn resolve_pulsar_auto_encode(
         )));
     }
 
+    Ok(Some(
+        resolve_pulsar_auto_encode(session, format_encode, source_options).await?,
+    ))
+}
+
+async fn resolve_pulsar_auto_encode(
+    session: &SessionImpl,
+    format_encode: &FormatEncodeOptions,
+    source_options: &WithOptions,
+) -> Result<Encode> {
     let (resolved_source_options, connection_type, _) = resolve_connection_ref_and_secret_ref(
         source_options.clone(),
         session,
@@ -130,8 +142,7 @@ pub(super) async fn resolve_pulsar_auto_encode(
     let schema = PulsarSchemaSupplier::new(config)?
         .get_latest_schema()
         .await?;
-    format_encode.row_encode = pulsar_schema_type_to_encode(schema.schema_type())?;
-    Ok(())
+    pulsar_schema_type_to_encode(schema.schema_type())
 }
 
 /// Resolves the schema of the source from external schema file.

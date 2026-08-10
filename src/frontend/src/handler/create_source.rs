@@ -112,7 +112,7 @@ use crate::utils::{
 use crate::{OptimizerContext, WithOptions, WithOptionsSecResolved, bind_data_type, build_graph};
 
 mod external_schema;
-use external_schema::resolve_pulsar_auto_encode;
+use external_schema::resolve_auto_encode;
 pub use external_schema::{
     bind_columns_from_source, get_schema_location, schema_has_schema_registry,
 };
@@ -1149,11 +1149,12 @@ pub async fn handle_create_source(
         )));
     }
 
-    let mut resolved_stmt = stmt.clone();
-    let mut format_encode = stmt.format_encode.into_v2_with_warning();
-    let was_auto = format_encode.row_encode == Encode::Auto;
-    resolve_pulsar_auto_encode(&session, &mut format_encode, &handler_args.with_options).await?;
-    if was_auto {
+    let mut format_encode = stmt.format_encode.clone().into_v2_with_warning();
+    if let Some(resolved_row_encode) =
+        resolve_auto_encode(&session, &format_encode, &handler_args.with_options).await?
+    {
+        format_encode.row_encode = resolved_row_encode;
+        let mut resolved_stmt = stmt.clone();
         resolved_stmt.if_not_exists = false;
         resolved_stmt.format_encode = CompatibleFormatEncode::V2(format_encode.clone());
         handler_args.normalized_sql = Statement::CreateSource {
