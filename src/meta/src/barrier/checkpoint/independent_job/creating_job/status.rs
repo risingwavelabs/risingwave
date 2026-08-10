@@ -407,10 +407,6 @@ mod tests {
                 snapshot_backfill_upstream_tables: Default::default(),
                 stream_actors: Default::default(),
             },
-            log_store_progress_tracker: CreateMviewLogStoreProgressTracker::new(
-                std::iter::empty(),
-                0,
-            ),
             pending_barriers: Default::default(),
         };
         let mut config = HashMap::from([(

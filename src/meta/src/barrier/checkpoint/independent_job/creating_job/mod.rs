@@ -41,7 +41,9 @@ use super::IndependentCheckpointJobControl;
 use crate::MetaResult;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::checkpoint::independent_job::creating_job::barrier_control::CreatingStreamingJobBarrierStats;
-use crate::barrier::command::{PostCollectCommand, TableLogEpochs, ThrottleConfigMap, UpstreamTableLogEpochs};
+use crate::barrier::command::{
+    PostCollectCommand, TableLogEpochs, ThrottleConfigMap, UpstreamTableLogEpochs,
+};
 use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::BarrierInfo;
