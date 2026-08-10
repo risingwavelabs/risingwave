@@ -21,14 +21,13 @@ mod tests {
     use risingwave_pb::catalog::subscription::SubscriptionState;
     use risingwave_pb::catalog::{PbSinkType, StreamSourceInfo};
     use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType, worker_node};
-    use risingwave_pb::ddl_service::streaming_job_resource_type;
     use risingwave_pb::meta::SubscribeType;
     use risingwave_pb::stream_plan::PbStreamNode;
     use tokio::sync::{mpsc, oneshot};
 
     use crate::controller::catalog::*;
     use crate::manager::{LocalNotification, WorkerKey};
-    use crate::model::{FragmentDownstreamRelation, StreamContext};
+    use crate::model::FragmentDownstreamRelation;
     use crate::serving::ServingVnodeMapping;
 
     const TEST_DATABASE_ID: DatabaseId = DatabaseId::new(1);

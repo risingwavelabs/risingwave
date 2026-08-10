@@ -481,7 +481,8 @@ impl CatalogController {
                         dependencies.iter().cloned().collect(),
                         &txn,
                     )
-                    .await? {
+                    .await?
+                {
                     bail!("Creating such a sink will result in circular dependency.");
                 }
 
