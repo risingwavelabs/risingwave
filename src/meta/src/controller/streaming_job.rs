@@ -73,8 +73,8 @@ use risingwave_sqlparser::parser::{Parser, ParserError};
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::{Expr, Query, SimpleExpr};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait, IntoActiveModel, JoinType,
-    NotSet, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, Condition, DatabaseTransaction, EntityTrait, IntoActiveModel,
+    JoinType, NotSet, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, TransactionTrait,
 };
 use thiserror_ext::AsReport;
 
@@ -124,6 +124,20 @@ pub struct CancelStreamingJobInfo {
     pub streaming_job_ids: Vec<JobId>,
     /// State tables to unregister after the barrier is collected.
     pub state_table_ids: Vec<TableId>,
+}
+
+#[derive(Debug)]
+pub struct SnapshotBackfillChangeLogInfo {
+    pub job_id: JobId,
+    pub state_table_ids: HashSet<TableId>,
+    pub upstream_table_snapshot_epochs: HashMap<TableId, Option<u64>>,
+    pub is_batch_refresh: bool,
+}
+
+#[derive(Debug)]
+pub struct TableChangeLogTruncateInfo {
+    pub subscription_retention_seconds: HashMap<TableId, u64>,
+    pub snapshot_backfill_jobs: Vec<SnapshotBackfillChangeLogInfo>,
 }
 
 fn serverless_backfill_resource_group_placeholder(job_id: JobId) -> String {
@@ -226,6 +240,131 @@ fn update_sink_node_rate_limit(node: &mut PbNodeBody, rate_limit: Option<u32>) -
 }
 
 impl CatalogController {
+    pub async fn get_table_change_log_truncate_info(
+        &self,
+    ) -> MetaResult<TableChangeLogTruncateInfo> {
+        let inner = self.inner.read().await;
+
+        let subscriptions: Vec<(TableId, i64)> = Subscription::find()
+            .select_only()
+            .columns([
+                subscription::Column::DependentTableId,
+                subscription::Column::RetentionSeconds,
+            ])
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+        let mut subscription_retention_seconds = HashMap::new();
+        for (table_id, retention_seconds) in subscriptions {
+            let retention_seconds = u64::try_from(retention_seconds).map_err(|_| {
+                anyhow!(
+                    "subscription on table {} has invalid retention seconds {}",
+                    table_id,
+                    retention_seconds
+                )
+            })?;
+            subscription_retention_seconds
+                .entry(table_id)
+                .and_modify(|retention: &mut u64| *retention = (*retention).max(retention_seconds))
+                .or_insert(retention_seconds);
+        }
+
+        let jobs: Vec<(JobId, Option<i64>)> = StreamingJobModel::find()
+            .select_only()
+            .columns([
+                streaming_job::Column::JobId,
+                streaming_job::Column::RefreshIntervalSec,
+            ])
+            .filter(
+                Condition::any()
+                    .add(streaming_job::Column::JobStatus.eq(JobStatus::Creating))
+                    .add(streaming_job::Column::RefreshIntervalSec.is_not_null()),
+            )
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+        let mut job_info: HashMap<_, _> = jobs
+            .into_iter()
+            .map(|(job_id, refresh_interval_sec)| {
+                (
+                    job_id,
+                    SnapshotBackfillChangeLogInfo {
+                        job_id,
+                        state_table_ids: HashSet::new(),
+                        upstream_table_snapshot_epochs: HashMap::new(),
+                        is_batch_refresh: refresh_interval_sec.is_some(),
+                    },
+                )
+            })
+            .collect();
+        if !job_info.is_empty() {
+            let fragments = Fragment::find()
+                .filter(fragment::Column::JobId.is_in(job_info.keys().copied()))
+                .all(&inner.db)
+                .await?;
+            for fragment in fragments {
+                let info = job_info
+                    .get_mut(&fragment.job_id)
+                    .expect("job should exist");
+                info.state_table_ids
+                    .extend(fragment.state_table_ids.inner_ref().iter().copied());
+                let mut collection_error = None;
+                visit_stream_node_stream_scan(&fragment.stream_node.to_protobuf(), |stream_scan| {
+                    let scan_type = match StreamScanType::try_from(stream_scan.stream_scan_type) {
+                        Ok(scan_type) => scan_type,
+                        Err(err) => {
+                            collection_error = Some(anyhow!(
+                                "invalid persisted stream scan type {} in job {} fragment {}: {}",
+                                stream_scan.stream_scan_type,
+                                fragment.job_id,
+                                fragment.fragment_id,
+                                err
+                            ));
+                            return;
+                        }
+                    };
+                    if !matches!(
+                        scan_type,
+                        StreamScanType::SnapshotBackfill | StreamScanType::CrossDbSnapshotBackfill
+                    ) {
+                        return;
+                    }
+                    if stream_scan.snapshot_backfill_epoch.is_none() && !info.is_batch_refresh {
+                        return;
+                    }
+                    match info
+                        .upstream_table_snapshot_epochs
+                        .entry(stream_scan.table_id)
+                    {
+                        std::collections::hash_map::Entry::Occupied(entry) => {
+                            if entry.get() != &stream_scan.snapshot_backfill_epoch {
+                                collection_error = Some(anyhow!(
+                                    "job {} has inconsistent snapshot epochs for upstream table {}",
+                                    fragment.job_id,
+                                    stream_scan.table_id
+                                ));
+                            }
+                        }
+                        std::collections::hash_map::Entry::Vacant(entry) => {
+                            entry.insert(stream_scan.snapshot_backfill_epoch);
+                        }
+                    }
+                });
+                if let Some(err) = collection_error {
+                    return Err(err.into());
+                }
+            }
+        }
+        let snapshot_backfill_jobs = job_info
+            .into_values()
+            .filter(|info| !info.upstream_table_snapshot_epochs.is_empty())
+            .collect();
+        Ok(TableChangeLogTruncateInfo {
+            subscription_retention_seconds,
+            snapshot_backfill_jobs,
+        })
+    }
+
     pub async fn get_pinned_snapshot_epochs(&self) -> MetaResult<HashMap<TableId, HashSet<u64>>> {
         // Hold the catalog read lock across both queries so a job cannot transition out of
         // `Creating` while its fragments are being inspected.

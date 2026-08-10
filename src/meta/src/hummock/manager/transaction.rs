@@ -12,13 +12,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::iter::once;
 use std::ops::{Deref, DerefMut};
-use std::sync::Arc;
+use std::sync::{Arc, LazyLock};
 
 use parking_lot::Mutex;
 use risingwave_common::catalog::TableId;
-use risingwave_hummock_sdk::change_log::{ChangeLogDelta, TableChangeLog};
+use risingwave_common::log::LogSuppressor;
+use risingwave_hummock_sdk::change_log::{EpochNewChangeLog, TableChangeLog};
 use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
@@ -27,10 +30,9 @@ use risingwave_hummock_sdk::version::{GroupDelta, HummockVersion, HummockVersion
 use risingwave_hummock_sdk::{
     CompactionGroupId, FrontendHummockVersionDelta, HummockSstableId, HummockVersionId,
 };
-use risingwave_meta_model::Epoch;
 use risingwave_pb::hummock::{
     CompatibilityVersion, GroupConstruct, HummockVersionDeltas, HummockVersionStats,
-    StateTableInfoDelta,
+    StateTableInfo, StateTableInfoDelta,
 };
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use sea_orm::{ConnectionTrait, EntityTrait};
@@ -50,8 +52,66 @@ fn trigger_delta_log_stats(metrics: &MetaMetrics, total_number: usize) {
 
 #[derive(Default)]
 struct TableChangeLogTransactionDelta {
-    updates: Vec<HashMap<TableId, ChangeLogDelta>>,
+    updates: Vec<HashMap<TableId, EpochNewChangeLog>>,
     delete_all: HashSet<TableId>,
+}
+
+impl TableChangeLogTransactionDelta {
+    fn apply_to_memory(self, table_change_logs: &mut HashMap<TableId, TableChangeLog>) {
+        for updates in self.updates {
+            for (table_id, new_log) in updates {
+                match table_change_logs.entry(table_id) {
+                    Entry::Occupied(entry) => {
+                        entry.into_mut().add_change_log(new_log);
+                    }
+                    Entry::Vacant(entry) => {
+                        entry.insert(TableChangeLog::new(once(new_log)));
+                    }
+                }
+            }
+        }
+
+        table_change_logs.retain(|table_id, _| !self.delete_all.contains(table_id));
+    }
+}
+
+fn collect_table_change_logs_to_delete<'a>(
+    current_change_log_table_ids: impl Iterator<Item = &'a TableId>,
+    change_log_updates: &HashMap<TableId, EpochNewChangeLog>,
+    removed_table_ids: &HashSet<TableId>,
+    state_table_info_delta: &HashMap<TableId, StateTableInfoDelta>,
+    changed_table_info: &HashMap<TableId, Option<StateTableInfo>>,
+) -> HashSet<TableId> {
+    let mut delete_all = HashSet::new();
+    // If a table has no new change log entry (even an empty one), it means we have stopped
+    // maintaining the change log for the table. The change log is also removed with the table.
+    for table_id in current_change_log_table_ids {
+        if removed_table_ids.contains(table_id) {
+            delete_all.insert(*table_id);
+            continue;
+        }
+        if let Some(table_info_delta) = state_table_info_delta.get(table_id)
+            && let Some(Some(prev_table_info)) = changed_table_info.get(table_id)
+            && table_info_delta.committed_epoch > prev_table_info.committed_epoch
+        {
+            // The table existed previously and its committed epoch has progressed.
+        } else {
+            continue;
+        }
+        if !change_log_updates.contains_key(table_id) {
+            delete_all.insert(*table_id);
+            static LOG_SUPPRESSOR: LazyLock<LogSuppressor> =
+                LazyLock::new(|| LogSuppressor::per_second(1));
+            if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
+                tracing::warn!(
+                    suppressed_count,
+                    %table_id,
+                    "table change log dropped due to no further change log at newly committed epoch"
+                );
+            }
+        }
+    }
+    delete_all
 }
 
 pub(super) fn trigger_version_stat(metrics: &MetaMetrics, current_version: &HummockVersion) {
@@ -126,14 +186,14 @@ impl<'a> HummockVersionTransaction<'a> {
         let delta = self.latest_version().version_delta_after();
         SingleDeltaTransaction {
             version_txn: self,
-            delta: Some((delta, HashMap::new())),
+            delta: Some(delta),
         }
     }
 
     fn pre_apply(
         &mut self,
         delta: HummockVersionDelta,
-        change_log_updates: HashMap<TableId, ChangeLogDelta>,
+        change_log_updates: HashMap<TableId, EpochNewChangeLog>,
     ) {
         let (version, deltas, table_change_log_delta) =
             self.pre_applied_version.get_or_insert_with(|| {
@@ -147,7 +207,7 @@ impl<'a> HummockVersionTransaction<'a> {
         // The in-memory change logs are only updated after the metastore transaction succeeds, so
         // complete deletion is derived from the original state. A deletion that becomes eligible
         // after multiple deltas in one transaction may be deferred to the next transaction.
-        let delete_all = HummockVersion::collect_gc_change_log_delta(
+        let delete_all = collect_table_change_logs_to_delete(
             self.orig_table_change_log.keys(),
             &change_log_updates,
             &delta.removed_table_ids,
@@ -169,13 +229,12 @@ impl<'a> HummockVersionTransaction<'a> {
         group_id_to_sub_levels: BTreeMap<CompactionGroupId, Vec<Vec<SstableInfo>>>,
         new_table_ids: &HashMap<TableId, CompactionGroupId>,
         new_table_watermarks: HashMap<TableId, TableWatermarks>,
-        change_log_delta: HashMap<TableId, ChangeLogDelta>,
+        change_log_delta: HashMap<TableId, EpochNewChangeLog>,
         vector_index_delta: HashMap<TableId, VectorIndexDelta>,
         group_id_to_truncate_tables: HashMap<CompactionGroupId, HashSet<TableId>>,
     ) -> HummockVersionDelta {
         let mut new_version_delta = self.new_delta();
         new_version_delta.new_table_watermarks = new_table_watermarks;
-        new_version_delta.set_change_log_delta(change_log_delta);
         new_version_delta.vector_index_delta = vector_index_delta;
 
         for compaction_group in &new_compaction_groups {
@@ -261,7 +320,7 @@ impl<'a> HummockVersionTransaction<'a> {
         });
 
         let time_travel_delta = (*new_version_delta).clone();
-        new_version_delta.pre_apply();
+        new_version_delta.pre_apply_with_table_change_log(change_log_delta);
         time_travel_delta
     }
 }
@@ -270,14 +329,7 @@ impl InMemValTransaction for HummockVersionTransaction<'_> {
     fn commit(self) {
         if let Some((version, deltas, table_change_log_delta)) = self.pre_applied_version {
             *self.orig_version = Arc::new(version);
-            for change_log_delta in table_change_log_delta.updates {
-                HummockVersion::apply_change_log_delta(
-                    self.orig_table_change_log,
-                    &change_log_delta,
-                );
-            }
-            self.orig_table_change_log
-                .retain(|table_id, _| !table_change_log_delta.delete_all.contains(table_id));
+            table_change_log_delta.apply_to_memory(self.orig_table_change_log);
 
             if !self.disable_apply_to_txn {
                 let pb_deltas = deltas.iter().map(|delta| delta.to_protobuf()).collect();
@@ -339,7 +391,7 @@ where
                 .updates
                 .iter()
                 .flat_map(|updates| updates.iter())
-                .map(|(table_id, change_log_delta)| (*table_id, &change_log_delta.new_log));
+                .map(|(table_id, new_log)| (*table_id, new_log));
             let mut stream = stream::iter(insert_iter).chunks(insert_batch_size);
             while let Some(change_log_batch) = stream.next().await {
                 let insert_many = change_log_batch
@@ -355,37 +407,16 @@ where
             }
 
             let delete_batch_size = self.opts.table_change_log_delete_batch_size as usize;
-            // `None` means deleting the whole table change log. Do not encode this as
-            // `u64::MAX`: the meta store epoch type is signed, so casting the sentinel would
-            // overflow and make the SQL predicate match nothing.
-            let delete_iter = table_change_log_delta
-                .updates
-                .iter()
-                .flat_map(|updates| updates.iter())
-                .map(|(table_id, change_log_delta)| {
-                    (*table_id, Some(change_log_delta.truncate_epoch))
-                })
-                .chain(
-                    table_change_log_delta
-                        .delete_all
-                        .iter()
-                        .map(|table_id| (*table_id, None)),
-                );
+            let delete_iter = table_change_log_delta.delete_all.iter().copied();
 
             let mut stream = stream::iter(delete_iter).chunks(delete_batch_size);
             while let Some(change_log_batch) = stream.next().await {
                 let mut condition = Condition::any();
-                for (table_id, truncate_epoch) in change_log_batch {
-                    let mut table_condition = Condition::all().add(
+                for table_id in change_log_batch {
+                    let table_condition = Condition::all().add(
                         risingwave_meta_model::hummock_table_change_log::Column::TableId
                             .eq(table_id),
                     );
-                    if let Some(truncate_epoch) = truncate_epoch {
-                        table_condition = table_condition.add(
-                            risingwave_meta_model::hummock_table_change_log::Column::CheckpointEpoch
-                                .lt(truncate_epoch as Epoch),
-                        );
-                    }
                     condition = condition.add(table_condition);
                 }
                 risingwave_meta_model::hummock_table_change_log::Entity::delete_many()
@@ -400,7 +431,7 @@ where
 
 pub(super) struct SingleDeltaTransaction<'a, 'b> {
     version_txn: &'b mut HummockVersionTransaction<'a>,
-    delta: Option<(HummockVersionDelta, HashMap<TableId, ChangeLogDelta>)>,
+    delta: Option<HummockVersionDelta>,
 }
 
 impl SingleDeltaTransaction<'_, '_> {
@@ -408,13 +439,17 @@ impl SingleDeltaTransaction<'_, '_> {
         self.version_txn.latest_version()
     }
 
-    fn set_change_log_delta(&mut self, change_log_delta: HashMap<TableId, ChangeLogDelta>) {
-        self.delta.as_mut().expect("should exist").1 = change_log_delta;
+    pub(super) fn pre_apply(mut self) {
+        self.version_txn
+            .pre_apply(self.delta.take().unwrap(), HashMap::new());
     }
 
-    pub(super) fn pre_apply(mut self) {
-        let (delta, change_log_delta) = self.delta.take().unwrap();
-        self.version_txn.pre_apply(delta, change_log_delta);
+    fn pre_apply_with_table_change_log(
+        mut self,
+        change_log_updates: HashMap<TableId, EpochNewChangeLog>,
+    ) {
+        self.version_txn
+            .pre_apply(self.delta.take().unwrap(), change_log_updates);
     }
 
     pub(super) fn with_latest_version(
@@ -423,7 +458,7 @@ impl SingleDeltaTransaction<'_, '_> {
     ) {
         f(
             self.version_txn.latest_version(),
-            &mut self.delta.as_mut().expect("should exist").0,
+            self.delta.as_mut().expect("should exist"),
         )
     }
 }
@@ -432,20 +467,20 @@ impl Deref for SingleDeltaTransaction<'_, '_> {
     type Target = HummockVersionDelta;
 
     fn deref(&self) -> &Self::Target {
-        &self.delta.as_ref().expect("should exist").0
+        self.delta.as_ref().expect("should exist")
     }
 }
 
 impl DerefMut for SingleDeltaTransaction<'_, '_> {
     fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.delta.as_mut().expect("should exist").0
+        self.delta.as_mut().expect("should exist")
     }
 }
 
 impl Drop for SingleDeltaTransaction<'_, '_> {
     fn drop(&mut self) {
-        if let Some((delta, change_log_delta)) = self.delta.take() {
-            self.version_txn.pre_apply(delta, change_log_delta);
+        if let Some(delta) = self.delta.take() {
+            self.version_txn.pre_apply(delta, HashMap::new());
         }
     }
 }
@@ -510,41 +545,41 @@ mod tests {
 
     use super::*;
 
-    fn change_log_delta(checkpoint_epoch: u64, truncate_epoch: u64) -> ChangeLogDelta {
-        ChangeLogDelta {
-            truncate_epoch,
-            new_log: EpochNewChangeLog {
-                new_value: vec![],
-                old_value: vec![],
-                non_checkpoint_epochs: vec![],
-                checkpoint_epoch,
-            },
+    fn new_change_log(checkpoint_epoch: u64) -> EpochNewChangeLog {
+        EpochNewChangeLog {
+            new_value: vec![],
+            old_value: vec![],
+            non_checkpoint_epochs: vec![],
+            checkpoint_epoch,
         }
     }
 
     #[test]
-    fn test_apply_change_log_delta() {
+    fn test_apply_table_change_log_transaction_delta() {
         let table_id = TableId::new(1);
-        let mut table_change_logs = HashMap::from([(
-            table_id,
-            TableChangeLog::new([
-                change_log_delta(1, 0).new_log,
-                change_log_delta(2, 0).new_log,
-            ]),
-        )]);
-        HummockVersion::apply_change_log_delta(
-            &mut table_change_logs,
-            &HashMap::from([(table_id, change_log_delta(3, 2))]),
-        );
+        let deleted_table_id = TableId::new(2);
+        let mut table_change_logs = HashMap::from([
+            (
+                table_id,
+                TableChangeLog::new([new_change_log(1), new_change_log(2)]),
+            ),
+            (deleted_table_id, TableChangeLog::new([new_change_log(1)])),
+        ]);
+        TableChangeLogTransactionDelta {
+            updates: vec![HashMap::from([(table_id, new_change_log(3))])],
+            delete_all: HashSet::from([deleted_table_id]),
+        }
+        .apply_to_memory(&mut table_change_logs);
 
         assert_eq!(
             table_change_logs[&table_id].epochs().collect_vec(),
-            vec![2, 3]
+            vec![1, 2, 3]
         );
+        assert!(!table_change_logs.contains_key(&deleted_table_id));
     }
 
     #[test]
-    fn test_collect_gc_change_log_delta() {
+    fn test_collect_table_change_logs_to_delete() {
         let table_id = TableId::new(1);
         let removed_table_id = TableId::new(2);
         let current_table_ids = HashSet::from([table_id, removed_table_id]);
@@ -564,9 +599,9 @@ mod tests {
         )]);
 
         assert_eq!(
-            HummockVersion::collect_gc_change_log_delta(
+            collect_table_change_logs_to_delete(
                 current_table_ids.iter(),
-                &HashMap::<TableId, ChangeLogDelta>::new(),
+                &HashMap::new(),
                 &HashSet::from([removed_table_id]),
                 &state_table_info_delta,
                 &changed_table_info,
@@ -574,9 +609,9 @@ mod tests {
             HashSet::from([table_id, removed_table_id])
         );
         assert_eq!(
-            HummockVersion::collect_gc_change_log_delta(
+            collect_table_change_logs_to_delete(
                 current_table_ids.iter(),
-                &HashMap::from([(table_id, change_log_delta(2, 0))]),
+                &HashMap::from([(table_id, new_change_log(2))]),
                 &HashSet::new(),
                 &state_table_info_delta,
                 &changed_table_info,

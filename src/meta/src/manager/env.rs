@@ -302,6 +302,7 @@ pub struct MetaOpts {
 
     pub table_change_log_insert_batch_size: u64,
     pub table_change_log_delete_batch_size: u64,
+    pub table_change_log_truncate_interval_sec: u64,
 
     pub license_key_path: Option<PathBuf>,
 
@@ -429,6 +430,7 @@ impl MetaOpts {
             serverless_backfill_controller_addr: String::new(),
             table_change_log_insert_batch_size: 1000,
             table_change_log_delete_batch_size: 1000,
+            table_change_log_truncate_interval_sec: 30,
         }
     }
 }

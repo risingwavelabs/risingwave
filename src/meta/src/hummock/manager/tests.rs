@@ -49,14 +49,17 @@ use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::{HummockPinnedVersion, PbLevelType, StateTableInfo};
 use risingwave_rpc_client::HummockMetaClient;
+use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use thiserror_ext::AsReport;
 
 use crate::controller::catalog::CatalogController;
 use crate::controller::cluster::ClusterController;
+use crate::controller::streaming_job::TableChangeLogTruncateInfo;
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction::selector::{ManualCompactionOption, default_compaction_selector};
 use crate::hummock::error::Error;
 use crate::hummock::manager::checkpoint::HummockVersionCheckpoint;
+use crate::hummock::model::ext::to_table_change_log_meta_store_model;
 use crate::hummock::table_write_throughput_statistic::TableWriteThroughputStatisticManager;
 use crate::hummock::test_utils::*;
 use crate::hummock::{CompactorManager, HummockManager, HummockManagerRef, MockHummockMetaClient};
@@ -189,6 +192,78 @@ async fn test_get_table_change_logs_with_inverted_epoch_range() {
             end_epoch: 5
         }
     ));
+}
+
+#[tokio::test]
+async fn test_truncate_table_change_log_persisted_and_in_memory() {
+    let (env, hummock_manager, _, _) = setup_compute_env(80).await;
+    let table_id = TableId::new(1);
+    let old_epoch = test_epoch(10_000);
+    let truncate_epoch = test_epoch(20_000);
+    let committed_epoch = test_epoch(30_000);
+    let change_logs =
+        [old_epoch, truncate_epoch, committed_epoch].map(|checkpoint_epoch| EpochNewChangeLog {
+            new_value: vec![],
+            old_value: vec![],
+            non_checkpoint_epochs: vec![],
+            checkpoint_epoch,
+        });
+
+    {
+        let mut versioning = hummock_manager.versioning.write().await;
+        let mut version = versioning.current_version.as_ref().clone();
+        let mut delta = version.version_delta_after();
+        delta.state_table_info_delta.insert(
+            table_id,
+            risingwave_pb::hummock::StateTableInfoDelta {
+                committed_epoch,
+                compaction_group_id: 1.into(),
+            },
+        );
+        version.apply_version_delta(&delta);
+        versioning.current_version = Arc::new(version);
+        versioning
+            .table_change_log
+            .insert(table_id, TableChangeLog::new(change_logs.clone()));
+    }
+    risingwave_meta_model::hummock_table_change_log::Entity::insert_many(
+        change_logs
+            .iter()
+            .map(|change_log| to_table_change_log_meta_store_model(table_id, change_log)),
+    )
+    .exec(&env.meta_store_ref().conn)
+    .await
+    .unwrap();
+
+    hummock_manager
+        .truncate_table_change_log(TableChangeLogTruncateInfo {
+            subscription_retention_seconds: HashMap::from([(table_id, 10)]),
+            snapshot_backfill_jobs: vec![],
+        })
+        .await
+        .unwrap();
+
+    let persisted_epochs: Vec<risingwave_meta_model::Epoch> =
+        risingwave_meta_model::hummock_table_change_log::Entity::find()
+            .filter(risingwave_meta_model::hummock_table_change_log::Column::TableId.eq(table_id))
+            .select_only()
+            .column(risingwave_meta_model::hummock_table_change_log::Column::CheckpointEpoch)
+            .order_by_asc(risingwave_meta_model::hummock_table_change_log::Column::CheckpointEpoch)
+            .into_tuple()
+            .all(&env.meta_store_ref().conn)
+            .await
+            .unwrap();
+    assert_eq!(
+        persisted_epochs,
+        vec![
+            truncate_epoch as risingwave_meta_model::Epoch,
+            committed_epoch as risingwave_meta_model::Epoch,
+        ]
+    );
+    let in_memory_epochs = hummock_manager.versioning.read().await.table_change_log[&table_id]
+        .epochs()
+        .collect_vec();
+    assert_eq!(in_memory_epochs, vec![truncate_epoch, committed_epoch]);
 }
 fn get_compaction_group_object_ids(
     version: &HummockVersion,

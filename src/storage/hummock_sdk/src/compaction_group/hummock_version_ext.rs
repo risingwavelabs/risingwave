@@ -14,24 +14,20 @@
 
 use std::borrow::Borrow;
 use std::cmp::Ordering;
-use std::collections::hash_map::Entry;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::iter::once;
-use std::sync::{Arc, LazyLock};
+use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VnodeBitmapExt;
-use risingwave_common::log::LogSuppressor;
 use risingwave_pb::hummock::{
-    CompactionConfig, CompatibilityVersion, PbLevelType, StateTableInfo, StateTableInfoDelta,
+    CompactionConfig, CompatibilityVersion, PbLevelType, StateTableInfo,
 };
 use tracing::warn;
 
 use super::group_split::split_sst_with_table_ids;
 use super::{StateTableId, group_split};
-use crate::change_log::{ChangeLogDeltaCommon, TableChangeLogCommon};
 use crate::compact_task::is_compaction_task_expired;
 use crate::compaction_group::StaticCompactionGroupId;
 use crate::key_range::KeyRangeCommon;
@@ -741,74 +737,6 @@ impl HummockVersionCommon<SstableInfo> {
         );
 
         changed_table_info
-    }
-
-    pub fn apply_change_log_delta<T: Clone>(
-        table_change_log: &mut HashMap<TableId, TableChangeLogCommon<T>>,
-        change_log_delta: &HashMap<TableId, ChangeLogDeltaCommon<T>>,
-    ) {
-        for (table_id, change_log_delta) in change_log_delta {
-            let new_change_log = &change_log_delta.new_log;
-            match table_change_log.entry(*table_id) {
-                Entry::Occupied(entry) => {
-                    let change_log = entry.into_mut();
-                    change_log.add_change_log(new_change_log.clone());
-                }
-                Entry::Vacant(entry) => {
-                    entry.insert(TableChangeLogCommon::new(once(new_change_log.clone())));
-                }
-            };
-        }
-
-        // truncate the remaining table change log
-        for (table_id, change_log_delta) in change_log_delta {
-            if let Some(change_log) = table_change_log.get_mut(table_id) {
-                change_log.truncate(change_log_delta.truncate_epoch);
-            }
-        }
-    }
-
-    /// Returns the log deltas required to truncate the entire change log for a table.
-    pub fn collect_gc_change_log_delta<'a, T: Clone>(
-        current_change_log_table_ids: impl Iterator<Item = &'a TableId>,
-        change_log_delta: &HashMap<TableId, ChangeLogDeltaCommon<T>>,
-        removed_table_ids: &HashSet<TableId>,
-        state_table_info_delta: &HashMap<TableId, StateTableInfoDelta>,
-        changed_table_info: &HashMap<TableId, Option<StateTableInfo>>,
-    ) -> HashSet<TableId> {
-        let mut gc_change_log_delta = HashSet::new();
-        // If a table has no new change log entry (even an empty one), it means we have stopped maintained
-        // the change log for the table, and then we will remove the table change log.
-        // The table change log will also be removed when the table id is removed.
-        for table_id in current_change_log_table_ids {
-            if removed_table_ids.contains(table_id) {
-                gc_change_log_delta.insert(*table_id);
-                continue;
-            }
-            if let Some(table_info_delta) = state_table_info_delta.get(table_id)
-                && let Some(Some(prev_table_info)) = changed_table_info.get(table_id)
-                && table_info_delta.committed_epoch > prev_table_info.committed_epoch
-            {
-                // the table exists previously, and its committed epoch has progressed.
-            } else {
-                // otherwise, the table change log should be kept anyway
-                continue;
-            }
-            let contains = change_log_delta.contains_key(table_id);
-            if !contains {
-                gc_change_log_delta.insert(*table_id);
-                static LOG_SUPPRESSOR: LazyLock<LogSuppressor> =
-                    LazyLock::new(|| LogSuppressor::per_second(1));
-                if let Ok(suppressed_count) = LOG_SUPPRESSOR.check() {
-                    warn!(
-                        suppressed_count,
-                        %table_id,
-                        "table change log dropped due to no further change log at newly committed epoch"
-                    );
-                }
-            }
-        }
-        gc_change_log_delta
     }
 
     pub fn build_branched_sst_info(&self) -> BTreeMap<HummockSstableObjectId, BranchedSstInfo> {
