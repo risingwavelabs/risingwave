@@ -381,15 +381,14 @@ impl LogicalJoin {
             dist_key_in_order_key_pos.push(pos);
         }
         // The shortest prefix of order key that contains distribution key.
+        //
+        // If the lookup table has a singleton distribution (i.e. an empty distribution key),
+        // any non-empty prefix of the order key can be used for the lookup, so we require a
+        // prefix of length at least 1.
         let shortest_prefix_len = dist_key_in_order_key_pos
             .iter()
             .max()
-            .map_or(0, |pos| pos + 1);
-
-        // Distributed lookup join can't support lookup table with a singleton distribution.
-        if shortest_prefix_len == 0 {
-            return Ok(None);
-        }
+            .map_or(1, |pos| pos + 1);
 
         // Reorder the join equal predicate to match the order key.
         let mut reorder_idx = Vec::with_capacity(shortest_prefix_len);

@@ -534,7 +534,7 @@ impl MetadataManager {
         &self,
         source_id: SourceId,
         rate_limit: Option<u32>,
-    ) -> MetaResult<(HashSet<JobId>, HashMap<FragmentId, PbStreamNode>)> {
+    ) -> MetaResult<HashMap<FragmentId, PbStreamNode>> {
         self.catalog_controller
             .update_source_rate_limit_by_source_id(source_id as _, rate_limit)
             .await

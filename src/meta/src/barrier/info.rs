@@ -34,14 +34,16 @@ use risingwave_pb::id::SubscriberId;
 use risingwave_pb::meta::PbFragmentWorkerSlotMapping;
 use risingwave_pb::meta::subscribe_response::Operation;
 use risingwave_pb::source::PbCdcTableSnapshotSplits;
+use risingwave_pb::stream_plan::PbUpstreamSinkInfo;
+use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{PbStreamNode, PbUpstreamSinkInfo};
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::{info, warn};
 
 use crate::barrier::cdc_progress::{CdcProgress, CdcTableBackfillTracker};
 use crate::barrier::command::{
-    CreateStreamingJobCommandInfo, PostCollectCommand, ReplaceStreamJobPlan,
+    CreateStreamingJobCommandInfo, PostCollectCommand, ReplaceStreamJobPlan, ThrottleConfigMap,
+    extract_throttle_config,
 };
 use crate::barrier::edge_builder::{
     EdgeBuilderFragmentInfo, FragmentEdgeBuildResult, FragmentEdgeBuilder,
@@ -1153,15 +1155,15 @@ impl InflightDatabaseInfo {
     /// Sync inflight `nodes` so a later reschedule won't materialize new actors from stale data.
     pub(crate) fn pre_apply_throttle(
         &mut self,
-        fragment_id: FragmentId,
-        stream_node: &PbStreamNode,
-    ) {
-        // Snapshot-backfill creating jobs live outside main inflight; their throttles
-        // flow through `on_new_upstream_barrier`.
-        if !self.fragment_location.contains_key(&fragment_id) {
-            return;
-        }
-        self.fragment_mut(fragment_id).0.nodes = stream_node.clone();
+        config: &mut ThrottleConfigMap,
+    ) -> Option<Mutation> {
+        extract_throttle_config(config, |fragment_id, stream_node| {
+            if !self.fragment_location.contains_key(&fragment_id) {
+                return false;
+            }
+            self.fragment_mut(fragment_id).0.nodes = stream_node.clone();
+            true
+        })
     }
 
     /// Update split assignments for actors in fragments.
