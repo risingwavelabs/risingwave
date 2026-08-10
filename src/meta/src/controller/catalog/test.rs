@@ -210,6 +210,26 @@ mod tests {
 
         let mut sink_ids = Vec::new();
         let test_sink_tuples = [("s1", mv1_id), ("s2", mv2_id)];
+
+        fn assert_incoming_sink_drop_error<T>(
+            error: &MetaError,
+            test_sink_tuples: &[(&str, T)],
+        ) {
+            let message = error.to_string();
+
+            assert!(
+                message.contains("Table used by incoming sinks"),
+                "expected an incoming-sink dependency error, got: {message}"
+            );
+
+            assert!(
+                test_sink_tuples
+                    .iter()
+                    .all(|(sink_name, _)| message.contains(*sink_name)),
+                "expected the error to mention all incoming sinks, got: {message}"
+            );
+        }
+
         for (name, source) in test_sink_tuples {
             let mut job = crate::manager::StreamingJob::Sink(PbSink {
                 name: name.to_owned(),
@@ -269,17 +289,20 @@ mod tests {
         drop(inner);
 
         std::sync::Arc::make_mut(&mut mgr.env.opts).protect_drop_table_with_incoming_sink = true;
-        mgr.drop_object(ObjectType::Table, target_table_id, DropMode::Restrict)
+        let error = mgr.drop_object(ObjectType::Table, target_table_id, DropMode::Restrict)
             .await
             .expect_err("protected RESTRICT drop should fail for a table with incoming sinks");
-        mgr.drop_object(ObjectType::Table, target_table_id, DropMode::Cascade)
+        assert_incoming_sink_drop_error(&error, &test_sink_tuples);
+        let error = mgr.drop_object(ObjectType::Table, target_table_id, DropMode::Cascade)
             .await
             .expect_err("protected CASCADE drop should fail for a table with incoming sinks");
+        assert_incoming_sink_drop_error(&error, &test_sink_tuples);
 
         std::sync::Arc::make_mut(&mut mgr.env.opts).protect_drop_table_with_incoming_sink = false;
-        mgr.drop_object(ObjectType::Table, target_table_id, DropMode::Restrict)
+        let error = mgr.drop_object(ObjectType::Table, target_table_id, DropMode::Restrict)
             .await
             .expect_err("unprotected RESTRICT drop should fail for a table with incoming sinks");
+        assert_incoming_sink_drop_error(&error, &test_sink_tuples);
         mgr.drop_object(ObjectType::Table, target_table_id, DropMode::Cascade)
             .await
             .expect("unprotected CASCADE drop should succeed");
