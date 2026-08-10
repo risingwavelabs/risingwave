@@ -1398,12 +1398,18 @@ impl DdlService for DdlServiceImpl {
             for table in tables {
                 // Since we only support `ADD` and `DROP` column, we check whether the new columns and the original columns
                 // is a subset of the other.
-                let original_column_types: HashMap<String, DataType> = table
+                let original_columns_by_name: HashMap<String, ColumnCatalog> = table
                     .columns
                     .iter()
                     .filter_map(|col| {
-                        cdc_auto_schema_change_comparable_column(&ColumnCatalog::from(col.clone()))
+                        let col = ColumnCatalog::from(col.clone());
+                        cdc_auto_schema_change_comparable_column(&col).map(|(name, _)| (name, col))
                     })
+                    .collect();
+
+                let original_column_types: HashMap<String, DataType> = original_columns_by_name
+                    .iter()
+                    .map(|(name, col)| (name.clone(), col.data_type().clone()))
                     .collect();
 
                 let original_column_names: HashSet<String> =
@@ -1447,7 +1453,7 @@ impl DdlService for DdlServiceImpl {
                             table_change.clone(),
                             PbCdcTableType::try_from(table.cdc_table_type.unwrap_or_default())
                                 .unwrap_or(PbCdcTableType::Unspecified),
-                            &original_column_types,
+                            &original_columns_by_name,
                         )
                     } else {
                         // Keep the raw schema change for non-add/drop-only cases, such as a
@@ -2005,7 +2011,7 @@ fn cdc_auto_schema_change_comparable_column(column: &ColumnCatalog) -> Option<(S
 fn normalize_cdc_auto_schema_change_existing_column_types(
     mut table_change: TableSchemaChange,
     cdc_table_type: PbCdcTableType,
-    original_column_types: &HashMap<String, DataType>,
+    original_columns_by_name: &HashMap<String, ColumnCatalog>,
 ) -> TableSchemaChange {
     for column in &mut table_change.columns {
         let mut column_catalog = ColumnCatalog::from(column.clone());
@@ -2013,14 +2019,19 @@ fn normalize_cdc_auto_schema_change_existing_column_types(
             continue;
         }
 
-        if let Some(original_type) = original_column_types.get(&column_catalog.column_desc.name)
+        if let Some(original_column) =
+            original_columns_by_name.get(&column_catalog.column_desc.name)
             && cdc_auto_schema_change_existing_type_compatible(
                 cdc_table_type,
-                original_type,
+                original_column.data_type(),
                 column_catalog.data_type(),
             )
         {
-            column_catalog.column_desc.data_type = original_type.clone();
+            column_catalog.column_desc.data_type = original_column.data_type().clone();
+            column_catalog.column_desc.generated_or_default_column = original_column
+                .column_desc
+                .generated_or_default_column
+                .clone();
             *column = column_catalog.to_protobuf();
         }
     }
@@ -2031,13 +2042,29 @@ fn normalize_cdc_auto_schema_change_existing_column_types(
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId};
+    use risingwave_common::types::ScalarImpl;
     use risingwave_pb::ddl_service::table_schema_change::TableChangeType;
+    use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 
     use super::*;
 
     fn pb_column(name: &str, data_type: DataType) -> risingwave_pb::plan_common::ColumnCatalog {
         ColumnCatalog::visible(ColumnDesc::named(name, ColumnId::placeholder(), data_type))
             .to_protobuf()
+    }
+
+    fn pb_column_with_default_value(
+        name: &str,
+        data_type: DataType,
+        snapshot_value: ScalarImpl,
+    ) -> risingwave_pb::plan_common::ColumnCatalog {
+        ColumnCatalog::visible(ColumnDesc::named_with_default_value(
+            name,
+            ColumnId::placeholder(),
+            data_type,
+            Some(snapshot_value),
+        ))
+        .to_protobuf()
     }
 
     fn pb_table_change(
@@ -2053,9 +2080,23 @@ mod tests {
 
     #[test]
     fn test_cdc_auto_schema_change_normalizes_compatible_existing_column_types() {
-        let original_column_types = HashMap::from([
-            ("id".to_owned(), DataType::Int64),
-            ("v".to_owned(), DataType::Varchar),
+        let original_columns_by_name = HashMap::from([
+            (
+                "id".to_owned(),
+                ColumnCatalog::visible(ColumnDesc::named(
+                    "id",
+                    ColumnId::placeholder(),
+                    DataType::Int64,
+                )),
+            ),
+            (
+                "v".to_owned(),
+                ColumnCatalog::visible(ColumnDesc::named(
+                    "v",
+                    ColumnId::placeholder(),
+                    DataType::Varchar,
+                )),
+            ),
         ]);
         let table_change = pb_table_change(vec![
             pb_column("id", DataType::Int32),
@@ -2066,7 +2107,7 @@ mod tests {
         let normalized = normalize_cdc_auto_schema_change_existing_column_types(
             table_change,
             PbCdcTableType::Mysql,
-            &original_column_types,
+            &original_columns_by_name,
         );
         let columns = normalized
             .columns
@@ -2078,5 +2119,38 @@ mod tests {
         assert_eq!(columns["id"], DataType::Int64);
         assert_eq!(columns["v"], DataType::Varchar);
         assert_eq!(columns["note"], DataType::Varchar);
+    }
+
+    #[test]
+    fn test_cdc_auto_schema_change_preserves_default_when_normalizing_type() {
+        let original = ColumnCatalog::visible(ColumnDesc::named_with_default_value(
+            "v",
+            ColumnId::placeholder(),
+            DataType::Int64,
+            Some(ScalarImpl::Int64(1)),
+        ));
+        let original_columns_by_name = HashMap::from([("v".to_owned(), original.clone())]);
+        let table_change = pb_table_change(vec![pb_column_with_default_value(
+            "v",
+            DataType::Int32,
+            ScalarImpl::Int32(1),
+        )]);
+
+        let normalized = normalize_cdc_auto_schema_change_existing_column_types(
+            table_change,
+            PbCdcTableType::Mysql,
+            &original_columns_by_name,
+        );
+        let column = ColumnCatalog::from(normalized.columns.into_iter().next().unwrap());
+
+        assert_eq!(column.column_desc.data_type, DataType::Int64);
+        assert_eq!(
+            column.column_desc.generated_or_default_column,
+            original.column_desc.generated_or_default_column
+        );
+        assert!(matches!(
+            column.column_desc.generated_or_default_column,
+            Some(GeneratedOrDefaultColumn::DefaultColumn(_))
+        ));
     }
 }
