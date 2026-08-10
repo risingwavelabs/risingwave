@@ -26,15 +26,16 @@ pub(crate) mod report;
 use std::collections::{HashMap, VecDeque};
 use std::sync::Arc;
 
+use risingwave_pb::id::IcebergCompactionTaskId;
 use tokio::sync::Notify;
 
 /// Unique key combining `(task_id, plan_index)` since one task can have multiple plans.
-pub(crate) type TaskKey = (u64, usize);
+pub(crate) type TaskKey = (IcebergCompactionTaskId, usize);
 
 /// Task metadata for queue operations.
 #[derive(Debug, Clone)]
 pub struct IcebergTaskMeta {
-    pub task_id: u64,
+    pub task_id: IcebergCompactionTaskId,
     pub plan_index: usize,
     /// Must be in range `1..=max_parallelism`
     pub required_parallelism: u32,
@@ -237,7 +238,7 @@ impl IcebergTaskQueue {
     pub fn finish_running(&mut self, task_key: TaskKey) -> bool {
         let Some(required) = self.inner.id_map.remove(&task_key) else {
             tracing::warn!(
-                task_id = task_key.0,
+                task_id = %task_key.0,
                 plan_index = task_key.1,
                 "finish_running called for unknown task key, possible bug: double-finish or invalid key"
             );
@@ -254,7 +255,7 @@ impl IcebergTaskQueue {
     /// Cancel all waiting plans belonging to the given task.
     ///
     /// Returns the number of waiting plans removed from the queue.
-    pub fn cancel_waiting_task(&mut self, task_id: u64) -> usize {
+    pub fn cancel_waiting_task(&mut self, task_id: IcebergCompactionTaskId) -> usize {
         let mut retained = VecDeque::with_capacity(self.inner.deque.len());
         let mut cancelled_parallelism = 0;
         let mut cancelled_count = 0;
@@ -290,7 +291,7 @@ mod tests {
 
     fn mk_meta(id: u64, plan_index: usize, p: u32) -> IcebergTaskMeta {
         IcebergTaskMeta {
-            task_id: id,
+            task_id: id.into(),
             plan_index,
             required_parallelism: p,
         }
@@ -303,11 +304,11 @@ mod tests {
         assert_eq!(q.waiting_parallelism_sum(), 4);
 
         let popped = q.pop().expect("should pop");
-        assert_eq!(popped.meta.task_id, 1);
+        assert_eq!(popped.meta.task_id.as_raw_id(), 1);
         assert_eq!(q.waiting_parallelism_sum(), 0);
         assert_eq!(q.running_parallelism_sum(), 4);
 
-        assert!(q.finish_running((1, 0)));
+        assert!(q.finish_running((1.into(), 0)));
         assert_eq!(q.running_parallelism_sum(), 0);
     }
 
@@ -318,9 +319,9 @@ mod tests {
         assert_eq!(q.push(mk_meta(2, 0, 2), None), PushResult::Added);
         assert_eq!(q.push(mk_meta(3, 0, 2), None), PushResult::Added);
 
-        assert_eq!(q.pop().unwrap().meta.task_id, 1);
-        assert_eq!(q.pop().unwrap().meta.task_id, 2);
-        assert_eq!(q.pop().unwrap().meta.task_id, 3);
+        assert_eq!(q.pop().unwrap().meta.task_id.as_raw_id(), 1);
+        assert_eq!(q.pop().unwrap().meta.task_id.as_raw_id(), 2);
+        assert_eq!(q.pop().unwrap().meta.task_id.as_raw_id(), 3);
     }
 
     #[test]
@@ -359,9 +360,9 @@ mod tests {
 
         // After pop and finish, the key can be reused
         let p = q.pop().unwrap();
-        assert_eq!(p.meta.task_id, 1);
+        assert_eq!(p.meta.task_id.as_raw_id(), 1);
         assert_eq!(p.meta.plan_index, 0);
-        q.finish_running((1, 0));
+        q.finish_running((1.into(), 0));
 
         // Now the same key can be pushed again
         assert_eq!(q.push(mk_meta(1, 0, 4), None), PushResult::Added);
@@ -374,20 +375,20 @@ mod tests {
         assert_eq!(q.push(mk_meta(2, 0, 4), None), PushResult::Added);
 
         let p1 = q.pop().unwrap();
-        assert_eq!(p1.meta.task_id, 1);
+        assert_eq!(p1.meta.task_id.as_raw_id(), 1);
         // Not enough remaining parallelism (only 2 left)
         assert!(q.pop().is_none());
 
         // Finish first, then second becomes schedulable
-        assert!(q.finish_running((1, 0)));
+        assert!(q.finish_running((1.into(), 0)));
         let p2 = q.pop().unwrap();
-        assert_eq!(p2.meta.task_id, 2);
+        assert_eq!(p2.meta.task_id.as_raw_id(), 2);
     }
 
     #[test]
     fn test_finish_nonexistent_task() {
         let mut q = IcebergTaskQueue::new(4, 16);
-        assert!(!q.finish_running((999, 0)));
+        assert!(!q.finish_running((999.into(), 0)));
         assert_eq!(q.running_parallelism_sum(), 0);
     }
 
@@ -399,11 +400,11 @@ mod tests {
         assert_eq!(q.running_parallelism_sum(), 4);
 
         // First finish succeeds
-        assert!(q.finish_running((1, 0)));
+        assert!(q.finish_running((1.into(), 0)));
         assert_eq!(q.running_parallelism_sum(), 0);
 
         // Second finish on same key returns false (triggers warn log)
-        assert!(!q.finish_running((1, 0)));
+        assert!(!q.finish_running((1.into(), 0)));
         assert_eq!(q.running_parallelism_sum(), 0);
     }
 
@@ -441,16 +442,16 @@ mod tests {
         // Pop all
         for i in 0..3 {
             let p = q.pop().unwrap();
-            assert_eq!(p.meta.task_id, task_id);
+            assert_eq!(p.meta.task_id.as_raw_id(), task_id);
             assert_eq!(p.meta.plan_index, i);
         }
         assert_eq!(q.running_parallelism_sum(), 9);
 
         // Finish out of order
-        assert!(q.finish_running((task_id, 1)));
+        assert!(q.finish_running((task_id.into(), 1)));
         assert_eq!(q.running_parallelism_sum(), 5);
-        assert!(q.finish_running((task_id, 0)));
-        assert!(q.finish_running((task_id, 2)));
+        assert!(q.finish_running((task_id.into(), 0)));
+        assert!(q.finish_running((task_id.into(), 2)));
         assert_eq!(q.running_parallelism_sum(), 0);
     }
 
@@ -464,18 +465,18 @@ mod tests {
         assert_eq!(q.push(mk_meta(2, 0, 2), None), PushResult::Added);
 
         let popped = q.pop().unwrap();
-        assert_eq!(popped.meta.task_id, task_id);
+        assert_eq!(popped.meta.task_id.as_raw_id(), task_id);
         assert_eq!(popped.meta.plan_index, 0);
         assert_eq!(q.running_parallelism_sum(), 3);
         assert_eq!(q.waiting_parallelism_sum(), 6);
 
-        assert_eq!(q.cancel_waiting_task(task_id), 1);
+        assert_eq!(q.cancel_waiting_task(task_id.into()), 1);
         assert_eq!(q.running_parallelism_sum(), 3);
         assert_eq!(q.waiting_parallelism_sum(), 2);
 
-        assert!(q.finish_running((task_id, 0)));
+        assert!(q.finish_running((task_id.into(), 0)));
         let next = q.pop().unwrap();
-        assert_eq!(next.meta.task_id, 2);
+        assert_eq!(next.meta.task_id.as_raw_id(), 2);
         assert_eq!(next.meta.plan_index, 0);
     }
 
@@ -483,7 +484,7 @@ mod tests {
     fn test_empty_queue_behavior() {
         let mut q = IcebergTaskQueue::new(8, 32);
         assert!(q.pop().is_none());
-        assert!(!q.finish_running((1, 0)));
+        assert!(!q.finish_running((1.into(), 0)));
         assert_eq!(q.waiting_parallelism_sum(), 0);
         assert_eq!(q.running_parallelism_sum(), 0);
     }

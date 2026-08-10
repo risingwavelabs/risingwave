@@ -21,4 +21,5 @@ mod event_log;
 mod locality_backfill;
 mod nexmark_recovery;
 mod serving_mapping;
+mod serving_mapping_start_order;
 mod time_travel;

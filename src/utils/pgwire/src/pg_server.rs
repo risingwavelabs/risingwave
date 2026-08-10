@@ -223,27 +223,44 @@ const ALLOWED_JWT_ALGORITHMS: &[Algorithm] = &[
     Algorithm::PS512,
 ];
 const RSA_JWK_KEY_TYPE: &str = "RSA";
+/// Optional OAuth user option overriding the expected JWT `aud`.
+const OAUTH_AUDIENCE_KEY: &str = "audience";
 
 async fn validate_jwt(
     jwt: &str,
     jwks_url: &str,
     issuer: &str,
-    cluster_id: &str,
+    audience: &str,
     metadata: &HashMap<String, String>,
 ) -> Result<bool, BoxedError> {
     let jwks: Jwks = reqwest::get(jwks_url).await?.json().await?;
-    validate_jwt_with_jwks(jwt, &jwks, issuer, cluster_id, metadata)
+    validate_jwt_with_jwks(jwt, &jwks, issuer, audience, metadata)
 }
 
 fn audience_from_cluster_id(cluster_id: &str) -> String {
     format!("urn:risingwave:cluster:{}", cluster_id)
 }
 
+fn resolve_oauth_audience(
+    configured: Option<String>,
+    cluster_id: &str,
+) -> Result<String, BoxedError> {
+    let Some(configured_audience) = configured else {
+        return Ok(audience_from_cluster_id(cluster_id));
+    };
+
+    let audience = configured_audience.trim();
+    if audience.is_empty() {
+        return Err(format!("OAuth option `{OAUTH_AUDIENCE_KEY}` cannot be empty").into());
+    }
+    Ok(audience.to_owned())
+}
+
 fn validate_jwt_with_jwks(
     jwt: &str,
     jwks: &Jwks,
     issuer: &str,
-    cluster_id: &str,
+    audience: &str,
     metadata: &HashMap<String, String>,
 ) -> Result<bool, BoxedError> {
     let header = decode_header(jwt)?;
@@ -291,7 +308,7 @@ fn validate_jwt_with_jwks(
     let decoding_key = DecodingKey::from_rsa_components(n, e)?;
     let mut validation = Validation::new(header.alg);
     validation.set_issuer(&[issuer]);
-    validation.set_audience(&[audience_from_cluster_id(cluster_id)]); // JWT 'aud' claim must match cluster_id
+    validation.set_audience(&[audience]);
     validation.set_required_spec_claims(&["exp", "iss", "aud"]);
     let token_data = decode::<HashMap<String, serde_json::Value>>(jwt, &decoding_key, &validation)?;
 
@@ -319,11 +336,14 @@ impl UserAuthenticator {
                 let mut metadata = metadata.clone();
                 let jwks_url = metadata.remove("jwks_url").unwrap();
                 let issuer = metadata.remove("issuer").unwrap();
+                let audience =
+                    resolve_oauth_audience(metadata.remove(OAUTH_AUDIENCE_KEY), cluster_id)
+                        .map_err(PsqlError::StartupError)?;
                 validate_jwt(
                     &String::from_utf8_lossy(password),
                     &jwks_url,
                     &issuer,
-                    cluster_id,
+                    &audience,
                     &metadata,
                 )
                 .await
@@ -679,7 +699,7 @@ mod tests {
         use rsa::{RsaPrivateKey, RsaPublicKey};
         use serde_json::json;
 
-        use crate::pg_server::{Jwk, Jwks, validate_jwt_with_jwks};
+        use crate::pg_server::{Jwk, Jwks, resolve_oauth_audience, validate_jwt_with_jwks};
 
         fn create_test_rsa_keys() -> (RsaPrivateKey, RsaPublicKey) {
             let mut rng = rand::thread_rng();
@@ -778,12 +798,53 @@ mod tests {
                 &jwt,
                 &jwks,
                 "https://test-issuer.com",
-                "test-cluster-id",
+                "urn:risingwave:cluster:test-cluster-id",
                 &metadata,
             );
 
             let error = result.unwrap_err();
             assert!(error.to_string().contains("InvalidAudience"));
+        }
+
+        #[test]
+        fn test_jwt_with_configured_audience() {
+            let (private_key, public_key) = create_test_rsa_keys();
+            let jwks = create_test_jwks(&public_key, "test-kid", Some("RS256"));
+
+            let mut additional_claims = HashMap::new();
+            additional_claims.insert("aud".to_owned(), json!(["urn:sn:cloud:o-for6u"]));
+            let jwt = create_jwt_token(
+                &private_key,
+                "test-kid",
+                Algorithm::RS256,
+                "https://test-issuer.com",
+                None,
+                get_future_timestamp(),
+                additional_claims,
+            );
+
+            let result = validate_jwt_with_jwks(
+                &jwt,
+                &jwks,
+                "https://test-issuer.com",
+                "urn:sn:cloud:o-for6u",
+                &HashMap::new(),
+            );
+
+            assert!(result.unwrap());
+        }
+
+        #[test]
+        fn test_empty_configured_audience() {
+            let error =
+                resolve_oauth_audience(Some("  ".to_owned()), "test-cluster-id").unwrap_err();
+            assert!(error.to_string().contains("cannot be empty"));
+        }
+
+        #[test]
+        fn test_default_audience_from_cluster_id() {
+            let audience = resolve_oauth_audience(None, "test-cluster-id").unwrap();
+            assert_eq!(audience, "urn:risingwave:cluster:test-cluster-id");
         }
 
         #[test]
@@ -807,7 +868,7 @@ mod tests {
                 &jwt,
                 &jwks,
                 "https://test-issuer.com",
-                "test-cluster-id",
+                "urn:risingwave:cluster:test-cluster-id",
                 &metadata,
             );
 
@@ -836,7 +897,7 @@ mod tests {
                 &jwt,
                 &jwks,
                 "https://test-issuer.com",
-                "test-cluster-id",
+                "urn:risingwave:cluster:test-cluster-id",
                 &metadata,
             );
 
@@ -865,7 +926,7 @@ mod tests {
                 &jwt,
                 &jwks,
                 "https://test-issuer.com",
-                "test-cluster-id",
+                "urn:risingwave:cluster:test-cluster-id",
                 &metadata,
             );
 
@@ -896,7 +957,7 @@ mod tests {
                 &jwt,
                 &jwks,
                 "https://test-issuer.com",
-                "test-cluster-id",
+                "urn:risingwave:cluster:test-cluster-id",
                 &HashMap::new(),
             );
 
@@ -929,7 +990,7 @@ mod tests {
                 &jwt,
                 &jwks,
                 "https://test-issuer.com",
-                "test-cluster-id",
+                "urn:risingwave:cluster:test-cluster-id",
                 &metadata,
             );
 
@@ -960,7 +1021,7 @@ mod tests {
                 &jwt,
                 &jwks,
                 "https://test-issuer.com",
-                "test-cluster-id",
+                "urn:risingwave:cluster:test-cluster-id",
                 &metadata,
             );
 
@@ -996,7 +1057,7 @@ mod tests {
                 &jwt,
                 &jwks,
                 "https://test-issuer.com",
-                "test-cluster-id",
+                "urn:risingwave:cluster:test-cluster-id",
                 &metadata,
             );
 
@@ -1030,7 +1091,7 @@ mod tests {
                 &jwt,
                 &jwks,
                 "https://test-issuer.com",
-                "test-cluster-id",
+                "urn:risingwave:cluster:test-cluster-id",
                 &metadata,
             );
 
@@ -1060,7 +1121,7 @@ mod tests {
                 &jwt,
                 &jwks,
                 "https://test-issuer.com",
-                "test-cluster-id",
+                "urn:risingwave:cluster:test-cluster-id",
                 &HashMap::new(),
             );
 
@@ -1093,7 +1154,7 @@ mod tests {
                 &jwt,
                 &jwks,
                 "https://test-issuer.com",
-                "test-cluster-id",
+                "urn:risingwave:cluster:test-cluster-id",
                 &HashMap::new(),
             );
 
@@ -1157,7 +1218,7 @@ mod tests {
                 &jwt,
                 &jwks,
                 "https://test-issuer.com",
-                "test-cluster-id",
+                "urn:risingwave:cluster:test-cluster-id",
                 &HashMap::new(),
             );
 
@@ -1191,7 +1252,7 @@ mod tests {
                 &jwt,
                 &jwks,
                 "https://test-issuer.com",
-                "test-cluster-id",
+                "urn:risingwave:cluster:test-cluster-id",
                 &HashMap::new(),
             );
 
@@ -1223,7 +1284,7 @@ mod tests {
                 &jwt,
                 &jwks,
                 "https://test-issuer.com",
-                "test-cluster-id",
+                "urn:risingwave:cluster:test-cluster-id",
                 &HashMap::new(),
             );
 

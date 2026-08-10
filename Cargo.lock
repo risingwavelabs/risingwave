@@ -6840,7 +6840,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.8.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=08a18f4116382e7c9691d63a91f1b0a0342a40b1#08a18f4116382e7c9691d63a91f1b0a0342a40b1"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=6bd8e98fe920def857f80024f5a666c9631e80f4#6bd8e98fe920def857f80024f5a666c9631e80f4"
 dependencies = [
  "anyhow",
  "apache-avro 0.21.0 (registry+https://github.com/rust-lang/crates.io-index)",
@@ -6899,7 +6899,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-glue"
 version = "0.8.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=08a18f4116382e7c9691d63a91f1b0a0342a40b1#08a18f4116382e7c9691d63a91f1b0a0342a40b1"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=6bd8e98fe920def857f80024f5a666c9631e80f4#6bd8e98fe920def857f80024f5a666c9631e80f4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -6914,7 +6914,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-rest"
 version = "0.8.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=08a18f4116382e7c9691d63a91f1b0a0342a40b1#08a18f4116382e7c9691d63a91f1b0a0342a40b1"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=6bd8e98fe920def857f80024f5a666c9631e80f4#6bd8e98fe920def857f80024f5a666c9631e80f4"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -6936,7 +6936,7 @@ dependencies = [
 [[package]]
 name = "iceberg-compaction-core"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=b67029788bdb0a5489cfc2f6fefc1193039f8b78#b67029788bdb0a5489cfc2f6fefc1193039f8b78"
+source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=200543af4e56bc9c476e9782e3664ab5b47a568b#200543af4e56bc9c476e9782e3664ab5b47a568b"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -6965,7 +6965,7 @@ dependencies = [
 [[package]]
 name = "iceberg-datafusion"
 version = "0.8.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=08a18f4116382e7c9691d63a91f1b0a0342a40b1#08a18f4116382e7c9691d63a91f1b0a0342a40b1"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=6bd8e98fe920def857f80024f5a666c9631e80f4#6bd8e98fe920def857f80024f5a666c9631e80f4"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9036,16 +9036,16 @@ dependencies = [
 
 [[package]]
 name = "opensearch"
-version = "2.3.0"
+version = "2.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a62b025c3503d3d53eaba3b6f14adb955af9f69fc71141b4d030a4e5331f5d42"
+checksum = "2af6815a23449a0860c8fe049a828c3589d3ad56d3b5875d0d1f340d1291871e"
 dependencies = [
  "base64 0.22.1",
  "bytes",
  "dyn-clone",
  "lazy_static",
  "percent-encoding",
- "reqwest 0.12.25",
+ "reqwest 0.13.2",
  "rustc_version",
  "serde",
  "serde_json",
@@ -11284,11 +11284,13 @@ dependencies = [
  "http-body-util",
  "hyper 1.9.0",
  "hyper-rustls 0.27.5",
+ "hyper-tls",
  "hyper-util",
  "js-sys",
  "log",
  "mime",
  "mime_guess",
+ "native-tls",
  "percent-encoding",
  "pin-project-lite",
  "quinn",
@@ -11300,6 +11302,7 @@ dependencies = [
  "serde_urlencoded",
  "sync_wrapper 1.0.2",
  "tokio",
+ "tokio-native-tls",
  "tokio-rustls 0.26.4",
  "tokio-util",
  "tower",
@@ -11468,6 +11471,7 @@ dependencies = [
  "assert_matches",
  "async-recursion",
  "async-trait",
+ "await-tree",
  "either",
  "futures",
  "futures-async-stream",
@@ -11683,6 +11687,7 @@ dependencies = [
  "opentelemetry_sdk",
  "parking_lot 0.12.5",
  "parquet-variant",
+ "parquet-variant-compute",
  "parquet-variant-json",
  "parse-display",
  "paste",
@@ -12993,6 +12998,7 @@ dependencies = [
  "pretty_assertions",
  "rand 0.9.2",
  "rand_chacha 0.9.0",
+ "risingwave_batch",
  "risingwave_batch_executors",
  "risingwave_common",
  "risingwave_compactor",
@@ -13204,7 +13210,6 @@ dependencies = [
  "moka",
  "multimap",
  "parking_lot 0.12.5",
- "parquet",
  "paste",
  "pin-project",
  "pretty_assertions",

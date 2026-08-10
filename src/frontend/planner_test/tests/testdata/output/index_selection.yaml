@@ -659,13 +659,14 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [1:Int32] }
-      └─BatchFilter { predicate: (mc.id = 1:Int32) AND (mc.tag = 'x':Varchar) }
-        └─BatchScan { table: mc, columns: [mc.id, mc.tag], distribution: Single }
+      └─BatchLookupJoin { type: Inner, predicate: mc_idx.mc._row_id IS NOT DISTINCT FROM mc._row_id AND (mc.tag = 'x':Varchar), output: [], lookup table: mc }
+        └─BatchExchange { order: [], dist: Single }
+          └─BatchScan { table: mc_idx, columns: [mc_idx.mc._row_id], scan_ranges: [mc_idx.id = Int32(1)], distribution: SomeShard }
   batch_local_plan: |-
-    BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [1:Int32] }
-      └─BatchFilter { predicate: (mc.id = 1:Int32) AND (mc.tag = 'x':Varchar) }
-        └─BatchScan { table: mc, columns: [mc.id, mc.tag], distribution: SomeShard }
+    BatchProject { exprs: [1:Int32] }
+    └─BatchLookupJoin { type: Inner, predicate: mc_idx.mc._row_id IS NOT DISTINCT FROM mc._row_id AND (mc.tag = 'x':Varchar), output: [], lookup table: mc }
+      └─BatchExchange { order: [], dist: Single }
+        └─BatchScan { table: mc_idx, columns: [mc_idx.mc._row_id], scan_ranges: [mc_idx.id = Int32(1)], distribution: SomeShard }
 - name: create index to include all columns by default
   sql: |
     create table t1 (a int, b numeric, c bigint);

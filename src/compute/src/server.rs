@@ -316,6 +316,7 @@ pub async fn compute_node_serve(
         config.batch.clone(),
         batch_manager_metrics,
         batch_mem_limit(compute_memory_bytes, opts.role.for_serving()),
+        await_tree_config.clone(),
     ));
 
     let target_memory = if let Some(v) = opts.memory_manager_target_bytes {
@@ -433,12 +434,18 @@ pub async fn compute_node_serve(
     };
     let monitor_srv = MonitorServiceImpl::new(
         stream_mgr.clone(),
+        batch_mgr.clone(),
         config.server.clone(),
         meta_cache.clone(),
         block_cache.clone(),
         hummock_storage,
     );
-    let config_srv = ConfigServiceImpl::new(batch_mgr, stream_mgr.clone(), meta_cache, block_cache);
+    let config_srv = ConfigServiceImpl::new(
+        batch_mgr.clone(),
+        stream_mgr.clone(),
+        meta_cache,
+        block_cache,
+    );
     let health_srv = HealthServiceImpl::new();
 
     let telemetry_manager = TelemetryManager::new(
@@ -466,7 +473,18 @@ pub async fn compute_node_serve(
         .http2_max_pending_accept_reset_streams(Some(config.server.grpc_max_reset_stream as usize))
         .layer(TracingExtractLayer::new())
         // XXX: unlimit the max message size to allow arbitrary large SQL input.
-        .add_service(TaskServiceServer::new(batch_srv).max_decoding_message_size(usize::MAX))
+        .add_service({
+            let await_tree_reg = batch_mgr.await_tree_reg().cloned();
+            let srv = TaskServiceServer::new(batch_srv).max_decoding_message_size(usize::MAX);
+            #[cfg(madsim)]
+            {
+                srv
+            }
+            #[cfg(not(madsim))]
+            {
+                AwaitTreeMiddlewareLayer::new_optional(await_tree_reg).layer(srv)
+            }
+        })
         .add_service(
             BatchExchangeServiceServer::new(batch_exchange_srv)
                 .max_decoding_message_size(usize::MAX),

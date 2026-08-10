@@ -35,7 +35,9 @@ pub use planner::{
     IcebergScanProjection, IcebergScanTaskBatchMode, IcebergScanTaskPlanner, PersistedFileScanTask,
 };
 use risingwave_common::array::arrow::IcebergArrowConvert;
-use risingwave_common::array::{ArrayImpl, DataChunk, I64Array, Utf8Array};
+use risingwave_common::array::{
+    ArrayBuilder, ArrayImpl, DataChunk, I64Array, Utf8Array, VariantArrayBuilder,
+};
 use risingwave_common::bail;
 use risingwave_common::types::JsonbVal;
 use risingwave_common_estimate_size::EstimateSize;
@@ -498,10 +500,42 @@ pub async fn scan_task_to_chunk_with_deletes(
         .with_batch_size(chunk_size)
         .with_row_group_filtering_enabled(true)
         .build();
-    let file_scan_stream = tokio_stream::once(Ok(data_file_scan_task));
+    let file_scan_stream = tokio_stream::once(Ok(data_file_scan_task.clone()));
 
-    let record_batch_stream: iceberg::scan::ArrowRecordBatchStream =
+    let mut record_batch_stream: iceberg::scan::ArrowRecordBatchStream =
         reader.read(Box::pin(file_scan_stream))?;
+
+    // The reader rejects a file with shredded variant columns before yielding any batch.
+    // Retry without the variant columns; NULL columns are spliced back in below.
+    let mut null_padded_variant_positions: Option<Vec<usize>> = None;
+    let record_batch_stream: iceberg::scan::ArrowRecordBatchStream =
+        match record_batch_stream.next().await {
+            Some(Err(e)) if is_shredded_variant_rejection(&e) => {
+                let (variant_field_ids, variant_positions, variant_names) =
+                    projected_variant_columns(&data_file_scan_task);
+                if variant_field_ids.is_empty() {
+                    return Err(e.into());
+                }
+                tracing::warn!(
+                    data_file_path,
+                    columns = ?variant_names,
+                    "shredded variant columns are not supported yet; reading them as NULL",
+                );
+                null_padded_variant_positions = Some(variant_positions);
+
+                let mut reduced_task = data_file_scan_task;
+                reduced_task
+                    .project_field_ids
+                    .retain(|id| !variant_field_ids.contains(id));
+                let reader = table
+                    .reader_builder()
+                    .with_batch_size(chunk_size)
+                    .with_row_group_filtering_enabled(true)
+                    .build();
+                reader.read(Box::pin(tokio_stream::once(Ok(reduced_task))))?
+            }
+            first => Box::pin(futures::stream::iter(first).chain(record_batch_stream)),
+        };
     let mut record_batch_stream = record_batch_stream.enumerate();
 
     let mut total_rows_read: u64 = 0;
@@ -512,6 +546,9 @@ pub async fn scan_task_to_chunk_with_deletes(
         let batch_start_pos = (batch_index * chunk_size) as i64;
 
         let mut chunk = IcebergArrowConvert.chunk_from_record_batch(&record_batch)?;
+        if let Some(positions) = &null_padded_variant_positions {
+            chunk = pad_null_variant_columns(chunk, positions, record_batch.num_rows());
+        }
         let row_count = chunk.capacity();
         total_rows_read += row_count as u64;
 
@@ -583,6 +620,44 @@ pub async fn scan_task_to_chunk_with_deletes(
             }
         }
     }
+}
+
+/// Whether the error is the reader's per-file rejection of shredded variant columns.
+// `IcebergError` hides the inner error, so the raw one is needed to inspect kind/message.
+#[expect(clippy::disallowed_types)]
+fn is_shredded_variant_rejection(e: &iceberg::Error) -> bool {
+    e.kind() == iceberg::ErrorKind::FeatureUnsupported && e.message().contains("shredded variant")
+}
+
+/// The projected VARIANT columns of a task: their field ids, their positions in the
+/// projected column order, and their names.
+fn projected_variant_columns(task: &FileScanTask) -> (Vec<i32>, Vec<usize>, Vec<String>) {
+    let mut field_ids = Vec::new();
+    let mut positions = Vec::new();
+    let mut names = Vec::new();
+    for (position, field_id) in task.project_field_ids.iter().enumerate() {
+        if let Some(field) = task.schema.field_by_id(*field_id)
+            && matches!(field.field_type.as_ref(), iceberg::spec::Type::Variant(_))
+        {
+            field_ids.push(*field_id);
+            positions.push(position);
+            names.push(field.name.clone());
+        }
+    }
+    (field_ids, positions, names)
+}
+
+/// Insert all-NULL variant columns at the given projected positions.
+fn pad_null_variant_columns(chunk: DataChunk, positions: &[usize], row_count: usize) -> DataChunk {
+    let (mut columns, visibility) = chunk.into_parts();
+    for &position in positions {
+        let mut builder = VariantArrayBuilder::new(row_count);
+        for _ in 0..row_count {
+            builder.append_null();
+        }
+        columns.insert(position, Arc::new(ArrayImpl::Variant(builder.finish())));
+    }
+    DataChunk::from_parts(columns.into(), visibility)
 }
 
 #[derive(Debug)]
