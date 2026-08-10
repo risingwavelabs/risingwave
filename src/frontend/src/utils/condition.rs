@@ -889,7 +889,10 @@ impl Condition {
                     return Ok(None);
                 }
                 eq_conds = vec![None];
-            } else if let Some((input_ref, in_const_list)) = expr.as_in_const_list() {
+            } else if let Some((input_ref, in_const_list)) = expr
+                .as_in_const_list()
+                .or_else(|| expr.as_some_eq_const_list())
+            {
                 let mut scalars = HashSet::new();
                 for const_expr in in_const_list {
                     // The cast should succeed, because otherwise the input_ref is casted
