@@ -19,6 +19,7 @@ use risingwave_pb::telemetry::PbTelemetryDatabaseObject;
 use sea_orm::{ColumnTrait, DatabaseTransaction, EntityTrait, ModelTrait, QueryFilter};
 
 use super::*;
+
 impl CatalogController {
     // Drop all kinds of objects including databases,
     // schemas, relations, connections, functions, etc.
@@ -136,7 +137,9 @@ impl CatalogController {
             .all(&txn)
             .await?;
         if !incoming_sink_ids.is_empty() {
-            if self.env.opts.protect_drop_table_with_incoming_sink {
+            if self.env.opts.protect_drop_table_with_incoming_sink
+                || drop_mode == DropMode::Restrict
+            {
                 let sink_names: Vec<String> = Sink::find()
                     .select_only()
                     .column(sink::Column::Name)
@@ -152,6 +155,8 @@ impl CatalogController {
             }
 
             // TODO: record dependency info in object_dependency table for sink into table.
+            // Issue#26143: recording dependency for sink into table could cause circular issue,
+            // so here we only fix it by check whether it's restrict or not
             let removed_sink_objs: Vec<PartialObject> = Object::find()
                 .filter(object::Column::Oid.is_in(incoming_sink_ids))
                 .into_partial_model()

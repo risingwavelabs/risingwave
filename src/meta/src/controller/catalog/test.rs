@@ -191,55 +191,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_create_sink_into_table_records_dependency() -> MetaResult<()> {
-        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
-        let inner = mgr.inner.write().await;
-        let txn = inner.db.begin().await?;
-        let (_, Some(target_table_id), _) =
-            insert_test_streaming_job(&txn, "target_table", true, None).await?
-        else {
-            unreachable!()
-        };
-        txn.commit().await?;
-        drop(inner);
-
-        let mut job = crate::manager::StreamingJob::Sink(PbSink {
-            name: "sink_into_table".to_owned(),
-            database_id: TEST_DATABASE_ID,
-            schema_id: TEST_SCHEMA_ID,
-            owner: TEST_OWNER_ID as _,
-            target_table: Some(target_table_id),
-            sink_type: PbSinkType::AppendOnly as i32,
-            ..Default::default()
-        });
-        mgr.create_job_catalog(
-            &mut job,
-            &StreamContext::default(),
-            &None,
-            1,
-            HashSet::new(),
-            streaming_job_resource_type::ResourceType::Regular(true),
-            &None,
-            None,
-            None,
-            None,
-            None,
-        )
-        .await?;
-
-        let dependency = ObjectDependency::find()
-            .filter(object_dependency::Column::Oid.eq(target_table_id.as_object_id()))
-            .filter(object_dependency::Column::UsedBy.eq(job.id().as_object_id()))
-            .one(&mgr.inner.read().await.db)
-            .await?
-            .expect("sink-into-table dependency should be recorded");
-        assert_eq!(dependency.oid, target_table_id.as_object_id());
-        assert_eq!(dependency.used_by, job.id().as_object_id());
-
-        Ok(())
-    }
-
-    #[tokio::test]
     async fn test_table_refill_catalog_snapshot_classifies_table_identity() -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let inner = mgr.inner.write().await;
