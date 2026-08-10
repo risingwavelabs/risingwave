@@ -417,19 +417,6 @@ impl InflightStreamingJobInfo {
         self.fragment_infos.values()
     }
 
-    pub fn snapshot_backfill_actor_ids(
-        fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
-    ) -> impl Iterator<Item = ActorId> + '_ {
-        fragment_infos
-            .values()
-            .filter(|fragment| {
-                fragment
-                    .fragment_type_mask
-                    .contains(FragmentTypeFlag::SnapshotBackfillStreamScan)
-            })
-            .flat_map(|fragment| fragment.actors.keys().copied())
-    }
-
     pub fn tracking_progress_actor_ids(
         fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
     ) -> Vec<(ActorId, BackfillUpstreamType)> {
@@ -1195,7 +1182,7 @@ impl InflightDatabaseInfo {
 
     pub(super) fn build_edge(
         &self,
-        info: Option<(&CreateStreamingJobCommandInfo, bool)>,
+        info: Option<&CreateStreamingJobCommandInfo>,
         replace_job: Option<&ReplaceStreamJobPlan>,
         new_upstream_sink: Option<&UpstreamSinkInfo>,
         control_stream_manager: &ControlStreamManager,
@@ -1211,13 +1198,13 @@ impl InflightDatabaseInfo {
         //  - should contain the `fragment_id` of the downstream table.
         let existing_fragment_ids = info
             .into_iter()
-            .flat_map(|(info, _)| info.upstream_fragment_downstreams.keys())
+            .flat_map(|info| info.upstream_fragment_downstreams.keys())
             .chain(replace_job.into_iter().flat_map(|replace_job| {
                 replace_job
                     .upstream_fragment_downstreams
                     .keys()
                     .filter(|fragment_id| {
-                        info.map(|(info, _)| {
+                        info.map(|info| {
                             !info
                                 .stream_job_fragments
                                 .fragments
@@ -1236,11 +1223,8 @@ impl InflightDatabaseInfo {
         // Collect new fragments with their partial graph IDs
         let new_fragments = info
             .into_iter()
-            .flat_map(|(info, is_snapshot_backfill)| {
-                let partial_graph_id = to_partial_graph_id(
-                    self.database_id,
-                    is_snapshot_backfill.then_some(info.streaming_job.id()),
-                );
+            .flat_map(|info| {
+                let partial_graph_id = to_partial_graph_id(self.database_id, None);
                 info.stream_job_fragments
                     .fragments
                     .values()
@@ -1281,7 +1265,7 @@ impl InflightDatabaseInfo {
                 control_stream_manager,
             )
             .finish_fragments();
-        if let Some((info, _)) = info {
+        if let Some(info) = info {
             builder = builder
                 .add_relations(&info.upstream_fragment_downstreams)?
                 .add_relations(&info.stream_job_fragments.downstreams)?;
