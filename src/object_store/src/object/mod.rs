@@ -885,10 +885,7 @@ pub async fn build_remote_object_store(
     match url {
         s3 if s3.starts_with("s3://") => {
             let bucket = s3.strip_prefix("s3://").unwrap();
-            if let Err(e) = crate::object::s3::validate_s3_bucket_name(bucket) {
-                panic!("Invalid object store configuration: {e}");
-            }
-            if config.s3.developer.use_opendal {
+            let store = if config.s3.developer.use_opendal {
                 tracing::info!("Using OpenDAL to access s3, bucket is {}", bucket);
                 ObjectStoreImpl::Opendal(
                     OpendalObjectStore::new_s3_engine(
@@ -897,15 +894,32 @@ pub async fn build_remote_object_store(
                         metrics.clone(),
                     )
                     .unwrap()
-                    .monitored(metrics, config),
+                    .monitored(metrics.clone(), config.clone()),
                 )
             } else {
                 ObjectStoreImpl::S3(
                     S3ObjectStore::new_with_config(bucket.to_owned(), metrics.clone(), config.clone())
                         .await
-                        .monitored(metrics, config),
+                        .monitored(metrics.clone(), config.clone()),
                 )
+            };
+            // Eagerly probe the bucket with a single, cheap `list` call so that a
+            // misconfigured bucket (wrong name, wrong region, missing permissions, ...)
+            // is reported clearly at startup instead of surfacing as an opaque error on
+            // first real access. Using `list` (rather than reimplementing bucket naming
+            // rules) also works for S3 Access Point aliases and S3-compatible services
+            // (e.g. Ceph) that don't follow AWS's own bucket naming rules.
+            match store.list("", None, Some(1)).await {
+                Ok(mut stream) => {
+                    if let Some(Err(e)) = stream.next().await {
+                        panic!("Invalid object store configuration for bucket {bucket:?}: {e}");
+                    }
+                }
+                Err(e) => {
+                    panic!("Invalid object store configuration for bucket {bucket:?}: {e}");
+                }
             }
+            store
         }
         #[cfg(feature = "hdfs-backend")]
         hdfs if hdfs.starts_with("hdfs://") => {
@@ -1178,27 +1192,6 @@ mod tests {
         let mut output = vec![];
         let err = reader.read_to_end(&mut output).await.unwrap_err();
         assert!(err.to_string().contains("injected stream error"));
-    }
-
-    /// Integration test for issue #20263: an invalid bucket name (e.g. containing an
-    /// underscore) must be rejected eagerly with a clear panic message, instead of
-    /// surfacing as an opaque request error only when the store is first accessed.
-    #[tokio::test]
-    #[should_panic(expected = "Invalid object store configuration")]
-    async fn test_build_remote_object_store_rejects_invalid_bucket_name() {
-        use std::sync::Arc;
-
-        use risingwave_common::config::ObjectStoreConfig;
-
-        use super::{ObjectStoreMetrics, build_remote_object_store};
-
-        build_remote_object_store(
-            "s3://rw_data",
-            Arc::new(ObjectStoreMetrics::unused()),
-            "test",
-            Arc::new(ObjectStoreConfig::default()),
-        )
-        .await;
     }
 }
 
