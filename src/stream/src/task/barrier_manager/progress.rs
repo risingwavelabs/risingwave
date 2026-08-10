@@ -33,7 +33,6 @@ type BufferedRows = u64;
 pub(crate) enum BackfillState {
     ConsumingUpstreamTableOrSource(ConsumedEpoch, ConsumedRows, BufferedRows),
     DoneConsumingUpstreamTableOrSource(ConsumedRows, BufferedRows),
-    ConsumingLogStore { pending_epoch_lag: u64 },
     DoneConsumingLogStore,
 }
 
@@ -47,9 +46,6 @@ impl BackfillState {
             ) => (false, consumed_epoch, consumed_rows, 0, buffered_rows),
             BackfillState::DoneConsumingUpstreamTableOrSource(consumed_rows, buffered_rows) => {
                 (true, 0, consumed_rows, 0, buffered_rows)
-            }
-            BackfillState::ConsumingLogStore { pending_epoch_lag } => {
-                (false, 0, 0, pending_epoch_lag, 0)
             }
             BackfillState::DoneConsumingLogStore => (true, 0, 0, 0, 0),
         };
@@ -80,12 +76,6 @@ impl Display for BackfillState {
                     f,
                     "DoneConsumingUpstreamTable(rows: {}, buffered: {})",
                     rows, buffered
-                )
-            }
-            BackfillState::ConsumingLogStore { pending_epoch_lag } => {
-                write!(
-                    f,
-                    "ConsumingLogStore(pending_epoch_lag: {pending_epoch_lag})"
                 )
             }
             BackfillState::DoneConsumingLogStore => {
@@ -344,31 +334,10 @@ impl CreateMviewProgressReporter {
         );
     }
 
-    pub(crate) fn update_create_mview_log_store_progress(
-        &mut self,
-        epoch: EpochPair,
-        pending_epoch_lag: u64,
-    ) {
-        assert_matches!(
-            self.state,
-            Some(BackfillState::DoneConsumingUpstreamTableOrSource(_, _))
-                | Some(BackfillState::ConsumingLogStore { .. })
-                | None,
-            "cannot update log store progress at state {:?}",
-            self.state
-        );
-        self.update_inner(
-            epoch,
-            BackfillState::ConsumingLogStore { pending_epoch_lag },
-        );
-    }
-
     pub(crate) fn finish_consuming_log_store(&mut self, epoch: EpochPair) {
         assert_matches!(
             self.state,
-            Some(BackfillState::DoneConsumingUpstreamTableOrSource(_, _))
-                | Some(BackfillState::ConsumingLogStore { .. })
-                | None,
+            Some(BackfillState::DoneConsumingUpstreamTableOrSource(_, _)) | None,
             "cannot finish log store progress at state {:?}",
             self.state
         );

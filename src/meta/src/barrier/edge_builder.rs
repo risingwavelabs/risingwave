@@ -224,9 +224,19 @@ impl FragmentEdgeBuilder {
     }
 
     pub(super) fn add_relations(&mut self, relations: &FragmentDownstreamRelation) {
+        self.add_relations_if(relations, |_, _| true);
+    }
+
+    pub(super) fn add_relations_if(
+        &mut self,
+        relations: &FragmentDownstreamRelation,
+        mut predicate: impl FnMut(FragmentId, &DownstreamFragmentRelation) -> bool,
+    ) {
         for (fragment_id, relations) in relations {
             for relation in relations {
-                self.add_edge(*fragment_id, relation);
+                if predicate(*fragment_id, relation) {
+                    self.add_edge(*fragment_id, relation);
+                }
             }
         }
     }
@@ -345,5 +355,104 @@ impl FragmentEdgeBuilder {
     /// Finalize the builder, returning the edge build result.
     pub(super) fn build(self) -> FragmentEdgeBuildResult {
         self.result
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_meta_model::DispatcherType;
+    use risingwave_pb::stream_plan::PbDispatchOutputMapping;
+
+    use super::*;
+
+    fn fragment_info(
+        actor_id: ActorId,
+        partial_graph_id: PartialGraphId,
+    ) -> EdgeBuilderFragmentInfo {
+        EdgeBuilderFragmentInfo {
+            distribution_type: DistributionType::Single,
+            actors: HashMap::from([(actor_id, None)]),
+            actor_location: HashMap::from([(
+                actor_id,
+                HostAddress {
+                    host: "127.0.0.1".to_owned(),
+                    port: 1234,
+                },
+            )]),
+            partial_graph_id,
+        }
+    }
+
+    fn relation(downstream_fragment_id: FragmentId) -> DownstreamFragmentRelation {
+        DownstreamFragmentRelation {
+            downstream_fragment_id,
+            dispatcher_type: DispatcherType::NoShuffle,
+            dist_key_indices: vec![],
+            output_mapping: PbDispatchOutputMapping::identical(1),
+        }
+    }
+
+    #[test]
+    fn test_build_edges_only_within_partial_graph() {
+        let upstream_fragment_id = FragmentId::new(1);
+        let backfill_input_fragment_id = FragmentId::new(2);
+        let backfill_output_fragment_id = FragmentId::new(3);
+        let database_graph_id = PartialGraphId::new(10);
+        let backfill_graph_id = PartialGraphId::new(20);
+
+        let fragments = || {
+            [
+                (
+                    upstream_fragment_id,
+                    fragment_info(ActorId::new(101), database_graph_id),
+                ),
+                (
+                    backfill_input_fragment_id,
+                    fragment_info(ActorId::new(102), backfill_graph_id),
+                ),
+                (
+                    backfill_output_fragment_id,
+                    fragment_info(ActorId::new(103), backfill_graph_id),
+                ),
+            ]
+        };
+        let relations = HashMap::from([
+            (
+                upstream_fragment_id,
+                vec![relation(backfill_input_fragment_id)],
+            ),
+            (
+                backfill_input_fragment_id,
+                vec![relation(backfill_output_fragment_id)],
+            ),
+        ]);
+        let partial_graphs = HashMap::from([
+            (upstream_fragment_id, database_graph_id),
+            (backfill_input_fragment_id, backfill_graph_id),
+            (backfill_output_fragment_id, backfill_graph_id),
+        ]);
+
+        let mut builder = FragmentEdgeBuilder::new(fragments());
+        builder.add_relations_if(&relations, |upstream_fragment_id, relation| {
+            partial_graphs[&upstream_fragment_id]
+                == partial_graphs[&relation.downstream_fragment_id]
+        });
+        let edges = builder.build();
+
+        assert!(!edges.dispatchers.contains_key(&upstream_fragment_id));
+        assert!(!edges.upstreams.contains_key(&backfill_input_fragment_id));
+        assert!(edges.dispatchers.contains_key(&backfill_input_fragment_id));
+        assert!(edges.upstreams.contains_key(&backfill_output_fragment_id));
+
+        let mut merge_builder = FragmentEdgeBuilder::new(fragments());
+        merge_builder.add_relations(&relations);
+        let merge_edges = merge_builder.build();
+
+        assert!(merge_edges.dispatchers.contains_key(&upstream_fragment_id));
+        assert!(
+            merge_edges
+                .upstreams
+                .contains_key(&backfill_input_fragment_id)
+        );
     }
 }
