@@ -66,6 +66,8 @@ use std::time::Duration;
 pub use base::{UPSTREAM_SOURCE_KEY, WEBHOOK_CONNECTOR, *};
 pub use batch::BatchSourceSplitImpl;
 pub(crate) use common::*;
+#[cfg(not(madsim))]
+use google_cloud_googleapis::pubsub::v1::ModifyAckDeadlineRequest;
 use google_cloud_pubsub::subscription::Subscription;
 pub use google_pubsub::GOOGLE_PUBSUB_CONNECTOR;
 pub use kafka::KAFKA_CONNECTOR;
@@ -131,6 +133,73 @@ pub enum WaitCheckpointTask {
     AckPulsarMessage(Vec<(String, ArrayRef)>),
 }
 
+#[cfg(not(madsim))]
+const PUBSUB_RPC_TIMEOUT: Duration = Duration::from_secs(30);
+#[cfg(not(madsim))]
+const MAX_PUBSUB_NACK_BATCH_SIZE: usize = 100;
+
+#[cfg(any(not(madsim), test))]
+fn collect_pubsub_ack_ids(ack_id_arrs: &[ArrayRef]) -> Vec<String> {
+    ack_id_arrs
+        .iter()
+        .flat_map(|arr| arr.as_utf8().iter().flatten().map(str::to_owned))
+        .collect()
+}
+
+#[cfg(not(madsim))]
+async fn nack_pubsub_messages(
+    subscription: &Subscription,
+    ack_ids: Vec<String>,
+    source_id_label: &str,
+    source_name: &str,
+) {
+    if ack_ids.is_empty() {
+        return;
+    }
+
+    let ack_id_count = ack_ids.len();
+    for ack_ids in ack_ids.chunks(MAX_PUBSUB_NACK_BATCH_SIZE) {
+        let request = ModifyAckDeadlineRequest {
+            subscription: subscription.fully_qualified_name().to_owned(),
+            ack_deadline_seconds: 0,
+            ack_ids: ack_ids.to_vec(),
+        };
+
+        match tokio::time::timeout(
+            PUBSUB_RPC_TIMEOUT,
+            subscription.get_client().modify_ack_deadline(request, None),
+        )
+        .await
+        {
+            Ok(Ok(_)) => {}
+            Ok(Err(e)) => {
+                tracing::error!(
+                    source_id = source_id_label,
+                    source_name,
+                    error = %e.as_report(),
+                    "failed to nack uncommitted pubsub messages",
+                );
+                return;
+            }
+            Err(_) => {
+                tracing::error!(
+                    source_id = source_id_label,
+                    source_name,
+                    "pubsub nack timed out after {PUBSUB_RPC_TIMEOUT:?}",
+                );
+                return;
+            }
+        }
+    }
+
+    tracing::info!(
+        source_id = source_id_label,
+        source_name,
+        ack_id_count,
+        "nacked uncommitted pubsub messages",
+    );
+}
+
 impl WaitCheckpointTask {
     /// Create a fresh task for the next epoch, reusing expensive-to-create clients
     /// (e.g. `PubSub` `Subscription`, NATS `JetStreamContext`) from the current task.
@@ -146,6 +215,19 @@ impl WaitCheckpointTask {
             }
             WaitCheckpointTask::AckPulsarMessage(_) => WaitCheckpointTask::AckPulsarMessage(vec![]),
         }
+    }
+
+    #[cfg(not(madsim))]
+    pub async fn nack_uncommitted_pubsub_messages(&self, source_id: SourceId, source_name: &str) {
+        let WaitCheckpointTask::AckPubsubMessage(subscription, ack_id_arrs) = self else {
+            return;
+        };
+        let ack_ids = collect_pubsub_ack_ids(ack_id_arrs);
+        nack_pubsub_messages(subscription, ack_ids, &source_id.to_string(), source_name).await;
+    }
+
+    #[cfg(madsim)]
+    pub async fn nack_uncommitted_pubsub_messages(&self, _source_id: SourceId, _source_name: &str) {
     }
 
     pub async fn run(self, source_id: SourceId, source_name: &str) {
@@ -411,4 +493,24 @@ pub type CdcTableSnapshotSplitRaw = CdcTableSnapshotSplitCommon<Vec<u8>>;
 #[inline]
 pub fn build_pulsar_ack_channel_id(source_id: SourceId, split_id: &SplitId) -> String {
     format!("{}-{}", source_id, split_id)
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::array::Utf8Array;
+
+    use super::*;
+
+    #[test]
+    fn test_collect_pubsub_ack_ids() {
+        let ack_id_arrs = vec![
+            Utf8Array::from_iter([Some("ack-1"), None, Some("ack-2")]).into_ref(),
+            Utf8Array::from_iter([Some("ack-3")]).into_ref(),
+        ];
+
+        assert_eq!(
+            collect_pubsub_ack_ids(&ack_id_arrs),
+            ["ack-1", "ack-2", "ack-3"],
+        );
+    }
 }
