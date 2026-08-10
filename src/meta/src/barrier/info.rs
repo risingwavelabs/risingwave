@@ -417,19 +417,6 @@ impl InflightStreamingJobInfo {
         self.fragment_infos.values()
     }
 
-    pub fn snapshot_backfill_actor_ids(
-        fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
-    ) -> impl Iterator<Item = ActorId> + '_ {
-        fragment_infos
-            .values()
-            .filter(|fragment| {
-                fragment
-                    .fragment_type_mask
-                    .contains(FragmentTypeFlag::SnapshotBackfillStreamScan)
-            })
-            .flat_map(|fragment| fragment.actors.keys().copied())
-    }
-
     pub fn tracking_progress_actor_ids(
         fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
     ) -> Vec<(ActorId, BackfillUpstreamType)> {
@@ -1291,8 +1278,10 @@ impl InflightDatabaseInfo {
                     )
                 })),
         );
-        if let Some((info, _)) = info {
-            builder.add_relations(&info.upstream_fragment_downstreams);
+        if let Some((info, is_snapshot_backfill)) = info {
+            if !is_snapshot_backfill {
+                builder.add_relations(&info.upstream_fragment_downstreams);
+            }
             builder.add_relations(&info.stream_job_fragments.downstreams);
         }
         if let Some(replace_job) = replace_job {

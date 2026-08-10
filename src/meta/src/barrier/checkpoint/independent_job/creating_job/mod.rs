@@ -41,13 +41,10 @@ use super::IndependentCheckpointJobControl;
 use crate::MetaResult;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::checkpoint::independent_job::creating_job::barrier_control::CreatingStreamingJobBarrierStats;
-use crate::barrier::checkpoint::independent_job::creating_job::status::CreateMviewLogStoreProgressTracker;
-use crate::barrier::command::{
-    PostCollectCommand, TableLogEpochs, ThrottleConfigMap, UpstreamTableLogEpochs,
-};
+use crate::barrier::command::{PostCollectCommand, TableLogEpochs, ThrottleConfigMap, UpstreamTableLogEpochs};
 use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
-use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
+use crate::barrier::info::BarrierInfo;
 use crate::barrier::notifier::NotifierStarter;
 use crate::barrier::partial_graph::{
     CollectedBarrier, PartialGraphBarrierInfo, PartialGraphManager, PartialGraphRecoverer,
@@ -128,8 +125,6 @@ impl CreatingStreamingJobControl {
                 split_assignment,
             )
             .collect();
-        let snapshot_backfill_actors: HashSet<ActorId> =
-            InflightStreamingJobInfo::snapshot_backfill_actor_ids(&fragment_infos).collect();
         let backfill_nodes_to_pause =
             get_nodes_with_backfill_dependencies(&info.fragment_backfill_ordering)
                 .into_iter()
@@ -281,17 +276,9 @@ impl CreatingStreamingJobControl {
                     .collect(),
             };
             if let Some(log_store_barriers_to_inject) = log_store_barriers_to_inject {
-                let upstream_lag = log_store_barriers_to_inject
-                    .last()
-                    .map(|info| info.prev_epoch().saturating_sub(snapshot_epoch))
-                    .unwrap_or(0);
                 job.status = CreatingStreamingJobStatus::ConsumingLogStore {
                     tracking_job: TrackingJob::recovered(job_id, &job_info.fragment_infos),
                     info: job_info,
-                    log_store_progress_tracker: CreateMviewLogStoreProgressTracker::new(
-                        snapshot_backfill_actors.iter().cloned(),
-                        upstream_lag,
-                    ),
                     pending_barriers: log_store_barriers_to_inject.into(),
                 };
             } else {
@@ -301,7 +288,6 @@ impl CreatingStreamingJobControl {
                     pending_upstream_barriers: vec![],
                     version_stats: version_stat.clone(),
                     create_mview_tracker,
-                    snapshot_backfill_actors,
                     snapshot_epoch,
                     info: job_info,
                     pending_non_checkpoint_barriers,
@@ -574,10 +560,6 @@ impl CreatingStreamingJobControl {
                 )?,
                 version_stats: version_stat.clone(),
                 create_mview_tracker,
-                snapshot_backfill_actors: InflightStreamingJobInfo::snapshot_backfill_actor_ids(
-                    &info.fragment_infos,
-                )
-                .collect(),
                 info,
                 snapshot_epoch,
                 pending_non_checkpoint_barriers,
@@ -609,13 +591,6 @@ impl CreatingStreamingJobControl {
         Ok((
             CreatingStreamingJobStatus::ConsumingLogStore {
                 tracking_job: TrackingJob::recovered(job_id, &info.fragment_infos),
-                log_store_progress_tracker: CreateMviewLogStoreProgressTracker::new(
-                    InflightStreamingJobInfo::snapshot_backfill_actor_ids(&info.fragment_infos),
-                    pending_barriers
-                        .back()
-                        .map(|info| info.prev_epoch() - committed_epoch)
-                        .unwrap_or(0),
-                ),
                 pending_barriers,
                 info,
             },
@@ -767,14 +742,8 @@ impl CreatingStreamingJobControl {
                 }
             }
             CreatingStreamingJobStatus::ConsumingLogStore {
-                log_store_progress_tracker,
-                ..
-            } => {
-                format!(
-                    "LogStore [{}]",
-                    log_store_progress_tracker.gen_backfill_progress()
-                )
-            }
+                pending_barriers, ..
+            } => format!("LogStore [pending barriers: {}]", pending_barriers.len()),
             CreatingStreamingJobStatus::Finishing(finish_epoch, ..) => {
                 let committed_epoch = self.max_committed_epoch.expect("should have committed");
                 let lag = Duration::from_millis(
@@ -933,37 +902,49 @@ impl CreatingStreamingJobControl {
                 .values()
                 .flat_map(|resp| &resp.create_mview_progress),
         );
-        self.is_ready_to_merge() && pending_barrier_num <= self.max_lagged_barrier_num
+        self.is_ready_to_merge(pending_barrier_num)
     }
 
-    fn is_ready_to_merge(&self) -> bool {
-        if let CreatingStreamingJobStatus::ConsumingLogStore {
-            log_store_progress_tracker,
+    fn is_ready_to_merge(&self, pending_partial_graph_barriers: usize) -> bool {
+        let pending_log_barriers = if let CreatingStreamingJobStatus::ConsumingLogStore {
             pending_barriers,
             ..
         } = &self.status
-            && pending_barriers.is_empty()
-            && log_store_progress_tracker.is_finished()
         {
-            true
+            pending_barriers.len()
         } else {
-            false
-        }
+            return false;
+        };
+        is_log_store_merge_ready(
+            pending_log_barriers,
+            pending_partial_graph_barriers,
+            self.max_lagged_barrier_num,
+        )
     }
 
     pub(crate) fn should_merge_to_upstream(
         &self,
         partial_graph_manager: &PartialGraphManager,
     ) -> bool {
-        if !self.is_ready_to_merge() {
+        if !matches!(
+            self.status,
+            CreatingStreamingJobStatus::ConsumingLogStore { .. }
+        ) {
             return false;
         }
 
         // A job that is ready to merge has finished initialization and is not resetting, so its
         // partial graph must be running.
-        partial_graph_manager.pending_barrier_num(self.partial_graph_id)
-            <= self.max_lagged_barrier_num
+        self.is_ready_to_merge(partial_graph_manager.pending_barrier_num(self.partial_graph_id))
     }
+}
+
+fn is_log_store_merge_ready(
+    pending_log_barriers: usize,
+    pending_partial_graph_barriers: usize,
+    max_lagged_barriers: usize,
+) -> bool {
+    pending_log_barriers == 0 && pending_partial_graph_barriers <= max_lagged_barriers
 }
 
 impl CreatingStreamingJobControl {
@@ -1168,6 +1149,13 @@ mod tests {
 
         opts.in_flight_barrier_nums = usize::MAX;
         assert_eq!(snapshot_backfill_max_pending_barrier_num(&opts), usize::MAX);
+    }
+
+    #[test]
+    fn test_log_store_merge_readiness() {
+        assert!(!is_log_store_merge_ready(1, 0, 2));
+        assert!(is_log_store_merge_ready(0, 2, 2));
+        assert!(!is_log_store_merge_ready(0, 3, 2));
     }
 
     #[test]

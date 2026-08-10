@@ -956,6 +956,22 @@ impl PartialGraphRecoverer<'_> {
         }?;
 
         let control_stream_manager = self.control_stream_manager();
+        let fragment_partial_graphs: HashMap<FragmentId, Option<JobId>> =
+            database_jobs
+                .values()
+                .flat_map(|job| {
+                    job.fragment_infos()
+                        .map(|fragment| (fragment.fragment_id, None))
+                })
+                .chain(ongoing_snapshot_backfill_jobs.iter().flat_map(
+                    |(&job_id, (fragments, ..))| {
+                        fragments
+                            .values()
+                            .map(move |fragment| (fragment.fragment_id, Some(job_id)))
+                    },
+                ))
+                .collect();
+
         let mut builder = FragmentEdgeBuilder::new(
             database_jobs
                 .values()
@@ -988,7 +1004,16 @@ impl PartialGraphRecoverer<'_> {
                     },
                 )),
         );
-        builder.add_relations(fragment_relations);
+        builder.add_relations_if(fragment_relations, |upstream_fragment_id, relation| {
+            matches!(
+                (
+                    fragment_partial_graphs.get(&upstream_fragment_id),
+                    fragment_partial_graphs.get(&relation.downstream_fragment_id),
+                ),
+                (Some(upstream_graph), Some(downstream_graph))
+                    if upstream_graph == downstream_graph
+            )
+        });
         let mut edges = builder.build();
 
         {
