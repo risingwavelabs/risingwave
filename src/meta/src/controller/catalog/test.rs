@@ -1165,6 +1165,87 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_alter_internal_table_schema_rejected() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        mgr.create_schema(PbSchema {
+            database_id: TEST_DATABASE_ID,
+            name: "internal_table_alter_target".to_owned(),
+            owner: TEST_OWNER_ID as _,
+            ..Default::default()
+        })
+        .await?;
+        let target_schema_id: SchemaId = Schema::find()
+            .select_only()
+            .column(schema::Column::SchemaId)
+            .filter(schema::Column::Name.eq("internal_table_alter_target"))
+            .into_tuple()
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+
+        let txn = mgr.inner.read().await.db.begin().await?;
+        let parent_obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(TEST_SCHEMA_ID.as_object_id()),
+        )
+        .await?;
+        let parent_job_id = parent_obj.oid.as_job_id();
+        insert_test_table(
+            &txn,
+            parent_job_id.as_mv_table_id(),
+            "internal_table_parent",
+            TableType::MaterializedView,
+            None,
+            "",
+        )
+        .await?;
+        let internal_obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(parent_job_id.as_object_id()),
+        )
+        .await?;
+        let internal_table_id = internal_obj.oid.as_table_id();
+        insert_test_table(
+            &txn,
+            internal_table_id,
+            "__internal_table_alter_target",
+            TableType::Internal,
+            Some(parent_job_id),
+            "",
+        )
+        .await?;
+        txn.commit().await?;
+
+        for new_schema in [TEST_SCHEMA_ID, target_schema_id] {
+            assert!(
+                mgr.alter_schema(
+                    ObjectType::Table,
+                    internal_table_id.as_object_id(),
+                    new_schema,
+                )
+                .await
+                .is_err()
+            );
+        }
+
+        let internal_obj = Object::find_by_id(internal_table_id)
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+        assert_eq!(internal_obj.schema_id, Some(TEST_SCHEMA_ID));
+        assert_eq!(
+            internal_obj.belong_to_oid,
+            Some(parent_job_id.as_object_id())
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_alter_table_schema_moves_indexes_but_not_subscriptions() -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         mgr.create_schema(PbSchema {
