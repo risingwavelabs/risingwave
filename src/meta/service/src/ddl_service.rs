@@ -374,7 +374,7 @@ impl DdlService for DdlServiceImpl {
             None => {
                 let version = self
                     .ddl_controller
-                    .run_command(DdlCommand::CreateNonSharedSource(source))
+                    .run_command(DdlCommand::CreateNonSharedSource(source, None))
                     .await?;
                 Ok(Response::new(CreateSourceResponse {
                     status: None,
@@ -464,7 +464,7 @@ impl DdlService for DdlServiceImpl {
             .unwrap_or_else(Self::default_streaming_job_resource_type);
         let since_timestamp_epoch = req.since_timestamp_epoch;
 
-        let stream_job = StreamingJob::Sink(sink);
+        let stream_job = StreamingJob::Sink(sink, None);
 
         let command = DdlCommand::CreateStreamingJob {
             stream_job,
@@ -881,7 +881,7 @@ impl DdlService for DdlServiceImpl {
                     resource_type,
                 } = replace_sink;
                 DdlCommand::CreateStreamingJob {
-                    stream_job: StreamingJob::Sink(sink.unwrap()),
+                    stream_job: StreamingJob::Sink(sink.unwrap(), None),
                     fragment_graph: fragment_graph.unwrap(),
                     dependencies: dependencies.into_iter().collect::<HashSet<_>>(),
                     resource_type: resource_type
@@ -1873,7 +1873,7 @@ impl DdlService for DdlServiceImpl {
 
         let table_id = table_catalog.id;
         let dependencies = HashSet::from_iter([table_id.into(), schema_id.into()]);
-        let stream_job = StreamingJob::Sink(sink);
+        let stream_job = StreamingJob::Sink(sink, Some(table_id));
         let res = self
             .ddl_controller
             .run_command(DdlCommand::CreateStreamingJob {
@@ -1932,7 +1932,10 @@ impl DdlService for DdlServiceImpl {
         let iceberg_source = iceberg_source.unwrap();
         let res = self
             .ddl_controller
-            .run_command(DdlCommand::CreateNonSharedSource(iceberg_source))
+            .run_command(DdlCommand::CreateNonSharedSource(
+                iceberg_source,
+                Some(table_id),
+            ))
             .await;
         if res.is_err() {
             let _ = self
