@@ -47,6 +47,13 @@ impl MatchScan {
     pub fn new() -> Self {
         Self::default()
     }
+
+    /// The first start with no decided outcome. Every start below it either produced a match or was
+    /// proven matchless, so a caller may treat "no match starts there" as evidence — which is only
+    /// true because a budget-aborted start is NOT advanced past (see `next_match`).
+    pub fn next_start(&self) -> usize {
+        self.next_start
+    }
 }
 
 /// Per-visit budget on `DEFINE` predicate evaluations, shared by every NFA walk of one partition
@@ -704,6 +711,15 @@ impl Nfa {
                     end,
                     labels,
                 }));
+            }
+            // Only advance past a start with a real verdict. `preferred_from_dynamic` returns
+            // `None` for two different reasons — "no match from here" and "the budget died mid-walk,
+            // no verdict" — and advancing on the second would report an unexplored start as decided.
+            // Callers treat the cursor as the boundary of the fully-scanned prefix, so that claim
+            // must hold: `(a b) | a` over two `a` rows with a budget of 1 dies inside start 0 before
+            // ever trying the second alternative, which matches there.
+            if budget.hit {
+                break;
             }
             scan.next_start += 1;
         }
@@ -2279,6 +2295,44 @@ mod tests {
                 .await
                 .unwrap(),
             vec![]
+        );
+    }
+
+    /// A budget that dies inside a start must NOT leave the scan cursor past it. `next_start` is
+    /// documented as the first start with no decided outcome, and `IncrementalMatcher` publishes it
+    /// as the boundary of the fully-scanned prefix — so claiming an aborted start was decided
+    /// licenses a caller to treat "no match here" as evidence when nothing was ever evaluated.
+    #[tokio::test]
+    async fn an_aborted_start_is_not_reported_as_scanned() {
+        // `(a b) | a`: the preferred branch charges `a` then `b`; with a budget of 1 the walk dies
+        // inside start 0 having never tried the second alternative, which DOES match there.
+        let pat = Pattern::Alt(vec![
+            Pattern::Concat(vec![Pattern::Var("a".into()), Pattern::Var("b".into())]),
+            Pattern::Var("a".into()),
+        ]);
+        let nfa = Nfa::compile(&pat);
+        let matcher = SetMatcher::new(vec![BTreeSet::from(["a".to_owned()]); 2]);
+        let mut scan = MatchScan::new();
+        let mut budget = ScanBudget::new(1);
+        let found = nfa
+            .next_match(
+                &mut scan,
+                2,
+                &matcher,
+                &SkipMode::PastLastRow,
+                &mut budget,
+                false,
+            )
+            .await
+            .unwrap();
+        assert!(
+            found.is_none() && budget.hit,
+            "the test needs the budget to die inside start 0"
+        );
+        assert_eq!(
+            scan.next_start(),
+            0,
+            "start 0 was aborted with no verdict, so the cursor must still point at it"
         );
     }
 }

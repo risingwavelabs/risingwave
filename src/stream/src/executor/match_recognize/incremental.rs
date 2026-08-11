@@ -2274,6 +2274,117 @@ mod tests {
         assert_eq!(provisional_triples(inc), batch, "oracle divergence {ctx}");
     }
 
+    /// The same operation sweep under a STARVED budget. Two properties, neither of which the
+    /// unlimited oracle can reach:
+    ///
+    /// 1. A truncated matcher is INCOMPLETE, never wrong — its provisional set is a leftmost
+    ///    *prefix* of the batch answer. The scan pulls matches in preference order and a budget
+    ///    abort inside a higher-preference subtree propagates out rather than falling through to a
+    ///    lower-preference alternative, so starvation can drop a suffix but can never fabricate a
+    ///    match, reorder two, or steal a row into a different variable.
+    /// 2. Starvation is always RECOVERABLE: one re-derive with budget restores exact equality.
+    ///    This is precisely the contract the executor's watermark arm relies on when it refreshes a
+    ///    partition before deciding anything, and nothing else tests it.
+    #[tokio::test]
+    async fn randomized_operation_sequence_oracle_under_a_starved_budget() {
+        const SEEDS: u64 = 200;
+        const OPS: usize = 30;
+        let var_pool: [&[&str]; 3] = [&["a", "b"], &["a", "b", "c"], &["a", "b", "c", "d"]];
+        // Guards against the test passing for the wrong reason: budgets small enough to matter must
+        // actually be exhausted, and a truncated state must actually differ from the batch answer at
+        // least sometimes. Without these a future change to the budget sizing could silently turn
+        // this into the unlimited oracle run twice.
+        let mut starved_ops = 0usize;
+        let mut strictly_shorter = 0usize;
+
+        for seed in 0..SEEDS {
+            let mut rng = SmallRng::seed_from_u64(seed ^ 0x5741_2764_u64);
+            let vars = var_pool[rng.random_range(0..var_pool.len())];
+            let pattern = gen_pattern(&mut rng, vars, 3);
+            let nfa = Nfa::compile(&pattern);
+            let skip = gen_skip(&mut rng, vars);
+
+            let n_rows = rng.random_range(3..=7);
+            let full_rows: Vec<BTreeSet<String>> = (0..n_rows)
+                .map(|_| {
+                    vars.iter()
+                        .filter(|_| rng.random_bool(0.6))
+                        .map(|v| (*v).to_owned())
+                        .collect()
+                })
+                .collect();
+
+            let mut inc = IncrementalMatcher::new(std::sync::Arc::new(nfa.clone()), skip.clone());
+            let mut fed = 0usize;
+            let evicted = 0usize;
+
+            for op in 0..OPS {
+                let matcher = SetMatcher::new(full_rows[evicted..].to_vec());
+                let ctx = format!("seed {seed} op {op} (starved)");
+                // 0 is included deliberately: a scan that dies on entry, having decided nothing.
+                let mut budget = ScanBudget::new(rng.random_range(0..=8));
+
+                match rng.random_range(0..2) {
+                    0 => {
+                        let remaining = full_rows.len() - fed;
+                        let chunk = if remaining == 0 {
+                            0
+                        } else {
+                            rng.random_range(0..=remaining.min(3))
+                        };
+                        let seqs: Vec<Seq> = (fed..fed + chunk).map(|i| Seq(i as i64)).collect();
+                        inc.advance(&seqs, &matcher, &mut budget, false)
+                            .await
+                            .unwrap();
+                        fed += chunk;
+                    }
+                    _ => {
+                        let k = rng.random_range(0..=fed + 2);
+                        inc.truncate_from_seq(Seq(k as i64), &matcher, &mut budget, false)
+                            .await
+                            .unwrap();
+                        if (evicted..fed).contains(&k) {
+                            fed = k;
+                        }
+                        inc.rescan(&matcher, &mut budget, false).await.unwrap();
+                    }
+                }
+
+                // (1) prefix, not equality.
+                let batch: Vec<(usize, usize, Vec<String>)> =
+                    batch_triples(&nfa, &skip, &full_rows[evicted..fed]).await;
+                let starved = provisional_triples(&inc);
+                if budget.hit {
+                    starved_ops += 1;
+                }
+                if starved.len() < batch.len() {
+                    strictly_shorter += 1;
+                }
+                assert!(
+                    batch.starts_with(&starved),
+                    "a starved matcher must hold a PREFIX of the batch answer {ctx}\n  starved: {starved:?}\n  batch:   {batch:?}"
+                );
+
+                // (2) one budgeted re-derive restores the exact invariant.
+                inc.refresh(&matcher, &mut ScanBudget::unlimited(), false)
+                    .await
+                    .unwrap();
+                assert_matches_batch(&inc, &nfa, &skip, &full_rows, evicted, fed, &ctx).await;
+            }
+        }
+
+        assert!(
+            starved_ops > 0,
+            "no operation exhausted its budget — the sweep never reached the truncation paths it \
+             exists to cover"
+        );
+        assert!(
+            strictly_shorter > 0,
+            "every starved op still matched the batch answer exactly — truncation never actually \
+             withheld a match, so the prefix property was asserted vacuously"
+        );
+    }
+
     #[tokio::test]
     async fn randomized_operation_sequence_oracle() {
         // ~200 seeds × ~30 ops. All in-memory over ≤7-row buffers, so the whole sweep is a few ms.
