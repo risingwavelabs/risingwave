@@ -92,6 +92,7 @@ fn for_all_metadata_models_v2_should_cover_all_required_meta_model_tables() {
         "hummock_sstable_info",
         "hummock_time_travel_delta",
         "hummock_time_travel_version",
+        "hummock_time_travel_version_epoch_summary",
         // Version deltas are replayed from meta store during snapshot build, not persisted in snapshot.
         "hummock_version_delta",
     ]
