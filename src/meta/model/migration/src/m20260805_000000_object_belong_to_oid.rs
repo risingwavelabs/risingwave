@@ -18,41 +18,51 @@ enum ObjectColumn {
 impl MigrationTrait for Migration {
     async fn up(&self, manager: &SchemaManager) -> Result<(), DbErr> {
         let backend = manager.get_database_backend();
-        match backend {
-            DatabaseBackend::MySql | DatabaseBackend::Postgres => {
-                manager
-                    .alter_table(
-                        Table::alter()
-                            .table(Object::Table)
-                            .add_column(ColumnDef::new(ObjectColumn::BelongToOid).integer().null())
-                            .to_owned(),
-                    )
-                    .await?;
-            }
-            DatabaseBackend::Sqlite => {
-                // SQLite cannot add a foreign key constraint to an existing table separately,
-                // but it allows REFERENCES on a newly added nullable column.
-                manager
-                    .get_connection()
-                    .execute(Statement::from_string(
-                        backend,
-                        r#"ALTER TABLE "object" ADD COLUMN "belong_to_oid" INTEGER REFERENCES "object" ("oid") ON DELETE CASCADE"#,
-                    ))
-                    .await?;
+        // The migrator records the version only after `up` returns, while MySQL DDL implicitly
+        // commits. Guard every DDL step so a new Meta leader can retry a partially run migration.
+        if !manager.has_column("object", "belong_to_oid").await? {
+            match backend {
+                DatabaseBackend::MySql | DatabaseBackend::Postgres => {
+                    manager
+                        .alter_table(
+                            Table::alter()
+                                .table(Object::Table)
+                                .add_column(
+                                    ColumnDef::new(ObjectColumn::BelongToOid).integer().null(),
+                                )
+                                .to_owned(),
+                        )
+                        .await?;
+                }
+                DatabaseBackend::Sqlite => {
+                    // SQLite cannot add a foreign key constraint to an existing table separately,
+                    // but it allows REFERENCES on a newly added nullable column.
+                    manager
+                        .get_connection()
+                        .execute(Statement::from_string(
+                            backend,
+                            r#"ALTER TABLE "object" ADD COLUMN "belong_to_oid" INTEGER REFERENCES "object" ("oid") ON DELETE CASCADE"#,
+                        ))
+                        .await?;
+                }
             }
         }
 
-        manager
-            .create_index(
-                Index::create()
-                    .name(INDEX_NAME)
-                    .table(Object::Table)
-                    .col(ObjectColumn::BelongToOid)
-                    .to_owned(),
-            )
-            .await?;
+        if !manager.has_index("object", INDEX_NAME).await? {
+            manager
+                .create_index(
+                    Index::create()
+                        .name(INDEX_NAME)
+                        .table(Object::Table)
+                        .col(ObjectColumn::BelongToOid)
+                        .to_owned(),
+                )
+                .await?;
+        }
 
-        if matches!(backend, DatabaseBackend::MySql | DatabaseBackend::Postgres) {
+        if matches!(backend, DatabaseBackend::MySql | DatabaseBackend::Postgres)
+            && !has_foreign_key(manager).await?
+        {
             manager
                 .alter_table(
                     Table::alter()
@@ -110,6 +120,28 @@ impl MigrationTrait for Migration {
 
         Ok(())
     }
+}
+
+async fn has_foreign_key(manager: &SchemaManager<'_>) -> Result<bool, DbErr> {
+    let backend = manager.get_database_backend();
+    let statement = match backend {
+        DatabaseBackend::MySql => format!(
+            "SELECT 1 FROM information_schema.TABLE_CONSTRAINTS \
+             WHERE CONSTRAINT_SCHEMA = DATABASE() AND TABLE_NAME = 'object' \
+             AND CONSTRAINT_NAME = '{FK_NAME}' AND CONSTRAINT_TYPE = 'FOREIGN KEY' LIMIT 1"
+        ),
+        DatabaseBackend::Postgres => format!(
+            "SELECT 1 FROM information_schema.table_constraints \
+             WHERE constraint_schema = current_schema() AND table_name = 'object' \
+             AND constraint_name = '{FK_NAME}' AND constraint_type = 'FOREIGN KEY' LIMIT 1"
+        ),
+        DatabaseBackend::Sqlite => unreachable!("SQLite defines the foreign key with the column"),
+    };
+    Ok(manager
+        .get_connection()
+        .query_one(Statement::from_string(backend, statement))
+        .await?
+        .is_some())
 }
 
 async fn backfill_belong_to_oid(manager: &SchemaManager<'_>) -> Result<(), DbErr> {
@@ -240,5 +272,59 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(i64::try_get(&remaining, "", "count").unwrap(), 4);
+    }
+
+    #[tokio::test]
+    async fn test_sqlite_partial_run_retry() {
+        let db = Database::connect("sqlite::memory:").await.unwrap();
+        for sql in [
+            r#"CREATE TABLE "object" ("oid" INTEGER PRIMARY KEY, "schema_id" INTEGER, "database_id" INTEGER)"#,
+            r#"CREATE TABLE "table" ("table_id" INTEGER PRIMARY KEY, "name" TEXT, "engine" TEXT, "belongs_to_job_id" INTEGER, "optional_associated_source_id" INTEGER)"#,
+            r#"CREATE TABLE "sink" ("sink_id" INTEGER PRIMARY KEY, "name" TEXT)"#,
+            r#"CREATE TABLE "source" ("source_id" INTEGER PRIMARY KEY, "name" TEXT)"#,
+            r#"CREATE TABLE "object_dependency" ("oid" INTEGER, "used_by" INTEGER)"#,
+            r#"INSERT INTO "object" ("oid", "schema_id", "database_id") VALUES (1, NULL, NULL), (2, NULL, 1), (3, 2, 1), (4, 2, 1)"#,
+            r#"INSERT INTO "table" ("table_id", "name", "engine", "belongs_to_job_id", "optional_associated_source_id") VALUES (3, 'table', 'HUMMOCK', NULL, NULL), (4, 'internal', 'HUMMOCK', 3, NULL)"#,
+            // Simulate Meta exiting after the first DDL statement but before recording the
+            // migration version.
+            r#"ALTER TABLE "object" ADD COLUMN "belong_to_oid" INTEGER REFERENCES "object" ("oid") ON DELETE CASCADE"#,
+        ] {
+            db.execute(Statement::from_string(DatabaseBackend::Sqlite, sql))
+                .await
+                .unwrap();
+        }
+
+        let manager = SchemaManager::new(&db);
+        Migration.up(&manager).await.unwrap();
+        // Simulate another exit after all migration statements but before recording the version.
+        Migration.up(&manager).await.unwrap();
+
+        assert!(manager.has_column("object", "belong_to_oid").await.unwrap());
+        assert!(manager.has_index("object", INDEX_NAME).await.unwrap());
+        let internal = db
+            .query_one(Statement::from_string(
+                DatabaseBackend::Sqlite,
+                r#"SELECT "belong_to_oid" FROM "object" WHERE "oid" = 4"#,
+            ))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(i32::try_get(&internal, "", "belong_to_oid").unwrap(), 3);
+
+        db.execute(Statement::from_string(
+            DatabaseBackend::Sqlite,
+            r#"DELETE FROM "object" WHERE "oid" = 3"#,
+        ))
+        .await
+        .unwrap();
+        assert!(
+            db.query_one(Statement::from_string(
+                DatabaseBackend::Sqlite,
+                r#"SELECT "oid" FROM "object" WHERE "oid" = 4"#,
+            ))
+            .await
+            .unwrap()
+            .is_none()
+        );
     }
 }

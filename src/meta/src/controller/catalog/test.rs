@@ -25,6 +25,7 @@ mod tests {
     use risingwave_pb::stream_plan::PbStreamNode;
     use tokio::sync::{mpsc, oneshot};
 
+    use crate::barrier::Command;
     use crate::controller::catalog::*;
     use crate::manager::{LocalNotification, WorkerKey};
     use crate::model::FragmentDownstreamRelation;
@@ -183,6 +184,142 @@ mod tests {
         }
         .insert(txn)
         .await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_cancel_creating_job_includes_belonging_streaming_jobs() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let mut inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let table_job_id = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(TEST_SCHEMA_ID.as_object_id()),
+        )
+        .await?
+        .oid
+        .as_job_id();
+        insert_test_table(
+            &txn,
+            table_job_id.as_mv_table_id(),
+            "cancel_table",
+            TableType::Table,
+            None,
+            "",
+        )
+        .await?;
+        let sink_job_id = CatalogController::create_object(
+            &txn,
+            ObjectType::Sink,
+            TEST_OWNER_ID,
+            Some(table_job_id.as_object_id()),
+        )
+        .await?
+        .oid
+        .as_job_id();
+        Sink::insert(sink::ActiveModel::from(PbSink {
+            id: sink_job_id.as_sink_id(),
+            schema_id: TEST_SCHEMA_ID,
+            database_id: TEST_DATABASE_ID,
+            name: "cancel_sink".to_owned(),
+            owner: TEST_OWNER_ID as _,
+            sink_type: PbSinkType::AppendOnly as i32,
+            ..Default::default()
+        }))
+        .exec(&txn)
+        .await?;
+        for job_id in [table_job_id, sink_job_id] {
+            insert_test_streaming_job_model(&txn, job_id, None).await?;
+            StreamingJob::update(streaming_job::ActiveModel {
+                job_id: Set(job_id),
+                job_status: Set(JobStatus::Creating),
+                ..Default::default()
+            })
+            .exec(&txn)
+            .await?;
+        }
+
+        let table_state_id = TableId::new(1000);
+        let sink_state_id = TableId::new(1001);
+        insert_test_fragment(
+            &txn,
+            FragmentId::new(100),
+            table_job_id,
+            TableIdArray(vec![table_state_id]),
+        )
+        .await?;
+        insert_test_fragment(
+            &txn,
+            FragmentId::new(101),
+            sink_job_id,
+            TableIdArray(vec![sink_state_id]),
+        )
+        .await?;
+        let (table_finish_tx, table_finish_rx) = oneshot::channel();
+        inner.register_finish_notifier(TEST_DATABASE_ID, table_job_id, table_finish_tx);
+        let (sink_finish_tx, sink_finish_rx) = oneshot::channel();
+        inner.register_finish_notifier(TEST_DATABASE_ID, sink_job_id, sink_finish_tx);
+        txn.commit().await?;
+        drop(inner);
+
+        let abort_result = mgr
+            .try_abort_creating_streaming_job(table_job_id, true)
+            .await?;
+        assert!(abort_result.aborted);
+        assert_eq!(
+            abort_result.aborted_sink_ids,
+            vec![sink_job_id.as_sink_id()]
+        );
+        let cancel_info = abort_result
+            .cancel_info
+            .expect("cancelled table job should have cleanup information");
+        assert_eq!(
+            cancel_info
+                .streaming_job_ids
+                .iter()
+                .copied()
+                .collect::<HashSet<_>>(),
+            HashSet::from([table_job_id, sink_job_id])
+        );
+        assert_eq!(
+            cancel_info
+                .state_table_ids
+                .iter()
+                .copied()
+                .collect::<HashSet<_>>(),
+            HashSet::from([table_state_id, sink_state_id])
+        );
+        let Command::DropStreamingJobs {
+            streaming_job_ids,
+            unregistered_state_table_ids,
+            ..
+        } = cancel_info.command
+        else {
+            unreachable!()
+        };
+        assert_eq!(
+            streaming_job_ids,
+            HashSet::from([table_job_id, sink_job_id])
+        );
+        assert_eq!(
+            unregistered_state_table_ids,
+            HashSet::from([table_state_id, sink_state_id])
+        );
+
+        for finish_rx in [table_finish_rx, sink_finish_rx] {
+            let err = finish_rx
+                .await
+                .expect("aborted job should notify its finish waiter")
+                .expect_err("aborted job should not finish successfully");
+            assert!(err.contains("cancelled"));
+        }
+        let db = &mgr.inner.read().await.db;
+        assert!(Object::find_by_id(table_job_id).one(db).await?.is_none());
+        assert!(Object::find_by_id(sink_job_id).one(db).await?.is_none());
 
         Ok(())
     }

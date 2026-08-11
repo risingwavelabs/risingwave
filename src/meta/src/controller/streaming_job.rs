@@ -108,9 +108,22 @@ pub struct AbortCreatingJobResult {
     pub aborted: bool,
     /// The database of the job, if the job was found.
     pub database_id: Option<DatabaseId>,
-    /// The aborted sink, if the aborted job was a sink; the caller should clear its iceberg
-    /// maintenance state via `IcebergCompactionManager::clear_maintenance_for_aborted_job`.
-    pub aborted_sink_id: Option<SinkId>,
+    /// The aborted sinks; the caller should clear their iceberg maintenance state via
+    /// `IcebergCompactionManager::clear_maintenance_for_aborted_job`.
+    pub aborted_sink_ids: Vec<SinkId>,
+    /// Runtime and state cleanup information captured before deleting the catalog rows.
+    /// This is returned only when handling an explicit cancellation.
+    pub cancel_info: Option<CancelStreamingJobInfo>,
+}
+
+/// Runtime and state cleanup information for canceling a creating streaming job.
+pub struct CancelStreamingJobInfo {
+    /// Barrier command that stops every affected streaming job.
+    pub command: Command,
+    /// Streaming jobs included in `command`.
+    pub streaming_job_ids: Vec<JobId>,
+    /// State tables to unregister after the barrier is collected.
+    pub state_table_ids: Vec<TableId>,
 }
 
 fn serverless_backfill_resource_group_placeholder(job_id: JobId) -> String {
@@ -873,69 +886,6 @@ impl CatalogController {
         Ok(())
     }
 
-    /// Builds a cancel command from persisted fragment metadata without reading `SharedActorInfos`.
-    ///
-    /// Returns `None` if the job no longer exists or has already been created.
-    pub async fn build_cancel_command(
-        &self,
-        job_id: JobId,
-    ) -> MetaResult<Option<(Command, Vec<TableId>)>> {
-        let inner = self.inner.read().await;
-        let txn = inner.db.begin().await?;
-
-        let Some(streaming_job) = StreamingJobModel::find_by_id(job_id).one(&txn).await? else {
-            tracing::warn!(
-                %job_id,
-                "streaming job not found when building cancel command, might be cancelled already"
-            );
-            return Ok(None);
-        };
-        if streaming_job.job_status == JobStatus::Created {
-            tracing::warn!(
-                "streaming job {} is already created, ignore cancel request",
-                job_id
-            );
-            return Ok(None);
-        }
-
-        let fragments = Fragment::find()
-            .filter(fragment::Column::JobId.eq(job_id))
-            .all(&txn)
-            .await?;
-
-        let state_table_ids = fragments
-            .iter()
-            .flat_map(|fragment| fragment.state_table_ids.inner_ref().iter().copied())
-            .collect_vec();
-        let sink_fragment_ids = fragments
-            .iter()
-            .filter_map(|fragment| {
-                FragmentTypeMask::from(fragment.fragment_type_mask)
-                    .contains(FragmentTypeFlag::Sink)
-                    .then_some(fragment.fragment_id)
-            })
-            .collect_vec();
-
-        let sink_target_fragments = fetch_target_fragments(&txn, sink_fragment_ids).await?;
-        let dropped_sink_fragment_by_targets = sink_target_fragments
-            .into_iter()
-            .filter_map(|(sink_fragment, target_fragments)| {
-                target_fragments
-                    .first()
-                    .map(|target_fragment| (*target_fragment, vec![sink_fragment]))
-            })
-            .collect();
-
-        Ok(Some((
-            Command::DropStreamingJobs {
-                streaming_job_ids: HashSet::from_iter([job_id]),
-                unregistered_state_table_ids: state_table_ids.iter().copied().collect(),
-                dropped_sink_fragment_by_targets,
-            },
-            state_table_ids,
-        )))
-    }
-
     /// `try_abort_creating_streaming_job` is used to abort the job that is under initial status or in `FOREGROUND` mode.
     #[await_tree::instrument]
     pub async fn try_abort_creating_streaming_job(
@@ -955,7 +905,8 @@ impl CatalogController {
             return Ok(AbortCreatingJobResult {
                 aborted: true,
                 database_id: None,
-                aborted_sink_id: None,
+                aborted_sink_ids: vec![],
+                cancel_info: None,
             });
         };
         let database_id = obj
@@ -963,9 +914,19 @@ impl CatalogController {
             .ok_or_else(|| anyhow!("obj has no database id: {:?}", obj))?;
         let streaming_job = streaming_job::Entity::find_by_id(job_id).one(&txn).await?;
 
-        if !is_cancelled && let Some(streaming_job) = &streaming_job {
-            assert_ne!(streaming_job.job_status, JobStatus::Created);
-            if streaming_job.create_type == CreateType::Background
+        if let Some(streaming_job) = &streaming_job {
+            if streaming_job.job_status == JobStatus::Created {
+                tracing::warn!(%job_id, "streaming job is already created, ignore abort request");
+                return Ok(AbortCreatingJobResult {
+                    aborted: false,
+                    database_id: Some(database_id),
+                    aborted_sink_ids: vec![],
+                    cancel_info: None,
+                });
+            }
+
+            if !is_cancelled
+                && streaming_job.create_type == CreateType::Background
                 && streaming_job.job_status == JobStatus::Creating
             {
                 if (obj.obj_type == ObjectType::Table || obj.obj_type == ObjectType::Sink)
@@ -982,20 +943,75 @@ impl CatalogController {
                     return Ok(AbortCreatingJobResult {
                         aborted: false,
                         database_id: Some(database_id),
-                        aborted_sink_id: None,
+                        aborted_sink_ids: vec![],
+                        cancel_info: None,
                     });
                 }
             }
         }
 
-        let obj_type = obj.obj_type;
         let mut objects_to_abort = vec![obj];
         objects_to_abort.extend(get_belong_objects(&txn, job_id.as_object_id()).await?);
         let object_ids_to_abort = objects_to_abort
             .iter()
             .map(|object| object.oid)
             .collect_vec();
+        let streaming_job_ids_to_abort: Vec<JobId> = StreamingJobModel::find()
+            .select_only()
+            .column(streaming_job::Column::JobId)
+            .filter(streaming_job::Column::JobId.is_in(object_ids_to_abort.iter().copied()))
+            .into_tuple()
+            .all(&txn)
+            .await?;
         let object_models = load_object_models(&txn, &objects_to_abort).await?;
+
+        let fragments: Vec<(FragmentId, i32, TableIdArray)> = Fragment::find()
+            .select_only()
+            .columns([
+                fragment::Column::FragmentId,
+                fragment::Column::FragmentTypeMask,
+                fragment::Column::StateTableIds,
+            ])
+            .filter(fragment::Column::JobId.is_in(streaming_job_ids_to_abort.iter().copied()))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+        let cancel_info = if is_cancelled {
+            let state_table_ids: HashSet<_> = fragments
+                .iter()
+                .flat_map(|(_, _, state_table_ids)| state_table_ids.inner_ref().iter().copied())
+                .collect();
+            let sink_fragment_ids = fragments
+                .iter()
+                .filter_map(|(fragment_id, fragment_type_mask, _)| {
+                    FragmentTypeMask::from(*fragment_type_mask)
+                        .contains(FragmentTypeFlag::Sink)
+                        .then_some(*fragment_id)
+                })
+                .collect_vec();
+            let sink_target_fragments = fetch_target_fragments(&txn, sink_fragment_ids).await?;
+            let mut dropped_sink_fragment_by_targets = HashMap::new();
+            for (sink_fragment, target_fragments) in sink_target_fragments {
+                if let Some(target_fragment) = target_fragments.first() {
+                    dropped_sink_fragment_by_targets
+                        .entry(*target_fragment)
+                        .or_insert_with(Vec::new)
+                        .push(sink_fragment);
+                }
+            }
+
+            Some(CancelStreamingJobInfo {
+                command: Command::DropStreamingJobs {
+                    streaming_job_ids: streaming_job_ids_to_abort.iter().copied().collect(),
+                    unregistered_state_table_ids: state_table_ids.clone(),
+                    dropped_sink_fragment_by_targets,
+                },
+                streaming_job_ids: streaming_job_ids_to_abort.clone(),
+                state_table_ids: state_table_ids.into_iter().collect(),
+            })
+        } else {
+            None
+        };
 
         // A job becomes visible to frontend only after it enters the creating status.
         let need_notify = streaming_job
@@ -1028,15 +1044,10 @@ impl CatalogController {
         };
 
         // Query fragment IDs before cascade-deleting them, for serving mapping cleanup.
-        let abort_fragment_ids: Vec<FragmentId> = Fragment::find()
-            .select_only()
-            .column(fragment::Column::FragmentId)
-            .filter(
-                fragment::Column::JobId.is_in(object_ids_to_abort.iter().map(|id| id.as_job_id())),
-            )
-            .into_tuple()
-            .all(&txn)
-            .await?;
+        let abort_fragment_ids = fragments
+            .iter()
+            .map(|(fragment_id, _, _)| *fragment_id)
+            .collect_vec();
 
         // Do not walk from an implicit Iceberg sink to its parent table here. The Iceberg table
         // creation error path drops the table explicitly, which then cascades to all objects that
@@ -1049,15 +1060,17 @@ impl CatalogController {
             MetaError::catalog_id_not_found("stream job", format!("streaming job {job_id} failed"))
         };
         let abort_reason = format!("streaming job aborted {}", err.as_report());
-        for tx in inner
-            .creating_table_finish_notifier
-            .get_mut(&database_id)
-            .map(|creating_tables| creating_tables.remove(&job_id).into_iter())
-            .into_iter()
-            .flatten()
-            .flatten()
-        {
-            let _ = tx.send(Err(abort_reason.clone()));
+        for aborted_job_id in streaming_job_ids_to_abort {
+            for tx in inner
+                .creating_table_finish_notifier
+                .get_mut(&database_id)
+                .map(|creating_tables| creating_tables.remove(&aborted_job_id).into_iter())
+                .into_iter()
+                .flatten()
+                .flatten()
+            {
+                let _ = tx.send(Err(abort_reason.clone()));
+            }
         }
         txn.commit().await?;
 
@@ -1074,11 +1087,16 @@ impl CatalogController {
             self.notify_frontend(Operation::Delete, build_object_group_for_delete(objs))
                 .await;
         }
-        let aborted_sink_id = (obj_type == ObjectType::Sink).then(|| job_id.as_sink_id());
+        let aborted_sink_ids = objects_to_abort
+            .iter()
+            .filter(|object| object.obj_type == ObjectType::Sink)
+            .map(|object| object.oid.as_sink_id())
+            .collect();
         Ok(AbortCreatingJobResult {
             aborted: true,
             database_id: Some(database_id),
-            aborted_sink_id,
+            aborted_sink_ids,
+            cancel_info,
         })
     }
 
