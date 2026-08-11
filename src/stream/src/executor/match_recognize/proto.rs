@@ -31,8 +31,78 @@ const MAX_PERMUTE_VARS: usize = 6;
 /// multiplier for the compiled NFA (`a{4_000_000_000}` would try to build billions of states).
 const MAX_QUANTIFIER_BOUND: u32 = 1000;
 
-/// Build a [`Pattern`] from its protobuf representation.
+/// Decode-side re-statement of the binder's `MAX_PATTERN_NFA_STATES`.
+///
+/// The two caps above bound each construct individually, which is not enough: nesting multiplies.
+/// `(a{1000}){1000}` satisfies both and still expands to ~10^6 states, allocated by `Nfa::compile`
+/// on the compute node while the actor is built. Only reachable from a corrupt or skewed plan —
+/// which is precisely what this layer exists to survive.
+const MAX_PATTERN_NFA_STATES: u64 = 100_000;
+
+/// Estimated compiled-NFA state count, mirroring the binder's `estimate_nfa_states` over the
+/// decoded pattern. Saturating throughout: the point is to reject the absurd, and a saturated
+/// total is still over the cap. `PERMUTE` is counted in its expanded form (`n!` orderings), the
+/// same shape the binder assumes.
+fn estimate_nfa_states(pattern: &Pattern) -> u64 {
+    match pattern {
+        Pattern::Var(_) => 2,
+        Pattern::Permute(vars) => {
+            let n = vars.len() as u64;
+            let orderings = (1..=n)
+                .try_fold(1u64, |acc, i| acc.checked_mul(i))
+                .unwrap_or(u64::MAX);
+            orderings
+                .saturating_mul(n.saturating_mul(2))
+                .saturating_add(2)
+        }
+        Pattern::Concat(ps) => ps
+            .iter()
+            .map(estimate_nfa_states)
+            .fold(0u64, u64::saturating_add)
+            .max(1),
+        Pattern::Alt(ps) => ps
+            .iter()
+            .map(estimate_nfa_states)
+            .fold(2u64, u64::saturating_add),
+        Pattern::Quantified(inner, q, _) => {
+            let inner = estimate_nfa_states(inner);
+            match q {
+                Quantifier::Star | Quantifier::Question => inner.saturating_add(2),
+                Quantifier::Plus => inner.saturating_mul(2).saturating_add(2),
+                // `min` mandatory copies, then either an unbounded `*` tail or `max - min`
+                // optional copies.
+                Quantifier::Range { min, max } => {
+                    let mandatory = inner.saturating_mul(u64::from(*min));
+                    match max {
+                        None => mandatory.saturating_add(inner).saturating_add(2),
+                        Some(max) => {
+                            let optional =
+                                inner.saturating_mul(u64::from(max.saturating_sub(*min)));
+                            mandatory.saturating_add(optional).max(1)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// Build a [`Pattern`] from its protobuf representation, rejecting one whose compiled size would be
+/// absurd. The size check is on the whole decoded pattern, since nesting is what defeats the
+/// per-construct caps.
 pub fn pattern_from_protobuf(pb: &MatchRecognizePatternNode) -> Result<Pattern, String> {
+    let pattern = decode_pattern(pb)?;
+    let states = estimate_nfa_states(&pattern);
+    if states > MAX_PATTERN_NFA_STATES {
+        return Err(format!(
+            "the pattern expands to an estimated {states} NFA states, above the supported \
+             maximum of {MAX_PATTERN_NFA_STATES}"
+        ));
+    }
+    Ok(pattern)
+}
+
+fn decode_pattern(pb: &MatchRecognizePatternNode) -> Result<Pattern, String> {
     let node = pb
         .node
         .as_ref()
@@ -61,17 +131,13 @@ pub fn pattern_from_protobuf(pb: &MatchRecognizePatternNode) -> Result<Pattern, 
                     .as_ref()
                     .ok_or_else(|| "quantified pattern missing quantifier".to_owned())?,
             )?;
-            Pattern::Quantified(
-                Box::new(pattern_from_protobuf(inner)?),
-                quantifier,
-                q.reluctant,
-            )
+            Pattern::Quantified(Box::new(decode_pattern(inner)?), quantifier, q.reluctant)
         }
     })
 }
 
 fn patterns_from_protobuf(patterns: &[MatchRecognizePatternNode]) -> Result<Vec<Pattern>, String> {
-    patterns.iter().map(pattern_from_protobuf).collect()
+    patterns.iter().map(decode_pattern).collect()
 }
 
 fn quantifier_from_protobuf(q: &MatchRecognizeQuantifier) -> Result<Quantifier, String> {
@@ -107,6 +173,32 @@ fn quantifier_from_protobuf(q: &MatchRecognizeQuantifier) -> Result<Quantifier, 
 
 #[cfg(test)]
 mod tests {
+
+    /// The whole-pattern state cap must be re-checked here, not only in the binder. Each nested
+    /// quantifier below is inside its per-construct bound, so `MAX_QUANTIFIER_BOUND` passes it —
+    /// yet the product expands to ~10^6 states, which `Nfa::compile` would allocate on the compute
+    /// node while the actor is being built.
+    #[test]
+    fn an_oversized_whole_pattern_is_rejected_even_when_every_construct_is_in_bounds() {
+        let inner = quantified(var("a"), Kind::Range, 1000, Some(1000), false);
+        let nested = quantified(inner, Kind::Range, 1000, Some(1000), false);
+        let err = pattern_from_protobuf(&nested).expect_err("must not decode");
+        assert!(
+            err.contains("states"),
+            "the error should name the state expansion, got: {err}"
+        );
+    }
+
+    /// A realistic pattern is nowhere near the cap and must still decode.
+    #[test]
+    fn an_ordinary_pattern_is_well_under_the_state_cap() {
+        let pat = concat(vec![
+            var("d"),
+            quantified(var("b"), Kind::Star, 0, None, false),
+            var("w"),
+        ]);
+        assert!(pattern_from_protobuf(&pat).is_ok());
+    }
     use risingwave_pb::stream_plan::match_recognize_pattern_node::Node;
     use risingwave_pb::stream_plan::{
         MatchRecognizePatternNode, MatchRecognizePatternSeq, MatchRecognizePermutePattern,
