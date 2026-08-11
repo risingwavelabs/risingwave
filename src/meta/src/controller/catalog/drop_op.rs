@@ -246,27 +246,6 @@ impl CatalogController {
             .all(&txn)
             .await?;
 
-        // Check if there are any streaming jobs that are creating.
-        if !removed_streaming_job_ids.is_empty() {
-            let creating = StreamingJob::find()
-                .filter(
-                    streaming_job::Column::JobStatus
-                        .ne(JobStatus::Created)
-                        .and(streaming_job::Column::JobId.is_in(removed_streaming_job_ids.clone())),
-                )
-                .count(&txn)
-                .await?;
-            if creating != 0 {
-                if creating == 1 && object_type == ObjectType::Sink {
-                    info!("dropping creating sink job, it will be cancelled");
-                } else {
-                    return Err(MetaError::permission_denied(format!(
-                        "can not drop {creating} creating streaming job, please cancel them firstly"
-                    )));
-                }
-            }
-        }
-
         let mut removed_state_table_ids: HashSet<_> = removed_table_ids.clone().collect();
 
         if !drop_database {

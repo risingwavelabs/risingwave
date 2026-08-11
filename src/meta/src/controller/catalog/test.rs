@@ -977,6 +977,92 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_drop_cascade_allows_creating_streaming_jobs() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let pb_source = PbSource {
+            schema_id: TEST_SCHEMA_ID,
+            database_id: TEST_DATABASE_ID,
+            name: "source_with_creating_jobs".to_owned(),
+            owner: TEST_OWNER_ID as _,
+            info: Some(StreamSourceInfo::default()),
+            ..Default::default()
+        };
+        let (source_id, _) = mgr.create_source(pb_source).await?;
+
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let (initial_job_id, Some(initial_table_id), initial_internal_table_id) =
+            insert_test_streaming_job(&txn, "initial_mv", true, None).await?
+        else {
+            unreachable!()
+        };
+        let (creating_job_id, Some(creating_table_id), creating_internal_table_id) =
+            insert_test_streaming_job(&txn, "creating_mv", true, None).await?
+        else {
+            unreachable!()
+        };
+        for (job_id, job_status) in [
+            (initial_job_id, JobStatus::Initial),
+            (creating_job_id, JobStatus::Creating),
+        ] {
+            streaming_job::ActiveModel {
+                job_id: Set(job_id),
+                job_status: Set(job_status),
+                ..Default::default()
+            }
+            .update(&txn)
+            .await?;
+        }
+        ObjectDependency::insert_many([initial_job_id, creating_job_id].map(|job_id| {
+            object_dependency::ActiveModel {
+                oid: Set(source_id.as_object_id()),
+                used_by: Set(job_id.as_object_id()),
+                ..Default::default()
+            }
+        }))
+        .exec(&txn)
+        .await?;
+        txn.commit().await?;
+        drop(inner);
+
+        let (release_context, _) = mgr
+            .drop_object(ObjectType::Source, source_id, DropMode::Cascade)
+            .await?;
+        assert_eq!(
+            release_context
+                .removed_streaming_job_ids
+                .into_iter()
+                .collect::<HashSet<_>>(),
+            HashSet::from([initial_job_id, creating_job_id])
+        );
+        assert_eq!(
+            release_context
+                .removed_state_table_ids
+                .into_iter()
+                .collect::<HashSet<_>>(),
+            HashSet::from([
+                initial_table_id,
+                initial_internal_table_id,
+                creating_table_id,
+                creating_internal_table_id,
+            ])
+        );
+
+        let db = &mgr.inner.read().await.db;
+        for object_id in [
+            source_id.as_object_id(),
+            initial_job_id.as_object_id(),
+            initial_internal_table_id.as_object_id(),
+            creating_job_id.as_object_id(),
+            creating_internal_table_id.as_object_id(),
+        ] {
+            assert!(Object::find_by_id(object_id).one(db).await?.is_none());
+        }
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_cancel_creating_table_deletes_associated_source() -> MetaResult<()> {
         let env = MetaSrvEnv::for_test().await;
         let (tx, mut notification_rx) = mpsc::unbounded_channel();
