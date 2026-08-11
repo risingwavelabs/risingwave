@@ -10449,9 +10449,9 @@ dependencies = [
 
 [[package]]
 name = "proto-src-confluent"
-version = "0.1.0+gc1e412b.v8.2.1"
+version = "0.1.1+g6a3cfd9.v8.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "b4f58442516149764e913a2ba92fa50a1db1a50fd539e5c1874c3ce25911bdcc"
+checksum = "90f6b92ba20d060c49734f01d8565b79a6c1916a182143fd28a4c75a2dd2ccbd"
 
 [[package]]
 name = "proto-src-google-type"
