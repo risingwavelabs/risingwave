@@ -15,6 +15,7 @@
 use std::assert_matches::assert_matches;
 use std::collections::{BTreeMap, HashMap};
 use std::mem;
+use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
 use futures::stream::select;
@@ -45,6 +46,7 @@ use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::oneshot;
+use tokio_retry::strategy::{ExponentialBackoff, jitter};
 
 use crate::common::change_buffer::{OutputKind, output_kind};
 use crate::common::compact_chunk::{
@@ -64,6 +66,19 @@ pub struct SinkExecutor<F: LogStoreFactory> {
     input_data_types: Vec<DataType>,
     non_append_only_behavior: Option<NonAppendOnlyBehavior>,
     rate_limit: Option<u32>,
+}
+
+const SINK_RETRY_BACKOFF_RESET_INTERVAL: Duration = Duration::from_secs(60);
+
+fn sink_retry_backoff() -> ExponentialBackoff {
+    ExponentialBackoff::from_millis(2)
+        .factor(500)
+        .max_delay(Duration::from_secs(30))
+}
+
+fn jitter_sink_retry_delay(delay: Duration) -> Duration {
+    let half = delay / 2;
+    half + jitter(half)
 }
 
 // Drop all the DELETE messages in this chunk and convert UPDATE INSERT into INSERT.
@@ -765,13 +780,16 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
             .rate_limited(rate_limit_rx);
 
         log_reader.init().await?;
+        let mut retry_backoff = sink_retry_backoff();
         loop {
             let future = async {
                 loop {
+                    let attempt_started_at = Instant::now();
                     let Err(e) = sink
                         .new_log_sinker(sink_writer_param.clone())
                         .and_then(|log_sinker| log_sinker.consume_log_and_sink(&mut log_reader))
                         .await;
+                    let attempt_duration = attempt_started_at.elapsed();
                     GLOBAL_ERROR_METRICS.user_sink_error.report([
                         "sink_executor_error".to_owned(),
                         sink_param.sink_id.to_string(),
@@ -793,12 +811,20 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                     if F::ALLOW_REWIND {
                         match log_reader.rewind().await {
                             Ok(()) => {
+                                if attempt_duration >= SINK_RETRY_BACKOFF_RESET_INTERVAL {
+                                    retry_backoff = sink_retry_backoff();
+                                }
+                                let retry_delay = jitter_sink_retry_delay(
+                                    retry_backoff.next().expect("retry strategy is infinite"),
+                                );
                                 error!(
                                     error = %e.as_report(),
                                     executor_id = %sink_writer_param.executor_id,
                                     sink_id = %sink_param.sink_id,
-                                    "reset log reader stream successfully after sink error"
+                                    ?retry_delay,
+                                    "reset log reader stream successfully after sink error; retrying after backoff"
                                 );
+                                tokio::time::sleep(retry_delay).await;
                                 Ok(())
                             }
                             Err(rewind_err) => {
@@ -920,6 +946,25 @@ mod test {
             &current,
             &HashMap::from([("force_append_only".to_owned(), "true".to_owned())])
         ));
+    }
+
+    #[test]
+    fn test_sink_retry_backoff_is_bounded() {
+        let mut retry_backoff = sink_retry_backoff();
+        for expected in [1, 2, 4, 8, 16, 30, 30].map(Duration::from_secs) {
+            assert_eq!(retry_backoff.next(), Some(expected));
+        }
+    }
+
+    #[test]
+    fn test_sink_retry_jitter_stays_in_upper_half() {
+        for delay in [Duration::from_secs(1), Duration::from_secs(30)] {
+            for _ in 0..100 {
+                let jittered = jitter_sink_retry_delay(delay);
+                assert!(jittered >= delay / 2);
+                assert!(jittered <= delay);
+            }
+        }
     }
 
     #[tokio::test]

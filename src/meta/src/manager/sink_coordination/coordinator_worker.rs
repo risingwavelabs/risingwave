@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fmt::Debug;
 use std::future::{Future, poll_fn};
 use std::pin::pin;
+use std::sync::Arc;
 use std::task::Poll;
 use std::time::{Duration, Instant};
 
@@ -39,6 +40,7 @@ use sea_orm::DatabaseConnection;
 use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::sleep;
 use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use tonic::Status;
@@ -526,7 +528,23 @@ impl CoordinatorWorker {
         db: DatabaseConnection,
         subscriber: SinkCommittedEpochSubscriber,
         iceberg_compact_stat_sender: UnboundedSender<IcebergSinkCompactionUpdate>,
+        coordinator_init_semaphore: Arc<Semaphore>,
     ) {
+        let coordinator_init_permit = match coordinator_init_semaphore
+            .acquire_owned()
+            .instrument_await("acquire_sink_coordinator_init_permit")
+            .await
+        {
+            Ok(permit) => permit,
+            Err(e) => {
+                error!(
+                    error = %e.as_report(),
+                    "sink coordinator initialization limiter closed unexpectedly"
+                );
+                return;
+            }
+        };
+
         let sink = match build_sink(param.clone()) {
             Ok(sink) => sink,
             Err(e) => {
@@ -552,16 +570,36 @@ impl CoordinatorWorker {
                         return;
                     }
                 };
-            Self::execute_coordinator(db, param, request_rx, coordinator, subscriber).await
+            Self::execute_coordinator_inner(
+                db,
+                param,
+                request_rx,
+                coordinator,
+                subscriber,
+                Some(coordinator_init_permit),
+            )
+            .await
         });
     }
 
+    #[cfg(test)]
     pub async fn execute_coordinator(
         db: DatabaseConnection,
         param: SinkParam,
         request_rx: UnboundedReceiver<SinkWriterCoordinationHandle>,
         coordinator: SinkCommitCoordinator,
         subscriber: SinkCommittedEpochSubscriber,
+    ) {
+        Self::execute_coordinator_inner(db, param, request_rx, coordinator, subscriber, None).await;
+    }
+
+    async fn execute_coordinator_inner(
+        db: DatabaseConnection,
+        param: SinkParam,
+        request_rx: UnboundedReceiver<SinkWriterCoordinationHandle>,
+        coordinator: SinkCommitCoordinator,
+        subscriber: SinkCommittedEpochSubscriber,
+        coordinator_init_permit: Option<OwnedSemaphorePermit>,
     ) {
         let mut worker = CoordinatorWorker {
             handle_manager: CoordinationHandleManager {
@@ -574,7 +612,10 @@ impl CoordinatorWorker {
             curr_state: CoordinatorWorkerState::Running,
         };
 
-        if let Err(e) = worker.run_coordination(db, coordinator, subscriber).await {
+        if let Err(e) = worker
+            .run_coordination(db, coordinator, subscriber, coordinator_init_permit)
+            .await
+        {
             for handle in worker.handle_manager.writer_handles.into_values() {
                 handle.abort(Status::internal(format!(
                     "failed to run coordination: {:?}",
@@ -665,6 +706,7 @@ impl CoordinatorWorker {
         db: DatabaseConnection,
         mut coordinator: SinkCommitCoordinator,
         subscriber: SinkCommittedEpochSubscriber,
+        coordinator_init_permit: Option<OwnedSemaphorePermit>,
     ) -> anyhow::Result<()> {
         let sink_id = self.handle_manager.param.sink_id;
 
@@ -675,6 +717,7 @@ impl CoordinatorWorker {
             SinkCommitCoordinator::SinglePhase(coordinator) => coordinator.init().await?,
             SinkCommitCoordinator::TwoPhase(coordinator) => coordinator.init().await?,
         }
+        drop(coordinator_init_permit);
 
         let mut running_handles = self.handle_manager.wait_init_handles().await?;
         self.try_handle_init_requests(&running_handles, &mut two_phase_handler)

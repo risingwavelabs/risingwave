@@ -31,7 +31,7 @@ use sea_orm::DatabaseConnection;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
 use tokio::sync::oneshot::{Receiver, Sender, channel};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{Semaphore, mpsc, oneshot};
 use tokio::task::{JoinError, JoinHandle};
 use tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::Status;
@@ -60,6 +60,9 @@ macro_rules! send_await_with_err_check {
 }
 
 const BOUNDED_CHANNEL_SIZE: usize = 16;
+// Keep coordinator initialization below the default MetaStore pool size (10), leaving
+// connections available for recovery and other Meta services.
+const MAX_CONCURRENT_COORDINATOR_INITIALIZATIONS: usize = 8;
 
 enum ManagerRequest {
     NewSinkWriter(SinkWriterCoordinationHandle),
@@ -108,6 +111,8 @@ impl SinkCoordinatorManager {
         await_tree_reg: await_tree::Registry,
     ) -> (Self, (JoinHandle<()>, Sender<()>)) {
         let subscriber = new_committed_epoch_subscriber(hummock_manager, metadata_manager);
+        let coordinator_init_semaphore =
+            Arc::new(Semaphore::new(MAX_CONCURRENT_COORDINATOR_INITIALIZATIONS));
         Self::start_worker_with_spawn_worker({
             move |param, manager_request_stream| {
                 let sink_id = param.sink_id;
@@ -117,6 +122,7 @@ impl SinkCoordinatorManager {
                     db.clone(),
                     subscriber.clone(),
                     iceberg_compact_stat_sender.clone(),
+                    coordinator_init_semaphore.clone(),
                 );
                 tokio::spawn(
                     await_tree_reg
