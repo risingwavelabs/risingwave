@@ -509,12 +509,24 @@ impl CandidateMatcher for DefineMatcher<'_> {
         }
         // WITHIN: binding `pos` extends the match to span `[match_start, pos]`. Reject the candidate
         // if that span exceeds the bound, so the NFA backtracks to a shorter match that fits.
-        if let Some(within) = self.within {
-            let first_key = self.rows[match_start].order_key.clone();
-            let last_key = self.rows[pos].order_key.clone();
-            let span_row = OwnedRow::new(vec![last_key, first_key]);
-            let value = within.eval_row_infallible(&span_row).await;
-            if !value.is_some_and(|s| s.into_bool()) {
+        //
+        // One comparison, not an expression call. The span predicate is `last <= first + bound` and
+        // `BufferedRow::deadline` is that same `first + bound`, already evaluated once per row at
+        // ingest — the binder builds both from one expression precisely so its two WITHIN consumers
+        // agree on every input, including calendar intervals, and `lower_within`'s
+        // `within_predicate_right_hand_side_is_the_deadline` test pins that. Reusing it here removes
+        // an allocation, two `Datum` clones and a boxed expression walk from the hottest path in the
+        // operator: this runs once per predicate evaluation, up to the whole scan budget per visit,
+        // and for a pattern variable with no `DEFINE` it was the entire cost of an evaluation.
+        //
+        // A NULL deadline (an eval error at ingest) rejects, which is what the expression did with a
+        // NULL result. `order_key` is never NULL for a buffered row — those are dropped at ingest.
+        if self.within.is_some() {
+            let fits = match (&self.rows[pos].order_key, &self.rows[match_start].deadline) {
+                (Some(last), Some(deadline)) => last.default_cmp(deadline).is_le(),
+                _ => false,
+            };
+            if !fits {
                 return Ok(false);
             }
         }
@@ -658,9 +670,6 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
     ) -> StreamExecutorResult<Vec<StreamChunk>> {
         let mut out = Vec::new();
         loop {
-            if budget.hit {
-                break;
-            }
             // Only the `Copy` identity fields before the gate: cloning the whole match (its label
             // vector in particular) on every ATTEMPT would copy it once per visit for a held
             // match; the clone happens below, after the gate passes.
@@ -696,6 +705,20 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             } else {
                 false
             };
+            // A spent budget cannot decide a STRUCTURAL hold: every walk short-circuits to
+            // "undecided", which the gate must read as hold. A WITHIN-final match is different —
+            // its window has closed, so `match_is_final` returns FINAL for it before spending
+            // anything, and it needs no walk at all. Those MUST still be drained: leaving one
+            // withheld while `prune_dead_prefix` treats its window-closed start row as dead is how
+            // a starved visit loses a match outright, and it is also the only way a degraded
+            // partition sheds rows at all. So stop only where a verdict genuinely needs budget we
+            // do not have.
+            //
+            // (Nothing between the loop head and here spends budget: the provisional read, the seq
+            // lookup and the deadline comparison are all plain reads.)
+            if budget.hit && !within_final {
+                break;
+            }
             // Short-circuit a match the gate already held under identical state: only the
             // watermark-dependent WITHIN test can change the answer.
             if run.held == Some((start_seq, resume_pos, run.rows.len())) && !within_final {
@@ -832,6 +855,18 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                 break;
             }
         }
+        // Never consume the start row of a match the matcher still holds. Prune deletes a DEAD
+        // prefix, and a match sitting in `provisional()` is by definition not dead — but the
+        // WITHIN-deadline skip above never consults the matcher, so on a visit where the emitter
+        // could not drain everything (a spent budget stops the drain at the first structurally-held
+        // match, and `consume_prefix`'s rebuild re-derives the tail under that same spent budget)
+        // it would otherwise delete rows an undrained match still needs. Clamping here makes the
+        // pass sound without having to reason about how much budget the emitter had left.
+        if let Some(first) = run.matcher.provisional().first()
+            && let Some(pos) = run.rows.iter().position(|r| Seq(r.seq) == first.start_seq)
+        {
+            retain_from = retain_from.min(pos);
+        }
         Self::consume_prefix(
             run,
             retain_from,
@@ -860,6 +895,15 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         if upto == 0 {
             return Ok(());
         }
+        // Invalidate the emission-gate cache: its key is `(start_seq, resume_pos, rows.len())`,
+        // which identifies gate state only while `rows` is immutable — and this function rebases
+        // the buffer, so both the position and the length can return to a value they held under a
+        // DIFFERENT set of rows. A stale hit then skips the gate for a match the gate would now
+        // decide FINAL, withholding it until the next row arrives in that partition (and, without
+        // WITHIN on an idle partition, indefinitely). Cheaper to drop the cache on every rebase
+        // than to carry a generation counter: the cache exists to save repeated walks on a HELD
+        // match, and a rebase means the next visit has to re-walk anyway.
+        run.held = None;
         for c in &run.rows[..upto] {
             state_table.delete(once(Some(ScalarImpl::Int64(c.seq))).chain(&c.row));
         }
@@ -1164,12 +1208,34 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         metrics
                             .match_recognize_evicted_rows_count
                             .inc_by((rows_before - run.rows.len()) as u64);
+                        // Captured while the entry is still borrowed; the removal below needs the
+                        // borrow released.
+                        let partition_emptied = run.rows.is_empty();
+                        let emptied_capacity = run.rows.capacity();
                         for c in filled {
                             yield Message::Chunk(c);
                         }
                         if budget.hit {
                             metrics.match_recognize_scan_budget_exhausted_count.inc();
                             report_scan_budget_once(&eval_error_report, &mut reported_budget);
+                        }
+                        // Only drop a partition whose buffers actually grew. Removing it
+                        // unconditionally looked tidier but cost more than the wart it fixed: any
+                        // pattern that consumes its whole buffer per match (the common case under
+                        // the default PAST LAST ROW — `PATTERN (d w)`, say) empties its partition on
+                        // essentially every row, and each removal forces the next row down the slow
+                        // branch, paying a partition-key clone, a skip-mode clone and regrowth of
+                        // three vectors — exactly the reconstruction `consume_prefix`'s `reset()`
+                        // exists to avoid. Above the threshold the retained capacity is worth more
+                        // than the reconstruction: a partition that peaked at tens of thousands of
+                        // rows holds a large allocation for an entry with nothing in it. Below it,
+                        // the next watermark pass sweeps the entry anyway.
+                        const DROP_EMPTY_PARTITION_CAPACITY: usize = 1024;
+                        if partition_emptied && emptied_capacity >= DROP_EMPTY_PARTITION_CAPACITY {
+                            // Safe for the same reason as the watermark arm: `consume_prefix` resets
+                            // the matcher when it consumes the whole buffer, so an empty-rows
+                            // partition carries no state a later row would need.
+                            parts.remove(&pk);
                         }
                     }
                     if let Some(c) = builder.take() {
@@ -1312,6 +1378,10 @@ struct PartitionRun {
     /// unchanged only the watermark-dependent `WITHIN`-finality test can flip the answer — a held
     /// match would otherwise re-pay the full walk set on every visit until decided. Budget-hit
     /// verdicts are never cached (they are not verdicts).
+    ///
+    /// The triple identifies gate state only over an UNCHANGED buffer, so `consume_prefix` clears
+    /// this on every rebase: after a prune, the same `(resume_pos, len)` can recur over a different
+    /// set of rows and a stale hit would withhold a now-decidable match.
     held: Option<(Seq, usize, usize)>,
 }
 
