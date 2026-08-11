@@ -529,10 +529,13 @@ pub fn start_iceberg_compactor(
                         let tracker = tracker_entry.remove();
                         let sink_id = tracker.sink_id();
                         let total_plans = tracker.total_plans();
+                        let admitted_plans = tracker.admitted_plans();
                         let successful_plans = tracker.successful_plans();
                         let failed_plans = tracker.failed_plans();
+                        let rejected_plans = tracker.rejected_plans();
                         let report = tracker.into_report(completed_task_id);
                         let task_succeeded = report.error_message.is_none();
+                        let task_error = report.error_message.clone();
                         if matches!(
                             send_or_buffer_iceberg_task_report(
                                 &request_sender,
@@ -550,9 +553,25 @@ pub fn start_iceberg_compactor(
                                 task_id = %completed_task_id,
                                 sink_id = sink_id,
                                 total_plans = total_plans,
+                                admitted_plans = admitted_plans,
                                 successful_plans = successful_plans,
                                 failed_plans = failed_plans,
+                                rejected_plans = rejected_plans,
                                 "iceberg_compaction_task_succeeded",
+                            );
+                        } else {
+                            tracing::warn!(
+                                iceberg_component = "compaction_worker",
+                                iceberg_operation = "report_task",
+                                error = %task_error.as_deref().unwrap_or("unknown task failure"),
+                                task_id = %completed_task_id,
+                                sink_id = sink_id,
+                                total_plans = total_plans,
+                                admitted_plans = admitted_plans,
+                                successful_plans = successful_plans,
+                                failed_plans = failed_plans,
+                                rejected_plans = rejected_plans,
+                                "iceberg_compaction_task_failed",
                             );
                         }
                         continue 'consume_stream;
@@ -767,8 +786,6 @@ pub fn start_iceberg_compactor(
                                                 total_plans = total_plans,
                                                 "iceberg_compaction_plan_rejected_capacity",
                                             );
-                                            // Stop enqueuing remaining plans
-                                            break;
                                         },
                                         PushResult::RejectedTooLarge => {
                                             tracing::error!(
@@ -816,7 +833,9 @@ pub fn start_iceberg_compactor(
                                     let report = build_iceberg_task_report(
                                         task_id,
                                         sink_id,
-                                        Some("Failed to enqueue all iceberg compaction plans".to_owned()),
+                                        Some(format!(
+                                            "Failed to enqueue any of {total_plans} iceberg compaction plans"
+                                        )),
                                     );
                                     if matches!(
                                         send_or_buffer_iceberg_task_report(
@@ -831,7 +850,11 @@ pub fn start_iceberg_compactor(
                                 } else {
                                     task_trackers.insert(
                                         task_id,
-                                        IcebergTaskTracker::new(sink_id, enqueued_count),
+                                        IcebergTaskTracker::new(
+                                            sink_id,
+                                            total_plans,
+                                            enqueued_count,
+                                        ),
                                     );
                                 }
 
@@ -842,6 +865,7 @@ pub fn start_iceberg_compactor(
                                     sink_id = sink_id,
                                     total_plans = total_plans,
                                     enqueued_count = enqueued_count,
+                                    rejected_count = total_plans - enqueued_count,
                                     "iceberg_compaction_task_enqueue_finished",
                                 );
                             },
@@ -1699,7 +1723,7 @@ mod tests {
         assert_eq!(task_queue.waiting_parallelism_sum(), 7);
 
         let shutdown_map = Arc::new(Mutex::new(HashMap::new()));
-        let mut task_trackers = HashMap::from([(task_id, IcebergTaskTracker::new(10, 2))]);
+        let mut task_trackers = HashMap::from([(task_id, IcebergTaskTracker::new(10, 2, 2))]);
 
         cancel_iceberg_task(task_id, &mut task_queue, &shutdown_map, &mut task_trackers);
 
@@ -1715,7 +1739,7 @@ mod tests {
         let shutdown_map = Arc::new(Mutex::new(HashMap::new()));
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         shutdown_map.lock().unwrap().insert(task_key, shutdown_tx);
-        let mut task_trackers = HashMap::from([(task_id, IcebergTaskTracker::new(10, 1))]);
+        let mut task_trackers = HashMap::from([(task_id, IcebergTaskTracker::new(10, 1, 1))]);
 
         cancel_iceberg_task(task_id, &mut task_queue, &shutdown_map, &mut task_trackers);
 
