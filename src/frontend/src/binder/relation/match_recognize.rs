@@ -245,32 +245,7 @@ impl Binder {
                 let Some(order_key) = order_by.first() else {
                     bail_not_implemented!("WITHIN requires an ORDER BY column");
                 };
-                let ts_type = order_key.return_type();
-                let last = ExprImpl::from(InputRef::new(0, ts_type.clone()));
-                let first = ExprImpl::from(InputRef::new(1, ts_type.clone()));
-                // The span predicate is `last <= first + bound` — the SAME function as the
-                // deadline below, by construction. Lowering it as `(last - first) <= bound` looks
-                // equivalent but is not for calendar-varying intervals: timestamp subtraction
-                // yields a months-free interval compared under 30-day normalization, while
-                // `first + INTERVAL '1 month'` is calendar addition — for starts in short months
-                // the deadline would close BEFORE the span window, prematurely finalizing and
-                // evicting live partials. Sharing the `first + bound` shape makes the executor's
-                // two WITHIN consumers (span check and deadline) agree on every input.
-                let first_plus_bound = ExprImpl::from(FunctionCall::new(
-                    ExprType::Add,
-                    vec![first, bound.clone()],
-                )?);
-                let predicate = ExprImpl::from(FunctionCall::new(
-                    ExprType::LessThanOrEqual,
-                    vec![last, first_plus_bound],
-                )?);
-                // Deadline `first_order_key + <interval>` over a synthetic `[first_order_key]` row
-                // (`InputRef(0)` is the first row's order key here): the watermark past which a
-                // partial starting at that row can no longer complete within the bound, so an idle
-                // partition can be woken to evict it.
-                let first_only = ExprImpl::from(InputRef::new(0, ts_type));
-                let deadline =
-                    ExprImpl::from(FunctionCall::new(ExprType::Add, vec![first_only, bound])?);
+                let (predicate, deadline) = lower_within(order_key.return_type(), bound)?;
                 (Some(predicate), Some(deadline))
             }
             None => {
@@ -1690,6 +1665,39 @@ impl ExprRewriter for SlotLoweringRewriter<'_, '_> {
     }
 }
 
+/// Lower a `WITHIN` bound into the two expressions the executor consumes: the span predicate over a
+/// synthetic `[last_order_key, first_order_key]` row, and the per-row deadline over a synthetic
+/// `[first_order_key]` row.
+///
+/// Extracted so their relationship is testable. The executor treats the deadline as interchangeable
+/// with the right-hand side of the span predicate — it is what lets a hot-path span check reuse the
+/// deadline already cached per row instead of evaluating an expression — and that interchangeability
+/// holds only because BOTH are built here from one `first + bound`. See
+/// [`within_predicate_right_hand_side_is_the_deadline`].
+///
+/// Lowering the predicate as `(last - first) <= bound` looks equivalent and is not, for
+/// calendar-varying intervals: timestamp subtraction yields a months-free interval compared under
+/// 30-day normalization, while `first + INTERVAL '1 month'` is calendar addition. For starts in
+/// short months the deadline would then close BEFORE the span window, prematurely finalizing and
+/// evicting live partials.
+fn lower_within(ts_type: DataType, bound: ExprImpl) -> crate::error::Result<(ExprImpl, ExprImpl)> {
+    let last = ExprImpl::from(InputRef::new(0, ts_type.clone()));
+    let first = ExprImpl::from(InputRef::new(1, ts_type.clone()));
+    let first_plus_bound = ExprImpl::from(FunctionCall::new(
+        ExprType::Add,
+        vec![first, bound.clone()],
+    )?);
+    let predicate = ExprImpl::from(FunctionCall::new(
+        ExprType::LessThanOrEqual,
+        vec![last, first_plus_bound],
+    )?);
+    // The deadline is the same `first + bound`, but over a one-column synthetic row, so `first` is
+    // `InputRef(0)` here rather than `InputRef(1)`.
+    let first_only = ExprImpl::from(InputRef::new(0, ts_type));
+    let deadline = ExprImpl::from(FunctionCall::new(ExprType::Add, vec![first_only, bound])?);
+    Ok((predicate, deadline))
+}
+
 #[cfg(test)]
 mod tests {
     use risingwave_sqlparser::ast::RepetitionQuantifier as Q;
@@ -1780,6 +1788,73 @@ mod tests {
         // A variable occurring twice keeps its smallest distance.
         let twice = concat(vec![var("a"), var("b"), var("a")]);
         assert_eq!(d(&twice, "a"), Some(0));
+    }
+
+    /// The executor's hot-path span check reuses the per-row deadline instead of evaluating the
+    /// span predicate, which is sound only while the deadline IS the predicate's right-hand side.
+    /// That relationship is established here, by building both from one `first + bound`, and is
+    /// relied on in `DefineMatcher::matches` — so pin it: a future change that lowers the predicate
+    /// differently (`(last - first) <= bound`, say, which is wrong for calendar intervals) would
+    /// silently change which matches the operator produces, and this fails instead.
+    #[test]
+    fn within_predicate_right_hand_side_is_the_deadline() {
+        let bound = ExprImpl::literal_int(5);
+        let (predicate, deadline) = lower_within(DataType::Int32, bound).unwrap();
+
+        let ExprImpl::FunctionCall(pred) = &predicate else {
+            panic!("the span predicate must be a function call, got {predicate:?}");
+        };
+        assert_eq!(pred.func_type(), ExprType::LessThanOrEqual);
+        let [last, rhs] = pred.inputs() else {
+            panic!("the span predicate must be binary");
+        };
+        assert_eq!(
+            last,
+            &ExprImpl::from(InputRef::new(0, DataType::Int32)),
+            "`last` is column 0 of the synthetic [last, first] row"
+        );
+
+        // The two differ only in where `first` is read from: column 1 of the two-column span row
+        // versus column 0 of the one-column deadline row. The operator and the bound must be
+        // identical, because that is exactly what makes them interchangeable.
+        let ExprImpl::FunctionCall(rhs) = rhs else {
+            panic!("the predicate's right-hand side must be `first + bound`, got {rhs:?}");
+        };
+        let ExprImpl::FunctionCall(dl) = &deadline else {
+            panic!("the deadline must be a function call, got {deadline:?}");
+        };
+        assert_eq!(
+            rhs.func_type(),
+            ExprType::Add,
+            "span rhs must be an addition"
+        );
+        assert_eq!(
+            dl.func_type(),
+            ExprType::Add,
+            "deadline must be an addition"
+        );
+
+        let [span_first, span_bound] = rhs.inputs() else {
+            panic!("span rhs must be binary");
+        };
+        let [dl_first, dl_bound] = dl.inputs() else {
+            panic!("deadline must be binary");
+        };
+        assert_eq!(
+            span_first,
+            &ExprImpl::from(InputRef::new(1, DataType::Int32)),
+            "`first` is column 1 of the two-column span row"
+        );
+        assert_eq!(
+            dl_first,
+            &ExprImpl::from(InputRef::new(0, DataType::Int32)),
+            "`first` is column 0 of the one-column deadline row"
+        );
+        assert_eq!(
+            span_bound, dl_bound,
+            "both must carry the SAME bound expression; if they diverge, the executor's hot-path \
+             span check (which reuses the cached deadline) stops agreeing with the span predicate"
+        );
     }
 
     /// Nesting multiplies, so per-quantifier bounds within [`MAX_QUANTIFIER_BOUND`] are not enough.
