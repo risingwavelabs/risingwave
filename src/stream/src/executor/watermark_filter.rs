@@ -15,7 +15,6 @@
 use std::cmp;
 
 use futures::future::{BoxFuture, Either, select, try_join, try_join_all};
-use futures::stream::FuturesOrdered;
 use risingwave_common::hash::VnodeBitmapExt;
 use risingwave_common::types::DefaultOrd;
 use risingwave_common::{bail, row};
@@ -86,7 +85,7 @@ impl<S: StateStore, const UPSERT: bool> Execute for WatermarkFilterExecutorInner
         self.execute_inner().boxed()
     }
 }
-const UPDATE_GLOBAL_WATERMARK_FREQUENCY: usize = 5;
+const UPDATE_GLOBAL_WATERMARK_FREQUENCY_WHEN_IDLE: usize = 5;
 
 impl<S: StateStore, const UPSERT: bool> WatermarkFilterExecutorInner<S, UPSERT> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
@@ -132,28 +131,29 @@ impl<S: StateStore, const UPSERT: bool> WatermarkFilterExecutorInner<S, UPSERT> 
             ));
         }
 
-        let mut barrier_num_since_last_global_refresh = 0;
-        let mut pending_global_refreshes = FuturesOrdered::<WatermarkRefreshFuture>::new();
+        // If the input is idle
+        let mut idle_input = true;
+        let mut barrier_num_during_idle = 0;
+        let mut pending_global_refresh: Option<WatermarkRefreshFuture> = None;
 
         loop {
-            let event = if pending_global_refreshes.is_empty() {
-                WatermarkFilterEvent::Input(input.next().await)
-            } else {
+            let event = if let Some(refresh) = pending_global_refresh.as_mut() {
                 let next_msg = input.next();
-                let next_global_refresh = pending_global_refreshes.next();
                 pin_mut!(next_msg);
-                pin_mut!(next_global_refresh);
-                match select(next_global_refresh, next_msg).await {
-                    Either::Left((Some(refresh_result), _)) => {
+                match select(refresh, next_msg).await {
+                    Either::Left((refresh_result, _)) => {
+                        pending_global_refresh = None;
                         WatermarkFilterEvent::GlobalRefresh(refresh_result)
                     }
-                    Either::Left((None, _)) => continue,
                     Either::Right((msg, _)) => WatermarkFilterEvent::Input(msg),
                 }
+            } else {
+                WatermarkFilterEvent::Input(input.next().await)
             };
 
             let msg = match event {
                 WatermarkFilterEvent::GlobalRefresh(refresh_result) => {
+                    pending_global_refresh = None;
                     let global_max_watermark = refresh_result?;
                     let previous_watermark = current_watermark.clone();
                     current_watermark = match (current_watermark, global_max_watermark) {
@@ -243,6 +243,7 @@ impl<S: StateStore, const UPSERT: bool> WatermarkFilterExecutorInner<S, UPSERT> 
                     }
 
                     if let Some(watermark) = current_watermark.clone() {
+                        idle_input = false;
                         yield Message::Watermark(Watermark::new(
                             event_time_col_idx,
                             watermark_type.clone(),
@@ -261,6 +262,7 @@ impl<S: StateStore, const UPSERT: bool> WatermarkFilterExecutorInner<S, UPSERT> 
                             && cur_watermark.default_cmp(&watermark).is_lt()
                         {
                             current_watermark = Some(watermark.clone());
+                            idle_input = false;
                             yield Message::Watermark(Watermark::new(
                                 event_time_col_idx,
                                 watermark_type.clone(),
@@ -327,17 +329,26 @@ impl<S: StateStore, const UPSERT: bool> WatermarkFilterExecutorInner<S, UPSERT> 
                         .await?;
                     }
 
-                    if is_checkpoint {
-                        barrier_num_since_last_global_refresh += 1;
-                        if barrier_num_since_last_global_refresh
-                            >= UPDATE_GLOBAL_WATERMARK_FREQUENCY
-                        {
-                            barrier_num_since_last_global_refresh = 0;
-                            let global_watermark_table = global_watermark_table.clone();
-                            pending_global_refreshes.push_back(Box::pin(async move {
-                                Self::read_global_max_watermark(&global_watermark_table, prev_epoch)
+                    if is_checkpoint && !is_paused && pending_global_refresh.is_none() {
+                        if idle_input {
+                            barrier_num_during_idle += 1;
+
+                            if barrier_num_during_idle
+                                >= UPDATE_GLOBAL_WATERMARK_FREQUENCY_WHEN_IDLE
+                            {
+                                barrier_num_during_idle = 0;
+                                let global_watermark_table = global_watermark_table.clone();
+                                pending_global_refresh = Some(Box::pin(async move {
+                                    Self::read_global_max_watermark(
+                                        &global_watermark_table,
+                                        prev_epoch,
+                                    )
                                     .await
-                            }));
+                                }));
+                            }
+                        } else {
+                            idle_input = true;
+                            barrier_num_during_idle = 0;
                         }
                     }
                 }
