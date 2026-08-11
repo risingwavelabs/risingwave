@@ -3749,7 +3749,10 @@ async fn test_schedule_group_split_with_normalize_disabled() {
 
 #[tokio::test]
 async fn test_time_travel_vacuum_with_cross_database_epoch_order() {
-    use risingwave_meta_model::{hummock_epoch_to_version, hummock_time_travel_version};
+    use risingwave_meta_model::{
+        hummock_epoch_to_version, hummock_time_travel_version,
+        hummock_time_travel_version_epoch_summary,
+    };
     use sea_orm::ActiveValue::Set;
     use sea_orm::{EntityTrait, PaginatorTrait};
 
@@ -3818,6 +3821,17 @@ async fn test_time_travel_vacuum_with_cross_database_epoch_order() {
         .await
         .unwrap();
     }
+    for (version_id, max_epoch) in [(10_u64, 300_u64), (11, 200)] {
+        hummock_time_travel_version_epoch_summary::Entity::insert(
+            hummock_time_travel_version_epoch_summary::ActiveModel {
+                version_id: Set(version_id.into()),
+                max_epoch: Set(max_epoch.try_into().unwrap()),
+            },
+        )
+        .exec(&env.meta_store_ref().conn)
+        .await
+        .unwrap();
+    }
 
     hummock_manager
         .truncate_time_travel_metadata(50, HashMap::new())
@@ -3882,7 +3896,9 @@ async fn test_time_travel_vacuum_with_cross_database_epoch_order() {
 #[tokio::test]
 async fn test_time_travel_epoch_mapping_excludes_internal_tables() {
     use risingwave_hummock_sdk::version::HummockVersionDelta;
-    use risingwave_meta_model::hummock_epoch_to_version;
+    use risingwave_meta_model::{
+        hummock_epoch_to_version, hummock_time_travel_version_epoch_summary,
+    };
     use sea_orm::{EntityTrait, TransactionTrait};
 
     let (env, hummock_manager, _, _) = setup_compute_env(80).await;
@@ -3931,6 +3947,13 @@ async fn test_time_travel_epoch_mapping_excludes_internal_tables() {
         epoch_mappings[0].table_id,
         i64::from(user_table_id.as_raw_id())
     );
+    let version_epoch_summaries = hummock_time_travel_version_epoch_summary::Entity::find()
+        .all(&env.meta_store_ref().conn)
+        .await
+        .unwrap();
+    assert_eq!(version_epoch_summaries.len(), 1);
+    assert_eq!(version_epoch_summaries[0].version_id.as_raw_id(), 2);
+    assert_eq!(version_epoch_summaries[0].max_epoch, 100);
 }
 
 #[tokio::test]
@@ -3939,7 +3962,7 @@ async fn test_time_travel_vacuum_pins_snapshot_epoch() {
     use risingwave_meta_model::hummock_sstable_info::SstableInfoV2Backend;
     use risingwave_meta_model::{
         hummock_epoch_to_version, hummock_sstable_info, hummock_time_travel_delta,
-        hummock_time_travel_version,
+        hummock_time_travel_version, hummock_time_travel_version_epoch_summary,
     };
     use sea_orm::ActiveValue::Set;
     use sea_orm::{EntityTrait, PaginatorTrait, QueryOrder, QuerySelect};
@@ -4003,6 +4026,18 @@ async fn test_time_travel_vacuum_pins_snapshot_epoch() {
         .unwrap();
     }
 
+    async fn insert_epoch_summary(env: &MetaSrvEnv, version: u64, max_epoch: u64) {
+        hummock_time_travel_version_epoch_summary::Entity::insert(
+            hummock_time_travel_version_epoch_summary::ActiveModel {
+                version_id: Set(version.into()),
+                max_epoch: Set(max_epoch.try_into().unwrap()),
+            },
+        )
+        .exec(&env.meta_store_ref().conn)
+        .await
+        .unwrap();
+    }
+
     let mut opts = MetaOpts::test(false);
     opts.time_travel_vacuum_max_version_count = Some(1);
     let (env, hummock_manager, _, _) = setup_compute_env_with_meta_opts(80, opts).await;
@@ -4020,6 +4055,11 @@ async fn test_time_travel_vacuum_pins_snapshot_epoch() {
     insert_epoch_mapping(&env, table_id, 200, 4).await;
     insert_epoch_mapping(&env, table_id, 300, 5).await;
     insert_epoch_mapping(&env, TableId::new(2), 50, 6).await;
+    insert_epoch_summary(&env, 2, 100).await;
+    insert_epoch_summary(&env, 3, 175).await;
+    insert_epoch_summary(&env, 4, 200).await;
+    insert_epoch_summary(&env, 5, 300).await;
+    insert_epoch_summary(&env, 6, 50).await;
 
     hummock_manager
         .truncate_time_travel_metadata(

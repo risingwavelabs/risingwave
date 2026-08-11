@@ -29,7 +29,7 @@ use risingwave_hummock_sdk::{CompactionGroupId, HummockEpoch, HummockObjectId, H
 use risingwave_meta_model::hummock_sstable_info::SstableInfoV2Backend;
 use risingwave_meta_model::{
     HummockVersionId, hummock_epoch_to_version, hummock_sstable_info, hummock_time_travel_delta,
-    hummock_time_travel_version,
+    hummock_time_travel_version, hummock_time_travel_version_epoch_summary,
 };
 use risingwave_pb::hummock::{PbHummockVersion, PbHummockVersionDelta};
 use sea_orm::ActiveValue::Set;
@@ -144,15 +144,17 @@ impl HummockManager {
             }
         }
 
-        // Version ids follow global commit order, while epochs are only monotonic per table.
-        // Use the earliest version needed by any retained mapping as the watermark so its replay
-        // metadata cannot be truncated. If no mapping is retained, only version pins and vacuum
-        // throttling need to constrain the watermark.
-        let version_watermark = hummock_epoch_to_version::Entity::find()
-            .filter(hummock_epoch_to_version::Column::Epoch.gte(epoch_watermark_model))
+        // Version ids follow global commit order, while epochs are only monotonic per table. Use
+        // the per-version max epoch summary to find the earliest version with any retained mapping
+        // without scanning/sorting the larger per-table mapping table.
+        let version_watermark = hummock_time_travel_version_epoch_summary::Entity::find()
+            .filter(
+                hummock_time_travel_version_epoch_summary::Column::MaxEpoch
+                    .gte(epoch_watermark_model),
+            )
             .select_only()
-            .column(hummock_epoch_to_version::Column::VersionId)
-            .order_by_asc(hummock_epoch_to_version::Column::VersionId)
+            .column(hummock_time_travel_version_epoch_summary::Column::VersionId)
+            .order_by_asc(hummock_time_travel_version_epoch_summary::Column::VersionId)
             .into_tuple::<HummockVersionId>()
             .one(&txn)
             .await?;
@@ -385,6 +387,31 @@ impl HummockManager {
             %watermark_version_id,
             %latest_valid_version_id,
             "Deleted {} rows from hummock_time_travel_delta.",
+            res.rows_affected
+        );
+
+        let mut version_epoch_summary_delete_condition = Condition::all().add(
+            hummock_time_travel_version_epoch_summary::Column::VersionId
+                .lt(latest_valid_version_id),
+        );
+        let pinned_time_travel_version_ids = pinned_replay_version_ids
+            .into_iter()
+            .chain(pinned_delta_ids)
+            .collect::<Vec<_>>();
+        if !pinned_time_travel_version_ids.is_empty() {
+            version_epoch_summary_delete_condition = version_epoch_summary_delete_condition.add(
+                hummock_time_travel_version_epoch_summary::Column::VersionId
+                    .is_not_in(pinned_time_travel_version_ids),
+            );
+        }
+        let res = hummock_time_travel_version_epoch_summary::Entity::delete_many()
+            .filter(version_epoch_summary_delete_condition)
+            .exec(&txn)
+            .await?;
+        tracing::info!(
+            %watermark_version_id,
+            %latest_valid_version_id,
+            "Deleted {} rows from hummock_time_travel_version_epoch_summary.",
             res.rows_affected
         );
 
@@ -683,10 +710,15 @@ impl HummockManager {
         }
 
         let mut batch = vec![];
+        let mut max_committed_epoch: Option<u64> = None;
         for (table_id, _cg_id, committed_epoch) in tables_to_commit {
             if !time_travel_table_ids.contains(table_id) {
                 continue;
             }
+            max_committed_epoch = Some(
+                max_committed_epoch
+                    .map_or(committed_epoch, |max_epoch| max_epoch.max(committed_epoch)),
+            );
             let m = hummock_epoch_to_version::ActiveModel {
                 epoch: Set(committed_epoch.try_into().unwrap()),
                 table_id: Set(i64::from(table_id.as_raw_id())),
@@ -712,6 +744,17 @@ impl HummockManager {
                 .do_nothing()
                 .exec(txn)
                 .await?;
+        }
+        if let Some(max_committed_epoch) = max_committed_epoch {
+            hummock_time_travel_version_epoch_summary::Entity::insert(
+                hummock_time_travel_version_epoch_summary::ActiveModel {
+                    version_id: Set(delta.id),
+                    max_epoch: Set(max_committed_epoch.try_into().unwrap()),
+                },
+            )
+            .on_conflict_do_nothing()
+            .exec(txn)
+            .await?;
         }
 
         let mut version_sst_ids = None;

@@ -47,6 +47,7 @@ pub mod hummock_sstable_info;
 pub mod hummock_table_change_log;
 pub mod hummock_time_travel_delta;
 pub mod hummock_time_travel_version;
+pub mod hummock_time_travel_version_epoch_summary;
 pub mod hummock_version_delta;
 pub mod hummock_version_stats;
 pub mod iceberg_namespace_properties;
@@ -99,6 +100,7 @@ macro_rules! for_all_meta_model_entities {
             hummock_table_change_log,
             hummock_time_travel_delta,
             hummock_time_travel_version,
+            hummock_time_travel_version_epoch_summary,
             hummock_version_delta,
             hummock_version_stats,
             iceberg_namespace_properties,
