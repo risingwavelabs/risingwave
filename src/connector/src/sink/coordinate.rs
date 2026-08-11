@@ -192,7 +192,6 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
                 }
                 LogStoreReadItem::Barrier {
                     is_checkpoint,
-                    new_vnode_bitmap,
                     is_stop,
                     schema_change,
                 } => {
@@ -204,7 +203,6 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
                         current_checkpoint += 1;
                         if current_checkpoint >= commit_checkpoint_interval.get()
                             || should_force_commit_on_checkpoint_barrier(
-                                new_vnode_bitmap.is_some(),
                                 is_stop,
                                 schema_change.is_some(),
                             )
@@ -236,18 +234,6 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
                                 .observe(start_time.elapsed().as_secs_f64());
 
                             current_checkpoint = 0;
-                            if let Some(new_vnode_bitmap) = new_vnode_bitmap {
-                                let epoch = coordinator_stream_handle
-                                    .update_vnode_bitmap(&new_vnode_bitmap)
-                                    .await?;
-                                if epoch != prev_epoch {
-                                    bail!(
-                                        "newly start epoch {} after update vnode bitmap not matched with prev_epoch {}",
-                                        epoch,
-                                        prev_epoch
-                                    );
-                                }
-                            }
                             if is_stop {
                                 coordinator_stream_handle.stop().await?;
                                 info!(

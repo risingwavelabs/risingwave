@@ -27,7 +27,6 @@ use risingwave_connector::sink::log_store::{LogStoreFactory, TruncateBarrierLogR
 use risingwave_pb::catalog::Table;
 use risingwave_storage::StateStore;
 use risingwave_storage::store::{LocalStateStore, NewLocalOptions, OpConsistencyLevel};
-use tokio::sync::mpsc::unbounded_channel;
 use tokio::sync::{oneshot, watch};
 
 use crate::common::log_store_impl::kv_log_store::buffer::new_log_store_buffer;
@@ -559,7 +558,6 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
     type Writer = KvLogStoreWriter<S::Local>;
 
     const ALLOW_REWIND: bool = true;
-    const REBUILD_SINK_ON_UPDATE_VNODE_BITMAP: bool = true;
 
     async fn build(self) -> (Self::Reader, Self::Writer) {
         let table_id = self.table_catalog.id;
@@ -590,13 +588,11 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
             new_log_store_state(table_id, local_state_store, serde, self.chunk_size);
 
         let (init_epoch_tx, init_epoch_rx) = oneshot::channel();
-        let (update_vnode_bitmap_tx, update_vnode_bitmap_rx) = unbounded_channel();
 
         let reader = KvLogStoreReader::new(
             read_state,
             rx,
             init_epoch_rx,
-            update_vnode_bitmap_rx,
             self.metrics.clone(),
             pause_rx,
             self.identity.clone(),
@@ -607,7 +603,6 @@ impl<S: StateStore> LogStoreFactory for KvLogStoreFactory<S> {
             write_state,
             tx,
             init_epoch_tx,
-            update_vnode_bitmap_tx,
             self.metrics,
             pause_tx,
             self.identity,
@@ -2023,7 +2018,6 @@ mod tests {
                     epoch1,
                     LogStoreReadItem::Barrier {
                         is_checkpoint: false,
-                        new_vnode_bitmap: None,
                         is_stop: false,
                         schema_change: None,
                     },
@@ -2039,7 +2033,6 @@ mod tests {
                     epoch2,
                     LogStoreReadItem::Barrier {
                         is_checkpoint: true,
-                        new_vnode_bitmap: None,
                         is_stop: false,
                         schema_change: None,
                     },
@@ -2089,7 +2082,6 @@ mod tests {
                     epoch1,
                     LogStoreReadItem::Barrier {
                         is_checkpoint: false,
-                        new_vnode_bitmap: None,
                         is_stop: false,
                         schema_change: None,
                     },
@@ -2105,7 +2097,6 @@ mod tests {
                     epoch2,
                     LogStoreReadItem::Barrier {
                         is_checkpoint: true,
-                        new_vnode_bitmap: None,
                         is_stop: false,
                         schema_change: None,
                     },
@@ -2165,7 +2156,6 @@ mod tests {
                     epoch2,
                     LogStoreReadItem::Barrier {
                         is_checkpoint: true,
-                        new_vnode_bitmap: None,
                         is_stop: false,
                         schema_change: None,
                     },
@@ -2254,7 +2244,6 @@ mod tests {
             epoch2,
             FlushCurrentEpochOptions {
                 is_checkpoint: true,
-                new_vnode_bitmap: None,
                 is_stop: false,
                 schema_change: Some(schema_change.clone()),
                 wait_log_store_flush: false,
@@ -2302,8 +2291,7 @@ mod tests {
             item => unreachable!("{:?}", item),
         }
 
-        let post_flush = flush_future.await.unwrap();
-        post_flush.post_yield_barrier().await.unwrap();
+        flush_future.await.unwrap();
 
         // Writer should be able to continue with the next epoch after reader truncation.
         writer.write_chunk(gen_stream_chunk(10)).await.unwrap();
@@ -2355,7 +2343,6 @@ mod tests {
             epoch2,
             FlushCurrentEpochOptions {
                 is_checkpoint: true,
-                new_vnode_bitmap: None,
                 is_stop: true,
                 schema_change: None,
                 wait_log_store_flush: true,
@@ -2392,8 +2379,7 @@ mod tests {
             item => unreachable!("{:?}", item),
         }
 
-        let post_flush = flush_future.await.unwrap();
-        post_flush.post_yield_barrier().await.unwrap();
+        flush_future.await.unwrap();
     }
 
     #[tokio::test]
@@ -2470,7 +2456,6 @@ mod tests {
             epoch2,
             FlushCurrentEpochOptions {
                 is_checkpoint: true,
-                new_vnode_bitmap: None,
                 is_stop: false,
                 schema_change: Some(schema_change),
                 wait_log_store_flush: false,
@@ -2490,13 +2475,10 @@ mod tests {
         reader
             .truncate(TruncateOffset::Barrier { epoch: epoch1 })
             .unwrap();
-        {
-            let post_flush = tokio::time::timeout(Duration::from_secs(10), flush_future)
-                .await
-                .expect("schema-change flush should finish after reader truncates barrier")
-                .unwrap();
-            post_flush.post_yield_barrier().await.unwrap();
-        }
+        tokio::time::timeout(Duration::from_secs(10), flush_future)
+            .await
+            .expect("schema-change flush should finish after reader truncates barrier")
+            .unwrap();
         tokio::time::timeout(Duration::from_secs(10), test_env.commit_epoch(epoch1))
             .await
             .expect("committing the schema-change epoch should not hang");

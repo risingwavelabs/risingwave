@@ -12,18 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::sync::Arc;
-
 use anyhow::anyhow;
-use futures::FutureExt;
 use risingwave_common::array::StreamChunk;
-use risingwave_common::bitmap::Bitmap;
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_connector::sink::log_store::{
-    FlushCurrentEpochOptions, LogStoreResult, LogWriter, LogWriterPostFlushCurrentEpoch,
-};
+use risingwave_connector::sink::log_store::{FlushCurrentEpochOptions, LogStoreResult, LogWriter};
 use risingwave_storage::store::LocalStateStore;
-use tokio::sync::mpsc::UnboundedSender;
 use tokio::sync::{oneshot, watch};
 
 use crate::common::log_store_impl::kv_log_store::buffer::LogStoreBufferSender;
@@ -39,7 +32,6 @@ pub struct KvLogStoreWriter<LS: LocalStateStore> {
 
     tx: LogStoreBufferSender,
     init_epoch_tx: Option<oneshot::Sender<EpochPair>>,
-    update_vnode_bitmap_tx: UnboundedSender<(Arc<Bitmap>, u64)>,
 
     metrics: KvLogStoreMetrics,
 
@@ -57,7 +49,6 @@ impl<LS: LocalStateStore> KvLogStoreWriter<LS> {
         state: LogStoreWriteState<LS>,
         tx: LogStoreBufferSender,
         init_epoch_tx: oneshot::Sender<EpochPair>,
-        update_vnode_bitmap_tx: UnboundedSender<(Arc<Bitmap>, u64)>,
         metrics: KvLogStoreMetrics,
         paused_notifier: watch::Sender<bool>,
         identity: String,
@@ -67,7 +58,6 @@ impl<LS: LocalStateStore> KvLogStoreWriter<LS> {
             state,
             tx,
             init_epoch_tx: Some(init_epoch_tx),
-            update_vnode_bitmap_tx,
             metrics,
             paused_notifier,
             identity,
@@ -137,7 +127,7 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         &mut self,
         next_epoch: u64,
         options: FlushCurrentEpochOptions,
-    ) -> LogStoreResult<LogWriterPostFlushCurrentEpoch<'_>> {
+    ) -> LogStoreResult<()> {
         let epoch = self.state.epoch().curr;
         let mut writer = self.state.start_writer(false);
 
@@ -164,8 +154,6 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
 
         let should_wait_log_store_flush =
             options.schema_change.is_some() || options.wait_log_store_flush;
-        // Barrier's new_vnode_bitmap field does not need to be passed to log-reader, because when sink is decoupled, we
-        // always rebuild sink when update vnode bitmap.
         self.tx.barrier(
             epoch,
             options.is_checkpoint,
@@ -181,7 +169,7 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
         if let Some(truncate_offset) = self.tx.pop_truncation(epoch) {
             self.last_truncate_offset = Some(truncate_offset);
         }
-        let post_seal_epoch = self.state.seal_current_epoch(
+        self.state.seal_current_epoch(
             next_epoch,
             self.last_truncate_offset
                 .map(|(epoch, seq_id)| {
@@ -189,28 +177,8 @@ impl<LS: LocalStateStore> LogWriter for KvLogStoreWriter<LS> {
                 })
                 .unwrap_or(LogStoreVnodeProgress::None),
         );
-        let update_vnode_bitmap_tx = &mut self.update_vnode_bitmap_tx;
-        let tx = &mut self.tx;
         self.seq_id = FIRST_SEQ_ID;
-        Ok(LogWriterPostFlushCurrentEpoch::new(move || {
-            async move {
-                {
-                    let new_vnodes = options.new_vnode_bitmap;
-
-                    post_seal_epoch
-                        .post_yield_barrier(new_vnodes.clone())
-                        .await?;
-                    if let Some(new_vnodes) = new_vnodes {
-                        update_vnode_bitmap_tx
-                            .send((new_vnodes, next_epoch))
-                            .map_err(|_| anyhow!("fail to send update vnode bitmap to reader"))?;
-                        tx.clear();
-                    }
-                    Ok(())
-                }
-            }
-            .boxed()
-        }))
+        Ok(())
     }
 
     fn pause(&mut self) -> LogStoreResult<()> {
