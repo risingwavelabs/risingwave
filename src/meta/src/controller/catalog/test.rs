@@ -211,10 +211,7 @@ mod tests {
         let mut sink_ids = Vec::new();
         let test_sink_tuples = [("s1", mv1_id), ("s2", mv2_id)];
 
-        fn assert_incoming_sink_drop_error<T>(
-            error: &MetaError,
-            test_sink_tuples: &[(&str, T)],
-        ) {
+        fn assert_incoming_sink_drop_error<T>(error: &MetaError, test_sink_tuples: &[(&str, T)]) {
             let message = error.to_string();
 
             assert!(
@@ -289,17 +286,20 @@ mod tests {
         drop(inner);
 
         std::sync::Arc::make_mut(&mut mgr.env.opts).protect_drop_table_with_incoming_sink = true;
-        let error = mgr.drop_object(ObjectType::Table, target_table_id, DropMode::Restrict)
+        let error = mgr
+            .drop_object(ObjectType::Table, target_table_id, DropMode::Restrict)
             .await
             .expect_err("protected RESTRICT drop should fail for a table with incoming sinks");
         assert_incoming_sink_drop_error(&error, &test_sink_tuples);
-        let error = mgr.drop_object(ObjectType::Table, target_table_id, DropMode::Cascade)
+        let error = mgr
+            .drop_object(ObjectType::Table, target_table_id, DropMode::Cascade)
             .await
             .expect_err("protected CASCADE drop should fail for a table with incoming sinks");
         assert_incoming_sink_drop_error(&error, &test_sink_tuples);
 
         std::sync::Arc::make_mut(&mut mgr.env.opts).protect_drop_table_with_incoming_sink = false;
-        let error = mgr.drop_object(ObjectType::Table, target_table_id, DropMode::Restrict)
+        let error = mgr
+            .drop_object(ObjectType::Table, target_table_id, DropMode::Restrict)
             .await
             .expect_err("unprotected RESTRICT drop should fail for a table with incoming sinks");
         assert_incoming_sink_drop_error(&error, &test_sink_tuples);
