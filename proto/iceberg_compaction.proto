@@ -45,7 +45,6 @@ message SubscribeIcebergCompactionEventRequest {
 
 message IcebergCompactionTask {
   uint64 task_id = 1;
-  // Now we only support iceberg table full compaction.
   // compactor will get the information of the iceberg table from the properties
   map<string, string> props = 2;
 
@@ -58,6 +57,9 @@ message IcebergCompactionTask {
     SMALL_FILES = 2;
 
     FILES_WITH_DELETE = 3;
+
+    // Select a localized compaction strategy from the current snapshot.
+    AUTO = 4;
   }
 
   TaskType task_type = 3;

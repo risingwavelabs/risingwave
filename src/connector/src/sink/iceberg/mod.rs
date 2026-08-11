@@ -188,6 +188,18 @@ impl Sink for IcebergSink {
         }
 
         match compaction_type {
+            CompactionType::Auto => {
+                risingwave_common::license::Feature::IcebergCompaction
+                    .check_available()
+                    .map_err(|e| anyhow::anyhow!(e))?;
+
+                if self.config.write_mode != IcebergWriteMode::MergeOnRead {
+                    bail!(
+                        "'auto' compaction type only supports 'merge-on-read' write mode, got: '{}'",
+                        self.config.write_mode
+                    );
+                }
+            }
             CompactionType::SmallFiles => {
                 // 1. check license
                 risingwave_common::license::Feature::IcebergCompaction
