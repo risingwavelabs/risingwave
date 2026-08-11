@@ -69,15 +69,11 @@ pub struct SinkExecutor<F: LogStoreFactory> {
 
 const SINK_RETRY_BACKOFF_RESET_INTERVAL: Duration = Duration::from_secs(60);
 
-fn sink_retry_backoff() -> ExponentialBackoff {
+fn sink_retry_backoff() -> impl Iterator<Item = Duration> {
     ExponentialBackoff::from_millis(2)
         .factor(500)
         .max_delay(Duration::from_secs(30))
-}
-
-fn jitter_sink_retry_delay(delay: Duration) -> Duration {
-    let half = delay / 2;
-    half + jitter(half)
+        .map(jitter)
 }
 
 // Drop all the DELETE messages in this chunk and convert UPDATE INSERT into INSERT.
@@ -830,9 +826,8 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 if attempt_duration >= SINK_RETRY_BACKOFF_RESET_INTERVAL {
                                     retry_backoff = sink_retry_backoff();
                                 }
-                                let retry_delay = jitter_sink_retry_delay(
-                                    retry_backoff.next().expect("retry strategy is infinite"),
-                                );
+                                let retry_delay =
+                                    retry_backoff.next().expect("retry strategy is infinite");
                                 error!(
                                     error = %e.as_report(),
                                     executor_id = %sink_writer_param.executor_id,
@@ -1234,19 +1229,8 @@ mod test {
     #[test]
     fn test_sink_retry_backoff_is_bounded() {
         let mut retry_backoff = sink_retry_backoff();
-        for expected in [1, 2, 4, 8, 16, 30, 30].map(Duration::from_secs) {
-            assert_eq!(retry_backoff.next(), Some(expected));
-        }
-    }
-
-    #[test]
-    fn test_sink_retry_jitter_stays_in_upper_half() {
-        for delay in [Duration::from_secs(1), Duration::from_secs(30)] {
-            for _ in 0..100 {
-                let jittered = jitter_sink_retry_delay(delay);
-                assert!(jittered >= delay / 2);
-                assert!(jittered <= delay);
-            }
+        for max_delay in [1, 2, 4, 8, 16, 30, 30].map(Duration::from_secs) {
+            assert!(retry_backoff.next().expect("retry strategy is infinite") <= max_delay);
         }
     }
 

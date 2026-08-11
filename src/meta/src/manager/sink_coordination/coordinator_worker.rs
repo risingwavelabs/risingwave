@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fmt::Debug;
 use std::future::{Future, poll_fn};
 use std::pin::pin;
-use std::sync::Arc;
+use std::sync::LazyLock;
 use std::task::Poll;
 use std::time::{Duration, Instant};
 
@@ -40,7 +40,7 @@ use sea_orm::DatabaseConnection;
 use thiserror_ext::AsReport;
 use tokio::select;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio::sync::{OwnedSemaphorePermit, Semaphore};
+use tokio::sync::{Semaphore, SemaphorePermit};
 use tokio::time::sleep;
 use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use tonic::Status;
@@ -51,6 +51,12 @@ use crate::manager::exactly_once_util::{
     persist_pre_commit_metadata,
 };
 use crate::manager::sink_coordination::handle::SinkWriterCoordinationHandle;
+
+// Keep coordinator initialization below the default MetaStore pool size (10), leaving
+// connections available for recovery and other Meta services.
+const MAX_CONCURRENT_COORDINATOR_INITIALIZATIONS: usize = 8;
+static COORDINATOR_INIT_SEMAPHORE: LazyLock<Semaphore> =
+    LazyLock::new(|| Semaphore::new(MAX_CONCURRENT_COORDINATOR_INITIALIZATIONS));
 
 async fn run_future_with_periodic_fn<F: Future>(
     future: F,
@@ -527,10 +533,9 @@ impl CoordinatorWorker {
         db: DatabaseConnection,
         subscriber: SinkCommittedEpochSubscriber,
         iceberg_compact_stat_sender: UnboundedSender<IcebergSinkCompactionUpdate>,
-        coordinator_init_semaphore: Arc<Semaphore>,
     ) {
-        let coordinator_init_permit = match coordinator_init_semaphore
-            .acquire_owned()
+        let coordinator_init_permit = match COORDINATOR_INIT_SEMAPHORE
+            .acquire()
             .instrument_await("acquire_sink_coordinator_init_permit")
             .await
         {
@@ -598,7 +603,7 @@ impl CoordinatorWorker {
         request_rx: UnboundedReceiver<SinkWriterCoordinationHandle>,
         coordinator: SinkCommitCoordinator,
         subscriber: SinkCommittedEpochSubscriber,
-        coordinator_init_permit: Option<OwnedSemaphorePermit>,
+        coordinator_init_permit: Option<SemaphorePermit<'static>>,
     ) {
         let mut worker = CoordinatorWorker {
             handle_manager: CoordinationHandleManager {
@@ -705,7 +710,7 @@ impl CoordinatorWorker {
         db: DatabaseConnection,
         mut coordinator: SinkCommitCoordinator,
         subscriber: SinkCommittedEpochSubscriber,
-        coordinator_init_permit: Option<OwnedSemaphorePermit>,
+        coordinator_init_permit: Option<SemaphorePermit<'static>>,
     ) -> anyhow::Result<()> {
         let sink_id = self.handle_manager.param.sink_id;
 
