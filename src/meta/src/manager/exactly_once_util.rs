@@ -101,6 +101,10 @@ pub async fn clean_aborted_records(
     sink_id: SinkId,
     aborted_epochs: Vec<u64>,
 ) -> anyhow::Result<()> {
+    if aborted_epochs.is_empty() {
+        return Ok(());
+    }
+
     match pending_sink_state::Entity::delete_many()
         .filter(
             pending_sink_state::Column::SinkId
