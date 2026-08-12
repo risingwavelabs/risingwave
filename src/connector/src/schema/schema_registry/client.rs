@@ -318,7 +318,7 @@ impl Client {
         let mut visited: HashMap<String, usize> = HashMap::new(); // subject -> index in `subjects`
         let mut queued_names = HashSet::new();
         let mut queue = vec![(String::new(), subject.to_owned(), "latest".to_owned())];
-        // use bfs to get all references
+        // use dfs to get all references
         while let Some((ref_name, subject, version)) = queue.pop() {
             // a subject referenced under a second name is cloned rather than fetched again
             if let Some(&i) = visited.get(&subject) {
