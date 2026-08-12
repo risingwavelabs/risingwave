@@ -243,5 +243,8 @@ impl SchemaLoader {
 }
 
 pub trait LoadedSchema: Sized {
-    fn compile(primary: Subject, references: Vec<Subject>) -> Result<Self, SchemaFetchError>;
+    fn compile(
+        primary: Subject,
+        references: Vec<(String, Subject)>,
+    ) -> Result<Self, SchemaFetchError>;
 }
