@@ -1672,8 +1672,10 @@ impl ExprRewriter for SlotLoweringRewriter<'_, '_> {
 /// Extracted so their relationship is testable. The executor treats the deadline as interchangeable
 /// with the right-hand side of the span predicate — it is what lets a hot-path span check reuse the
 /// deadline already cached per row instead of evaluating an expression — and that interchangeability
-/// holds only because BOTH are built here from one `first + bound`. See
-/// [`within_predicate_right_hand_side_is_the_deadline`].
+/// holds only because BOTH are built here from one `first + bound`, and because the check below
+/// forces that sum to keep the order key's type. The
+/// `within_predicate_right_hand_side_is_the_deadline` test pins the first property; the
+/// `within_bound_that_promotes_the_order_key_type_is_rejected` test pins the second.
 ///
 /// Lowering the predicate as `(last - first) <= bound` looks equivalent and is not, for
 /// calendar-varying intervals: timestamp subtraction yields a months-free interval compared under
@@ -1687,6 +1689,33 @@ fn lower_within(ts_type: DataType, bound: ExprImpl) -> crate::error::Result<(Exp
         ExprType::Add,
         vec![first, bound.clone()],
     )?);
+    // `Add` goes through generic type inference, so the sum can be WIDER than the order key: an
+    // `int2` key with a bare `2` (which binds as `int4`) yields an `int4` deadline, and a `date` key
+    // with an interval bound yields `timestamp`. The executor compares the cached deadline against
+    // the order key and against the watermark directly, and `ScalarRefImpl::default_cmp` panics on
+    // mismatched variants — an actor panic as soon as rows flow, and a crash loop once recovery
+    // replays the same rows. The span predicate alone would survive this (its `FunctionCall::new`
+    // inserts an implicit cast on `last`), but the deadline consumers have no such protection.
+    //
+    // Rejected rather than cast back down: truncating `timestamp -> date` would close the window
+    // early and prematurely finalize and evict live partials — the same calendar-correctness trap
+    // described above.
+    let sum_type = first_plus_bound.return_type();
+    if sum_type != ts_type {
+        return Err(crate::error::ErrorCode::NotSupported(
+            format!(
+                "a MATCH_RECOGNIZE WITHIN bound whose addition widens the ORDER BY type \
+                 ({ts_type} + bound yields {sum_type})"
+            ),
+            format!(
+                "the bound must keep the ORDER BY column's type, since it is also used as a \
+                 per-row deadline compared against that column and the watermark — cast the bound \
+                 (e.g. `WITHIN <bound>::{ts_type}`), or use an ORDER BY column whose type absorbs \
+                 the bound (a timestamp or timestamptz column for an interval bound)"
+            ),
+        )
+        .into());
+    }
     let predicate = ExprImpl::from(FunctionCall::new(
         ExprType::LessThanOrEqual,
         vec![last, first_plus_bound],
@@ -1788,6 +1817,40 @@ mod tests {
         // A variable occurring twice keeps its smallest distance.
         let twice = concat(vec![var("a"), var("b"), var("a")]);
         assert_eq!(d(&twice, "a"), Some(0));
+    }
+
+    /// A bound whose addition PROMOTES the order-key type must be rejected at bind time.
+    ///
+    /// `smallint` order key with `WITHIN 2`: the literal binds as `int4`, so `first + bound` is
+    /// `int4` while the order key and the watermark stay `int2`. Nothing downstream reconciles them,
+    /// and the executor compares the deadline against both raw — `ScalarRefImpl::default_cmp`
+    /// panics on mismatched variants, which is an actor panic as soon as rows flow and a crash loop
+    /// after recovery replays them. `date` key with an interval bound promotes to `timestamp` the
+    /// same way.
+    ///
+    /// Rejecting rather than casting the deadline back down is deliberate: truncating
+    /// `timestamp -> date` closes the window early and prematurely evicts live partials, which is
+    /// the same calendar-correctness trap documented on `lower_within`.
+    #[test]
+    fn within_bound_that_promotes_the_order_key_type_is_rejected() {
+        let err = lower_within(DataType::Int16, ExprImpl::literal_int(2)).expect_err(
+            "int4 bound over an int2 order key promotes the deadline and must not bind",
+        );
+        let msg = err.to_string();
+        assert!(
+            msg.contains("smallint") && msg.contains("integer"),
+            "the error should name both types so the cast is obvious, got: {msg}"
+        );
+
+        // The matching-type case still binds.
+        lower_within(DataType::Int32, ExprImpl::literal_int(2))
+            .expect("an int4 bound over an int4 order key keeps the type");
+
+        // And the documented way through — casting the bound to the order key's type — must work,
+        // since `match_recognize_within.slt` tells users to do exactly that.
+        let int2_bound = ExprImpl::from(Literal::new(Some(ScalarImpl::Int16(2)), DataType::Int16));
+        lower_within(DataType::Int16, int2_bound)
+            .expect("`WITHIN 2::smallint` over an int2 order key must keep the type");
     }
 
     /// The executor's hot-path span check reuses the per-row deadline instead of evaluating the

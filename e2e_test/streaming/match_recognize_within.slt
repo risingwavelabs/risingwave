@@ -42,3 +42,43 @@ drop materialized view mv_within;
 
 statement ok
 drop table t;
+
+# A WITHIN bound whose addition widens the ORDER BY type is rejected at bind time. The bound doubles
+# as a per-row deadline compared directly against the order key and the watermark, and a mismatched
+# datum there panics the actor rather than erroring — so this has to fail before the job is created.
+statement ok
+create table t_narrow (id int, ts smallint, v int, watermark for ts as ts) append only;
+
+# `2` binds as int4, so `int2 + int4` yields an int4 deadline against an int2 order key.
+statement error widens the ORDER BY type
+create materialized view mv_narrow as
+select * from t_narrow match_recognize (
+  partition by id
+  order by ts
+  measures count(*) as n
+  one row per match
+  after match skip past last row
+  pattern (a+)
+  within 2
+  define a as a.v > 0
+) as m;
+
+# Casting the bound to the order key's type is the documented way through.
+statement ok
+create materialized view mv_narrow as
+select * from t_narrow match_recognize (
+  partition by id
+  order by ts
+  measures count(*) as n
+  one row per match
+  after match skip past last row
+  pattern (a+)
+  within 2::smallint
+  define a as a.v > 0
+) as m;
+
+statement ok
+drop materialized view mv_narrow;
+
+statement ok
+drop table t_narrow;
