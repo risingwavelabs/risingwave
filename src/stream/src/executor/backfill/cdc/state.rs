@@ -73,6 +73,7 @@ impl<S: StateStore> CdcBackfillState<S> {
                     Some(ScalarImpl::Jsonb(ref jsonb)) => {
                         serde_json::from_value(jsonb.clone().take()).unwrap()
                     }
+                    None => None,
                     _ => return Err(anyhow!("invalid backfill state: cdc_offset").into()),
                 };
                 let row_count = match state[state_len - 2] {
