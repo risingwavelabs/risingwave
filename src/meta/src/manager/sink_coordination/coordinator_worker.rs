@@ -39,8 +39,8 @@ use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use sea_orm::DatabaseConnection;
 use thiserror_ext::AsReport;
 use tokio::select;
+use tokio::sync::Semaphore;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tokio::sync::{Semaphore, SemaphorePermit};
 use tokio::time::sleep;
 use tokio_retry::strategy::{ExponentialBackoff, jitter};
 use tonic::Status;
@@ -534,21 +534,6 @@ impl CoordinatorWorker {
         subscriber: SinkCommittedEpochSubscriber,
         iceberg_compact_stat_sender: UnboundedSender<IcebergSinkCompactionUpdate>,
     ) {
-        let coordinator_init_permit = match COORDINATOR_INIT_SEMAPHORE
-            .acquire()
-            .instrument_await("acquire_sink_coordinator_init_permit")
-            .await
-        {
-            Ok(permit) => permit,
-            Err(e) => {
-                error!(
-                    error = %e.as_report(),
-                    "sink coordinator initialization limiter closed unexpectedly"
-                );
-                return;
-            }
-        };
-
         let sink = match build_sink(param.clone()) {
             Ok(sink) => sink,
             Err(e) => {
@@ -574,36 +559,16 @@ impl CoordinatorWorker {
                         return;
                     }
                 };
-            Self::execute_coordinator_inner(
-                db,
-                param,
-                request_rx,
-                coordinator,
-                subscriber,
-                Some(coordinator_init_permit),
-            )
-            .await
+            Self::execute_coordinator(db, param, request_rx, coordinator, subscriber).await
         });
     }
 
-    #[cfg(test)]
     pub async fn execute_coordinator(
         db: DatabaseConnection,
         param: SinkParam,
         request_rx: UnboundedReceiver<SinkWriterCoordinationHandle>,
         coordinator: SinkCommitCoordinator,
         subscriber: SinkCommittedEpochSubscriber,
-    ) {
-        Self::execute_coordinator_inner(db, param, request_rx, coordinator, subscriber, None).await;
-    }
-
-    async fn execute_coordinator_inner(
-        db: DatabaseConnection,
-        param: SinkParam,
-        request_rx: UnboundedReceiver<SinkWriterCoordinationHandle>,
-        coordinator: SinkCommitCoordinator,
-        subscriber: SinkCommittedEpochSubscriber,
-        coordinator_init_permit: Option<SemaphorePermit<'static>>,
     ) {
         let mut worker = CoordinatorWorker {
             handle_manager: CoordinationHandleManager {
@@ -616,10 +581,7 @@ impl CoordinatorWorker {
             curr_state: CoordinatorWorkerState::Running,
         };
 
-        if let Err(e) = worker
-            .run_coordination(db, coordinator, subscriber, coordinator_init_permit)
-            .await
-        {
+        if let Err(e) = worker.run_coordination(db, coordinator, subscriber).await {
             for handle in worker.handle_manager.writer_handles.into_values() {
                 handle.abort(Status::internal(format!(
                     "failed to run coordination: {:?}",
@@ -710,10 +672,13 @@ impl CoordinatorWorker {
         db: DatabaseConnection,
         mut coordinator: SinkCommitCoordinator,
         subscriber: SinkCommittedEpochSubscriber,
-        coordinator_init_permit: Option<SemaphorePermit<'static>>,
     ) -> anyhow::Result<()> {
         let sink_id = self.handle_manager.param.sink_id;
 
+        let coordinator_init_permit = COORDINATOR_INIT_SEMAPHORE
+            .acquire()
+            .instrument_await("acquire_sink_coordinator_init_permit")
+            .await?;
         let mut two_phase_handler = self
             .init_state_from_store(&db, sink_id, subscriber, &mut coordinator)
             .await?;
