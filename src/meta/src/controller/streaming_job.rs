@@ -883,6 +883,9 @@ impl CatalogController {
             .notification_manager()
             .notify_serving_fragment_mapping_update(inserted_fragment_ids);
 
+        self.notify_hummock_table_cache_refill_policy_if_explicit(&inner, job_id)
+            .await?;
+
         Ok(())
     }
 
