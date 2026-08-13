@@ -191,7 +191,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_create_multiple_sinks_into_same_table_and_drop_table() -> MetaResult<()> {
-        let mut mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let inner = mgr.inner.write().await;
         let txn = inner.db.begin().await?;
         let (_, Some(target_table_id), _) =
@@ -215,7 +215,7 @@ mod tests {
             let message = error.to_string();
 
             assert!(
-                message.contains("Table used by incoming sinks"),
+                message.contains("sink") && message.contains("depends on it"),
                 "expected an incoming-sink dependency error, got: {message}"
             );
 
@@ -285,31 +285,18 @@ mod tests {
         assert_eq!(object_dependency_count, 0);
         drop(inner);
 
-        std::sync::Arc::make_mut(&mut mgr.env.opts).protect_drop_table_with_incoming_sink = true;
         let error = mgr
             .drop_object(ObjectType::Table, target_table_id, DropMode::Restrict)
             .await
-            .expect_err("protected RESTRICT drop should fail for a table with incoming sinks");
-        assert_incoming_sink_drop_error(&error, &test_sink_tuples);
-        let error = mgr
-            .drop_object(ObjectType::Table, target_table_id, DropMode::Cascade)
-            .await
-            .expect_err("protected CASCADE drop should fail for a table with incoming sinks");
-        assert_incoming_sink_drop_error(&error, &test_sink_tuples);
-
-        std::sync::Arc::make_mut(&mut mgr.env.opts).protect_drop_table_with_incoming_sink = false;
-        let error = mgr
-            .drop_object(ObjectType::Table, target_table_id, DropMode::Restrict)
-            .await
-            .expect_err("unprotected RESTRICT drop should fail for a table with incoming sinks");
+            .expect_err("RESTRICT drop should fail for a table with incoming sinks");
         assert_incoming_sink_drop_error(&error, &test_sink_tuples);
         mgr.drop_object(ObjectType::Table, target_table_id, DropMode::Cascade)
             .await
-            .expect("unprotected CASCADE drop should succeed");
+            .expect("CASCADE drop should succeed");
 
         let inner = mgr.inner.read().await;
         let db = &inner.db;
-        // Check that the unprotected cascade drop successfully dropped
+        // Check that the cascade drop successfully dropped
         assert!(Object::find_by_id(target_table_id).one(db).await?.is_none());
         assert_eq!(
             Object::find()
@@ -321,6 +308,80 @@ mod tests {
         // Sanity checks that sources were not dropped
         assert!(Object::find_by_id(mv1_id).one(db).await?.is_some());
         assert!(Object::find_by_id(mv2_id).one(db).await?.is_some());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_replace_upstream_object_rejects_creating_incoming_sink() -> MetaResult<()> {
+        fn assert_replace_concurrency_error(error: &MetaError) {
+            let message = error.to_string();
+            assert!(
+                message.contains("referenced by some creating jobs"),
+                "expected a replace concurrency error, got: {message}"
+            );
+        }
+
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let (target_mv_id, Some(target_mv_table_id), _) =
+            insert_test_streaming_job(&txn, "target_mv", true, None).await?
+        else {
+            unreachable!()
+        };
+        let (source_mv_id, Some(_), _) =
+            insert_test_streaming_job(&txn, "source_mv", true, None).await?
+        else {
+            unreachable!()
+        };
+        txn.commit().await?;
+        drop(inner);
+
+        let mut sink = crate::manager::StreamingJob::Sink(PbSink {
+            name: "creating_sink".to_owned(),
+            database_id: TEST_DATABASE_ID,
+            schema_id: TEST_SCHEMA_ID,
+            owner: TEST_OWNER_ID as _,
+            target_table: Some(target_mv_table_id),
+            sink_type: PbSinkType::AppendOnly as i32,
+            ..Default::default()
+        });
+        let creating_sink = mgr
+            .create_job_catalog(
+                &mut sink,
+                &crate::model::StreamContext::default(),
+                &None,
+                1,
+                HashSet::from([source_mv_id.as_object_id()]),
+                risingwave_pb::ddl_service::streaming_job_resource_type::ResourceType::Regular(
+                    true,
+                ),
+                &None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await?;
+        // Ensures the sink is not created yet
+        assert_ne!(creating_sink.job_status, JobStatus::Created);
+
+        let replacement = crate::manager::StreamingJob::MaterializedView(PbTable {
+            id: target_mv_table_id,
+            name: "target_mv".to_owned(),
+            database_id: TEST_DATABASE_ID,
+            schema_id: TEST_SCHEMA_ID,
+            owner: TEST_OWNER_ID as _,
+            ..Default::default()
+        });
+        assert_eq!(replacement.id(), target_mv_id);
+
+        let error = mgr
+            .create_job_catalog_for_replace(&replacement, None, None, None)
+            .await
+            .expect_err("replacement should reject a creating incoming sink");
+        assert_replace_concurrency_error(&error);
 
         Ok(())
     }

@@ -27,7 +27,7 @@ select count(*) from rw_sinks where name in ('multi_sink_1', 'multi_sink_2');
 ----
 2
 
-statement error Table used by incoming sinks
+statement error sink.*depends on it
 drop table multi_sink_target;
 
 query I
