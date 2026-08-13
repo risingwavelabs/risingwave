@@ -7,7 +7,7 @@ mysql -e "
     DROP TABLE IF EXISTS mysql_auto_schema_change_type_compat;
     CREATE TABLE mysql_auto_schema_change_type_compat (
         id INT NOT NULL PRIMARY KEY,
-        v_int INT,
+        v_int INT DEFAULT 1,
         v_float FLOAT,
         v_unsigned_int INT UNSIGNED,
         v_unsigned_bigint BIGINT UNSIGNED,
@@ -54,8 +54,10 @@ system ok
 mysql -e "
     USE risedev;
     ALTER TABLE mysql_auto_schema_change_type_compat ADD COLUMN added INT DEFAULT 9;
-    INSERT INTO mysql_auto_schema_change_type_compat VALUES
-        (2, 20, 2.5, 2147483648, 9223372036854775808, 'after', 10);
+    INSERT INTO mysql_auto_schema_change_type_compat
+        (id, v_float, v_unsigned_int, v_unsigned_bigint, note, added)
+    VALUES
+        (2, 2.5, 2147483648, 9223372036854775808, 'after', 10);
 "
 
 query TTTTTTT retry 10 backoff 1s
@@ -64,7 +66,7 @@ from rw_mysql_auto_schema_change_type_compat
 order by id;
 ----
 1 10 1.5 4294967295 18446744073709551615 before 9
-2 20 2.5 2147483648 9223372036854775808 after 10
+2 1 2.5 2147483648 9223372036854775808 after 10
 
 query TTTT retry 10 backoff 1s
 describe rw_mysql_auto_schema_change_type_compat;
