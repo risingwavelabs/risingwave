@@ -96,7 +96,8 @@ impl CatalogController {
         };
 
         removed_objects.push(obj);
-        let mut removed_object_ids: HashSet<_> = removed_objects.iter().map(|obj| obj.oid).collect();
+        let mut removed_object_ids: HashSet<_> =
+            removed_objects.iter().map(|obj| obj.oid).collect();
 
         for obj in &removed_objects {
             if obj.obj_type == ObjectType::Sink {
