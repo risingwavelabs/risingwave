@@ -839,7 +839,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 // MONEY -> NUMERIC
                 return val == Data.DataType.TypeName.DECIMAL_VALUE;
             case "point":
-                // POINT -> STRUCT<x REAL, y REAL>
+                // POINT -> STRUCT<x DOUBLE, y DOUBLE>
                 return val == Data.DataType.TypeName.STRUCT_VALUE;
             case "ARRAY":
                 // ARRAY -> LIST
