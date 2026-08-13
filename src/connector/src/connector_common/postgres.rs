@@ -726,12 +726,12 @@ pub fn sea_type_to_rw_type(col_type: &SeaType) -> ConnectorResult<DataType> {
         | SeaType::TsRange
         | SeaType::TsTzRange
         | SeaType::DateRange
-        | SeaType::Enum(_) => DataType::Varchar,
+        | SeaType::Enum(_)
+        | SeaType::Polygon => DataType::Varchar,
         SeaType::Line
         | SeaType::Lseg
         | SeaType::Box
         | SeaType::Path
-        | SeaType::Polygon
         | SeaType::Circle
         | SeaType::Bit(_)
         | SeaType::VarBit(_)
@@ -871,10 +871,21 @@ fn sea_type_to_pg_type(sea_type: &SeaType) -> ConnectorResult<tokio_postgres::ty
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::types::DataType;
+    use sea_schema::postgres::def::ColumnType as SeaType;
+
     use super::{
         format_grant_table_privilege, format_grant_usage, format_pg_table_name,
-        format_required_table_grants, parse_pgvector_dimension,
+        format_required_table_grants, parse_pgvector_dimension, sea_type_to_rw_type,
     };
+
+    #[test]
+    fn test_sea_type_polygon_maps_to_varchar() {
+        assert_eq!(
+            sea_type_to_rw_type(&SeaType::Polygon).unwrap(),
+            DataType::Varchar
+        );
+    }
 
     #[test]
     fn test_parse_pgvector_dimension() {

@@ -795,8 +795,9 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             case "tsrange":
             case "tstzrange":
             case "daterange":
+            case "polygon":
                 // TEXT, XML, UUID, INET, CIDR, MACADDR, MACADDR8, INT4RANGE, INT8RANGE,
-                // NUMRANGE, TSRANGE, TSTZRANGE, DATERANGE -> CHARACTER VARYING
+                // NUMRANGE, TSRANGE, TSTZRANGE, DATERANGE, POLYGON -> CHARACTER VARYING
                 return val == Data.DataType.TypeName.VARCHAR_VALUE;
             case "timestamp with time zone":
             case "timestamptz":

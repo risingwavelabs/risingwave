@@ -1,0 +1,377 @@
+control substitution on
+
+# Test that Postgres CDC correctly handles PostgreSQL's built-in `polygon` type.
+#
+# Covers:
+#   1. explicit_rw : a polygon column explicitly mapped to VARCHAR, with a backfill
+#      check followed by separate INSERT and UPDATE exact-text comparisons.
+#   2. auto_rw      : `polygon` and `polygon[]` columns derived via `(*)`, with a NULL
+#      row backfill kept intact, then an INSERT and an UPDATE each carrying two array
+#      elements, all compared against upstream by exact scalar/element text.
+#   3. schema_rw    : ALTER TABLE ADD COLUMN polygon after source creation, then an
+#      UPDATE of the old row plus an INSERT of a new row, verified via describe and
+#      exact ordered checks.
+#
+# A single postgres-cdc source with auto.schema.change is shared by all three tables;
+# polygon values are compared to their upstream text rather than hardcoded.
+
+# --- Conditional cleanup of a leftover slot and upstream tables (idempotent) ---
+system ok
+psql -c "
+    SELECT pg_terminate_backend(active_pid)
+    FROM pg_replication_slots
+    WHERE slot_name = 'polygon_issue_25517_slot' AND active_pid IS NOT NULL;
+    SELECT pg_sleep(1);
+    SELECT pg_drop_replication_slot(slot_name)
+    FROM pg_replication_slots
+    WHERE slot_name = 'polygon_issue_25517_slot';
+    DROP TABLE IF EXISTS public.upstream_polygon_explicit CASCADE;
+    DROP TABLE IF EXISTS public.upstream_polygon_auto CASCADE;
+    DROP TABLE IF EXISTS public.upstream_polygon_schema CASCADE;
+"
+
+statement ok
+drop table if exists explicit_rw;
+
+statement ok
+drop table if exists auto_rw;
+
+statement ok
+drop table if exists schema_rw;
+
+statement ok
+drop source if exists polygon_source;
+
+# One source shared by all three reading tables.
+statement ok
+create source polygon_source with (
+  connector = 'postgres-cdc',
+  hostname = '${PGHOST:localhost}',
+  port = '${PGPORT:5432}',
+  username = '${PGUSER:$USER}',
+  password = '${PGPASSWORD:}',
+  database.name = '${PGDATABASE:postgres}',
+  schema.name = 'public',
+  slot.name = 'polygon_issue_25517_slot',
+  auto.schema.change = 'true',
+  debezium.include.unknown.datatypes = 'true'
+);
+
+# ===========================================================================
+# 1. explicit_rw : explicit VARCHAR mapping of a polygon column
+# ===========================================================================
+system ok
+psql -c "
+    CREATE TABLE public.upstream_polygon_explicit (
+        id int PRIMARY KEY,
+        name varchar,
+        location polygon
+    );
+    INSERT INTO public.upstream_polygon_explicit (id, name, location) VALUES
+        (1, 'seed', polygon '((0,0),(10,0),(10,10),(0,10),(0,0))'),
+        (3, 'sci-backfill', polygon '((1e15,1e-5),(1e20,1e-10))');
+"
+
+statement ok
+create table explicit_rw (
+    id int primary key,
+    name varchar,
+    location varchar
+) from polygon_source table 'public.upstream_polygon_explicit';
+
+# Backfill check: compare our exact text against upstream text (no hardcoded polygon).
+query ITT retry 10 backoff 1s
+select ours.id, ours.name, ours.location = upstream.location_text as location_ok
+from explicit_rw ours
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, name, location::text as location_text from public.upstream_polygon_explicit order by id'
+    )
+) as upstream(id, name, location_text)
+on ours.id = upstream.id and ours.name = upstream.name
+where ours.id in (1, 3)
+order by ours.id;
+----
+1 seed t
+3 sci-backfill t
+
+# Separate INSERT exact-text check.
+system ok
+psql -c "
+    INSERT INTO public.upstream_polygon_explicit (id, name, location) VALUES
+        (2, 'inserted', polygon '((1,1),(11,1),(11,11),(1,11),(1,1))');
+"
+
+query ITT retry 10 backoff 1s
+select ours.id, ours.name, ours.location = upstream.location_text as location_ok
+from explicit_rw ours
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, name, location::text as location_text from public.upstream_polygon_explicit order by id'
+    )
+) as upstream(id, name, location_text)
+on ours.id = upstream.id and ours.name = upstream.name
+where ours.id = 2
+order by ours.id;
+----
+2 inserted t
+
+# Separate UPDATE exact-text check.
+system ok
+psql -c "
+    UPDATE public.upstream_polygon_explicit SET
+        name = 'updated',
+        location = polygon '((20,20),(30,20),(30,30),(20,30),(20,20))'
+    WHERE id = 1;
+    INSERT INTO public.upstream_polygon_explicit (id, name, location) VALUES
+        (4, 'sci-incremental', polygon '((1e20,1e-10),(1e15,1e-5))');
+"
+
+query ITT retry 10 backoff 1s
+select ours.id, ours.name, ours.location = upstream.location_text as location_ok
+from explicit_rw ours
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, name, location::text as location_text from public.upstream_polygon_explicit order by id'
+    )
+) as upstream(id, name, location_text)
+on ours.id = upstream.id and ours.name = upstream.name
+where ours.id = 1
+order by ours.id;
+----
+1 updated t
+
+query ITT retry 10 backoff 1s
+select ours.id, ours.name, ours.location = upstream.location_text as location_ok
+from explicit_rw ours
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, name, location::text as location_text from public.upstream_polygon_explicit order by id'
+    )
+) as upstream(id, name, location_text)
+on ours.id = upstream.id and ours.name = upstream.name
+where ours.id = 4
+order by ours.id;
+----
+4 sci-incremental t
+
+# ===========================================================================
+# 2. auto_rw : auto-derive `polygon` and `polygon[]` via (*), NULL preserved
+# ===========================================================================
+system ok
+psql -c "
+    CREATE TABLE public.upstream_polygon_auto (
+        id int PRIMARY KEY,
+        scalar polygon,
+        locations polygon[]
+    );
+    INSERT INTO public.upstream_polygon_auto (id, scalar, locations) VALUES
+        (1, polygon '((0,0),(10,0),(10,10),(0,10),(0,0))',
+            ARRAY[polygon '((1,1),(11,1),(11,11),(1,11),(1,1))',
+                  polygon '((2,2),(12,2),(12,12),(2,12),(2,2))']),
+        (2, NULL, NULL);
+"
+
+statement ok
+create table auto_rw (*)
+from polygon_source table 'public.upstream_polygon_auto';
+
+# Type assertions: polygon -> varchar, polygon[] -> varchar[].
+query TTTT retry 10 backoff 1s
+describe auto_rw;
+----
+id integer false NULL
+"scalar" character varying false NULL
+locations character varying[] false NULL
+_rw_timestamp timestamp with time zone true NULL
+primary key id NULL NULL
+distribution key id NULL NULL
+table description auto_rw NULL NULL
+
+# Backfill check: scalar plus both array elements match upstream exactly.
+query ITTT retry 10 backoff 1s
+select ours.id,
+    ours.scalar = upstream.scalar_text as scalar_ok,
+    ours.locations[1] = upstream.loc1_text as loc1_ok,
+    ours.locations[2] = upstream.loc2_text as loc2_ok
+from auto_rw ours
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, scalar::text as scalar_text, locations[1]::text as loc1_text, locations[2]::text as loc2_text from public.upstream_polygon_auto order by id'
+    )
+) as upstream(id, scalar_text, loc1_text, loc2_text)
+on ours.id = upstream.id
+where ours.id = 1
+order by ours.id;
+----
+1 t t t
+
+# NULL backfill row stays NULL.
+query ITTT retry 10 backoff 1s
+select id,
+    scalar is null as scalar_null,
+    locations[1] is null as loc1_null,
+    locations[2] is null as loc2_null
+from auto_rw
+where id = 2
+order by id;
+----
+2 t t t
+
+# INSERT and UPDATE, each carrying two array elements.
+system ok
+psql -c "
+    INSERT INTO public.upstream_polygon_auto (id, scalar, locations) VALUES
+        (3, polygon '((3,3),(13,3),(13,13),(3,13),(3,3))',
+            ARRAY[polygon '((4,4),(14,4),(14,14),(4,14),(4,4))',
+                  polygon '((5,5),(15,5),(15,15),(5,15),(5,5))']);
+    UPDATE public.upstream_polygon_auto SET
+        scalar = polygon '((6,6),(16,6),(16,16),(6,16),(6,6))',
+        locations = ARRAY[polygon '((7,7),(17,7),(17,17),(7,17),(7,7))',
+                          polygon '((8,8),(18,8),(18,18),(8,18),(8,8))']
+    WHERE id = 1;
+"
+
+query ITTT retry 10 backoff 1s
+select ours.id,
+    ours.scalar = upstream.scalar_text as scalar_ok,
+    ours.locations[1] = upstream.loc1_text as loc1_ok,
+    ours.locations[2] = upstream.loc2_text as loc2_ok
+from auto_rw ours
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, scalar::text as scalar_text, locations[1]::text as loc1_text, locations[2]::text as loc2_text from public.upstream_polygon_auto order by id'
+    )
+) as upstream(id, scalar_text, loc1_text, loc2_text)
+on ours.id = upstream.id
+order by ours.id;
+----
+1 t t t
+2 NULL NULL NULL
+3 t t t
+
+# ===========================================================================
+# 3. schema_rw : ALTER TABLE ADD COLUMN polygon after source creation
+# ===========================================================================
+system ok
+psql -c "
+    CREATE TABLE public.upstream_polygon_schema (
+        id int PRIMARY KEY,
+        note varchar
+    );
+    INSERT INTO public.upstream_polygon_schema (id, note) VALUES
+        (1, 'baseline');
+"
+
+statement ok
+create table schema_rw (*)
+from polygon_source table 'public.upstream_polygon_schema';
+
+# Baseline row backfill (no polygon column yet).
+query IT retry 10 backoff 1s
+select id, note from schema_rw where id = 1 order by id;
+----
+1 baseline
+
+# Add the polygon column upstream; update the old row and insert a new row.
+system ok
+psql -c "
+    ALTER TABLE public.upstream_polygon_schema ADD COLUMN location polygon;
+    UPDATE public.upstream_polygon_schema SET
+        location = polygon '((9,9),(19,9),(19,19),(9,19),(9,9))'
+    WHERE id = 1;
+    INSERT INTO public.upstream_polygon_schema (id, note, location) VALUES
+        (2, 'added', polygon '((10,10),(20,10),(20,20),(10,20),(10,10))');
+"
+
+# The added column is derived as VARCHAR via schema change.
+query TTTT retry 10 backoff 1s
+describe schema_rw;
+----
+id integer false NULL
+note character varying false NULL
+"location" character varying false NULL
+_rw_timestamp timestamp with time zone true NULL
+primary key id NULL NULL
+distribution key id NULL NULL
+table description schema_rw NULL NULL
+
+# Exact ordered checks against upstream text.
+query ITT retry 10 backoff 1s
+select ours.id, ours.note, ours.location = upstream.location_text as location_ok
+from schema_rw ours
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, note, location::text as location_text from public.upstream_polygon_schema order by id'
+    )
+) as upstream(id, note, location_text)
+on ours.id = upstream.id and ours.note = upstream.note
+order by ours.id;
+----
+1 baseline t
+2 added t
+
+# ===========================================================================
+# Cleanup: drop RW tables, drop source with cascade, drop upstream tables and
+# conditionally drop the replication slot.
+# ===========================================================================
+statement ok
+drop table explicit_rw;
+
+statement ok
+drop table auto_rw;
+
+statement ok
+drop table schema_rw;
+
+statement ok
+drop source polygon_source cascade;
+
+system ok
+psql -c "
+    SELECT pg_terminate_backend(active_pid)
+    FROM pg_replication_slots
+    WHERE slot_name = 'polygon_issue_25517_slot' AND active_pid IS NOT NULL;
+    SELECT pg_sleep(1);
+    SELECT pg_drop_replication_slot(slot_name)
+    FROM pg_replication_slots
+    WHERE slot_name = 'polygon_issue_25517_slot';
+    DROP TABLE IF EXISTS public.upstream_polygon_explicit CASCADE;
+    DROP TABLE IF EXISTS public.upstream_polygon_auto CASCADE;
+    DROP TABLE IF EXISTS public.upstream_polygon_schema CASCADE;
+"
