@@ -88,6 +88,10 @@ fn mysql_source_column_type_compatible(
     char_max_length: Option<i64>,
     is_unsigned: bool,
 ) -> bool {
+    // For creation-time validation, `mysql_type` comes from MySQL information schema DATA_TYPE,
+    // with unsigned/length metadata passed separately. For auto schema change, meta only has the
+    // already-mapped RW type, so callers pass one of the synthetic candidates below that uses the
+    // same normalized type strings.
     if is_unsigned {
         match mysql_type {
             "tinyint" => return type_in_range(rw_type, PbTypeName::Int16, PbTypeName::Int64),
@@ -142,6 +146,10 @@ fn postgres_source_column_type_compatible(
     char_max_length: Option<i64>,
     udt_name: Option<&str>,
 ) -> bool {
+    // For creation-time validation, `postgres_type` comes from PostgreSQL information schema
+    // DATA_TYPE, such as ARRAY or USER-DEFINED, and is lowercased by the public entry point. For
+    // auto schema change, meta only has the already-mapped RW type, so callers pass synthetic
+    // candidates below that intentionally reuse these normalized validation tokens.
     match postgres_type {
         "boolean" => rw_type == PbTypeName::Boolean,
         "bit" => char_max_length.is_none_or(|length| length == 1) && rw_type == PbTypeName::Boolean,
@@ -183,6 +191,9 @@ fn postgres_source_column_type_compatible(
 }
 
 fn sql_server_source_column_type_compatible(sql_server_type: &str, rw_type: PbTypeName) -> bool {
+    // For creation-time validation, `sql_server_type` comes from SQL Server information schema
+    // DATA_TYPE. For auto schema change, meta only has the already-mapped RW type, so callers pass
+    // one of the synthetic candidates below that uses the same normalized type strings.
     match sql_server_type {
         "bit" | "boolean" => rw_type == PbTypeName::Boolean,
         "tinyint" | "smallint" => type_in_range(rw_type, PbTypeName::Int16, PbTypeName::Int64),
@@ -275,6 +286,7 @@ fn mysql_auto_schema_change_source_type_candidates(
             Candidate::new("decimal"),
             Candidate::new("numeric"),
         ],
+        DataType::Varchar => vec![Candidate::new("longtext")],
         DataType::Float32 => vec![Candidate::new("float"), Candidate::new("real")],
         DataType::Float64 => vec![Candidate::new("double")],
         _ => vec![],
@@ -288,6 +300,7 @@ fn postgres_auto_schema_change_source_type_candidates(
 
     match mapped_type {
         DataType::Decimal => vec![Candidate::new("numeric")],
+        DataType::List(_) => vec![Candidate::new("array")],
         _ => vec![],
     }
 }
@@ -424,6 +437,11 @@ mod tests {
             &DataType::Int64,
             &DataType::Decimal,
         ));
+        assert!(cdc_auto_schema_change_existing_type_compatible(
+            PbCdcTableType::Mysql,
+            &DataType::Bytea,
+            &DataType::Varchar,
+        ));
 
         assert!(!cdc_auto_schema_change_existing_type_compatible(
             PbCdcTableType::Mysql,
@@ -464,11 +482,56 @@ mod tests {
             &DataType::Varchar,
             &DataType::Decimal,
         ));
+        assert!(cdc_auto_schema_change_existing_type_compatible(
+            PbCdcTableType::Postgres,
+            &DataType::Int64.list(),
+            &DataType::Int32.list(),
+        ));
 
         assert!(!cdc_auto_schema_change_existing_type_compatible(
             PbCdcTableType::Postgres,
             &DataType::Int64,
             &DataType::Int32,
         ));
+    }
+
+    #[test]
+    fn test_auto_schema_change_candidates_use_source_compatibility_type_strings() {
+        let cases = [
+            (PbCdcTableType::Mysql, DataType::Boolean),
+            (PbCdcTableType::Mysql, DataType::Int16),
+            (PbCdcTableType::Mysql, DataType::Int32),
+            (PbCdcTableType::Mysql, DataType::Int64),
+            (PbCdcTableType::Mysql, DataType::Decimal),
+            (PbCdcTableType::Mysql, DataType::Varchar),
+            (PbCdcTableType::Mysql, DataType::Float32),
+            (PbCdcTableType::Mysql, DataType::Float64),
+            (PbCdcTableType::Postgres, DataType::Decimal),
+            (PbCdcTableType::Postgres, DataType::Int32.list()),
+            (PbCdcTableType::Sqlserver, DataType::Int16),
+            (PbCdcTableType::Sqlserver, DataType::Int32),
+            (PbCdcTableType::Sqlserver, DataType::Float32),
+            (PbCdcTableType::Sqlserver, DataType::Float64),
+        ];
+
+        for (cdc_table_type, mapped_type) in cases {
+            for candidate in auto_schema_change_source_type_candidates(cdc_table_type, &mapped_type)
+            {
+                assert!(
+                    cdc_source_column_type_compatible(
+                        cdc_table_type,
+                        candidate.upstream_type_name,
+                        mapped_type.prost_type_name(),
+                        candidate.char_max_length,
+                        candidate.is_unsigned,
+                        candidate.postgres_udt_name,
+                    ),
+                    "candidate {:?} is not accepted as mapped type {:?} for {:?}",
+                    candidate.upstream_type_name,
+                    mapped_type,
+                    cdc_table_type,
+                );
+            }
+        }
     }
 }
