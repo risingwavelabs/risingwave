@@ -821,7 +821,8 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 // BYTEA -> BYTEA
                 return val == Data.DataType.TypeName.BYTEA_VALUE;
             case "geometry":
-                // PostGIS GEOMETRY -> BYTEA (stored as EWKB bytes)
+            case "geography":
+                // PostGIS GEOMETRY/GEOGRAPHY -> BYTEA (stored as EWKB bytes)
                 return val == Data.DataType.TypeName.BYTEA_VALUE;
             case "json":
             case "jsonb":
@@ -852,7 +853,8 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                             // CITEXT -> CHARACTER VARYING
                             return val == Data.DataType.TypeName.VARCHAR_VALUE;
                         case "geometry":
-                            // PostGIS GEOMETRY -> BYTEA (stored as EWKB bytes)
+                        case "geography":
+                            // PostGIS GEOMETRY/GEOGRAPHY -> BYTEA (stored as EWKB bytes)
                             return val == Data.DataType.TypeName.BYTEA_VALUE;
                         case "vector":
                             // pgvector VECTOR -> VECTOR

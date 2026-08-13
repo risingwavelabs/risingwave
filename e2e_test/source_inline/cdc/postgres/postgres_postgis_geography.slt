@@ -1,0 +1,350 @@
+# PostGIS geography type CDC test
+#
+# Covers three upstream situations with a single Postgres-CDC source:
+#   1. explicit  : a hand-written RW table with `location bytea` sourced from an
+#                  upstream geography(Point, 4269) column, plus full-EWKB
+#                  equality checks for backfill, INSERT and UPDATE, including a
+#                  little-endian SRID byte assertion (ad100000 for 4269).
+#   2. auto      : a `create table (*)` RW table derived from upstream
+#                  geography(Point, 4326) scalar + geography(Point, 4326)[]
+#                  array columns (both must map to bytea / bytea[]), including a
+#                  NULL cell, backfill and incremental INSERT / UPDATE.
+#   3. schema    : an auto schema change that ADD COLUMN a geography(Point, 4269)
+#                  column; the new column maps to bytea, old rows get NULL, and
+#                  newly inserted rows carry the full EWKB value.
+
+control substitution on
+
+# Clean up any stale state and seed the three upstream tables.
+system ok
+psql -c "
+    CREATE EXTENSION IF NOT EXISTS postgis;
+    SELECT pg_terminate_backend(active_pid)
+    FROM pg_replication_slots
+    WHERE slot_name = 'postgis_geography_slot' AND active_pid IS NOT NULL;
+    SELECT pg_sleep(1);
+    SELECT pg_drop_replication_slot(slot_name)
+    FROM pg_replication_slots
+    WHERE slot_name = 'postgis_geography_slot';
+    DROP TABLE IF EXISTS public.upstream_explicit;
+    DROP TABLE IF EXISTS public.upstream_auto;
+    DROP TABLE IF EXISTS public.upstream_schema;
+    CREATE TABLE public.upstream_explicit (
+        id int PRIMARY KEY,
+        location geography(Point, 4269)
+    );
+    INSERT INTO public.upstream_explicit VALUES
+        (1, ST_SetSRID(ST_MakePoint(-71.060316, 48.432044), 4269));
+    CREATE TABLE public.upstream_auto (
+        id int PRIMARY KEY,
+        location geography(Point, 4326),
+        locations geography(Point, 4326)[]
+    );
+    INSERT INTO public.upstream_auto VALUES
+        (
+            1,
+            ST_SetSRID(ST_MakePoint(-122.4194, 37.7749), 4326),
+            ARRAY[
+                ST_SetSRID(ST_MakePoint(-0.1276, 51.5074), 4326),
+                ST_SetSRID(ST_MakePoint(2.3522, 48.8566), 4326)
+            ]::geography(Point, 4326)[]
+        ),
+        (2, NULL, NULL);
+    CREATE TABLE public.upstream_schema (
+        id int PRIMARY KEY,
+        note varchar
+    );
+    INSERT INTO public.upstream_schema VALUES (1, 'baseline');
+"
+
+statement ok
+create source geography_source with (
+  connector = 'postgres-cdc',
+  hostname = '${PGHOST:localhost}',
+  port = '${PGPORT:5432}',
+  username = '${PGUSER:$USER}',
+  password = '${PGPASSWORD:}',
+  database.name = '${PGDATABASE:postgres}',
+  schema.name = 'public',
+  slot.name = 'postgis_geography_slot',
+  auto.schema.change = 'true'
+);
+
+# Explicit path: hand-written RW table, geography maps to bytea.
+statement ok
+create table explicit_rw (
+    id int primary key,
+    location bytea
+) from geography_source table 'public.upstream_explicit';
+
+# Backfill: the geography value is exactly reproduced as EWKB bytes.
+query IIIT retry 10 backoff 1s
+select
+  ours.id,
+  length(ours.location) as ours_bytes,
+  length(upstream.upstream_hex) / 2 as upstream_bytes,
+  encode(ours.location, 'hex') = upstream.upstream_hex as same_full
+from explicit_rw as ours
+join (
+  select * from postgres_query(
+    '${PGHOST:localhost}',
+    '${PGPORT:5432}',
+    '${PGUSER:$USER}',
+    '${PGPASSWORD:}',
+    '${PGDATABASE:postgres}',
+    'select id, encode(ST_AsEWKB(location::geometry), ''hex'') as upstream_hex from upstream_explicit where id = 1'
+  )
+) as upstream(id, upstream_hex)
+on ours.id = upstream.id;
+----
+1 25 25 t
+
+# For SRID 4269 the little-endian SRID uint32 is ad100000, at hex offset 11.
+query T retry 10 backoff 1s
+select substring(encode(location, 'hex') from 11 for 8)::text from explicit_rw where id = 1;
+----
+ad100000
+
+# Incremental INSERT on the explicit table.
+system ok
+psql -c "INSERT INTO upstream_explicit VALUES (2, ST_SetSRID(ST_MakePoint(-73.9857, 40.7484), 4269));"
+
+query IIIT retry 10 backoff 1s
+select
+  ours.id,
+  length(ours.location) as ours_bytes,
+  length(upstream.upstream_hex) / 2 as upstream_bytes,
+  encode(ours.location, 'hex') = upstream.upstream_hex as same_full
+from explicit_rw as ours
+join (
+  select * from postgres_query(
+    '${PGHOST:localhost}',
+    '${PGPORT:5432}',
+    '${PGUSER:$USER}',
+    '${PGPASSWORD:}',
+    '${PGDATABASE:postgres}',
+    'select id, encode(ST_AsEWKB(location::geometry), ''hex'') as upstream_hex from upstream_explicit where id = 2'
+  )
+) as upstream(id, upstream_hex)
+on ours.id = upstream.id;
+----
+2 25 25 t
+
+# Incremental UPDATE on the explicit table.
+system ok
+psql -c "UPDATE upstream_explicit SET location = ST_SetSRID(ST_MakePoint(-74.0060, 40.7128), 4269) WHERE id = 1;"
+
+query IIIT retry 10 backoff 1s
+select
+  ours.id,
+  length(ours.location) as ours_bytes,
+  length(upstream.upstream_hex) / 2 as upstream_bytes,
+  encode(ours.location, 'hex') = upstream.upstream_hex as same_full
+from explicit_rw as ours
+join (
+  select * from postgres_query(
+    '${PGHOST:localhost}',
+    '${PGPORT:5432}',
+    '${PGUSER:$USER}',
+    '${PGPASSWORD:}',
+    '${PGDATABASE:postgres}',
+    'select id, encode(ST_AsEWKB(location::geometry), ''hex'') as upstream_hex from upstream_explicit where id = 1'
+  )
+) as upstream(id, upstream_hex)
+on ours.id = upstream.id;
+----
+1 25 25 t
+
+# Auto path: `create table (*)` derives bytea and bytea[] from the geography
+# scalar and array columns.
+statement ok
+create table auto_rw (*) from geography_source table 'public.upstream_auto';
+
+query TTTT retry 6 backoff 1s
+describe auto_rw;
+----
+id integer false NULL
+location bytea false NULL
+locations bytea[] false NULL
+_rw_timestamp timestamp with time zone true NULL
+primary key id NULL NULL
+distribution key id NULL NULL
+table description auto_rw NULL NULL
+
+# Backfill: scalar and both array elements equal the upstream EWKB exactly.
+query IIITT retry 10 backoff 1s
+select
+  ours.id,
+  length(ours.location) as ours_bytes,
+  length(upstream.upstream_hex) / 2 as upstream_bytes,
+  encode(ours.location, 'hex') = upstream.upstream_hex as scalar_same,
+  encode(ours.locations[1], 'hex') = upstream.upstream_hex_1
+    AND encode(ours.locations[2], 'hex') = upstream.upstream_hex_2 as array_same
+from auto_rw as ours
+join (
+  select * from postgres_query(
+    '${PGHOST:localhost}',
+    '${PGPORT:5432}',
+    '${PGUSER:$USER}',
+    '${PGPASSWORD:}',
+    '${PGDATABASE:postgres}',
+    'select id,
+            encode(ST_AsEWKB(location::geometry), ''hex'') as upstream_hex,
+            encode(ST_AsEWKB(locations[1]::geometry), ''hex'') as upstream_hex_1,
+            encode(ST_AsEWKB(locations[2]::geometry), ''hex'') as upstream_hex_2
+     from upstream_auto where id = 1'
+  )
+) as upstream(id, upstream_hex, upstream_hex_1, upstream_hex_2)
+on ours.id = upstream.id;
+----
+1 25 25 t t
+
+# NULL scalar and NULL array both survive the backfill.
+query TT retry 10 backoff 1s
+select location is null, locations is null from auto_rw where id = 2;
+----
+t t
+
+# Incremental INSERT on the auto table.
+system ok
+psql -c "INSERT INTO upstream_auto VALUES (3, ST_SetSRID(ST_MakePoint(139.6917, 35.6895), 4326), ARRAY[ST_SetSRID(ST_MakePoint(-0.1276, 51.5074), 4326)]::geography(Point, 4326)[]);"
+
+query IIITT retry 10 backoff 1s
+select
+  ours.id,
+  length(ours.location) as ours_bytes,
+  length(upstream.upstream_hex) / 2 as upstream_bytes,
+  encode(ours.location, 'hex') = upstream.upstream_hex as scalar_same,
+  encode(ours.locations[1], 'hex') = upstream.upstream_hex_1 as arr1_same
+from auto_rw as ours
+join (
+  select * from postgres_query(
+    '${PGHOST:localhost}',
+    '${PGPORT:5432}',
+    '${PGUSER:$USER}',
+    '${PGPASSWORD:}',
+    '${PGDATABASE:postgres}',
+    'select id,
+            encode(ST_AsEWKB(location::geometry), ''hex'') as upstream_hex,
+            encode(ST_AsEWKB(locations[1]::geometry), ''hex'') as upstream_hex_1
+     from upstream_auto where id = 3'
+  )
+) as upstream(id, upstream_hex, upstream_hex_1)
+on ours.id = upstream.id;
+----
+3 25 25 t t
+
+# Incremental UPDATE on the auto table (scalar + array).
+system ok
+psql -c "UPDATE upstream_auto SET location = ST_SetSRID(ST_MakePoint(151.2093, -33.8688), 4326), locations = ARRAY[ST_SetSRID(ST_MakePoint(4.9041, 52.3676), 4326), ST_SetSRID(ST_MakePoint(13.4050, 52.5200), 4326)]::geography(Point, 4326)[] WHERE id = 1;"
+
+query IIITT retry 10 backoff 1s
+select
+  ours.id,
+  length(ours.location) as ours_bytes,
+  length(upstream.upstream_hex) / 2 as upstream_bytes,
+  encode(ours.location, 'hex') = upstream.upstream_hex as scalar_same,
+  encode(ours.locations[1], 'hex') = upstream.upstream_hex_1
+    AND encode(ours.locations[2], 'hex') = upstream.upstream_hex_2 as array_same
+from auto_rw as ours
+join (
+  select * from postgres_query(
+    '${PGHOST:localhost}',
+    '${PGPORT:5432}',
+    '${PGUSER:$USER}',
+    '${PGPASSWORD:}',
+    '${PGDATABASE:postgres}',
+    'select id,
+            encode(ST_AsEWKB(location::geometry), ''hex'') as upstream_hex,
+            encode(ST_AsEWKB(locations[1]::geometry), ''hex'') as upstream_hex_1,
+            encode(ST_AsEWKB(locations[2]::geometry), ''hex'') as upstream_hex_2
+     from upstream_auto where id = 1'
+  )
+) as upstream(id, upstream_hex, upstream_hex_1, upstream_hex_2)
+on ours.id = upstream.id;
+----
+1 25 25 t t
+
+# Auto schema change path: baseline row before the geography column exists.
+statement ok
+create table schema_rw (*) from geography_source table 'public.upstream_schema';
+
+query TTTT retry 6 backoff 1s
+describe schema_rw;
+----
+id integer false NULL
+note character varying false NULL
+_rw_timestamp timestamp with time zone true NULL
+primary key id NULL NULL
+distribution key id NULL NULL
+table description schema_rw NULL NULL
+
+query IT retry 10 backoff 1s
+select id, note from schema_rw order by id;
+----
+1 baseline
+
+# ADD COLUMN geography upstream and insert a new row that carries a value.
+system ok
+psql -c "
+    ALTER TABLE public.upstream_schema ADD COLUMN location geography(Point, 4269);
+    INSERT INTO public.upstream_schema (id, note, location) VALUES (2, 'new', ST_SetSRID(ST_MakePoint(-104.9903, 39.7392), 4269));
+"
+
+# The new column is derived as `bytea`.
+query TTTT retry 6 backoff 1s
+describe schema_rw;
+----
+id integer false NULL
+note character varying false NULL
+location bytea false NULL
+_rw_timestamp timestamp with time zone true NULL
+primary key id NULL NULL
+distribution key id NULL NULL
+table description schema_rw NULL NULL
+
+# The pre-existing row has NULL for the new column.
+query ITT retry 10 backoff 1s
+select id, note, location is null from schema_rw where id = 1;
+----
+1 baseline t
+
+# The row written after the column was added carries the full EWKB value.
+query IIIT retry 10 backoff 1s
+select
+  ours.id,
+  length(ours.location) as ours_bytes,
+  length(upstream.upstream_hex) / 2 as upstream_bytes,
+  encode(ours.location, 'hex') = upstream.upstream_hex as same_full
+from schema_rw as ours
+join (
+  select * from postgres_query(
+    '${PGHOST:localhost}',
+    '${PGPORT:5432}',
+    '${PGUSER:$USER}',
+    '${PGPASSWORD:}',
+    '${PGDATABASE:postgres}',
+    'select id, encode(ST_AsEWKB(location::geometry), ''hex'') as upstream_hex from upstream_schema where id = 2'
+  )
+) as upstream(id, upstream_hex)
+on ours.id = upstream.id;
+----
+2 25 25 t
+
+# Clean up downstream and upstream objects.
+statement ok
+drop source geography_source cascade;
+
+system ok
+psql -c "
+    SELECT pg_terminate_backend(active_pid)
+    FROM pg_replication_slots
+    WHERE slot_name = 'postgis_geography_slot' AND active_pid IS NOT NULL;
+    SELECT pg_sleep(1);
+    SELECT pg_drop_replication_slot(slot_name)
+    FROM pg_replication_slots
+    WHERE slot_name = 'postgis_geography_slot';
+    DROP TABLE IF EXISTS public.upstream_explicit;
+    DROP TABLE IF EXISTS public.upstream_auto;
+    DROP TABLE IF EXISTS public.upstream_schema;
+"

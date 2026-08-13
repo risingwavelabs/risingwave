@@ -862,7 +862,7 @@ pub fn type_name_to_pg_type(ty_name: &str) -> Option<PgType> {
             "varchar" => Some(PgType::VARCHAR_ARRAY),
             "text" => Some(PgType::TEXT_ARRAY),
             "bytea" => Some(PgType::BYTEA_ARRAY),
-            "geometry" => Some(PgType::BYTEA_ARRAY), // PostGIS geometry array
+            "geometry" | "geography" => Some(PgType::BYTEA_ARRAY), // PostGIS spatial type array
             "date" => Some(PgType::DATE_ARRAY),
             "time" => Some(PgType::TIME_ARRAY),
             "timetz" => Some(PgType::TIMETZ_ARRAY),
@@ -895,7 +895,7 @@ pub fn type_name_to_pg_type(ty_name: &str) -> Option<PgType> {
             "char" | "character" | "bpchar" => Some(PgType::BPCHAR),
             "citext" | "text" => Some(PgType::TEXT),
             "bytea" => Some(PgType::BYTEA),
-            "geometry" => Some(PgType::BYTEA), // PostGIS geometry type
+            "geometry" | "geography" => Some(PgType::BYTEA), // PostGIS spatial type
             "date" => Some(PgType::DATE),
             "time" => Some(PgType::TIME),
             "timetz" => Some(PgType::TIMETZ),
@@ -981,10 +981,29 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{DataType, ScalarImpl};
+    use tokio_postgres::types::Type as PgType;
 
     use crate::connector_common::PostgresExternalTable;
-    use crate::source::cdc::external::postgres::{PostgresExternalTableReader, PostgresOffset};
+    use crate::source::cdc::external::postgres::{
+        PostgresExternalTableReader, PostgresOffset, pg_type_to_rw_type, type_name_to_pg_type,
+    };
     use crate::source::cdc::external::{ExternalTableConfig, ExternalTableReader, SchemaTableName};
+
+    #[test]
+    fn test_type_name_to_pg_type_postgis_geography() {
+        // Scalar `geography` maps to BYTEA (EWKB bytes), array `_geography` to BYTEA_ARRAY.
+        assert_eq!(type_name_to_pg_type("geography"), Some(PgType::BYTEA));
+        assert_eq!(
+            type_name_to_pg_type("_geography"),
+            Some(PgType::BYTEA_ARRAY)
+        );
+        // Both map to bytea / bytea[] in RisingWave.
+        assert_eq!(pg_type_to_rw_type(&PgType::BYTEA).unwrap(), DataType::Bytea);
+        assert_eq!(
+            pg_type_to_rw_type(&PgType::BYTEA_ARRAY).unwrap(),
+            DataType::Bytea.list()
+        );
+    }
 
     #[ignore]
     #[tokio::test]
