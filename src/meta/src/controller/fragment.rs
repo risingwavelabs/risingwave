@@ -2056,6 +2056,35 @@ impl CatalogController {
         Ok(mview_fragment.into_iter().next().unwrap())
     }
 
+    /// Resolve the iceberg pk-index sink's WRITER fragment and its pk-index state table.
+    ///
+    /// The writer fragment is the one whose stream node tree contains an
+    /// `IcebergWithPkIndexWriter` node; the pk-index table id is read from that node's
+    /// `pk_index_table` catalog. Used by the compaction-trigger driver to build a
+    /// `Command::CreateCompactionResolveJob` after a coordinated compaction report. `sink_id` is
+    /// the sink's streaming job id.
+    ///
+    /// Returns `(writer_fragment_id, pk_index_table_id)`.
+    pub async fn get_iceberg_pk_index_writer_fragment(
+        &self,
+        sink_id: JobId,
+    ) -> MetaResult<(FragmentId, TableId)> {
+        let inner = self.inner.read().await;
+        let fragments: Vec<fragment::Model> = FragmentModel::find()
+            .filter(fragment::Column::JobId.eq(sink_id))
+            .all(&inner.db)
+            .await?;
+
+        find_iceberg_pk_index_writer_fragment(
+            fragments
+                .iter()
+                .map(|f| (f.fragment_id, f.stream_node.to_protobuf())),
+        )
+        .ok_or_else(|| {
+            anyhow::anyhow!("no iceberg pk-index writer fragment found for sink {sink_id}").into()
+        })
+    }
+
     pub async fn has_table_been_migrated(&self, table_id: TableId) -> MetaResult<bool> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
@@ -2123,6 +2152,25 @@ impl CatalogController {
 
         Ok(())
     }
+}
+
+/// Find the `(fragment_id, pk_index_table_id)` of the iceberg pk-index WRITER fragment among a
+/// job's fragments: the first fragment whose stream node tree contains an
+/// `IcebergWithPkIndexWriter` node. The pk-index table id is read from that node's
+/// `pk_index_table` catalog. Returns `None` if no such fragment exists (not a pk-index sink).
+fn find_iceberg_pk_index_writer_fragment(
+    fragments: impl IntoIterator<Item = (FragmentId, PbStreamNode)>,
+) -> Option<(FragmentId, TableId)> {
+    fn find_writer_table(node: &PbStreamNode) -> Option<TableId> {
+        if let Some(NodeBody::IcebergWithPkIndexWriter(body)) = &node.node_body {
+            return Some(body.pk_index_table.as_ref()?.id);
+        }
+        node.input.iter().find_map(find_writer_table)
+    }
+
+    fragments
+        .into_iter()
+        .find_map(|(fragment_id, node)| find_writer_table(&node).map(|t| (fragment_id, t)))
 }
 
 #[cfg(test)]
@@ -2532,5 +2580,54 @@ mod tests {
         );
 
         assert_eq!(policy, "upstream_fragment([1, 2, 3])");
+    }
+
+    #[test]
+    fn test_find_iceberg_pk_index_writer_fragment() {
+        use risingwave_pb::catalog::PbTable;
+        use risingwave_pb::stream_plan::stream_node::NodeBody;
+        use risingwave_pb::stream_plan::{IcebergWithPkIndexWriterNode, PbSinkDesc};
+
+        // A writer node nested under a (non-writer) parent, plus a sibling non-writer fragment.
+        let writer_child = PbStreamNode {
+            node_body: Some(NodeBody::IcebergWithPkIndexWriter(Box::new(
+                IcebergWithPkIndexWriterNode {
+                    sink_desc: Some(PbSinkDesc {
+                        id: 7.into(),
+                        ..Default::default()
+                    }),
+                    pk_index_table: Some(PbTable {
+                        id: 99.into(),
+                        ..Default::default()
+                    }),
+                },
+            ))),
+            ..Default::default()
+        };
+        let writer_fragment_node = PbStreamNode {
+            identity: "PositionDeleteMerger".to_owned(),
+            input: vec![writer_child],
+            ..Default::default()
+        };
+        let other_fragment_node = PbStreamNode {
+            identity: "Merge".to_owned(),
+            node_body: Some(NodeBody::Merge(Box::default())),
+            ..Default::default()
+        };
+
+        // The writer fragment is found regardless of order; the pk-index table id is read from the
+        // (possibly nested) writer node, not the fragment's own state_table_ids.
+        let found = super::find_iceberg_pk_index_writer_fragment(vec![
+            (FragmentId::new(10), other_fragment_node.clone()),
+            (FragmentId::new(20), writer_fragment_node),
+        ]);
+        assert_eq!(found, Some((FragmentId::new(20), TableId::new(99))));
+
+        // No writer fragment among a job's fragments (not a pk-index sink) -> None.
+        let none = super::find_iceberg_pk_index_writer_fragment(vec![(
+            FragmentId::new(10),
+            other_fragment_node,
+        )]);
+        assert_eq!(none, None);
     }
 }

@@ -15,6 +15,7 @@
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
+use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
@@ -24,6 +25,7 @@ use risingwave_common::id::{JobId, SinkId, SourceId};
 use risingwave_common::must_match;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_connector::sink::iceberg::IcebergCommitResult;
 use risingwave_connector::source::{CdcTableSnapshotSplitRaw, SplitImpl};
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
@@ -31,6 +33,7 @@ use risingwave_meta_model::{DispatcherType, WorkerId, fragment_relation, streami
 use risingwave_pb::catalog::CreateType;
 use risingwave_pb::common::PbActorInfo;
 use risingwave_pb::hummock::vector_index_delta::PbVectorIndexInit;
+use risingwave_pb::id::IcebergCompactionTaskId;
 use risingwave_pb::plan_common::{ColumnCatalog as PbColumnCatalog, PbField};
 use risingwave_pb::source::{
     ConnectorSplit, ConnectorSplits, PbCdcTableSnapshotSplits,
@@ -65,6 +68,7 @@ use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::scale::LoadedFragmentContext;
 use crate::controller::utils::StreamingJobExtraInfo;
 use crate::hummock::NewTableFragmentInfo;
+use crate::manager::iceberg_compaction::CompactionResolveCompletion;
 use crate::manager::{StreamingJob, StreamingJobType};
 use crate::model::{
     ActorId, ActorUpstreams, DispatcherId, FragmentActorDispatchers, FragmentDownstreamRelation,
@@ -596,6 +600,38 @@ pub enum Command {
         /// Split ID -> offset (JSON-encoded based on connector type)
         split_offsets: HashMap<String, String>,
     },
+
+    /// Attach a transient singleton resolver directly to the existing pk-index writers for one
+    /// adjacent B1/B2 main-graph barrier pair.
+    CreateCompactionResolveJob {
+        database_id: DatabaseId,
+        sink_id: SinkId,
+        /// The compaction task id, baked into the resolver plan node.
+        task_id: IcebergCompactionTaskId,
+        /// The writer fragment whose dormant right Merge receives the resolver's hash edge.
+        writer_fragment_id: FragmentId,
+        /// The writer's pk-index state table, used to validate the target job.
+        pk_index_table_id: TableId,
+        /// The compaction overwrite committed by the B2 checkpoint.
+        overwrite: CompactionResolveOverwrite,
+        /// Resolves the scheduler track only after the resolver's B2 and
+        /// Iceberg overwrite are durable. Drop means retryable abandonment.
+        completion: Arc<CompactionResolveCompletion>,
+    },
+}
+
+/// The pk-index compaction overwrite carried by [`Command::CreateCompactionResolveJob`].
+#[derive(educe::Educe)]
+#[educe(Debug)]
+pub struct CompactionResolveOverwrite {
+    /// Compacted output of the writer's pk-index state table, to be committed as an Iceberg overwrite.
+    #[educe(Debug(ignore))]
+    pub output_result: IcebergCommitResult,
+    /// Paths of the input data files the compaction replaces (removed by the overwrite).
+    pub input_file_paths: Vec<String>,
+    /// The snapshot the compaction plan was computed against (drives B3 masking of `(R, N]`
+    /// deletes; not used to gate the commit).
+    pub read_snapshot_id: i64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -693,6 +729,16 @@ impl std::fmt::Display for Command {
                 "InjectSourceOffsets: {} ({} splits)",
                 source_id,
                 split_offsets.len()
+            ),
+            Command::CreateCompactionResolveJob {
+                database_id,
+                sink_id,
+                task_id,
+                pk_index_table_id,
+                ..
+            } => write!(
+                f,
+                "CreateCompactionResolveJob: sink={sink_id} task_id={task_id} table={pk_index_table_id} (database={database_id})"
             ),
         }
     }
@@ -955,8 +1001,8 @@ impl Command {
                 .expect("non-duplicate");
         }
         info.truncate_tables.extend(truncate_tables);
-        task.iceberg_pk_index_sink_metadata
-            .extend(iceberg_pk_index_sink_metadata);
+        task.iceberg_pk_index_pre_commit_metadata
+            .extend(iceberg_pk_index_sink_metadata.into_iter().map(Into::into));
     }
 }
 

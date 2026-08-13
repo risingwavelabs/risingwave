@@ -25,8 +25,7 @@ use risingwave_meta_model::SinkId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::barrier_complete_response::{
-    IcebergPkIndexSinkMetadata as PbIcebergPkIndexSinkMetadata, PbListFinishedSource,
-    PbLoadFinishedSource,
+    PbListFinishedSource, PbLoadFinishedSource,
 };
 use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
 use risingwave_rpc_client::StreamingControlHandle;
@@ -43,7 +42,9 @@ use crate::barrier::{
 };
 use crate::hummock::{CommitEpochInfo, HummockManagerRef};
 use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
-use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
+use crate::manager::iceberg_pk_index_sink::{
+    IcebergPkIndexPreCommitMetadata, IcebergPkIndexSinkManager,
+};
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::serving::ServingVnodeMappingRef;
@@ -169,7 +170,7 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
 
     fn pre_commit_iceberg_pk_index_sink_metadata(
         &self,
-        reports: Vec<PbIcebergPkIndexSinkMetadata>,
+        metadata: Vec<IcebergPkIndexPreCommitMetadata>,
     ) -> impl Future<Output = MetaResult<Vec<SinkId>>> + Send + '_;
 
     fn commit_iceberg_pk_index_sink_metadata(
