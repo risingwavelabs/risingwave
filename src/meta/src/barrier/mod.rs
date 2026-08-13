@@ -87,11 +87,11 @@ enum BarrierManagerStatus {
     Running,
 }
 
-/// Scheduled command with its notifiers.
+/// Scheduled command with its notifier.
 struct Scheduled {
     database_id: DatabaseId,
     command: Command,
-    notifiers: Vec<Notifier>,
+    notifier: Notifier,
     span: tracing::Span,
 }
 

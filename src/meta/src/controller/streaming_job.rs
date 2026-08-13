@@ -81,15 +81,17 @@ use thiserror_ext::AsReport;
 use super::rename::IndexItemRewriter;
 use crate::barrier::Command;
 use crate::controller::ObjectModel;
-use crate::controller::catalog::{CatalogController, DropTableConnectorContext};
+use crate::controller::catalog::{
+    CatalogController, DropTableConnectorContext, load_object_models,
+};
 use crate::controller::fragment::FragmentTypeMaskExt;
 use crate::controller::utils::{
     PartialObject, build_object_group_for_delete, check_if_belongs_to_iceberg_table,
     check_relation_name_duplicate, check_sink_into_table_cycle, ensure_job_not_canceled,
-    ensure_object_id, ensure_user_id, fetch_target_fragments, get_internal_tables_by_id,
-    get_referring_objects, get_table_columns, grant_default_privileges_automatically,
-    insert_fragment_relations, list_object_dependencies_by_object_id, list_user_info_by_ids,
-    try_get_iceberg_table_by_downstream_sink,
+    ensure_object_id, ensure_user_id, fetch_target_fragments, get_belong_objects,
+    get_belong_objects_by_ids, get_referring_objects, get_table_columns,
+    grant_default_privileges_automatically, insert_fragment_relations,
+    list_object_dependencies_by_object_id, list_user_info_by_ids,
 };
 use crate::error::MetaErrorInner;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
@@ -107,9 +109,22 @@ pub struct AbortCreatingJobResult {
     pub aborted: bool,
     /// The database of the job, if the job was found.
     pub database_id: Option<DatabaseId>,
-    /// The aborted sink, if the aborted job was a sink; the caller should clear its iceberg
-    /// maintenance state via `IcebergCompactionManager::clear_maintenance_for_aborted_job`.
-    pub aborted_sink_id: Option<SinkId>,
+    /// The aborted sinks; the caller should clear their iceberg maintenance state via
+    /// `IcebergCompactionManager::clear_maintenance_for_aborted_job`.
+    pub aborted_sink_ids: Vec<SinkId>,
+    /// Runtime and state cleanup information captured before deleting the catalog rows.
+    /// This is returned only when handling an explicit cancellation.
+    pub cancel_info: Option<CancelStreamingJobInfo>,
+}
+
+/// Runtime and state cleanup information for canceling a creating streaming job.
+pub struct CancelStreamingJobInfo {
+    /// Barrier command that stops every affected streaming job.
+    pub command: Command,
+    /// Streaming jobs included in `command`.
+    pub streaming_job_ids: Vec<JobId>,
+    /// State tables to unregister after the barrier is collected.
+    pub state_table_ids: Vec<TableId>,
 }
 
 fn serverless_backfill_resource_group_placeholder(job_id: JobId) -> String {
@@ -275,8 +290,7 @@ impl CatalogController {
         txn: &DatabaseTransaction,
         obj_type: ObjectType,
         owner_id: UserId,
-        database_id: Option<DatabaseId>,
-        schema_id: Option<SchemaId>,
+        belong_to_oid: Option<ObjectId>,
         create_type: PbCreateType,
         ctx: StreamContext,
         adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
@@ -287,7 +301,7 @@ impl CatalogController {
         backfill_adaptive_parallelism_strategy: Option<AdaptiveParallelismStrategy>,
         refresh_interval_sec: Option<u64>,
     ) -> MetaResult<streaming_job::Model> {
-        let obj = Self::create_object(txn, obj_type, owner_id, database_id, schema_id).await?;
+        let obj = Self::create_object(txn, obj_type, owner_id, belong_to_oid).await?;
         let job_id = obj.oid.as_job_id();
         let is_serverless_backfill = matches!(
             &resource_type,
@@ -362,7 +376,7 @@ impl CatalogController {
         ensure_object_id(ObjectType::Database, streaming_job.database_id(), &txn).await?;
         ensure_object_id(ObjectType::Schema, streaming_job.schema_id(), &txn).await?;
         if let Some(old_sink_id) = replace_sink {
-            let StreamingJob::Sink(sink) = streaming_job else {
+            let StreamingJob::Sink(sink, _) = streaming_job else {
                 bail!("replacement sink catalog requires a sink job")
             };
             let (old_sink, old_object) = Sink::find_by_id(*old_sink_id)
@@ -456,8 +470,7 @@ impl CatalogController {
                     &txn,
                     ObjectType::Table,
                     table.owner as _,
-                    Some(table.database_id),
-                    Some(table.schema_id),
+                    Some(table.schema_id.as_object_id()),
                     create_type,
                     ctx.clone(),
                     adaptive_parallelism_strategy,
@@ -474,7 +487,7 @@ impl CatalogController {
                 Table::insert(table_model).exec(&txn).await?;
                 streaming_job_model
             }
-            StreamingJob::Sink(sink) => {
+            StreamingJob::Sink(sink, belong_to_table_id) => {
                 if let Some(target_table_id) = sink.target_table
                     && check_sink_into_table_cycle(
                         target_table_id.into(),
@@ -490,8 +503,11 @@ impl CatalogController {
                     &txn,
                     ObjectType::Sink,
                     sink.owner as _,
-                    Some(sink.database_id),
-                    Some(sink.schema_id),
+                    Some(
+                        belong_to_table_id
+                            .map(|table_id| table_id.as_object_id())
+                            .unwrap_or(sink.schema_id.as_object_id()),
+                    ),
                     create_type,
                     ctx.clone(),
                     adaptive_parallelism_strategy,
@@ -527,8 +543,7 @@ impl CatalogController {
                     &txn,
                     ObjectType::Table,
                     table.owner as _,
-                    Some(table.database_id),
-                    Some(table.schema_id),
+                    Some(table.schema_id.as_object_id()),
                     create_type,
                     ctx.clone(),
                     adaptive_parallelism_strategy,
@@ -547,8 +562,7 @@ impl CatalogController {
                         &txn,
                         ObjectType::Source,
                         src.owner as _,
-                        Some(src.database_id),
-                        Some(src.schema_id),
+                        Some(job_id.as_object_id()),
                     )
                     .await?;
                     src.id = src_obj.oid.as_source_id();
@@ -592,8 +606,7 @@ impl CatalogController {
                     &txn,
                     ObjectType::Index,
                     index.owner as _,
-                    Some(index.database_id),
-                    Some(index.schema_id),
+                    Some(index.schema_id.as_object_id()),
                     create_type,
                     ctx.clone(),
                     adaptive_parallelism_strategy,
@@ -630,8 +643,7 @@ impl CatalogController {
                     &txn,
                     ObjectType::Source,
                     src.owner as _,
-                    Some(src.database_id),
-                    Some(src.schema_id),
+                    Some(src.schema_id.as_object_id()),
                     create_type,
                     ctx.clone(),
                     adaptive_parallelism_strategy,
@@ -708,8 +720,7 @@ impl CatalogController {
                 &txn,
                 ObjectType::Table,
                 table.owner as _,
-                Some(table.database_id),
-                Some(table.schema_id),
+                Some(job_id.as_object_id()),
             )
             .await?
             .oid
@@ -876,74 +887,11 @@ impl CatalogController {
         Ok(())
     }
 
-    /// Builds a cancel command from persisted fragment metadata without reading `SharedActorInfos`.
-    ///
-    /// Returns `None` if the job no longer exists or has already been created.
-    pub async fn build_cancel_command(
-        &self,
-        job_id: JobId,
-    ) -> MetaResult<Option<(Command, Vec<TableId>)>> {
-        let inner = self.inner.read().await;
-        let txn = inner.db.begin().await?;
-
-        let Some(streaming_job) = StreamingJobModel::find_by_id(job_id).one(&txn).await? else {
-            tracing::warn!(
-                %job_id,
-                "streaming job not found when building cancel command, might be cancelled already"
-            );
-            return Ok(None);
-        };
-        if streaming_job.job_status == JobStatus::Created {
-            tracing::warn!(
-                "streaming job {} is already created, ignore cancel request",
-                job_id
-            );
-            return Ok(None);
-        }
-
-        let fragments = Fragment::find()
-            .filter(fragment::Column::JobId.eq(job_id))
-            .all(&txn)
-            .await?;
-
-        let state_table_ids = fragments
-            .iter()
-            .flat_map(|fragment| fragment.state_table_ids.inner_ref().iter().copied())
-            .collect_vec();
-        let sink_fragment_ids = fragments
-            .iter()
-            .filter_map(|fragment| {
-                FragmentTypeMask::from(fragment.fragment_type_mask)
-                    .contains(FragmentTypeFlag::Sink)
-                    .then_some(fragment.fragment_id)
-            })
-            .collect_vec();
-
-        let sink_target_fragments = fetch_target_fragments(&txn, sink_fragment_ids).await?;
-        let dropped_sink_fragment_by_targets = sink_target_fragments
-            .into_iter()
-            .filter_map(|(sink_fragment, target_fragments)| {
-                target_fragments
-                    .first()
-                    .map(|target_fragment| (*target_fragment, vec![sink_fragment]))
-            })
-            .collect();
-
-        Ok(Some((
-            Command::DropStreamingJobs {
-                streaming_job_ids: HashSet::from_iter([job_id]),
-                unregistered_state_table_ids: state_table_ids.iter().copied().collect(),
-                dropped_sink_fragment_by_targets,
-            },
-            state_table_ids,
-        )))
-    }
-
     /// `try_abort_creating_streaming_job` is used to abort the job that is under initial status or in `FOREGROUND` mode.
     #[await_tree::instrument]
     pub async fn try_abort_creating_streaming_job(
         &self,
-        mut job_id: JobId,
+        job_id: JobId,
         is_cancelled: bool,
     ) -> MetaResult<AbortCreatingJobResult> {
         let mut inner = self.inner.write().await;
@@ -958,7 +906,8 @@ impl CatalogController {
             return Ok(AbortCreatingJobResult {
                 aborted: true,
                 database_id: None,
-                aborted_sink_id: None,
+                aborted_sink_ids: vec![],
+                cancel_info: None,
             });
         };
         let database_id = obj
@@ -966,17 +915,28 @@ impl CatalogController {
             .ok_or_else(|| anyhow!("obj has no database id: {:?}", obj))?;
         let streaming_job = streaming_job::Entity::find_by_id(job_id).one(&txn).await?;
 
-        if !is_cancelled && let Some(streaming_job) = &streaming_job {
-            assert_ne!(streaming_job.job_status, JobStatus::Created);
-            if streaming_job.create_type == CreateType::Background
+        if let Some(streaming_job) = &streaming_job {
+            if streaming_job.job_status == JobStatus::Created {
+                tracing::warn!(%job_id, "streaming job is already created, ignore abort request");
+                return Ok(AbortCreatingJobResult {
+                    aborted: false,
+                    database_id: Some(database_id),
+                    aborted_sink_ids: vec![],
+                    cancel_info: None,
+                });
+            }
+
+            if !is_cancelled
+                && streaming_job.create_type == CreateType::Background
                 && streaming_job.job_status == JobStatus::Creating
             {
                 if (obj.obj_type == ObjectType::Table || obj.obj_type == ObjectType::Sink)
                     && check_if_belongs_to_iceberg_table(&txn, job_id).await?
                 {
-                    // If the job belongs to an iceberg table, we still need to clean it.
+                    // If the job belongs to an Iceberg table, we still need to clean it.
                 } else {
-                    // If the job is created in background and still in creating status, we should not abort it and let recovery handle it.
+                    // If the job is created in background and still in creating status, we should
+                    // not abort it and let recovery handle it.
                     tracing::warn!(
                         id = %job_id,
                         "streaming job is created in background and still in creating status"
@@ -984,149 +944,116 @@ impl CatalogController {
                     return Ok(AbortCreatingJobResult {
                         aborted: false,
                         database_id: Some(database_id),
-                        aborted_sink_id: None,
+                        aborted_sink_ids: vec![],
+                        cancel_info: None,
                     });
                 }
             }
         }
 
-        // Record original job info before any potential job id rewrite (e.g. iceberg sink).
-        let original_job_id = job_id;
-        let original_obj_type = obj.obj_type;
+        let mut objects_to_abort = vec![obj];
+        objects_to_abort.extend(get_belong_objects(&txn, job_id.as_object_id()).await?);
+        let object_ids_to_abort = objects_to_abort
+            .iter()
+            .map(|object| object.oid)
+            .collect_vec();
+        let streaming_job_ids_to_abort: Vec<JobId> = StreamingJobModel::find()
+            .select_only()
+            .column(streaming_job::Column::JobId)
+            .filter(streaming_job::Column::JobId.is_in(object_ids_to_abort.iter().copied()))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+        let object_models = load_object_models(&txn, &objects_to_abort).await?;
 
-        let iceberg_table_id =
-            try_get_iceberg_table_by_downstream_sink(&txn, job_id.as_sink_id()).await?;
-        if let Some(iceberg_table_id) = iceberg_table_id {
-            // If the job is iceberg sink, we need to clean the iceberg table as well.
-            // Here we will drop the sink objects directly.
-            let internal_tables = get_internal_tables_by_id(job_id, &txn).await?;
-            Object::delete_many()
-                .filter(
-                    object::Column::Oid
-                        .eq(job_id)
-                        .or(object::Column::Oid.is_in(internal_tables)),
-                )
-                .exec(&txn)
-                .await?;
-            job_id = iceberg_table_id.as_job_id();
+        let fragments: Vec<(FragmentId, i32, TableIdArray)> = Fragment::find()
+            .select_only()
+            .columns([
+                fragment::Column::FragmentId,
+                fragment::Column::FragmentTypeMask,
+                fragment::Column::StateTableIds,
+            ])
+            .filter(fragment::Column::JobId.is_in(streaming_job_ids_to_abort.iter().copied()))
+            .into_tuple()
+            .all(&txn)
+            .await?;
+        let cancel_info = if is_cancelled {
+            let state_table_ids: HashSet<_> = fragments
+                .iter()
+                .flat_map(|(_, _, state_table_ids)| state_table_ids.inner_ref().iter().copied())
+                .collect();
+            let sink_fragment_ids = fragments
+                .iter()
+                .filter_map(|(fragment_id, fragment_type_mask, _)| {
+                    FragmentTypeMask::from(*fragment_type_mask)
+                        .contains(FragmentTypeFlag::Sink)
+                        .then_some(*fragment_id)
+                })
+                .collect_vec();
+            let sink_target_fragments = fetch_target_fragments(&txn, sink_fragment_ids).await?;
+            let mut dropped_sink_fragment_by_targets = HashMap::new();
+            for (sink_fragment, target_fragments) in sink_target_fragments {
+                if let Some(target_fragment) = target_fragments.first() {
+                    dropped_sink_fragment_by_targets
+                        .entry(*target_fragment)
+                        .or_insert_with(Vec::new)
+                        .push(sink_fragment);
+                }
+            }
+
+            Some(CancelStreamingJobInfo {
+                command: Command::DropStreamingJobs {
+                    streaming_job_ids: streaming_job_ids_to_abort.iter().copied().collect(),
+                    unregistered_state_table_ids: state_table_ids.clone(),
+                    dropped_sink_fragment_by_targets,
+                },
+                streaming_job_ids: streaming_job_ids_to_abort.clone(),
+                state_table_ids: state_table_ids.into_iter().collect(),
+            })
+        } else {
+            None
         };
 
-        let internal_table_ids = get_internal_tables_by_id(job_id, &txn).await?;
-
         // A job becomes visible to frontend only after it enters the creating status.
-        let mut objs = vec![];
-        let table_obj = Table::find_by_id(job_id.as_mv_table_id()).one(&txn).await?;
         let need_notify = streaming_job
             .as_ref()
             .is_some_and(|job| job.job_status != JobStatus::Initial);
 
         if is_cancelled {
-            let dropped_tables = Table::find()
-                .find_also_related(Object)
-                .filter(
-                    table::Column::TableId.is_in(
-                        internal_table_ids
-                            .iter()
-                            .cloned()
-                            .chain(table_obj.iter().map(|t| t.table_id as _)),
-                    ),
-                )
-                .all(&txn)
-                .await?
-                .into_iter()
-                .map(|(table, obj)| PbTable::from(ObjectModel(table, obj.unwrap(), None)));
-            inner
-                .dropped_tables
-                .extend(dropped_tables.map(|t| (t.id, t)));
-        }
-
-        if need_notify {
-            // Special handling for iceberg sinks: the `job_id` may have been rewritten to the table id.
-            // Ensure we still notify the frontend to delete the original sink object.
-            if original_obj_type == ObjectType::Sink && original_job_id != job_id {
-                let orig_obj: Option<PartialObject> = Object::find_by_id(original_job_id)
-                    .select_only()
-                    .columns([
-                        object::Column::Oid,
-                        object::Column::ObjType,
-                        object::Column::SchemaId,
-                        object::Column::DatabaseId,
-                    ])
-                    .into_partial_model()
-                    .one(&txn)
-                    .await?;
-                if let Some(orig_obj) = orig_obj {
-                    objs.push(orig_obj);
+            let dropped_tables = object_models.iter().filter_map(|object_info| {
+                if let PbObjectInfo::Table(table) = object_info {
+                    Some((table.id, table.clone()))
+                } else {
+                    None
                 }
-            }
-
-            let obj: Option<PartialObject> = Object::find_by_id(job_id)
-                .select_only()
-                .columns([
-                    object::Column::Oid,
-                    object::Column::ObjType,
-                    object::Column::SchemaId,
-                    object::Column::DatabaseId,
-                ])
-                .into_partial_model()
-                .one(&txn)
-                .await?;
-            let obj =
-                obj.ok_or_else(|| MetaError::catalog_id_not_found("streaming job", job_id))?;
-            objs.push(obj);
-            if let Some(table) = &table_obj
-                && let Some(source_id) = table.optional_associated_source_id
-                && let Some(source_obj) = Object::find_by_id(source_id)
-                    .select_only()
-                    .columns([
-                        object::Column::Oid,
-                        object::Column::ObjType,
-                        object::Column::SchemaId,
-                        object::Column::DatabaseId,
-                    ])
-                    .into_partial_model()
-                    .one(&txn)
-                    .await?
-            {
-                objs.push(source_obj);
-            }
-            let internal_table_objs: Vec<PartialObject> = Object::find()
-                .select_only()
-                .columns([
-                    object::Column::Oid,
-                    object::Column::ObjType,
-                    object::Column::SchemaId,
-                    object::Column::DatabaseId,
-                ])
-                .join(JoinType::InnerJoin, object::Relation::Table.def())
-                .filter(table::Column::BelongsToJobId.eq(job_id))
-                .into_partial_model()
-                .all(&txn)
-                .await?;
-            objs.extend(internal_table_objs);
+            });
+            inner.dropped_tables.extend(dropped_tables);
         }
+
+        let objs = if need_notify {
+            objects_to_abort
+                .iter()
+                .map(|object| PartialObject {
+                    oid: object.oid,
+                    obj_type: object.obj_type,
+                    schema_id: object.schema_id,
+                    database_id: object.database_id,
+                })
+                .collect_vec()
+        } else {
+            vec![]
+        };
 
         // Query fragment IDs before cascade-deleting them, for serving mapping cleanup.
-        let abort_fragment_ids: Vec<FragmentId> = Fragment::find()
-            .select_only()
-            .column(fragment::Column::FragmentId)
-            .filter(fragment::Column::JobId.eq(job_id))
-            .into_tuple()
-            .all(&txn)
-            .await?;
+        let abort_fragment_ids = fragments
+            .iter()
+            .map(|(fragment_id, _, _)| *fragment_id)
+            .collect_vec();
 
+        // Do not walk from an implicit Iceberg sink to its parent table here. The Iceberg table
+        // creation error path drops the table explicitly, which then cascades to all objects that
+        // belong to it.
         Object::delete_by_id(job_id).exec(&txn).await?;
-        if !internal_table_ids.is_empty() {
-            Object::delete_many()
-                .filter(object::Column::Oid.is_in(internal_table_ids))
-                .exec(&txn)
-                .await?;
-        }
-        if let Some(t) = &table_obj
-            && let Some(source_id) = t.optional_associated_source_id
-        {
-            Object::delete_by_id(source_id).exec(&txn).await?;
-        }
 
         let err = if is_cancelled {
             MetaError::cancelled(format!("streaming job {job_id} is cancelled"))
@@ -1134,15 +1061,17 @@ impl CatalogController {
             MetaError::catalog_id_not_found("stream job", format!("streaming job {job_id} failed"))
         };
         let abort_reason = format!("streaming job aborted {}", err.as_report());
-        for tx in inner
-            .creating_table_finish_notifier
-            .get_mut(&database_id)
-            .map(|creating_tables| creating_tables.remove(&job_id).into_iter())
-            .into_iter()
-            .flatten()
-            .flatten()
-        {
-            let _ = tx.send(Err(abort_reason.clone()));
+        for aborted_job_id in streaming_job_ids_to_abort {
+            for tx in inner
+                .creating_table_finish_notifier
+                .get_mut(&database_id)
+                .map(|creating_tables| creating_tables.remove(&aborted_job_id).into_iter())
+                .into_iter()
+                .flatten()
+                .flatten()
+            {
+                let _ = tx.send(Err(abort_reason.clone()));
+            }
         }
         txn.commit().await?;
 
@@ -1159,12 +1088,16 @@ impl CatalogController {
             self.notify_frontend(Operation::Delete, build_object_group_for_delete(objs))
                 .await;
         }
-        let aborted_sink_id =
-            (original_obj_type == ObjectType::Sink).then(|| original_job_id.as_sink_id());
+        let aborted_sink_ids = objects_to_abort
+            .iter()
+            .filter(|object| object.obj_type == ObjectType::Sink)
+            .map(|object| object.oid.as_sink_id())
+            .collect();
         Ok(AbortCreatingJobResult {
             aborted: true,
             database_id: Some(database_id),
-            aborted_sink_id,
+            aborted_sink_ids,
+            cancel_info,
         })
     }
 
@@ -1318,7 +1251,6 @@ impl CatalogController {
 
         if let Some(old_sink_id) = replace_sink {
             let old_sink_id = *old_sink_id;
-            let old_job_id = old_sink_id.as_job_id();
 
             let (old_sink, old_sink_object) = Sink::find_by_id(old_sink_id)
                 .find_also_related(Object)
@@ -1326,48 +1258,41 @@ impl CatalogController {
                 .await?
                 .and_then(|(sink, object)| object.map(|object| (sink, object)))
                 .ok_or_else(|| MetaError::catalog_id_not_found("sink", old_sink_id))?;
-            let old_sink_object = PartialObject {
-                oid: old_sink_object.oid,
-                obj_type: old_sink_object.obj_type,
-                schema_id: old_sink_object.schema_id,
-                database_id: old_sink_object.database_id,
-            };
             if old_sink_object.obj_type != ObjectType::Sink {
                 bail!("object {} is not a sink", old_sink_id);
             }
             let final_sink_name = old_sink.name.clone();
 
-            let old_internal_table_objs: Vec<PartialObject> = Object::find()
-                .select_only()
-                .columns([
-                    object::Column::Oid,
-                    object::Column::ObjType,
-                    object::Column::SchemaId,
-                    object::Column::DatabaseId,
-                ])
-                .join(JoinType::InnerJoin, object::Relation::Table.def())
-                .filter(table::Column::BelongsToJobId.eq(old_job_id))
-                .into_partial_model()
-                .all(&txn)
-                .await?;
-            let old_state_table_ids = old_internal_table_objs
+            let mut old_objects_to_delete = vec![old_sink_object];
+            old_objects_to_delete
+                .extend(get_belong_objects(&txn, old_sink_id.as_object_id()).await?);
+            let old_object_models = load_object_models(&txn, &old_objects_to_delete).await?;
+            let old_state_table_ids = old_object_models
                 .iter()
-                .map(|obj| obj.oid.as_table_id())
+                .filter_map(|object_info| match object_info {
+                    PbObjectInfo::Table(table) => Some(table.id),
+                    _ => None,
+                })
                 .collect_vec();
             let old_fragment_ids: Vec<FragmentId> = Fragment::find()
                 .select_only()
                 .column(fragment::Column::FragmentId)
-                .filter(fragment::Column::JobId.eq(old_job_id))
+                .filter(
+                    fragment::Column::JobId.is_in(
+                        old_objects_to_delete
+                            .iter()
+                            .map(|object| object.oid.as_job_id()),
+                    ),
+                )
                 .into_tuple()
                 .all(&txn)
                 .await?;
-            let dropped_tables = Table::find()
-                .find_also_related(Object)
-                .filter(table::Column::TableId.is_in(old_state_table_ids.iter().copied()))
-                .all(&txn)
-                .await?
-                .into_iter()
-                .map(|(table, obj)| PbTable::from(ObjectModel(table, obj.unwrap(), None)))
+            let dropped_tables = old_object_models
+                .iter()
+                .filter_map(|object_info| match object_info {
+                    PbObjectInfo::Table(table) => Some(table.clone()),
+                    _ => None,
+                })
                 .collect_vec();
 
             Sink::update(sink::ActiveModel {
@@ -1378,8 +1303,9 @@ impl CatalogController {
             .exec(&txn)
             .await?;
 
-            let old_objects = std::iter::once(old_sink_object)
-                .chain(old_internal_table_objs)
+            let old_objects = old_objects_to_delete
+                .into_iter()
+                .map(PartialObject::from)
                 .collect_vec();
             let old_object_ids = old_objects.iter().map(|obj| obj.oid).collect_vec();
             let updated_user_ids: Vec<UserId> = UserPrivilege::find()
@@ -1391,40 +1317,25 @@ impl CatalogController {
                 .all(&txn)
                 .await?;
 
-            // Deleting only the sink object cascades the internal `table` rows through
-            // `belongs_to_job_id`, but leaves their corresponding `object` rows behind.
-            // Delete the complete object set to keep the catalog hierarchy consistent.
-            let res = Object::delete_many()
-                .filter(object::Column::Oid.is_in(old_object_ids))
-                .exec(&txn)
-                .await?;
+            // Internal objects and their catalog rows follow the old sink's belong-to cascade.
+            let res = Object::delete_by_id(old_sink_id).exec(&txn).await?;
             if res.rows_affected == 0 {
                 return Err(MetaError::catalog_id_not_found("sink", old_sink_id));
             }
 
-            let (new_sink, new_obj) = Sink::find_by_id(job_id.as_sink_id())
-                .find_also_related(Object)
+            let new_root_object = Object::find_by_id(job_id)
                 .one(&txn)
                 .await?
                 .ok_or_else(|| MetaError::catalog_id_not_found("sink", job_id))?;
-            let streaming_job = StreamingJobModel::find_by_id(job_id).one(&txn).await?;
-            let mut new_objects = Table::find()
-                .find_also_related(Object)
-                .filter(table::Column::BelongsToJobId.eq(job_id))
-                .all(&txn)
+            let mut new_objects_to_notify = vec![new_root_object];
+            new_objects_to_notify.extend(get_belong_objects(&txn, job_id.as_object_id()).await?);
+            let new_objects = load_object_models(&txn, &new_objects_to_notify)
                 .await?
                 .into_iter()
-                .map(|(table, obj)| PbObject {
-                    object_info: Some(PbObjectInfo::Table(
-                        ObjectModel(table, obj.unwrap(), streaming_job.clone()).into(),
-                    )),
+                .map(|object_info| PbObject {
+                    object_info: Some(object_info),
                 })
                 .collect_vec();
-            new_objects.push(PbObject {
-                object_info: Some(PbObjectInfo::Sink(
-                    ObjectModel(new_sink, new_obj.unwrap(), streaming_job).into(),
-                )),
-            });
             let dependencies =
                 list_object_dependencies_by_object_id(&txn, job_id.as_object_id()).await?;
             let updated_user_info = list_user_info_by_ids(updated_user_ids, &txn).await?;
@@ -1593,14 +1504,20 @@ impl CatalogController {
             .as_deref()
             .map(|s| parse_strategy(s).expect("strategy should be validated before persisting"));
         let resource_type = original_job.resource_type();
+        let belong_to_oid = Object::find_by_id(id)
+            .select_only()
+            .column(object::Column::BelongToOid)
+            .into_tuple::<Option<ObjectId>>()
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found(streaming_job.job_type_str(), id))?;
 
         // 4. create streaming object for new replace table.
         let tmp_model = Self::create_streaming_job_obj(
             &txn,
             streaming_job.object_type(),
             streaming_job.owner() as _,
-            Some(streaming_job.database_id() as _),
-            Some(streaming_job.schema_id() as _),
+            belong_to_oid,
             streaming_job.create_type(),
             ctx,
             adaptive_parallelism_strategy,
@@ -2394,25 +2311,36 @@ impl CatalogController {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
-        // Query fragment IDs of the temp job and temp sinks before cascade-deleting them.
-        let mut all_job_ids: Vec<ObjectId> = vec![tmp_job_id.into()];
-        if let Some(ref sink_ids) = tmp_sink_ids {
-            all_job_ids.extend(sink_ids.iter().copied());
+        let mut root_ids: Vec<ObjectId> = vec![tmp_job_id.into()];
+        if let Some(sink_ids) = &tmp_sink_ids {
+            root_ids.extend(sink_ids.iter().copied());
         }
+        let mut temporary_objects = Object::find()
+            .filter(object::Column::Oid.is_in(root_ids.iter().copied()))
+            .all(&txn)
+            .await?;
+        temporary_objects.extend(get_belong_objects_by_ids(&txn, root_ids.iter().copied()).await?);
+
+        // Query fragment IDs before cascade-deleting the temporary jobs and objects that belong to
+        // them.
         let abort_fragment_ids: Vec<FragmentId> = Fragment::find()
             .select_only()
             .column(fragment::Column::FragmentId)
-            .filter(fragment::Column::JobId.is_in(all_job_ids))
+            .filter(
+                fragment::Column::JobId.is_in(
+                    temporary_objects
+                        .iter()
+                        .map(|object| object.oid.as_job_id()),
+                ),
+            )
             .into_tuple()
             .all(&txn)
             .await?;
 
-        Object::delete_by_id(tmp_job_id).exec(&txn).await?;
-        if let Some(tmp_sink_ids) = tmp_sink_ids {
-            for tmp_sink_id in tmp_sink_ids {
-                Object::delete_by_id(tmp_sink_id).exec(&txn).await?;
-            }
-        }
+        Object::delete_many()
+            .filter(object::Column::Oid.is_in(root_ids))
+            .exec(&txn)
+            .await?;
         txn.commit().await?;
 
         // Notify serving module about deleted fragments from the aborted replace job.
@@ -2431,7 +2359,7 @@ impl CatalogController {
         &self,
         source_id: SourceId,
         rate_limit: Option<u32>,
-    ) -> MetaResult<(HashSet<JobId>, HashMap<FragmentId, PbStreamNode>)> {
+    ) -> MetaResult<HashMap<FragmentId, PbStreamNode>> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
@@ -2536,13 +2464,10 @@ impl CatalogController {
             "source id should be used by at least one fragment"
         );
 
-        let (fragment_nodes, job_ids): (HashMap<FragmentId, PbStreamNode>, HashSet<JobId>) =
-            fragments
-                .iter()
-                .map(|(fragment_id, job_id, _, stream_node)| {
-                    ((*fragment_id, stream_node.clone()), *job_id)
-                })
-                .unzip();
+        let fragment_nodes = fragments
+            .iter()
+            .map(|(fragment_id, _, _, stream_node)| (*fragment_id, stream_node.clone()))
+            .collect();
 
         for (fragment_id, _, fragment_type_mask, stream_node) in fragments {
             Fragment::update(fragment::ActiveModel {
@@ -2570,7 +2495,7 @@ impl CatalogController {
             )
             .await;
 
-        Ok((job_ids, fragment_nodes))
+        Ok(fragment_nodes)
     }
 
     // edit the content of fragments in given `table_id`
