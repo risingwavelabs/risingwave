@@ -58,7 +58,7 @@ aws-sdk-s3 = { workspace = true }
 aws-smithy-types = { workspace = true }
 aws-smithy-types-convert = { version = "0.60.1", features = ["convert-chrono"] }
 aws-types = { workspace = true }
-base64 = "0.22"
+base64 = "0.23"
 byteorder = "1"
 bytes = { version = "1", features = ["serde"] }
 cfg-if = "1"

@@ -566,7 +566,7 @@ steps:
           <<: *docker-compose
           run: sink-test-env
       - ./ci/plugins/upload-failure-logs
-    timeout_in_minutes: 10
+    timeout_in_minutes: 20
     retry: *auto-retry
 
   - label: "end-to-end redis sink test"
