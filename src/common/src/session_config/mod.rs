@@ -404,7 +404,7 @@ pub struct SessionConfig {
     streaming_cache_refill_policy: OptionConfig<CacheRefillPolicy>,
 
     /// Run DDL statements in background
-    #[parameter(default = false)]
+    #[parameter(default = true)]
     background_ddl: bool,
 
     /// Enable shared source. Currently only for Kafka.

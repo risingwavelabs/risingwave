@@ -261,6 +261,51 @@ mod tests {
         assert_eq!(models.value, params.get("rw_implicit_flush").unwrap());
     }
 
+    #[tokio::test]
+    async fn test_background_ddl_default_for_new_and_existing_clusters() {
+        let env = MetaSrvEnv::for_test().await;
+        let meta_store = env.meta_store_ref().clone();
+
+        // A new cluster uses and persists the current built-in default.
+        SessionParameter::delete_many()
+            .exec(&meta_store.conn)
+            .await
+            .unwrap();
+        let ctl = SessionParamsController::new(
+            meta_store.clone(),
+            env.notification_manager_ref(),
+            SessionInitConfig::default(),
+        )
+        .await
+        .unwrap();
+        assert!(ctl.get_params().await.background_ddl());
+
+        let persisted = SessionParameter::find_by_id("background_ddl".to_owned())
+            .one(&meta_store.conn)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(persisted.value, "true");
+        drop(ctl);
+
+        // Simulate an existing cluster whose previous built-in default was persisted as false.
+        let mut persisted: session_parameter::ActiveModel = persisted.into();
+        persisted.value = Set("false".to_owned());
+        SessionParameter::update(persisted)
+            .exec(&meta_store.conn)
+            .await
+            .unwrap();
+
+        let ctl = SessionParamsController::new(
+            meta_store.clone(),
+            env.notification_manager_ref(),
+            SessionInitConfig::default(),
+        )
+        .await
+        .unwrap();
+        assert!(!ctl.get_params().await.background_ddl());
+    }
+
     /// Scenario 1: on a new cluster, `[session_init]` seeds values into the meta store, including
     /// the `default` placeholder which must be persisted verbatim.
     #[tokio::test]
