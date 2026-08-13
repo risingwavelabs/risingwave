@@ -363,15 +363,18 @@ mod tests {
         }
 
         for (name, source) in test_sink_tuples {
-            let mut job = crate::manager::StreamingJob::Sink(PbSink {
-                name: name.to_owned(),
-                database_id: TEST_DATABASE_ID,
-                schema_id: TEST_SCHEMA_ID,
-                owner: TEST_OWNER_ID as _,
-                target_table: Some(target_table_id),
-                sink_type: PbSinkType::AppendOnly as i32,
-                ..Default::default()
-            });
+            let mut job = crate::manager::StreamingJob::Sink(
+                PbSink {
+                    name: name.to_owned(),
+                    database_id: TEST_DATABASE_ID,
+                    schema_id: TEST_SCHEMA_ID,
+                    owner: TEST_OWNER_ID as _,
+                    target_table: Some(target_table_id),
+                    sink_type: PbSinkType::AppendOnly as i32,
+                    ..Default::default()
+                },
+                None,
+            );
             // Use create_job_catalog to trigger construct_sink_cycle_check_query for regression
             // testing purpose to ensure no circular issue causing infinite recursion when
             // cte_referencing
@@ -473,15 +476,18 @@ mod tests {
         txn.commit().await?;
         drop(inner);
 
-        let mut sink = crate::manager::StreamingJob::Sink(PbSink {
-            name: "creating_sink".to_owned(),
-            database_id: TEST_DATABASE_ID,
-            schema_id: TEST_SCHEMA_ID,
-            owner: TEST_OWNER_ID as _,
-            target_table: Some(target_mv_table_id),
-            sink_type: PbSinkType::AppendOnly as i32,
-            ..Default::default()
-        });
+        let mut sink = crate::manager::StreamingJob::Sink(
+            PbSink {
+                name: "creating_sink".to_owned(),
+                database_id: TEST_DATABASE_ID,
+                schema_id: TEST_SCHEMA_ID,
+                owner: TEST_OWNER_ID as _,
+                target_table: Some(target_mv_table_id),
+                sink_type: PbSinkType::AppendOnly as i32,
+                ..Default::default()
+            },
+            None,
+        );
         let creating_sink = mgr
             .create_job_catalog(
                 &mut sink,
