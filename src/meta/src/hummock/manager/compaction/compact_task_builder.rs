@@ -85,7 +85,7 @@ pub(super) fn build_base_compact_task(
             max_sub_compaction: compaction_config.max_sub_compaction,
             blocked_xor_filter_kv_count_threshold: compaction_config.max_kv_count_for_xor16,
             max_vnode_key_range_bytes: compaction_config.max_vnode_key_range_bytes,
-            sstable_filter_kind: picked_task.sstable_filter_kind,
+            sstable_filter_type: picked_task.sstable_filter_type,
             sstable_filter_layout: picked_task.sstable_filter_layout,
             ..Default::default()
         },

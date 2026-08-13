@@ -123,11 +123,12 @@ pub fn compact_chunk_inline<const KIND: OutputKind>(
     key_indices: &[usize],
     ib: InconsistencyBehavior,
 ) -> StreamChunk {
-    StreamChunkCompactor::new(key_indices.to_vec(), vec![stream_chunk])
-        .into_compacted_chunks_inline::<KIND>(ib)
-        .into_iter()
-        .exactly_one()
-        .unwrap_or_else(|_| unreachable!("should have exactly one chunk in the output"))
+    Itertools::exactly_one(
+        StreamChunkCompactor::new(key_indices.to_vec(), vec![stream_chunk])
+            .into_compacted_chunks_inline::<KIND>(ib)
+            .into_iter(),
+    )
+    .unwrap_or_else(|_| unreachable!("should have exactly one chunk in the output"))
 }
 
 #[cfg(test)]

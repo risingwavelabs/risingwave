@@ -178,7 +178,7 @@ impl ToBatch for LogicalGapFill {
 
 impl ToStream for LogicalGapFill {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<super::StreamPlanRef> {
-        use super::{StreamEowcGapFill, StreamGapFill};
+        use super::{StreamEowcGapFill, StreamEowcSort, StreamGapFill};
         use crate::error::ErrorCode;
         use crate::optimizer::property::RequiredDist;
 
@@ -199,14 +199,6 @@ impl ToStream for LogicalGapFill {
         // No stream key validation - gap fill manages its own state internally
         // using (partition_cols, time_col, upstream_stream_key) as state table PK.
 
-        let core = generic::GapFill {
-            input: new_input.clone(),
-            time_col: self.core.time_col.clone(),
-            interval: self.core.interval.clone(),
-            fill_strategies: self.core.fill_strategies.clone(),
-            partition_by_cols: self.core.partition_by_cols.clone(),
-        };
-
         if ctx.emit_on_window_close() {
             // EOWC mode requires watermark on time column
             let time_col_idx = self.core.time_col.index();
@@ -223,18 +215,23 @@ impl ToStream for LogicalGapFill {
                 .into());
             }
 
-            if !partition_cols.is_empty() {
-                return Err(ErrorCode::NotSupported(
-                    "GAP_FILL with PARTITION_BY and EMIT ON WINDOW CLOSE is not supported yet."
-                        .to_owned(),
-                    "Remove PARTITION_BY or use normal streaming GAP_FILL until partitioned EOWC gap fill is implemented."
-                        .to_owned(),
-                )
-                .into());
-            }
-
+            let sorted_input = StreamEowcSort::new(new_input, time_col_idx).into();
+            let core = generic::GapFill {
+                input: sorted_input,
+                time_col: self.core.time_col.clone(),
+                interval: self.core.interval.clone(),
+                fill_strategies: self.core.fill_strategies.clone(),
+                partition_by_cols: self.core.partition_by_cols.clone(),
+            };
             Ok(StreamEowcGapFill::new(core).into())
         } else {
+            let core = generic::GapFill {
+                input: new_input,
+                time_col: self.core.time_col.clone(),
+                interval: self.core.interval.clone(),
+                fill_strategies: self.core.fill_strategies.clone(),
+                partition_by_cols: self.core.partition_by_cols.clone(),
+            };
             Ok(StreamGapFill::new(core).into())
         }
     }

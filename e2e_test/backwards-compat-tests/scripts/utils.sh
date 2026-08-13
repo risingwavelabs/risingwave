@@ -6,16 +6,20 @@
 #
 # 1. Setup old cluster binaries.
 # 2. Seed old cluster.
-# 3. Setup new cluster binaries.
-# 4. Run validation on new cluster.
+# 3. Start the latest stable patch of each intermediate release line and wait
+#    for successful recovery.
+# 4. Setup new cluster binaries and wait for successful recovery.
+# 5. Run validation on new cluster.
 #
-# Steps 1,3 are specific to the execution environment, CI / Local.
-# This script only provides utilities for 2, 4.
+# Steps 1,3,4 are specific to the execution environment, CI / Local.
+# This script provides the shared version, recovery, seeding, and validation utilities.
 
 ################################### ENVIRONMENT CONFIG
 
-# Duration to wait for recovery (seconds)
-RECOVERY_DURATION=20
+# Maximum duration to wait for recovery (seconds)
+RECOVERY_TIMEOUT=300
+# The `RECOVER` command was introduced in this version.
+RECOVER_COMMAND_MIN_VERSION=1.9.0
 
 # Setup test directory
 TEST_DIR=.risingwave/e2e_test/backwards-compat-tests/
@@ -25,6 +29,11 @@ HUMMOCK_STALE_TABLE_IDS_MIN_VERSION=2.8.0
 # v2.8.4 backported normalized compact task table ids, so old clusters at this
 # version and later already clean stale table ids from SST metadata.
 HUMMOCK_STALE_TABLE_IDS_FIXED_VERSION=2.8.4
+# This case relies on cross-database streaming queries and subscriptions on the
+# old cluster before upgrade, and only targets upgrades crossing 2.8 -> 3.0.
+CROSS_DB_SUBSCRIPTION_MIN_VERSION=2.2.0
+CROSS_DB_SUBSCRIPTION_MAX_OLD_VERSION=2.8.999
+CROSS_DB_SUBSCRIPTION_MIN_NEW_VERSION=3.0.0
 mkdir -p $TEST_DIR
 cp -r e2e_test/backwards-compat-tests/slt/* $TEST_DIR
 
@@ -71,8 +80,41 @@ run_sql() {
   psql -h localhost -p 4566 -d dev -U root -c "$@"
 }
 
+run_sql_db() {
+  local db="$1"
+  shift
+  psql -h localhost -p 4566 -d "$db" -U root -c "$@"
+}
+
 run_sql_scalar() {
   psql -h localhost -p 4566 -d dev -U root -At -c "$@" | tr -d '[:space:]'
+}
+
+run_sql_scalar_db() {
+  local db="$1"
+  shift
+  psql -h localhost -p 4566 -d "$db" -U root -At -c "$@" | tr -d '[:space:]'
+}
+
+wait_for_recovery() {
+  local version="$1"
+  local deadline=$((SECONDS + RECOVERY_TIMEOUT))
+  local recover_output=""
+
+  echo "--- Wait for a successful RECOVER command on version ${version}"
+  while (( SECONDS < deadline )); do
+    if recover_output=$(run_sql "RECOVER;" 2>&1); then
+      echo "$recover_output"
+      echo "--- RECOVER succeeded on version ${version}"
+      return
+    fi
+    echo "RECOVER is not ready on version ${version}; retry in 1 second"
+    sleep 1
+  done
+
+  echo "$recover_output"
+  echo "Timed out after ${RECOVERY_TIMEOUT}s waiting for RECOVER on version ${version}"
+  return 1
 }
 
 run_risectl() (
@@ -253,6 +295,210 @@ version_lt() {
   ! version_le "$2" "$1"
 }
 
+seed_cross_db_subscription_validation() {
+  local test_name="CROSS DATABASE SUBSCRIPTION TEST"
+  local test_path="$TEST_DIR/cross-db-subscription"
+  rm -rf "$test_path"
+  mkdir -p "$test_path"
+
+  if version_lt "$OLD_VERSION" "$CROSS_DB_SUBSCRIPTION_MIN_VERSION" ||
+    version_lt "$CROSS_DB_SUBSCRIPTION_MAX_OLD_VERSION" "$OLD_VERSION" ||
+    version_lt "$NEW_VERSION" "$CROSS_DB_SUBSCRIPTION_MIN_NEW_VERSION"; then
+    echo "--- ${test_name}: Skipped for OLD_VERSION=${OLD_VERSION}, NEW_VERSION=${NEW_VERSION}"
+    return
+  fi
+
+  echo "--- ${test_name}: Seeding old cluster"
+  run_sql "CREATE DATABASE db1;"
+  run_sql "CREATE DATABASE db2;"
+
+  run_sql_db "db1" "
+    CREATE TABLE t1 (v1 int)
+    WITH (
+      connector = 'datagen',
+      datagen.rows.per.second = '10'
+    )
+    FORMAT PLAIN
+    ENCODE JSON;
+  "
+  run_sql_db "db1" "CREATE SUBSCRIPTION sub_t1 FROM t1 WITH (retention = '1d');"
+  run_sql_db "db2" "CREATE MATERIALIZED VIEW mv AS SELECT * FROM db1.public.t1;"
+
+  echo "--- ${test_name}: Wait 60s for streaming data and changelog epochs"
+  sleep 60
+
+  local min_epoch
+  local max_epoch
+  min_epoch=$(run_sql_scalar_db "db1" "
+    WITH epochs AS (
+      SELECT
+        (jsonb_array_elements_text((jsonb_array_elements(change_log->'changeLogs'))->'epochs'))::bigint AS epoch
+      FROM rw_catalog.rw_hummock_table_change_log
+    )
+    SELECT min(epoch) FROM epochs;
+  ")
+  max_epoch=$(run_sql_scalar_db "db1" "
+    WITH epochs AS (
+      SELECT
+        (jsonb_array_elements_text((jsonb_array_elements(change_log->'changeLogs'))->'epochs'))::bigint AS epoch
+      FROM rw_catalog.rw_hummock_table_change_log
+    )
+    SELECT max(epoch) FROM epochs;
+  ")
+
+  if [[ -z "$min_epoch" || -z "$max_epoch" ]]; then
+    echo "${test_name}: Failed to capture epoch window on old cluster"
+    exit 1
+  fi
+
+  local epoch_count_before_upgrade
+  epoch_count_before_upgrade=$(run_sql_scalar_db "db1" "
+    WITH epochs AS (
+      SELECT
+        (jsonb_array_elements_text((jsonb_array_elements(change_log->'changeLogs'))->'epochs'))::bigint AS epoch
+      FROM rw_catalog.rw_hummock_table_change_log
+    )
+    SELECT count(*) FROM epochs WHERE epoch >= ${min_epoch} AND epoch <= ${max_epoch};
+  ")
+
+  if [[ -z "$epoch_count_before_upgrade" ]]; then
+    echo "${test_name}: Failed to capture epoch count on old cluster"
+    exit 1
+  fi
+
+  echo "$min_epoch" > "$test_path/min_epoch"
+  echo "$max_epoch" > "$test_path/max_epoch"
+  echo "$epoch_count_before_upgrade" > "$test_path/epoch_count"
+  touch "$test_path/enabled"
+}
+
+query_cross_db_epoch_count() {
+  local min_epoch="$1"
+  local max_epoch="$2"
+
+  run_sql_scalar_db "db1" "
+    WITH epochs AS (
+      SELECT
+        (jsonb_array_elements_text((jsonb_array_elements(change_log->'changeLogs'))->'epochs'))::bigint AS epoch
+      FROM rw_catalog.rw_hummock_table_change_log
+    )
+    SELECT count(*) FROM epochs WHERE epoch >= ${min_epoch} AND epoch <= ${max_epoch};
+  "
+}
+
+log_cross_db_counts() {
+  run_sql "
+    SELECT count(*) AS cnt, 'db1' AS src FROM db1.public.t1
+    UNION ALL
+    SELECT count(*) AS cnt, 'db2' AS src FROM db2.public.mv;
+  "
+}
+
+assert_cross_db_counts_increasing() {
+  local before_t1
+  local before_mv
+  local after_t1
+  local after_mv
+
+  before_t1=$(run_sql_scalar_db "db1" "SELECT count(*) FROM t1;")
+  before_mv=$(run_sql_scalar_db "db2" "SELECT count(*) FROM mv;")
+  log_cross_db_counts
+
+  echo "--- CROSS DATABASE SUBSCRIPTION TEST: Wait 10s before rechecking row counts"
+  sleep 10
+
+  after_t1=$(run_sql_scalar_db "db1" "SELECT count(*) FROM t1;")
+  after_mv=$(run_sql_scalar_db "db2" "SELECT count(*) FROM mv;")
+  log_cross_db_counts
+
+  if (( after_t1 <= before_t1 )); then
+    echo "CROSS DATABASE SUBSCRIPTION TEST: db1.public.t1 count did not increase (${before_t1} -> ${after_t1})"
+    exit 1
+  fi
+
+  if (( after_mv <= before_mv )); then
+    echo "CROSS DATABASE SUBSCRIPTION TEST: db2.mv count did not increase (${before_mv} -> ${after_mv})"
+    exit 1
+  fi
+}
+
+log_cross_db_epoch_count() {
+  local min_epoch="$1"
+  local max_epoch="$2"
+  local epoch_count="$3"
+  local phase="$4"
+
+  echo "CROSS DATABASE SUBSCRIPTION TEST: epoch window ${phase}, min_epoch=${min_epoch}, max_epoch=${max_epoch}, epoch_count=${epoch_count}"
+}
+
+assert_cross_db_epoch_count_matches() {
+  local expected_count="$1"
+  local actual_count="$2"
+  local min_epoch="$3"
+  local max_epoch="$4"
+  local phase="$5"
+
+  log_cross_db_epoch_count "$min_epoch" "$max_epoch" "$actual_count" "$phase"
+
+  if [[ "$actual_count" != "$expected_count" ]]; then
+    echo "CROSS DATABASE SUBSCRIPTION TEST: epoch count mismatch ${phase}, expected ${expected_count}, got ${actual_count}"
+    exit 1
+  fi
+}
+
+restart_meta_node() {
+  local tmux_cmd="tmux"
+  if tmux -L risedev ls &>/dev/null; then
+    tmux_cmd="tmux -L risedev"
+  fi
+
+  local meta_window_index
+  meta_window_index=$($tmux_cmd list-windows -t risedev -F "#{window_index} #{window_name}" | awk '$2 ~ /^meta-node/ {print $1; exit}')
+  if [[ -z "$meta_window_index" ]]; then
+    echo "Failed to find meta-node tmux window"
+    exit 1
+  fi
+
+  echo "--- Restart meta node"
+  $tmux_cmd respawn-window -k -t "risedev:${meta_window_index}"
+  wait_for_recovery "$NEW_VERSION after meta restart"
+}
+
+validate_cross_db_subscription_after_upgrade() {
+  local test_name="CROSS DATABASE SUBSCRIPTION TEST"
+  local test_path="$TEST_DIR/cross-db-subscription"
+
+  if [[ ! -f "$test_path/enabled" ]]; then
+    echo "--- ${test_name}: Skipped"
+    return
+  fi
+
+  local min_epoch
+  local max_epoch
+  local expected_epoch_count
+  min_epoch=$(cat "$test_path/min_epoch")
+  max_epoch=$(cat "$test_path/max_epoch")
+  expected_epoch_count=$(cat "$test_path/epoch_count")
+
+  echo "--- ${test_name}: Validate row count growth after upgrade"
+  assert_cross_db_counts_increasing
+
+  echo "--- ${test_name}: Validate epoch window after upgrade"
+  local epoch_count_after_upgrade
+  epoch_count_after_upgrade=$(query_cross_db_epoch_count "$min_epoch" "$max_epoch")
+  assert_cross_db_epoch_count_matches "$expected_epoch_count" "$epoch_count_after_upgrade" "$min_epoch" "$max_epoch" "after upgrade"
+
+  restart_meta_node
+
+  echo "--- ${test_name}: Validate row count growth meta restart"
+  assert_cross_db_counts_increasing
+
+  echo "--- ${test_name}: Validate epoch window after meta restart"
+  local epoch_count_after_meta_restart
+  epoch_count_after_meta_restart=$(query_cross_db_epoch_count "$min_epoch" "$max_epoch")
+  assert_cross_db_epoch_count_matches "$expected_epoch_count" "$epoch_count_after_meta_restart" "$min_epoch" "$max_epoch" "after meta restart"
+}
+
 ################################### Entry Points
 
 get_old_version() {
@@ -330,6 +576,31 @@ get_rw_versions() {
   fi
 }
 
+get_intermediate_versions() {
+  local version
+  local series
+  local latest_series=""
+  local latest_version=""
+
+  while read -r version; do
+    if version_lt "$OLD_VERSION" "$version" && version_lt "$version" "$NEW_VERSION"; then
+      series="${version%.*}"
+      if [[ -n "$latest_series" && "$series" != "$latest_series" ]]; then
+        echo "$latest_version"
+      fi
+      latest_series="$series"
+      latest_version="$version"
+    fi
+  done < <(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' \
+    | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' \
+    | sed 's/^v//' \
+    | sort -V)
+
+  if [[ -n "$latest_version" ]]; then
+    echo "$latest_version"
+  fi
+}
+
 # Setup table and materialized view.
 # Run updates and deletes on the table.
 # Get the results.
@@ -349,6 +620,9 @@ seed_old_cluster() {
   # `ENABLE_PYTHON_UDF` and `ENABLE_JS_UDF` are set for backwards-compartibility
   ENABLE_PYTHON_UDF=1 ENABLE_JS_UDF=1 ENABLE_UDF=1 ./risedev d full-without-monitoring && rm .risingwave/log/*
 
+  if version_le "$RECOVER_COMMAND_MIN_VERSION" "$OLD_VERSION"; then
+    wait_for_recovery "$OLD_VERSION"
+  fi
   check_version "$OLD_VERSION"
 
   echo "--- BASIC TEST: Seeding old cluster with data"
@@ -446,9 +720,18 @@ seed_old_cluster() {
   echo "--- CDC TEST: Validating old cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/cdc/validate_original.slt"
 
+  # The `pending_sink_state` table and exactly-once Iceberg sinks exist since 2.8.0.
+  if version_le "2.8.0" "$OLD_VERSION"; then
+    echo "--- PENDING SINK STATE TEST: Seeding old cluster with a dropped Iceberg sink"
+    ./risedev mc mb -p hummock-minio/icebergdata || true
+    sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/pending-sink-state/seed.slt"
+  fi
+
   # work around https://github.com/risingwavelabs/risingwave/issues/18650
   echo "--- wait for a version checkpoint"
   sleep 60
+
+  seed_cross_db_subscription_validation
 
   seed_hummock_stale_table_ids
 
@@ -461,8 +744,7 @@ validate_new_cluster() {
   echo "--- Start cluster on latest"
   ENABLE_UDF=1 ./risedev d full-without-monitoring
 
-  echo "--- Wait ${RECOVERY_DURATION}s for Recovery on Old Cluster Data"
-  sleep $RECOVERY_DURATION
+  wait_for_recovery "$NEW_VERSION"
 
   check_version "$NEW_VERSION"
 
@@ -513,6 +795,14 @@ validate_new_cluster() {
 
   echo "--- CDC TEST: Validating new cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/cdc/validate_restart.slt"
+
+  validate_cross_db_subscription_after_upgrade
+
+  # The `pending_sink_state` table and exactly-once Iceberg sinks exist since 2.8.0.
+  if version_le "2.8.0" "$OLD_VERSION"; then
+    echo "--- PENDING SINK STATE TEST: Validating new cluster"
+    sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/pending-sink-state/validate_restart.slt"
+  fi
 
   validate_hummock_stale_table_ids
 

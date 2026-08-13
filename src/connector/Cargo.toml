@@ -36,14 +36,14 @@ sink-doris = []
 sink-starrocks = []
 
 [dependencies]
-# Rust ADBC crates (e.g., adbc_core 0.21) are built against the ADBC C/C++ core driver library version 0.19
+# Rust ADBC crates (e.g., adbc_core 0.23) are built against the ADBC C/C++ core driver library version 0.19
 adbc_core = { workspace = true, optional = true }
 adbc_snowflake = { workspace = true, optional = true, default-features = false }
 anyhow = "1"
 apache-avro = { workspace = true }
 assert_matches = "1"
 async-compression = { version = "0.4.5", features = ["gzip", "tokio"] }
-async-nats = { version = "0.47", features = ["websockets"] }
+async-nats = { version = "0.49", features = ["websockets"] }
 async-trait = "0.1"
 auto_enums = { workspace = true }
 auto_impl = "1"
@@ -55,7 +55,6 @@ aws-sdk-dynamodb = { workspace = true }
 aws-sdk-glue = { workspace = true }
 aws-sdk-kinesis = { workspace = true }
 aws-sdk-s3 = { workspace = true }
-aws-smithy-runtime-api = { workspace = true }
 aws-smithy-types = { workspace = true }
 aws-smithy-types-convert = { version = "0.60.1", features = ["convert-chrono"] }
 aws-types = { workspace = true }
@@ -133,6 +132,7 @@ pulsar = { version = "6.7", default-features = false, features = [
     "lz4",
     "zstd",
 ] }
+rand = { workspace = true }
 rdkafka = { workspace = true, features = [
     "cmake-build",
     "ssl",

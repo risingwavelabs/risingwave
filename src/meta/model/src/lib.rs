@@ -374,7 +374,8 @@ macro_rules! derive_btreemap_from_blob {
     };
 }
 
-pub(crate) use {derive_array_from_blob, derive_from_blob};
+pub(crate) use derive_array_from_blob;
+pub(crate) use derive_from_blob;
 
 derive_from_json_struct!(TableIdArray, Vec<TableId>);
 
@@ -450,6 +451,10 @@ derive_from_blob!(
 );
 derive_from_blob!(ConnectionParams, risingwave_pb::catalog::ConnectionParams);
 derive_from_blob!(AuthInfo, risingwave_pb::user::PbAuthInfo);
+derive_from_blob!(
+    WorkerResource,
+    risingwave_pb::common::worker_node::PbResource
+);
 
 derive_from_blob!(ConnectorSplits, risingwave_pb::source::ConnectorSplits);
 derive_from_blob!(VnodeBitmap, risingwave_pb::common::Buffer);

@@ -72,6 +72,10 @@ mod m20260311_000000_legacy_streaming_parallelism_session_params;
 mod m20260312_000000_streaming_job_backfill_parallelism_strategy;
 mod m20260518_000000_disable_unused_read_prefix_hints;
 mod m20260519_000000_streaming_job_batch_refresh_seconds;
+mod m20260624_000000_pending_sink_state_object_fk;
+mod m20260705_000000_subscription_dependent_object_fk;
+mod m20260804_000000_worker_property_resource;
+mod m20260805_000000_object_belong_to_oid;
 mod utils;
 
 pub struct Migrator;
@@ -182,6 +186,10 @@ impl MigratorTrait for Migrator {
             Box::new(m20260312_000000_streaming_job_backfill_parallelism_strategy::Migration),
             Box::new(m20260518_000000_disable_unused_read_prefix_hints::Migration),
             Box::new(m20260519_000000_streaming_job_batch_refresh_seconds::Migration),
+            Box::new(m20260624_000000_pending_sink_state_object_fk::Migration),
+            Box::new(m20260705_000000_subscription_dependent_object_fk::Migration),
+            Box::new(m20260804_000000_worker_property_resource::Migration),
+            Box::new(m20260805_000000_object_belong_to_oid::Migration),
         ]
     }
 }

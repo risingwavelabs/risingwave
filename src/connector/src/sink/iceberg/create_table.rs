@@ -19,7 +19,7 @@ use std::sync::LazyLock;
 use anyhow::{Context, anyhow};
 use iceberg::arrow::schema_to_arrow_schema;
 use iceberg::spec::{
-    NullOrder, SortDirection, SortField, SortOrder, TableProperties, Transform,
+    FormatVersion, NullOrder, SortDirection, SortField, SortOrder, TableProperties, Transform,
     UnboundPartitionField, UnboundPartitionSpec,
 };
 use iceberg::table::Table;
@@ -37,6 +37,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use url::Url;
 
 use super::{IcebergConfig, PARTITION_DATA_ID_START, SinkError};
+use crate::connector_common::{IcebergCatalogKind, IcebergCatalogRuntime};
 use crate::sink::{Result, SinkParam};
 
 static ORDER_KEY_COLUMN_RE: LazyLock<Regex> =
@@ -71,6 +72,17 @@ pub async fn create_and_validate_table_impl(
         .await
         .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
 
+    if config.enable_pk_index {
+        let table_format_version = table.metadata().format_version();
+        if table_format_version < FormatVersion::V2 {
+            return Err(SinkError::Config(anyhow!(
+                "`enable_pk_index` requires an Iceberg table with format version >= 2, \
+                 but the target table is format version {}",
+                table_format_version
+            )));
+        }
+    }
+
     let sink_schema = param.schema();
     let iceberg_arrow_schema = schema_to_arrow_schema(table.metadata().current_schema())
         .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
@@ -81,10 +93,11 @@ pub async fn create_and_validate_table_impl(
     Ok(table)
 }
 
+/// Returns `true` if this call created the table, `false` if it already existed.
 pub(super) async fn create_table_if_not_exists_impl(
     config: &IcebergConfig,
     param: &SinkParam,
-) -> Result<()> {
+) -> Result<bool> {
     let catalog = config.create_catalog().await?;
     let table_id = config
         .full_table_name()
@@ -93,144 +106,156 @@ pub(super) async fn create_table_if_not_exists_impl(
     let table_name = table_id.name().to_owned();
     create_namespace_if_not_exists(catalog.as_ref(), &namespace).await?;
 
-    if !catalog
+    if catalog
         .table_exists(&table_id)
         .await
         .map_err(|e| SinkError::Iceberg(anyhow!(e)))?
     {
-        let iceberg_create_table_arrow_convert = IcebergCreateTableArrowConvert::default();
-        // convert risingwave schema -> arrow schema -> iceberg schema
-        let arrow_fields = param
-            .columns
-            .iter()
-            .map(|column| {
-                Ok(iceberg_create_table_arrow_convert
-                    .to_arrow_field(&column.name, &column.data_type)
-                    .map_err(|e| SinkError::Iceberg(anyhow!(e)))
-                    .context(format!(
-                        "failed to convert {}: {} to arrow type",
-                        &column.name, &column.data_type
-                    ))?)
-            })
-            .collect::<Result<Vec<ArrowField>>>()?;
-        let arrow_schema = arrow_schema_iceberg::Schema::new(arrow_fields);
-        let iceberg_schema = iceberg::arrow::arrow_schema_to_schema(&arrow_schema)
-            .map_err(|e| SinkError::Iceberg(anyhow!(e)))
-            .context("failed to convert arrow schema to iceberg schema")?;
+        return Ok(false);
+    }
 
-        let location = {
-            let mut names = namespace.clone().inner();
-            names.push(table_name.clone());
-            match &config.common.warehouse_path {
-                Some(warehouse_path) => {
-                    let is_s3_tables = warehouse_path.starts_with("arn:aws:s3tables");
-                    // Lakehouse Iceberg REST catalog federation uses bq:// prefix for BigQuery-managed Iceberg tables.
-                    let is_bq_catalog_federation = warehouse_path.starts_with("bq://");
-                    let url = Url::parse(warehouse_path);
-                    if url.is_err() || is_s3_tables || is_bq_catalog_federation {
-                        // For rest catalog, the warehouse_path could be a warehouse name.
-                        // In this case, we should specify the location when creating a table.
-                        if config.common.catalog_type() == "rest"
-                            || config.common.catalog_type() == "rest_rust"
-                        {
-                            None
-                        } else {
-                            bail!(format!("Invalid warehouse path: {}", warehouse_path))
-                        }
-                    } else if warehouse_path.ends_with('/') {
-                        Some(format!("{}{}", warehouse_path, names.join("/")))
+    let iceberg_create_table_arrow_convert = IcebergCreateTableArrowConvert::default();
+    // convert risingwave schema -> arrow schema -> iceberg schema
+    let arrow_fields = param
+        .columns
+        .iter()
+        .map(|column| {
+            Ok(iceberg_create_table_arrow_convert
+                .to_arrow_field(&column.name, &column.data_type)
+                .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+                .context(format!(
+                    "failed to convert {}: {} to arrow type",
+                    column.name, column.data_type
+                ))?)
+        })
+        .collect::<Result<Vec<ArrowField>>>()?;
+    let arrow_schema = arrow_schema_iceberg::Schema::new(arrow_fields);
+    let iceberg_schema = iceberg::arrow::arrow_schema_to_schema(&arrow_schema)
+        .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+        .context("failed to convert arrow schema to iceberg schema")?;
+
+    let location = {
+        let mut names = namespace.clone().inner();
+        names.push(table_name.clone());
+        match &config.common.warehouse_path {
+            Some(warehouse_path) => {
+                let is_s3_tables = warehouse_path.starts_with("arn:aws:s3tables");
+                // Lakehouse Iceberg REST catalog federation uses bq:// prefix for BigQuery-managed Iceberg tables.
+                let is_bq_catalog_federation = warehouse_path.starts_with("bq://");
+                let url = Url::parse(warehouse_path);
+                if url.is_err() || is_s3_tables || is_bq_catalog_federation {
+                    // For rest catalog, the warehouse_path could be a warehouse name.
+                    // In this case, we should specify the location when creating a table.
+                    if config
+                        .common
+                        .is_rest_catalog()
+                        .map_err(|err| SinkError::Config(anyhow!(err)))?
+                    {
+                        None
                     } else {
-                        Some(format!("{}/{}", warehouse_path, names.join("/")))
+                        bail!(format!("Invalid warehouse path: {}", warehouse_path))
                     }
+                } else if warehouse_path.ends_with('/') {
+                    Some(format!("{}{}", warehouse_path, names.join("/")))
+                } else {
+                    Some(format!("{}/{}", warehouse_path, names.join("/")))
                 }
-                None => None,
-            }
-        };
-
-        let partition_spec = match &config.partition_by {
-            Some(partition_by) => {
-                let mut partition_fields = Vec::<UnboundPartitionField>::new();
-                for (i, (column, transform)) in parse_partition_by_exprs(partition_by.clone())?
-                    .into_iter()
-                    .enumerate()
-                {
-                    match iceberg_schema.field_id_by_name(&column) {
-                        Some(id) => partition_fields.push(
-                            UnboundPartitionField::builder()
-                                .source_id(id)
-                                .transform(transform)
-                                .name(format!("_p_{}", column))
-                                .field_id(PARTITION_DATA_ID_START + i as i32)
-                                .build(),
-                        ),
-                        None => bail!(format!(
-                            "Partition source column does not exist in schema: {}",
-                            column
-                        )),
-                    };
-                }
-                Some(
-                    UnboundPartitionSpec::builder()
-                        .with_spec_id(0)
-                        .add_partition_fields(partition_fields)
-                        .map_err(|e| SinkError::Iceberg(anyhow!(e)))
-                        .context("failed to add partition columns")?
-                        .build(),
-                )
             }
             None => None,
-        };
+        }
+    };
 
-        let sort_order = match &config.order_key {
-            Some(order_key) => Some(build_sort_order(order_key, &iceberg_schema)?),
-            None => None,
-        };
+    let partition_spec = match &config.partition_by {
+        Some(partition_by) => {
+            let mut partition_fields = Vec::<UnboundPartitionField>::new();
+            for (i, (column, transform)) in parse_partition_by_exprs(partition_by.clone())?
+                .into_iter()
+                .enumerate()
+            {
+                match iceberg_schema.field_id_by_name(&column) {
+                    Some(id) => partition_fields.push(
+                        UnboundPartitionField::builder()
+                            .source_id(id)
+                            .transform(transform)
+                            .name(format!("_p_{}", column))
+                            .field_id(PARTITION_DATA_ID_START + i as i32)
+                            .build(),
+                    ),
+                    None => bail!(format!(
+                        "Partition source column does not exist in schema: {}",
+                        column
+                    )),
+                };
+            }
+            Some(
+                UnboundPartitionSpec::builder()
+                    .with_spec_id(0)
+                    .add_partition_fields(partition_fields)
+                    .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+                    .context("failed to add partition columns")?
+                    .build(),
+            )
+        }
+        None => None,
+    };
 
-        // Put format-version into table properties, because catalog like jdbc extract format-version from table properties.
-        let properties = HashMap::from([(
+    let sort_order = match &config.order_key {
+        Some(order_key) => Some(build_sort_order(order_key, &iceberg_schema)?),
+        None => None,
+    };
+
+    // Some JNI catalogs extract `format-version` from table properties, while
+    // native Rust Glue rejects reserved properties before creating metadata.
+    let properties = if matches!(
+        config.catalog_kind()?,
+        IcebergCatalogKind::Glue(IcebergCatalogRuntime::NativeRust)
+    ) {
+        HashMap::new()
+    } else {
+        HashMap::from([(
             TableProperties::PROPERTY_FORMAT_VERSION.to_owned(),
             (config.format_version as u8).to_string(),
-        )]);
+        )])
+    };
 
-        let table_creation_builder = TableCreation::builder()
-            .name(table_name)
-            .schema(iceberg_schema)
-            .format_version(config.table_format_version())
-            .properties(properties);
+    let table_creation_builder = TableCreation::builder()
+        .name(table_name)
+        .schema(iceberg_schema)
+        .format_version(config.table_format_version())
+        .properties(properties);
 
-        let table_creation = match (location, partition_spec, sort_order) {
-            (Some(location), Some(partition_spec), Some(sort_order)) => table_creation_builder
-                .location(location)
-                .partition_spec(partition_spec)
-                .sort_order(sort_order)
-                .build(),
-            (Some(location), Some(partition_spec), None) => table_creation_builder
-                .location(location)
-                .partition_spec(partition_spec)
-                .build(),
-            (Some(location), None, Some(sort_order)) => table_creation_builder
-                .location(location)
-                .sort_order(sort_order)
-                .build(),
-            (Some(location), None, None) => table_creation_builder.location(location).build(),
-            (None, Some(partition_spec), Some(sort_order)) => table_creation_builder
-                .partition_spec(partition_spec)
-                .sort_order(sort_order)
-                .build(),
-            (None, Some(partition_spec), None) => table_creation_builder
-                .partition_spec(partition_spec)
-                .build(),
-            (None, None, Some(sort_order)) => table_creation_builder.sort_order(sort_order).build(),
-            (None, None, None) => table_creation_builder.build(),
-        };
+    let table_creation = match (location, partition_spec, sort_order) {
+        (Some(location), Some(partition_spec), Some(sort_order)) => table_creation_builder
+            .location(location)
+            .partition_spec(partition_spec)
+            .sort_order(sort_order)
+            .build(),
+        (Some(location), Some(partition_spec), None) => table_creation_builder
+            .location(location)
+            .partition_spec(partition_spec)
+            .build(),
+        (Some(location), None, Some(sort_order)) => table_creation_builder
+            .location(location)
+            .sort_order(sort_order)
+            .build(),
+        (Some(location), None, None) => table_creation_builder.location(location).build(),
+        (None, Some(partition_spec), Some(sort_order)) => table_creation_builder
+            .partition_spec(partition_spec)
+            .sort_order(sort_order)
+            .build(),
+        (None, Some(partition_spec), None) => table_creation_builder
+            .partition_spec(partition_spec)
+            .build(),
+        (None, None, Some(sort_order)) => table_creation_builder.sort_order(sort_order).build(),
+        (None, None, None) => table_creation_builder.build(),
+    };
 
-        catalog
-            .create_table(&namespace, table_creation)
-            .await
-            .map_err(|e| SinkError::Iceberg(anyhow!(e)))
-            .context("failed to create iceberg table")?;
-    }
-    Ok(())
+    catalog
+        .create_table(&namespace, table_creation)
+        .await
+        .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+        .context("failed to create iceberg table")?;
+    Ok(true)
 }
 
 async fn create_namespace_if_not_exists(

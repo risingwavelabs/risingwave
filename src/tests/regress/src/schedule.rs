@@ -89,12 +89,7 @@ impl Schedule {
         for line in reader.lines() {
             let line = line?;
             if line.starts_with("test: ") {
-                schedules.push(
-                    line[5..]
-                        .split_whitespace()
-                        .map(ToString::to_string)
-                        .collect(),
-                );
+                schedules.push(line[5..].split_whitespace().map(str::to_owned).collect());
                 debug!("Add one parallel schedule: {:?}", schedules.last().unwrap());
             }
         }

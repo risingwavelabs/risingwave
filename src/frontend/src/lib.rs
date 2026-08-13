@@ -14,17 +14,12 @@
 
 #![allow(clippy::derive_partial_eq_without_eq)]
 #![feature(map_try_insert)]
-#![feature(negative_impls)]
 #![feature(coroutines)]
 #![feature(proc_macro_hygiene, stmt_expr_attributes)]
 #![feature(trait_alias)]
-#![feature(if_let_guard)]
-#![feature(assert_matches)]
 #![feature(box_patterns)]
-#![feature(macro_metavar_expr)]
 #![feature(min_specialization)]
 #![feature(extend_one)]
-#![feature(type_alias_impl_trait)]
 #![feature(impl_trait_in_assoc_type)]
 #![feature(error_generic_member_access)]
 #![feature(iterator_try_collect)]
@@ -183,10 +178,10 @@ pub struct FrontendOpts {
     #[clap(long, env = "RW_WEBHOOK_LISTEN_ADDR", default_value = "0.0.0.0:4560")]
     pub webhook_listen_addr: String,
 
-    /// Address of the serverless backfill controller.
-    /// Needed if frontend receives a query like
-    /// CREATE MATERIALIZED VIEW ... WITH ( `cloud.serverless_backfill_enabled=true` )
-    /// Feature disabled by default.
+    /// Deprecated. Configure the serverless backfill controller address on meta nodes instead.
+    #[deprecated(
+        note = "Configure the serverless backfill controller address on meta nodes instead"
+    )]
     #[clap(long, env = "RW_SBC_ADDR", default_value = "")]
     pub serverless_backfill_controller_addr: String,
 

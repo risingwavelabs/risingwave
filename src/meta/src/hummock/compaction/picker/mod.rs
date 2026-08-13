@@ -63,6 +63,7 @@ pub struct CompactionInput {
     pub target_input_size: u64,
     pub total_file_count: u64,
     pub vnode_partition_count: u32,
+    pub skip_target_range_conflict_check: bool,
 }
 
 impl CompactionInput {

@@ -13,7 +13,6 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap};
-use std::mem::size_of;
 
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
@@ -91,7 +90,7 @@ pub struct CompactTask {
 
     pub max_vnode_key_range_bytes: Option<u64>,
 
-    pub sstable_filter_kind: PbSstableFilterType,
+    pub sstable_filter_type: PbSstableFilterType,
 
     pub sstable_filter_layout: PbSstableFilterLayout,
 }
@@ -103,61 +102,6 @@ pub struct CompactTaskAssignment {
 }
 
 impl CompactTask {
-    pub fn estimated_encode_len(&self) -> usize {
-        self.input_ssts
-            .iter()
-            .map(|input_level| input_level.estimated_encode_len())
-            .sum::<usize>()
-            + self
-                .splits
-                .iter()
-                .map(|split| split.left.len() + split.right.len() + size_of::<bool>())
-                .sum::<usize>()
-            + size_of::<u64>()
-            + self
-                .sorted_output_ssts
-                .iter()
-                .map(|sst| sst.estimated_encode_len())
-                .sum::<usize>()
-            + size_of::<u64>()
-            + size_of::<u32>()
-            + size_of::<bool>()
-            + size_of::<u32>()
-            + size_of::<i32>()
-            + size_of::<u64>()
-            + self.existing_table_ids.len() * size_of::<u32>()
-            + size_of::<u32>()
-            + size_of::<u64>()
-            + size_of::<u32>()
-            + self.table_options.len() * size_of::<u64>()
-            + size_of::<u64>()
-            + size_of::<u64>()
-            + size_of::<i32>()
-            + size_of::<bool>()
-            + size_of::<u32>()
-            + self.table_vnode_partition.len() * size_of::<u64>()
-            + self
-                .pk_prefix_table_watermarks
-                .values()
-                .map(|table_watermark| size_of::<u32>() + table_watermark.estimated_encode_len())
-                .sum::<usize>()
-            + self
-                .non_pk_prefix_table_watermarks
-                .values()
-                .map(|table_watermark| size_of::<u32>() + table_watermark.estimated_encode_len())
-                .sum::<usize>()
-            + self
-                .max_vnode_key_range_bytes
-                .map(|_| size_of::<u32>())
-                .unwrap_or_default()
-            + size_of::<u32>()
-            + self
-                .value_table_watermarks
-                .values()
-                .map(|table_watermark| size_of::<u32>() + table_watermark.estimated_encode_len())
-                .sum::<usize>()
-    }
-
     pub fn is_trivial_move_task(&self) -> bool {
         if self.task_type != TaskType::Dynamic && self.task_type != TaskType::Emergency {
             return false;
@@ -245,23 +189,27 @@ impl CompactTask {
         )
     }
 
-    /// Determines whether to use block-based filter for one output SST.
+    /// Resolves the physical filter layout for one output SST.
     ///
     /// The caller should pass an output-SST-level key-count estimate. This differs from the legacy
     /// task-level check below: a large compaction task can produce many small output SSTs, and those
     /// outputs should be allowed to use plain filters when each output is below the threshold.
-    pub fn should_use_block_based_filter_for_output(
+    pub fn sstable_filter_layout_for_output(
         &self,
         estimated_output_key_count: u64,
-    ) -> bool {
+    ) -> PbSstableFilterLayout {
         match self.sstable_filter_layout {
-            PbSstableFilterLayout::Plain => false,
-            PbSstableFilterLayout::Blocked => true,
+            PbSstableFilterLayout::Plain => PbSstableFilterLayout::Plain,
+            PbSstableFilterLayout::Blocked => PbSstableFilterLayout::Blocked,
             PbSstableFilterLayout::Auto | PbSstableFilterLayout::Unspecified => {
-                crate::filter_utils::should_use_blocked_xor_filter_by_kv_count(
+                if crate::filter_utils::should_use_blocked_xor_filter_by_kv_count(
                     estimated_output_key_count,
                     self.blocked_xor_filter_kv_count_threshold,
-                )
+                ) {
+                    PbSstableFilterLayout::Blocked
+                } else {
+                    PbSstableFilterLayout::Plain
+                }
             }
         }
     }
@@ -385,24 +333,12 @@ impl From<PbCompactTask> for CompactTask {
             compaction_group_version_id: pb_compact_task.compaction_group_version_id,
             blocked_xor_filter_kv_count_threshold: pb_compact_task.max_kv_count_for_xor16,
             max_vnode_key_range_bytes: pb_compact_task.max_vnode_key_range_bytes,
-            sstable_filter_kind: match PbSstableFilterType::try_from(
-                pb_compact_task.sstable_filter_kind,
-            )
-            .unwrap_or(PbSstableFilterType::SstableFilterXor16)
-            {
-                PbSstableFilterType::SstableFilterUnspecified => {
-                    PbSstableFilterType::SstableFilterXor16
-                }
-                kind => kind,
-            },
-            sstable_filter_layout: match PbSstableFilterLayout::try_from(
+            sstable_filter_type: PbSstableFilterType::try_from(pb_compact_task.sstable_filter_type)
+                .unwrap_or(PbSstableFilterType::SstableFilterUnspecified),
+            sstable_filter_layout: PbSstableFilterLayout::try_from(
                 pb_compact_task.sstable_filter_layout,
             )
-            .unwrap_or(PbSstableFilterLayout::Auto)
-            {
-                PbSstableFilterLayout::Unspecified => PbSstableFilterLayout::Auto,
-                layout => layout,
-            },
+            .unwrap_or(PbSstableFilterLayout::Auto),
         }
     }
 }
@@ -469,24 +405,12 @@ impl From<&PbCompactTask> for CompactTask {
             compaction_group_version_id: pb_compact_task.compaction_group_version_id,
             blocked_xor_filter_kv_count_threshold: pb_compact_task.max_kv_count_for_xor16,
             max_vnode_key_range_bytes: pb_compact_task.max_vnode_key_range_bytes,
-            sstable_filter_kind: match PbSstableFilterType::try_from(
-                pb_compact_task.sstable_filter_kind,
-            )
-            .unwrap_or(PbSstableFilterType::SstableFilterXor16)
-            {
-                PbSstableFilterType::SstableFilterUnspecified => {
-                    PbSstableFilterType::SstableFilterXor16
-                }
-                kind => kind,
-            },
-            sstable_filter_layout: match PbSstableFilterLayout::try_from(
+            sstable_filter_type: PbSstableFilterType::try_from(pb_compact_task.sstable_filter_type)
+                .unwrap_or(PbSstableFilterType::SstableFilterUnspecified),
+            sstable_filter_layout: PbSstableFilterLayout::try_from(
                 pb_compact_task.sstable_filter_layout,
             )
-            .unwrap_or(PbSstableFilterLayout::Auto)
-            {
-                PbSstableFilterLayout::Unspecified => PbSstableFilterLayout::Auto,
-                layout => layout,
-            },
+            .unwrap_or(PbSstableFilterLayout::Auto),
         }
     }
 }
@@ -543,7 +467,7 @@ impl From<CompactTask> for PbCompactTask {
             compaction_group_version_id: compact_task.compaction_group_version_id,
             max_kv_count_for_xor16: compact_task.blocked_xor_filter_kv_count_threshold,
             max_vnode_key_range_bytes: compact_task.max_vnode_key_range_bytes,
-            sstable_filter_kind: compact_task.sstable_filter_kind.into(),
+            sstable_filter_type: compact_task.sstable_filter_type.into(),
             sstable_filter_layout: compact_task.sstable_filter_layout.into(),
         }
     }
@@ -601,7 +525,7 @@ impl From<&CompactTask> for PbCompactTask {
             compaction_group_version_id: compact_task.compaction_group_version_id,
             max_kv_count_for_xor16: compact_task.blocked_xor_filter_kv_count_threshold,
             max_vnode_key_range_bytes: compact_task.max_vnode_key_range_bytes,
-            sstable_filter_kind: compact_task.sstable_filter_kind.into(),
+            sstable_filter_type: compact_task.sstable_filter_type.into(),
             sstable_filter_layout: compact_task.sstable_filter_layout.into(),
         }
     }
@@ -672,17 +596,6 @@ impl From<ValidationTask> for PbValidationTask {
                 .collect_vec(),
             sst_id_to_worker_id: validation_task.sst_id_to_worker_id,
         }
-    }
-}
-
-impl ValidationTask {
-    pub fn estimated_encode_len(&self) -> usize {
-        self.sst_infos
-            .iter()
-            .map(|sst| sst.estimated_encode_len())
-            .sum::<usize>()
-            + self.sst_id_to_worker_id.len() * (size_of::<u64>() + size_of::<u32>())
-            + size_of::<u64>()
     }
 }
 
@@ -772,15 +685,21 @@ mod tests {
     }
 
     #[test]
-    fn test_should_use_block_based_filter_for_output() {
+    fn test_sstable_filter_layout_for_output() {
         let task = CompactTask {
             sstable_filter_layout: PbSstableFilterLayout::Auto,
             blocked_xor_filter_kv_count_threshold: Some(100),
             ..Default::default()
         };
 
-        assert!(!task.should_use_block_based_filter_for_output(100));
-        assert!(task.should_use_block_based_filter_for_output(101));
+        assert_eq!(
+            task.sstable_filter_layout_for_output(100),
+            PbSstableFilterLayout::Plain
+        );
+        assert_eq!(
+            task.sstable_filter_layout_for_output(101),
+            PbSstableFilterLayout::Blocked
+        );
 
         let task = CompactTask {
             sstable_filter_layout: PbSstableFilterLayout::Plain,
@@ -788,7 +707,10 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(!task.should_use_block_based_filter_for_output(101));
+        assert_eq!(
+            task.sstable_filter_layout_for_output(101),
+            PbSstableFilterLayout::Plain
+        );
 
         let task = CompactTask {
             sstable_filter_layout: PbSstableFilterLayout::Blocked,
@@ -796,7 +718,10 @@ mod tests {
             ..Default::default()
         };
 
-        assert!(task.should_use_block_based_filter_for_output(0));
+        assert_eq!(
+            task.sstable_filter_layout_for_output(0),
+            PbSstableFilterLayout::Blocked
+        );
     }
 
     #[test]
@@ -846,21 +771,6 @@ mod tests {
 
         assert!(task.contains_range_tombstone());
         assert!(task.contains_split_sst());
-    }
-
-    #[test]
-    fn test_blocked_filter_layout_ignores_kv_count_threshold() {
-        let task = CompactTask {
-            input_ssts: vec![InputLevel {
-                table_infos: vec![test_read_property_sstable(vec![TableId::new(1)])],
-                ..Default::default()
-            }],
-            sstable_filter_layout: PbSstableFilterLayout::Blocked,
-            blocked_xor_filter_kv_count_threshold: Some(u64::MAX),
-            ..Default::default()
-        };
-
-        assert!(task.should_use_block_based_filter_for_output(0));
     }
 
     #[test]

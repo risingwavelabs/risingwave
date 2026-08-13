@@ -28,7 +28,6 @@ use futures::stream::BoxStream;
 use list_rate_limits_response::RateLimitInfo;
 use lru::LruCache;
 use replace_job_plan::ReplaceJob;
-use risingwave_common::RW_VERSION;
 use risingwave_common::catalog::{
     AlterDatabaseParam, FunctionId, IndexId, ObjectId, SecretId, TableId,
 };
@@ -46,6 +45,7 @@ use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::hostname;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
+use risingwave_common::util::version::current_rw_version;
 use risingwave_error::bail;
 use risingwave_error::tonic::ErrorIsFromTonicServerImpl;
 use risingwave_hummock_sdk::change_log::{TableChangeLog, TableChangeLogs};
@@ -82,7 +82,7 @@ use risingwave_pb::iceberg_compaction::{
     SubscribeIcebergCompactionEventRequest, SubscribeIcebergCompactionEventResponse,
     subscribe_iceberg_compaction_event_request,
 };
-use risingwave_pb::id::{ActorId, FragmentId, HummockSstableId, SourceId};
+use risingwave_pb::id::{ActorId, FragmentId, HummockSstableId, IcebergCompactionTaskId, SourceId};
 use risingwave_pb::meta::alter_connector_props_request::{
     AlterConnectorPropsObject, AlterIcebergTableIds, ExtraOptions,
 };
@@ -307,7 +307,7 @@ impl MetaClient {
                         host: Some(addr.to_protobuf()),
                         property: Some(property.clone()),
                         resource: Some(risingwave_pb::common::worker_node::Resource {
-                            rw_version: RW_VERSION.to_owned(),
+                            rw_version: current_rw_version(),
                             total_memory_bytes: system_memory_available_bytes() as _,
                             total_cpu_cores: total_cpu_available() as _,
                             hostname: hostname(),
@@ -380,12 +380,6 @@ impl MetaClient {
     pub async fn send_heartbeat(&self) -> Result<()> {
         let request = HeartbeatRequest {
             node_id: self.worker_id,
-            resource: Some(risingwave_pb::common::worker_node::Resource {
-                rw_version: RW_VERSION.to_owned(),
-                total_memory_bytes: system_memory_available_bytes() as _,
-                total_cpu_cores: total_cpu_available() as _,
-                hostname: hostname(),
-            }),
         };
         let resp = self.inner.heartbeat(request).await?;
         if let Some(status) = resp.status
@@ -485,6 +479,7 @@ impl MetaClient {
         dependencies: HashSet<ObjectId>,
         resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
+        since_timestamp_epoch: Option<u64>,
     ) -> Result<WaitVersion> {
         let request = CreateSinkRequest {
             sink: Some(sink),
@@ -494,6 +489,7 @@ impl MetaClient {
             resource_type: Some(PbStreamingJobResourceType {
                 resource_type: Some(resource_type),
             }),
+            since_timestamp_epoch,
         };
 
         let resp = self.inner.create_sink(request).await?;
@@ -839,6 +835,18 @@ impl MetaClient {
         Ok(())
     }
 
+    /// Block until the pk-index sink `sink_id`'s database has committed through `epoch`, returning
+    /// the coordinator's committed iceberg snapshot id (`None` if no snapshot committed yet).
+    pub async fn wait_iceberg_pk_index_sink_epoch(
+        &self,
+        sink_id: SinkId,
+        epoch: u64,
+    ) -> Result<Option<i64>> {
+        let request = WaitIcebergPkIndexSinkEpochRequest { sink_id, epoch };
+        let resp = self.inner.wait_iceberg_pk_index_sink_epoch(request).await?;
+        Ok(resp.snapshot_id)
+    }
+
     pub async fn create_view(
         &self,
         view: PbView,
@@ -897,10 +905,16 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn compact_iceberg_table(&self, sink_id: SinkId) -> Result<u64> {
+    pub async fn compact_iceberg_table(&self, sink_id: SinkId) -> Result<IcebergCompactionTaskId> {
         let request = CompactIcebergTableRequest { sink_id };
         let resp = self.inner.compact_iceberg_table(request).await?;
         Ok(resp.task_id)
+    }
+
+    pub async fn rewrite_iceberg_table_manifests(&self, sink_id: SinkId) -> Result<()> {
+        let request = RewriteIcebergTableManifestsRequest { sink_id };
+        let _resp = self.inner.rewrite_iceberg_table_manifests(request).await?;
+        Ok(())
     }
 
     pub async fn expire_iceberg_table_snapshots(&self, sink_id: SinkId) -> Result<()> {
@@ -2396,7 +2410,8 @@ impl MetaMemberManagement {
                                 let endpoint = GrpcMetaClient::addr_to_endpoint(addr.clone());
                                 let channel = GrpcMetaClient::connect_to_endpoint(endpoint)
                                     .await
-                                    .context("failed to create client")?;
+                                    .context("failed to create client")
+                                    .map_err(RpcError::from)?;
                                 let new_client: MetaMemberClient =
                                     MetaMemberServiceClient::new(channel);
                                 *client = Some(new_client.clone());
@@ -2408,7 +2423,8 @@ impl MetaMemberManagement {
                         let resp = client
                             .members(MembersRequest {})
                             .await
-                            .context("failed to fetch members")?;
+                            .context("failed to fetch members")
+                            .map_err(RpcError::from)?;
 
                         resp.into_inner().members
                     };
@@ -2748,8 +2764,10 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, alter_swap_rename, AlterSwapRenameRequest, AlterSwapRenameResponse }
             ,{ ddl_client, alter_secret, AlterSecretRequest, AlterSecretResponse }
             ,{ ddl_client, compact_iceberg_table, CompactIcebergTableRequest, CompactIcebergTableResponse }
+            ,{ ddl_client, rewrite_iceberg_table_manifests, RewriteIcebergTableManifestsRequest, RewriteIcebergTableManifestsResponse }
             ,{ ddl_client, expire_iceberg_table_snapshots, ExpireIcebergTableSnapshotsRequest, ExpireIcebergTableSnapshotsResponse }
             ,{ ddl_client, create_iceberg_table, CreateIcebergTableRequest, CreateIcebergTableResponse }
+            ,{ ddl_client, wait_iceberg_pk_index_sink_epoch, WaitIcebergPkIndexSinkEpochRequest, WaitIcebergPkIndexSinkEpochResponse }
             ,{ hummock_client, unpin_version_before, UnpinVersionBeforeRequest, UnpinVersionBeforeResponse }
             ,{ hummock_client, get_current_version, GetCurrentVersionRequest, GetCurrentVersionResponse }
             ,{ hummock_client, replay_version_delta, ReplayVersionDeltaRequest, ReplayVersionDeltaResponse }

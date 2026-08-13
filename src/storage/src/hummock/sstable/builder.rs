@@ -17,6 +17,7 @@ use std::mem;
 use std::sync::Arc;
 use std::time::SystemTime;
 
+use await_tree::{InstrumentAwait, SpanExt};
 use bytes::{Bytes, BytesMut};
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
@@ -26,7 +27,7 @@ use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner, VnodeStatistics};
 use risingwave_hummock_sdk::table_stats::{TableStats, TableStatsMap};
 use risingwave_hummock_sdk::{HummockEpoch, HummockSstableObjectId, LocalSstableInfo};
-use risingwave_pb::hummock::{BloomFilterType, PbSstableFilterType};
+use risingwave_pb::hummock::{PbSstableFilterLayout, PbSstableFilterType};
 
 use super::utils::CompressionAlgorithm;
 use super::{
@@ -267,7 +268,9 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         if self.last_table_id.is_none() || self.last_table_id.unwrap() != table_id {
             if !self.block_builder.is_empty() {
                 // Try to finish the previous `Block`` when the `table_id` is switched, making sure that the data in the `Block` doesn't span two `table_ids`.
-                self.build_block().await?;
+                self.build_block()
+                    .instrument_await("sstable_build_block_on_raw_table_switch".verbose())
+                    .await?;
             }
 
             self.table_ids.insert(table_id);
@@ -290,13 +293,17 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                             self.sst_object_id, self.block_metas.len(), self.last_table_id
                         )
                     });
-                    self.add_impl(iter.key(), value, false).await?;
+                    self.add_impl(iter.key(), value, false)
+                        .instrument_await("sstable_add_raw_block_fallback_add".verbose())
+                        .await?;
                     iter.next();
                 }
                 return Ok(false);
             }
 
-            self.build_block().await?;
+            self.build_block()
+                .instrument_await("sstable_build_block_before_raw_block".verbose())
+                .await?;
         }
         self.last_full_key = largest_key;
         assert_eq!(
@@ -311,7 +318,10 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         self.block_metas.push(meta);
         self.filter_builder.add_raw_data(filter_data);
         let block_meta = self.block_metas.last_mut().unwrap();
-        self.writer.write_block_bytes(buf, block_meta).await?;
+        self.writer
+            .write_block_bytes(buf, block_meta)
+            .instrument_await("sstable_write_raw_block_bytes".verbose())
+            .await?;
 
         Ok(true)
     }
@@ -384,10 +394,14 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             self.finalize_last_table_stats();
             self.last_table_id = Some(table_id);
             if !self.block_builder.is_empty() {
-                self.build_block().await?;
+                self.build_block()
+                    .instrument_await("sstable_build_block_on_table_switch".verbose())
+                    .await?;
             }
         } else if is_block_full && could_switch_block {
-            self.build_block().await?;
+            self.build_block()
+                .instrument_await("sstable_build_block_on_block_full".verbose())
+                .await?;
         }
         self.last_table_stats.total_key_count += 1;
         self.epoch_set.insert(full_key.epoch_with_gap.pure_epoch());
@@ -490,20 +504,28 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             self.table_ids.len()
         );
 
-        self.build_block().await?;
+        self.build_block()
+            .instrument_await("sstable_finish_build_block".verbose())
+            .await?;
         let right_exclusive = false;
         let meta_offset = self.writer.data_len() as u64;
 
         let filter_data = self.filter_builder.finish(self.memory_limiter.clone());
-        let (bloom_filter_kind, filter_type) = if filter_data.is_empty() {
+        let (filter_type, filter_layout) = if filter_data.is_none() {
             (
-                BloomFilterType::BloomFilterUnspecified,
                 PbSstableFilterType::SstableFilterNone,
+                PbSstableFilterLayout::Unspecified,
             )
         } else if self.filter_builder.support_blocked_raw_data() {
-            (BloomFilterType::Blocked, self.filter_builder.filter_type())
+            (
+                self.filter_builder.filter_type(),
+                PbSstableFilterLayout::Blocked,
+            )
         } else {
-            (BloomFilterType::Sstable, self.filter_builder.filter_type())
+            (
+                self.filter_builder.filter_type(),
+                PbSstableFilterLayout::Plain,
+            )
         };
 
         let total_key_count = self
@@ -525,7 +547,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
         #[expect(deprecated)]
         let mut meta = SstableMeta {
             block_metas: self.block_metas,
-            bloom_filter: filter_data,
+            bloom_filter: filter_data.unwrap_or_default(),
             estimated_size: 0,
             key_count: utils::checked_into_u32(total_key_count).unwrap_or_else(|_| {
                 panic!(
@@ -571,26 +593,22 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 .map(|s| s.total_key_count as usize)
                 .sum();
 
-            if total_key_count == 0 {
-                (0, 0)
-            } else {
-                let total_key_size: usize = self
-                    .table_stats
-                    .values()
-                    .map(|s| s.total_key_size as usize)
-                    .sum();
+            let total_key_size: usize = self
+                .table_stats
+                .values()
+                .map(|s| s.total_key_size as usize)
+                .sum();
 
-                let total_value_size: usize = self
-                    .table_stats
-                    .values()
-                    .map(|s| s.total_value_size as usize)
-                    .sum();
+            let total_value_size: usize = self
+                .table_stats
+                .values()
+                .map(|s| s.total_value_size as usize)
+                .sum();
 
-                (
-                    total_key_size / total_key_count,
-                    total_value_size / total_key_count,
-                )
-            }
+            (
+                total_key_size.checked_div(total_key_count).unwrap_or(0),
+                total_value_size.checked_div(total_key_count).unwrap_or(0),
+            )
         };
 
         let (min_epoch, max_epoch) = {
@@ -613,7 +631,6 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             object_id: self.sst_object_id,
             // use the same sst_id as object_id for initial sst
             sst_id: self.sst_object_id.as_raw_id().into(),
-            bloom_filter_kind,
             key_range: KeyRange {
                 left: Bytes::from(meta.smallest_key.clone()),
                 right: Bytes::from(meta.largest_key.clone()),
@@ -630,6 +647,7 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             range_tombstone_count: 0,
             sst_size: meta.estimated_size as u64,
             filter_type,
+            filter_layout,
             vnode_statistics: vnode_user_key_ranges,
         }
         .into();
@@ -662,7 +680,11 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
             }
         }
 
-        let writer_output = self.writer.finish(meta).await?;
+        let writer_output = self
+            .writer
+            .finish(meta)
+            .instrument_await("sstable_writer_finish".verbose())
+            .await?;
         // The timestamp is only used during full GC.
         //
         // Ideally object store object's last_modified should be used.
@@ -712,7 +734,10 @@ impl<W: SstableWriter, F: FilterBuilder> SstableBuilder<W, F> {
                 )
             });
         let block = self.block_builder.build();
-        self.writer.write_block(block, block_meta).await?;
+        self.writer
+            .write_block(block, block_meta)
+            .instrument_await("sstable_write_block".verbose())
+            .await?;
         self.block_size_vec.push(block.len());
         let data_len = utils::checked_into_u32(self.writer.data_len()).unwrap_or_else(|_| {
             panic!(
@@ -1256,6 +1281,7 @@ pub(super) mod tests {
     async fn test_with_xor_filter_builder<F: FilterBuilder>(
         bloom_false_positive: f64,
         expected_filter_type: PbSstableFilterType,
+        expected_filter_layout: PbSstableFilterLayout,
     ) {
         let key_count = 1000;
 
@@ -1282,6 +1308,7 @@ pub(super) mod tests {
         )
         .await;
         assert_eq!(sst_info.filter_type, expected_filter_type);
+        assert_eq!(sst_info.filter_layout, expected_filter_layout);
         let table = sstable_store
             .sstable(&sst_info, &mut StoreLocalStatistic::default())
             .await
@@ -1305,21 +1332,25 @@ pub(super) mod tests {
         test_with_xor_filter_builder::<Xor16FilterBuilder>(
             0.0,
             PbSstableFilterType::SstableFilterXor16,
+            PbSstableFilterLayout::Plain,
         )
         .await;
         test_with_xor_filter_builder::<Xor16FilterBuilder>(
             0.01,
             PbSstableFilterType::SstableFilterXor16,
+            PbSstableFilterLayout::Plain,
         )
         .await;
         test_with_xor_filter_builder::<Xor8FilterBuilder>(
             0.01,
             PbSstableFilterType::SstableFilterXor8,
+            PbSstableFilterLayout::Plain,
         )
         .await;
         test_with_xor_filter_builder::<BlockedXor16FilterBuilder>(
             0.01,
             PbSstableFilterType::SstableFilterXor16,
+            PbSstableFilterLayout::Blocked,
         )
         .await;
     }

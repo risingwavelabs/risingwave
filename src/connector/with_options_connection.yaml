@@ -44,6 +44,9 @@ IcebergConnection:
   - name: glue.region
     field_type: String
     required: false
+  - name: glue.endpoint
+    field_type: String
+    required: false
   - name: glue.id
     field_type: String
     comments: |-
@@ -69,6 +72,18 @@ IcebergConnection:
     field_type: String
     required: false
   - name: adlsgen2.endpoint
+    field_type: String
+    required: false
+  - name: adlsgen2.tenant_id
+    field_type: String
+    required: false
+  - name: adlsgen2.client_id
+    field_type: String
+    required: false
+  - name: adlsgen2.client_secret
+    field_type: String
+    required: false
+  - name: adlsgen2.authority_host
     field_type: String
     required: false
   - name: warehouse.path

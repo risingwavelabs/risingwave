@@ -113,7 +113,7 @@ async fn create_tables(
         );
         let sql: Arc<str> = Arc::from(sql);
         reproduce_failing_queries(&setup_sql, &sql);
-        setup_sql.push_str(&format!("{};", &sql));
+        setup_sql.push_str(&format!("{};", sql));
         let stmts = parse_sql(&sql);
         let stmt = stmts[0].clone();
         let skipped = Box::pin(handle(session.clone(), stmt, sql)).await?;

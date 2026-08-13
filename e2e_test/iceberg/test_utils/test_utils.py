@@ -1,14 +1,23 @@
 import decimal
 import glob
 import os
+import re
 import subprocess
 import time
 import unittest
 from datetime import date, datetime, timezone
+from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import List
 
 from .log import log, LogLevel
 from .spark_utils import get_spark
+
+
+def get_repo_root() -> str:
+    return os.path.abspath(
+        os.path.join(os.path.dirname(__file__), "..", "..", "..")
+    )
 
 
 def strtobool(v):
@@ -27,9 +36,38 @@ def execute_slt(args, slt):
     if slt is None or slt == "":
         return
     rw_config = args["risingwave"]
-    cmd = f"sqllogictest -p {rw_config['port']} -d {rw_config['db']} {slt}"
+    slt_path = Path(slt)
+    test_file = slt_path
+    rendered_file = None
+
+    content = slt_path.read_text()
+    if "${" in content:
+
+        def replace_env(match):
+            env_name = match.group(1)
+            if env_name not in os.environ:
+                raise RuntimeError(f"environment variable {env_name} is not set")
+            return os.environ[env_name]
+
+        content = re.sub(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}", replace_env, content)
+        rendered_file = NamedTemporaryFile(
+            mode="w",
+            suffix=".slt",
+            prefix=f"{slt_path.stem}.",
+            dir=slt_path.parent,
+            delete=False,
+        )
+        rendered_file.write(content)
+        rendered_file.close()
+        test_file = Path(rendered_file.name)
+
+    cmd = f"sqllogictest -p {rw_config['port']} -d {rw_config['db']} {test_file}"
     log(f"Executing slt: {slt}", level=LogLevel.INFO)
-    subprocess.run(cmd, shell=True, check=True)
+    try:
+        subprocess.run(cmd, shell=True, check=True)
+    finally:
+        if rendered_file:
+            Path(rendered_file.name).unlink(missing_ok=True)
 
 
 def verify_result(args, verify_sql, verify_schema, verify_data):
@@ -131,14 +169,17 @@ def discover_test_cases() -> List[str]:
 def prepare_test_env():
     log("prepare test env", level=LogLevel.HEADER)
     log("create minio bucket", level=LogLevel.INFO)
+    repo_root = get_repo_root()
+    risedev = os.path.join(repo_root, "risedev")
     subprocess.run(
         [
-            "risedev",
+            risedev,
             "mc",
             "mb",
             "-p",
             "hummock-minio/icebergdata",
         ],
+        cwd=repo_root,
         check=True,
     )
     log("start spark connect server", level=LogLevel.INFO)

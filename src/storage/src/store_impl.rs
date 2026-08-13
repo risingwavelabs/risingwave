@@ -26,6 +26,7 @@ use futures::FutureExt;
 use futures::future::BoxFuture;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use risingwave_common::catalog::TableId;
+use risingwave_common::config::Role;
 use risingwave_common::license::Feature;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::RpcNotificationClient;
@@ -684,6 +685,7 @@ impl StateStoreImpl {
     #[expect(clippy::borrowed_box)]
     pub async fn new(
         s: &str,
+        role: Role,
         opts: Arc<StorageOpts>,
         hummock_meta_client: Arc<MonitoredHummockMetaClient>,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
@@ -723,7 +725,10 @@ impl StateStoreImpl {
                         .with_indexer_shards(opts.meta_file_cache_indexer_shards)
                         .with_flushers(opts.meta_file_cache_flushers)
                         .with_reclaimers(opts.meta_file_cache_reclaimers)
-                        .with_buffer_pool_size(opts.meta_file_cache_flush_buffer_threshold_mb * MB) // 128 MiB
+                        .with_buffer_pool_size(opts.meta_file_cache_flush_buffer_threshold_mb * MB)
+                        .with_submit_queue_size_threshold(
+                            opts.meta_file_cache_submit_queue_size_threshold_mb * MB,
+                        )
                         .with_clean_block_threshold(
                             opts.meta_file_cache_reclaimers + opts.meta_file_cache_reclaimers / 2,
                         )
@@ -772,7 +777,10 @@ impl StateStoreImpl {
                         .with_indexer_shards(opts.data_file_cache_indexer_shards)
                         .with_flushers(opts.data_file_cache_flushers)
                         .with_reclaimers(opts.data_file_cache_reclaimers)
-                        .with_buffer_pool_size(opts.data_file_cache_flush_buffer_threshold_mb * MB) // 128 MiB
+                        .with_buffer_pool_size(opts.data_file_cache_flush_buffer_threshold_mb * MB)
+                        .with_submit_queue_size_threshold(
+                            opts.data_file_cache_submit_queue_size_threshold_mb * MB,
+                        )
                         .with_clean_block_threshold(
                             opts.data_file_cache_reclaimers + opts.data_file_cache_reclaimers / 2,
                         )
@@ -862,6 +870,7 @@ impl StateStoreImpl {
                     )));
 
                 let inner = HummockStorage::new(
+                    role,
                     opts.clone(),
                     sstable_store,
                     hummock_meta_client.clone(),

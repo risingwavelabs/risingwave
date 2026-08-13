@@ -44,26 +44,28 @@ mod optimizer_context;
 pub mod plan_expr_rewriter;
 mod plan_expr_visitor;
 mod rule;
+pub mod variant_key;
 
 use std::collections::{BTreeMap, HashMap};
 use std::marker::PhantomData;
 
 use educe::Educe;
 use fixedbitset::FixedBitSet;
-use itertools::Itertools as _;
+use itertools::Itertools;
 pub use logical_optimization::*;
 pub use optimizer_context::*;
 use plan_expr_rewriter::ConstEvalRewriter;
 use property::Order;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ConflictBehavior, Field, Schema};
+use risingwave_common::catalog::{
+    ColumnCatalog, ColumnDesc, ConflictBehavior, Field, FieldDisplay, Schema,
+};
 use risingwave_common::session_config::LocalityBackfillMode;
 use risingwave_common::types::DataType;
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 use risingwave_common::util::iter_util::ZipEqDebug;
 use risingwave_connector::WithPropertiesExt;
 use risingwave_connector::sink::catalog::SinkFormatDesc;
-use risingwave_pb::stream_plan::StreamScanType;
 
 use self::heuristic_optimizer::ApplyOrder;
 use self::plan_node::generic::{self, PhysicalPlanRef};
@@ -77,6 +79,7 @@ use self::plan_visitor::InputRefValidator;
 use self::plan_visitor::{CardinalityVisitor, StreamKeyChecker, has_batch_exchange};
 use self::property::{Cardinality, RequiredDist};
 use self::rule::*;
+use self::variant_key::variant_key_error;
 use crate::TableCatalog;
 use crate::catalog::table_catalog::TableType;
 use crate::catalog::{DatabaseId, SchemaId};
@@ -260,7 +263,7 @@ fn resolve_locality_backfill(
         LocalityBackfillMode::Off => false,
         LocalityBackfillMode::On => true,
         LocalityBackfillMode::Auto => {
-            if backfill_type == BackfillType::UpstreamOnly
+            if backfill_type.without_snapshot()
                 || risingwave_common::license::Feature::LocalityBackfill
                     .check_available()
                     .is_err()
@@ -300,7 +303,7 @@ impl LogicalPlanRoot {
         use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
         use crate::utils::{Condition, IndexSet};
 
-        let Ok(select_idx) = self.out_fields.ones().exactly_one() else {
+        let Ok(select_idx) = Itertools::exactly_one(self.out_fields.ones()) else {
             bail!("subquery must return only one column");
         };
         let input_column_type = self.plan.schema().fields()[select_idx].data_type();
@@ -356,8 +359,28 @@ impl LogicalPlanRoot {
 }
 
 impl BatchOptimizedLogicalPlanRoot {
+    /// Rejects `VARIANT` wherever a batch plan would group, deduplicate or order by it. See
+    /// [`crate::optimizer::variant_key`] for why this is batch's last line of defense.
+    fn reject_variant_keys(&self) -> Result<()> {
+        if let Some(err) = StreamKeyChecker::Variant.visit(self.plan.clone()) {
+            return Err(variant_key_error(err));
+        }
+        let schema = self.plan.schema();
+        for order in &self.required_order.column_orders {
+            let field = &schema[order.column_index];
+            if field.data_type().contains_variant() {
+                return Err(variant_key_error(format!(
+                    "VARIANT column \"{}\" should not be in the ORDER BY.",
+                    FieldDisplay(field)
+                )));
+            }
+        }
+        Ok(())
+    }
+
     /// Optimize and generate a singleton batch physical plan without exchange nodes.
     pub fn gen_batch_plan(self) -> Result<BatchPlanRoot> {
+        self.reject_variant_keys()?;
         if TemporalJoinValidator::exist_dangling_temporal_scan(self.plan.clone()) {
             return Err(ErrorCode::NotSupported(
                 "do not support temporal join for batch queries".to_owned(),
@@ -562,10 +585,8 @@ impl LogicalPlanRoot {
     pub(crate) fn derive_backfill_type(&self, allow_snapshot_backfill: bool) -> BackfillType {
         if allow_snapshot_backfill && self.should_use_snapshot_backfill() {
             BackfillType::SnapshotBackfill
-        } else if self.should_use_arrangement_backfill() {
-            BackfillType::ArrangementBackfill
         } else {
-            BackfillType::Backfill
+            BackfillType::ArrangementBackfill
         }
     }
 
@@ -709,11 +730,14 @@ impl LogicalPlanRoot {
 
         let plan = {
             {
+                if let Some(err) = StreamKeyChecker::Variant.visit(self.plan.clone()) {
+                    return Err(variant_key_error(err));
+                }
                 if !ctx
                     .session_ctx()
                     .config()
                     .streaming_allow_jsonb_in_stream_key()
-                    && let Some(err) = StreamKeyChecker.visit(self.plan.clone())
+                    && let Some(err) = StreamKeyChecker::Jsonb.visit(self.plan.clone())
                 {
                     return Err(ErrorCode::NotSupported(
                         err,
@@ -881,7 +905,9 @@ impl LogicalPlanRoot {
 
         let kind = if let Some(row_id_index) = row_id_index {
             assert_eq!(
-                pk_column_indices.iter().exactly_one().copied().unwrap(),
+                Itertools::exactly_one(pk_column_indices.iter())
+                    .copied()
+                    .unwrap(),
                 row_id_index
             );
             if append_only {
@@ -922,7 +948,15 @@ impl LogicalPlanRoot {
                 context.clone(),
                 None,
             )
-            .and_then(|s| s.to_stream(&mut ToStreamContext::new(false)))?;
+            .and_then(|s| {
+                s.to_stream(&mut ToStreamContext::new_with_backfill_type(
+                    false,
+                    // Dummy DML source planning does not create stream table scans, so this
+                    // required context value is only a placeholder and is not used for backfill
+                    // selection.
+                    BackfillType::ArrangementBackfill,
+                ))
+            })?;
             let mut external_source_node = stream_plan.plan;
             external_source_node =
                 inject_project_for_generated_column_if_needed(&columns, external_source_node)?;
@@ -1056,15 +1090,14 @@ impl LogicalPlanRoot {
         let refreshable = source_catalog
             .as_ref()
             .map(|catalog| {
-                catalog.with_properties.is_batch_connector() || {
-                    matches!(
+                catalog.with_properties.supports_full_reload_refresh()
+                    && matches!(
                         catalog
                             .refresh_mode
                             .as_ref()
                             .map(|refresh_mode| refresh_mode.refresh_mode),
                         Some(Some(RefreshMode::FullReload(_)))
                     )
-                }
             })
             .unwrap_or(false);
 
@@ -1184,16 +1217,30 @@ impl LogicalPlanRoot {
         db_name: String,
         sink_from_table_name: String,
         format_desc: Option<SinkFormatDesc>,
-        without_backfill: bool,
+        without_snapshot: bool,
+        since_timestamp: bool,
+        is_iceberg_engine_internal: bool,
         target_table: Option<Arc<TableCatalog>>,
         partition_info: Option<PartitionComputeInfo>,
         user_specified_columns: bool,
         auto_refresh_schema_from_table: Option<Arc<TableCatalog>>,
-        allow_snapshot_backfill: bool,
     ) -> Result<StreamSink> {
-        let backfill_type = if without_backfill {
-            BackfillType::UpstreamOnly
-        } else if allow_snapshot_backfill
+        let backfill_type = if since_timestamp {
+            assert!(
+                target_table.is_none(),
+                "should not allow since_timestamp for sink-into-table"
+            );
+            if is_iceberg_engine_internal {
+                return Err(ErrorCode::InvalidInputSyntax(
+                    "since_timestamp is not allowed for this sink".to_owned(),
+                )
+                .into());
+            }
+            BackfillType::SnapshotBackfillSinceTimestamp
+        } else if without_snapshot {
+            BackfillType::UpstreamOnlySink
+        } else if target_table.is_none()
+            && !is_iceberg_engine_internal
             && self.should_use_snapshot_backfill()
             && {
                 if auto_refresh_schema_from_table.is_some() {
@@ -1210,10 +1257,8 @@ impl LogicalPlanRoot {
             );
             // Snapshot backfill on sink-into-table is not allowed
             BackfillType::SnapshotBackfill
-        } else if self.should_use_arrangement_backfill() {
-            BackfillType::ArrangementBackfill
         } else {
-            BackfillType::Backfill
+            BackfillType::ArrangementBackfill
         };
         if auto_refresh_schema_from_table.is_some()
             && backfill_type != BackfillType::ArrangementBackfill
@@ -1243,17 +1288,6 @@ impl LogicalPlanRoot {
             partition_info,
             auto_refresh_schema_from_table,
         )
-    }
-
-    pub fn should_use_arrangement_backfill(&self) -> bool {
-        let ctx = self.plan.ctx();
-        let session_ctx = ctx.session_ctx();
-        let arrangement_backfill_enabled = session_ctx
-            .env()
-            .streaming_config()
-            .developer
-            .enable_arrangement_backfill;
-        arrangement_backfill_enabled && session_ctx.config().streaming_use_arrangement_backfill()
     }
 
     pub fn should_use_snapshot_backfill(&self) -> bool {
@@ -1323,6 +1357,7 @@ fn find_version_column_indices(
         for (index, column) in column_catalog.iter().enumerate() {
             if column.column_desc.name == version_column_name {
                 if let &DataType::Jsonb
+                | &DataType::Variant
                 | &DataType::List(_)
                 | &DataType::Struct(_)
                 | &DataType::Bytea
@@ -1400,6 +1435,10 @@ impl BatchPlanRef {
             || self.node_type() == BatchPlanNodeType::BatchIcebergScan
     }
 
+    fn is_lookup_join(&self) -> bool {
+        self.node_type() == BatchPlanNodeType::BatchLookupJoin
+    }
+
     fn is_insert(&self) -> bool {
         self.node_type() == BatchPlanNodeType::BatchInsert
     }
@@ -1426,6 +1465,10 @@ fn require_additional_exchange_on_root_in_distributed_mode(plan: BatchPlanRef) -
             || plan.is_insert()
             || plan.is_update()
             || plan.is_delete()
+            // A lookup join on a singleton lookup table may be already in `Single`
+            // distribution and reads from the state store, so it must not be executed
+            // in the root stage on the frontend.
+            || plan.is_lookup_join()
     })
 }
 

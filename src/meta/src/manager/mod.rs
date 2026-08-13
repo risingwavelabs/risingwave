@@ -15,7 +15,9 @@
 pub mod diagnose;
 mod env;
 pub mod event_log;
+mod exactly_once_util;
 pub mod iceberg_compaction;
+pub mod iceberg_pk_index_sink;
 mod idle;
 mod license;
 mod metadata;

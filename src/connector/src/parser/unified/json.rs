@@ -137,6 +137,7 @@ impl TimestamptzHandling {
 #[derive(Clone, Debug)]
 pub enum TimestampHandling {
     Milli,
+    Micro,
     GuessNumberUnit,
 }
 
@@ -571,18 +572,23 @@ impl JsonParseOptions {
             (
                 DataType::Timestamp,
                 ValueType::I64 | ValueType::I128 | ValueType::U64 | ValueType::U128,
-            ) => {
-                match self.timestamp_handling {
+            ) => value
+                .as_i64()
+                .map(|num| match self.timestamp_handling {
                     // Only when user configures debezium.time.precision.mode = 'connect',
                     // the Milli branch will be executed
-                    TimestampHandling::Milli => Timestamp::with_millis(value.as_i64().unwrap())
-                        .map_err(|_| create_error())?
-                        .into(),
-                    TimestampHandling::GuessNumberUnit => i64_to_timestamp(value.as_i64().unwrap())
-                        .map_err(|_| create_error())?
-                        .into(),
-                }
-            }
+                    TimestampHandling::Milli => {
+                        Timestamp::with_millis(num).map_err(|_| create_error())
+                    }
+                    TimestampHandling::Micro => {
+                        Timestamp::with_micros(num).map_err(|_| create_error())
+                    }
+                    TimestampHandling::GuessNumberUnit => {
+                        i64_to_timestamp(num).map_err(|_| create_error())
+                    }
+                })
+                .ok_or_else(create_error)??
+                .into(),
             // ---- Timestamptz -----
             (DataType::Timestamptz, ValueType::String) => match self.timestamptz_handling {
                 TimestamptzHandling::UtcWithoutSuffix => value
@@ -590,7 +596,7 @@ impl JsonParseOptions {
                     .unwrap()
                     .parse::<Timestamp>()
                     .map(|naive_utc| {
-                        Timestamptz::from_micros(naive_utc.0.and_utc().timestamp_micros())
+                        Timestamptz::from_micros_uncheck(naive_utc.0.and_utc().timestamp_micros())
                     })
                     .map_err(|_| create_error())?
                     .into(),
@@ -609,7 +615,7 @@ impl JsonParseOptions {
                 .as_i64()
                 .and_then(|num| match self.timestamptz_handling {
                     TimestamptzHandling::GuessNumberUnit => i64_to_timestamptz(num).ok(),
-                    TimestamptzHandling::Micro => Some(Timestamptz::from_micros(num)),
+                    TimestamptzHandling::Micro => Timestamptz::from_micros(num),
                     TimestamptzHandling::Milli => Timestamptz::from_millis(num),
                     // When explicitly requested string format, number without units are rejected.
                     TimestamptzHandling::UtcString | TimestamptzHandling::UtcWithoutSuffix => None,

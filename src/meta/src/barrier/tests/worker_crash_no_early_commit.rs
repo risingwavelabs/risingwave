@@ -20,7 +20,7 @@ use anyhow::anyhow;
 use futures::StreamExt;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::id::JobId;
+use risingwave_common::id::{JobId, PartialGraphId, SinkId};
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::{
@@ -93,6 +93,14 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
         };
         assert!(blocked_databases.is_empty());
         self.0.send(ContextRequest::MarkReady).unwrap();
+    }
+
+    async fn resolve_log_store_epoch<'a>(
+        &'a self,
+        _upstream_table_ids: impl Iterator<Item = risingwave_common::catalog::TableId> + Send + 'a,
+        _since_epoch: u64,
+    ) -> MetaResult<crate::barrier::command::SinceTimestampResolvedEpoch> {
+        Ok(Default::default())
     }
 
     async fn post_collect_command(&self, _command: PostCollectCommand) -> MetaResult<()> {
@@ -168,6 +176,29 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
         _last_committed_epoch: u64,
     ) -> MetaResult<crate::barrier::checkpoint::independent_job::BatchRefreshJobTriggerContext>
     {
+        unimplemented!()
+    }
+
+    async fn pre_commit_iceberg_pk_index_sink_metadata(
+        &self,
+        _reports: Vec<
+            risingwave_pb::stream_service::barrier_complete_response::IcebergPkIndexSinkMetadata,
+        >,
+    ) -> MetaResult<Vec<SinkId>> {
+        unimplemented!()
+    }
+
+    async fn commit_iceberg_pk_index_sink_metadata(
+        &self,
+        _sink_ids: Vec<SinkId>,
+    ) -> MetaResult<()> {
+        unimplemented!()
+    }
+
+    fn advance_iceberg_pk_index_sink_committed_epochs(
+        &self,
+        _epochs: impl IntoIterator<Item = (PartialGraphId, u64)>,
+    ) {
         unimplemented!()
     }
 }

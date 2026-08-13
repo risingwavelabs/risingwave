@@ -50,10 +50,8 @@ pub fn infer_type_with_sigmap(
                 return res;
             }
         }
-        FuncName::Aggregate(agg_kind) => {
-            if *agg_kind == PbAggKind::Grouping {
-                return Ok(DataType::Int32);
-            }
+        FuncName::Aggregate(agg_kind) if *agg_kind == PbAggKind::Grouping => {
+            return Ok(DataType::Int32);
         }
         _ => {}
     }

@@ -4,7 +4,8 @@ system ok
 psql -c "
     DROP TABLE IF EXISTS t;
     CREATE EXTENSION IF NOT EXISTS citext;
-    CREATE TYPE mood_enum AS ENUM ('happy', 'sad', 'angry');
+    DROP TYPE IF EXISTS mood_enum_2;
+    CREATE TYPE mood_enum_2 AS ENUM ('happy', 'sad', 'angry');
     CREATE TABLE t (
         v1 bigserial PRIMARY KEY,
         v2 jsonb NOT NULL,
@@ -47,7 +48,7 @@ psql -c "
         v39 macaddr8,
         v40 int[],
         v41 bit(1),
-        v42 mood_enum,
+        v42 mood_enum_2,
         v43 smallserial,
         v44 serial,
         v45 bigserial,
@@ -426,7 +427,7 @@ psql -c "
     DROP TABLE IF EXISTS t_bit;
     DROP TABLE IF EXISTS t_hstore;
     DROP TABLE IF EXISTS t_bit8;
-    DROP TYPE IF EXISTS mood_enum;
+    DROP TYPE IF EXISTS mood_enum_2;
     DROP EXTENSION IF EXISTS citext;
     DROP EXTENSION IF EXISTS ltree;
     DROP EXTENSION IF EXISTS hstore;

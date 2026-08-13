@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::time::Duration;
+
 use anyhow::anyhow;
 use chrono::{DateTime, NaiveDate, NaiveDateTime, NaiveTime, Utc};
 use pg_interval::Interval;
@@ -83,6 +85,8 @@ impl TestSuite {
         self.simple_cancel(true).await?;
         self.complex_cancel(false).await?;
         self.complex_cancel(true).await?;
+        self.subscription_fetch_cancel(false).await?;
+        self.subscription_fetch_cancel(true).await?;
         self.subquery_with_param().await?;
         self.create_mview_with_parameter().await?;
         Ok(())
@@ -580,6 +584,55 @@ impl TestSuite {
         new_client.execute("drop table t1", &[]).await?;
         new_client.execute("drop table t2", &[]).await?;
         new_client.execute("drop table t3", &[]).await?;
+        Ok(())
+    }
+
+    async fn subscription_fetch_cancel(&self, is_distributed: bool) -> anyhow::Result<()> {
+        let client = self.create_client(is_distributed).await?;
+        let suffix = if is_distributed { "dist" } else { "local" };
+        let table_name = format!("sub_cancel_t_{suffix}");
+        let subscription_name = format!("sub_cancel_{suffix}");
+
+        client
+            .execute(&format!("create table {table_name}(v int)"), &[])
+            .await?;
+        client
+            .execute(
+                &format!("create subscription {subscription_name} from {table_name} with(retention = '1D')"),
+                &[],
+            )
+            .await?;
+        client
+            .execute(
+                &format!("declare cur subscription cursor for {subscription_name} since now()"),
+                &[],
+            )
+            .await?;
+
+        let cancel_token = client.cancel_token();
+        let fetch_handle = tokio::spawn(async move {
+            client
+                .query("fetch 1 from cur with (timeout = '60s')", &[])
+                .await
+        });
+
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        cancel_token.cancel_query(NoTls).await?;
+
+        let result = tokio::time::timeout(Duration::from_secs(10), fetch_handle).await??;
+        if result.is_ok() {
+            return Err(anyhow!(
+                "subscription cursor fetch should be cancelled by CancelRequest"
+            ));
+        }
+
+        let cleanup_client = self.create_client(is_distributed).await?;
+        cleanup_client
+            .execute(&format!("drop subscription {subscription_name}"), &[])
+            .await?;
+        cleanup_client
+            .execute(&format!("drop table {table_name}"), &[])
+            .await?;
         Ok(())
     }
 

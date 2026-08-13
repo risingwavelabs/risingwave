@@ -54,8 +54,9 @@ macro_rules! commit_multi_var_with_provided_txn {
     };
 }
 
+pub(crate) use commit_multi_var;
+pub(crate) use commit_multi_var_with_provided_txn;
 use risingwave_hummock_sdk::ObjectIdRange;
-pub(crate) use {commit_multi_var, commit_multi_var_with_provided_txn};
 
 use crate::hummock::HummockManager;
 use crate::hummock::error::Result;

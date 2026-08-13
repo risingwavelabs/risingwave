@@ -172,7 +172,8 @@ impl<R: Rng> SqlGenerator<'_, R> {
 }
 
 fn make_unary_op(func: ExprType, expr: &Expr) -> Option<Expr> {
-    use {ExprType as E, UnaryOperator as U};
+    use ExprType as E;
+    use UnaryOperator as U;
     let unary_op = match func {
         E::Neg => U::Minus,
         E::Not => U::Not,
@@ -267,7 +268,8 @@ pub fn make_simple_func(func_name: &str, exprs: &[Expr]) -> Function {
 }
 
 fn make_bin_op(func: ExprType, exprs: &[Expr]) -> Option<Expr> {
-    use {BinaryOperator as B, ExprType as E};
+    use BinaryOperator as B;
+    use ExprType as E;
     let bin_op = match func {
         E::Add => B::Plus,
         E::Subtract => B::Minus,

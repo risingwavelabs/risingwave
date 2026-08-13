@@ -440,16 +440,14 @@ impl IndexSelectionRule {
             for (column_index, expr) in iter {
                 let mut index_paths = vec![];
                 let conjunctions = to_conjunctions(expr);
-                index_paths.extend(
-                    self.gen_index_path(column_index, &conjunctions, logical_scan)
-                        .into_iter(),
-                );
+                index_paths.extend(self.gen_index_path(column_index, &conjunctions, logical_scan));
                 // complex condition, recursively gen paths
                 if conjunctions.len() > 1 {
-                    index_paths.extend(
-                        self.gen_paths(&conjunctions, logical_scan, primary_table_row_size)
-                            .into_iter(),
-                    );
+                    index_paths.extend(self.gen_paths(
+                        &conjunctions,
+                        logical_scan,
+                        primary_table_row_size,
+                    ));
                 }
 
                 match self.choose_min_cost_path(&index_paths, primary_table_row_size) {
@@ -793,6 +791,7 @@ impl<'a> TableScanIoEstimator<'a> {
             DataType::Varchar => 20,
             DataType::Bytea => 20,
             DataType::Jsonb => 20,
+            DataType::Variant => 20,
             DataType::Struct { .. } => 20,
             DataType::List { .. } => 20,
             DataType::Map(_) => 20,

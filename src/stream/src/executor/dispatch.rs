@@ -43,8 +43,8 @@ use super::{
     AddMutation, DispatcherBarriers, DispatcherMessageBatch, MessageBatch, TroublemakerExecutor,
     UpdateMutation,
 };
+use crate::executor::StreamConsumer;
 use crate::executor::prelude::*;
-use crate::executor::{StopMutation, StreamConsumer};
 use crate::task::{DispatcherId, NewOutputRequest};
 
 mod dispatch_sync_log_store;
@@ -376,34 +376,22 @@ impl DispatchExecutorInner {
             return Ok(());
         };
 
-        match mutation {
-            Mutation::Stop(StopMutation { dropped_actors, .. }) => {
-                // Remove outputs only if this actor itself is not to be stopped.
-                if !dropped_actors.contains(&self.actor_id) {
-                    for dispatcher in &mut self.dispatchers {
-                        dispatcher.remove_outputs(dropped_actors);
-                    }
-                }
+        if let Mutation::Update(UpdateMutation { dispatchers, .. }) = mutation
+            && let Some(updates) = dispatchers.get(&self.actor_id)
+        {
+            for update in updates {
+                self.post_update_dispatcher(update)?;
             }
-            Mutation::Update(UpdateMutation {
-                dispatchers,
-                dropped_actors,
-                ..
-            }) => {
-                if let Some(updates) = dispatchers.get(&self.actor_id) {
-                    for update in updates {
-                        self.post_update_dispatcher(update)?;
-                    }
-                }
-
-                if !dropped_actors.contains(&self.actor_id) {
-                    for dispatcher in &mut self.dispatchers {
-                        dispatcher.remove_outputs(dropped_actors);
-                    }
-                }
-            }
-            _ => {}
         };
+
+        if let Some(dropped_actors) = mutation.all_stop_actors()
+            // Remove outputs only if this actor itself is not to be stopped.
+            && !dropped_actors.contains(&self.actor_id)
+        {
+            for dispatcher in &mut self.dispatchers {
+                dispatcher.remove_outputs(dropped_actors);
+            }
+        }
 
         // After stopping the downstream mview, the outputs of some dispatcher might be empty and we
         // should clean up them.
@@ -1236,22 +1224,16 @@ impl Dispatcher for SimpleDispatcher {
     }
 
     async fn dispatch_data(&mut self, chunk: StreamChunk) -> StreamResult<()> {
-        let output = self
-            .output
-            .iter_mut()
-            .exactly_one()
-            .expect("expect exactly one output");
+        let output =
+            Itertools::exactly_one(self.output.iter_mut()).expect("expect exactly one output");
 
         let chunk = self.output_mapping.apply(chunk);
         output.send(DispatcherMessageBatch::Chunk(chunk)).await
     }
 
     async fn dispatch_watermark(&mut self, watermark: Watermark) -> StreamResult<()> {
-        let output = self
-            .output
-            .iter_mut()
-            .exactly_one()
-            .expect("expect exactly one output");
+        let output =
+            Itertools::exactly_one(self.output.iter_mut()).expect("expect exactly one output");
 
         if let Some(watermark) = self.output_mapping.apply_watermark(watermark) {
             output

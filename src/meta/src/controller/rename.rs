@@ -36,10 +36,8 @@ pub fn alter_relation_rename(definition: &str, new_name: &str) -> String {
         return definition.into();
     }
     let ast = Parser::parse_sql(definition).expect("failed to parse relation definition");
-    let mut stmt = ast
-        .into_iter()
-        .exactly_one()
-        .expect("should contains only one statement");
+    let mut stmt =
+        Itertools::exactly_one(ast.into_iter()).expect("should contains only one statement");
 
     match &mut stmt {
         Statement::CreateTable { name, .. }
@@ -72,10 +70,8 @@ pub fn alter_relation_rename(definition: &str, new_name: &str) -> String {
 /// target relation's `Create` statement.
 pub fn alter_relation_rename_refs(definition: &str, from: &str, to: &str) -> String {
     let ast = Parser::parse_sql(definition).expect("failed to parse relation definition");
-    let mut stmt = ast
-        .into_iter()
-        .exactly_one()
-        .expect("should contains only one statement");
+    let mut stmt =
+        Itertools::exactly_one(ast.into_iter()).expect("should contains only one statement");
 
     match &mut stmt {
         Statement::CreateTable {

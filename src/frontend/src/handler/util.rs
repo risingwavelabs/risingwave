@@ -580,7 +580,8 @@ mod tests {
 
     #[test]
     fn test_value_format() {
-        use {DataType as T, ScalarRefImpl as S};
+        use DataType as T;
+        use ScalarRefImpl as S;
         let static_session = StaticSessionData {
             timezone: "UTC".into(),
         };
@@ -624,7 +625,7 @@ mod tests {
         assert_eq!(
             &f(
                 &T::Timestamptz,
-                S::Timestamptz(Timestamptz::from_micros(-1)),
+                S::Timestamptz(Timestamptz::from_micros(-1).unwrap()),
                 Format::Text
             ),
             "1969-12-31 23:59:59.999999+00:00"

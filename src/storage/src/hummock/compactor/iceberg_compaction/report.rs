@@ -18,6 +18,7 @@ use std::time::SystemTime;
 use risingwave_pb::iceberg_compaction::{
     SubscribeIcebergCompactionEventRequest, subscribe_iceberg_compaction_event_request,
 };
+use risingwave_pb::id::IcebergCompactionTaskId;
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc;
 
@@ -38,8 +39,10 @@ pub(crate) enum ReportSendResult {
 
 pub(crate) struct IcebergTaskTracker {
     sink_id: u32,
+    total_plans: usize,
     remaining_plans: usize,
     successful_plans: usize,
+    failed_plans: usize,
     first_error: Option<String>,
 }
 
@@ -47,8 +50,10 @@ impl IcebergTaskTracker {
     pub(crate) fn new(sink_id: u32, remaining_plans: usize) -> Self {
         Self {
             sink_id,
+            total_plans: remaining_plans,
             remaining_plans,
             successful_plans: 0,
+            failed_plans: 0,
             first_error: None,
         }
     }
@@ -57,6 +62,7 @@ impl IcebergTaskTracker {
         debug_assert!(self.remaining_plans > 0);
         self.remaining_plans -= 1;
         if let Some(error_message) = error_message {
+            self.failed_plans += 1;
             if self.first_error.is_none() {
                 self.first_error = Some(error_message);
             }
@@ -69,7 +75,23 @@ impl IcebergTaskTracker {
         self.remaining_plans == 0
     }
 
-    pub(crate) fn into_report(self, task_id: u64) -> IcebergTaskReport {
+    pub(crate) fn sink_id(&self) -> u32 {
+        self.sink_id
+    }
+
+    pub(crate) fn total_plans(&self) -> usize {
+        self.total_plans
+    }
+
+    pub(crate) fn successful_plans(&self) -> usize {
+        self.successful_plans
+    }
+
+    pub(crate) fn failed_plans(&self) -> usize {
+        self.failed_plans
+    }
+
+    pub(crate) fn into_report(self, task_id: IcebergCompactionTaskId) -> IcebergTaskReport {
         let error_message = if self.successful_plans > 0 {
             None
         } else {
@@ -83,7 +105,7 @@ impl IcebergTaskTracker {
 }
 
 pub(crate) fn build_iceberg_task_report(
-    task_id: u64,
+    task_id: IcebergCompactionTaskId,
     sink_id: u32,
     error_message: Option<String>,
 ) -> IcebergTaskReport {
@@ -113,10 +135,12 @@ pub(crate) fn send_iceberg_task_report(
             .as_millis() as u64,
     }) {
         tracing::warn!(
+            iceberg_component = "compaction_worker",
+            iceberg_operation = "report_task",
             error = %e.as_report(),
-            task_id = report_event.task_id,
+            task_id = %report_event.task_id,
             sink_id = report_event.sink_id,
-            "Failed to report iceberg compaction task result - will retry on stream restart"
+            "iceberg_compaction_task_report_send_failed",
         );
         return Err(report_event);
     }
@@ -160,7 +184,7 @@ mod tests {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
         drop(rx);
 
-        let report = build_iceberg_task_report(7, 9, Some("send failure".to_owned()));
+        let report = build_iceberg_task_report(7.into(), 9, Some("send failure".to_owned()));
         let failed_report = send_iceberg_task_report(&tx, report.clone()).unwrap_err();
 
         assert_eq!(failed_report.task_id, report.task_id);
@@ -173,7 +197,7 @@ mod tests {
         let mut tracker = IcebergTaskTracker::new(9, 1);
         tracker.record_completion(None);
 
-        let report = tracker.into_report(7);
+        let report = tracker.into_report(7.into());
 
         assert_eq!(
             report.status,
@@ -188,7 +212,7 @@ mod tests {
         tracker.record_completion(Some("first failure".to_owned()));
         tracker.record_completion(Some("second failure".to_owned()));
 
-        let report = tracker.into_report(7);
+        let report = tracker.into_report(7.into());
 
         assert_eq!(
             report.status,

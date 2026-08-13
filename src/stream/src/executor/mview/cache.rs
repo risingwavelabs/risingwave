@@ -449,7 +449,6 @@ fn versions_are_newer_or_equal(
 
 /// TOAST column handling for CDC tables with TOAST columns.
 mod toast {
-    use risingwave_common::row::Row as _;
     use risingwave_common::types::{DEBEZIUM_UNAVAILABLE_VALUE, DEBEZIUM_UNAVAILABLE_VECTOR_ELEM};
 
     use super::*;
@@ -499,17 +498,15 @@ mod toast {
                         .iter()
                         .all(|f| f.0 == DEBEZIUM_UNAVAILABLE_VECTOR_ELEM)
             }
-            Some(risingwave_common::types::ScalarRefImpl::List(list_ref)) => {
-                // For list type, check if it contains exactly one element with the unavailable value
-                // This is because when any element in an array triggers TOAST, Debezium treats the entire
-                // array as unchanged and sends a placeholder array with only one element
-                if list_ref.len() == 1 {
-                    if let Some(Some(element)) = list_ref.get(0) {
-                        // Recursively check the array element
-                        is_debezium_unavailable_value(&Some(element))
-                    } else {
-                        false
-                    }
+            // For list type, check if it contains exactly one element with the unavailable value.
+            // This is because when any element in an array triggers TOAST, Debezium treats the
+            // entire array as unchanged and sends a placeholder array with only one element.
+            Some(risingwave_common::types::ScalarRefImpl::List(list_ref))
+                if list_ref.len() == 1 =>
+            {
+                if let Some(Some(element)) = list_ref.get(0) {
+                    // Recursively check the array element
+                    is_debezium_unavailable_value(&Some(element))
                 } else {
                     false
                 }

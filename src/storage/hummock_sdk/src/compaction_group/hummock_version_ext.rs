@@ -56,7 +56,7 @@ pub struct SstDeltaInfo {
 
 pub type BranchedSstInfo = HashMap<CompactionGroupId, Vec<HummockSstableId>>;
 
-impl<L> HummockVersionCommon<SstableInfo, L> {
+impl HummockVersionCommon<SstableInfo> {
     pub fn get_compaction_group_levels(&self, compaction_group_id: CompactionGroupId) -> &Levels {
         self.levels
             .get(&compaction_group_id)
@@ -72,7 +72,7 @@ impl<L> HummockVersionCommon<SstableInfo, L> {
             .unwrap_or_else(|| panic!("compaction group {} does not exist", compaction_group_id))
     }
 
-    // only scan the sst infos from levels in the specified compaction group (without table change log)
+    // Only scan SST infos from levels in the specified compaction group.
     pub fn get_sst_ids_by_group_id(
         &self,
         compaction_group_id: CompactionGroupId,
@@ -231,7 +231,7 @@ pub fn safe_epoch_read_table_watermarks_impl(
         .collect()
 }
 
-impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
+impl HummockVersionCommon<SstableInfo> {
     pub fn count_new_ssts_in_group_split(
         &self,
         parent_group_id: CompactionGroupId,
@@ -395,7 +395,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
 
     pub fn build_sst_delta_infos(
         &self,
-        version_delta: &HummockVersionDeltaCommon<SstableInfo, L>,
+        version_delta: &HummockVersionDeltaCommon<SstableInfo>,
     ) -> Vec<SstDeltaInfo> {
         let mut infos = vec![];
 
@@ -502,7 +502,7 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
 
     pub fn apply_version_delta(
         &mut self,
-        version_delta: &HummockVersionDeltaCommon<SstableInfo, L>,
+        version_delta: &HummockVersionDeltaCommon<SstableInfo>,
     ) -> HashMap<TableId, Option<StateTableInfo>> {
         assert_eq!(self.id, version_delta.prev_id);
 
@@ -701,6 +701,9 @@ impl<L: Clone> HummockVersionCommon<SstableInfo, L> {
             } else {
                 modified_table_watermarks.insert(*table_id, Some(table_watermarks.clone()));
             }
+        }
+        for table_id in &version_delta.removed_table_ids {
+            modified_table_watermarks.insert(*table_id, None);
         }
         for (table_id, table_watermarks) in &self.table_watermarks {
             let safe_epoch = if let Some(state_table_info) =
@@ -1133,7 +1136,7 @@ impl Levels {
     }
 }
 
-impl<T, L> HummockVersionCommon<T, L> {
+impl<T> HummockVersionCommon<T> {
     pub fn get_combined_levels(&self) -> impl Iterator<Item = &'_ LevelCommon<T>> + '_ {
         self.levels
             .values()
@@ -1617,8 +1620,10 @@ pub fn validate_version(version: &HummockVersion) -> Vec<String> {
 #[cfg(test)]
 mod tests {
     use std::collections::{HashMap, HashSet};
+    use std::sync::Arc;
 
     use bytes::Bytes;
+    use risingwave_common::bitmap::Bitmap;
     use risingwave_common::catalog::TableId;
     use risingwave_common::hash::VirtualNode;
     use risingwave_common::util::epoch::test_epoch;
@@ -1634,6 +1639,9 @@ mod tests {
     use crate::key_range::KeyRange;
     use crate::level::{Level, Levels, OverlappingLevel};
     use crate::sstable_info::{SstableInfo, SstableInfoInner};
+    use crate::table_watermark::{
+        TableWatermarks, VnodeWatermark, WatermarkDirection, WatermarkSerdeType,
+    };
     use crate::version::{
         GroupDelta, GroupDeltas, HummockVersion, HummockVersionDelta, HummockVersionStateTableInfo,
         IntraLevelDelta,
@@ -3064,6 +3072,38 @@ mod tests {
         assert_eq!(cg.levels[0].uncompressed_file_size, 160);
 
         assert_eq!(cg.compaction_group_version_id, 1);
+    }
+
+    #[test]
+    fn test_apply_version_delta_removes_dropped_table_watermark() {
+        let table_id = TableId::new(100);
+        let mut version = HummockVersion {
+            id: HummockVersionId::new(0),
+            table_watermarks: HashMap::from([(
+                table_id,
+                Arc::new(TableWatermarks::single_epoch(
+                    test_epoch(1),
+                    vec![VnodeWatermark::new(
+                        Arc::new(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+                        Bytes::from_static(b"watermark"),
+                    )],
+                    WatermarkDirection::Ascending,
+                    WatermarkSerdeType::PkPrefix,
+                )),
+            )]),
+            ..Default::default()
+        };
+
+        let version_delta = HummockVersionDelta {
+            id: HummockVersionId::new(1),
+            prev_id: HummockVersionId::new(0),
+            removed_table_ids: HashSet::from([table_id]),
+            ..Default::default()
+        };
+
+        version.apply_version_delta(&version_delta);
+
+        assert!(!version.table_watermarks.contains_key(&table_id));
     }
 
     #[test]

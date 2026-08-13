@@ -12,12 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::assert_matches::assert_matches;
 use std::collections::HashMap;
-use std::mem;
 use std::pin::pin;
 use std::sync::Arc;
 use std::time::Duration;
+use std::{assert_matches, mem};
 
 use StageEvent::Failed;
 use anyhow::anyhow;
@@ -804,7 +803,7 @@ impl StageRunner {
             )?;
             let id_to_worker_slots = self
                 .worker_node_manager
-                .fragment_mapping(fragment_id)?
+                .fragment_mapping(fragment_id, self.query.batch_parallelism())?
                 .iter_unique()
                 .collect_vec();
 

@@ -44,9 +44,9 @@ pub use storage::{
 pub mod merge;
 pub mod mutate;
 pub mod none_as_empty_string;
+pub mod role;
 pub mod system;
 pub mod utils;
-
 use std::collections::BTreeMap;
 use std::fs;
 use std::num::NonZeroUsize;
@@ -58,6 +58,7 @@ pub use merge::*;
 use risingwave_common_proc_macro::ConfigDoc;
 pub use risingwave_common_proc_macro::OverrideConfig;
 use risingwave_pb::meta::SystemParams;
+pub use role::*;
 use serde::{Deserialize, Serialize, Serializer};
 use serde_default::DefaultFromSerde;
 use serde_json::Value;
@@ -166,6 +167,8 @@ impl RwConfig {
 pub mod default {
 
     pub mod developer {
+        use crate::config::streaming::CacheRefillPolicy;
+
         pub fn meta_cached_traces_num() -> u32 {
             256
         }
@@ -233,6 +236,14 @@ pub mod default {
         }
 
         pub fn stream_exchange_concurrent_dispatchers() -> usize {
+            0
+        }
+
+        pub fn stream_project_expr_concurrency() -> usize {
+            1
+        }
+
+        pub fn stream_project_expr_inflight_request_concurrency() -> usize {
             0
         }
 
@@ -466,6 +477,10 @@ pub mod default {
             false
         }
 
+        pub fn cache_refill_policy() -> CacheRefillPolicy {
+            CacheRefillPolicy::Enabled
+        }
+
         pub fn enable_vnode_key_stats_for_materialize() -> bool {
             false
         }
@@ -548,11 +563,6 @@ pub mod tests {
                 ("streaming_parallelism_for_table", "default"),
             ]
         );
-    }
-
-    #[test]
-    fn test_session_init_default_is_empty() {
-        assert!(SessionInitConfig::default().entries().is_empty());
     }
 
     #[test]
@@ -882,15 +892,6 @@ pub mod tests {
             storage.max_prefetch_block_number must be greater than 0
         "#]]
         .assert_eq(&config.to_string());
-    }
-
-    #[test]
-    fn test_iceberg_compaction_enable_prefetch_default_is_false() {
-        let config = StorageConfig::default();
-        assert!(
-            !config.iceberg_compaction_enable_prefetch,
-            "enable_prefetch must default to false to avoid unexpected memory usage in existing deployments"
-        );
     }
 
     #[test]

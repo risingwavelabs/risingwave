@@ -19,10 +19,12 @@ use risingwave_common_proc_macro::serde_prefix_all;
 use super::*;
 
 mod async_stack_trace;
+mod cache_refill;
 mod join_encoding_type;
 mod over_window;
 
 pub use async_stack_trace::*;
+pub use cache_refill::*;
 pub use join_encoding_type::*;
 pub use over_window::*;
 
@@ -30,9 +32,20 @@ pub use over_window::*;
 #[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct StreamingConfig {
-    /// The maximum number of barriers in-flight in the compute nodes.
+    /// The maximum number of pending barriers in each partial graph. Pending barriers include
+    /// in-flight, collected but not committed, and currently completing barriers.
     #[serde(default = "default::streaming::in_flight_barrier_nums")]
     pub in_flight_barrier_nums: usize,
+
+    /// The maximum number of lagged barriers allowed when merging a snapshot backfill job into
+    /// the database graph.
+    #[serde(default = "default::streaming::snapshot_backfill_finish_max_lagged_barriers")]
+    pub snapshot_backfill_finish_max_lagged_barriers: usize,
+
+    /// The multiplier applied to `in_flight_barrier_nums` when limiting pending barriers in a
+    /// snapshot backfill partial graph. A value of 0 is treated as 1.
+    #[serde(default = "default::streaming::snapshot_backfill_barrier_amplification_factor")]
+    pub snapshot_backfill_barrier_amplification_factor: usize,
 
     /// The thread number of the streaming actor runtime in the compute node. The default value is
     /// decided by `tokio`.
@@ -111,6 +124,23 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::stream_exchange_concurrent_dispatchers")]
     pub exchange_concurrent_dispatchers: usize,
 
+    /// The maximum number of chunks that `ProjectExecutor` evaluates concurrently.
+    ///
+    /// - `1` means no chunk-level concurrency.
+    /// - `0` means unlimited concurrency.
+    #[serde(default = "default::developer::stream_project_expr_concurrency")]
+    pub project_expr_concurrency: usize,
+
+    /// The maximum number of in-flight projection evaluation requests in `ProjectExecutor`.
+    ///
+    /// An in-flight request has started projection evaluation but has not finished yet. A finished
+    /// request no longer counts against this limit even if its result is still waiting to be emitted
+    /// in order.
+    ///
+    /// - `0` means unlimited in-flight requests.
+    #[serde(default = "default::developer::stream_project_expr_inflight_request_concurrency")]
+    pub project_expr_inflight_request_concurrency: usize,
+
     /// The initial permits for a dml channel, i.e., the maximum row count can be buffered in
     /// the channel.
     #[serde(default = "default::developer::stream_dml_channel_initial_permits")]
@@ -148,10 +178,11 @@ pub struct StreamingDeveloperConfig {
     pub memory_controller_sequence_tls_lag: u64,
 
     #[serde(default = "default::developer::stream_enable_arrangement_backfill")]
-    /// Enable arrangement backfill
-    /// If false, the arrangement backfill will be disabled,
-    /// even if session variable set.
-    /// If true, it's decided by session variable `streaming_use_arrangement_backfill` (default true)
+    /// Deprecated and ignored for new streaming jobs. Arrangement backfill is always used as the
+    /// fallback backfill type.
+    #[deprecated(
+        note = "Deprecated and ignored for new streaming jobs. Arrangement backfill is always used as the fallback backfill type."
+    )]
     pub enable_arrangement_backfill: bool,
 
     #[serde(default = "default::developer::stream_enable_snapshot_backfill")]
@@ -300,6 +331,11 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::enable_state_table_vnode_stats_pruning")]
     pub enable_state_table_vnode_stats_pruning: bool,
 
+    /// Cache refill policy for streaming cache refill feature.
+    /// Can be `enabled`, `disabled`, `streaming`, `serving` or `both`.
+    #[serde(default = "default::developer::cache_refill_policy")]
+    pub cache_refill_policy: CacheRefillPolicy,
+
     /// Whether `MaterializeExecutor` enables vnode key stats for its state table.
     #[serde(default = "default::developer::enable_vnode_key_stats_for_materialize")]
     pub enable_vnode_key_stats_for_materialize: bool,
@@ -362,6 +398,14 @@ pub mod default {
             // quick fix
             // TODO: remove this limitation from code
             10000
+        }
+
+        pub fn snapshot_backfill_finish_max_lagged_barriers() -> usize {
+            100
+        }
+
+        pub fn snapshot_backfill_barrier_amplification_factor() -> usize {
+            1
         }
 
         pub fn async_stack_trace() -> AsyncStackTraceOption {

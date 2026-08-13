@@ -184,7 +184,11 @@ impl LogicalSource {
     fn create_non_shared_source_plan(core: generic::Source) -> Result<StreamPlanRef> {
         let mut plan;
         if core.is_new_fs_connector() {
-            plan = Self::create_list_plan(core.clone(), true)?;
+            // Streaming file sources list objects repeatedly and need a persistent
+            // file-name dedup. FULL_RELOAD sources must reprocess the complete
+            // current object set on every refresh, including names seen earlier.
+            let dedup = !Self::is_full_reload_refresh(&core);
+            plan = Self::create_list_plan(core.clone(), dedup)?;
             plan = StreamFsFetch::new(plan, core).into();
         } else if core.is_iceberg_connector() || core.is_batch_connector() {
             plan = Self::create_list_plan(core.clone(), false)?;
@@ -193,6 +197,14 @@ impl LogicalSource {
             plan = StreamSource::new(core).into()
         }
         Ok(plan)
+    }
+
+    fn is_full_reload_refresh(core: &generic::Source) -> bool {
+        core.catalog.as_ref().is_some_and(|catalog| {
+            catalog.refresh_mode.as_ref().is_some_and(|refresh_mode| {
+                matches!(refresh_mode.refresh_mode, Some(RefreshMode::FullReload(_)))
+            })
+        })
     }
 
     /// `StreamSource` (list) -> shuffle -> (optional) `StreamDedup`
@@ -365,13 +377,8 @@ impl Distill for LogicalSource {
 
 impl ColPrunable for LogicalSource {
     fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
-        let is_refreshable_iceberg = self.source_catalog().is_some_and(|catalog| {
-            catalog.refresh_mode.is_some_and(|refresh_mode| {
-                matches!(refresh_mode.refresh_mode, Some(RefreshMode::FullReload(_)))
-            })
-        }); // for refreshable iceberg table, we does not expose iceberg hidden columns to the user
-
-        if self.core.is_iceberg_connector() && !is_refreshable_iceberg {
+        // For refreshable iceberg table, we do not expose iceberg hidden columns to the user.
+        if self.core.is_iceberg_connector() && !Self::is_full_reload_refresh(&self.core) {
             self.prune_col_for_iceberg_source(required_cols)
         } else {
             // For other sources, use a LogicalProject to prune columns

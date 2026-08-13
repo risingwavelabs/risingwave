@@ -94,7 +94,7 @@ use crate::stream::{
 };
 use crate::{MetaError, MetaResult};
 
-pub(super) fn to_partial_graph_id(
+pub(crate) fn to_partial_graph_id(
     database_id: DatabaseId,
     creating_job_id: Option<JobId>,
 ) -> PartialGraphId {
@@ -678,6 +678,8 @@ impl PartialGraphRecoverer<'_> {
                 subscriptions_to_add: Default::default(),
                 backfill_nodes_to_pause,
                 new_upstream_sinks: Default::default(),
+                dropped_actors: Default::default(),
+                sink_log_store_flush: Default::default(),
             })
         }
 
