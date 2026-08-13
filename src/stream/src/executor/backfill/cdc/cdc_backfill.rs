@@ -1373,6 +1373,45 @@ mod tests {
         assert_eq!(state.last_cdc_offset, None);
     }
 
+    #[tokio::test]
+    async fn test_unfinished_cdc_backfill_rejects_null_offset_on_restore() {
+        let memory_state_store = MemoryStateStore::new();
+        let mut state_writer = CdcBackfillState::new(
+            TableId::new(1234),
+            create_cdc_state_table(memory_state_store.clone()).await,
+            5,
+        );
+        state_writer
+            .init_epoch(Barrier::new_test_barrier(test_epoch(1)).epoch)
+            .await
+            .unwrap();
+        state_writer
+            .mutate_state(
+                Some(OwnedRow::new(vec![Some(ScalarImpl::Int64(10))])),
+                None,
+                10,
+                false,
+            )
+            .await
+            .unwrap();
+        state_writer
+            .commit_state(Barrier::new_test_barrier(test_epoch(2)).epoch)
+            .await
+            .unwrap();
+
+        let mut restored_state = CdcBackfillState::new(
+            TableId::new(1234),
+            create_cdc_state_table(memory_state_store).await,
+            5,
+        );
+        restored_state
+            .init_epoch(Barrier::new_test_barrier(test_epoch(2)).epoch)
+            .await
+            .unwrap();
+
+        assert!(restored_state.restore_state().await.is_err());
+    }
+
     fn create_raw_cdc_chunk(rows: &[(&str, &str)]) -> StreamChunk {
         let schema = Schema::new(vec![
             Field::unnamed(DataType::Jsonb),
