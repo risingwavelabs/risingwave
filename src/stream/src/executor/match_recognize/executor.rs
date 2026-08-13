@@ -669,18 +669,15 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         metrics: &MatchRecognizeMetrics,
     ) -> StreamExecutorResult<Vec<StreamChunk>> {
         let mut out = Vec::new();
-        loop {
-            // Only the `Copy` identity fields before the gate: cloning the whole match (its label
-            // vector in particular) on every ATTEMPT would copy it once per visit for a held
-            // match; the clone happens below, after the gate passes.
-            let Some((start_seq, labels_len)) = run
-                .matcher
-                .provisional()
-                .first()
-                .map(|m| (m.start_seq, m.labels.len()))
-            else {
-                break;
-            };
+        // Only the `Copy` identity fields before the gate: cloning the whole match (its label vector
+        // in particular) on every ATTEMPT would copy it once per visit for a held match; the clone
+        // happens below, after the gate passes.
+        while let Some((start_seq, labels_len)) = run
+            .matcher
+            .provisional()
+            .first()
+            .map(|m| (m.start_seq, m.labels.len()))
+        {
             // `end_seq` is a synthetic exclusive bound (last row's seq + 1), not a real row's
             // seq; the span length is the label count (one label per matched row). The scan runs
             // from 0, NOT from the matcher's resume position: `provisional()` leads with FROZEN
