@@ -90,6 +90,68 @@ fn build_file_cache_spawner(
     Ok(runtime.into())
 }
 
+#[cfg(test)]
+mod tests {
+    use risingwave_common::config::storage::FileCacheTokioRuntimeConfig;
+
+    use super::*;
+
+    #[test]
+    fn test_build_file_cache_spawner_rejects_separated_runtime() {
+        let runtime_options = FileCacheTokioRuntimeConfig {
+            worker_threads: 1,
+            max_blocking_threads: 1,
+        };
+        let error = build_file_cache_spawner(
+            "foyer.test",
+            &FileCacheRuntimeConfig::Separated {
+                read_runtime_options: runtime_options.clone(),
+                write_runtime_options: runtime_options,
+            },
+        )
+        .unwrap_err()
+        .to_string();
+
+        assert!(error.contains("foyer.test runtime_config.Separated"));
+        assert!(error.contains("use runtime_config.Unified instead"));
+    }
+
+    #[cfg(not(madsim))]
+    #[tokio::test]
+    async fn test_build_file_cache_spawner_runtime_modes() {
+        let current_runtime_id = tokio::runtime::Handle::current().id();
+
+        let disabled =
+            build_file_cache_spawner("foyer.test", &FileCacheRuntimeConfig::Disabled).unwrap();
+        let disabled_runtime_id = disabled
+            .spawn(async { tokio::runtime::Handle::current().id() })
+            .await
+            .unwrap();
+        assert_eq!(disabled_runtime_id, current_runtime_id);
+
+        let unified = build_file_cache_spawner(
+            "foyer.test",
+            &FileCacheRuntimeConfig::Unified(FileCacheTokioRuntimeConfig {
+                worker_threads: 1,
+                max_blocking_threads: 1,
+            }),
+        )
+        .unwrap();
+        let (unified_runtime_id, thread_name) = unified
+            .spawn(async {
+                (
+                    tokio::runtime::Handle::current().id(),
+                    std::thread::current().name().map(str::to_owned),
+                )
+            })
+            .await
+            .unwrap();
+
+        assert_ne!(unified_runtime_id, current_runtime_id);
+        assert_eq!(thread_name.as_deref(), Some("foyer.test-unified"));
+    }
+}
+
 static FOYER_METRICS_REGISTRY: LazyLock<Box<PrometheusMetricsRegistry>> = LazyLock::new(|| {
     Box::new(PrometheusMetricsRegistry::new(
         GLOBAL_METRICS_REGISTRY.clone(),
