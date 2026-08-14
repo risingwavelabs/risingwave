@@ -49,11 +49,8 @@ use crate::{PG_VERSION, SERVER_ENCODING, SERVER_VERSION_NUM, STANDARD_CONFORMING
 
 pub const SESSION_CONFIG_LIST_SEP: &str = ", ";
 
-/// Session-parameter schema understood by this binary's incremental notification handler.
-pub const CURRENT_SESSION_CONFIG_VERSION: u32 = 1;
 pub const ENABLE_LOCALITY_BACKFILL_PARAM: &str = "enable_locality_backfill";
 pub const LOCALITY_BACKFILL_MODE_PARAM: &str = "locality_backfill_mode";
-pub const AUTO_LOCALITY_BACKFILL_MIN_SIZE_PARAM: &str = "auto_locality_backfill_min_size";
 
 #[derive(Error, Debug)]
 pub enum SessionConfigError {
@@ -716,14 +713,6 @@ impl SessionConfig {
         }
 
         Ok(config)
-    }
-
-    /// Minimum session-config schema version required to apply an incremental update.
-    pub fn min_version_for_param(key_name: &str) -> u32 {
-        match Self::alias_to_entry_name(key_name).as_str() {
-            LOCALITY_BACKFILL_MODE_PARAM | AUTO_LOCALITY_BACKFILL_MIN_SIZE_PARAM => 1,
-            _ => 0,
-        }
     }
 
     /// Generate an initial override for the streaming config from the session config.

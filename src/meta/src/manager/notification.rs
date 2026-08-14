@@ -59,7 +59,6 @@ struct Target {
     subscribe_type: SubscribeType,
     // `None` indicates sending to all subscribers of `subscribe_type`.
     worker_key: Option<WorkerKey>,
-    min_session_config_version: u32,
 }
 
 impl From<SubscribeType> for Target {
@@ -67,7 +66,6 @@ impl From<SubscribeType> for Target {
         Self {
             subscribe_type: value,
             worker_key: None,
-            min_session_config_version: 0,
         }
     }
 }
@@ -171,7 +169,6 @@ impl NotificationManager {
             Target {
                 subscribe_type,
                 worker_key: Some(worker_key),
-                min_session_config_version: 0,
             },
             Operation::Snapshot,
             Info::Snapshot(meta_snapshot),
@@ -226,7 +223,6 @@ impl NotificationManager {
             Target {
                 subscribe_type: SubscribeType::Hummock,
                 worker_key: Some(worker_key),
-                min_session_config_version: 0,
             },
             Operation::Update,
             info,
@@ -245,23 +241,6 @@ impl NotificationManager {
 
     pub fn notify_frontend_without_version(&self, operation: Operation, info: Info) {
         self.notify_without_version(SubscribeType::Frontend.into(), operation, info)
-    }
-
-    pub fn notify_frontend_without_version_with_min_session_config_version(
-        &self,
-        operation: Operation,
-        info: Info,
-        min_session_config_version: u32,
-    ) {
-        self.notify_without_version(
-            Target {
-                subscribe_type: SubscribeType::Frontend,
-                worker_key: None,
-                min_session_config_version,
-            },
-            operation,
-            info,
-        )
     }
 
     pub fn notify_hummock_without_version(&self, operation: Operation, info: Info) {
@@ -315,16 +294,6 @@ impl NotificationManager {
         worker_key: WorkerKey,
         sender: UnboundedSender<Notification>,
     ) {
-        self.insert_sender_with_session_config_version(subscribe_type, worker_key, sender, 0);
-    }
-
-    pub fn insert_sender_with_session_config_version(
-        &self,
-        subscribe_type: SubscribeType,
-        worker_key: WorkerKey,
-        sender: UnboundedSender<Notification>,
-        session_config_version: u32,
-    ) {
         let mut core_guard = self.core.lock();
         if core_guard.exiting {
             tracing::warn!("notification manager exiting.");
@@ -332,13 +301,7 @@ impl NotificationManager {
         }
         let senders = core_guard.senders_of(subscribe_type);
 
-        senders.insert(
-            worker_key,
-            NotificationSender {
-                sender,
-                session_config_version,
-            },
-        );
+        senders.insert(worker_key, sender);
     }
 
     pub fn insert_local_sender(&self, sender: UnboundedSender<LocalNotification>) {
@@ -361,12 +324,7 @@ impl NotificationManager {
     }
 }
 
-struct NotificationSender {
-    sender: UnboundedSender<Notification>,
-    session_config_version: u32,
-}
-
-type SenderMap = HashMap<WorkerKey, NotificationSender>;
+type SenderMap = HashMap<WorkerKey, UnboundedSender<Notification>>;
 
 struct NotificationManagerCore {
     /// The notification sender to frontends.
@@ -411,12 +369,10 @@ impl NotificationManagerCore {
         if let Some(worker_key) = target.worker_key {
             match senders.entry(worker_key.clone()) {
                 Entry::Occupied(entry) => {
-                    if entry.get().session_config_version >= target.min_session_config_version
-                        && let Err(err) = entry.get().sender.send(Ok(response))
-                    {
+                    let _ = entry.get().send(Ok(response)).inspect_err(|err| {
                         warn_send_failure!(target.subscribe_type, &worker_key, err.as_report());
                         entry.remove_entry();
-                    }
+                    });
                 }
                 Entry::Vacant(_) => {
                     tracing::warn!("Failed to find notification sender of {:?}", worker_key)
@@ -424,11 +380,7 @@ impl NotificationManagerCore {
             }
         } else {
             senders.retain(|worker_key, sender| {
-                if sender.session_config_version < target.min_session_config_version {
-                    return true;
-                }
                 sender
-                    .sender
                     .send(Ok(response.clone()))
                     .inspect_err(|err| {
                         warn_send_failure!(target.subscribe_type, &worker_key, err.as_report());

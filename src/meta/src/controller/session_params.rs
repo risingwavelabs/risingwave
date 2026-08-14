@@ -169,8 +169,7 @@ impl SessionParamsController {
             name.as_str(),
             ENABLE_LOCALITY_BACKFILL_PARAM | LOCALITY_BACKFILL_MODE_PARAM
         ) {
-            // Send the legacy mirror first. Old frontends receive only this update, while new
-            // frontends apply the canonical mode immediately afterwards.
+            // Keep the legacy boolean and canonical mode synchronized in storage and observers.
             vec![
                 (
                     ENABLE_LOCALITY_BACKFILL_PARAM.to_owned(),
@@ -212,16 +211,13 @@ impl SessionParamsController {
     }
 
     pub fn notify_workers(&self, name: String, value: String) {
-        let min_session_config_version = SessionConfig::min_version_for_param(&name);
-        self.notification_manager
-            .notify_frontend_without_version_with_min_session_config_version(
-                Operation::Update,
-                Info::SessionParam(SetSessionParamRequest {
-                    param: name,
-                    value: Some(value),
-                }),
-                min_session_config_version,
-            );
+        self.notification_manager.notify_frontend_without_version(
+            Operation::Update,
+            Info::SessionParam(SetSessionParamRequest {
+                param: name,
+                value: Some(value),
+            }),
+        );
     }
 }
 

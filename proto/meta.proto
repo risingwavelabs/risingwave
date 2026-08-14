@@ -599,8 +599,6 @@ message SubscribeRequest {
   SubscribeType subscribe_type = 1;
   common.HostAddress host = 2;
   uint32 worker_id = 3;
-  // SessionConfig schema understood by the subscriber. Clients predating this field send 0.
-  uint32 session_config_version = 4;
 }
 
 message MetaSnapshot {
