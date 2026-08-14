@@ -16,6 +16,7 @@ use core::mem;
 use core::time::Duration;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{Display, Formatter};
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -65,6 +66,12 @@ pub struct FetchCursorCancelHandle {
     cancel_rx: ShutdownToken,
 }
 
+enum InterruptibleCursorResult<T> {
+    Completed(T),
+    TimedOut,
+    Cancelled,
+}
+
 impl FetchCursorCancelHandle {
     pub fn new() -> Self {
         let (cancel_tx, cancel_rx) = ShutdownToken::new();
@@ -84,6 +91,29 @@ impl FetchCursorCancelHandle {
 
     fn is_cancelled(&self) -> bool {
         self.cancel_rx.is_cancelled()
+    }
+}
+
+async fn await_interruptible_cursor_operation<T>(
+    future: impl Future<Output = Result<T>>,
+    timeout_instant: Option<Instant>,
+    cancel_handle: &mut FetchCursorCancelHandle,
+) -> Result<InterruptibleCursorResult<T>> {
+    if let Some(timeout_instant) = timeout_instant {
+        let timeout = tokio::time::sleep(timeout_instant.saturating_duration_since(Instant::now()));
+        tokio::pin!(timeout);
+        tokio::select! {
+            biased;
+            _ = cancel_handle.cancelled() => Ok(InterruptibleCursorResult::Cancelled),
+            result = future => result.map(InterruptibleCursorResult::Completed),
+            _ = &mut timeout => Ok(InterruptibleCursorResult::TimedOut),
+        }
+    } else {
+        tokio::select! {
+            biased;
+            _ = cancel_handle.cancelled() => Ok(InterruptibleCursorResult::Cancelled),
+            result = future => result.map(InterruptibleCursorResult::Completed),
+        }
     }
 }
 
@@ -639,6 +669,8 @@ impl SubscriptionCursor {
         cancel_handle: &mut FetchCursorCancelHandle,
     ) -> Result<(Vec<Row>, Vec<PgFieldDescriptor>)> {
         let timeout_instant = timeout_seconds.map(|s| Instant::now() + Duration::from_secs(s));
+        let check_timeout_by_instant =
+            || timeout_instant.is_some_and(|timeout_instant| Instant::now() > timeout_instant);
         if Instant::now() > self.cursor_need_drop_time {
             return Err(ErrorCode::InternalError(
                 "The cursor has exceeded its maximum lifetime, please recreate it (close then declare cursor).".to_owned(),
@@ -665,23 +697,45 @@ impl SubscriptionCursor {
                 return Err(SchedulerError::QueryCancelled("Cancelled by user".to_owned()).into());
             }
             let fetch_cursor_timer = Instant::now();
-            let row = self.next_row(&handler_args, formats).await?;
+            // Register the FETCH-level cancel token before `next_row` so the
+            // interruptible wait below can stop long-running internal awaits promptly.
+            cancel_handle.register(session);
+            let row = await_interruptible_cursor_operation(
+                self.next_row(&handler_args, formats),
+                timeout_instant,
+                cancel_handle,
+            )
+            .await;
             self.cursor_metrics
                 .subscription_cursor_fetch_duration
                 .with_label_values(&[&self.subscription.name])
                 .observe(fetch_cursor_timer.elapsed().as_millis() as _);
+            let row = match row? {
+                InterruptibleCursorResult::Completed(row) => row,
+                InterruptibleCursorResult::TimedOut => break,
+                InterruptibleCursorResult::Cancelled => {
+                    return Err(
+                        SchedulerError::QueryCancelled("Cancelled by user".to_owned()).into(),
+                    );
+                }
+            };
             match row {
                 Some(row) => {
                     cur += 1;
                     ans.push(row);
                 }
                 None => {
-                    let timeout_seconds = timeout_seconds.unwrap_or(0);
-                    if cur > 0 || timeout_seconds == 0 {
-                        break;
-                    }
+                    let timeout_instant = match timeout_instant {
+                        Some(timeout_instant) if cur == 0 && timeout_seconds != Some(0) => {
+                            timeout_instant
+                        }
+                        _ => break,
+                    };
                     let State::InitLogStoreQuery { seek_timestamp, .. } = &self.state else {
                         // Triggered when previous next_row returns None while self.state is State::Fetch.
+                        if check_timeout_by_instant() {
+                            break;
+                        }
                         continue;
                     };
                     // This is the only point where subscription cursor fetch waits without an
@@ -689,41 +743,41 @@ impl SubscriptionCursor {
                     // interrupt this wait. The token also marks the whole FETCH as cancelled, so
                     // we won't start another inner query after a cancellation.
                     cancel_handle.register(session);
-                    let timeout = tokio::time::sleep(Duration::from_secs(timeout_seconds));
-                    tokio::pin!(timeout);
-                    tokio::select! {
-                        biased;
-                        _ = cancel_handle.cancelled() => {
-                            return Err(SchedulerError::QueryCancelled(
-                                "Cancelled by user".to_owned(),
-                            )
-                            .into());
-                        }
-                        result = session
+                    // `timeout_seconds` is the total FETCH budget. Time spent in `next_row` has
+                    // already consumed part of it, so the changelog wait must use only the
+                    // remaining time instead of starting another full timeout.
+                    if check_timeout_by_instant() {
+                        break;
+                    }
+                    match await_interruptible_cursor_operation(
+                        session
                             .env
                             .hummock_snapshot_manager()
                             .wait_table_change_log_notification(
                                 self.dependent_table_id,
                                 *seek_timestamp,
-                            ) => {
-                            result?;
-                        }
-                        _ = &mut timeout => {
+                            ),
+                        Some(timeout_instant),
+                        cancel_handle,
+                    )
+                    .await?
+                    {
+                        InterruptibleCursorResult::Completed(()) => {}
+                        InterruptibleCursorResult::TimedOut => {
                             tracing::debug!("Cursor wait next epoch timeout");
                             break;
                         }
-                    }
-                    if cancel_handle.is_cancelled() {
-                        return Err(
-                            SchedulerError::QueryCancelled("Cancelled by user".to_owned()).into(),
-                        );
+                        InterruptibleCursorResult::Cancelled => {
+                            return Err(SchedulerError::QueryCancelled(
+                                "Cancelled by user".to_owned(),
+                            )
+                            .into());
+                        }
                     }
                 }
             }
             // Timeout, return with current value
-            if let Some(timeout_instant) = timeout_instant
-                && Instant::now() > timeout_instant
-            {
+            if check_timeout_by_instant() {
                 break;
             }
         }
