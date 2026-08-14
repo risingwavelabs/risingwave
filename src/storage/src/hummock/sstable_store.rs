@@ -39,12 +39,12 @@ use risingwave_object_store::object::{
     ObjectError, ObjectMetadataIter, ObjectResult, ObjectStoreRef, ObjectStreamingUploader,
 };
 use risingwave_pb::hummock::PbHnswGraph;
-use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
 
 use super::{
-    BatchUploadWriter, Block, BlockMeta, BlockResponse, RecentFilter, Sstable, SstableMeta,
+    BatchUploadWriter, Block, BlockMeta, BlockResponse, LiveSsts, RecentFilter, Sstable,
+    SstableBlockCache, SstableBlockHashBuilder, SstableBlockIndex, SstableMeta,
     SstableWriterOptions,
 };
 use crate::hummock::block_stream::{
@@ -118,12 +118,6 @@ pub type VectorBlockHolder = CacheEntry<(HummockVectorFileId, usize), Box<Vector
 
 pub type VectorFileHolder = VectorMetaFileHolder<VectorFileMeta>;
 pub type HnswGraphFileHolder = VectorMetaFileHolder<PbHnswGraph>;
-
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash, Serialize, Deserialize)]
-pub struct SstableBlockIndex {
-    pub sst_id: HummockSstableObjectId,
-    pub block_idx: u64,
-}
 
 pub struct BlockCacheEventListener {
     metrics: Arc<HummockStateStoreMetrics>,
@@ -199,7 +193,8 @@ pub struct SstableStoreConfig {
     pub skip_bloom_filter_in_serde: bool,
 
     pub meta_cache: HybridCache<HummockSstableObjectId, Box<Sstable>>,
-    pub block_cache: HybridCache<SstableBlockIndex, Box<Block>>,
+    pub block_cache: SstableBlockCache,
+    pub live_ssts: LiveSsts,
 
     pub vector_meta_cache: Cache<HummockRawObjectId, HummockVectorIndexMetaFile>,
     pub vector_block_cache: Cache<(HummockVectorFileId, usize), Box<VectorBlock>>,
@@ -210,7 +205,8 @@ pub struct SstableStore {
     store: ObjectStoreRef,
 
     meta_cache: HybridCache<HummockSstableObjectId, Box<Sstable>>,
-    block_cache: HybridCache<SstableBlockIndex, Box<Block>>,
+    block_cache: SstableBlockCache,
+    live_ssts: LiveSsts,
     pub vector_meta_cache: Cache<HummockRawObjectId, HummockVectorIndexMetaFile>,
     pub vector_block_cache: Cache<(HummockVectorFileId, usize), Box<VectorBlock>>,
 
@@ -248,6 +244,7 @@ impl SstableStore {
 
             meta_cache: config.meta_cache,
             block_cache: config.block_cache,
+            live_ssts: config.live_ssts,
             vector_meta_cache: config.vector_meta_cache,
             vector_block_cache: config.vector_block_cache,
 
@@ -284,6 +281,7 @@ impl SstableStore {
 
         let block_cache = HybridCacheBuilder::new()
             .memory(block_cache_capacity)
+            .with_hash_builder(SstableBlockHashBuilder::default())
             .with_shards(1)
             .with_weighter(|_: &SstableBlockIndex, value: &Box<Block>| {
                 std::mem::size_of::<SstableBlockIndex>() + value.estimated_memory_weight()
@@ -306,6 +304,7 @@ impl SstableStore {
 
             meta_cache,
             block_cache,
+            live_ssts: LiveSsts::default(),
             vector_meta_cache: CacheBuilder::new(1 << 10).build(),
             vector_block_cache: CacheBuilder::new(1 << 10).build(),
         })
@@ -829,8 +828,12 @@ impl SstableStore {
         &self.meta_cache
     }
 
-    pub fn block_cache(&self) -> &HybridCache<SstableBlockIndex, Box<Block>> {
+    pub fn block_cache(&self) -> &SstableBlockCache {
         &self.block_cache
+    }
+
+    pub fn live_ssts(&self) -> &LiveSsts {
+        &self.live_ssts
     }
 
     pub fn recent_filter(&self) -> &Arc<RecentFilter<(HummockSstableObjectId, usize)>> {

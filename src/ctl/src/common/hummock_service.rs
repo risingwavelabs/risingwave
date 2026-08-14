@@ -23,7 +23,9 @@ use risingwave_object_store::object::build_remote_object_store;
 use risingwave_rpc_client::MetaClient;
 use risingwave_storage::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use risingwave_storage::hummock::none::NoneRecentFilter;
-use risingwave_storage::hummock::{HummockStorage, SstableStore, SstableStoreConfig};
+use risingwave_storage::hummock::{
+    HummockStorage, LiveSsts, SstableBlockHashBuilder, SstableStore, SstableStoreConfig,
+};
 use risingwave_storage::monitor::{
     CompactorMetrics, HummockMetrics, HummockStateStoreMetrics, MonitoredStateStore,
     MonitoredStorageMetrics, ObjectStoreMetrics, global_hummock_state_store_metrics,
@@ -186,6 +188,7 @@ impl HummockServiceOpts {
             .await?;
         let block_cache = HybridCacheBuilder::new()
             .memory(opts.block_cache_capacity_mb * (1 << 20))
+            .with_hash_builder(SstableBlockHashBuilder::default())
             .with_shards(opts.block_cache_shard_num)
             .storage()
             .build()
@@ -204,6 +207,7 @@ impl HummockServiceOpts {
             skip_bloom_filter_in_serde: opts.sst_skip_bloom_filter_in_serde,
             meta_cache,
             block_cache,
+            live_ssts: LiveSsts::default(),
             vector_meta_cache: CacheBuilder::new(1 << 10).build(),
             vector_block_cache: CacheBuilder::new(1 << 10).build(),
         })))
