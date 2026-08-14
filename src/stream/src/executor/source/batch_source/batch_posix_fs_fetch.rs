@@ -34,7 +34,9 @@ use tokio::fs;
 
 use crate::common::rate_limit::limited_chunk_size;
 use crate::executor::prelude::*;
-use crate::executor::source::{StreamSourceCore, get_split_offset_col_idx, prune_additional_cols};
+use crate::executor::source::{
+    StreamSourceCore, get_source_state_col_indices, prune_additional_cols,
+};
 use crate::executor::stream_reader::StreamReaderWithPause;
 use crate::task::LocalBarrierManager;
 
@@ -245,8 +247,11 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
         let source_desc = source_desc_builder
             .build()
             .map_err(StreamExecutorError::connector_error)?;
-        let (Some(split_idx), Some(offset_idx), _) = get_split_offset_col_idx(&source_desc.columns)
-        else {
+        let source_state_column_indices = get_source_state_col_indices(&source_desc.columns);
+        let (Some(split_idx), Some(offset_idx)) = (
+            source_state_column_indices.split_idx,
+            source_state_column_indices.offset_idx,
+        ) else {
             unreachable!("Partition and offset columns must be set.");
         };
 

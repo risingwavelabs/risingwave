@@ -26,7 +26,8 @@ use super::fs_reader::LegacyFsSourceReader;
 use super::reader::SourceReader;
 use crate::error::ConnectorResult;
 use crate::parser::additional_columns::{
-    derive_pulsar_message_id_data_column, source_add_partition_offset_cols,
+    derive_pulsar_message_id_data_column, derive_rabbitmq_ack_data_column,
+    source_add_partition_offset_cols,
 };
 use crate::parser::{EncodingProperties, ProtocolProperties, SpecificParserConfig};
 use crate::source::monitor::SourceMetrics;
@@ -124,6 +125,14 @@ impl SourceDescBuilder {
                     &connector_name,
                     &mut columns_exist,
                     &mut additional_columns,
+                );
+            }
+            if self.with_properties.is_rabbitmq_connector() {
+                derive_rabbitmq_ack_data_column(
+                    &connector_name,
+                    &mut columns_exist,
+                    &mut additional_columns,
+                    false,
                 );
             }
             (columns_exist, additional_columns)
