@@ -7587,7 +7587,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.10.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=4cbd183953f89d7179b64072940a98232b958307#4cbd183953f89d7179b64072940a98232b958307"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=aac27678a717deef473e98b026ce54dbf8a4670b#aac27678a717deef473e98b026ce54dbf8a4670b"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -7646,7 +7646,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-glue"
 version = "0.10.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=4cbd183953f89d7179b64072940a98232b958307#4cbd183953f89d7179b64072940a98232b958307"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=aac27678a717deef473e98b026ce54dbf8a4670b#aac27678a717deef473e98b026ce54dbf8a4670b"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7661,7 +7661,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-rest"
 version = "0.10.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=4cbd183953f89d7179b64072940a98232b958307#4cbd183953f89d7179b64072940a98232b958307"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=aac27678a717deef473e98b026ce54dbf8a4670b#aac27678a717deef473e98b026ce54dbf8a4670b"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -7682,7 +7682,7 @@ dependencies = [
 [[package]]
 name = "iceberg-compaction-core"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=60baea7ed85d45e8192e2e79e3104d06dbf8af6a#60baea7ed85d45e8192e2e79e3104d06dbf8af6a"
+source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=dbae05cee86714c0e035b44ab5d7acce7fe4dde4#dbae05cee86714c0e035b44ab5d7acce7fe4dde4"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -7711,7 +7711,7 @@ dependencies = [
 [[package]]
 name = "iceberg-datafusion"
 version = "0.10.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=4cbd183953f89d7179b64072940a98232b958307#4cbd183953f89d7179b64072940a98232b958307"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=aac27678a717deef473e98b026ce54dbf8a4670b#aac27678a717deef473e98b026ce54dbf8a4670b"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7727,7 +7727,7 @@ dependencies = [
 [[package]]
 name = "iceberg-storage-opendal"
 version = "0.10.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=4cbd183953f89d7179b64072940a98232b958307#4cbd183953f89d7179b64072940a98232b958307"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=aac27678a717deef473e98b026ce54dbf8a4670b#aac27678a717deef473e98b026ce54dbf8a4670b"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7735,6 +7735,7 @@ dependencies = [
  "cfg-if",
  "futures",
  "iceberg",
+ "once_cell",
  "opendal 0.58.1",
  "reqsign-aws-v4",
  "reqsign-core",
@@ -9650,7 +9651,7 @@ version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "51e219e79014df21a225b1860a479e2dcd7cbd9130f4defd4bd0e191ea31d67d"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.21.7",
  "chrono",
  "getrandom 0.2.11",
  "http 1.4.0",
@@ -10724,7 +10725,7 @@ version = "3.1.0-alpha"
 dependencies = [
  "anyhow",
  "auto_enums",
- "base64 0.22.1",
+ "base64 0.23.1",
  "byteorder",
  "bytes",
  "futures",
@@ -11526,6 +11527,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "proto-src-confluent"
+version = "0.1.1+g6a3cfd9.v8.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "90f6b92ba20d060c49734f01d8565b79a6c1916a182143fd28a4c75a2dd2ccbd"
+
+[[package]]
+name = "proto-src-google-type"
+version = "0.1.0+g208f198.v2.71.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "9380399e02f6d18b5aad0c5d47054a82c7aa346919a98f835fe7f590c7b4c123"
+
+[[package]]
 name = "protobuf"
 version = "3.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -12074,11 +12087,12 @@ checksum = "0b97c0a6319ae55341eb213c8ef97002630a3a5bd6f287f0124d077121d3f2a5"
 
 [[package]]
 name = "redis"
-version = "1.0.2"
+version = "1.2.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5dfe20977fe93830c0e9817a16fbf1ed1cfd8d4bba366087a1841d2c6033c251"
+checksum = "bae41a63fd0b8a5372f82b21e810e09a316f5dd7efd96bf08e678fb240fc1918"
 dependencies = [
  "arcstr",
+ "async-lock",
  "bytes",
  "cfg-if",
  "combine",
@@ -12089,7 +12103,7 @@ dependencies = [
  "num-bigint",
  "percent-encoding",
  "pin-project-lite",
- "rand 0.9.5",
+ "rand 0.10.1",
  "rustls 0.23.35",
  "rustls-native-certs 0.8.1",
  "ryu",
@@ -13192,7 +13206,7 @@ dependencies = [
  "aws-smithy-types",
  "aws-smithy-types-convert",
  "aws-types",
- "base64 0.22.1",
+ "base64 0.23.1",
  "byteorder",
  "bytes",
  "cfg-if",
@@ -13325,6 +13339,8 @@ dependencies = [
  "prost-build 0.14.3",
  "prost-reflect",
  "prost-types 0.14.3",
+ "proto-src-confluent",
+ "proto-src-google-type",
  "protox",
  "reqwest 0.12.25",
  "risingwave_common",
@@ -13551,7 +13567,7 @@ dependencies = [
  "auto_impl",
  "axum",
  "axum-server",
- "base64 0.22.1",
+ "base64 0.23.1",
  "bk-tree",
  "bytes",
  "chrono",

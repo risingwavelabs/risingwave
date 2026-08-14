@@ -16,6 +16,7 @@ use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fmt::Debug;
 use std::future::{Future, poll_fn};
 use std::pin::pin;
+use std::sync::LazyLock;
 use std::task::Poll;
 use std::time::{Duration, Instant};
 
@@ -38,6 +39,7 @@ use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use sea_orm::DatabaseConnection;
 use thiserror_ext::AsReport;
 use tokio::select;
+use tokio::sync::Semaphore;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::time::sleep;
 use tokio_retry::strategy::{ExponentialBackoff, jitter};
@@ -49,6 +51,12 @@ use crate::manager::exactly_once_util::{
     persist_pre_commit_metadata,
 };
 use crate::manager::sink_coordination::handle::SinkWriterCoordinationHandle;
+
+// Keep coordinator initialization below the default MetaStore pool size (10), leaving
+// connections available for recovery and other Meta services.
+const MAX_CONCURRENT_COORDINATOR_INITIALIZATIONS: usize = 8;
+static COORDINATOR_INIT_SEMAPHORE: LazyLock<Semaphore> =
+    LazyLock::new(|| Semaphore::new(MAX_CONCURRENT_COORDINATOR_INITIALIZATIONS));
 
 async fn run_future_with_periodic_fn<F: Future>(
     future: F,
@@ -667,6 +675,10 @@ impl CoordinatorWorker {
     ) -> anyhow::Result<()> {
         let sink_id = self.handle_manager.param.sink_id;
 
+        let coordinator_init_permit = COORDINATOR_INIT_SEMAPHORE
+            .acquire()
+            .instrument_await("acquire_sink_coordinator_init_permit")
+            .await?;
         let mut two_phase_handler = self
             .init_state_from_store(&db, sink_id, subscriber, &mut coordinator)
             .await?;
@@ -674,6 +686,7 @@ impl CoordinatorWorker {
             SinkCommitCoordinator::SinglePhase(coordinator) => coordinator.init().await?,
             SinkCommitCoordinator::TwoPhase(coordinator) => coordinator.init().await?,
         }
+        drop(coordinator_init_permit);
 
         let mut running_handles = self.handle_manager.wait_init_handles().await?;
         self.try_handle_init_requests(&running_handles, &mut two_phase_handler)

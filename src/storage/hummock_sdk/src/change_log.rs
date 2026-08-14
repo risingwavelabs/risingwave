@@ -16,7 +16,6 @@ use std::collections::{HashMap, VecDeque};
 use std::ops::RangeBounds;
 
 use risingwave_common::catalog::TableId;
-use risingwave_pb::hummock::hummock_version_delta::PbChangeLogDelta;
 use risingwave_pb::hummock::{PbEpochNewChangeLog, PbSstableInfo, PbTableChangeLog};
 use tracing::warn;
 
@@ -369,54 +368,6 @@ pub struct ChangeLogDeltaCommon<T> {
 }
 
 pub type ChangeLogDelta = ChangeLogDeltaCommon<SstableInfo>;
-
-impl<T> From<&ChangeLogDeltaCommon<T>> for PbChangeLogDelta
-where
-    PbSstableInfo: for<'a> From<&'a T>,
-{
-    fn from(val: &ChangeLogDeltaCommon<T>) -> Self {
-        Self {
-            truncate_epoch: val.truncate_epoch,
-            new_log: Some((&val.new_log).into()),
-        }
-    }
-}
-
-impl<T> From<&PbChangeLogDelta> for ChangeLogDeltaCommon<T>
-where
-    T: for<'a> From<&'a PbSstableInfo>,
-{
-    fn from(val: &PbChangeLogDelta) -> Self {
-        Self {
-            truncate_epoch: val.truncate_epoch,
-            new_log: val.new_log.as_ref().unwrap().into(),
-        }
-    }
-}
-
-impl<T> From<ChangeLogDeltaCommon<T>> for PbChangeLogDelta
-where
-    PbSstableInfo: From<T>,
-{
-    fn from(val: ChangeLogDeltaCommon<T>) -> Self {
-        Self {
-            truncate_epoch: val.truncate_epoch,
-            new_log: Some(val.new_log.into()),
-        }
-    }
-}
-
-impl<T> From<PbChangeLogDelta> for ChangeLogDeltaCommon<T>
-where
-    T: From<PbSstableInfo>,
-{
-    fn from(val: PbChangeLogDelta) -> Self {
-        Self {
-            truncate_epoch: val.truncate_epoch,
-            new_log: val.new_log.unwrap().into(),
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {

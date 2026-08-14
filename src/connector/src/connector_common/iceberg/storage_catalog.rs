@@ -82,9 +82,7 @@ impl StorageCatalog {
     pub fn new(config: StorageCatalogConfig) -> Result<Self> {
         let (warehouse, file_io) = match config {
             StorageCatalogConfig::S3(config) => {
-                let mut file_io_builder = FileIOBuilder::new(Arc::new(OpenDalStorageFactory::S3 {
-                    customized_credential_load: None,
-                }));
+                let mut file_io_builder = FileIOBuilder::new(Arc::new(OpenDalStorageFactory::s3()));
                 if let Some(access_key) = &config.access_key {
                     file_io_builder = file_io_builder.with_prop(S3_ACCESS_KEY_ID, access_key)
                 };
@@ -107,7 +105,8 @@ impl StorageCatalog {
                 (config.warehouse, file_io_builder.build())
             }
             StorageCatalogConfig::Gcs(config) => {
-                let mut file_io_builder = FileIOBuilder::new(Arc::new(OpenDalStorageFactory::Gcs));
+                let mut file_io_builder =
+                    FileIOBuilder::new(Arc::new(OpenDalStorageFactory::gcs()));
                 if let Some(credential) = &config.credential {
                     file_io_builder = file_io_builder.with_prop(GCS_CREDENTIALS_JSON, credential)
                 };
@@ -118,7 +117,7 @@ impl StorageCatalog {
             }
             StorageCatalogConfig::Azblob(config) => {
                 let mut file_io_builder =
-                    FileIOBuilder::new(Arc::new(OpenDalStorageFactory::Azblob));
+                    FileIOBuilder::new(Arc::new(OpenDalStorageFactory::azblob()));
                 if let Some(account_name) = &config.account_name {
                     file_io_builder = file_io_builder.with_prop(AZBLOB_ACCOUNT_NAME, account_name)
                 };
