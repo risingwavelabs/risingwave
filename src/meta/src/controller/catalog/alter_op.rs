@@ -644,6 +644,18 @@ impl CatalogController {
                 object_id,
             ));
         }
+        if object_type == ObjectType::Table {
+            let table_type = Table::find_by_id(object_id.as_table_id())
+                .select_only()
+                .column(table::Column::TableType)
+                .into_tuple::<TableType>()
+                .one(&txn)
+                .await?
+                .ok_or_else(|| MetaError::catalog_id_not_found("table", object_id))?;
+            if table_type == TableType::Internal {
+                return Err(MetaError::catalog_id_not_found("table", object_id));
+            }
+        }
         if obj.schema_id == Some(new_schema) {
             return Ok(IGNORED_NOTIFICATION_VERSION);
         }

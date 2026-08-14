@@ -36,7 +36,7 @@ use thiserror::Error;
 
 use self::non_zero64::ConfigNonZeroU64;
 use crate::config::mutate::TomlTableMutateExt;
-use crate::config::streaming::{JoinEncodingType, OverWindowCachePolicy};
+use crate::config::streaming::{CacheRefillPolicy, JoinEncodingType, OverWindowCachePolicy};
 use crate::config::{ConfigMergeError, StreamingConfig, merge_streaming_config_section};
 use crate::hash::VirtualNode;
 use crate::session_config::parallelism::{ConfigBackfillParallelism, ConfigParallelism};
@@ -395,6 +395,14 @@ pub struct SessionConfig {
     #[parameter(default = None, alias = "rw_streaming_over_window_cache_policy")]
     streaming_over_window_cache_policy: OptionConfig<OverWindowCachePolicy>,
 
+    /// Cache refill policy for streaming cache refill feature.
+    /// Can be `enabled`, `disabled`, `streaming`, `serving` or `both`.
+    ///
+    /// This overrides the corresponding entry from the `[streaming.developer]` section in the config file,
+    /// taking effect for new streaming jobs created in the current session.
+    #[parameter(default = None)]
+    streaming_cache_refill_policy: OptionConfig<CacheRefillPolicy>,
+
     /// Run DDL statements in background
     #[parameter(default = false)]
     background_ddl: bool,
@@ -660,6 +668,11 @@ impl SessionConfig {
                 .upsert("streaming.developer.over_window_cache_policy", v)
                 .unwrap();
         }
+        if let Some(v) = self.streaming_cache_refill_policy.as_ref() {
+            table
+                .upsert("streaming.developer.cache_refill_policy", v)
+                .unwrap();
+        }
 
         let res = toml::to_string(&table)?;
 
@@ -721,11 +734,15 @@ mod test {
                 &mut (),
             )
             .unwrap();
+        config
+            .set_streaming_cache_refill_policy(Some(CacheRefillPolicy::Both).into(), &mut ())
+            .unwrap();
 
         // Check the converted config override string.
         let override_str = config.to_initial_streaming_config_override().unwrap();
         expect![[r#"
             [streaming.developer]
+            cache_refill_policy = "both"
             join_encoding_type = "cpu_optimized"
             over_window_cache_policy = "recent_first_n"
         "#]]
@@ -739,6 +756,10 @@ mod test {
         assert_eq!(
             merged.developer.over_window_cache_policy,
             OverWindowCachePolicy::RecentFirstN
+        );
+        assert_eq!(
+            merged.developer.cache_refill_policy,
+            CacheRefillPolicy::Both
         );
     }
 

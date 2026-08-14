@@ -14,6 +14,7 @@
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::catalog::FragmentTypeMask;
     use risingwave_common::hash::VirtualNode;
     use risingwave_meta_model::FragmentId;
     use risingwave_meta_model::fragment::DistributionType;
@@ -22,13 +23,14 @@ mod tests {
     use risingwave_pb::catalog::{PbSinkType, StreamSourceInfo};
     use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType, worker_node};
     use risingwave_pb::meta::SubscribeType;
+    use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
     use risingwave_pb::stream_plan::PbStreamNode;
     use tokio::sync::{mpsc, oneshot};
 
     use crate::barrier::Command;
     use crate::controller::catalog::*;
     use crate::manager::{LocalNotification, WorkerKey};
-    use crate::model::FragmentDownstreamRelation;
+    use crate::model::{Fragment, FragmentDownstreamRelation};
     use crate::serving::ServingVnodeMapping;
 
     const TEST_DATABASE_ID: DatabaseId = DatabaseId::new(1);
@@ -1034,6 +1036,13 @@ mod tests {
         else {
             unreachable!()
         };
+        insert_test_fragment(
+            &txn,
+            FragmentId::new(200),
+            result_table_id.as_job_id(),
+            TableIdArray(vec![result_table_id, internal_table_id]),
+        )
+        .await?;
         txn.commit().await?;
         drop(inner);
 
@@ -1083,6 +1092,132 @@ mod tests {
                 CacheRefillPolicy::Both.to_protobuf() as i32,
             )])
         );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_prepare_streaming_job_cache_refill_policy_notifies_hummock() -> MetaResult<()> {
+        let env = MetaSrvEnv::for_test().await;
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        env.notification_manager().insert_sender(
+            SubscribeType::Hummock,
+            WorkerKey(HostAddress {
+                host: "localhost".to_owned(),
+                port: 1234,
+            }),
+            tx,
+        );
+        let (local_notification_tx, mut local_notification_rx) = mpsc::unbounded_channel();
+        env.notification_manager()
+            .insert_local_sender(local_notification_tx);
+        let mgr = CatalogController::new(env).await?;
+
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let (job_id, Some(result_table_id), internal_table_id) = insert_test_streaming_job(
+            &txn,
+            "mv_initial_cache_refill",
+            true,
+            Some(CacheRefillPolicy::Both),
+        )
+        .await?
+        else {
+            unreachable!()
+        };
+        let (unprepared_job_id, Some(unprepared_result_table_id), unprepared_internal_table_id) =
+            insert_test_streaming_job(
+                &txn,
+                "mv_unprepared_cache_refill",
+                true,
+                Some(CacheRefillPolicy::Serving),
+            )
+            .await?
+        else {
+            unreachable!()
+        };
+        for job_id in [job_id, unprepared_job_id] {
+            streaming_job::ActiveModel {
+                job_id: Set(job_id),
+                job_status: Set(JobStatus::Initial),
+                ..Default::default()
+            }
+            .update(&txn)
+            .await?;
+        }
+        txn.commit().await?;
+        drop(inner);
+
+        let fragments = [Fragment {
+            fragment_id: FragmentId::new(300),
+            fragment_type_mask: FragmentTypeMask::default(),
+            distribution_type: PbFragmentDistributionType::Hash,
+            state_table_ids: vec![],
+            maybe_vnode_count: Some(1),
+            nodes: PbStreamNode::default(),
+        }];
+        mgr.prepare_streaming_job(
+            job_id,
+            || fragments.iter(),
+            &FragmentDownstreamRelation::default(),
+            true,
+            None,
+            None,
+        )
+        .await?;
+
+        let local_notification = local_notification_rx
+            .try_recv()
+            .expect("should receive serving fragment mapping notification");
+        let LocalNotification::ServingFragmentMappingsUpsert(fragment_ids) = local_notification
+        else {
+            panic!(
+                "unexpected local notification before hummock notification: {:?}",
+                local_notification
+            );
+        };
+        assert_eq!(fragment_ids, vec![FragmentId::new(300).as_raw_id()]);
+
+        let response = rx
+            .recv()
+            .await
+            .expect("should receive hummock notification")
+            .expect("notification should be ok");
+        assert_eq!(response.operation(), NotificationOperation::Update);
+        let info = response.info;
+        let Some(NotificationInfo::TableRefillRuntimeConfig(config)) = info else {
+            panic!("unexpected notification: {:?}", info);
+        };
+        assert!(config.serving_table_vnode_mappings.is_none());
+        let policies = config
+            .table_cache_refill_policies
+            .expect("policy snapshot should be present");
+        let table_policies = policies
+            .table_policies
+            .into_iter()
+            .map(|policy| (policy.table_id, policy.policy))
+            .collect::<HashMap<_, _>>();
+        assert_eq!(
+            table_policies,
+            HashMap::from([(
+                result_table_id.as_raw_id(),
+                CacheRefillPolicy::Both.to_protobuf() as i32,
+            )])
+        );
+        assert!(!table_policies.contains_key(&unprepared_result_table_id.as_raw_id()));
+        let internal_table_policies = policies
+            .internal_table_policies
+            .into_iter()
+            .map(|policy| (policy.table_id, policy.policy))
+            .collect::<HashMap<_, _>>();
+        assert_eq!(
+            internal_table_policies,
+            HashMap::from([(
+                internal_table_id.as_raw_id(),
+                CacheRefillPolicy::Both.to_protobuf() as i32,
+            )])
+        );
+        assert!(!internal_table_policies.contains_key(&unprepared_internal_table_id.as_raw_id()));
 
         Ok(())
     }
@@ -1480,6 +1615,87 @@ mod tests {
                 .is_none()
         );
         assert!(Object::find_by_id(nested_obj.oid).one(db).await?.is_none());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_alter_internal_table_schema_rejected() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        mgr.create_schema(PbSchema {
+            database_id: TEST_DATABASE_ID,
+            name: "internal_table_alter_target".to_owned(),
+            owner: TEST_OWNER_ID as _,
+            ..Default::default()
+        })
+        .await?;
+        let target_schema_id: SchemaId = Schema::find()
+            .select_only()
+            .column(schema::Column::SchemaId)
+            .filter(schema::Column::Name.eq("internal_table_alter_target"))
+            .into_tuple()
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+
+        let txn = mgr.inner.read().await.db.begin().await?;
+        let parent_obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(TEST_SCHEMA_ID.as_object_id()),
+        )
+        .await?;
+        let parent_job_id = parent_obj.oid.as_job_id();
+        insert_test_table(
+            &txn,
+            parent_job_id.as_mv_table_id(),
+            "internal_table_parent",
+            TableType::MaterializedView,
+            None,
+            "",
+        )
+        .await?;
+        let internal_obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(parent_job_id.as_object_id()),
+        )
+        .await?;
+        let internal_table_id = internal_obj.oid.as_table_id();
+        insert_test_table(
+            &txn,
+            internal_table_id,
+            "__internal_table_alter_target",
+            TableType::Internal,
+            Some(parent_job_id),
+            "",
+        )
+        .await?;
+        txn.commit().await?;
+
+        for new_schema in [TEST_SCHEMA_ID, target_schema_id] {
+            assert!(
+                mgr.alter_schema(
+                    ObjectType::Table,
+                    internal_table_id.as_object_id(),
+                    new_schema,
+                )
+                .await
+                .is_err()
+            );
+        }
+
+        let internal_obj = Object::find_by_id(internal_table_id)
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+        assert_eq!(internal_obj.schema_id, Some(TEST_SCHEMA_ID));
+        assert_eq!(
+            internal_obj.belong_to_oid,
+            Some(parent_job_id.as_object_id())
+        );
 
         Ok(())
     }
