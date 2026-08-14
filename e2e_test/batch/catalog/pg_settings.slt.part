@@ -56,6 +56,7 @@ user iceberg_query_storage_mode
 user idle_in_transaction_session_timeout
 user implicit_flush
 user intervalstyle
+user locality_backfill_mode
 user lock_timeout
 user max_split_range_gap
 user query_epoch

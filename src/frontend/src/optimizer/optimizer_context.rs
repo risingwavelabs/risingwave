@@ -104,7 +104,10 @@ impl OptimizerContext {
             handler_args.session.config().timezone(),
         ));
         let locality_backfill_enabled = matches!(
-            handler_args.session.config().enable_locality_backfill(),
+            handler_args
+                .session
+                .config()
+                .effective_locality_backfill_mode(),
             LocalityBackfillMode::On
         );
         let overwrite_options = OverwriteOptions::new(&mut handler_args);
