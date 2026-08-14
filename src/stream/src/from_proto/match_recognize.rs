@@ -146,6 +146,21 @@ impl ExecutorBuilder for MatchRecognizeExecutorBuilder {
             .as_ref()
             .map(|e| build_non_strict_from_prost(e, params.eval_error_report.clone()))
             .transpose()?;
+        // The two WITHIN expressions are a correctness-coupled pair, and the coupling tightened when
+        // the executor's span check started reading the cached deadline instead of evaluating the
+        // predicate: `within` present with `within_deadline` absent now rejects EVERY candidate, so
+        // the view would silently produce zero rows. The binder only ever emits both or neither
+        // (`lower_within`), so a plan carrying one is corrupt — fail loud, as the rest of this
+        // decoder does, rather than emitting nothing forever.
+        if within.is_some() != within_deadline.is_some() {
+            return Err(anyhow::anyhow!(
+                "MATCH_RECOGNIZE carries only one of the two WITHIN expressions \
+                 (predicate: {}, deadline: {}); the binder emits both or neither",
+                within.is_some(),
+                within_deadline.is_some(),
+            )
+            .into());
+        }
 
         let vnode_bitmap = params.vnode_bitmap.clone().map(std::sync::Arc::new);
         let state_table_catalog = node

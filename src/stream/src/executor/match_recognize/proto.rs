@@ -76,8 +76,14 @@ fn estimate_nfa_states(pattern: &Pattern) -> u64 {
                     match max {
                         None => mandatory.saturating_add(inner).saturating_add(2),
                         Some(max) => {
-                            let optional =
-                                inner.saturating_mul(u64::from(max.saturating_sub(*min)));
+                            // Each optional copy is expanded as `Question` by `build_range`, and
+                            // `Question` allocates its own start/accept pair on top of the inner
+                            // fragment — so it costs `inner + 2`, not `inner`. Undercounting by 2
+                            // per copy let `(a{0,1000}){0,50}` estimate exactly at the cap while
+                            // really compiling to a little over twice it.
+                            let optional = inner
+                                .saturating_add(2)
+                                .saturating_mul(u64::from(max.saturating_sub(*min)));
                             mandatory.saturating_add(optional).max(1)
                         }
                     }
@@ -190,6 +196,24 @@ mod tests {
     }
 
     /// A realistic pattern is nowhere near the cap and must still decode.
+    /// A bounded range with `max > min` must count each OPTIONAL copy at the price the compiler
+    /// actually pays. `build_range` expands `max - min` of them as `Question`, and `Question`
+    /// allocates its own start/accept pair on top of the inner fragment — so an optional copy costs
+    /// `inner + 2`, not `inner`.
+    ///
+    /// The existing oversize test uses `{1000,1000}`, where `max == min` makes the optional term
+    /// zero, so it cannot see this. `(a{0,1000}){0,50}` is the smallest shape that can: it estimates
+    /// exactly at the cap while really compiling to a little over twice it.
+    #[test]
+    fn a_bounded_range_counts_the_state_pair_each_optional_copy_allocates() {
+        let inner = quantified(var("a"), Kind::Range, 0, Some(1000), false);
+        let nested = quantified(inner, Kind::Range, 0, Some(50), false);
+        assert!(
+            pattern_from_protobuf(&nested).is_err(),
+            "must be rejected: this compiles to ~200k states, twice the cap"
+        );
+    }
+
     #[test]
     fn an_ordinary_pattern_is_well_under_the_state_cap() {
         let pat = concat(vec![

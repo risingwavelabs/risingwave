@@ -1707,12 +1707,24 @@ fn lower_within(ts_type: DataType, bound: ExprImpl) -> crate::error::Result<(Exp
                 "a MATCH_RECOGNIZE WITHIN bound whose addition widens the ORDER BY type \
                  ({ts_type} + bound yields {sum_type})"
             ),
-            format!(
-                "the bound must keep the ORDER BY column's type, since it is also used as a \
-                 per-row deadline compared against that column and the watermark — cast the bound \
-                 (e.g. `WITHIN <bound>::{ts_type}`), or use an ORDER BY column whose type absorbs \
-                 the bound (a timestamp or timestamptz column for an interval bound)"
-            ),
+            // Deliberately does not offer `WITHIN <bound>::{ts_type}` unconditionally: for the
+            // motivating `date` + interval case there is no such cast (`interval::date` is not a
+            // valid cast), and suggesting it sends the reader down a dead end. Widening within one
+            // numeric family is castable; crossing families is not.
+            if sum_type.is_numeric() && ts_type.is_numeric() {
+                format!(
+                    "the bound must keep the ORDER BY column's type, since it is also used as a \
+                     per-row deadline compared against that column and the watermark — cast the \
+                     bound, e.g. `WITHIN <bound>::{ts_type}`"
+                )
+            } else {
+                format!(
+                    "the bound must keep the ORDER BY column's type, since it is also used as a \
+                     per-row deadline compared against that column and the watermark — use an \
+                     ORDER BY column whose type absorbs the bound (a timestamp or timestamptz \
+                     column for an interval bound, rather than {ts_type})"
+                )
+            },
         )
         .into());
     }
@@ -1722,8 +1734,17 @@ fn lower_within(ts_type: DataType, bound: ExprImpl) -> crate::error::Result<(Exp
     )?);
     // The deadline is the same `first + bound`, but over a one-column synthetic row, so `first` is
     // `InputRef(0)` here rather than `InputRef(1)`.
-    let first_only = ExprImpl::from(InputRef::new(0, ts_type));
+    let first_only = ExprImpl::from(InputRef::new(0, ts_type.clone()));
     let deadline = ExprImpl::from(FunctionCall::new(ExprType::Add, vec![first_only, bound])?);
+    // The check above is on the predicate's right-hand side; the DEADLINE is the expression the
+    // executor actually evaluates and compares, so assert it directly rather than inferring that
+    // identical operand types must infer identically.
+    debug_assert_eq!(
+        deadline.return_type(),
+        ts_type,
+        "the WITHIN deadline must keep the ORDER BY type; it is compared against the order key \
+         and the watermark by `default_cmp`, which panics across variants"
+    );
     Ok((predicate, deadline))
 }
 
