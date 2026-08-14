@@ -25,6 +25,7 @@ use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use simd_json::prelude::ArrayTrait;
 use thiserror_ext::AsReport;
+use tokio_postgres::error::SqlState;
 use tokio_postgres::types::Type as PgType;
 
 use super::{
@@ -44,6 +45,10 @@ pub const POSTGRES_SINK: &str = "postgres";
 /// the client encodes the parameter count of a `Bind` message as `i16`, so a larger batch fails
 /// before ever reaching the server.
 const MAX_STATEMENT_PARAMS: usize = i16::MAX as usize;
+
+/// Upper bound of `max_batch_rows`: bigger batches only add buffer memory, since statements are
+/// split at [`MAX_STATEMENT_PARAMS`] anyway.
+const MAX_BATCH_ROWS_LIMIT: usize = 65536;
 
 const CHECK_FOREIGN_KEY_SQL: &str = r#"
     SELECT EXISTS (
@@ -227,6 +232,14 @@ impl Sink for PostgresSink {
     crate::impl_validate_sink_unknown_fields!();
 
     async fn validate(&self) -> Result<()> {
+        if !(1..=MAX_BATCH_ROWS_LIMIT).contains(&self.config.max_batch_rows) {
+            return Err(SinkError::Config(anyhow!(
+                "`max_batch_rows` must be between 1 and {}, got {}",
+                MAX_BATCH_ROWS_LIMIT,
+                self.config.max_batch_rows
+            )));
+        }
+
         if !self.is_append_only && self.pk_indices.is_empty() {
             return Err(SinkError::Config(anyhow!(
                 "Primary key not defined for upsert Postgres sink (please define in `primary_key` field)"
@@ -493,12 +506,23 @@ impl PostgresSinkWriter {
             .map(|i| schema_types[*i].clone())
             .collect_vec();
 
+        // `validate()` rejects out-of-range values at DDL time; only clamp here so pre-existing
+        // sinks (the option was inert before batching) keep running after an upgrade.
+        let max_batch_rows = config.max_batch_rows.clamp(1, MAX_BATCH_ROWS_LIMIT);
+        if max_batch_rows != config.max_batch_rows {
+            tracing::warn!(
+                configured = config.max_batch_rows,
+                effective = max_batch_rows,
+                "max_batch_rows out of range, clamped"
+            );
+        }
+
         let (write_kind, pending) = if is_append_only {
             (StatementKind::Insert, PendingRows::Insert(Vec::new()))
         } else {
             (
                 StatementKind::Upsert,
-                PendingRows::Upsert(HashMap::with_capacity(config.max_batch_rows)),
+                PendingRows::Upsert(HashMap::with_capacity(max_batch_rows.min(1024))),
             )
         };
 
@@ -511,7 +535,7 @@ impl PostgresSinkWriter {
             key_indices,
             key_types,
             schema_types,
-            max_batch_rows: config.max_batch_rows,
+            max_batch_rows,
             write_statement: None,
             delete_statement: None,
             pending,
@@ -604,10 +628,67 @@ impl PostgresSinkWriter {
 
         let transaction = self.client.transaction().await?;
         // Deletes go first, which is safe because dedup leaves deleted and upserted keys disjoint.
-        execute_batches(&transaction, StatementKind::Delete, &delete_batches).await?;
-        execute_batches(&transaction, self.write_kind, &write_batches).await?;
+        execute_batches(&transaction, &delete_batches)
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to execute delete statements on {} rows",
+                    deletes.len()
+                )
+            })?;
+        if let Err(e) = execute_batches(&transaction, &write_batches).await {
+            // Keys the dedup kept apart may still be equal to PostgreSQL (e.g. `char(n)` padding
+            // or a case-insensitive collation), which a multi-row upsert rejects with SQLSTATE
+            // 21000. Retry such batches row by row.
+            if e.code() == Some(&SqlState::CARDINALITY_VIOLATION) {
+                transaction.rollback().await?;
+                tracing::warn!(
+                    error = %e.as_report(),
+                    rows = upserts.len(),
+                    "batch contains keys equal to PostgreSQL but distinct to RisingWave, retrying row by row"
+                );
+                return self.flush_row_by_row(&deletes, &upserts).await;
+            }
+            return Err(anyhow::Error::new(e)
+                .context(format!(
+                    "failed to execute {} statements on {} rows",
+                    self.write_kind.as_str(),
+                    upserts.len()
+                ))
+                .into());
+        }
         transaction.commit().await?;
 
+        Ok(())
+    }
+
+    /// Applies a batch whose upsert keys collide under PostgreSQL's equality: batched deletes
+    /// first, then one upsert per statement.
+    async fn flush_row_by_row(&mut self, deletes: &[PgRow], upserts: &[PgRow]) -> Result<()> {
+        let delete_batches = self.prepare_batches(StatementKind::Delete, deletes).await?;
+        let sql = self.create_sql(self.write_kind, 1);
+        let statement = self
+            .client
+            .prepare(&sql)
+            .await
+            .context("failed to prepare single-row write statement")?;
+
+        let transaction = self.client.transaction().await?;
+        execute_batches(&transaction, &delete_batches)
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to execute delete statements on {} rows",
+                    deletes.len()
+                )
+            })?;
+        for row in upserts {
+            transaction
+                .execute_raw(&statement, row)
+                .await
+                .context("failed to execute single-row write statement")?;
+        }
+        transaction.commit().await?;
         Ok(())
     }
 
@@ -633,22 +714,12 @@ fn tuples_per_statement(max_batch_rows: usize, params_per_tuple: usize) -> usize
 
 async fn execute_batches(
     transaction: &tokio_postgres::Transaction<'_>,
-    kind: StatementKind,
     batches: &[(tokio_postgres::Statement, &[PgRow])],
-) -> Result<()> {
+) -> std::result::Result<(), tokio_postgres::Error> {
     for (statement, tuples) in batches {
         let mut params = Vec::with_capacity(tuples.len() * tuples.first().map_or(0, |t| t.len()));
         params.extend(tuples.iter().flatten());
-        transaction
-            .execute_raw(statement, params)
-            .await
-            .with_context(|| {
-                format!(
-                    "failed to execute {} statement on {} rows",
-                    kind.as_str(),
-                    tuples.len()
-                )
-            })?;
+        transaction.execute_raw(statement, params).await?;
     }
     Ok(())
 }
@@ -936,6 +1007,31 @@ mod tests {
                 r#"INSERT INTO "test_schema"."test_table" ("user_id", "client_id") VALUES ($1, $2), ($3, $4) on conflict ("user_id", "client_id") do nothing"#
             ]],
         );
+    }
+
+    #[tokio::test]
+    async fn test_validate_max_batch_rows_range() {
+        let properties = BTreeMap::from(
+            [
+                ("host", "localhost"),
+                ("port", "5432"),
+                ("user", "u"),
+                ("password", "p"),
+                ("database", "d"),
+                ("table", "t"),
+                ("type", "upsert"),
+            ]
+            .map(|(k, v)| (k.to_owned(), v.to_owned())),
+        );
+        // The range check fails before any connection is attempted.
+        for bad in ["0", "65537"] {
+            let mut properties = properties.clone();
+            properties.insert("max_batch_rows".to_owned(), bad.to_owned());
+            let config = PostgresConfig::from_btreemap(properties).unwrap();
+            let sink = PostgresSink::new(config, test_schema(), vec![0], false).unwrap();
+            let err = sink.validate().await.unwrap_err();
+            assert!(err.to_string().contains("max_batch_rows"), "{}", err);
+        }
     }
 
     #[test]
