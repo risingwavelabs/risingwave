@@ -31,6 +31,7 @@ use sqlx::{PgPool, Row};
 use thiserror_ext::AsReport;
 use tokio_postgres::types::Kind as PgKind;
 use tokio_postgres::{Client as PgClient, NoTls};
+use with_options::WithOptions;
 
 #[cfg(not(madsim))]
 use super::maybe_tls_connector::MaybeMakeTlsConnector;
@@ -134,7 +135,7 @@ impl PgConnectionConfig {
 /// Lives in `connector_common` so both the sink config and the shared
 /// `create_pg_client` helper reference the same definition.
 #[serde_as]
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone, Deserialize, WithOptions)]
 pub struct TcpKeepaliveConfig {
     #[serde(rename = "tcp.keepalive.idle")]
     #[serde_as(as = "DisplayFromStr")]
