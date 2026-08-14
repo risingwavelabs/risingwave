@@ -519,7 +519,7 @@ impl PostgresSinkWriter {
         } else {
             PendingRows::Upsert {
                 absorbed: 0,
-                rows: HashMap::with_capacity(max_batch_rows.min(1024)),
+                rows: HashMap::new(),
             }
         };
 
