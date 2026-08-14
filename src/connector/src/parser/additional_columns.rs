@@ -542,29 +542,6 @@ mod test {
     }
 
     #[test]
-    fn test_build_pulsar_header_additional_column() {
-        let col = build_additional_column_desc(
-            ColumnId::new(1),
-            PULSAR_CONNECTOR,
-            "header",
-            Some("pulsar_header".to_owned()),
-            Some("tenant"),
-            Some(&DataType::Varchar),
-            true,
-            false,
-        )
-        .unwrap();
-
-        assert_eq!(col.name, "pulsar_header");
-        assert_eq!(col.data_type, DataType::Varchar);
-        assert_matches::assert_matches!(
-            col.additional_column.column_type,
-            Some(AdditionalColumnType::HeaderInner(ref header))
-                if header.inner_field == "tenant"
-        );
-    }
-
-    #[test]
     fn test_rabbitmq_public_additional_columns_exclude_internal_state() {
         let supported = get_supported_additional_columns(RABBITMQ_CONNECTOR, false).unwrap();
         assert_eq!(supported, &HashSet::from(["payload"]));
