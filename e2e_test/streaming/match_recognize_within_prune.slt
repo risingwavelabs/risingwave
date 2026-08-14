@@ -46,3 +46,58 @@ drop materialized view mv_within_prune;
 
 statement ok
 drop table t;
+
+# The deadline prune skips a window-closed row WITHOUT consulting the matcher, while the emission
+# gate can hold a match because a *gap* position before its start is still alive at the boundary. A
+# held match's own start row can then be dead at the boundary (a path from it accepts before the
+# buffer end), so the prune marches straight past it. Deleting that row loses the match AND lets the
+# rebuild emit one a batch evaluation never produces. No budget exhaustion is involved.
+statement ok
+create table t_gap (id int, ts int, v int, watermark for ts as ts - 1) append only;
+
+statement ok
+create materialized view mv_gap as
+select * from t_gap match_recognize (
+  partition by id
+  order by ts
+  measures count(*) as len, first(b.ts) as b0
+  one row per match
+  after match skip past last row
+  pattern (a b b b b | b b)
+  within 4
+  define a as a.v = 7, b as b.v = 8
+) as m;
+
+# Buffer [ts10 v7, ts11 v8, ts12 v8, ts13 v8]; deadlines 14,15,16,17. The only match is `b b` over
+# ts11..ts12, held because `a b b b` from ts10 is still alive at the boundary.
+statement ok
+insert into t_gap values (1,10,7),(1,11,8),(1,12,8),(1,13,8);
+
+# Advance the watermark to 15 from another partition: ts10's window (14) has closed while ts11's (15)
+# has not, which is exactly the state where the prune would step over the held match's start row.
+statement ok
+insert into t_gap values (9,16,0);
+
+statement ok
+flush;
+
+# Release everything so the held match finalises.
+statement ok
+insert into t_gap values (9,40,0);
+
+statement ok
+flush;
+
+# Exactly the batch answer: one match, `b b` over ts11..ts12. Verified to catch the regression: with
+# the prune's clamp to the first still-held match removed, ts11 is evicted and this returns `2 12` —
+# a different span that batch semantics never produces.
+query II
+select len, b0 from mv_gap where partition_0 = 1;
+----
+2 11
+
+statement ok
+drop materialized view mv_gap;
+
+statement ok
+drop table t_gap;
