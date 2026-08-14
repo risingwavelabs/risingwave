@@ -30,8 +30,8 @@ use thiserror_ext::AsReport;
 use super::MessageMeta;
 use crate::parser::utils::{
     extract_cdc_meta_column, extract_header_inner_from_meta, extract_headers_from_meta,
-    extract_pulsar_message_id_data_from_meta, extract_subject_from_meta,
-    extract_timestamp_from_meta,
+    extract_pulsar_message_id_data_from_meta, extract_rabbitmq_ack_data_from_meta,
+    extract_subject_from_meta, extract_timestamp_from_meta,
 };
 use crate::source::{SourceColumnDesc, SourceColumnType, SourceCtrlOpts, SourceMeta};
 
@@ -157,6 +157,15 @@ impl SourceStreamChunkBuilder {
             .with_meta(meta)
             .do_insert(|_| Ok(Datum::None));
         self.finish_current_chunk(); // each heartbeat should be a separate chunk
+    }
+
+    /// Write an invisible row that advances connector-internal state without producing user data.
+    pub fn invisible_progress(&mut self, meta: MessageMeta<'_>) {
+        _ = self
+            .row_writer()
+            .invisible()
+            .with_meta(meta)
+            .do_insert(|_| Ok(Datum::None));
     }
 
     /// Finish and build a [`StreamChunk`] from the current pending records in the builder,
@@ -426,6 +435,15 @@ impl SourceStreamChunkRowWriter<'_> {
                             .and_then(|ele| {
                                 extract_pulsar_message_id_data_from_meta(ele.source_meta)
                             })
+                            .unwrap_or(None),
+                    ))
+                }
+                (_, &Some(AdditionalColumnType::RabbitmqAckData(_))) => {
+                    // rabbitmq_ack_data is derived internally, so it's not included here
+                    Ok(A::output_for(
+                        self.row_meta
+                            .as_ref()
+                            .and_then(|ele| extract_rabbitmq_ack_data_from_meta(ele.source_meta))
                             .unwrap_or(None),
                     ))
                 }
