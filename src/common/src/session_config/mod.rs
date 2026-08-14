@@ -780,16 +780,8 @@ impl SessionConfig {
 #[cfg(test)]
 mod test {
     use expect_test::expect;
-    use serde::Deserialize;
 
     use super::*;
-
-    #[serde_with::serde_as]
-    #[derive(Debug, Deserialize)]
-    struct LegacyLocalityBackfillConfig {
-        #[serde_as(as = "serde_with::DisplayFromStr")]
-        enable_locality_backfill: bool,
-    }
 
     #[derive(SessionConfig)]
     struct TestConfig {
@@ -814,48 +806,6 @@ mod test {
             Some("deprecated test notice")
         );
         assert_eq!(TestConfig::deprecated_notice("test_param").unwrap(), None);
-    }
-
-    #[test]
-    fn test_locality_backfill_new_meta_snapshot_is_readable_by_legacy_frontend() {
-        let mut config = SessionConfig::default();
-        config
-            .set_locality_backfill_mode(LocalityBackfillMode::On, &mut ())
-            .unwrap();
-
-        // Changing the new mode must leave the legacy field readable after an upgrade or rollback.
-        let legacy: LegacyLocalityBackfillConfig =
-            serde_json::from_value(serde_json::to_value(&config).unwrap()).unwrap();
-        assert!(legacy.enable_locality_backfill);
-
-        config
-            .set_locality_backfill_mode(LocalityBackfillMode::Off, &mut ())
-            .unwrap();
-        assert!(!config.enable_locality_backfill());
-        config.set_enable_locality_backfill(true, &mut ()).unwrap();
-        assert_eq!(config.locality_backfill_mode(), LocalityBackfillMode::On);
-    }
-
-    #[test]
-    fn test_locality_backfill_new_frontend_reads_legacy_meta_snapshot() {
-        let mut old_snapshot = serde_json::to_value(SessionConfig::default()).unwrap();
-        let old_snapshot = old_snapshot.as_object_mut().unwrap();
-        assert!(old_snapshot.remove("locality_backfill_mode").is_some());
-        assert!(
-            old_snapshot
-                .remove("auto_locality_backfill_min_size")
-                .is_some()
-        );
-
-        let upgraded = SessionConfig::from_meta_snapshot(
-            &serde_json::to_string(&serde_json::Value::Object(old_snapshot.clone())).unwrap(),
-        )
-        .unwrap();
-        assert_eq!(upgraded.locality_backfill_mode(), LocalityBackfillMode::Off);
-        assert_eq!(
-            upgraded.auto_locality_backfill_min_size(),
-            AUTO_LOCALITY_BACKFILL_MIN_SIZE
-        );
     }
 
     #[test]

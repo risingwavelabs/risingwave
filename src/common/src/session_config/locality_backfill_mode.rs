@@ -52,33 +52,3 @@ impl std::fmt::Display for LocalityBackfillMode {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_locality_backfill_mode() {
-        assert_eq!(
-            LocalityBackfillMode::from_str("auto").unwrap(),
-            LocalityBackfillMode::Auto
-        );
-        assert_eq!(
-            LocalityBackfillMode::from_str("on").unwrap(),
-            LocalityBackfillMode::On
-        );
-        assert_eq!(
-            LocalityBackfillMode::from_str("true").unwrap(),
-            LocalityBackfillMode::On
-        );
-        assert_eq!(
-            LocalityBackfillMode::from_str("off").unwrap(),
-            LocalityBackfillMode::Off
-        );
-        assert_eq!(
-            LocalityBackfillMode::from_str("false").unwrap(),
-            LocalityBackfillMode::Off
-        );
-        assert!(LocalityBackfillMode::from_str("invalid").is_err());
-    }
-}

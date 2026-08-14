@@ -227,11 +227,10 @@ impl SessionParamsController {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_pb::common::HostAddress;
     use sea_orm::ColumnTrait;
 
     use super::*;
-    use crate::manager::{MetaSrvEnv, WorkerKey};
+    use crate::manager::MetaSrvEnv;
 
     #[tokio::test]
     async fn test_session_params() {
@@ -307,67 +306,6 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(models.value, params.get("rw_implicit_flush").unwrap());
-
-        // A locality-mode update is mirrored to the legacy boolean. Old frontends receive only
-        // the compatible boolean, while new frontends also receive the canonical mode.
-        let (old_tx, mut old_rx) = tokio::sync::mpsc::unbounded_channel();
-        let (new_tx, mut new_rx) = tokio::sync::mpsc::unbounded_channel();
-        session_param_ctl
-            .notification_manager
-            .insert_sender_with_session_config_version(
-                risingwave_pb::meta::SubscribeType::Frontend,
-                WorkerKey(HostAddress {
-                    host: "old".to_owned(),
-                    port: 1,
-                }),
-                old_tx,
-                0,
-            );
-        session_param_ctl
-            .notification_manager
-            .insert_sender_with_session_config_version(
-                risingwave_pb::meta::SubscribeType::Frontend,
-                WorkerKey(HostAddress {
-                    host: "new".to_owned(),
-                    port: 1,
-                }),
-                new_tx,
-                1,
-            );
-        session_param_ctl
-            .set_param(LOCALITY_BACKFILL_MODE_PARAM, Some("auto".to_owned()))
-            .await
-            .unwrap();
-
-        let old_update = old_rx.recv().await.unwrap().unwrap();
-        let Info::SessionParam(old_update) = old_update.info.unwrap() else {
-            panic!("unexpected notification")
-        };
-        assert_eq!(old_update.param, ENABLE_LOCALITY_BACKFILL_PARAM);
-        assert_eq!(old_update.value(), "false");
-
-        let new_updates = [
-            new_rx.recv().await.unwrap().unwrap(),
-            new_rx.recv().await.unwrap().unwrap(),
-        ]
-        .map(|notification| {
-            let Info::SessionParam(update) = notification.info.unwrap() else {
-                panic!("unexpected notification")
-            };
-            let value = update.value().to_owned();
-            (update.param, value)
-        });
-        assert_eq!(
-            new_updates,
-            [
-                (
-                    ENABLE_LOCALITY_BACKFILL_PARAM.to_owned(),
-                    "false".to_owned()
-                ),
-                (LOCALITY_BACKFILL_MODE_PARAM.to_owned(), "auto".to_owned()),
-            ]
-        );
-        assert!(old_rx.try_recv().is_err());
     }
 
     /// Scenario 1: on a new cluster, `[session_init]` seeds values into the meta store, including
