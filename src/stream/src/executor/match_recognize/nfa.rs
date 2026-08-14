@@ -48,9 +48,16 @@ impl MatchScan {
         Self::default()
     }
 
-    /// The first start with no decided outcome. Every start below it either produced a match or was
-    /// proven matchless, so a caller may treat "no match starts there" as evidence — which is only
-    /// true because a budget-aborted start is NOT advanced past (see `next_match`).
+    /// The next start the pull loop would explore.
+    ///
+    /// This is NOT a "fully scanned prefix" marker, and must not be used as one: on a hit the cursor
+    /// jumps to `skip.next_pos`, so under `PAST LAST ROW` every start strictly inside the match it
+    /// just returned was never evaluated. What it does guarantee, since the budget fix below, is the
+    /// narrower property that a start whose walk the budget ABORTED is not advanced past — so the
+    /// cursor never claims a verdict the walk did not reach.
+    ///
+    /// No production caller reads this today; it exists for the emit-on-update port, which needs to
+    /// resume a pull, and for the test that pins the abort behaviour.
     pub fn next_start(&self) -> usize {
         self.next_start
     }
@@ -712,12 +719,14 @@ impl Nfa {
                     labels,
                 }));
             }
-            // Only advance past a start with a real verdict. `preferred_from_dynamic` returns
-            // `None` for two different reasons — "no match from here" and "the budget died mid-walk,
-            // no verdict" — and advancing on the second would report an unexplored start as decided.
-            // Callers treat the cursor as the boundary of the fully-scanned prefix, so that claim
-            // must hold: `(a b) | a` over two `a` rows with a budget of 1 dies inside start 0 before
-            // ever trying the second alternative, which matches there.
+            // Only advance past a start with a real verdict. `preferred_from_dynamic` returns `None`
+            // for two different reasons — "no match from here" and "the budget died mid-walk, no
+            // verdict" — and advancing on the second leaves the cursor claiming a verdict the walk
+            // never reached: `(a b) | a` over two `a` rows with a budget of 1 dies inside start 0
+            // before ever trying the second alternative, which matches there.
+            //
+            // Inert for this operator (the loop condition already stops on `budget.hit`, and nothing
+            // here reads the cursor afterwards); it matters to a caller that resumes a pull.
             if budget.hit {
                 break;
             }
@@ -2298,10 +2307,10 @@ mod tests {
         );
     }
 
-    /// A budget that dies inside a start must NOT leave the scan cursor past it. `next_start` is
-    /// documented as the first start with no decided outcome, and `IncrementalMatcher` publishes it
-    /// as the boundary of the fully-scanned prefix — so claiming an aborted start was decided
-    /// licenses a caller to treat "no match here" as evidence when nothing was ever evaluated.
+    /// A budget that dies inside a start must NOT leave the scan cursor past it: the cursor would
+    /// then claim a verdict for a start whose walk never reached one. (It is not a fully-scanned
+    /// marker either way — a hit jumps it past the whole match — but "aborted" and "decided" must
+    /// stay distinguishable for a caller that resumes a pull.)
     #[tokio::test]
     async fn an_aborted_start_is_not_reported_as_scanned() {
         // `(a b) | a`: the preferred branch charges `a` then `b`; with a budget of 1 the walk dies

@@ -669,6 +669,13 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         metrics: &MatchRecognizeMetrics,
     ) -> StreamExecutorResult<Vec<StreamChunk>> {
         let mut out = Vec::new();
+        // With no watermark there is no `within_final`, so a spent budget can decide nothing at all
+        // on this path — bail before the per-match seq lookup below rather than walking the whole
+        // buffer once per arriving row only to break. (The data path always passes `None`; only the
+        // watermark path can reach the drain.)
+        if budget.hit && watermark.is_none() {
+            return Ok(out);
+        }
         // Only the `Copy` identity fields before the gate: cloning the whole match (its label vector
         // in particular) on every ATTEMPT would copy it once per visit for a held match; the clone
         // happens below, after the gate passes.
@@ -707,9 +714,11 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             // its window has closed, so `match_is_final` returns FINAL for it before spending
             // anything, and it needs no walk at all. Those MUST still be drained: leaving one
             // withheld while `prune_dead_prefix` treats its window-closed start row as dead is how
-            // a starved visit loses a match outright, and it is also the only way a degraded
-            // partition sheds rows at all. So stop only where a verdict genuinely needs budget we
-            // do not have.
+            // a starved visit loses a match outright. It is also the ONLY way a starved partition
+            // sheds anything — `prune_dead_prefix` returns early while the matcher is incomplete —
+            // though only about one match per visit: emitting a provisional match rebuilds the
+            // matcher under the same spent budget, which empties the tail and ends this loop. That
+            // is an improvement on shedding nothing, not convergence; see the design doc.
             //
             // (Nothing between the loop head and here spends budget: the provisional read, the seq
             // lookup and the deadline comparison are all plain reads.)
@@ -852,15 +861,27 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                 break;
             }
         }
-        // Never consume the start row of a match the matcher still holds. Prune deletes a DEAD
-        // prefix, and a match sitting in `provisional()` is by definition not dead — but the
-        // WITHIN-deadline skip above never consults the matcher, so on a visit where the emitter
-        // could not drain everything (a spent budget stops the drain at the first structurally-held
-        // match, and `consume_prefix`'s rebuild re-derives the tail under that same spent budget)
-        // it would otherwise delete rows an undrained match still needs. Clamping here makes the
-        // pass sound without having to reason about how much budget the emitter had left.
-        if let Some(first) = run.matcher.provisional().first()
-            && let Some(pos) = run.rows.iter().position(|r| Seq(r.seq) == first.start_seq)
+        // Never consume the start row of a match the matcher still holds.
+        //
+        // This is NOT about a spent budget — do not gate it on `budget.hit`. With the budget spent
+        // this function has already returned above, and even reaching here the loop stops at the
+        // first window-open position, which is at or before any held match's start. The case it
+        // guards has budget to spare: the loop skips a window-closed row on `deadline < w` WITHOUT
+        // consulting the matcher, while the emission gate holds a match because a *gap* position
+        // before its start is still alive at the boundary. The held match's own start row can then
+        // be dead at the boundary (a path from it accepts before the buffer end), so the loop marches
+        // straight past it and `consume_prefix` deletes the row of a match that was never emitted —
+        // losing it, and emitting in its place a match a batch evaluation never produces.
+        //
+        // `provisional()` is ordered by start position and includes frozen-but-unemitted matches, so
+        // its first entry is a lower bound on every undrained match. Skipped entirely when nothing
+        // would be consumed, since the scan below is O(n) and cannot change a zero.
+        if retain_from > 0
+            && let Some(first) = run.matcher.provisional().first()
+            // `seq` is strictly increasing in buffer position: rows are appended in mint order, and
+            // the recovery rebuild re-feeds them in `(partition.., order.., seq)` key order, which
+            // under the ordered-input model is the same order.
+            && let Ok(pos) = run.rows.binary_search_by_key(&first.start_seq.0, |r| r.seq)
         {
             retain_from = retain_from.min(pos);
         }

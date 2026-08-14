@@ -180,7 +180,8 @@ replay**: re-emitting a match after a rollback reproduces byte-identical output.
 
 The operator emits **only final matches, as soon as they are decidable** — a match is output once
 no future row can change it (see [Match finality](#match-finality)), which for many patterns is the
-moment its last row arrives, not a watermark later. Every output row is decided once and never
+moment its last row arrives, not a watermark later. (Under a spent scan budget this degrades to
+watermark latency; see [Degradation under a spent budget](#degradation-under-a-spent-budget).) Every output row is decided once and never
 revised or retracted, so the plan node declares Emit-On-Window-Close semantics
 (`emit_on_window_close = true`): a query written with an explicit `EMIT ON WINDOW CLOSE` clause is
 accepted as naming behavior the operator already has, and the plain form is the normal spelling.
@@ -215,12 +216,17 @@ or version-skewed plan fails with an error instead of allocating).
 Backtracking over predicates is worst-case exponential, so every walk — the match finder itself,
 liveness checks, extension probes — runs under two defenses:
 
-- a **scan budget** (a per-visit cap on predicate evaluations). Exhaustion is *never converted into
-  a verdict*: the walk stops, the caller treats the position as undecided (nothing is emitted,
-  frozen, or evicted on partial information), the condition is counted in a metric and reported
-  once per pass, and the next visit retries with a fresh budget. The budget is scoped per row on
-  the data path and per partition visit on the watermark path, so one pathological partition cannot
-  starve the others.
+- a **scan budget** (a per-visit cap on predicate evaluations). Exhaustion is never converted into a
+  *structural* verdict: the walk stops, the caller treats the position as undecided, nothing is
+  frozen, the condition is counted in a metric and reported once per pass, and the next visit retries
+  with a fresh budget. The budget is scoped per row on the data path and per partition visit on the
+  watermark path, so one pathological partition cannot starve the others.
+
+  Two things a spent budget *does* still decide, both from the watermark rather than from predicate
+  evaluation, and neither refinable by spending more: a match whose `WITHIN` window has closed is
+  FINAL and is emitted, and a row whose window has closed carries no live match and is evicted. See
+  [Degradation under a spent budget](#degradation-under-a-spent-budget) for what that means
+  operationally, including the case where it does not help at all.
 - a **failure memo** over `(state, position)`, recorded only at row-consumption boundaries. It is
   sound only when no `DEFINE` slot reads the running label assignment (all slots `SelfCol`/`Prev`);
   the executor computes that classification once per query. For such path-independent patterns the
@@ -272,7 +278,34 @@ The gate (`match_is_final`) therefore asks exactly what batch equivalence requir
    a gap match over existing rows would already have been the finder's leftmost result, and no
    future row can satisfy the span bound for any start at or before this one.
 
-On a spent scan budget every one of these answers "hold" — never "emit" and never "dead".
+On a spent scan budget the two *structural* conditions answer "hold". The `WITHIN`-finality
+condition still answers "emit", because a closed window is a fact the watermark supplies: no future
+row can satisfy the span bound for this start, so no amount of predicate evaluation could refine it.
+That is what lets a starved partition make any progress at all.
+
+### Degradation under a spent budget
+
+Worth stating plainly, because the two cases differ and only one of them recovers.
+
+**With `WITHIN`.** A starved partition still makes progress, but only through window closure. Each
+watermark visit re-derives the tail (spending the whole budget), then emits the head if its window
+has closed. Emitting a provisional match rebuilds the matcher under that same spent budget, which
+empties the tail and ends the drain — so the practical rate is about **one match per watermark
+visit**, and the deadline prune contributes nothing while the matcher is incomplete. Emission latency
+degrades from decidability to window closure, and the retained set shrinks only at that rate: if
+arrivals per watermark interval exceed it, the partition still grows. This is an improvement on
+shedding nothing; it is not convergence.
+
+**Without `WITHIN`.** There is no deadline, so `WITHIN`-finality is unreachable and nothing above
+applies: the partition emits nothing and evicts nothing, and because per-visit cost grows with the
+retained set, each failed visit makes the next one likelier to fail. That state is absorbing — it
+does not recover on its own, and the practical remedy is to drop and recreate the view.
+
+So the two remedies the runtime report names are not interchangeable. Simplifying nested
+optional/alternation quantifiers addresses the cause. Adding or tightening `WITHIN` is what makes the
+degradation bounded rather than absorbing, and is the one that matters if a partition is already
+stuck. A `scan_budget_exhausted` count that is nonzero and rising on a query without `WITHIN` should
+be read as a stuck partition, not as slow progress.
 
 `e2e_test/streaming/match_recognize_preference_supersession.slt` pins both shapes end to end, with
 both endings each (the superseding row arrives; a killing row decides the held match), plus an
