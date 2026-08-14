@@ -49,9 +49,6 @@ use crate::{PG_VERSION, SERVER_ENCODING, SERVER_VERSION_NUM, STANDARD_CONFORMING
 
 pub const SESSION_CONFIG_LIST_SEP: &str = ", ";
 
-pub const ENABLE_LOCALITY_BACKFILL_PARAM: &str = "enable_locality_backfill";
-pub const LOCALITY_BACKFILL_MODE_PARAM: &str = "locality_backfill_mode";
-
 #[derive(Error, Debug)]
 pub enum SessionConfigError {
     #[error("Invalid value `{value}` for `{entry}`")]
@@ -71,6 +68,10 @@ const AUTO_LOCALITY_BACKFILL_MIN_SIZE: u64 = 10 * 1024 * 1024 * 1024;
 
 fn default_auto_locality_backfill_min_size() -> u64 {
     AUTO_LOCALITY_BACKFILL_MIN_SIZE
+}
+
+fn default_legacy_locality_backfill_mode() -> LocalityBackfillMode {
+    LocalityBackfillMode::Always
 }
 
 // NOTE(kwannoel): We declare it separately as a constant,
@@ -502,15 +503,16 @@ pub struct SessionConfig {
     #[parameter(default = false)]
     enable_mv_selection: bool,
 
-    /// Legacy boolean control for locality backfill. Kept for wire compatibility with older
-    /// frontend nodes and synchronized with `locality_backfill_mode`.
-    #[parameter(default = false, flags = "SETTER")]
+    /// Whether to enable locality backfill. When enabled, `locality_backfill_mode` controls
+    /// whether it is selected automatically or always used.
+    #[parameter(default = true)]
     enable_locality_backfill: bool,
 
-    /// Control locality backfill for streaming queries. Accepted values are off/on/auto.
-    /// `true` and `false` are accepted as aliases of `on` and `off`.
-    #[serde(default)]
-    #[parameter(default = LocalityBackfillMode::Auto, flags = "SETTER")]
+    /// How to apply locality backfill when it is enabled. `auto` uses the estimated backfill size,
+    /// while `always` skips the size check. Missing values from older versions mean `always` to
+    /// preserve the previous boolean behavior.
+    #[serde(default = "default_legacy_locality_backfill_mode")]
+    #[parameter(default = LocalityBackfillMode::Auto)]
     locality_backfill_mode: LocalityBackfillMode,
 
     /// Auto-enable locality backfill when estimated scan backfill data reaches this size in bytes.
@@ -614,33 +616,6 @@ fn check_streaming_parallelism_for_backfill(val: &ConfigBackfillParallelism) -> 
 }
 
 impl SessionConfig {
-    pub fn set_enable_locality_backfill(
-        &mut self,
-        val: bool,
-        reporter: &mut impl ConfigReporter,
-    ) -> SessionConfigResult<bool> {
-        self.set_enable_locality_backfill_inner(val, reporter)?;
-        self.set_locality_backfill_mode_inner(
-            if val {
-                LocalityBackfillMode::On
-            } else {
-                LocalityBackfillMode::Off
-            },
-            reporter,
-        )?;
-        Ok(val)
-    }
-
-    pub fn set_locality_backfill_mode(
-        &mut self,
-        val: LocalityBackfillMode,
-        reporter: &mut impl ConfigReporter,
-    ) -> SessionConfigResult<LocalityBackfillMode> {
-        self.set_locality_backfill_mode_inner(val, reporter)?;
-        self.set_enable_locality_backfill_inner(matches!(val, LocalityBackfillMode::On), reporter)?;
-        Ok(val)
-    }
-
     pub fn set_force_two_phase_agg(
         &mut self,
         val: bool,
@@ -691,30 +666,6 @@ def_anyhow_newtype! {
 }
 
 impl SessionConfig {
-    /// Deserialize the session-parameter snapshot sent by Meta.
-    ///
-    /// Snapshots from an older Meta do not contain `locality_backfill_mode`; in that case the
-    /// legacy boolean remains the source of truth. New snapshots use the mode and normalize the
-    /// legacy field to its boolean wire representation.
-    pub fn from_meta_snapshot(snapshot: &str) -> serde_json::Result<Self> {
-        let value: serde_json::Value = serde_json::from_str(snapshot)?;
-        let has_locality_backfill_mode = value.get(LOCALITY_BACKFILL_MODE_PARAM).is_some();
-        let mut config: Self = serde_json::from_value(value)?;
-
-        if has_locality_backfill_mode {
-            config.enable_locality_backfill =
-                matches!(config.locality_backfill_mode, LocalityBackfillMode::On);
-        } else {
-            config.locality_backfill_mode = if config.enable_locality_backfill {
-                LocalityBackfillMode::On
-            } else {
-                LocalityBackfillMode::Off
-            };
-        }
-
-        Ok(config)
-    }
-
     /// Generate an initial override for the streaming config from the session config.
     pub fn to_initial_streaming_config_override(
         &self,

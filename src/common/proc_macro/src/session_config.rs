@@ -196,9 +196,10 @@ pub(crate) fn derive_config(input: DeriveInput) -> TokenStream {
         #deprecated_attr
         #[allow(clippy::useless_conversion)]
         pub fn #reset_func_name(&mut self, reporter: &mut impl ConfigReporter) -> String {
-                self.#set_t_func_name((#default).into(), reporter)
-                    .expect("default session parameter value must be valid")
-                    .to_string()
+                let val = #default;
+                #report_hook
+                self.#field_ident = val.into();
+                self.#field_ident.to_string()
             }
         });
 

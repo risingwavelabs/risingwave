@@ -19,26 +19,22 @@ use std::str::FromStr;
 
 #[derive(Copy, Default, Debug, Clone, PartialEq, Eq)]
 pub enum LocalityBackfillMode {
-    Off,
-
-    On,
-
     #[default]
     Auto,
+
+    Always,
 }
 
 impl FromStr for LocalityBackfillMode {
     type Err = &'static str;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.eq_ignore_ascii_case("off") || s.eq_ignore_ascii_case("false") {
-            Ok(Self::Off)
-        } else if s.eq_ignore_ascii_case("on") || s.eq_ignore_ascii_case("true") {
-            Ok(Self::On)
-        } else if s.eq_ignore_ascii_case("auto") {
+        if s.eq_ignore_ascii_case("auto") {
             Ok(Self::Auto)
+        } else if s.eq_ignore_ascii_case("always") {
+            Ok(Self::Always)
         } else {
-            Err("expect one of [off, on, auto]")
+            Err("expect one of [auto, always]")
         }
     }
 }
@@ -46,9 +42,8 @@ impl FromStr for LocalityBackfillMode {
 impl std::fmt::Display for LocalityBackfillMode {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Off => write!(f, "off"),
-            Self::On => write!(f, "on"),
             Self::Auto => write!(f, "auto"),
+            Self::Always => write!(f, "always"),
         }
     }
 }

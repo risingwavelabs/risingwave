@@ -255,13 +255,17 @@ fn resolve_locality_backfill(
     backfill_type: BackfillType,
 ) -> bool {
     let config = ctx.session_ctx().config();
+    let enabled = config.enable_locality_backfill();
     let mode = config.locality_backfill_mode();
     let min_size = config.auto_locality_backfill_min_size();
     drop(config);
 
+    if !enabled {
+        return false;
+    }
+
     match mode {
-        LocalityBackfillMode::Off => false,
-        LocalityBackfillMode::On => true,
+        LocalityBackfillMode::Always => true,
         LocalityBackfillMode::Auto => {
             if backfill_type.without_snapshot()
                 || risingwave_common::license::Feature::LocalityBackfill
@@ -677,8 +681,10 @@ impl LogicalPlanRoot {
 
         let locality_provider_count = LocalityProviderCounter::count(plan.clone());
         if locality_provider_count > 0 {
-            let mode = ctx.session_ctx().config().locality_backfill_mode();
-            if mode == LocalityBackfillMode::Auto || locality_provider_count > 5 {
+            let config = ctx.session_ctx().config();
+            let auto_locality_backfill = config.enable_locality_backfill()
+                && config.locality_backfill_mode() == LocalityBackfillMode::Auto;
+            if auto_locality_backfill || locality_provider_count > 5 {
                 risingwave_common::license::Feature::LocalityBackfill.check_available()?;
             }
         }

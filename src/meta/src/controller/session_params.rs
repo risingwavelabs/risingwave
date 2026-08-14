@@ -17,9 +17,7 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::config::SessionInitConfig;
-use risingwave_common::session_config::{
-    ENABLE_LOCALITY_BACKFILL_PARAM, LOCALITY_BACKFILL_MODE_PARAM, SessionConfig, SessionConfigError,
-};
+use risingwave_common::session_config::{SessionConfig, SessionConfigError};
 use risingwave_meta_model::prelude::SessionParameter;
 use risingwave_meta_model::session_parameter;
 use risingwave_pb::meta::SetSessionParamRequest;
@@ -35,6 +33,9 @@ use crate::manager::{LocalNotification, NotificationManagerRef};
 use crate::{MetaError, MetaResult};
 
 pub type SessionParamsControllerRef = Arc<SessionParamsController>;
+
+const ENABLE_LOCALITY_BACKFILL_PARAM: &str = "enable_locality_backfill";
+const LOCALITY_BACKFILL_MODE_PARAM: &str = "locality_backfill_mode";
 
 /// Manages the global default session params on meta.
 /// Note that the session params in each session will be initialized from the default value here.
@@ -79,12 +80,10 @@ impl SessionParamsController {
         let has_locality_backfill_mode = params
             .iter()
             .any(|param| param.name == LOCALITY_BACKFILL_MODE_PARAM);
+        let has_legacy_locality_backfill = params
+            .iter()
+            .any(|param| param.name == ENABLE_LOCALITY_BACKFILL_PARAM);
         for param in params {
-            // The mode is the canonical representation. The legacy boolean row is only its wire
-            // mirror and must not override it when both are present.
-            if has_locality_backfill_mode && param.name == ENABLE_LOCALITY_BACKFILL_PARAM {
-                continue;
-            }
             if let Some(configured) = session_init_values.get(&param.name)
                 && *configured != param.value
             {
@@ -105,6 +104,10 @@ impl SessionParamsController {
                     }
                 }
             }
+        }
+        // Before the mode existed, enabling locality backfill always skipped the size check.
+        if !has_locality_backfill_mode && has_legacy_locality_backfill {
+            init_params.set(LOCALITY_BACKFILL_MODE_PARAM, "always".to_owned(), &mut ())?;
         }
 
         info!(?init_params, "session parameters");
@@ -146,11 +149,10 @@ impl SessionParamsController {
     pub async fn set_param(&self, name: &str, value: Option<String>) -> MetaResult<String> {
         let mut params_guard = self.params.write().await;
         let name = SessionConfig::alias_to_entry_name(name);
-        if SessionParameter::find_by_id(name.clone())
+        let Some(param) = SessionParameter::find_by_id(name.clone())
             .one(&self.db)
             .await?
-            .is_none()
-        {
+        else {
             return Err(MetaError::system_params(format!(
                 "unrecognized session parameter {:?}",
                 name
@@ -165,43 +167,11 @@ impl SessionParamsController {
             params_guard.reset(&name, reporter)?
         };
 
-        let updates = if matches!(
-            name.as_str(),
-            ENABLE_LOCALITY_BACKFILL_PARAM | LOCALITY_BACKFILL_MODE_PARAM
-        ) {
-            // Keep the legacy boolean and canonical mode synchronized in storage and observers.
-            vec![
-                (
-                    ENABLE_LOCALITY_BACKFILL_PARAM.to_owned(),
-                    params_guard.get(ENABLE_LOCALITY_BACKFILL_PARAM)?,
-                ),
-                (
-                    LOCALITY_BACKFILL_MODE_PARAM.to_owned(),
-                    params_guard.get(LOCALITY_BACKFILL_MODE_PARAM)?,
-                ),
-            ]
-        } else {
-            vec![(name.clone(), new_param.clone())]
-        };
-
-        let txn = self.db.begin().await?;
-        for (name, value) in &updates {
-            let Some(param) = SessionParameter::find_by_id(name.clone()).one(&txn).await? else {
-                return Err(MetaError::system_params(format!(
-                    "unrecognized session parameter {:?}",
-                    name
-                )));
-            };
-            let mut param: session_parameter::ActiveModel = param.into();
-            param.value = Set(value.clone());
-            SessionParameter::update(param).exec(&txn).await?;
-        }
-        txn.commit().await?;
-
+        let mut param: session_parameter::ActiveModel = param.into();
+        param.value = Set(new_param.clone());
+        SessionParameter::update(param).exec(&self.db).await?;
         let new_batch_parallelism = params_guard.batch_parallelism();
-        for (name, value) in updates {
-            self.notify_workers(name, value);
-        }
+        self.notify_workers(name.clone(), new_param.clone());
         if old_batch_parallelism != new_batch_parallelism {
             self.notification_manager
                 .notify_local_subscribers(LocalNotification::BatchParallelismChange);
