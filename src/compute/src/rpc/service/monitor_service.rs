@@ -41,7 +41,7 @@ use risingwave_storage::hummock::event_handler::refiller::{
     TableCacheRefillContext, TableCacheRefillMonitorSnapshot,
 };
 use risingwave_storage::hummock::store::HummockStorage;
-use risingwave_storage::hummock::{Block, Sstable, SstableBlockIndex};
+use risingwave_storage::hummock::{Sstable, SstableBlockCache};
 use risingwave_stream::executor::monitor::global_streaming_metrics;
 use risingwave_stream::task::LocalStreamManager;
 use risingwave_stream::task::await_tree_key::{Actor, BarrierAwait};
@@ -49,7 +49,7 @@ use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status};
 
 type MetaCache = HybridCache<HummockSstableObjectId, Box<Sstable>>;
-type BlockCache = HybridCache<SstableBlockIndex, Box<Block>>;
+type BlockCache = SstableBlockCache;
 
 #[derive(Clone)]
 pub struct MonitorServiceImpl {

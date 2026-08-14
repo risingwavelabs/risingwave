@@ -48,8 +48,8 @@ use risingwave_storage::hummock::sstable::SstableIteratorReadOptions;
 use risingwave_storage::hummock::sstable_store::SstableStoreRef;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    CachePolicy, SstableBuilder, SstableBuilderOptions, SstableIterator, SstableStore,
-    SstableStoreConfig, SstableWriterOptions, Xor16FilterBuilder,
+    CachePolicy, LiveSsts, SstableBlockHashBuilder, SstableBuilder, SstableBuilderOptions,
+    SstableIterator, SstableStore, SstableStoreConfig, SstableWriterOptions, Xor16FilterBuilder,
 };
 use risingwave_storage::monitor::{
     CompactorMetrics, StoreLocalStatistic, global_hummock_state_store_metrics,
@@ -71,6 +71,7 @@ pub async fn mock_sstable_store() -> SstableStoreRef {
         .unwrap();
     let block_cache = HybridCacheBuilder::new()
         .memory(128 << 20)
+        .with_hash_builder(SstableBlockHashBuilder::default())
         .with_shards(2)
         .storage()
         .build()
@@ -89,6 +90,7 @@ pub async fn mock_sstable_store() -> SstableStoreRef {
 
         meta_cache,
         block_cache,
+        live_ssts: LiveSsts::default(),
         vector_meta_cache: CacheBuilder::new(1 << 10).build(),
         vector_block_cache: CacheBuilder::new(1 << 10).build(),
     }))
