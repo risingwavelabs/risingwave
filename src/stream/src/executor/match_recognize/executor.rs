@@ -1152,10 +1152,26 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                     let mut builder = StreamChunkBuilder::new(chunk_size, schema.data_types());
                     let mut reported_budget = false;
                     let mut reported_degradations: Vec<SkipDegradation> = Vec::new();
+                    // One budget per CHUNK, not per row. Per-row was 256 fresh budgets for a default
+                    // chunk, so a single degraded partition could spend 2^28 predicate evaluations in
+                    // one message — tens of seconds of single-threaded work with the barrier queued
+                    // behind it, which stalls checkpointing well beyond this job. Sharing it across
+                    // the chunk bounds a message at 2^20 regardless of chunk size.
+                    //
+                    // Safe because nothing on this path needs budget for correctness: every row is
+                    // still buffered and fed, a truncated `advance` only defers match derivation and
+                    // latches `incomplete`, and the next watermark re-derives with a fresh budget.
+                    // Later rows of a chunk that exhausts the budget emit nothing, which is the same
+                    // degraded-latency behaviour the design describes.
+                    //
+                    // TODO: the watermark arm still grants one budget per partition, so a pass costs
+                    // `starved_partitions * 2^20` and a message is bounded only by partition count.
+                    // Fixing that needs a pass-level cap plus a rotating start offset — a shared
+                    // budget alone would starve whichever partitions sort last, pass after pass, as
+                    // the comment on that arm says. Left for the follow-up that also addresses
+                    // convergence (scanning the window-bounded expiring region under its own budget).
+                    let mut budget = ScanBudget::new(SCAN_BUDGET_EVALUATIONS);
                     for (op, row_ref) in chunk.rows() {
-                        // One budget per row visit — see the watermark arm for why it is not
-                        // shared across the pass.
-                        let mut budget = ScanBudget::new(SCAN_BUDGET_EVALUATIONS);
                         // Append-only input is enforced at planning time; fail loud otherwise.
                         if !matches!(op, Op::Insert) {
                             return Err(anyhow::anyhow!(
@@ -1233,10 +1249,6 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         for c in filled {
                             yield Message::Chunk(c);
                         }
-                        if budget.hit {
-                            metrics.match_recognize_scan_budget_exhausted_count.inc();
-                            report_scan_budget_once(&eval_error_report, &mut reported_budget);
-                        }
                         // Only drop a partition whose buffers actually grew. Removing it
                         // unconditionally looked tidier but cost more than the wart it fixed: any
                         // pattern that consumes its whole buffer per match (the common case under
@@ -1255,6 +1267,13 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                             // partition carries no state a later row would need.
                             parts.remove(&pk);
                         }
+                    }
+                    // Once per chunk, not once per row: the budget is now shared across the chunk, so
+                    // a per-row check would count every row seen after exhaustion and the counter
+                    // would read as "rows processed while starved" rather than "visits that ran out".
+                    if budget.hit {
+                        metrics.match_recognize_scan_budget_exhausted_count.inc();
+                        report_scan_budget_once(&eval_error_report, &mut reported_budget);
                     }
                     if let Some(c) = builder.take() {
                         yield Message::Chunk(c);
