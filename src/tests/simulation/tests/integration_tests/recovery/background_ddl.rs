@@ -557,7 +557,7 @@ async fn test_ddl_cancel() -> Result<()> {
         let result = create_mv(&mut session).await;
         match result {
             Ok(_) => break,
-            Err(e) if e.to_string().contains("under creation") => {
+            Err(e) if e.to_string().contains("still being created") => {
                 tracing::info!("create mv failed, retrying: {}", e);
             }
             Err(e) => {
