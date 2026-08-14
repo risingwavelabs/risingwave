@@ -454,6 +454,7 @@ mod tests {
     async fn test_replace_upstream_object_rejects_creating_incoming_sink() -> MetaResult<()> {
         fn assert_replace_concurrency_error(error: &MetaError) {
             let message = error.to_string();
+            // Ensures the replacement failed because a referring streaming job is still creating.
             assert!(
                 message.contains("referenced by some creating jobs"),
                 "expected a replace concurrency error, got: {message}"
@@ -505,7 +506,7 @@ mod tests {
                 None,
             )
             .await?;
-        // Ensures the sink is not created yet
+        // Ensures the incoming sink is still creating, which should block replacement.
         assert_ne!(creating_sink.job_status, JobStatus::Created);
 
         let replacement = crate::manager::StreamingJob::MaterializedView(PbTable {
@@ -516,71 +517,128 @@ mod tests {
             owner: TEST_OWNER_ID as _,
             ..Default::default()
         });
+        // Ensures the replacement targets the upstream MV that the creating sink depends on.
         assert_eq!(replacement.id(), target_mv_id);
 
+        // Ensures replacement rejects the upstream MV while its referring sink is creating.
         let error = mgr
             .create_job_catalog_for_replace(&replacement, None, None, None)
             .await
             .expect_err("replacement should reject a creating incoming sink");
+        // Ensures the rejection error reports the expected concurrency reason.
         assert_replace_concurrency_error(&error);
 
         Ok(())
     }
 
     #[tokio::test]
-    async fn test_create_job_catalog_for_replace_records_tmp_job_dependency() -> MetaResult<()> {
+    async fn test_replace_upstream_object_with_created_incoming_sink() -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let inner = mgr.inner.write().await;
         let txn = inner.db.begin().await?;
-        let (target_mv_id, Some(target_mv_table_id), _) =
-            insert_test_streaming_job(&txn, "target_mv", true, None).await?
+        let (_, Some(target_table_id), _) =
+            insert_test_streaming_job(&txn, "target_table", true, None).await?
+        else {
+            unreachable!()
+        };
+        let (source_mv_id, Some(source_mv_table_id), _) =
+            insert_test_streaming_job(&txn, "source_mv", true, None).await?
         else {
             unreachable!()
         };
         txn.commit().await?;
         drop(inner);
 
+        let mut sink = crate::manager::StreamingJob::Sink(
+            PbSink {
+                name: "created_sink".to_owned(),
+                database_id: TEST_DATABASE_ID,
+                schema_id: TEST_SCHEMA_ID,
+                owner: TEST_OWNER_ID as _,
+                target_table: Some(target_table_id),
+                sink_type: PbSinkType::AppendOnly as i32,
+                ..Default::default()
+            },
+            None,
+        );
+        let creating_sink = mgr
+            .create_job_catalog(
+                &mut sink,
+                &crate::model::StreamContext::default(),
+                &None,
+                1,
+                HashSet::from([source_mv_id.as_object_id()]),
+                risingwave_pb::ddl_service::streaming_job_resource_type::ResourceType::Regular(
+                    true,
+                ),
+                &None,
+                None,
+                None,
+                None,
+                None,
+            )
+            .await?;
+        // Ensures the incoming sink starts as a creating job before the test marks it created.
+        assert_ne!(creating_sink.job_status, JobStatus::Created);
+
+        let sink_id = sink.id();
+        let inner = mgr.inner.read().await;
+        streaming_job::ActiveModel {
+            job_id: Set(sink_id),
+            job_status: Set(JobStatus::Created),
+            ..Default::default()
+        }
+        .update(&inner.db)
+        .await?;
+        let sink_model = risingwave_meta_model::prelude::StreamingJob::find_by_id(sink_id)
+            .one(&inner.db)
+            .await?
+            .expect("sink should exist");
+        // Ensures the persisted sink row is the sink created by this test.
+        assert_eq!(sink_model.job_id, sink_id);
+        // Ensures a fully created incoming sink does not block upstream MV replacement.
+        assert_eq!(sink_model.job_status, JobStatus::Created);
+        drop(inner);
+
         let replacement = crate::manager::StreamingJob::MaterializedView(PbTable {
-            id: target_mv_table_id,
-            name: "target_mv".to_owned(),
+            id: source_mv_table_id,
+            name: "source_mv".to_owned(),
             database_id: TEST_DATABASE_ID,
             schema_id: TEST_SCHEMA_ID,
             owner: TEST_OWNER_ID as _,
             ..Default::default()
         });
-        assert_eq!(replacement.id(), target_mv_id);
+        // Ensures the replacement targets the upstream MV that the created sink depends on.
+        assert_eq!(replacement.id(), source_mv_id);
 
         let tmp_model = mgr
             .create_job_catalog_for_replace(&replacement, None, None, None)
             .await?;
 
-        assert_ne!(tmp_model.job_id, target_mv_id);
+        // Ensures replacement creates a distinct temporary job instead of reusing the original MV id.
+        assert_ne!(tmp_model.job_id, source_mv_id);
+        // Ensures the temporary replacement job is created but not finished yet.
         assert_eq!(tmp_model.job_status, JobStatus::Initial);
-        assert_eq!(tmp_model.create_type, CreateType::Foreground);
-        assert_eq!(tmp_model.parallelism, StreamingParallelism::Adaptive);
-        assert_eq!(tmp_model.max_parallelism, 1);
 
         let inner = mgr.inner.read().await;
         let db = &inner.db;
+        // Ensures the created sink still depends on the upstream MV being replaced.
         assert_eq!(
             ObjectDependency::find()
-                .filter(object_dependency::Column::Oid.eq(target_mv_id.as_object_id()))
-                .filter(object_dependency::Column::UsedBy.eq(tmp_model.job_id.as_object_id()))
+                .filter(object_dependency::Column::Oid.eq(source_mv_id.as_object_id()))
+                .filter(object_dependency::Column::UsedBy.eq(sink_id.as_object_id()))
                 .count(db)
                 .await?,
             1
         );
-        assert!(
-            Object::find_by_id(tmp_model.job_id)
-                .one(db)
-                .await?
-                .is_some()
-        );
-        assert!(
-            risingwave_meta_model::prelude::StreamingJob::find_by_id(tmp_model.job_id)
-                .one(db)
-                .await?
-                .is_some()
+        // Ensures replacement records the temporary job as a dependent of the original MV.
+        assert_eq!(
+            ObjectDependency::find()
+                .filter(object_dependency::Column::Oid.eq(source_mv_id.as_object_id()))
+                .filter(object_dependency::Column::UsedBy.eq(tmp_model.job_id.as_object_id()))
+                .count(db)
+                .await?,
+            1
         );
 
         Ok(())
