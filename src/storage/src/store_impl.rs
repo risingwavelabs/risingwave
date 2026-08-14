@@ -792,6 +792,10 @@ impl StateStoreImpl {
                             StorageFilter::new()
                                 .with_condition(LiveSstFilter::new(live_ssts.clone())),
                         )
+                        .with_reinsertion_filter(
+                            StorageFilter::new()
+                                .with_condition(LiveSstFilter::new(live_ssts.clone())),
+                        )
                         .with_eviction_pickers(vec![Box::new(FifoPicker::new(
                             opts.data_file_cache_fifo_probation_ratio,
                         ))]);
