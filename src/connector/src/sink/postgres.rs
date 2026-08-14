@@ -450,8 +450,10 @@ pub struct PostgresSinkWriter {
     key_types: Vec<PgType>,
     schema_types: Vec<PgType>,
     max_batch_rows: usize,
-    write_statement: Option<tokio_postgres::Statement>,
-    delete_statement: Option<tokio_postgres::Statement>,
+    /// Prepared statements keyed by tuple count. Only power-of-two sizes are inserted, so each
+    /// cache stays logarithmic in `max_batch_rows`.
+    write_statements: HashMap<usize, tokio_postgres::Statement>,
+    delete_statements: HashMap<usize, tokio_postgres::Statement>,
     pending: PendingRows,
 }
 
@@ -536,8 +538,8 @@ impl PostgresSinkWriter {
             key_types,
             schema_types,
             max_batch_rows,
-            write_statement: None,
-            delete_statement: None,
+            write_statements: HashMap::new(),
+            delete_statements: HashMap::new(),
             pending,
         };
         Ok(writer)
@@ -565,48 +567,52 @@ impl PostgresSinkWriter {
         }
     }
 
-    fn statement_cache(&mut self, kind: StatementKind) -> &mut Option<tokio_postgres::Statement> {
+    fn statement_cache(
+        &mut self,
+        kind: StatementKind,
+    ) -> &mut HashMap<usize, tokio_postgres::Statement> {
         match kind {
-            StatementKind::Insert | StatementKind::Upsert => &mut self.write_statement,
-            StatementKind::Delete => &mut self.delete_statement,
+            StatementKind::Insert | StatementKind::Upsert => &mut self.write_statements,
+            StatementKind::Delete => &mut self.delete_statements,
         }
     }
 
-    /// Pairs each sub-batch with a statement of matching tuple count. Only the full-size
-    /// statement is cached; remainder sizes (barrier flushes) are prepared ad hoc.
+    async fn cached_statement(
+        &mut self,
+        kind: StatementKind,
+        n_tuples: usize,
+    ) -> Result<tokio_postgres::Statement> {
+        if let Some(statement) = self.statement_cache(kind).get(&n_tuples) {
+            return Ok(statement.clone());
+        }
+        let sql = self.create_sql(kind, n_tuples);
+        let statement = self.client.prepare(&sql).await.with_context(|| {
+            format!(
+                "failed to prepare {} statement for {} rows",
+                kind.as_str(),
+                n_tuples
+            )
+        })?;
+        self.statement_cache(kind)
+            .insert(n_tuples, statement.clone());
+        Ok(statement)
+    }
+
+    /// Pairs each sub-batch with a prepared statement of matching tuple count. Batches are split
+    /// into power-of-two sizes so that once warm, every size hits the statement cache.
     async fn prepare_batches<'a>(
         &mut self,
         kind: StatementKind,
         rows: &'a [PgRow],
     ) -> Result<Vec<(tokio_postgres::Statement, &'a [PgRow])>> {
-        if rows.is_empty() {
-            return Ok(vec![]);
-        }
         let params_per_tuple = match kind {
             StatementKind::Insert | StatementKind::Upsert => self.schema.len(),
             StatementKind::Delete => self.key_indices.len(),
         };
-        let full = tuples_per_statement(self.max_batch_rows, params_per_tuple);
-        let mut batches = Vec::with_capacity(rows.len().div_ceil(full));
-        for tuples in rows.chunks(full) {
-            let is_full = tuples.len() == full;
-            let statement = match self.statement_cache(kind).clone() {
-                Some(statement) if is_full => statement,
-                _ => {
-                    let sql = self.create_sql(kind, tuples.len());
-                    let statement = self.client.prepare(&sql).await.with_context(|| {
-                        format!(
-                            "failed to prepare {} statement for {} rows",
-                            kind.as_str(),
-                            tuples.len()
-                        )
-                    })?;
-                    if is_full {
-                        *self.statement_cache(kind) = Some(statement.clone());
-                    }
-                    statement
-                }
-            };
+        let cap = tuples_per_statement(self.max_batch_rows, params_per_tuple);
+        let mut batches = Vec::new();
+        for tuples in split_power_of_two(rows, cap) {
+            let statement = self.cached_statement(kind, tuples.len()).await?;
             batches.push((statement, tuples));
         }
         Ok(batches)
@@ -619,24 +625,14 @@ impl PostgresSinkWriter {
             return Ok(());
         }
 
-        // Statements are prepared before the transaction so cache hits skip the prepare round trip
-        // entirely.
-        let delete_batches = self
+        // Statements are prepared before the transaction; after warm-up every size hits the cache.
+        let mut batches = self
             .prepare_batches(StatementKind::Delete, &deletes)
             .await?;
-        let write_batches = self.prepare_batches(self.write_kind, &upserts).await?;
+        batches.extend(self.prepare_batches(self.write_kind, &upserts).await?);
 
         let transaction = self.client.transaction().await?;
-        // Deletes go first, which is safe because dedup leaves deleted and upserted keys disjoint.
-        execute_batches(&transaction, &delete_batches)
-            .await
-            .with_context(|| {
-                format!(
-                    "failed to execute delete statements on {} rows",
-                    deletes.len()
-                )
-            })?;
-        if let Err(e) = execute_batches(&transaction, &write_batches).await {
+        if let Err(e) = execute_batches(&transaction, &batches).await {
             // Keys the dedup kept apart may still be equal to PostgreSQL (e.g. `char(n)` padding
             // or a case-insensitive collation), which a multi-row upsert rejects with SQLSTATE
             // 21000. Retry such batches row by row.
@@ -651,8 +647,8 @@ impl PostgresSinkWriter {
             }
             return Err(anyhow::Error::new(e)
                 .context(format!(
-                    "failed to execute {} statements on {} rows",
-                    self.write_kind.as_str(),
+                    "failed to execute batched statements ({} delete rows, {} write rows)",
+                    deletes.len(),
                     upserts.len()
                 ))
                 .into());
@@ -666,12 +662,7 @@ impl PostgresSinkWriter {
     /// first, then one upsert per statement.
     async fn flush_row_by_row(&mut self, deletes: &[PgRow], upserts: &[PgRow]) -> Result<()> {
         let delete_batches = self.prepare_batches(StatementKind::Delete, deletes).await?;
-        let sql = self.create_sql(self.write_kind, 1);
-        let statement = self
-            .client
-            .prepare(&sql)
-            .await
-            .context("failed to prepare single-row write statement")?;
+        let statement = self.cached_statement(self.write_kind, 1).await?;
 
         let transaction = self.client.transaction().await?;
         execute_batches(&transaction, &delete_batches)
@@ -712,15 +703,37 @@ fn tuples_per_statement(max_batch_rows: usize, params_per_tuple: usize) -> usize
         .max(1)
 }
 
+/// Splits `rows` into power-of-two-sized chunks no larger than `cap`, largest first, so any
+/// length is covered by a logarithmic set of statement sizes.
+fn split_power_of_two<T>(rows: &[T], cap: usize) -> Vec<&[T]> {
+    let mut chunks = Vec::new();
+    let mut rest = rows;
+    while !rest.is_empty() {
+        let (chunk, tail) = rest.split_at(prev_power_of_two(rest.len().min(cap)));
+        chunks.push(chunk);
+        rest = tail;
+    }
+    chunks
+}
+
+/// Largest power of two not exceeding `n`. `n` must be positive.
+fn prev_power_of_two(n: usize) -> usize {
+    1 << (usize::BITS - 1 - n.leading_zeros())
+}
+
 async fn execute_batches(
     transaction: &tokio_postgres::Transaction<'_>,
     batches: &[(tokio_postgres::Statement, &[PgRow])],
 ) -> std::result::Result<(), tokio_postgres::Error> {
-    for (statement, tuples) in batches {
+    // Polling all statements concurrently pipelines them into a single round trip. Execution
+    // order does not matter: dedup keeps deleted and upserted keys disjoint, and sub-batches
+    // never share a row.
+    let executions = batches.iter().map(|(statement, tuples)| {
         let mut params = Vec::with_capacity(tuples.len() * tuples.first().map_or(0, |t| t.len()));
         params.extend(tuples.iter().flatten());
-        transaction.execute_raw(statement, params).await?;
-    }
+        transaction.execute_raw(statement, params)
+    });
+    futures::future::try_join_all(executions).await?;
     Ok(())
 }
 
@@ -1007,6 +1020,29 @@ mod tests {
                 r#"INSERT INTO "test_schema"."test_table" ("user_id", "client_id") VALUES ($1, $2), ($3, $4) on conflict ("user_id", "client_id") do nothing"#
             ]],
         );
+    }
+
+    #[test]
+    fn test_split_power_of_two() {
+        let check_split = |len: usize, cap: usize, expect: &[usize]| {
+            let rows = vec![(); len];
+            let sizes = split_power_of_two(&rows, cap)
+                .iter()
+                .map(|c| c.len())
+                .collect_vec();
+            assert_eq!(sizes, expect, "len={len} cap={cap}");
+        };
+        check_split(1024, 1024, &[1024]);
+        check_split(922, 1024, &[512, 256, 128, 16, 8, 2]);
+        check_split(37, 1024, &[32, 4, 1]);
+        check_split(1, 1, &[1]);
+        // A non-power-of-two cap yields chunks of at most the previous power of two.
+        check_split(1000, 327, &[256, 256, 256, 128, 64, 32, 8]);
+
+        assert_eq!(prev_power_of_two(1), 1);
+        assert_eq!(prev_power_of_two(3), 2);
+        assert_eq!(prev_power_of_two(1023), 512);
+        assert_eq!(prev_power_of_two(1024), 1024);
     }
 
     #[tokio::test]
