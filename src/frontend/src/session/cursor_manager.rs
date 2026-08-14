@@ -1330,3 +1330,65 @@ impl CursorManager {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::error::RwError;
+
+    async fn slow_cursor_operation() -> Result<()> {
+        tokio::time::sleep(Duration::from_secs(5)).await;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_interruptible_cursor_operation_completes() {
+        let mut cancel_handle = FetchCursorCancelHandle::new();
+
+        let result = await_interruptible_cursor_operation(
+            async { Ok::<_, RwError>(()) },
+            None,
+            &mut cancel_handle,
+        )
+        .await
+        .unwrap();
+
+        assert!(matches!(result, InterruptibleCursorResult::Completed(())));
+    }
+
+    #[tokio::test]
+    async fn test_interruptible_cursor_operation_times_out_slow_next_row() {
+        let mut cancel_handle = FetchCursorCancelHandle::new();
+        let start = Instant::now();
+
+        let result = await_interruptible_cursor_operation(
+            slow_cursor_operation(),
+            Some(Instant::now() + Duration::from_secs(1)),
+            &mut cancel_handle,
+        )
+        .await
+        .unwrap();
+
+        assert!(matches!(result, InterruptibleCursorResult::TimedOut));
+        assert!(start.elapsed() < Duration::from_secs(2));
+    }
+
+    #[tokio::test]
+    async fn test_interruptible_cursor_operation_cancels_slow_next_row() {
+        let mut cancel_handle = FetchCursorCancelHandle::new();
+        let cancel_tx = cancel_handle.cancel_tx.clone();
+        tokio::spawn(async move {
+            tokio::time::sleep(Duration::from_millis(1000)).await;
+            assert!(cancel_tx.cancel());
+        });
+        let start = Instant::now();
+
+        let result =
+            await_interruptible_cursor_operation(slow_cursor_operation(), None, &mut cancel_handle)
+                .await
+                .unwrap();
+
+        assert!(matches!(result, InterruptibleCursorResult::Cancelled));
+        assert!(start.elapsed() < Duration::from_millis(2000));
+    }
+}
