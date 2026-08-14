@@ -912,11 +912,17 @@ pub async fn build_remote_object_store(
             match store.list("", None, Some(1)).await {
                 Ok(mut stream) => {
                     if let Some(Err(e)) = stream.next().await {
-                        panic!("Invalid object store configuration for bucket {bucket:?}: {e}");
+                        panic!(
+                            "Invalid object store configuration for bucket {bucket:?}: {}",
+                            e.as_report()
+                        );
                     }
                 }
                 Err(e) => {
-                    panic!("Invalid object store configuration for bucket {bucket:?}: {e}");
+                    panic!(
+                        "Invalid object store configuration for bucket {bucket:?}: {}",
+                        e.as_report()
+                    );
                 }
             }
             store
