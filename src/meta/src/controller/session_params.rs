@@ -17,7 +17,9 @@ use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::config::SessionInitConfig;
-use risingwave_common::session_config::{SessionConfig, SessionConfigError};
+use risingwave_common::session_config::{
+    ENABLE_LOCALITY_BACKFILL_PARAM, LOCALITY_BACKFILL_MODE_PARAM, SessionConfig, SessionConfigError,
+};
 use risingwave_meta_model::prelude::SessionParameter;
 use risingwave_meta_model::session_parameter;
 use risingwave_pb::meta::SetSessionParamRequest;
@@ -74,7 +76,15 @@ impl SessionParamsController {
 
         // Persisted values take precedence over `[session_init]`.
         let params = SessionParameter::find().all(&db).await?;
+        let has_locality_backfill_mode = params
+            .iter()
+            .any(|param| param.name == LOCALITY_BACKFILL_MODE_PARAM);
         for param in params {
+            // The mode is the canonical representation. The legacy boolean row is only its wire
+            // mirror and must not override it when both are present.
+            if has_locality_backfill_mode && param.name == ENABLE_LOCALITY_BACKFILL_PARAM {
+                continue;
+            }
             if let Some(configured) = session_init_values.get(&param.name)
                 && *configured != param.value
             {
@@ -136,10 +146,11 @@ impl SessionParamsController {
     pub async fn set_param(&self, name: &str, value: Option<String>) -> MetaResult<String> {
         let mut params_guard = self.params.write().await;
         let name = SessionConfig::alias_to_entry_name(name);
-        let Some(param) = SessionParameter::find_by_id(name.clone())
+        if SessionParameter::find_by_id(name.clone())
             .one(&self.db)
             .await?
-        else {
+            .is_none()
+        {
             return Err(MetaError::system_params(format!(
                 "unrecognized session parameter {:?}",
                 name
@@ -154,11 +165,44 @@ impl SessionParamsController {
             params_guard.reset(&name, reporter)?
         };
 
-        let mut param: session_parameter::ActiveModel = param.into();
-        param.value = Set(new_param.clone());
-        SessionParameter::update(param).exec(&self.db).await?;
+        let updates = if matches!(
+            name.as_str(),
+            ENABLE_LOCALITY_BACKFILL_PARAM | LOCALITY_BACKFILL_MODE_PARAM
+        ) {
+            // Send the legacy mirror first. Old frontends receive only this update, while new
+            // frontends apply the canonical mode immediately afterwards.
+            vec![
+                (
+                    ENABLE_LOCALITY_BACKFILL_PARAM.to_owned(),
+                    params_guard.get(ENABLE_LOCALITY_BACKFILL_PARAM)?,
+                ),
+                (
+                    LOCALITY_BACKFILL_MODE_PARAM.to_owned(),
+                    params_guard.get(LOCALITY_BACKFILL_MODE_PARAM)?,
+                ),
+            ]
+        } else {
+            vec![(name.clone(), new_param.clone())]
+        };
+
+        let txn = self.db.begin().await?;
+        for (name, value) in &updates {
+            let Some(param) = SessionParameter::find_by_id(name.clone()).one(&txn).await? else {
+                return Err(MetaError::system_params(format!(
+                    "unrecognized session parameter {:?}",
+                    name
+                )));
+            };
+            let mut param: session_parameter::ActiveModel = param.into();
+            param.value = Set(value.clone());
+            SessionParameter::update(param).exec(&txn).await?;
+        }
+        txn.commit().await?;
+
         let new_batch_parallelism = params_guard.batch_parallelism();
-        self.notify_workers(name.clone(), new_param.clone());
+        for (name, value) in updates {
+            self.notify_workers(name, value);
+        }
         if old_batch_parallelism != new_batch_parallelism {
             self.notification_manager
                 .notify_local_subscribers(LocalNotification::BatchParallelismChange);
@@ -168,22 +212,26 @@ impl SessionParamsController {
     }
 
     pub fn notify_workers(&self, name: String, value: String) {
-        self.notification_manager.notify_frontend_without_version(
-            Operation::Update,
-            Info::SessionParam(SetSessionParamRequest {
-                param: name,
-                value: Some(value),
-            }),
-        );
+        let min_session_config_version = SessionConfig::min_version_for_param(&name);
+        self.notification_manager
+            .notify_frontend_without_version_with_min_session_config_version(
+                Operation::Update,
+                Info::SessionParam(SetSessionParamRequest {
+                    param: name,
+                    value: Some(value),
+                }),
+                min_session_config_version,
+            );
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use risingwave_pb::common::HostAddress;
     use sea_orm::ColumnTrait;
 
     use super::*;
-    use crate::manager::MetaSrvEnv;
+    use crate::manager::{MetaSrvEnv, WorkerKey};
 
     #[tokio::test]
     async fn test_session_params() {
@@ -259,6 +307,67 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(models.value, params.get("rw_implicit_flush").unwrap());
+
+        // A locality-mode update is mirrored to the legacy boolean. Old frontends receive only
+        // the compatible boolean, while new frontends also receive the canonical mode.
+        let (old_tx, mut old_rx) = tokio::sync::mpsc::unbounded_channel();
+        let (new_tx, mut new_rx) = tokio::sync::mpsc::unbounded_channel();
+        session_param_ctl
+            .notification_manager
+            .insert_sender_with_session_config_version(
+                risingwave_pb::meta::SubscribeType::Frontend,
+                WorkerKey(HostAddress {
+                    host: "old".to_owned(),
+                    port: 1,
+                }),
+                old_tx,
+                0,
+            );
+        session_param_ctl
+            .notification_manager
+            .insert_sender_with_session_config_version(
+                risingwave_pb::meta::SubscribeType::Frontend,
+                WorkerKey(HostAddress {
+                    host: "new".to_owned(),
+                    port: 1,
+                }),
+                new_tx,
+                1,
+            );
+        session_param_ctl
+            .set_param(LOCALITY_BACKFILL_MODE_PARAM, Some("auto".to_owned()))
+            .await
+            .unwrap();
+
+        let old_update = old_rx.recv().await.unwrap().unwrap();
+        let Info::SessionParam(old_update) = old_update.info.unwrap() else {
+            panic!("unexpected notification")
+        };
+        assert_eq!(old_update.param, ENABLE_LOCALITY_BACKFILL_PARAM);
+        assert_eq!(old_update.value(), "false");
+
+        let new_updates = [
+            new_rx.recv().await.unwrap().unwrap(),
+            new_rx.recv().await.unwrap().unwrap(),
+        ]
+        .map(|notification| {
+            let Info::SessionParam(update) = notification.info.unwrap() else {
+                panic!("unexpected notification")
+            };
+            let value = update.value().to_owned();
+            (update.param, value)
+        });
+        assert_eq!(
+            new_updates,
+            [
+                (
+                    ENABLE_LOCALITY_BACKFILL_PARAM.to_owned(),
+                    "false".to_owned()
+                ),
+                (LOCALITY_BACKFILL_MODE_PARAM.to_owned(), "auto".to_owned()),
+            ]
+        );
+        assert!(old_rx.try_recv().is_err());
     }
 
     /// Scenario 1: on a new cluster, `[session_init]` seeds values into the meta store, including

@@ -66,11 +66,15 @@ pub trait ToStream {
 /// If no better plan can be found, and locality backfill is enabled, wrap the plan
 /// with `LogicalLocalityProvider`.
 /// Otherwise, return the plan as is.
-pub fn try_enforce_locality_requirement(plan: LogicalPlanRef, columns: &[usize]) -> LogicalPlanRef {
+pub fn try_enforce_locality_requirement(
+    plan: LogicalPlanRef,
+    columns: &[usize],
+    locality_backfill_enabled: bool,
+) -> LogicalPlanRef {
     assert!(!columns.is_empty());
     if let Some(better_plan) = plan.try_better_locality(columns) {
         better_plan
-    } else if plan.ctx().locality_backfill_enabled() {
+    } else if locality_backfill_enabled {
         LogicalLocalityProvider::new(plan, columns.to_owned()).into()
     } else {
         plan
@@ -114,18 +118,27 @@ pub struct RewriteStreamContext {
     // so operators above `LogicalScan` can preserve hidden primary-key columns before
     // `StreamTableScan` is built. Other backfill types keep logical stream-key semantics.
     backfill_type: BackfillType,
+    locality_backfill_enabled: bool,
 }
 
 impl RewriteStreamContext {
-    pub fn new_with_backfill_type(backfill_type: BackfillType) -> Self {
+    pub fn new_with_backfill_type(
+        backfill_type: BackfillType,
+        locality_backfill_enabled: bool,
+    ) -> Self {
         Self {
             share_rewrite_map: HashMap::new(),
             backfill_type,
+            locality_backfill_enabled,
         }
     }
 
     pub fn backfill_type(&self) -> BackfillType {
         self.backfill_type
+    }
+
+    pub fn locality_backfill_enabled(&self) -> bool {
+        self.locality_backfill_enabled
     }
 
     pub fn add_rewrite_result(

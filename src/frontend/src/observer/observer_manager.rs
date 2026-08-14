@@ -213,7 +213,7 @@ impl ObserverState for FrontendObserverNode {
             .send(snapshot_version.catalog_version)
             .unwrap();
         *self.session_params.write() =
-            serde_json::from_str(&session_params.unwrap().params).unwrap();
+            SessionConfig::from_meta_snapshot(&session_params.unwrap().params).unwrap();
         LocalSecretManager::global().init_secrets(secrets);
         LicenseManager::get().update_cluster_resource(cluster_resource.unwrap());
     }

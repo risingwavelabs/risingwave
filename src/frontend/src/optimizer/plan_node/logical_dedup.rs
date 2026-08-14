@@ -93,7 +93,11 @@ impl ToStream for LogicalDedup {
         &self,
         ctx: &mut RewriteStreamContext,
     ) -> Result<(PlanRef, ColIndexMapping)> {
-        let logical_input = try_enforce_locality_requirement(self.input(), self.dedup_cols());
+        let logical_input = try_enforce_locality_requirement(
+            self.input(),
+            self.dedup_cols(),
+            ctx.locality_backfill_enabled(),
+        );
         let (input, input_col_change) = logical_input.logical_rewrite_for_stream(ctx)?;
         let (logical, out_col_change) = self.rewrite_with_input(input, input_col_change);
         Ok((logical.into(), out_col_change))

@@ -49,6 +49,12 @@ use crate::{PG_VERSION, SERVER_ENCODING, SERVER_VERSION_NUM, STANDARD_CONFORMING
 
 pub const SESSION_CONFIG_LIST_SEP: &str = ", ";
 
+/// Session-parameter schema understood by this binary's incremental notification handler.
+pub const CURRENT_SESSION_CONFIG_VERSION: u32 = 1;
+pub const ENABLE_LOCALITY_BACKFILL_PARAM: &str = "enable_locality_backfill";
+pub const LOCALITY_BACKFILL_MODE_PARAM: &str = "locality_backfill_mode";
+pub const AUTO_LOCALITY_BACKFILL_MIN_SIZE_PARAM: &str = "auto_locality_backfill_min_size";
+
 #[derive(Error, Debug)]
 pub enum SessionConfigError {
     #[error("Invalid value `{value}` for `{entry}`")]
@@ -499,15 +505,15 @@ pub struct SessionConfig {
     #[parameter(default = false)]
     enable_mv_selection: bool,
 
-    /// Enable locality backfill for streaming queries. Kept as a boolean for compatibility with
-    /// older frontend nodes. When enabled, this takes precedence over `locality_backfill_mode`.
-    #[parameter(default = false)]
+    /// Legacy boolean control for locality backfill. Kept for wire compatibility with older
+    /// frontend nodes and synchronized with `locality_backfill_mode`.
+    #[parameter(default = false, flags = "SETTER")]
     enable_locality_backfill: bool,
 
     /// Control locality backfill for streaming queries. Accepted values are off/on/auto.
     /// `true` and `false` are accepted as aliases of `on` and `off`.
     #[serde(default)]
-    #[parameter(default = LocalityBackfillMode::Auto)]
+    #[parameter(default = LocalityBackfillMode::Auto, flags = "SETTER")]
     locality_backfill_mode: LocalityBackfillMode,
 
     /// Auto-enable locality backfill when estimated scan backfill data reaches this size in bytes.
@@ -611,6 +617,33 @@ fn check_streaming_parallelism_for_backfill(val: &ConfigBackfillParallelism) -> 
 }
 
 impl SessionConfig {
+    pub fn set_enable_locality_backfill(
+        &mut self,
+        val: bool,
+        reporter: &mut impl ConfigReporter,
+    ) -> SessionConfigResult<bool> {
+        self.set_enable_locality_backfill_inner(val, reporter)?;
+        self.set_locality_backfill_mode_inner(
+            if val {
+                LocalityBackfillMode::On
+            } else {
+                LocalityBackfillMode::Off
+            },
+            reporter,
+        )?;
+        Ok(val)
+    }
+
+    pub fn set_locality_backfill_mode(
+        &mut self,
+        val: LocalityBackfillMode,
+        reporter: &mut impl ConfigReporter,
+    ) -> SessionConfigResult<LocalityBackfillMode> {
+        self.set_locality_backfill_mode_inner(val, reporter)?;
+        self.set_enable_locality_backfill_inner(matches!(val, LocalityBackfillMode::On), reporter)?;
+        Ok(val)
+    }
+
     pub fn set_force_two_phase_agg(
         &mut self,
         val: bool,
@@ -661,12 +694,35 @@ def_anyhow_newtype! {
 }
 
 impl SessionConfig {
-    /// Resolve the locality backfill mode while honoring the legacy boolean parameter.
-    pub fn effective_locality_backfill_mode(&self) -> LocalityBackfillMode {
-        if self.enable_locality_backfill() {
-            LocalityBackfillMode::On
+    /// Deserialize the session-parameter snapshot sent by Meta.
+    ///
+    /// Snapshots from an older Meta do not contain `locality_backfill_mode`; in that case the
+    /// legacy boolean remains the source of truth. New snapshots use the mode and normalize the
+    /// legacy field to its boolean wire representation.
+    pub fn from_meta_snapshot(snapshot: &str) -> serde_json::Result<Self> {
+        let value: serde_json::Value = serde_json::from_str(snapshot)?;
+        let has_locality_backfill_mode = value.get(LOCALITY_BACKFILL_MODE_PARAM).is_some();
+        let mut config: Self = serde_json::from_value(value)?;
+
+        if has_locality_backfill_mode {
+            config.enable_locality_backfill =
+                matches!(config.locality_backfill_mode, LocalityBackfillMode::On);
         } else {
-            self.locality_backfill_mode()
+            config.locality_backfill_mode = if config.enable_locality_backfill {
+                LocalityBackfillMode::On
+            } else {
+                LocalityBackfillMode::Off
+            };
+        }
+
+        Ok(config)
+    }
+
+    /// Minimum session-config schema version required to apply an incremental update.
+    pub fn min_version_for_param(key_name: &str) -> u32 {
+        match Self::alias_to_entry_name(key_name).as_str() {
+            LOCALITY_BACKFILL_MODE_PARAM | AUTO_LOCALITY_BACKFILL_MIN_SIZE_PARAM => 1,
+            _ => 0,
         }
     }
 
@@ -763,32 +819,21 @@ mod test {
     #[test]
     fn test_locality_backfill_new_meta_snapshot_is_readable_by_legacy_frontend() {
         let mut config = SessionConfig::default();
-
-        assert_eq!(config.get("enable_locality_backfill").unwrap(), "false");
-        assert_eq!(config.get("locality_backfill_mode").unwrap(), "auto");
-
-        // The new mode and threshold fields are ignored as unknown fields by the old schema.
-        let snapshot = serde_json::to_value(&config).unwrap();
-        assert_eq!(snapshot["enable_locality_backfill"], "false");
-        let legacy: LegacyLocalityBackfillConfig =
-            serde_json::from_value(snapshot.clone()).unwrap();
-        assert!(!legacy.enable_locality_backfill);
-
-        // Changing the new mode must not rewrite the legacy field. This also keeps its persisted
-        // value readable by an old Meta after rollback.
         config
             .set_locality_backfill_mode(LocalityBackfillMode::On, &mut ())
             .unwrap();
-        assert_eq!(config.get("enable_locality_backfill").unwrap(), "false");
-        let legacy: LegacyLocalityBackfillConfig =
-            serde_json::from_value(serde_json::to_value(&config).unwrap()).unwrap();
-        assert!(!legacy.enable_locality_backfill);
 
-        config.set_enable_locality_backfill(true, &mut ()).unwrap();
-        assert_eq!(config.get("enable_locality_backfill").unwrap(), "true");
+        // Changing the new mode must leave the legacy field readable after an upgrade or rollback.
         let legacy: LegacyLocalityBackfillConfig =
             serde_json::from_value(serde_json::to_value(&config).unwrap()).unwrap();
         assert!(legacy.enable_locality_backfill);
+
+        config
+            .set_locality_backfill_mode(LocalityBackfillMode::Off, &mut ())
+            .unwrap();
+        assert!(!config.enable_locality_backfill());
+        config.set_enable_locality_backfill(true, &mut ()).unwrap();
+        assert_eq!(config.locality_backfill_mode(), LocalityBackfillMode::On);
     }
 
     #[test]
@@ -802,40 +847,14 @@ mod test {
                 .is_some()
         );
 
-        let upgraded: SessionConfig =
-            serde_json::from_value(serde_json::Value::Object(old_snapshot.clone())).unwrap();
-        assert_eq!(
-            upgraded.locality_backfill_mode(),
-            LocalityBackfillMode::Auto
-        );
+        let upgraded = SessionConfig::from_meta_snapshot(
+            &serde_json::to_string(&serde_json::Value::Object(old_snapshot.clone())).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(upgraded.locality_backfill_mode(), LocalityBackfillMode::Off);
         assert_eq!(
             upgraded.auto_locality_backfill_min_size(),
             AUTO_LOCALITY_BACKFILL_MIN_SIZE
-        );
-    }
-
-    #[test]
-    fn test_effective_locality_backfill_mode() {
-        let mut config = SessionConfig::default();
-
-        assert_eq!(
-            config.effective_locality_backfill_mode(),
-            LocalityBackfillMode::Auto
-        );
-
-        // The legacy boolean takes precedence. Once it is disabled, the new mode applies.
-        config.set_enable_locality_backfill(true, &mut ()).unwrap();
-        config
-            .set_locality_backfill_mode(LocalityBackfillMode::Off, &mut ())
-            .unwrap();
-        assert_eq!(
-            config.effective_locality_backfill_mode(),
-            LocalityBackfillMode::On
-        );
-        config.set_enable_locality_backfill(false, &mut ()).unwrap();
-        assert_eq!(
-            config.effective_locality_backfill_mode(),
-            LocalityBackfillMode::Off
         );
     }
 

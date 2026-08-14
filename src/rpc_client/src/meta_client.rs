@@ -37,6 +37,7 @@ use risingwave_common::id::{
     ConnectionId, DatabaseId, JobId, SchemaId, SinkId, SubscriptionId, UserId, ViewId, WorkerId,
 };
 use risingwave_common::monitor::EndpointExt;
+use risingwave_common::session_config::CURRENT_SESSION_CONFIG_VERSION;
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::system_param::reader::SystemParamsReader;
 use risingwave_common::telemetry::report::TelemetryInfoFetcher;
@@ -173,6 +174,7 @@ impl MetaClient {
             subscribe_type: subscribe_type as i32,
             host: Some(self.host_addr.to_protobuf()),
             worker_id: self.worker_id(),
+            session_config_version: CURRENT_SESSION_CONFIG_VERSION,
         };
 
         let retry_strategy = GrpcMetaClient::retry_strategy_to_bound(
