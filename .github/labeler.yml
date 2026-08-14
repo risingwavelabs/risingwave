@@ -87,9 +87,11 @@ labels:
   files:
   - "ci\\/scripts\\/e2e-source-test\\.sh"
   - "e2e_test\\/source_inline\\/fs\\/.*"
+  - "e2e_test\\/source_inline\\/rabbitmq\\/.*"
   - "e2e_test\\/source_inline\\/refresh\\/.*"
   - "e2e_test\\/source_inline\\/vault\\/vault_secret_ddl\\.slt"
   - "e2e_test\\/webhook\\/.*"
+  - "src\\/connector\\/src\\/source\\/rabbitmq\\/.*"
 
 - label: "ci/run-e2e-sink-tests"
   files:

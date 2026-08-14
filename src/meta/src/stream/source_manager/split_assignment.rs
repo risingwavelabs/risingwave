@@ -116,7 +116,9 @@ impl SourceManager {
     ///
     /// `fragment_actor_ids` provides the actor IDs assigned to each fragment from rendering.
     /// For `Fixed` splits, splits are distributed across actors via [`reassign_splits`].
-    /// For `Adaptive` splits, `fill_adaptive_split` expands the template per actor count.
+    /// For `Adaptive` splits, `fill_adaptive_split` expands the template and the concrete
+    /// splits are distributed across the rendered actors. An actor may receive zero or multiple
+    /// splits when a connector uses an actor-count-independent expansion.
     pub fn resolve_fragment_to_actor_splits(
         table_fragments: &StreamJobFragments,
         source_assignment: &SourceSplitAssignment,
@@ -150,12 +152,18 @@ impl SourceManager {
                     }
                     DiscoveredSplits::Adaptive(template) => {
                         let expanded = fill_adaptive_split(template, actor_count)?;
-                        let expanded_splits: Vec<SplitImpl> = expanded.into_values().collect();
-                        let mut actor_splits = HashMap::new();
-                        for (i, actor_id) in actor_ids.iter().enumerate() {
-                            actor_splits.insert(*actor_id, vec![expanded_splits[i].clone()]);
+                        let empty_actor_splits: HashMap<ActorId, Vec<SplitImpl>> = actor_ids
+                            .iter()
+                            .map(|actor_id| (*actor_id, vec![]))
+                            .collect();
+                        if let Some(diff) = reassign_splits(
+                            *fragment_id,
+                            empty_actor_splits,
+                            &expanded,
+                            SplitDiffOptions::default(),
+                        ) {
+                            result.insert(*fragment_id, diff);
                         }
-                        result.insert(*fragment_id, actor_splits);
                     }
                 }
             }
