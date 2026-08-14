@@ -21,7 +21,6 @@ use phf::phf_set;
 use risingwave_common::array::{Op, StreamChunk};
 use risingwave_common::catalog::Schema;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
-use risingwave_common::util::iter_util::ZipEqFast;
 use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use simd_json::prelude::ArrayTrait;
@@ -333,16 +332,18 @@ impl Sink for PostgresSink {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 enum StatementKind {
-    /// Plain `INSERT` for append-only sinks, `INSERT .. ON CONFLICT` otherwise.
+    /// Plain `INSERT`, used by append-only sinks.
+    Insert,
     Upsert,
     Delete,
 }
 
 impl StatementKind {
-    fn as_str(&self) -> &'static str {
+    fn as_str(self) -> &'static str {
         match self {
+            StatementKind::Insert => "insert",
             StatementKind::Upsert => "upsert",
             StatementKind::Delete => "delete",
         }
@@ -351,7 +352,7 @@ impl StatementKind {
 
 enum PendingOp {
     Upsert(PgRow),
-    Delete(PgRow),
+    Delete,
 }
 
 /// Rows accumulated across chunks, written out on flush.
@@ -376,15 +377,10 @@ impl PendingRows {
         }
     }
 
-    fn absorb(
-        &mut self,
-        chunk: &StreamChunk,
-        key_indices: &[usize],
-        key_types: &[PgType],
-        schema_types: &[PgType],
-    ) {
+    fn absorb(&mut self, chunk: &StreamChunk, key_indices: &[usize], schema_types: &[PgType]) {
         match self {
             PendingRows::Insert(rows) => {
+                rows.reserve(chunk.cardinality());
                 for (op, row) in chunk.rows() {
                     if op == Op::Insert {
                         rows.push(convert_row_to_pg_row(row, schema_types));
@@ -396,16 +392,14 @@ impl PendingRows {
                 }
             }
             PendingRows::Upsert(rows) => {
+                rows.reserve(chunk.cardinality());
                 for (op, row) in chunk.rows() {
                     let key = row.project(key_indices).into_owned_row();
                     let pending_op = match op {
                         Op::Insert | Op::UpdateInsert => {
                             PendingOp::Upsert(convert_row_to_pg_row(row, schema_types))
                         }
-                        Op::Delete | Op::UpdateDelete => PendingOp::Delete(convert_row_to_pg_row(
-                            row.project(key_indices),
-                            key_types,
-                        )),
+                        Op::Delete | Op::UpdateDelete => PendingOp::Delete,
                     };
                     rows.insert(key, pending_op);
                 }
@@ -413,17 +407,17 @@ impl PendingRows {
         }
     }
 
-    /// Takes all pending rows out, split into deletes and upserts.
-    fn take(&mut self) -> (Vec<PgRow>, Vec<PgRow>) {
+    /// Takes all pending rows out, split into deletes (rebuilt from the keys) and upserts.
+    fn take(&mut self, key_types: &[PgType]) -> (Vec<PgRow>, Vec<PgRow>) {
         match self {
             PendingRows::Insert(rows) => (vec![], std::mem::take(rows)),
             PendingRows::Upsert(rows) => {
-                let mut deletes = Vec::new();
-                let mut upserts = Vec::new();
-                for op in rows.drain().map(|(_, op)| op) {
+                let mut deletes = Vec::with_capacity(rows.len());
+                let mut upserts = Vec::with_capacity(rows.len());
+                for (key, op) in rows.drain() {
                     match op {
                         PendingOp::Upsert(row) => upserts.push(row),
-                        PendingOp::Delete(row) => deletes.push(row),
+                        PendingOp::Delete => deletes.push(convert_row_to_pg_row(&key, key_types)),
                     }
                 }
                 (deletes, upserts)
@@ -433,21 +427,17 @@ impl PendingRows {
 }
 
 pub struct PostgresSinkWriter {
-    is_append_only: bool,
+    write_kind: StatementKind,
     client: tokio_postgres::Client,
     schema: Schema,
     schema_name: String,
     table_name: String,
-    pk_indices: Vec<usize>,
-    pk_indices_lookup: HashSet<usize>,
     /// Columns identifying a downstream row: the sink pk, or all columns when there is no pk.
     key_indices: Vec<usize>,
     key_types: Vec<PgType>,
     schema_types: Vec<PgType>,
     max_batch_rows: usize,
-    upsert_tuples_per_statement: usize,
-    delete_tuples_per_statement: usize,
-    upsert_statement: Option<tokio_postgres::Statement>,
+    write_statement: Option<tokio_postgres::Statement>,
     delete_statement: Option<tokio_postgres::Statement>,
     pending: PendingRows,
 }
@@ -465,8 +455,6 @@ impl PostgresSinkWriter {
         let client = create_pg_client(&pg_conn, tcp_keepalive).await?;
 
         ensure_no_foreign_key_with_client(&client, &config.schema, &config.table).await?;
-
-        let pk_indices_lookup = pk_indices.iter().copied().collect::<HashSet<_>>();
 
         // Rewrite schema types for serialization
         let schema_types = {
@@ -494,41 +482,37 @@ impl PostgresSinkWriter {
             schema_types
         };
 
-        // Fall back to all columns when no pk is defined, consistent with `create_delete_sql`.
+        // Normalize the key here: pk, or all columns when there is no pk. SQL builders require it non-empty.
         let key_indices = if pk_indices.is_empty() {
             (0..schema.len()).collect_vec()
         } else {
-            pk_indices.clone()
+            pk_indices
         };
         let key_types = key_indices
             .iter()
             .map(|i| schema_types[*i].clone())
             .collect_vec();
 
-        let upsert_tuples_per_statement = tuples_per_statement(config.max_batch_rows, schema.len());
-        let delete_tuples_per_statement =
-            tuples_per_statement(config.max_batch_rows, key_indices.len());
-        let pending = if is_append_only {
-            PendingRows::Insert(Vec::new())
+        let (write_kind, pending) = if is_append_only {
+            (StatementKind::Insert, PendingRows::Insert(Vec::new()))
         } else {
-            PendingRows::Upsert(HashMap::new())
+            (
+                StatementKind::Upsert,
+                PendingRows::Upsert(HashMap::with_capacity(config.max_batch_rows)),
+            )
         };
 
         let writer = Self {
-            is_append_only,
+            write_kind,
             client,
             schema,
             schema_name: config.schema,
             table_name: config.table,
-            pk_indices,
-            pk_indices_lookup,
             key_indices,
             key_types,
             schema_types,
             max_batch_rows: config.max_batch_rows,
-            upsert_tuples_per_statement,
-            delete_tuples_per_statement,
-            upsert_statement: None,
+            write_statement: None,
             delete_statement: None,
             pending,
         };
@@ -537,15 +521,14 @@ impl PostgresSinkWriter {
 
     fn create_sql(&self, kind: StatementKind, n_tuples: usize) -> String {
         match kind {
-            StatementKind::Upsert if self.is_append_only => {
+            StatementKind::Insert => {
                 create_insert_sql(&self.schema, &self.schema_name, &self.table_name, n_tuples)
             }
             StatementKind::Upsert => create_upsert_sql(
                 &self.schema,
                 &self.schema_name,
                 &self.table_name,
-                &self.pk_indices,
-                &self.pk_indices_lookup,
+                &self.key_indices,
                 n_tuples,
             ),
             StatementKind::Delete => create_delete_sql(
@@ -558,95 +541,86 @@ impl PostgresSinkWriter {
         }
     }
 
-    fn tuples_per_statement(&self, kind: StatementKind) -> usize {
+    fn statement_cache(&mut self, kind: StatementKind) -> &mut Option<tokio_postgres::Statement> {
         match kind {
-            StatementKind::Upsert => self.upsert_tuples_per_statement,
-            StatementKind::Delete => self.delete_tuples_per_statement,
+            StatementKind::Insert | StatementKind::Upsert => &mut self.write_statement,
+            StatementKind::Delete => &mut self.delete_statement,
         }
     }
 
-    /// Prepares one statement per sub-batch. Only the full-sized statement is cached, the
-    /// remainder differs from flush to flush and is prepared ad hoc.
-    async fn prepare_statements(
+    /// Pairs each sub-batch with a statement of matching tuple count. Only the full-size
+    /// statement is cached; remainder sizes (barrier flushes) are prepared ad hoc.
+    async fn prepare_batches<'a>(
         &mut self,
         kind: StatementKind,
-        n_rows: usize,
-    ) -> Result<Vec<tokio_postgres::Statement>> {
-        let full = self.tuples_per_statement(kind);
-        let mut statements = Vec::with_capacity(n_rows.div_ceil(full));
-        let mut remaining = n_rows;
-        while remaining > 0 {
-            let n_tuples = remaining.min(full);
-            let cached = match kind {
-                StatementKind::Upsert => &self.upsert_statement,
-                StatementKind::Delete => &self.delete_statement,
-            };
-            let statement = match cached {
-                Some(statement) if n_tuples == full => statement.clone(),
+        rows: &'a [PgRow],
+    ) -> Result<Vec<(tokio_postgres::Statement, &'a [PgRow])>> {
+        if rows.is_empty() {
+            return Ok(vec![]);
+        }
+        let params_per_tuple = match kind {
+            StatementKind::Insert | StatementKind::Upsert => self.schema.len(),
+            StatementKind::Delete => self.key_indices.len(),
+        };
+        let full = tuples_per_statement(self.max_batch_rows, params_per_tuple);
+        let mut batches = Vec::with_capacity(rows.len().div_ceil(full));
+        for tuples in rows.chunks(full) {
+            let is_full = tuples.len() == full;
+            let statement = match self.statement_cache(kind).clone() {
+                Some(statement) if is_full => statement,
                 _ => {
-                    let sql = self.create_sql(kind, n_tuples);
+                    let sql = self.create_sql(kind, tuples.len());
                     let statement = self.client.prepare(&sql).await.with_context(|| {
                         format!(
                             "failed to prepare {} statement for {} rows",
                             kind.as_str(),
-                            n_tuples
+                            tuples.len()
                         )
                     })?;
-                    if n_tuples == full {
-                        match kind {
-                            StatementKind::Upsert => {
-                                self.upsert_statement = Some(statement.clone())
-                            }
-                            StatementKind::Delete => {
-                                self.delete_statement = Some(statement.clone())
-                            }
-                        }
+                    if is_full {
+                        *self.statement_cache(kind) = Some(statement.clone());
                     }
                     statement
                 }
             };
-            statements.push(statement);
-            remaining -= n_tuples;
+            batches.push((statement, tuples));
         }
-        Ok(statements)
+        Ok(batches)
     }
 
     /// Writes out all pending rows in a single transaction.
     async fn flush(&mut self) -> Result<()> {
-        let (deletes, upserts) = self.pending.take();
+        let (deletes, upserts) = self.pending.take(&self.key_types);
         if deletes.is_empty() && upserts.is_empty() {
             return Ok(());
         }
 
-        // Statements are prepared before the transaction begins, as it borrows the client mutably.
-        let delete_statements = self
-            .prepare_statements(StatementKind::Delete, deletes.len())
+        // Statements are prepared before the transaction so cache hits skip the prepare round trip
+        // entirely.
+        let delete_batches = self
+            .prepare_batches(StatementKind::Delete, &deletes)
             .await?;
-        let upsert_statements = self
-            .prepare_statements(StatementKind::Upsert, upserts.len())
-            .await?;
+        let write_batches = self.prepare_batches(self.write_kind, &upserts).await?;
 
         let transaction = self.client.transaction().await?;
         // Deletes go first, which is safe because dedup leaves deleted and upserted keys disjoint.
-        execute_batches(
-            &transaction,
-            StatementKind::Delete,
-            &delete_statements,
-            &deletes,
-            self.delete_tuples_per_statement,
-        )
-        .await?;
-        execute_batches(
-            &transaction,
-            StatementKind::Upsert,
-            &upsert_statements,
-            &upserts,
-            self.upsert_tuples_per_statement,
-        )
-        .await?;
+        execute_batches(&transaction, StatementKind::Delete, &delete_batches).await?;
+        execute_batches(&transaction, self.write_kind, &write_batches).await?;
         transaction.commit().await?;
 
         Ok(())
+    }
+
+    /// Buffers the chunk, flushing when the batch is full. Returns whether a flush happened.
+    async fn write_chunk(&mut self, chunk: &StreamChunk) -> Result<bool> {
+        self.pending
+            .absorb(chunk, &self.key_indices, &self.schema_types);
+        if self.pending.len() >= self.max_batch_rows {
+            self.flush().await?;
+            Ok(true)
+        } else {
+            Ok(false)
+        }
     }
 }
 
@@ -660,15 +634,11 @@ fn tuples_per_statement(max_batch_rows: usize, params_per_tuple: usize) -> usize
 async fn execute_batches(
     transaction: &tokio_postgres::Transaction<'_>,
     kind: StatementKind,
-    statements: &[tokio_postgres::Statement],
-    rows: &[PgRow],
-    tuples_per_statement: usize,
+    batches: &[(tokio_postgres::Statement, &[PgRow])],
 ) -> Result<()> {
-    for (statement, tuples) in statements
-        .iter()
-        .zip_eq_fast(rows.chunks(tuples_per_statement))
-    {
-        let params = tuples.iter().flatten().collect_vec();
+    for (statement, tuples) in batches {
+        let mut params = Vec::with_capacity(tuples.len() * tuples.first().map_or(0, |t| t.len()));
+        params.extend(tuples.iter().flatten());
         transaction
             .execute_raw(statement, params)
             .await
@@ -691,17 +661,10 @@ impl LogSinker for PostgresSinkWriter {
             let (epoch, item) = log_reader.next_item().await?;
             match item {
                 LogStoreReadItem::StreamChunk { chunk, chunk_id } => {
-                    self.pending.absorb(
-                        &chunk,
-                        &self.key_indices,
-                        &self.key_types,
-                        &self.schema_types,
-                    );
-                    // Rows are buffered across chunks, so an offset may only be truncated once
-                    // the flush that commits its rows has succeeded. Offsets of chunks that are
-                    // still buffered are covered by a later truncation.
-                    if self.pending.len() >= self.max_batch_rows {
-                        self.flush().await?;
+                    // Rows are buffered across chunks, so an offset may only be truncated once the
+                    // flush that commits its rows has succeeded. Offsets of chunks that are still
+                    // buffered are covered by a later truncation.
+                    if self.write_chunk(&chunk).await? {
                         log_reader.truncate(TruncateOffset::Chunk { epoch, chunk_id })?;
                     }
                 }
@@ -750,7 +713,7 @@ fn create_delete_sql(
     schema: &Schema,
     schema_name: &str,
     table_name: &str,
-    pk_indices: &[usize],
+    key_indices: &[usize],
     n_tuples: usize,
 ) -> String {
     let normalized_table_name = format!(
@@ -758,19 +721,14 @@ fn create_delete_sql(
         quote_identifier(schema_name),
         quote_identifier(table_name)
     );
-    let pk_indices = if pk_indices.is_empty() {
-        (0..schema.len()).collect_vec()
-    } else {
-        pk_indices.to_vec()
-    };
     let pk = {
-        let pk_symbols = pk_indices
+        let pk_symbols = key_indices
             .iter()
-            .map(|pk_index| quote_identifier(&schema.fields()[*pk_index].name))
+            .map(|key_index| quote_identifier(&schema.fields()[*key_index].name))
             .join(", ");
         format!("({})", pk_symbols)
     };
-    let parameters = create_parameter_tuples(pk_indices.len(), n_tuples);
+    let parameters = create_parameter_tuples(key_indices.len(), n_tuples);
     format!("DELETE FROM {normalized_table_name} WHERE {pk} in ({parameters})")
 }
 
@@ -779,7 +737,6 @@ fn create_upsert_sql(
     schema_name: &str,
     table_name: &str,
     pk_indices: &[usize],
-    pk_indices_lookup: &HashSet<usize>,
     n_tuples: usize,
 ) -> String {
     let insert_sql = create_insert_sql(schema, schema_name, table_name, n_tuples);
@@ -792,7 +749,7 @@ fn create_upsert_sql(
         .collect_vec()
         .join(", ");
     let update_parameters: String = (0..schema.len())
-        .filter(|i| !pk_indices_lookup.contains(i))
+        .filter(|i| !pk_indices.contains(i))
         .map(|i| {
             let column = quote_identifier(&schema.fields()[i].name);
             format!("{column} = EXCLUDED.{column}")
@@ -915,29 +872,14 @@ mod tests {
         let schema = test_schema();
         let schema_name = "test_schema";
         let table_name = "test_table";
-        let pk_indices_lookup = HashSet::from_iter([1]);
-        let sql = create_upsert_sql(
-            &schema,
-            schema_name,
-            table_name,
-            &[1],
-            &pk_indices_lookup,
-            1,
-        );
+        let sql = create_upsert_sql(&schema, schema_name, table_name, &[1], 1);
         check(
             sql,
             expect![[
                 r#"INSERT INTO "test_schema"."test_table" ("a", "b") VALUES ($1, $2) on conflict ("b") do update set "a" = EXCLUDED."a""#
             ]],
         );
-        let sql = create_upsert_sql(
-            &schema,
-            schema_name,
-            table_name,
-            &[1],
-            &pk_indices_lookup,
-            3,
-        );
+        let sql = create_upsert_sql(&schema, schema_name, table_name, &[1], 3);
         check(
             sql,
             expect![[
@@ -964,15 +906,7 @@ mod tests {
         ]);
         let schema_name = "test_schema";
         let table_name = "test_table";
-        let pk_indices_lookup = HashSet::from_iter([0, 1]);
-        let sql = create_upsert_sql(
-            &schema,
-            schema_name,
-            table_name,
-            &[0, 1],
-            &pk_indices_lookup,
-            2,
-        );
+        let sql = create_upsert_sql(&schema, schema_name, table_name, &[0, 1], 2);
         check(
             sql,
             expect![[
@@ -995,15 +929,7 @@ mod tests {
         ]);
         let schema_name = "test_schema";
         let table_name = "test_table";
-        let pk_indices_lookup = HashSet::from_iter([0, 1]);
-        let sql = create_upsert_sql(
-            &schema,
-            schema_name,
-            table_name,
-            &[0, 1],
-            &pk_indices_lookup,
-            2,
-        );
+        let sql = create_upsert_sql(&schema, schema_name, table_name, &[0, 1], 2);
         check(
             sql,
             expect![[
@@ -1040,7 +966,7 @@ mod tests {
                 .iter()
                 .map(|(key, op)| match op {
                     PendingOp::Upsert(row) => format!("{:?} => upsert {:?}", key, row),
-                    PendingOp::Delete(row) => format!("{:?} => delete {:?}", key, row),
+                    PendingOp::Delete => format!("{:?} => delete", key),
                 })
                 .sorted()
                 .join("\n"),
@@ -1066,7 +992,6 @@ mod tests {
                  + 3 30",
             ),
             &key_indices,
-            &key_types,
             &types,
         );
         pending.absorb(
@@ -1076,7 +1001,6 @@ mod tests {
                  U+ 3 31",
             ),
             &key_indices,
-            &key_types,
             &types,
         );
         assert_eq!(pending.len(), 3);
@@ -1084,11 +1008,11 @@ mod tests {
             render_pending(&pending),
             expect![[r#"
                 OwnedRow([Some(Int32(1))]) => upsert [Some(Builtin(Int32(1))), Some(Builtin(Int32(11)))]
-                OwnedRow([Some(Int32(2))]) => delete [Some(Builtin(Int32(2)))]
+                OwnedRow([Some(Int32(2))]) => delete
                 OwnedRow([Some(Int32(3))]) => upsert [Some(Builtin(Int32(3))), Some(Builtin(Int32(31)))]"#]],
         );
 
-        let (deletes, upserts) = pending.take();
+        let (deletes, upserts) = pending.take(&key_types);
         assert_eq!(deletes.len(), 1);
         assert_eq!(upserts.len(), 2);
         assert_eq!(pending.len(), 0);
@@ -1107,7 +1031,6 @@ mod tests {
                  - 1 10",
             ),
             &[0],
-            &[PgType::INT4],
             &types,
         );
         check(
@@ -1116,7 +1039,7 @@ mod tests {
                 insert [Some(Builtin(Int32(1))), Some(Builtin(Int32(10)))]
                 insert [Some(Builtin(Int32(1))), Some(Builtin(Int32(10)))]"#]],
         );
-        let (deletes, upserts) = pending.take();
+        let (deletes, upserts) = pending.take(&[PgType::INT4]);
         assert!(deletes.is_empty());
         assert_eq!(upserts.len(), 2);
     }
