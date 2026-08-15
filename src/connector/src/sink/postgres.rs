@@ -60,6 +60,9 @@ const CHECK_FOREIGN_KEY_SQL: &str = r#"
     )
 "#;
 
+const CHECK_READ_ONLY_SQL: &str =
+    "SELECT pg_is_in_recovery() OR current_setting('transaction_read_only') = 'on'";
+
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct PostgresConfig {
@@ -134,6 +137,29 @@ async fn ensure_no_foreign_key_with_client(
     if has_foreign_key {
         return Err(SinkError::Config(anyhow!(
             "Postgres sink does not support target table \"{}\".\"{}\" with foreign key constraints. Please remove foreign key constraints from the target table or choose a different sink table.",
+            schema,
+            table,
+        )));
+    }
+
+    Ok(())
+}
+
+/// `EXPLAIN` is exempt from PostgreSQL's read-only check, so the probe cannot catch a reader.
+async fn ensure_target_writable(
+    client: &tokio_postgres::Client,
+    schema: &str,
+    table: &str,
+) -> Result<()> {
+    let read_only = client
+        .query_one(CHECK_READ_ONLY_SQL, &[])
+        .await
+        .context("failed to check whether the target database accepts writes")?
+        .get::<_, bool>(0);
+
+    if read_only {
+        return Err(SinkError::Config(anyhow!(
+            "Postgres sink cannot write to target table \"{}\".\"{}\": the connection is read-only (hot standby, or `transaction_read_only` set to `on`). Please point the sink at an endpoint that accepts writes.",
             schema,
             table,
         )));
@@ -476,6 +502,7 @@ impl PostgresSinkWriter {
         let client = create_pg_client(&pg_conn, tcp_keepalive).await?;
 
         ensure_no_foreign_key_with_client(&client, &config.schema, &config.table).await?;
+        ensure_target_writable(&client, &config.schema, &config.table).await?;
 
         // Rewrite schema types for serialization
         let schema_types = {
@@ -526,7 +553,7 @@ impl PostgresSinkWriter {
             }
         };
 
-        let writer = Self {
+        let mut writer = Self {
             client,
             schema,
             schema_name: config.schema,
@@ -539,7 +566,38 @@ impl PostgresSinkWriter {
             delete_statements: HashMap::new(),
             pending,
         };
+        // Fails fast on unparsable SQL, and pre-warms a size the batch path really uses:
+        // power-of-two splitting ends a batch at a single row.
+        writer.cached_statement(writer.write_kind(), 1).await?;
+        writer.probe_target_table(writer.write_kind()).await?;
+        if !is_append_only {
+            writer.cached_statement(StatementKind::Delete, 1).await?;
+            writer.probe_target_table(StatementKind::Delete).await?;
+        }
         Ok(writer)
+    }
+
+    /// Plans a single-row statement of `kind` via `EXPLAIN`. Planning resolves the `ON CONFLICT`
+    /// arbiter and runs executor-start privilege checks, both invisible to `prepare`, so an
+    /// incompatible or under-privileged target fails at construction, not at the first flush.
+    /// Executor-init-only checks (e.g. a `DEFERRABLE` arbiter) still surface at the first flush.
+    async fn probe_target_table(&self, kind: StatementKind) -> Result<()> {
+        let sql = format!("EXPLAIN {}", self.create_sql(kind, 1));
+        let nulls = (0..self.params_per_tuple(kind)).map(|_| PgDatum::None);
+        self.client
+            .execute_raw(&sql, nulls)
+            .await
+            .with_context(|| {
+                format!(
+                    "failed to plan the {} statement against the target table",
+                    kind.as_str()
+                )
+            })?;
+        Ok(())
+    }
+
+    fn params_per_tuple(&self, kind: StatementKind) -> usize {
+        params_per_tuple(kind, self.schema.len(), self.key_indices.len())
     }
 
     fn write_kind(&self) -> StatementKind {
@@ -609,11 +667,7 @@ impl PostgresSinkWriter {
         kind: StatementKind,
         rows: &'a [PgRow],
     ) -> Result<Vec<(tokio_postgres::Statement, &'a [PgRow])>> {
-        let params_per_tuple = match kind {
-            StatementKind::Insert | StatementKind::Upsert => self.schema.len(),
-            StatementKind::Delete => self.key_indices.len(),
-        };
-        let cap = tuples_per_statement(self.max_batch_rows, params_per_tuple);
+        let cap = tuples_per_statement(self.max_batch_rows, self.params_per_tuple(kind));
         let mut batches = Vec::new();
         for tuples in split_power_of_two(rows, cap) {
             let statement = self.cached_statement(kind, tuples.len()).await?;
@@ -722,6 +776,13 @@ impl BatchingSinkWriter for PostgresSinkWriter {
     async fn commit_on_barrier(&mut self) -> Result<bool> {
         self.flush().await?;
         Ok(true)
+    }
+}
+
+fn params_per_tuple(kind: StatementKind, schema_len: usize, n_key_columns: usize) -> usize {
+    match kind {
+        StatementKind::Insert | StatementKind::Upsert => schema_len,
+        StatementKind::Delete => n_key_columns,
     }
 }
 
@@ -991,6 +1052,35 @@ mod tests {
                 r#"INSERT INTO "test_schema"."test_table" ("user_id", "client_id") VALUES ($1, $2), ($3, $4) on conflict ("user_id", "client_id") do nothing"#
             ]],
         );
+    }
+
+    /// The probe binds `params_per_tuple` NULLs against the single-row SQL, so the two must agree.
+    #[test]
+    fn test_params_per_tuple_matches_placeholders() {
+        let schema = test_schema();
+        let key_indices = [1];
+        let statements = [
+            (
+                StatementKind::Insert,
+                create_insert_sql(&schema, "test_schema", "test_table", 1),
+            ),
+            (
+                StatementKind::Upsert,
+                create_upsert_sql(&schema, "test_schema", "test_table", &key_indices, 1),
+            ),
+            (
+                StatementKind::Delete,
+                create_delete_sql(&schema, "test_schema", "test_table", &key_indices, 1),
+            ),
+        ];
+        for (kind, sql) in statements {
+            assert_eq!(
+                sql.matches('$').count(),
+                params_per_tuple(kind, schema.len(), key_indices.len()),
+                "{} statement: {sql}",
+                kind.as_str()
+            );
+        }
     }
 
     #[test]
