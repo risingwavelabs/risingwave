@@ -313,7 +313,7 @@ fn task_main(
                 ServiceConfig::ClickHouse(c) => {
                     let mut service = ClickHouseService::new(c.clone());
                     service.execute(&mut ctx)?;
-                    let mut task = risedev::ClickHouseReadyCheckTask::new(c.clone())?;
+                    let mut task = risedev::ClickHouseReadyCheckTask::new(c.clone());
                     task.execute(&mut ctx)?;
                     ctx.pb
                         .set_message(format!("clickhouse http://{}:{}", c.address, c.http_port));
