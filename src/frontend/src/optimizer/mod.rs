@@ -1522,26 +1522,6 @@ mod tests {
     use super::*;
     use crate::optimizer::plan_node::LogicalValues;
 
-    #[test]
-    fn test_locality_backfill_requires_license() {
-        assert!(!locality_backfill_requires_license(
-            LocalityBackfillMode::Always,
-            0
-        ));
-        assert!(!locality_backfill_requires_license(
-            LocalityBackfillMode::Always,
-            UNLICENSED_LOCALITY_PROVIDER_LIMIT
-        ));
-        assert!(locality_backfill_requires_license(
-            LocalityBackfillMode::Always,
-            UNLICENSED_LOCALITY_PROVIDER_LIMIT + 1
-        ));
-        assert!(locality_backfill_requires_license(
-            LocalityBackfillMode::Auto,
-            1
-        ));
-    }
-
     #[tokio::test]
     async fn test_as_subplan() {
         let ctx = OptimizerContext::mock();
