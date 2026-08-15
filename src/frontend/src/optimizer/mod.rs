@@ -283,6 +283,51 @@ fn resolve_locality_backfill(
     }
 }
 
+const UNLICENSED_LOCALITY_PROVIDER_LIMIT: usize = 5;
+
+fn locality_backfill_requires_license(
+    mode: LocalityBackfillMode,
+    locality_provider_count: usize,
+) -> bool {
+    locality_provider_count > 0
+        && (mode == LocalityBackfillMode::Auto
+            || locality_provider_count > UNLICENSED_LOCALITY_PROVIDER_LIMIT)
+}
+
+fn rewrite_logical_plan_for_stream(
+    plan: &LogicalPlanRef,
+    backfill_type: BackfillType,
+    locality_backfill_enabled: bool,
+) -> Result<(LogicalPlanRef, ColIndexMapping)> {
+    let (plan, out_col_change) = plan.logical_rewrite_for_stream(
+        &mut RewriteStreamContext::new_with_backfill_type(backfill_type, locality_backfill_enabled),
+    )?;
+    if out_col_change.is_injective() {
+        Ok((plan, out_col_change))
+    } else {
+        let mut output_indices = (0..plan.schema().len()).collect_vec();
+        #[expect(unused_assignments)]
+        let (mut map, mut target_size) = out_col_change.into_parts();
+
+        // TODO(st1page): https://github.com/risingwavelabs/risingwave/issues/7234
+        // assert_eq!(target_size, output_indices.len());
+        target_size = plan.schema().len();
+        let mut tar_exists = vec![false; target_size];
+        for i in map.iter_mut().flatten() {
+            if tar_exists[*i] {
+                output_indices.push(*i);
+                *i = target_size;
+                target_size += 1;
+            } else {
+                tar_exists[*i] = true;
+            }
+        }
+        let plan = LogicalProject::with_out_col_idx(plan, output_indices.into_iter());
+        let out_col_change = ColIndexMapping::new(map, target_size);
+        Ok((plan.into(), out_col_change))
+    }
+}
+
 impl LogicalPlanRoot {
     /// Transform the [`PlanRoot`] back to a [`PlanRef`] suitable to be used as a subplan, for
     /// example as insert source or subquery. This ignores Order but retains post-Order pruning
@@ -679,16 +724,6 @@ impl LogicalPlanRoot {
             ).into());
         }
 
-        let locality_provider_count = LocalityProviderCounter::count(plan.clone());
-        if locality_provider_count > 0 {
-            let config = ctx.session_ctx().config();
-            let auto_locality_backfill = config.enable_locality_backfill()
-                && config.locality_backfill_mode() == LocalityBackfillMode::Auto;
-            if auto_locality_backfill || locality_provider_count > 5 {
-                risingwave_common::license::Feature::LocalityBackfill.check_available()?;
-            }
-        }
-
         Ok(optimized_plan.into_phase(plan))
     }
 
@@ -751,39 +786,33 @@ impl LogicalPlanRoot {
                 let mut optimized_plan = self.gen_optimized_logical_plan_for_stream()?;
                 let locality_backfill_enabled =
                     resolve_locality_backfill(&ctx, optimized_plan.plan.clone(), backfill_type);
-                let (plan, out_col_change) = {
-                    let (plan, out_col_change) = optimized_plan.plan.logical_rewrite_for_stream(
-                        &mut RewriteStreamContext::new_with_backfill_type(
-                            backfill_type,
-                            locality_backfill_enabled,
-                        ),
-                    )?;
-                    if out_col_change.is_injective() {
-                        (plan, out_col_change)
-                    } else {
-                        let mut output_indices = (0..plan.schema().len()).collect_vec();
-                        #[expect(unused_assignments)]
-                        let (mut map, mut target_size) = out_col_change.into_parts();
+                let (mut plan, mut out_col_change) = rewrite_logical_plan_for_stream(
+                    &optimized_plan.plan,
+                    backfill_type,
+                    locality_backfill_enabled,
+                )?;
 
-                        // TODO(st1page): https://github.com/risingwavelabs/risingwave/issues/7234
-                        // assert_eq!(target_size, output_indices.len());
-                        target_size = plan.schema().len();
-                        let mut tar_exists = vec![false; target_size];
-                        for i in map.iter_mut().flatten() {
-                            if tar_exists[*i] {
-                                output_indices.push(*i);
-                                *i = target_size;
-                                target_size += 1;
-                            } else {
-                                tar_exists[*i] = true;
-                            }
-                        }
-                        let plan =
-                            LogicalProject::with_out_col_idx(plan, output_indices.into_iter());
-                        let out_col_change = ColIndexMapping::new(map, target_size);
-                        (plan.into(), out_col_change)
-                    }
-                };
+                let locality_provider_count = LocalityProviderCounter::count(plan.clone());
+                let locality_backfill_mode = ctx.session_ctx().config().locality_backfill_mode();
+                if locality_backfill_enabled
+                    && locality_backfill_requires_license(
+                        locality_backfill_mode,
+                        locality_provider_count,
+                    )
+                    && risingwave_common::license::Feature::LocalityBackfill
+                        .check_available()
+                        .is_err()
+                {
+                    ctx.warn_to_user(format!(
+                        "The streaming job would use {locality_provider_count} locality providers, \
+                         which are unavailable under the current license. Falling back to regular backfill."
+                    ));
+                    (plan, out_col_change) = rewrite_logical_plan_for_stream(
+                        &optimized_plan.plan,
+                        backfill_type,
+                        false,
+                    )?;
+                }
                 if explain_trace {
                     ctx.trace("Logical Rewrite For Stream:");
                     ctx.trace(plan.explain_to_string());
@@ -1492,6 +1521,26 @@ fn require_additional_exchange_on_root_in_local_mode(plan: BatchPlanRef) -> bool
 mod tests {
     use super::*;
     use crate::optimizer::plan_node::LogicalValues;
+
+    #[test]
+    fn test_locality_backfill_requires_license() {
+        assert!(!locality_backfill_requires_license(
+            LocalityBackfillMode::Always,
+            0
+        ));
+        assert!(!locality_backfill_requires_license(
+            LocalityBackfillMode::Always,
+            UNLICENSED_LOCALITY_PROVIDER_LIMIT
+        ));
+        assert!(locality_backfill_requires_license(
+            LocalityBackfillMode::Always,
+            UNLICENSED_LOCALITY_PROVIDER_LIMIT + 1
+        ));
+        assert!(locality_backfill_requires_license(
+            LocalityBackfillMode::Auto,
+            1
+        ));
+    }
 
     #[tokio::test]
     async fn test_as_subplan() {

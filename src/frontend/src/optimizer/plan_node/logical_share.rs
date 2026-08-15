@@ -180,8 +180,38 @@ mod tests {
     use crate::expr::{ExprImpl, FunctionCall, InputRef, Literal};
     use crate::optimizer::optimizer_context::OptimizerContext;
     use crate::optimizer::plan_node::{
-        LogicalFilter, LogicalJoin, LogicalValues, PlanTreeNodeBinary,
+        BackfillType, LogicalFilter, LogicalJoin, LogicalValues, PlanTreeNodeBinary,
     };
+
+    #[tokio::test]
+    async fn test_stream_rewrite_does_not_mutate_original_share() {
+        let ctx = OptimizerContext::mock();
+        let input: PlanRef = LogicalValues::new(
+            vec![],
+            Schema::new(vec![Field::with_name(DataType::Int32, "v")]),
+            ctx,
+        )
+        .into();
+        let share = LogicalShare::create(input.clone());
+        let mut expected_col_change = None;
+
+        for locality_backfill_enabled in [true, false] {
+            let mut rewrite_ctx = RewriteStreamContext::new_with_backfill_type(
+                BackfillType::SnapshotBackfill,
+                locality_backfill_enabled,
+            );
+            let (rewritten, col_change) =
+                share.logical_rewrite_for_stream(&mut rewrite_ctx).unwrap();
+
+            assert_eq!(share.as_logical_share().unwrap().input().id(), input.id());
+            assert_ne!(rewritten.id(), share.id());
+            if let Some(expected_col_change) = &expected_col_change {
+                assert_eq!(&col_change, expected_col_change);
+            } else {
+                expected_col_change = Some(col_change);
+            }
+        }
+    }
 
     #[tokio::test]
     async fn test_share_predicate_pushdown() {
