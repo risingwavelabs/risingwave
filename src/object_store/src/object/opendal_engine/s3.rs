@@ -134,10 +134,20 @@ mod tests {
         store.op
     }
 
+    fn assert_has_one_logging_layer(operator: &Operator) {
+        assert_eq!(
+            format!("{:?}", operator.inner())
+                .matches("LoggingAccessor")
+                .count(),
+            1
+        );
+    }
+
     #[test]
     fn test_minio_concurrency_limits() {
         let operator = minio_operator(ObjectStoreConfig::default());
         assert!(!format!("{:?}", operator.inner()).contains("ConcurrentLimitAccessor"));
+        assert_has_one_logging_layer(&operator);
 
         let config = ObjectStoreConfig {
             req_concurrency_limit: 1,
@@ -145,6 +155,7 @@ mod tests {
         };
         let operator = minio_operator(config);
         assert!(format!("{:?}", operator.inner()).contains("ConcurrentLimitAccessor"));
+        assert_has_one_logging_layer(&operator);
 
         let config = ObjectStoreConfig {
             http_concurrent_limit: 1,
@@ -152,5 +163,6 @@ mod tests {
         };
         let operator = minio_operator(config);
         assert!(format!("{:?}", operator.inner()).contains("ConcurrentLimitAccessor"));
+        assert_has_one_logging_layer(&operator);
     }
 }
