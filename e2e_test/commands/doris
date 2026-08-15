@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+script_dir=$(dirname "$0")
+real_path=${PATH//"$script_dir:"/}
+
+if [[ -n "${DORIS_CONTAINER:-}" ]]; then
+  exec docker exec -i "${DORIS_CONTAINER}" mysql -h 127.0.0.1 -P 9030 -uroot "$@"
+fi
+
+if PATH="$real_path" command -v mysql >/dev/null 2>&1; then
+  PATH="$real_path" exec mysql -h "${DORIS_HOST}" -P "${DORIS_QUERY_PORT}" -uroot "$@"
+fi
+
+echo "mysql client is unavailable and DORIS_CONTAINER is not set" >&2
+exit 1

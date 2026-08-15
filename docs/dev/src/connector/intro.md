@@ -167,6 +167,14 @@ Run the ClickHouse sink test in the same way:
 ./risedev k
 ```
 
+Run the Doris sink test in the same way:
+
+```sh
+./risedev d local-doris-sink-test
+./risedev slt './e2e_test/sink/doris_sink.slt'
+./risedev k
+```
+
 ### Tips for writing `system` commands
 
 Refer to
