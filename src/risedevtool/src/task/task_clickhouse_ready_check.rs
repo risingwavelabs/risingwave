@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::io::Write;
+use std::time::Duration;
 
 use anyhow::{Context, Result, ensure};
 use reqwest::blocking::Client;
@@ -21,15 +22,11 @@ use crate::{ClickHouseConfig, ExecuteContext, Task};
 
 pub struct ClickHouseReadyCheckTask {
     config: ClickHouseConfig,
-    client: Client,
 }
 
 impl ClickHouseReadyCheckTask {
-    pub fn new(config: ClickHouseConfig) -> Result<Self> {
-        Ok(Self {
-            config,
-            client: Client::builder().build()?,
-        })
+    pub fn new(config: ClickHouseConfig) -> Self {
+        Self { config }
     }
 }
 
@@ -40,10 +37,10 @@ impl Task for ClickHouseReadyCheckTask {
             "http://{}:{}/?query=SELECT%201",
             self.config.address, self.config.http_port
         );
+        let client = Client::builder().timeout(Duration::from_secs(1)).build()?;
 
         ctx.wait(|| {
-            let response = self
-                .client
+            let response = client
                 .get(&url)
                 .basic_auth(&self.config.user, Some(&self.config.password))
                 .send()
