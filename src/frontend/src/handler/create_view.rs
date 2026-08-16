@@ -21,10 +21,12 @@ use risingwave_pb::catalog::PbView;
 use risingwave_sqlparser::ast::{Ident, ObjectName, Query};
 
 use super::RwPgResponse;
-use crate::binder::Binder;
+use crate::binder::{Binder, BoundStatement};
 use crate::error::Result;
 use crate::handler::HandlerArgs;
 use crate::handler::util::reject_internal_table_dependencies;
+use crate::optimizer::{OptimizerContext, RelationCollectorVisitor};
+use crate::planner::Planner;
 
 pub async fn handle_create_view(
     handler_args: HandlerArgs,
@@ -49,13 +51,22 @@ pub async fn handle_create_view(
         return Ok(resp);
     }
 
-    // Bind the query to validate it and resolve its schema and dependencies.
+    // Bind and plan the query to validate it and resolve its schema and dependencies. The batch
+    // plan is only used for validation and dependency collection. It is neither stored nor
+    // executed, so creating a logical view does not depend on the selected batch execution engine.
     let (dependent_relations, dependent_secrets, schema) = {
         let mut binder = Binder::new_for_batch(&session);
         let bound_query = binder.bind_query(&query)?;
-        let schema = bound_query.schema().into_owned();
         let dependent_relations = binder.included_relations().clone();
         let dependent_secrets = binder.included_secrets().clone();
+
+        let context = OptimizerContext::from_handler_args(handler_args);
+        let logical = Planner::new_for_batch_dql(context.into())
+            .plan(BoundStatement::Query(bound_query.into()))?;
+        let schema = logical.schema();
+        let batch_plan = logical.gen_batch_plan()?;
+        let dependent_relations =
+            RelationCollectorVisitor::collect_with(dependent_relations, batch_plan.plan);
 
         reject_internal_table_dependencies(&session, &dependent_relations, "CREATE VIEW")?;
 
