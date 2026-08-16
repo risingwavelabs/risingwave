@@ -12,9 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use foyer::{
-    Compression, LfuConfig, LruConfig, RecoverMode, RuntimeOptions, S3FifoConfig, Throttle,
-};
+use foyer::{Compression, LfuConfig, LruConfig, RecoverMode, S3FifoConfig, Throttle};
 use serde::de::Error as _;
 
 use super::*;
@@ -426,6 +424,30 @@ pub struct CacheRefillConfig {
     pub unrecognized: Unrecognized<Self>,
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+pub struct FileCacheTokioRuntimeConfig {
+    /// Dedicated runtime worker threads. `0` uses the Tokio default.
+    pub worker_threads: usize,
+
+    /// Maximum number of blocking threads. `0` uses the Tokio default.
+    pub max_blocking_threads: usize,
+}
+
+#[derive(Clone, Debug, Serialize, Deserialize)]
+pub enum FileCacheRuntimeConfig {
+    /// Use the runtime that creates the file cache.
+    Disabled,
+    /// Use one dedicated runtime for all file cache tasks.
+    Unified(FileCacheTokioRuntimeConfig),
+    /// Legacy configuration for separate read and write runtimes.
+    ///
+    /// Foyer 0.22 uses one spawner, so this configuration is no longer supported.
+    Separated {
+        read_runtime_options: FileCacheTokioRuntimeConfig,
+        write_runtime_options: FileCacheTokioRuntimeConfig,
+    },
+}
+
 /// The subsection `[storage.data_file_cache]` and `[storage.meta_file_cache]` in `risingwave.toml`.
 ///
 /// It's put at [`StorageConfig::data_file_cache`] and  [`StorageConfig::meta_file_cache`].
@@ -501,7 +523,7 @@ pub struct FileCacheConfig {
     pub recover_mode: RecoverMode,
 
     #[serde(default = "default::file_cache::runtime_config")]
-    pub runtime_config: RuntimeOptions,
+    pub runtime_config: FileCacheRuntimeConfig,
 
     #[serde(default, flatten)]
     #[config_doc(omitted)]
@@ -1217,7 +1239,9 @@ pub mod default {
     pub mod file_cache {
         use std::num::NonZeroUsize;
 
-        use foyer::{Compression, RecoverMode, RuntimeOptions, Throttle, TokioRuntimeOptions};
+        use foyer::{Compression, RecoverMode, Throttle};
+
+        use super::super::{FileCacheRuntimeConfig, FileCacheTokioRuntimeConfig};
 
         pub fn dir() -> String {
             "".to_owned()
@@ -1275,8 +1299,8 @@ pub mod default {
             RecoverMode::Quiet
         }
 
-        pub fn runtime_config() -> RuntimeOptions {
-            RuntimeOptions::Unified(TokioRuntimeOptions::default())
+        pub fn runtime_config() -> FileCacheRuntimeConfig {
+            FileCacheRuntimeConfig::Unified(FileCacheTokioRuntimeConfig::default())
         }
 
         pub fn throttle() -> Throttle {

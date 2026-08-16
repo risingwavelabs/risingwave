@@ -820,6 +820,7 @@ impl IcebergCompactionManager {
                 TaskType::Full
             } else {
                 match iceberg_config.compaction_type() {
+                    CompactionType::Auto => TaskType::Auto,
                     CompactionType::Full => TaskType::Full,
                     CompactionType::SmallFiles => TaskType::SmallFiles,
                     CompactionType::FilesWithDelete => TaskType::FilesWithDelete,
