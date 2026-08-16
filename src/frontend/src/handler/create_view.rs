@@ -18,14 +18,13 @@ use either::Either;
 use pgwire::pg_response::{PgResponse, StatementType};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::catalog::PbView;
-use risingwave_sqlparser::ast::{Ident, ObjectName, Query, Statement};
+use risingwave_sqlparser::ast::{Ident, ObjectName, Query};
 
 use super::RwPgResponse;
 use crate::binder::Binder;
 use crate::error::Result;
 use crate::handler::HandlerArgs;
 use crate::handler::util::reject_internal_table_dependencies;
-use crate::optimizer::OptimizerContext;
 
 pub async fn handle_create_view(
     handler_args: HandlerArgs,
@@ -50,20 +49,13 @@ pub async fn handle_create_view(
         return Ok(resp);
     }
 
-    // plan the query to validate it and resolve dependencies
+    // Bind the query to validate it and resolve its schema and dependencies.
     let (dependent_relations, dependent_secrets, schema) = {
-        let context = OptimizerContext::from_handler_args(handler_args);
-        let super::query::RwBatchQueryPlanResult {
-            schema,
-            dependent_relations,
-            dependent_secrets,
-            ..
-        } = super::query::gen_batch_plan_by_statement(
-            &session,
-            context.into(),
-            Statement::Query(Box::new(query.clone())),
-        )?
-        .unwrap_rw()?;
+        let mut binder = Binder::new_for_batch(&session);
+        let bound_query = binder.bind_query(&query)?;
+        let schema = bound_query.schema().into_owned();
+        let dependent_relations = binder.included_relations().clone();
+        let dependent_secrets = binder.included_secrets().clone();
 
         reject_internal_table_dependencies(&session, &dependent_relations, "CREATE VIEW")?;
 
