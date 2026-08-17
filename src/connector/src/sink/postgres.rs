@@ -88,7 +88,7 @@ pub struct PostgresConfig {
     pub tcp_keepalive_enable: bool,
 
     #[serde(flatten)]
-    pub tcp_keepalive: Option<TcpKeepaliveConfig>,
+    pub tcp_keepalive: TcpKeepaliveConfig,
 
     #[serde(flatten)]
     pub unknown_fields: std::collections::HashMap<String, String>,
@@ -111,14 +111,9 @@ fn default_schema() -> String {
 }
 
 fn tcp_keepalive_from_config(config: &PostgresConfig) -> Option<TcpKeepaliveConfig> {
-    if config.tcp_keepalive_enable {
-        config
-            .tcp_keepalive
-            .clone()
-            .or_else(|| Some(TcpKeepaliveConfig::default()))
-    } else {
-        None
-    }
+    config
+        .tcp_keepalive_enable
+        .then(|| config.tcp_keepalive.clone())
 }
 
 async fn ensure_no_foreign_key(config: &PostgresConfig) -> Result<()> {
