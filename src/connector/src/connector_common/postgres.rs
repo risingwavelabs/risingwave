@@ -742,6 +742,8 @@ pub fn sea_type_to_rw_type(col_type: &SeaType) -> ConnectorResult<DataType> {
         SeaType::Unknown(name) => {
             if let Some(dim) = parse_pgvector_dimension(name)? {
                 DataType::Vector(dim)
+            } else if matches!(name.to_ascii_lowercase().as_str(), "geometry" | "geography") {
+                DataType::Bytea
             } else {
                 // NOTES: user-defined enum type is classified as `Unknown`
                 tracing::warn!("Unknown Postgres data type: {name}, map to varchar");

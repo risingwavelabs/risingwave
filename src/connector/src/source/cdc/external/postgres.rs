@@ -895,7 +895,7 @@ pub fn type_name_to_pg_type(ty_name: &str) -> Option<PgType> {
             "char" | "character" | "bpchar" => Some(PgType::BPCHAR),
             "citext" | "text" => Some(PgType::TEXT),
             "bytea" => Some(PgType::BYTEA),
-            "geometry" => Some(PgType::BYTEA), // PostGIS geometry type
+            "geometry" | "geography" => Some(PgType::BYTEA), // PostGIS spatial types
             "date" => Some(PgType::DATE),
             "time" => Some(PgType::TIME),
             "timetz" => Some(PgType::TIMETZ),
