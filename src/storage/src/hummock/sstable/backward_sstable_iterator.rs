@@ -42,6 +42,8 @@ pub struct BackwardSstableIterator {
 
     stats: StoreLocalStatistic,
 
+    cache_level_hint: Option<u32>,
+
     // used for checking if the block is valid, filter out the block that is not in the table-id range
     read_block_meta_range: (usize, usize),
 }
@@ -51,6 +53,15 @@ impl BackwardSstableIterator {
         sstable: TableHolder,
         sstable_store: SstableStoreRef,
         sstable_info_ref: &SstableInfo,
+    ) -> Self {
+        Self::new_with_cache_level_hint(sstable, sstable_store, sstable_info_ref, None)
+    }
+
+    fn new_with_cache_level_hint(
+        sstable: TableHolder,
+        sstable_store: SstableStoreRef,
+        sstable_info_ref: &SstableInfo,
+        cache_level_hint: Option<u32>,
     ) -> Self {
         let mut start_idx = 0;
         let mut end_idx = sstable.meta.block_metas.len() - 1;
@@ -132,6 +143,7 @@ impl BackwardSstableIterator {
             sst: sstable,
             sstable_store,
             stats: StoreLocalStatistic::default(),
+            cache_level_hint,
             read_block_meta_range: (start_idx, end_idx),
         }
     }
@@ -147,11 +159,12 @@ impl BackwardSstableIterator {
         } else {
             let block = self
                 .sstable_store
-                .get(
+                .get_with_level_hint(
                     &self.sst,
                     idx as usize,
                     crate::hummock::CachePolicy::Fill(Hint::Normal),
                     &mut self.stats,
+                    self.cache_level_hint,
                 )
                 .await?;
             let mut block_iter = BlockIterator::new(block);
@@ -241,13 +254,19 @@ impl HummockIterator for BackwardSstableIterator {
 }
 
 impl SstableIteratorType for BackwardSstableIterator {
-    fn create(
+    fn create_with_cache_level_hint(
         sstable: TableHolder,
         sstable_store: SstableStoreRef,
-        _: Arc<SstableIteratorReadOptions>,
+        _options: Arc<SstableIteratorReadOptions>,
+        cache_level_hint: Option<u32>,
         sstable_info_ref: &SstableInfo,
     ) -> Self {
-        BackwardSstableIterator::new(sstable, sstable_store, sstable_info_ref)
+        BackwardSstableIterator::new_with_cache_level_hint(
+            sstable,
+            sstable_store,
+            sstable_info_ref,
+            cache_level_hint,
+        )
     }
 }
 

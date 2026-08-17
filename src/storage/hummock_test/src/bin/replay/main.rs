@@ -43,7 +43,9 @@ use risingwave_storage::compaction_catalog_manager::{
     CompactionCatalogManager, FakeRemoteTableAccessor,
 };
 use risingwave_storage::hummock::none::NoneRecentFilter;
-use risingwave_storage::hummock::{HummockStorage, SstableStore, SstableStoreConfig};
+use risingwave_storage::hummock::{
+    HummockStorage, LiveSsts, SstableBlockHashBuilder, SstableStore, SstableStoreConfig,
+};
 use risingwave_storage::monitor::{CompactorMetrics, HummockStateStoreMetrics, ObjectStoreMetrics};
 use risingwave_storage::opts::StorageOpts;
 
@@ -121,6 +123,7 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
         .unwrap();
     let block_cache = HybridCacheBuilder::new()
         .memory(storage_opts.block_cache_capacity_mb * (1 << 20))
+        .with_hash_builder(SstableBlockHashBuilder::default())
         .with_shards(storage_opts.block_cache_shard_num)
         .storage()
         .build()
@@ -138,6 +141,8 @@ async fn create_replay_hummock(r: Record, args: &Args) -> Result<impl GlobalRepl
         skip_bloom_filter_in_serde: storage_opts.sst_skip_bloom_filter_in_serde,
         meta_cache,
         block_cache,
+        l0_block_cache: None,
+        live_ssts: LiveSsts::default(),
         vector_meta_cache: CacheBuilder::new(1 << 10).build(),
         vector_block_cache: CacheBuilder::new(1 << 10).build(),
     }));

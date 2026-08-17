@@ -726,6 +726,7 @@ impl DataCacheRefillTaskGenerator<'_> {
                     tasks.push(DataCacheRefillTask {
                         sst: sst.clone(),
                         blks: blk_start..blk_end,
+                        level: self.delta.insert_sst_level,
                     });
                 }
                 blk_start = blk_end;
@@ -877,6 +878,7 @@ impl DataCacheRefillTaskGenerator<'_> {
 struct DataCacheRefillTask {
     sst: TableHolder,
     blks: Range<usize>,
+    level: u32,
 }
 
 impl DataCacheRefillTask {
@@ -1008,7 +1010,10 @@ impl CacheRefillTask {
                     block_idx: blk as u64,
                 };
 
-                let mut writer = context.sstable_store.block_cache().storage_writer(key);
+                let mut writer = context
+                    .sstable_store
+                    .block_cache_for_level(task.level)
+                    .storage_writer(key);
 
                 if writer.filter(size).is_admitted() {
                     admits += 1;

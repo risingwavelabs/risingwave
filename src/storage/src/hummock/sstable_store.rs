@@ -39,12 +39,12 @@ use risingwave_object_store::object::{
     ObjectError, ObjectMetadataIter, ObjectResult, ObjectStoreRef, ObjectStreamingUploader,
 };
 use risingwave_pb::hummock::PbHnswGraph;
-use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
 use tokio::time::Instant;
 
 use super::{
-    BatchUploadWriter, Block, BlockMeta, BlockResponse, RecentFilter, Sstable, SstableMeta,
+    BatchUploadWriter, Block, BlockMeta, BlockResponse, LiveSsts, RecentFilter, Sstable,
+    SstableBlockCache, SstableBlockHashBuilder, SstableBlockIndex, SstableMeta,
     SstableWriterOptions,
 };
 use crate::hummock::block_stream::{
@@ -116,14 +116,13 @@ pub type TableHolder = HybridCacheEntry<HummockSstableObjectId, Box<Sstable>>;
 
 pub type VectorBlockHolder = CacheEntry<(HummockVectorFileId, usize), Box<VectorBlock>>;
 
+#[derive(Clone, Copy)]
+struct BlockCacheLookup {
+    level: u32,
+}
+
 pub type VectorFileHolder = VectorMetaFileHolder<VectorFileMeta>;
 pub type HnswGraphFileHolder = VectorMetaFileHolder<PbHnswGraph>;
-
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Ord, Hash, Serialize, Deserialize)]
-pub struct SstableBlockIndex {
-    pub sst_id: HummockSstableObjectId,
-    pub block_idx: u64,
-}
 
 pub struct BlockCacheEventListener {
     metrics: Arc<HummockStateStoreMetrics>,
@@ -199,7 +198,9 @@ pub struct SstableStoreConfig {
     pub skip_bloom_filter_in_serde: bool,
 
     pub meta_cache: HybridCache<HummockSstableObjectId, Box<Sstable>>,
-    pub block_cache: HybridCache<SstableBlockIndex, Box<Block>>,
+    pub block_cache: SstableBlockCache,
+    pub l0_block_cache: Option<SstableBlockCache>,
+    pub live_ssts: LiveSsts,
 
     pub vector_meta_cache: Cache<HummockRawObjectId, HummockVectorIndexMetaFile>,
     pub vector_block_cache: Cache<(HummockVectorFileId, usize), Box<VectorBlock>>,
@@ -210,7 +211,9 @@ pub struct SstableStore {
     store: ObjectStoreRef,
 
     meta_cache: HybridCache<HummockSstableObjectId, Box<Sstable>>,
-    block_cache: HybridCache<SstableBlockIndex, Box<Block>>,
+    block_cache: SstableBlockCache,
+    l0_block_cache: Option<SstableBlockCache>,
+    live_ssts: LiveSsts,
     pub vector_meta_cache: Cache<HummockRawObjectId, HummockVectorIndexMetaFile>,
     pub vector_block_cache: Cache<(HummockVectorFileId, usize), Box<VectorBlock>>,
 
@@ -248,6 +251,8 @@ impl SstableStore {
 
             meta_cache: config.meta_cache,
             block_cache: config.block_cache,
+            l0_block_cache: config.l0_block_cache,
+            live_ssts: config.live_ssts,
             vector_meta_cache: config.vector_meta_cache,
             vector_block_cache: config.vector_block_cache,
 
@@ -284,6 +289,7 @@ impl SstableStore {
 
         let block_cache = HybridCacheBuilder::new()
             .memory(block_cache_capacity)
+            .with_hash_builder(SstableBlockHashBuilder::default())
             .with_shards(1)
             .with_weighter(|_: &SstableBlockIndex, value: &Box<Block>| {
                 std::mem::size_of::<SstableBlockIndex>() + value.estimated_memory_weight()
@@ -306,6 +312,8 @@ impl SstableStore {
 
             meta_cache,
             block_cache,
+            l0_block_cache: None,
+            live_ssts: LiveSsts::default(),
             vector_meta_cache: CacheBuilder::new(1 << 10).build(),
             vector_block_cache: CacheBuilder::new(1 << 10).build(),
         })
@@ -337,6 +345,62 @@ impl SstableStore {
             .map_err(Into::into)
     }
 
+    async fn get_cached_block(
+        &self,
+        index: &SstableBlockIndex,
+        lookup: BlockCacheLookup,
+    ) -> HummockResult<
+        Option<HybridCacheEntry<SstableBlockIndex, Box<Block>, SstableBlockHashBuilder>>,
+    > {
+        let entry = self
+            .block_cache_for_level(lookup.level)
+            .get(index)
+            .await
+            .map_err(HummockError::foyer_error)?;
+        Ok(entry)
+    }
+
+    fn contains_cached_block(&self, index: &SstableBlockIndex, lookup: BlockCacheLookup) -> bool {
+        self.block_cache_for_level(lookup.level).contains(index)
+    }
+
+    pub(crate) fn insert_new_l0_cache(&self, index: SstableBlockIndex, block: Block, hint: Hint) {
+        self.block_cache_for_level(0).insert_with_properties(
+            index,
+            Box::new(block),
+            HybridCacheProperties::default().with_hint(hint),
+        );
+    }
+
+    pub(crate) fn block_cache_for_level(&self, level: u32) -> &SstableBlockCache {
+        if level == 0
+            && let Some(cache) = &self.l0_block_cache
+        {
+            return cache;
+        }
+        &self.block_cache
+    }
+
+    fn block_cache_lookup(
+        &self,
+        object_id: HummockSstableObjectId,
+        snapshot_level: Option<u32>,
+    ) -> BlockCacheLookup {
+        if self.l0_block_cache.is_none() {
+            return BlockCacheLookup { level: 1 };
+        }
+
+        if let Some(level) = self.live_ssts.level(&object_id) {
+            return BlockCacheLookup { level };
+        }
+
+        if let Some(level) = snapshot_level {
+            return BlockCacheLookup { level };
+        }
+
+        BlockCacheLookup { level: 1 }
+    }
+
     pub async fn prefetch_blocks(
         &self,
         sst: &Sstable,
@@ -345,9 +409,25 @@ impl SstableStore {
         policy: CachePolicy,
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<Box<dyn BlockStream>> {
+        self.prefetch_blocks_with_level_hint(sst, block_index, end_index, policy, stats, None)
+            .await
+    }
+
+    pub async fn prefetch_blocks_with_level_hint(
+        &self,
+        sst: &Sstable,
+        block_index: usize,
+        end_index: usize,
+        policy: CachePolicy,
+        stats: &mut StoreLocalStatistic,
+        snapshot_level: Option<u32>,
+    ) -> HummockResult<Box<dyn BlockStream>> {
         let object_id = sst.id;
+        let lookup = self.block_cache_lookup(object_id, snapshot_level);
         if self.prefetch_buffer_usage.load(Ordering::Acquire) > self.prefetch_buffer_capacity {
-            let block = self.get(sst, block_index, policy, stats).await?;
+            let block = self
+                .get_with_level_hint(sst, block_index, policy, stats, snapshot_level)
+                .await?;
             return Ok(Box::new(PrefetchBlockStream::new(
                 VecDeque::from([block]),
                 block_index,
@@ -355,13 +435,14 @@ impl SstableStore {
             )));
         }
         if let Some(entry) = self
-            .block_cache
-            .get(&SstableBlockIndex {
-                sst_id: object_id,
-                block_idx: block_index as _,
-            })
-            .await
-            .map_err(HummockError::foyer_error)?
+            .get_cached_block(
+                &SstableBlockIndex {
+                    sst_id: object_id,
+                    block_idx: block_index as _,
+                },
+                lookup,
+            )
+            .await?
         {
             stats.cache_data_block_total += 1;
             if entry.source() == foyer::Source::Outer {
@@ -380,10 +461,13 @@ impl SstableStore {
         let mut min_hit_index = end_index;
         let mut hit_count = 0;
         for idx in block_index..end_index {
-            if self.block_cache.contains(&SstableBlockIndex {
-                sst_id: object_id,
-                block_idx: idx as _,
-            }) {
+            if self.contains_cached_block(
+                &SstableBlockIndex {
+                    sst_id: object_id,
+                    block_idx: idx as _,
+                },
+                lookup,
+            ) {
                 if min_hit_index > idx && idx > block_index {
                     min_hit_index = idx;
                 }
@@ -444,14 +528,17 @@ impl SstableStore {
             )?;
             let holder = if let CachePolicy::Fill(hint) = policy {
                 let hint = if idx == block_index { hint } else { Hint::Low };
-                let entry = self.block_cache.insert_with_properties(
-                    SstableBlockIndex {
-                        sst_id: object_id,
-                        block_idx: idx as _,
-                    },
-                    Box::new(block),
-                    HybridCacheProperties::default().with_hint(hint),
-                );
+                let index = SstableBlockIndex {
+                    sst_id: object_id,
+                    block_idx: idx as _,
+                };
+                let entry = self
+                    .block_cache_for_level(lookup.level)
+                    .insert_with_properties(
+                        index,
+                        Box::new(block),
+                        HybridCacheProperties::default().with_hint(hint),
+                    );
                 BlockHolder::from_hybrid_cache_entry(entry)
             } else {
                 BlockHolder::from_owned_block(Box::new(block))
@@ -472,6 +559,17 @@ impl SstableStore {
         sst: &Sstable,
         block_index: usize,
         policy: CachePolicy,
+    ) -> HummockResult<BlockResponse> {
+        self.get_block_response_with_level_hint(sst, block_index, policy, None)
+            .await
+    }
+
+    pub async fn get_block_response_with_level_hint(
+        &self,
+        sst: &Sstable,
+        block_index: usize,
+        policy: CachePolicy,
+        snapshot_level: Option<u32>,
     ) -> HummockResult<BlockResponse> {
         let object_id = sst.id;
         let (range, uncompressed_capacity) = sst.calculate_block_info(block_index);
@@ -495,6 +593,7 @@ impl SstableStore {
             sst_id: object_id,
             block_idx: block_index as _,
         };
+        let lookup = self.block_cache_lookup(object_id, snapshot_level);
 
         self.recent_filter
             .extend([(object_id, usize::MAX), (object_id, block_index)]);
@@ -517,34 +616,28 @@ impl SstableStore {
                     return Err(HummockError::from(e));
                 }
             };
-            let block = Box::new(Block::decode(block_data, uncompressed_capacity)?);
-            Ok(block)
+            Ok(Box::new(Block::decode(block_data, uncompressed_capacity)?))
         };
 
         match policy {
             CachePolicy::Fill(hint) => {
                 let properties = HybridCacheProperties::default().with_hint(hint);
-                let fetch = self.block_cache.get_or_fetch(&idx, || {
-                    fetch_block.map(|res| res.map(|block| (block, properties)))
-                });
+                let fetch = self
+                    .block_cache_for_level(lookup.level)
+                    .get_or_fetch(&idx, move || {
+                        fetch_block.map(move |res| res.map(|block| (block, properties)))
+                    });
                 Ok(BlockResponse::Fetch(fetch))
             }
-            CachePolicy::NotFill => {
-                match self
-                    .block_cache
-                    .get(&idx)
-                    .await
-                    .map_err(HummockError::foyer_error)?
-                {
-                    Some(entry) => Ok(BlockResponse::Block(BlockHolder::from_hybrid_cache_entry(
-                        entry,
-                    ))),
-                    _ => {
-                        let block = fetch_block.await?;
-                        Ok(BlockResponse::Block(BlockHolder::from_owned_block(block)))
-                    }
+            CachePolicy::NotFill => match self.get_cached_block(&idx, lookup).await? {
+                Some(entry) => Ok(BlockResponse::Block(BlockHolder::from_hybrid_cache_entry(
+                    entry,
+                ))),
+                _ => {
+                    let block = fetch_block.await?;
+                    Ok(BlockResponse::Block(BlockHolder::from_owned_block(block)))
                 }
-            }
+            },
             CachePolicy::Disable => {
                 let block = fetch_block.await?;
                 Ok(BlockResponse::Block(BlockHolder::from_owned_block(block)))
@@ -559,7 +652,21 @@ impl SstableStore {
         policy: CachePolicy,
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<BlockHolder> {
-        let block_response = self.get_block_response(sst, block_index, policy).await?;
+        self.get_with_level_hint(sst, block_index, policy, stats, None)
+            .await
+    }
+
+    pub async fn get_with_level_hint(
+        &self,
+        sst: &Sstable,
+        block_index: usize,
+        policy: CachePolicy,
+        stats: &mut StoreLocalStatistic,
+        snapshot_level: Option<u32>,
+    ) -> HummockResult<BlockHolder> {
+        let block_response = self
+            .get_block_response_with_level_hint(sst, block_index, policy, snapshot_level)
+            .await?;
         let block_holder = block_response.wait().await?;
         stats.cache_data_block_total += 1;
         if let BlockEntry::HybridCache(entry) = block_holder.entry()
@@ -689,7 +796,11 @@ impl SstableStore {
         self.block_cache
             .clear()
             .await
-            .map_err(HummockError::foyer_error)
+            .map_err(HummockError::foyer_error)?;
+        if let Some(cache) = &self.l0_block_cache {
+            cache.clear().await.map_err(HummockError::foyer_error)?;
+        }
+        Ok(())
     }
 
     #[cfg(any(test, feature = "test"))]
@@ -829,8 +940,28 @@ impl SstableStore {
         &self.meta_cache
     }
 
-    pub fn block_cache(&self) -> &HybridCache<SstableBlockIndex, Box<Block>> {
+    pub fn block_cache(&self) -> &SstableBlockCache {
         &self.block_cache
+    }
+
+    pub(crate) fn block_cache_memory_usage(&self) -> usize {
+        self.block_cache.memory().usage()
+            + self
+                .l0_block_cache
+                .as_ref()
+                .map_or(0, |cache| cache.memory().usage())
+    }
+
+    pub(crate) fn block_cache_memory_capacity(&self) -> usize {
+        self.block_cache.memory().capacity()
+            + self
+                .l0_block_cache
+                .as_ref()
+                .map_or(0, |cache| cache.memory().capacity())
+    }
+
+    pub fn live_ssts(&self) -> &LiveSsts {
+        &self.live_ssts
     }
 
     pub fn recent_filter(&self) -> &Arc<RecentFilter<(HummockSstableObjectId, usize)>> {
@@ -851,8 +982,12 @@ mod tests {
     use std::ops::Range;
     use std::sync::Arc;
 
-    use risingwave_hummock_sdk::HummockObjectId;
+    use foyer::{
+        BlockEngineConfig, DeviceBuilder, FifoPicker, FsDeviceBuilder, HybridCacheBuilder, Source,
+        StorageFilter,
+    };
     use risingwave_hummock_sdk::sstable_info::SstableInfo;
+    use risingwave_hummock_sdk::{HummockObjectId, HummockSstableObjectId};
 
     use super::{SstableStoreRef, SstableWriterOptions};
     use crate::hummock::iterator::HummockIterator;
@@ -862,13 +997,120 @@ mod tests {
         default_builder_opt_for_test, gen_test_sstable_data, put_sst,
     };
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{CachePolicy, SstableIterator, SstableMeta, SstableStore};
+    use crate::hummock::{
+        Block, CachePolicy, LiveSstFilter, LiveSsts, SstableBlockCache, SstableBlockHashBuilder,
+        SstableBlockIndex, SstableIterator, SstableMeta, SstableStore, get_from_sstable_info,
+    };
     use crate::monitor::StoreLocalStatistic;
+    use crate::store::ReadOptions;
 
     const SST_ID: u64 = 1;
 
     fn get_hummock_value(x: usize) -> HummockValue<Vec<u8>> {
         HummockValue::put(format!("overlapped_new_{}", x).as_bytes().to_vec())
+    }
+
+    async fn test_block_with_value_size(value_size: usize) -> Block {
+        let (data, meta) = gen_test_sstable_data(
+            default_builder_opt_for_test(),
+            [(
+                iterator_test_key_of(0),
+                HummockValue::put(vec![0; value_size]),
+            )]
+            .into_iter(),
+        )
+        .await;
+        let block_meta = &meta.block_metas[0];
+        let start = block_meta.offset as usize;
+        let end = start + block_meta.len as usize;
+        Block::decode(
+            data.slice(start..end),
+            block_meta.uncompressed_size as usize,
+        )
+        .unwrap()
+    }
+
+    async fn test_block() -> Block {
+        test_block_with_value_size(16).await
+    }
+
+    #[expect(clippy::borrowed_box)]
+    async fn disk_cache(
+        dir: &std::path::Path,
+        memory_capacity: usize,
+        capacity: usize,
+        block_size: usize,
+    ) -> SstableBlockCache {
+        let device = FsDeviceBuilder::new(dir)
+            .with_capacity(capacity)
+            .build()
+            .unwrap();
+        let engine = BlockEngineConfig::new(device)
+            .with_block_size(block_size)
+            .with_indexer_shards(1)
+            .with_flushers(1)
+            .with_reclaimers(1)
+            .with_clean_block_threshold(1)
+            .with_buffer_pool_size(16 << 20)
+            .with_eviction_pickers(vec![Box::<FifoPicker>::default()]);
+        HybridCacheBuilder::new()
+            .memory(memory_capacity)
+            .with_hash_builder(SstableBlockHashBuilder::default())
+            .with_shards(1)
+            .with_weighter(|_: &SstableBlockIndex, value: &Box<Block>| {
+                std::mem::size_of::<SstableBlockIndex>() + value.estimated_memory_weight()
+            })
+            .storage()
+            .with_engine_config(engine)
+            .build()
+            .await
+            .unwrap()
+    }
+
+    async fn zero_memory_disk_cache(
+        dir: &std::path::Path,
+        capacity: usize,
+        block_size: usize,
+    ) -> SstableBlockCache {
+        disk_cache(dir, 0, capacity, block_size).await
+    }
+
+    #[expect(clippy::borrowed_box)]
+    async fn l0_live_filtered_disk_cache(
+        dir: &std::path::Path,
+        live_ssts: LiveSsts,
+    ) -> SstableBlockCache {
+        const KB: usize = 1 << 10;
+        let device = FsDeviceBuilder::new(dir)
+            .with_capacity(64 * KB)
+            .build()
+            .unwrap();
+        let engine = BlockEngineConfig::new(device)
+            .with_block_size(16 * KB)
+            .with_indexer_shards(1)
+            .with_flushers(1)
+            .with_reclaimers(1)
+            .with_clean_block_threshold(1)
+            .with_buffer_pool_size(16 << 20)
+            .with_admission_filter(
+                StorageFilter::new().with_condition(LiveSstFilter::l0(live_ssts.clone())),
+            )
+            .with_reinsertion_filter(
+                StorageFilter::new().with_condition(LiveSstFilter::l0(live_ssts)),
+            )
+            .with_eviction_pickers(vec![Box::<FifoPicker>::default()]);
+        HybridCacheBuilder::new()
+            .memory(0)
+            .with_hash_builder(SstableBlockHashBuilder::default())
+            .with_shards(1)
+            .with_weighter(|_: &SstableBlockIndex, value: &Box<Block>| {
+                std::mem::size_of::<SstableBlockIndex>() + value.estimated_memory_weight()
+            })
+            .storage()
+            .with_engine_config(engine)
+            .build()
+            .await
+            .unwrap()
     }
 
     async fn validate_sst(
@@ -970,5 +1212,290 @@ mod tests {
             SstableStore::get_object_id_from_path(&data_path),
             HummockObjectId::Sstable(object_id.into())
         );
+    }
+
+    #[tokio::test]
+    async fn test_l0_live_filter_preserves_only_current_l0_during_fifo_reclaim() {
+        const KB: usize = 1 << 10;
+        let dir = tempfile::tempdir().unwrap();
+        let live_ssts = LiveSsts::default();
+        live_ssts.replace_levels_for_test(
+            (0..=10).map(|object_id| (HummockSstableObjectId::new(object_id), 0)),
+        );
+        let cache = l0_live_filtered_disk_cache(dir.path(), live_ssts.clone()).await;
+        let block = Box::new(test_block_with_value_size(3 * KB).await);
+        let indexes = (0..=10)
+            .map(|object_id| SstableBlockIndex {
+                sst_id: HummockSstableObjectId::new(object_id),
+                block_idx: 0,
+            })
+            .collect::<Vec<_>>();
+
+        for index in indexes.iter().take(9).copied() {
+            cache.storage_writer(index).force().insert(block.clone());
+            cache.storage().wait().await;
+        }
+
+        // The first physical region contains objects 0, 1, and 2. Keep 1 in L0, move 2 to a
+        // stable level, and remove 0 from the current version before FIFO reclaims that region.
+        live_ssts.replace_levels_for_test(
+            [(1, 0), (2, 1)]
+                .into_iter()
+                .chain((3..=10).map(|object_id| (object_id, 0)))
+                .map(|(object_id, level)| (HummockSstableObjectId::new(object_id), level)),
+        );
+        for index in indexes.iter().skip(9).copied() {
+            let mut writer = cache.storage_writer(index);
+            assert!(writer.filter(block.estimated_memory_weight()).is_admitted());
+            writer.force().insert(block.clone());
+        }
+        cache.storage().wait().await;
+
+        assert!(cache.get(&indexes[0]).await.unwrap().is_none());
+        assert_eq!(
+            cache
+                .get(&indexes[1])
+                .await
+                .unwrap()
+                .map(|entry| entry.source()),
+            Some(Source::Disk)
+        );
+        assert!(cache.get(&indexes[2]).await.unwrap().is_none());
+
+        cache.close().await.unwrap();
+    }
+
+    #[tokio::test]
+    #[expect(clippy::borrowed_box)]
+    async fn test_snapshot_level_hint_skips_opposite_cache() {
+        let mut sstable_store = mock_sstable_store().await;
+        let l0_block_cache = HybridCacheBuilder::new()
+            .memory(1 << 20)
+            .with_hash_builder(SstableBlockHashBuilder::default())
+            .with_shards(1)
+            .with_weighter(|_: &SstableBlockIndex, value: &Box<Block>| {
+                std::mem::size_of::<SstableBlockIndex>() + value.estimated_memory_weight()
+            })
+            .storage()
+            .build()
+            .await
+            .unwrap();
+        Arc::get_mut(&mut sstable_store).unwrap().l0_block_cache = Some(l0_block_cache.clone());
+
+        let l0_index = SstableBlockIndex {
+            sst_id: HummockSstableObjectId::new(20),
+            block_idx: 0,
+        };
+        l0_block_cache.insert(l0_index, Box::new(test_block().await));
+        let l0_lookup = sstable_store.block_cache_lookup(l0_index.sst_id, Some(0));
+        let entry = sstable_store
+            .get_cached_block(&l0_index, l0_lookup)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(entry.source(), Source::Memory);
+        let stable_lookup = sstable_store.block_cache_lookup(l0_index.sst_id, Some(6));
+        assert!(
+            sstable_store
+                .get_cached_block(&l0_index, stable_lookup)
+                .await
+                .unwrap()
+                .is_none()
+        );
+
+        let stable_index = SstableBlockIndex {
+            sst_id: HummockSstableObjectId::new(21),
+            block_idx: 0,
+        };
+        sstable_store
+            .block_cache
+            .insert(stable_index, Box::new(test_block().await));
+        let stable_lookup = sstable_store.block_cache_lookup(stable_index.sst_id, Some(6));
+        let entry = sstable_store
+            .get_cached_block(&stable_index, stable_lookup)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(entry.source(), Source::Memory);
+        let l0_lookup = sstable_store.block_cache_lookup(stable_index.sst_id, Some(0));
+        assert!(
+            sstable_store
+                .get_cached_block(&stable_index, l0_lookup)
+                .await
+                .unwrap()
+                .is_none()
+        );
+    }
+
+    #[tokio::test]
+    #[expect(clippy::borrowed_box)]
+    async fn test_point_get_propagates_snapshot_level_hint() {
+        for (object_id, cache_level_hint, expected_stable_fill) in
+            [(30, Some(0), false), (31, Some(6), true)]
+        {
+            let mut sstable_store = mock_sstable_store().await;
+            let l0_block_cache = HybridCacheBuilder::new()
+                .memory(1 << 20)
+                .with_hash_builder(SstableBlockHashBuilder::default())
+                .with_shards(1)
+                .with_weighter(|_: &SstableBlockIndex, value: &Box<Block>| {
+                    std::mem::size_of::<SstableBlockIndex>() + value.estimated_memory_weight()
+                })
+                .storage()
+                .build()
+                .await
+                .unwrap();
+            Arc::get_mut(&mut sstable_store).unwrap().l0_block_cache = Some(l0_block_cache.clone());
+
+            let (data, meta) = gen_test_sstable_data(
+                default_builder_opt_for_test(),
+                [(iterator_test_key_of(0), get_hummock_value(0))].into_iter(),
+            )
+            .await;
+            let block_meta = &meta.block_metas[0];
+            let block = Block::decode(
+                data.slice(
+                    block_meta.offset as usize..(block_meta.offset + block_meta.len) as usize,
+                ),
+                block_meta.uncompressed_size as usize,
+            )
+            .unwrap();
+            let info = put_sst(
+                object_id,
+                data,
+                meta,
+                sstable_store.clone(),
+                SstableWriterOptions {
+                    capacity_hint: None,
+                    tracker: None,
+                    policy: CachePolicy::Disable,
+                },
+                vec![0],
+            )
+            .await
+            .unwrap();
+            let index = SstableBlockIndex {
+                sst_id: info.object_id,
+                block_idx: 0,
+            };
+            l0_block_cache.insert(index, Box::new(block));
+            assert!(!sstable_store.block_cache.contains(&index));
+
+            let mut stats = StoreLocalStatistic::default();
+            let key = iterator_test_key_of(0);
+            let read_options = ReadOptions::default();
+            let result = get_from_sstable_info(
+                sstable_store.clone(),
+                &info,
+                key.to_ref(),
+                &read_options,
+                cache_level_hint,
+                None,
+                &mut stats,
+            )
+            .await
+            .unwrap();
+            assert!(result.is_some());
+            drop(result);
+
+            assert_eq!(
+                sstable_store.block_cache.contains(&index),
+                expected_stable_fill
+            );
+            assert!(l0_block_cache.contains(&index));
+        }
+    }
+
+    #[tokio::test]
+    #[expect(clippy::borrowed_box)]
+    async fn test_current_level_hint_does_not_fallback_to_opposite_cache() {
+        let mut sstable_store = mock_sstable_store().await;
+        let l0_block_cache = HybridCacheBuilder::new()
+            .memory(1 << 20)
+            .with_hash_builder(SstableBlockHashBuilder::default())
+            .with_shards(1)
+            .with_weighter(|_: &SstableBlockIndex, value: &Box<Block>| {
+                std::mem::size_of::<SstableBlockIndex>() + value.estimated_memory_weight()
+            })
+            .storage()
+            .build()
+            .await
+            .unwrap();
+        Arc::get_mut(&mut sstable_store).unwrap().l0_block_cache = Some(l0_block_cache.clone());
+
+        let index = SstableBlockIndex {
+            sst_id: HummockSstableObjectId::new(8),
+            block_idx: 0,
+        };
+        l0_block_cache.insert(index, Box::new(test_block().await));
+        assert!(l0_block_cache.contains(&index));
+        assert!(!sstable_store.block_cache.contains(&index));
+
+        sstable_store
+            .live_ssts
+            .replace_levels_for_test([(index.sst_id, 1)]);
+        let stable_lookup = sstable_store.block_cache_lookup(index.sst_id, None);
+        assert_eq!(stable_lookup.level, 1);
+        assert!(
+            sstable_store
+                .get_cached_block(&index, stable_lookup)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(!sstable_store.contains_cached_block(&index, stable_lookup));
+
+        sstable_store
+            .block_cache
+            .insert(index, Box::new(test_block().await));
+        let entry = sstable_store
+            .get_cached_block(&index, stable_lookup)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(entry.source(), Source::Memory);
+    }
+
+    #[tokio::test]
+    async fn test_l0_churn_isolated_from_stable_cache() {
+        const KB: usize = 1 << 10;
+        let baseline_dir = tempfile::tempdir().unwrap();
+        let split_dir = tempfile::tempdir().unwrap();
+        let baseline = zero_memory_disk_cache(baseline_dir.path(), 64 * KB, 16 * KB).await;
+        let stable =
+            zero_memory_disk_cache(&split_dir.path().join("stable"), 32 * KB, 16 * KB).await;
+        let l0 = zero_memory_disk_cache(&split_dir.path().join("l0"), 32 * KB, 16 * KB).await;
+        let stable_index = SstableBlockIndex {
+            sst_id: 1.into(),
+            block_idx: 0,
+        };
+        let block = Box::new(test_block_with_value_size(KB).await);
+
+        baseline
+            .storage_writer(stable_index)
+            .force()
+            .insert(block.clone());
+        stable
+            .storage_writer(stable_index)
+            .force()
+            .insert(block.clone());
+        for object_id in 2..=64 {
+            let index = SstableBlockIndex {
+                sst_id: object_id.into(),
+                block_idx: 0,
+            };
+            baseline.storage_writer(index).force().insert(block.clone());
+            l0.storage_writer(index).force().insert(block.clone());
+        }
+        baseline.storage().wait().await;
+        stable.storage().wait().await;
+        l0.storage().wait().await;
+
+        assert!(baseline.get(&stable_index).await.unwrap().is_none());
+        assert!(stable.get(&stable_index).await.unwrap().is_some());
+
+        baseline.close().await.unwrap();
+        stable.close().await.unwrap();
+        l0.close().await.unwrap();
     }
 }

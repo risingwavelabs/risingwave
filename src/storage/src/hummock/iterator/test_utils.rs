@@ -37,8 +37,8 @@ use crate::hummock::test_utils::{
     gen_test_sstable, gen_test_sstable_info, gen_test_sstable_with_range_tombstone,
 };
 use crate::hummock::{
-    HummockValue, RecentFilter, SstableBuilderOptions, SstableIterator, SstableIteratorType,
-    SstableStoreConfig, SstableStoreRef, TableHolder,
+    HummockValue, LiveSsts, RecentFilter, SstableBlockHashBuilder, SstableBuilderOptions,
+    SstableIterator, SstableIteratorType, SstableStoreConfig, SstableStoreRef, TableHolder,
 };
 use crate::monitor::{ObjectStoreMetrics, global_hummock_state_store_metrics};
 
@@ -97,6 +97,7 @@ pub async fn mock_sstable_store_with_object_store_and_recent_filter(
         .unwrap();
     let block_cache = HybridCacheBuilder::new()
         .memory(64 << 20)
+        .with_hash_builder(SstableBlockHashBuilder::default())
         .with_shards(2)
         .storage()
         .build()
@@ -116,6 +117,8 @@ pub async fn mock_sstable_store_with_object_store_and_recent_filter(
 
         meta_cache,
         block_cache,
+        l0_block_cache: None,
+        live_ssts: LiveSsts::default(),
         vector_meta_cache: CacheBuilder::new(64 << 20).build(),
         vector_block_cache: CacheBuilder::new(64 << 20).build(),
     }))
