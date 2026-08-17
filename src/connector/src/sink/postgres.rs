@@ -379,7 +379,9 @@ enum PendingRows {
         /// Rows absorbed since the last flush; drives the flush threshold so log-store
         /// truncation keeps pace even when dedup keeps the map small.
         absorbed: usize,
-        rows: HashMap<OwnedRow, PendingOp>,
+        /// Last op per key, tagged with its arrival sequence: keys distinct to RisingWave may
+        /// be equal to PostgreSQL (e.g. `char(n)` padding), so execution order is observable.
+        rows: HashMap<OwnedRow, (usize, PendingOp)>,
     },
 }
 
@@ -406,7 +408,6 @@ impl PendingRows {
                 }
             }
             PendingRows::Upsert { absorbed, rows } => {
-                *absorbed += chunk.cardinality();
                 rows.reserve(chunk.cardinality());
                 for (op, row) in chunk.rows() {
                     let key = row.project(key_indices).into_owned_row();
@@ -416,13 +417,15 @@ impl PendingRows {
                         }
                         Op::Delete | Op::UpdateDelete => PendingOp::Delete,
                     };
-                    rows.insert(key, pending_op);
+                    rows.insert(key, (*absorbed, pending_op));
+                    *absorbed += 1;
                 }
             }
         }
     }
 
-    /// Takes all pending rows out, split into deletes (rebuilt from the keys) and upserts.
+    /// Takes all pending rows out, split into deletes (rebuilt from the keys) and upserts, each
+    /// in chronological order.
     fn take(&mut self, key_types: &[PgType]) -> (Vec<PgRow>, Vec<PgRow>) {
         match self {
             PendingRows::Insert(rows) => (vec![], std::mem::take(rows)),
@@ -430,13 +433,20 @@ impl PendingRows {
                 *absorbed = 0;
                 let mut deletes = Vec::with_capacity(rows.len());
                 let mut upserts = Vec::with_capacity(rows.len());
-                for (key, op) in rows.drain() {
+                for (key, (seq, op)) in rows.drain() {
                     match op {
-                        PendingOp::Upsert(row) => upserts.push(row),
-                        PendingOp::Delete => deletes.push(convert_row_to_pg_row(&key, key_types)),
+                        PendingOp::Upsert(row) => upserts.push((seq, row)),
+                        PendingOp::Delete => {
+                            deletes.push((seq, convert_row_to_pg_row(&key, key_types)))
+                        }
                     }
                 }
-                (deletes, upserts)
+                deletes.sort_unstable_by_key(|(seq, _)| *seq);
+                upserts.sort_unstable_by_key(|(seq, _)| *seq);
+                (
+                    deletes.into_iter().map(|(_, row)| row).collect(),
+                    upserts.into_iter().map(|(_, row)| row).collect(),
+                )
             }
         }
     }
@@ -619,7 +629,10 @@ impl PostgresSinkWriter {
         Ok(batches)
     }
 
-    /// Writes out all pending rows in a single transaction.
+    /// Writes out all pending rows in a single transaction: all deletes first, then upserts in
+    /// chronological order. Deletes are not interleaved by time because every upsert surviving
+    /// dedup is live in RisingWave and must reach the target even if a PG-equal key was deleted
+    /// after it.
     async fn flush(&mut self) -> Result<()> {
         let (deletes, upserts) = self.pending.take(&self.key_types);
         if deletes.is_empty() && upserts.is_empty() {
@@ -676,8 +689,8 @@ impl PostgresSinkWriter {
                     deletes.len()
                 )
             })?;
-        // Polled concurrently to pipeline; statements still execute in wire order, so which of
-        // several PG-equal keys wins is unchanged.
+        // Polled concurrently to pipeline; statements still execute in wire order, so the
+        // chronologically last of several PG-equal keys wins.
         let executions = upserts
             .iter()
             .map(|row| transaction.execute_raw(&statement, row));
@@ -730,9 +743,8 @@ async fn execute_batches(
     transaction: &tokio_postgres::Transaction<'_>,
     batches: &[(tokio_postgres::Statement, &[PgRow])],
 ) -> std::result::Result<(), tokio_postgres::Error> {
-    // Polling all statements concurrently pipelines them into a single round trip. Execution
-    // order does not matter: dedup keeps deleted and upserted keys disjoint, and sub-batches
-    // never share a row.
+    // Polling all statements concurrently pipelines them into a single round trip; they still
+    // execute in wire order, i.e. in the order of `batches`.
     let executions = batches.iter().map(|(statement, tuples)| {
         let mut params = Vec::with_capacity(tuples.len() * tuples.first().map_or(0, |t| t.len()));
         params.extend(tuples.iter().flatten());
@@ -1066,13 +1078,17 @@ mod tests {
                 .join("\n"),
             PendingRows::Upsert { rows, .. } => rows
                 .iter()
-                .map(|(key, op)| match op {
-                    PendingOp::Upsert(row) => format!("{:?} => upsert {:?}", key, row),
-                    PendingOp::Delete => format!("{:?} => delete", key),
+                .map(|(key, (seq, op))| match op {
+                    PendingOp::Upsert(row) => format!("{:?} => #{} upsert {:?}", key, seq, row),
+                    PendingOp::Delete => format!("{:?} => #{} delete", key, seq),
                 })
                 .sorted()
                 .join("\n"),
         }
+    }
+
+    fn first_columns(rows: &[PgRow]) -> Vec<String> {
+        rows.iter().map(|row| format!("{:?}", row[0])).collect()
     }
 
     #[test]
@@ -1113,15 +1129,53 @@ mod tests {
         check(
             render_pending(&pending),
             expect![[r#"
-                OwnedRow([Some(Int32(1))]) => upsert [Some(Builtin(Int32(1))), Some(Builtin(Int32(11)))]
-                OwnedRow([Some(Int32(2))]) => delete
-                OwnedRow([Some(Int32(3))]) => upsert [Some(Builtin(Int32(3))), Some(Builtin(Int32(31)))]"#]],
+                OwnedRow([Some(Int32(1))]) => #1 upsert [Some(Builtin(Int32(1))), Some(Builtin(Int32(11)))]
+                OwnedRow([Some(Int32(2))]) => #3 delete
+                OwnedRow([Some(Int32(3))]) => #6 upsert [Some(Builtin(Int32(3))), Some(Builtin(Int32(31)))]"#]],
         );
 
         let (deletes, upserts) = pending.take(&key_types);
         assert_eq!(deletes.len(), 1);
         assert_eq!(upserts.len(), 2);
         assert_eq!(pending.absorbed(), 0);
+    }
+
+    #[test]
+    fn test_pending_take_chronological() {
+        let types = vec![PgType::INT4, PgType::INT4];
+        let mut pending = PendingRows::Upsert {
+            absorbed: 0,
+            rows: HashMap::new(),
+        };
+
+        let inserts = (1..=64).map(|k| format!("+ {k} {k}")).join("\n");
+        pending.absorb(
+            &StreamChunk::from_pretty(&format!(" i i\n{inserts}")),
+            &[0],
+            &types,
+        );
+        // Re-upserting a key moves it to the end.
+        pending.absorb(
+            &StreamChunk::from_pretty(
+                " i i
+                 - 3 3
+                 + 1 100
+                 - 2 2",
+            ),
+            &[0],
+            &types,
+        );
+
+        let (deletes, upserts) = pending.take(&[PgType::INT4]);
+        let expected_upserts = (4..=64)
+            .chain([1])
+            .map(|k| format!("Some(Builtin(Int32({k})))"))
+            .collect_vec();
+        assert_eq!(first_columns(&upserts), expected_upserts);
+        assert_eq!(
+            first_columns(&deletes),
+            ["Some(Builtin(Int32(3)))", "Some(Builtin(Int32(2)))"]
+        );
     }
 
     #[test]
