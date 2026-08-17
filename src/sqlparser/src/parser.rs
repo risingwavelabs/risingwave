@@ -1795,6 +1795,24 @@ impl Parser<'_> {
         }
     }
 
+    /// Like [`Parser::parse_keywords`], but over contextual words: each element is matched
+    /// case-insensitively against the next word token (keyword or not), and the parser is reset on
+    /// the first miss. This is what lets `MATCH_RECOGNIZE`'s clause markers (`MEASURES`, `PATTERN`,
+    /// `DEFINE`, ...) avoid the keyword table entirely — a global keyword changes identifier
+    /// parsing and quoting everywhere (`UPDATE t SET per = 1` stopped parsing when `PER` was
+    /// briefly a keyword), while inside the parenthesized clause the grammar owns the context.
+    #[must_use]
+    pub fn parse_words(&mut self, words: &[&str]) -> bool {
+        let checkpoint = *self;
+        for w in words {
+            if !self.parse_word(w) {
+                *self = checkpoint;
+                return false;
+            }
+        }
+        true
+    }
+
     /// Look for an expected keyword and consume it if it exists
     #[must_use]
     pub fn parse_keyword(&mut self, expected: Keyword) -> bool {
@@ -4389,6 +4407,20 @@ impl Parser<'_> {
             // (For example, in `FROM t1 JOIN` the `JOIN` will always be parsed as a keyword,
             // not an alias.)
             Token::Word(w) if after_as || (!reserved_kwds.contains(&w.keyword)) => {
+                // Contextual reservation: `MATCH_RECOGNIZE` is deliberately NOT a keyword (a
+                // stored definition may use it as a bare alias from before the clause existed,
+                // and keywords change quoting and identifier parsing globally), so the clause is
+                // recognised here instead — a bare `match_recognize` immediately followed by `(`
+                // opens the clause and must not be taken as an implicit alias. With an explicit
+                // `AS`, or quoted, or not followed by `(`, it stays a perfectly good alias.
+                if !after_as
+                    && w.quote_style.is_none()
+                    && w.value.eq_ignore_ascii_case("MATCH_RECOGNIZE")
+                    && self.peek_token() == Token::LParen
+                {
+                    *self = checkpoint;
+                    return Ok(None);
+                }
                 Ok(Some(w.to_ident()?))
             }
             _ => {
@@ -5531,11 +5563,17 @@ impl Parser<'_> {
     /// A table name or a parenthesized subquery, followed by optional `[AS] alias`
     pub fn parse_table_factor(&mut self) -> ModalResult<TableFactor> {
         let relation = self.parse_table_factor_inner()?;
-        if self.parse_keyword(Keyword::MATCH_RECOGNIZE) {
-            self.parse_match_recognize(relation)
-        } else {
-            Ok(relation)
+        // Contextual, not a keyword: only `MATCH_RECOGNIZE (` opens the clause (the alias parser
+        // above declines exactly that shape), so a bare `match_recognize` elsewhere remains an
+        // ordinary identifier.
+        let checkpoint = *self;
+        if self.parse_word("MATCH_RECOGNIZE") {
+            if self.peek_token() == Token::LParen {
+                return self.parse_match_recognize(relation);
+            }
+            *self = checkpoint;
         }
+        Ok(relation)
     }
 
     fn parse_table_factor_inner(&mut self) -> ModalResult<TableFactor> {
@@ -5676,34 +5714,27 @@ impl Parser<'_> {
             vec![]
         };
 
-        let measures = if self.parse_keyword(Keyword::MEASURES) {
+        let measures = if self.parse_word("MEASURES") {
             self.parse_comma_separated(Parser::parse_measure)?
         } else {
             vec![]
         };
 
-        let rows_per_match =
-            if self.parse_keywords(&[Keyword::ONE, Keyword::ROW, Keyword::PER, Keyword::MATCH]) {
-                Some(RowsPerMatch::OneRow)
-            } else if self.parse_keywords(&[
-                Keyword::ALL,
-                Keyword::ROWS,
-                Keyword::PER,
-                Keyword::MATCH,
-            ]) {
-                Some(RowsPerMatch::AllRows)
-            } else {
-                None
-            };
+        let rows_per_match = if self.parse_words(&["ONE", "ROW", "PER", "MATCH"]) {
+            Some(RowsPerMatch::OneRow)
+        } else if self.parse_words(&["ALL", "ROWS", "PER", "MATCH"]) {
+            Some(RowsPerMatch::AllRows)
+        } else {
+            None
+        };
 
-        let after_match_skip =
-            if self.parse_keywords(&[Keyword::AFTER, Keyword::MATCH, Keyword::SKIP]) {
-                Some(self.parse_after_match_skip()?)
-            } else {
-                None
-            };
+        let after_match_skip = if self.parse_words(&["AFTER", "MATCH", "SKIP"]) {
+            Some(self.parse_after_match_skip()?)
+        } else {
+            None
+        };
 
-        self.expect_keyword(Keyword::PATTERN)?;
+        self.expect_word("PATTERN")?;
         self.expect_token(&Token::LParen)?;
         let pattern = self.parse_pattern()?;
         self.expect_token(&Token::RParen)?;
@@ -5715,13 +5746,13 @@ impl Parser<'_> {
             None
         };
 
-        let subsets = if self.parse_keyword(Keyword::SUBSET) {
+        let subsets = if self.parse_word("SUBSET") {
             self.parse_comma_separated(Parser::parse_subset_definition)?
         } else {
             vec![]
         };
 
-        self.expect_keyword(Keyword::DEFINE)?;
+        self.expect_word("DEFINE")?;
         let symbols = self.parse_comma_separated(Parser::parse_symbol_definition)?;
 
         self.expect_token(&Token::RParen)?;
@@ -5754,7 +5785,7 @@ impl Parser<'_> {
     }
 
     fn parse_after_match_skip(&mut self) -> ModalResult<AfterMatchSkip> {
-        if self.parse_keywords(&[Keyword::PAST, Keyword::LAST, Keyword::ROW]) {
+        if self.parse_words(&["PAST", "LAST", "ROW"]) {
             Ok(AfterMatchSkip::PastLastRow)
         } else if self.parse_keywords(&[Keyword::TO, Keyword::NEXT, Keyword::ROW]) {
             Ok(AfterMatchSkip::ToNextRow)
@@ -5815,9 +5846,16 @@ impl Parser<'_> {
 
     /// A row pattern: alternation of concatenations (alternation has the lowest precedence).
     fn parse_pattern(&mut self) -> ModalResult<MatchRecognizePattern> {
-        let mut alternatives = vec![self.parse_pattern_concat()?];
-        while self.consume_pattern_pipe() {
-            alternatives.push(self.parse_pattern_concat()?);
+        // The tokenizer greedily fuses adjacent operator characters, so `a+|b` arrives as
+        // `Op("+|")`: a quantifier carrying the alternation pipe in the same token. The quantifier
+        // parser strips and reports that trailing pipe (it cannot be pushed back), and this loop
+        // treats it exactly like a free-standing one.
+        let (first, mut fused_pipe) = self.parse_pattern_concat()?;
+        let mut alternatives = vec![first];
+        while fused_pipe || self.consume_pattern_pipe() {
+            let (next, fp) = self.parse_pattern_concat()?;
+            alternatives.push(next);
+            fused_pipe = fp;
         }
         if alternatives.len() == 1 {
             Ok(alternatives.pop().unwrap())
@@ -5826,42 +5864,57 @@ impl Parser<'_> {
         }
     }
 
-    /// A concatenation of quantified primaries, terminated by `)`, `|`, or end of input.
-    fn parse_pattern_concat(&mut self) -> ModalResult<MatchRecognizePattern> {
-        let mut terms = vec![self.parse_pattern_repetition()?];
-        while !matches!(self.peek_token().token, Token::RParen | Token::EOF)
+    /// A concatenation of quantified primaries, terminated by `)`, `|` (possibly fused into the
+    /// preceding quantifier's token), or end of input. The bool reports that fused pipe.
+    fn parse_pattern_concat(&mut self) -> ModalResult<(MatchRecognizePattern, bool)> {
+        let (first, mut fused_pipe) = self.parse_pattern_repetition()?;
+        let mut terms = vec![first];
+        while !fused_pipe
+            && !matches!(self.peek_token().token, Token::RParen | Token::EOF)
             && !self.peek_is_pattern_pipe()
         {
-            terms.push(self.parse_pattern_repetition()?);
+            let (next, fp) = self.parse_pattern_repetition()?;
+            terms.push(next);
+            fused_pipe = fp;
         }
-        if terms.len() == 1 {
-            Ok(terms.pop().unwrap())
+        let pattern = if terms.len() == 1 {
+            terms.pop().unwrap()
         } else {
-            Ok(MatchRecognizePattern::Concat(terms))
-        }
+            MatchRecognizePattern::Concat(terms)
+        };
+        Ok((pattern, fused_pipe))
     }
 
-    /// A pattern primary with an optional trailing quantifier.
-    fn parse_pattern_repetition(&mut self) -> ModalResult<MatchRecognizePattern> {
+    /// A pattern primary with an optional trailing quantifier. The bool reports an alternation
+    /// pipe fused into the quantifier's own token (`a+|b`), which the caller must honour.
+    fn parse_pattern_repetition(&mut self) -> ModalResult<(MatchRecognizePattern, bool)> {
         let primary = self.parse_pattern_primary()?;
-        if let Some((quantifier, reluctant)) = self.parse_optional_pattern_quantifier()? {
-            Ok(MatchRecognizePattern::Repetition(
-                Box::new(primary),
-                quantifier,
-                reluctant,
+        if let Some((quantifier, reluctant, fused_pipe)) =
+            self.parse_optional_pattern_quantifier()?
+        {
+            Ok((
+                MatchRecognizePattern::Repetition(Box::new(primary), quantifier, reluctant),
+                fused_pipe,
             ))
         } else {
-            Ok(primary)
+            Ok((primary, false))
         }
     }
 
-    /// Consume a trailing reluctant marker `?` (it may be a standalone `?` token).
-    fn consume_pattern_reluctant_mark(&mut self) -> bool {
-        if matches!(&self.peek_token().token, Token::Op(op) if op == "?") {
-            self.next_token();
-            true
-        } else {
-            false
+    /// Consume a trailing reluctant marker `?`. The alternation pipe may be fused into the same
+    /// operator token (`{2}?|b` tokenizes the `?|` as one `Op`), so the second bool reports a
+    /// consumed pipe for the caller to honour.
+    fn consume_pattern_reluctant_mark(&mut self) -> (bool, bool) {
+        match &self.peek_token().token {
+            Token::Op(op) if op == "?" => {
+                self.next_token();
+                (true, false)
+            }
+            Token::Op(op) if op == "?|" => {
+                self.next_token();
+                (true, true)
+            }
+            _ => (false, false),
         }
     }
 
@@ -5871,7 +5924,7 @@ impl Parser<'_> {
             let inner = self.parse_pattern()?;
             self.expect_token(&Token::RParen)?;
             Ok(MatchRecognizePattern::Group(Box::new(inner)))
-        } else if self.parse_keyword(Keyword::PERMUTE) {
+        } else if self.parse_word("PERMUTE") {
             self.expect_token(&Token::LParen)?;
             let symbols = self.parse_comma_separated(Parser::parse_pattern_symbol)?;
             self.expect_token(&Token::RParen)?;
@@ -5886,9 +5939,11 @@ impl Parser<'_> {
     }
 
     /// Parse an optional pattern quantifier: `*`, `+`, `?`, or a `{...}` range.
+    /// Returns `(quantifier, reluctant, fused_pipe)` — the last reporting an alternation `|` the
+    /// tokenizer fused into the quantifier's own operator token, which the caller must honour.
     fn parse_optional_pattern_quantifier(
         &mut self,
-    ) -> ModalResult<Option<(RepetitionQuantifier, bool)>> {
+    ) -> ModalResult<Option<(RepetitionQuantifier, bool, bool)>> {
         if self.consume_token(&Token::LBrace) {
             // The quantifier bounds are `u32` in the AST, so parse them as `u32`: a `u64` parse plus
             // an `as u32` cast would silently wrap (`{4294967296}` to `{0}`, a pattern that matches
@@ -5919,26 +5974,44 @@ impl Parser<'_> {
                 }
             };
             self.expect_token(&Token::RBrace)?;
-            let reluctant = self.consume_pattern_reluctant_mark();
-            return Ok(Some((quantifier, reluctant)));
+            let (reluctant, fused_pipe) = self.consume_pattern_reluctant_mark();
+            return Ok(Some((quantifier, reluctant, fused_pipe)));
         }
         // `*`, `+`, `?` may arrive as dedicated tokens or as `Token::Op(_)` depending on surrounding
         // operator characters, so accept both spellings. A trailing `?` makes the quantifier
-        // reluctant, and may be fused into the operator token (e.g. `+?` as `Token::Op("+?")`).
-        let (quantifier, fused_reluctant) = match &self.peek_token().token {
-            Token::Mul => (RepetitionQuantifier::ZeroOrMore, false),
-            Token::Plus => (RepetitionQuantifier::OneOrMore, false),
-            Token::Op(op) if op == "*" => (RepetitionQuantifier::ZeroOrMore, false),
-            Token::Op(op) if op == "+" => (RepetitionQuantifier::OneOrMore, false),
-            Token::Op(op) if op == "?" => (RepetitionQuantifier::AtMostOne, false),
-            Token::Op(op) if op == "*?" => (RepetitionQuantifier::ZeroOrMore, true),
-            Token::Op(op) if op == "+?" => (RepetitionQuantifier::OneOrMore, true),
-            Token::Op(op) if op == "??" => (RepetitionQuantifier::AtMostOne, true),
+        // reluctant, and both the `?` and an alternation `|` may be fused into the operator token —
+        // `a+?|b` arrives with `Op("+?|")` carrying the quantifier, the reluctant marker AND the
+        // pipe. The pipe cannot be pushed back, so it is reported to the caller instead.
+        let (quantifier, fused_reluctant, fused_pipe) = match &self.peek_token().token {
+            Token::Mul => (RepetitionQuantifier::ZeroOrMore, false, false),
+            Token::Plus => (RepetitionQuantifier::OneOrMore, false, false),
+            Token::Op(op) if op == "*" => (RepetitionQuantifier::ZeroOrMore, false, false),
+            Token::Op(op) if op == "+" => (RepetitionQuantifier::OneOrMore, false, false),
+            Token::Op(op) if op == "?" => (RepetitionQuantifier::AtMostOne, false, false),
+            Token::Op(op) if op == "*?" => (RepetitionQuantifier::ZeroOrMore, true, false),
+            Token::Op(op) if op == "+?" => (RepetitionQuantifier::OneOrMore, true, false),
+            Token::Op(op) if op == "??" => (RepetitionQuantifier::AtMostOne, true, false),
+            Token::Op(op) if op == "*|" => (RepetitionQuantifier::ZeroOrMore, false, true),
+            Token::Op(op) if op == "+|" => (RepetitionQuantifier::OneOrMore, false, true),
+            Token::Op(op) if op == "?|" => (RepetitionQuantifier::AtMostOne, false, true),
+            Token::Op(op) if op == "*?|" => (RepetitionQuantifier::ZeroOrMore, true, true),
+            Token::Op(op) if op == "+?|" => (RepetitionQuantifier::OneOrMore, true, true),
+            Token::Op(op) if op == "??|" => (RepetitionQuantifier::AtMostOne, true, true),
             _ => return Ok(None),
         };
         self.next_token();
-        let reluctant = fused_reluctant || self.consume_pattern_reluctant_mark();
-        Ok(Some((quantifier, reluctant)))
+        let (reluctant, fused_pipe) = if fused_pipe {
+            // The pipe was the token's last character; nothing can follow it in the same token.
+            (fused_reluctant, true)
+        } else {
+            let (marker, pipe) = if fused_reluctant {
+                (false, false)
+            } else {
+                self.consume_pattern_reluctant_mark()
+            };
+            (fused_reluctant || marker, pipe)
+        };
+        Ok(Some((quantifier, reluctant, fused_pipe)))
     }
 
     fn peek_is_pattern_pipe(&mut self) -> bool {
