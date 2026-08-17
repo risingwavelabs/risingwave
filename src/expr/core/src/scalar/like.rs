@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::borrow::Cow;
+
 use const_currying::const_currying;
 use itertools::Itertools;
 use risingwave_common::util::recursive::{self, Recurse};
@@ -24,9 +26,9 @@ use crate::{ExprError, Result};
 /// This mirrors PostgreSQL's `do_like_escape`: `ESCAPE ''` disables escaping and
 /// doubles backslashes, `ESCAPE '\'` leaves the pattern unchanged, and any other
 /// escape character is rewritten to the internal `\` escape marker.
-fn normalize_pattern(p: &str, escape: Option<u8>) -> Vec<u8> {
+fn normalize_pattern(p: &str, escape: Option<u8>) -> Cow<'_, [u8]> {
     if escape == Some(b'\\') {
-        return p.as_bytes().to_vec();
+        return Cow::Borrowed(p.as_bytes());
     }
 
     let mut normalized = Vec::with_capacity(p.len());
@@ -48,7 +50,7 @@ fn normalize_pattern(p: &str, escape: Option<u8>) -> Vec<u8> {
         }
     }
 
-    normalized
+    Cow::Owned(normalized)
 }
 
 fn like_impl_inner<const CASE_INSENSITIVE: bool>(
@@ -57,7 +59,7 @@ fn like_impl_inner<const CASE_INSENSITIVE: bool>(
     escape: Option<u8>,
 ) -> Result<bool> {
     let pattern = normalize_pattern(p, escape);
-    Ok(match_text::<CASE_INSENSITIVE>(s.as_bytes(), &pattern)?.into_bool())
+    Ok(match_text::<CASE_INSENSITIVE>(s.as_bytes(), pattern.as_ref())?.into_bool())
 }
 
 #[const_currying]
@@ -256,6 +258,14 @@ fn like(s: &str, p: &str, escape: &EscapeChar) -> Result<bool> {
     like_impl_inner::<false>(s, p, escape.0)
 }
 
+#[function(
+    "i_like(varchar, varchar, varchar) -> boolean",
+    prebuild = "EscapeChar::from_str($2)?"
+)]
+fn i_like(s: &str, p: &str, escape: &EscapeChar) -> Result<bool> {
+    like_impl_inner::<true>(s, p, escape.0)
+}
+
 // TODO: We should support any UTF-8 character as escape character.
 #[derive(Copy, Clone, Debug)]
 struct EscapeChar(Option<u8>);
@@ -282,7 +292,9 @@ impl EscapeChar {
 mod tests {
     use risingwave_expr::scalar::like::EscapeChar;
 
-    use super::{MAX_RECURSION_DEPTH, i_like_default, like, like_default, normalize_pattern};
+    use super::{
+        MAX_RECURSION_DEPTH, i_like, i_like_default, like, like_default, normalize_pattern,
+    };
 
     static CASES: &[(&str, &str, bool, bool)] = &[
         (r#"ABCDE"#, r#"%abcde%"#, false, false),
@@ -434,7 +446,9 @@ mod tests {
 
     #[test]
     fn test_like_pattern_ends_with_escape() {
-        assert!(like("____", "_____", &EscapeChar::from_str("_").unwrap()).is_err());
+        let escape = EscapeChar::from_str("_").unwrap();
+        assert!(like("____", "_____", &escape).is_err());
+        assert!(i_like("____", "_____", &escape).is_err());
     }
 
     #[test]

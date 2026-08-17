@@ -47,6 +47,21 @@ select
 ----
 t t f
 
+query BBBBBBBBBB
+select
+    'Foo_Bar' ilike 'foo#_bar' escape '#',
+    'FooXBar' ilike 'foo#_bar' escape '#',
+    'Foo%Bar' ilike 'foo#%bar' escape '#',
+    'FooXBar' ilike 'foo#%bar' escape '#',
+    'FooXBar' ilike 'foo_bar' escape '#',
+    'Foo_Bar' ilike 'foo\_bar' escape '\',
+    'FooXBar' ilike 'foo\_bar' escape '\',
+    'Foo\XBar' ilike 'foo\_bar' escape '',
+    'BE_R' ilike 'b_e__r' escape '_',
+    'MACA' ilike 'm%aca' escape '%';
+----
+t f t f t t f t t t
+
 query BBB
 select
     'be__r' like 'b_e___r' escape '_',
@@ -65,6 +80,9 @@ t t f
 
 statement error LIKE pattern must not end with escape character
 SELECT '____' LIKE '_____' ESCAPE '_';
+
+statement error LIKE pattern must not end with escape character
+SELECT '____' ILIKE '_____' ESCAPE '_';
 
 statement ok
 drop table test_table;
