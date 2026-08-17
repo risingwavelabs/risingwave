@@ -92,6 +92,12 @@ impl RewriteExprsRecursive for Relation {
             Relation::TableFunction { expr: inner, .. } => {
                 *inner = rewriter.rewrite_expr(inner.take())
             }
+            Relation::MatchRecognize(inner) => {
+                inner.input.rewrite_exprs_recursive(rewriter);
+                for e in inner.exprs_mut() {
+                    *e = rewriter.rewrite_expr(e.take());
+                }
+            }
             _ => {}
         }
     }
@@ -121,6 +127,12 @@ impl Relation {
                 BoundShareInput::Query(query) => query.is_correlated_by_depth(depth),
                 BoundShareInput::ChangeLog(change_log) => change_log.is_correlated_by_depth(depth),
             },
+            Relation::MatchRecognize(inner) => {
+                inner.input.is_correlated_by_depth(depth)
+                    || inner
+                        .exprs()
+                        .any(|e| e.has_correlated_input_ref_by_depth(depth))
+            }
             _ => false,
         }
     }
@@ -148,6 +160,12 @@ impl Relation {
                     change_log.is_correlated_by_correlated_id(correlated_id)
                 }
             },
+            Relation::MatchRecognize(inner) => {
+                inner.input.is_correlated_by_correlated_id(correlated_id)
+                    || inner
+                        .exprs()
+                        .any(|e| e.has_correlated_input_ref_by_correlated_id(correlated_id))
+            }
             _ => false,
         }
     }
@@ -208,6 +226,17 @@ impl Relation {
                 BoundShareInput::ChangeLog(change_log) => change_log
                     .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
             },
+            Relation::MatchRecognize(inner) => {
+                let mut indices = inner
+                    .input
+                    .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id);
+                for e in inner.exprs_mut() {
+                    indices.extend(
+                        e.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+                    );
+                }
+                indices
+            }
             _ => vec![],
         }
     }

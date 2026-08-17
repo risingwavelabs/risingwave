@@ -142,6 +142,34 @@ pub struct BoundMatchRecognize {
     pub within_deadline: Option<ExprImpl>,
 }
 
+impl BoundMatchRecognize {
+    /// Every bound expression this node carries, in one place, so relation traversals
+    /// (correlation checks, recursive expression rewrites) cannot silently skip a field. The
+    /// measure/define/WITHIN expressions are over synthetic slot rows — their `InputRef`s index
+    /// slots, not the input schema — but they can still carry `CorrelatedInputRef`s from an
+    /// enclosing query and are subject to the same expression-local rewrites as everything else.
+    pub fn exprs(&self) -> impl Iterator<Item = &ExprImpl> {
+        self.partition_by
+            .iter()
+            .chain(self.order_by.iter())
+            .chain(self.measures.iter().map(|m| &m.expr))
+            .chain(self.defines.iter().map(|d| &d.definition))
+            .chain(self.within.iter())
+            .chain(self.within_deadline.iter())
+    }
+
+    /// See [`BoundMatchRecognize::exprs`].
+    pub fn exprs_mut(&mut self) -> impl Iterator<Item = &mut ExprImpl> {
+        self.partition_by
+            .iter_mut()
+            .chain(self.order_by.iter_mut())
+            .chain(self.measures.iter_mut().map(|m| &mut m.expr))
+            .chain(self.defines.iter_mut().map(|d| &mut d.definition))
+            .chain(self.within.iter_mut())
+            .chain(self.within_deadline.iter_mut())
+    }
+}
+
 impl Binder {
     #[allow(clippy::too_many_arguments)]
     pub(super) fn bind_match_recognize(
@@ -352,6 +380,21 @@ impl Binder {
         // synthetic row of navigation slots (the candidate row's columns, physical PREV/NEXT, and
         // running references to other variables), evaluated per candidate during matching.
         let input_fields: Vec<Field> = input_columns.iter().map(|(_, f)| f.clone()).collect();
+        // Reject a variable defined twice. The executor keys DEFINEs by symbol, so without this
+        // check `DEFINE a AS x > 0, a AS x < 0` silently keeps whichever lowered last — the user's
+        // first predicate simply stops existing, with nothing to say so.
+        {
+            let mut seen = std::collections::HashSet::new();
+            for sym in symbols {
+                let name = sym.symbol.real_value();
+                if !seen.insert(name.clone()) {
+                    return Err(crate::error::ErrorCode::InvalidInputSyntax(format!(
+                        "pattern variable `{name}` is defined more than once in DEFINE"
+                    ))
+                    .into());
+                }
+            }
+        }
         let defines = symbols
             .iter()
             .map(|s| self.lower_define(s, &resolver, &input_fields))
@@ -677,15 +720,52 @@ impl Binder {
         // per-variable alias blocks; each resulting InputRef is then rewritten to a synthetic
         // LAST(var.col) slot.
         let expr = self.bind_expr(&m.expr)?;
+        // An aggregate call that is not the whole measure expression has no lowering: the slot
+        // rewriter below maps variable-qualified columns to LAST slots and nothing else, so an
+        // embedded `sum(a.v) + 1` would carry a live AggCall into a scalar-projection plan and fail
+        // (or panic) far from here, after the statement looked accepted.
+        if expr.has_agg_call() {
+            bail_not_implemented!(
+                "an aggregate inside a larger MEASURES expression; aggregates are supported only \
+                 as the whole measure (count/min/max/sum/avg over one pattern-variable column)"
+            );
+        }
+        // Same reasoning as the DEFINE rejection: a measure is evaluated by the executor from a
+        // serialized scalar expression over the slot row; a subquery has no representation there
+        // and would otherwise be carried to the plan-to-proto conversion before failing — after
+        // the statement looked accepted. Rejecting it here also keeps every MATCH_RECOGNIZE
+        // clause expression free of relation references, which `ALTER ... RENAME`'s query
+        // rewriter (`src/meta/src/controller/rename.rs`) relies on to visit only the input table.
+        if expr.has_subquery() {
+            return Err(crate::error::ErrorCode::NotSupported(
+                format!("a subquery in the MEASURES item `{name}`"),
+                "a measure must be a scalar expression over the pattern variables".to_owned(),
+            )
+            .into());
+        }
         let mut check = InputRefBlockCheck {
             input_col_num: resolver.input_col_num,
+            // Everything above the variable/subset alias blocks is internal scaffolding — the
+            // `__mr_nav` placeholder relations registered while lowering DEFINE stay in the binder
+            // context, so a user measure can name them. Un-checked, such a reference reaches
+            // `resolve_unchecked` with a block index past `alias_names` and panics the frontend.
+            nav_floor: (1 + resolver.alias_names.len()) * resolver.input_col_num,
             unqualified: false,
+            internal: false,
         };
         check.visit_expr(&expr);
         if check.unqualified {
             bail_not_implemented!(
                 "unqualified or non-pattern-variable column reference in MATCH_RECOGNIZE MEASURES"
             );
+        }
+        if check.internal {
+            return Err(crate::error::ErrorCode::InvalidInputSyntax(
+                "a MATCH_RECOGNIZE MEASURES expression references an internal navigation column \
+                 (`__mr_nav*`); only input columns qualified by a pattern variable are addressable"
+                    .to_owned(),
+            )
+            .into());
         }
         let mut rewriter = SlotLoweringRewriter {
             resolver,
@@ -1625,13 +1705,20 @@ impl VarResolver<'_> {
 /// pattern-variable navigation meaning.
 struct InputRefBlockCheck {
     input_col_num: usize,
+    /// First index past the variable/subset alias blocks; anything at or above it is internal
+    /// binder scaffolding (`__mr_nav` placeholders) that user SQL must not address.
+    nav_floor: usize,
     unqualified: bool,
+    internal: bool,
 }
 
 impl ExprVisitor for InputRefBlockCheck {
     fn visit_input_ref(&mut self, input_ref: &InputRef) {
         if input_ref.index() < self.input_col_num {
             self.unqualified = true;
+        }
+        if input_ref.index() >= self.nav_floor {
+            self.internal = true;
         }
     }
 }
