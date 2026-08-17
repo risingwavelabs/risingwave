@@ -63,8 +63,11 @@ impl MatchScan {
     }
 }
 
-/// Per-visit budget on `DEFINE` predicate evaluations, shared by every NFA walk of one partition
-/// visit (matching, eviction liveness, extension probing).
+/// Per-visit budget on NFA walk steps — predicate evaluations AND recursion descents (row
+/// consumptions and ε-transitions) — shared by every walk of one partition visit (matching,
+/// eviction liveness, extension probing). ε-descents are charged deliberately: metering only
+/// predicate evaluations left ε-traversal free, so a large NFA could spend arbitrary CPU per
+/// metered evaluation and the budget was not actually a CPU bound.
 ///
 /// The matcher is a backtracking DFS whose worst case is exponential in the pattern for
 /// pathological shapes (`(a? a? … a? b)` over a run of `a`-rows — the classic catastrophic
@@ -81,14 +84,58 @@ pub struct ScanBudget {
     remaining: usize,
     /// Set once the budget runs out; sticky for the rest of the visit.
     pub hit: bool,
+    /// Current recursion depth of the walk in flight; see [`MAX_WALK_DEPTH`].
+    depth: u32,
 }
+
+/// Hard cap on a single walk's recursion depth.
+///
+/// The walkers recurse per consumed row and per ε-transition (`#[async_recursion]` boxes each
+/// frame, but *polling* the chain still recurses the real stack), so without a cap a long enough
+/// match is a stack overflow — SIGSEGV, not a catchable error — and the budget alone does not
+/// prevent it: 2^20 charges permit a 2^20-deep path. Overrunning the cap is folded into the
+/// existing exhaustion semantics (undecided, held, reported, retried), so it adds no new degraded
+/// mode.
+///
+/// Sized empirically, and conservatively: a poll chain of these futures costs on the order of
+/// half a kilobyte per level in a debug build (a 4096 cap still overflowed a 2 MB test-thread
+/// stack), so 512 keeps the walk comfortably inside the smallest stack it runs on. The honest
+/// trade: one match spanning more rows than this cannot be decided and degrades to the budget
+/// path — but before the cap existed the same match was a segfault, so nothing that worked is
+/// lost. Raising the ceiling means rewriting the walkers iteratively (explicit stack), which is
+/// the real fix and its own change.
+const MAX_WALK_DEPTH: u32 = 512;
 
 impl ScanBudget {
     pub fn new(evaluations: usize) -> Self {
         Self {
             remaining: evaluations,
             hit: false,
+            depth: 0,
         }
+    }
+
+    /// Account one recursion descent (an ε-transition or a row consumption). Returns `false` — and
+    /// latches `hit` — when the budget is spent or the walk is deeper than [`MAX_WALK_DEPTH`].
+    /// ε-transitions were previously free, which made the budget a bound on predicate evaluations
+    /// rather than on the walk: a large NFA could spend arbitrary CPU on ε-traversal per metered
+    /// evaluation. Every descent must be paired with [`ScanBudget::ascend`].
+    #[must_use]
+    pub fn descend(&mut self) -> bool {
+        if self.depth >= MAX_WALK_DEPTH {
+            self.remaining = 0;
+            self.hit = true;
+            return false;
+        }
+        if !self.charge() {
+            return false;
+        }
+        self.depth += 1;
+        true
+    }
+
+    pub fn ascend(&mut self) {
+        self.depth = self.depth.saturating_sub(1);
     }
 
     /// No practical limit — for callers (tests, the collect wrapper) that need the historical
@@ -870,18 +917,25 @@ impl Nfa {
         for t in &self.states[state] {
             let accepted = match t {
                 Transition::Epsilon(next) => {
-                    self.preferred_blocked_before_accept(
-                        end,
-                        *next,
-                        pos,
-                        path,
-                        matcher,
-                        visited,
-                        blocked,
-                        budget,
-                        memo.as_deref_mut(),
-                    )
-                    .await?
+                    if !budget.descend() {
+                        false
+                    } else {
+                        let r = self
+                            .preferred_blocked_before_accept(
+                                end,
+                                *next,
+                                pos,
+                                path,
+                                matcher,
+                                visited,
+                                blocked,
+                                budget,
+                                memo.as_deref_mut(),
+                            )
+                            .await;
+                        budget.ascend();
+                        r?
+                    }
                 }
                 Transition::OnVar { var, target } => {
                     if pos == end {
@@ -905,19 +959,25 @@ impl Nfa {
                         } else {
                             path.push(var.clone());
                             let mut next_visited = Visited::new(self.states.len());
-                            let r = self
-                                .preferred_blocked_before_accept(
-                                    end,
-                                    *target,
-                                    pos + 1,
-                                    path,
-                                    matcher,
-                                    &mut next_visited,
-                                    blocked,
-                                    budget,
-                                    memo.as_deref_mut(),
-                                )
-                                .await?;
+                            let r = if !budget.descend() {
+                                false
+                            } else {
+                                let r = self
+                                    .preferred_blocked_before_accept(
+                                        end,
+                                        *target,
+                                        pos + 1,
+                                        path,
+                                        matcher,
+                                        &mut next_visited,
+                                        blocked,
+                                        budget,
+                                        memo.as_deref_mut(),
+                                    )
+                                    .await;
+                                budget.ascend();
+                                r?
+                            };
                             path.pop();
                             if !r
                                 && !budget.hit
@@ -978,17 +1038,24 @@ impl Nfa {
         for t in &self.states[state] {
             let alive = match t {
                 Transition::Epsilon(next) => {
-                    self.live_to_boundary(
-                        n_rows,
-                        *next,
-                        pos,
-                        path,
-                        matcher,
-                        visited,
-                        budget,
-                        memo.as_deref_mut(),
-                    )
-                    .await?
+                    if !budget.descend() {
+                        false
+                    } else {
+                        let r = self
+                            .live_to_boundary(
+                                n_rows,
+                                *next,
+                                pos,
+                                path,
+                                matcher,
+                                visited,
+                                budget,
+                                memo.as_deref_mut(),
+                            )
+                            .await;
+                        budget.ascend();
+                        r?
+                    }
                 }
                 Transition::OnVar { var, target } => {
                     if pos < n_rows && budget.charge() && matcher.matches(var, pos, path).await? {
@@ -1002,18 +1069,24 @@ impl Nfa {
                         } else {
                             path.push(var.clone());
                             let mut next_visited = Visited::new(self.states.len());
-                            let r = self
-                                .live_to_boundary(
-                                    n_rows,
-                                    *target,
-                                    pos + 1,
-                                    path,
-                                    matcher,
-                                    &mut next_visited,
-                                    budget,
-                                    memo.as_deref_mut(),
-                                )
-                                .await?;
+                            let r = if !budget.descend() {
+                                false
+                            } else {
+                                let r = self
+                                    .live_to_boundary(
+                                        n_rows,
+                                        *target,
+                                        pos + 1,
+                                        path,
+                                        matcher,
+                                        &mut next_visited,
+                                        budget,
+                                        memo.as_deref_mut(),
+                                    )
+                                    .await;
+                                budget.ascend();
+                                r?
+                            };
                             path.pop();
                             if !r
                                 && !budget.hit
@@ -1079,17 +1152,24 @@ impl Nfa {
         for t in &self.states[state] {
             let candidate = match t {
                 Transition::Epsilon(next) => {
-                    self.preferred_from_dynamic(
-                        n_rows,
-                        *next,
-                        pos,
-                        path,
-                        matcher,
-                        visited,
-                        budget,
-                        memo.as_deref_mut(),
-                    )
-                    .await?
+                    if !budget.descend() {
+                        None
+                    } else {
+                        let r = self
+                            .preferred_from_dynamic(
+                                n_rows,
+                                *next,
+                                pos,
+                                path,
+                                matcher,
+                                visited,
+                                budget,
+                                memo.as_deref_mut(),
+                            )
+                            .await;
+                        budget.ascend();
+                        r?
+                    }
                 }
                 Transition::OnVar { var, target } => {
                     if pos < n_rows && budget.charge() && matcher.matches(var, pos, path).await? {
@@ -1105,18 +1185,24 @@ impl Nfa {
                         } else {
                             path.push(var.clone());
                             let mut next_visited = Visited::new(self.states.len());
-                            let r = self
-                                .preferred_from_dynamic(
-                                    n_rows,
-                                    *target,
-                                    pos + 1,
-                                    path,
-                                    matcher,
-                                    &mut next_visited,
-                                    budget,
-                                    memo.as_deref_mut(),
-                                )
-                                .await?;
+                            let r = if !budget.descend() {
+                                None
+                            } else {
+                                let r = self
+                                    .preferred_from_dynamic(
+                                        n_rows,
+                                        *target,
+                                        pos + 1,
+                                        path,
+                                        matcher,
+                                        &mut next_visited,
+                                        budget,
+                                        memo.as_deref_mut(),
+                                    )
+                                    .await;
+                                budget.ascend();
+                                r?
+                            };
                             path.pop();
                             // A budget-aborted None is NOT a proven failure; memoizing it would
                             // turn a transient abort into a permanent wrong verdict.
@@ -2343,5 +2429,64 @@ mod tests {
             0,
             "start 0 was aborted with no verdict, so the cursor must still point at it"
         );
+    }
+
+    /// A walk deeper than `MAX_WALK_DEPTH` must fold into budget exhaustion, not overflow the
+    /// stack. The walkers recurse per consumed row, so before the guard a single greedy `a+` match
+    /// spanning enough rows was a SIGSEGV — not a catchable panic — and the per-visit budget did
+    /// not prevent it (2^20 charges permit a 2^20-deep path). With the guard the walk aborts as
+    /// ordinary exhaustion: undecided, `hit` latched, retried by the caller like any other
+    /// truncation.
+    #[tokio::test]
+    async fn a_walk_past_the_depth_cap_degrades_instead_of_overflowing_the_stack() {
+        let pat = Pattern::Quantified(Box::new(Pattern::Var("a".into())), Quantifier::Plus, false);
+        let nfa = Nfa::compile(&pat);
+        let n_rows = 2000; // comfortably past MAX_WALK_DEPTH
+        let rows = vec![BTreeSet::from(["a".to_owned()]); n_rows];
+        let matcher = SetMatcher::new(rows);
+        let mut scan = MatchScan::new();
+        let mut budget = ScanBudget::unlimited();
+        let found = nfa
+            .next_match(
+                &mut scan,
+                n_rows,
+                &matcher,
+                &SkipMode::PastLastRow,
+                &mut budget,
+                true,
+            )
+            .await
+            .unwrap();
+        assert!(budget.hit, "a depth overrun must latch the exhaustion flag");
+        assert!(
+            found.is_none(),
+            "an aborted walk must stay undecided rather than fabricate a partial match"
+        );
+        assert_eq!(
+            scan.next_start(),
+            0,
+            "the aborted start must not be advanced past"
+        );
+
+        // A match well under the cap is untouched.
+        let n_rows = 100;
+        let rows = vec![BTreeSet::from(["a".to_owned()]); n_rows];
+        let matcher = SetMatcher::new(rows);
+        let mut scan = MatchScan::new();
+        let mut budget = ScanBudget::unlimited();
+        let found = nfa
+            .next_match(
+                &mut scan,
+                n_rows,
+                &matcher,
+                &SkipMode::PastLastRow,
+                &mut budget,
+                true,
+            )
+            .await
+            .unwrap()
+            .expect("a 100-row greedy match is far below the cap");
+        assert_eq!((found.start, found.end), (0, 100));
+        assert!(!budget.hit);
     }
 }
