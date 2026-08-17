@@ -108,6 +108,10 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v5
+        with:
+          # Persist the PAT used by the cherry-pick action. Otherwise checkout stores the
+          # built-in GITHUB_TOKEN, and git push ignores the PAT supplied through .netrc.
+          token: ${{ secrets.RISINGWAVE_CI_GITHUB_TOKEN }}
 
       - name: Create PR to branch
         uses: risingwavelabs/github-action-cherry-pick@master
