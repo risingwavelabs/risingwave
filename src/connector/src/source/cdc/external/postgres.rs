@@ -862,7 +862,7 @@ pub fn type_name_to_pg_type(ty_name: &str) -> Option<PgType> {
             "varchar" => Some(PgType::VARCHAR_ARRAY),
             "text" => Some(PgType::TEXT_ARRAY),
             "bytea" => Some(PgType::BYTEA_ARRAY),
-            "geometry" => Some(PgType::BYTEA_ARRAY), // PostGIS geometry array
+            "geometry" | "geography" => Some(PgType::BYTEA_ARRAY), // PostGIS spatial arrays
             "date" => Some(PgType::DATE_ARRAY),
             "time" => Some(PgType::TIME_ARRAY),
             "timetz" => Some(PgType::TIMETZ_ARRAY),

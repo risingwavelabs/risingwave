@@ -5,11 +5,10 @@ control substitution on
 system ok
 psql -c "
     CREATE EXTENSION IF NOT EXISTS postgis;
-
     DROP TABLE IF EXISTS test_geography CASCADE;
+    DROP TABLE IF EXISTS test_geography_array CASCADE;
     DROP TABLE IF EXISTS test_geography_auto_discovery CASCADE;
     DROP TABLE IF EXISTS test_geography_schema_change CASCADE;
-
     CREATE TABLE test_geography (
         id int PRIMARY KEY,
         name varchar,
@@ -18,14 +17,26 @@ psql -c "
     INSERT INTO test_geography VALUES
         (1, 'Chicago', ST_SetSRID(ST_MakePoint(-87.6298, 41.8781), 4326)),
         (2, 'NewYork', ST_SetSRID(ST_MakePoint(-74.0060, 40.7128), 4326));
-
+    CREATE TABLE test_geography_array (
+        id int PRIMARY KEY,
+        name varchar,
+        locations geography(Point, 4326)[]
+    );
+    INSERT INTO test_geography_array VALUES
+        (
+            1,
+            'InitialRoute',
+            ARRAY[
+                ST_SetSRID(ST_MakePoint(-87.6298, 41.8781), 4326),
+                ST_SetSRID(ST_MakePoint(-74.0060, 40.7128), 4326)
+            ]::geography(Point, 4326)[]
+        );
     CREATE TABLE test_geography_auto_discovery (
         id int PRIMARY KEY,
         location geography(Point, 4326)
     );
     INSERT INTO test_geography_auto_discovery VALUES
         (1, ST_SetSRID(ST_MakePoint(-122.4194, 37.7749), 4326));
-
     CREATE TABLE test_geography_schema_change (
         id int PRIMARY KEY,
         name varchar
@@ -52,6 +63,18 @@ create table test_geography (
     name varchar,
     location bytea
 ) from geography_source table 'public.test_geography';
+
+statement ok
+create table test_geography_array (*)
+from geography_source table 'public.test_geography_array';
+
+query T retry 10 backoff 1s
+select c.data_type
+from rw_catalog.rw_columns c
+join rw_catalog.rw_tables t on c.relation_id = t.id
+where t.name = 'test_geography_array' and c.name = 'locations';
+----
+bytea[]
 
 # Backfill preserves the complete EWKB bytes.
 query IT retry 10 backoff 1s
@@ -96,6 +119,59 @@ select id, name, location from test_geography where id = 4;
 ----
 4 NullLocation NULL
 
+# Test geography[] backfill.
+query ITTT retry 10 backoff 1s
+select id, name, encode(locations[1], 'hex'), encode(locations[2], 'hex')
+from test_geography_array where id = 1;
+----
+1 InitialRoute 0101000020e610000055c1a8a44ee855c00e4faf9465f04440 0101000020e6100000aaf1d24d628052c05e4bc8073d5b4440
+
+# Test incremental INSERT into geography[].
+system ok
+psql -c "
+    INSERT INTO test_geography_array VALUES
+        (
+            2,
+            'InsertedRoute',
+            ARRAY[
+                ST_SetSRID(ST_MakePoint(-0.1278, 51.5074), 4326),
+                ST_SetSRID(ST_MakePoint(-122.4194, 37.7749), 4326)
+            ]::geography(Point, 4326)[]
+        );
+"
+
+query ITTT retry 10 backoff 1s
+select id, name, encode(locations[1], 'hex'), encode(locations[2], 'hex')
+from test_geography_array where id = 2;
+----
+2 InsertedRoute 0101000020e6100000ebe2361ac05bc0bfc5feb27bf2c04940 0101000020e610000050fc1873d79a5ec0d0d556ec2fe34240
+
+# Test incremental UPDATE of geography[].
+system ok
+psql -c "
+    UPDATE test_geography_array
+    SET locations = ARRAY[
+        ST_SetSRID(ST_MakePoint(0, 0), 4326),
+        ST_SetSRID(ST_MakePoint(-104.9903, 39.7392), 4326)
+    ]::geography(Point, 4326)[]
+    WHERE id = 1;
+"
+
+query ITT retry 10 backoff 1s
+select id, encode(locations[1], 'hex'), encode(locations[2], 'hex')
+from test_geography_array where id = 1;
+----
+1 0101000020e610000000000000000000000000000000000000 0101000020e6100000a54e4013613f5ac0029a081b9ede4340
+
+# Test incremental DELETE from geography[].
+system ok
+psql -c "DELETE FROM test_geography_array WHERE id = 2;"
+
+query I retry 10 backoff 1s
+select count(*) from test_geography_array where id = 2;
+----
+0
+
 # Test automatic schema discovery.
 statement ok
 create table test_geography_auto_discovery_rw (*)
@@ -127,28 +203,46 @@ select id, name from test_geography_schema_change_rw where id = 1;
 system ok
 psql -c "
     ALTER TABLE test_geography_schema_change
-        ADD COLUMN location geography(Point, 4326);
+        ADD COLUMN location geography(Point, 4326),
+        ADD COLUMN locations geography(Point, 4326)[];
     INSERT INTO test_geography_schema_change VALUES
-        (2, 'After', ST_SetSRID(ST_MakePoint(-104.9903, 39.7392), 4326));
+        (
+            2,
+            'After',
+            ST_SetSRID(ST_MakePoint(-104.9903, 39.7392), 4326),
+            ARRAY[
+                ST_SetSRID(ST_MakePoint(-87.6298, 41.8781), 4326),
+                ST_SetSRID(ST_MakePoint(-74.0060, 40.7128), 4326)
+            ]::geography(Point, 4326)[]
+        );
 "
 
-query T retry 10 backoff 1s
-select c.data_type
+query TT retry 10 backoff 1s
+select c.name, c.data_type
 from rw_catalog.rw_columns c
 join rw_catalog.rw_tables t on c.relation_id = t.id
-where t.name = 'test_geography_schema_change_rw' and c.name = 'location';
+where t.name = 'test_geography_schema_change_rw'
+  and c.name in ('location', 'locations')
+order by c.name;
 ----
-bytea
+location bytea
+locations bytea[]
 
-query IT retry 10 backoff 1s
-select id, location is null from test_geography_schema_change_rw where id = 1;
+query ITT retry 10 backoff 1s
+select id, location is null, locations is null
+from test_geography_schema_change_rw where id = 1;
 ----
-1 t
+1 t t
 
-query IT retry 10 backoff 1s
-select id, encode(location, 'hex') from test_geography_schema_change_rw where id = 2;
+query ITTT retry 10 backoff 1s
+select
+    id,
+    encode(location, 'hex'),
+    encode(locations[1], 'hex'),
+    encode(locations[2], 'hex')
+from test_geography_schema_change_rw where id = 2;
 ----
-2 0101000020e6100000a54e4013613f5ac0029a081b9ede4340
+2 0101000020e6100000a54e4013613f5ac0029a081b9ede4340 0101000020e610000055c1a8a44ee855c00e4faf9465f04440 0101000020e6100000aaf1d24d628052c05e4bc8073d5b4440
 
 # Test a different geography type.
 system ok
@@ -183,6 +277,9 @@ statement ok
 drop table test_geography;
 
 statement ok
+drop table test_geography_array;
+
+statement ok
 drop table test_geography_auto_discovery_rw;
 
 statement ok
@@ -194,6 +291,7 @@ drop source geography_source;
 system ok
 psql -c "
     DROP TABLE IF EXISTS test_geography CASCADE;
+    DROP TABLE IF EXISTS test_geography_array CASCADE;
     DROP TABLE IF EXISTS test_geography_auto_discovery CASCADE;
     DROP TABLE IF EXISTS test_geography_schema_change CASCADE;
     DROP TABLE IF EXISTS test_geography_line CASCADE;
