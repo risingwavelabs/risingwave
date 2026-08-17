@@ -849,3 +849,50 @@
       define a as a.v > 0, b as b.v < 0
     );
   binder_error: 'Invalid input syntax: SUBSET u references unknown pattern variable typo'
+- name: a pattern variable defined twice is rejected, not silently last-wins
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures count(*) as n
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as a.v > 0, b as b.v < 0, a as a.v < 0
+    );
+  binder_error: 'Invalid input syntax: pattern variable `a` is defined more than once in DEFINE'
+- name: an aggregate nested inside a larger MEASURES expression is rejected at bind time
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures sum(a.v) + 1 as m
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as a.v > 0, b as b.v < 0
+    );
+  binder_error: |-
+    Feature is not yet implemented: an aggregate inside a larger MEASURES expression; aggregates are supported only as the whole measure (count/min/max/sum/avg over one pattern-variable column)
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- name: a correlated reference inside DEFINE is traversed, not silently dropped
+  sql: |
+    create table t1(x int) append only;
+    create table t2(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t1 where exists (
+      select 1 from t2 match_recognize (
+        partition by id
+        order by ts
+        measures count(*) as n
+        one row per match
+        after match skip past last row
+        pattern (a b)
+        define a as a.v > t1.x, b as b.v < 0
+      )
+    );
+  stream_error: |-
+    Not supported: streaming nested-loop join
+    HINT: The non-equal join in the query requires a nested-loop join executor, which could be very expensive to run. Consider rewriting the query to use dynamic filter as a substitute if possible.
+    See also: https://docs.risingwave.com/processing/sql/dynamic-filters
