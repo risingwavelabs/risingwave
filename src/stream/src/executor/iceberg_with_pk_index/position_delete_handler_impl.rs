@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::Duration;
-
 use anyhow::{Context, anyhow};
 use hashbrown::HashMap;
 use hashbrown::hash_map::Entry;
@@ -41,6 +39,7 @@ use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
+use super::load_table_at_least;
 use super::position_delete_merger::PositionDeleteHandler;
 use super::position_delete_staging::StagingVersion;
 
@@ -300,34 +299,6 @@ impl PositionDeleteHandler for PositionDeleteHandlerImpl {
     async fn flush(&mut self) -> SinkResult<Option<SinkMetadata>> {
         self.flush_inner().await
     }
-}
-
-/// Load the table, retrying until its snapshot set contains `expected`
-async fn load_table_at_least(config: &IcebergConfig, expected: Option<i64>) -> SinkResult<Table> {
-    const MAX_ATTEMPTS: usize = 10;
-    const BACKOFF: Duration = Duration::from_millis(500);
-    let mut last = None;
-    for _ in 0..MAX_ATTEMPTS {
-        let table = config.load_table().await?;
-        let Some(expected) = expected else {
-            return Ok(table);
-        };
-        if table
-            .metadata()
-            .snapshots()
-            .any(|s| s.snapshot_id() == expected)
-        {
-            return Ok(table);
-        }
-        last = Some(table.metadata().current_snapshot_id());
-        tokio::time::sleep(BACKOFF).await;
-    }
-    Err(SinkError::Iceberg(anyhow!(
-        "iceberg catalog did not reflect committed pk-index snapshot {:?} after {} attempts (last current_snapshot_id={:?})",
-        expected,
-        MAX_ATTEMPTS,
-        last,
-    )))
 }
 
 /// Scan the table's current-snapshot delete manifests once and seed `staging` with
