@@ -1,0 +1,200 @@
+control substitution on
+
+# PostGIS geography type CDC test
+
+system ok
+psql -c "
+    CREATE EXTENSION IF NOT EXISTS postgis;
+
+    DROP TABLE IF EXISTS test_geography CASCADE;
+    DROP TABLE IF EXISTS test_geography_auto_discovery CASCADE;
+    DROP TABLE IF EXISTS test_geography_schema_change CASCADE;
+
+    CREATE TABLE test_geography (
+        id int PRIMARY KEY,
+        name varchar,
+        location geography(Point, 4326)
+    );
+    INSERT INTO test_geography VALUES
+        (1, 'Chicago', ST_SetSRID(ST_MakePoint(-87.6298, 41.8781), 4326)),
+        (2, 'NewYork', ST_SetSRID(ST_MakePoint(-74.0060, 40.7128), 4326));
+
+    CREATE TABLE test_geography_auto_discovery (
+        id int PRIMARY KEY,
+        location geography(Point, 4326)
+    );
+    INSERT INTO test_geography_auto_discovery VALUES
+        (1, ST_SetSRID(ST_MakePoint(-122.4194, 37.7749), 4326));
+
+    CREATE TABLE test_geography_schema_change (
+        id int PRIMARY KEY,
+        name varchar
+    );
+    INSERT INTO test_geography_schema_change VALUES (1, 'Before');
+"
+
+statement ok
+create source geography_source with (
+  connector = 'postgres-cdc',
+  hostname = '${PGHOST:localhost}',
+  port = '${PGPORT:5432}',
+  username = '${PGUSER:$USER}',
+  password = '${PGPASSWORD:}',
+  database.name = '${PGDATABASE:postgres}',
+  schema.name = 'public',
+  slot.name = 'geography_slot',
+  auto.schema.change = 'true'
+);
+
+statement ok
+create table test_geography (
+    id int primary key,
+    name varchar,
+    location bytea
+) from geography_source table 'public.test_geography';
+
+# Backfill preserves the complete EWKB bytes.
+query IT retry 10 backoff 1s
+select id, encode(location, 'hex') from test_geography order by id;
+----
+1 0101000020e610000055c1a8a44ee855c00e4faf9465f04440
+2 0101000020e6100000aaf1d24d628052c05e4bc8073d5b4440
+
+# Test incremental INSERT.
+system ok
+psql -c "INSERT INTO test_geography VALUES (3, 'London', ST_SetSRID(ST_MakePoint(-0.1278, 51.5074), 4326));"
+
+query IT retry 10 backoff 1s
+select id, encode(location, 'hex') from test_geography where id = 3;
+----
+3 0101000020e6100000ebe2361ac05bc0bfc5feb27bf2c04940
+
+# Test incremental UPDATE.
+system ok
+psql -c "UPDATE test_geography SET location = ST_SetSRID(ST_MakePoint(0, 0), 4326) WHERE id = 1;"
+
+query IT retry 10 backoff 1s
+select id, encode(location, 'hex') from test_geography where id = 1;
+----
+1 0101000020e610000000000000000000000000000000000000
+
+# Test incremental DELETE.
+system ok
+psql -c "DELETE FROM test_geography WHERE id = 2;"
+
+query I retry 10 backoff 1s
+select count(*) from test_geography where id = 2;
+----
+0
+
+# Test NULL geography.
+system ok
+psql -c "INSERT INTO test_geography VALUES (4, 'NullLocation', NULL);"
+
+query ITI retry 10 backoff 1s
+select id, name, location from test_geography where id = 4;
+----
+4 NullLocation NULL
+
+# Test automatic schema discovery.
+statement ok
+create table test_geography_auto_discovery_rw (*)
+from geography_source table 'public.test_geography_auto_discovery';
+
+query T retry 10 backoff 1s
+select c.data_type
+from rw_catalog.rw_columns c
+join rw_catalog.rw_tables t on c.relation_id = t.id
+where t.name = 'test_geography_auto_discovery_rw' and c.name = 'location';
+----
+bytea
+
+query IT retry 10 backoff 1s
+select id, encode(location, 'hex') from test_geography_auto_discovery_rw where id = 1;
+----
+1 0101000020e610000050fc1873d79a5ec0d0d556ec2fe34240
+
+# Test automatic schema changes.
+statement ok
+create table test_geography_schema_change_rw (*)
+from geography_source table 'public.test_geography_schema_change';
+
+query IT retry 10 backoff 1s
+select id, name from test_geography_schema_change_rw where id = 1;
+----
+1 Before
+
+system ok
+psql -c "
+    ALTER TABLE test_geography_schema_change
+        ADD COLUMN location geography(Point, 4326);
+    INSERT INTO test_geography_schema_change VALUES
+        (2, 'After', ST_SetSRID(ST_MakePoint(-104.9903, 39.7392), 4326));
+"
+
+query T retry 10 backoff 1s
+select c.data_type
+from rw_catalog.rw_columns c
+join rw_catalog.rw_tables t on c.relation_id = t.id
+where t.name = 'test_geography_schema_change_rw' and c.name = 'location';
+----
+bytea
+
+query IT retry 10 backoff 1s
+select id, location is null from test_geography_schema_change_rw where id = 1;
+----
+1 t
+
+query IT retry 10 backoff 1s
+select id, encode(location, 'hex') from test_geography_schema_change_rw where id = 2;
+----
+2 0101000020e6100000a54e4013613f5ac0029a081b9ede4340
+
+# Test a different geography type.
+system ok
+psql -c "
+    DROP TABLE IF EXISTS test_geography_line CASCADE;
+    CREATE TABLE test_geography_line (
+        id int PRIMARY KEY,
+        name varchar,
+        path geography(LineString, 4326)
+    );
+    INSERT INTO test_geography_line VALUES
+        (1, 'Route1', ST_SetSRID(ST_MakeLine(ST_MakePoint(-87.6298, 41.8781), ST_MakePoint(-74.0060, 40.7128)), 4326));
+"
+
+statement ok
+create table test_geography_line (
+    id int primary key,
+    name varchar,
+    path bytea
+) from geography_source table 'public.test_geography_line';
+
+query IT retry 10 backoff 1s
+select id, encode(path, 'hex') from test_geography_line where id = 1;
+----
+1 0102000020e61000000200000055c1a8a44ee855c00e4faf9465f04440aaf1d24d628052c05e4bc8073d5b4440
+
+# Clean up.
+statement ok
+drop table test_geography_line;
+
+statement ok
+drop table test_geography;
+
+statement ok
+drop table test_geography_auto_discovery_rw;
+
+statement ok
+drop table test_geography_schema_change_rw;
+
+statement ok
+drop source geography_source;
+
+system ok
+psql -c "
+    DROP TABLE IF EXISTS test_geography CASCADE;
+    DROP TABLE IF EXISTS test_geography_auto_discovery CASCADE;
+    DROP TABLE IF EXISTS test_geography_schema_change CASCADE;
+    DROP TABLE IF EXISTS test_geography_line CASCADE;
+"
