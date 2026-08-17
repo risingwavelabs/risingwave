@@ -153,9 +153,7 @@ impl<S: StateStore, const UPSERT: bool> WatermarkFilterExecutorInner<S, UPSERT> 
 
             let msg = match event {
                 WatermarkFilterEvent::GlobalRefresh(refresh_result) => {
-                    pending_global_refresh = None;
                     let global_max_watermark = refresh_result?;
-                    let previous_watermark = current_watermark.clone();
                     current_watermark = match (current_watermark, global_max_watermark) {
                         (Some(watermark), Some(global_max_watermark)) => Some(cmp::max_by(
                             watermark,
@@ -165,8 +163,7 @@ impl<S: StateStore, const UPSERT: bool> WatermarkFilterExecutorInner<S, UPSERT> 
                         (Some(watermark), None) => Some(watermark),
                         (None, global_max_watermark) => global_max_watermark,
                     };
-                    if current_watermark != previous_watermark
-                        && let Some(watermark) = current_watermark.clone()
+                    if let Some(watermark) = current_watermark.clone()
                         && !is_paused
                     {
                         yield Message::Watermark(Watermark::new(
@@ -329,12 +326,13 @@ impl<S: StateStore, const UPSERT: bool> WatermarkFilterExecutorInner<S, UPSERT> 
                         .await?;
                     }
 
-                    if is_checkpoint && !is_paused && pending_global_refresh.is_none() {
+                    if is_checkpoint && !is_paused {
                         if idle_input {
                             barrier_num_during_idle += 1;
 
                             if barrier_num_during_idle
                                 >= UPDATE_GLOBAL_WATERMARK_FREQUENCY_WHEN_IDLE
+                                && pending_global_refresh.is_none()
                             {
                                 barrier_num_during_idle = 0;
                                 let global_watermark_table = global_watermark_table.clone();
