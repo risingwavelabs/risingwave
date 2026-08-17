@@ -120,8 +120,9 @@ fn report_skip_degradation_once(
     });
 }
 
-/// Predicate evaluations one partition visit may spend across all its NFA walks (matching,
-/// eviction liveness, extension probing) before the visit degrades — see [`ScanBudget`]. The
+/// Walk steps — predicate evaluations plus recursion descents, ε-transitions included — one
+/// partition visit may spend across all its NFA walks (matching, eviction liveness, extension
+/// probing) before the visit degrades; see [`ScanBudget`]. The
 /// matcher's worst case is exponential for pathological patterns whose `DEFINE`s read the running
 /// label assignment (path-independent patterns are memoized and never approach this); the budget
 /// converts that from a pinned compute node into a bounded, reported degradation. Sized so that
@@ -270,6 +271,7 @@ impl MeasureSlot {
         rows: &[BufferedRow],
         start: usize,
         labels: &[String],
+        error_report: &impl risingwave_expr::expr::EvalErrorReport,
     ) -> StreamExecutorResult<Datum> {
         // The column value of the row at match-relative index `j`.
         let col_at = |j: usize| rows[start + j].row.datum_at(self.col_idx).to_owned_datum();
@@ -323,9 +325,25 @@ impl MeasureSlot {
                     None
                 } else {
                     let chunk = StreamChunk::from_rows(&input, std::slice::from_ref(&agg.col_type));
-                    let mut state = agg.func.create_state()?;
-                    agg.func.update(&mut state, &chunk).await?;
-                    agg.func.get_result(&state).await?
+                    // A kernel error here is a DATA error — numeric overflow in SUM is the
+                    // canonical one — on rows that recovery will replay verbatim: propagating it
+                    // kills the actor and every restart replays the same rows into the same
+                    // overflow, an unrecoverable crash loop from one bad match. Mirror what
+                    // `NonStrictExpression` does for every other expression in this operator:
+                    // report through the actor's error report and yield NULL for the measure.
+                    let evaluated = async {
+                        let mut state = agg.func.create_state()?;
+                        agg.func.update(&mut state, &chunk).await?;
+                        agg.func.get_result(&state).await
+                    }
+                    .await;
+                    match evaluated {
+                        Ok(d) => d,
+                        Err(e) => {
+                            error_report.report(e);
+                            None
+                        }
+                    }
                 }
             }
         })
@@ -768,7 +786,10 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             for measure in measures {
                 let mut synthetic = Vec::with_capacity(measure.slots.len());
                 for slot in &measure.slots {
-                    synthetic.push(slot.resolve(&run.rows, start, &m.labels).await?);
+                    synthetic.push(
+                        slot.resolve(&run.rows, start, &m.labels, eval_error_report)
+                            .await?,
+                    );
                 }
                 let synthetic = OwnedRow::new(synthetic);
                 measure_datums.push(measure.expr.eval_row_infallible(&synthetic).await);
@@ -1172,13 +1193,18 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                     // convergence (scanning the window-bounded expiring region under its own budget).
                     let mut budget = ScanBudget::new(SCAN_BUDGET_EVALUATIONS);
                     for (op, row_ref) in chunk.rows() {
-                        // Append-only input is enforced at planning time; fail loud otherwise.
+                        // Append-only input is enforced at planning time, so a non-Insert here is
+                        // an upstream inconsistency. Follow the operator convention rather than
+                        // erroring the actor unconditionally: panic under strict consistency,
+                        // report-and-skip the record when the cluster runs with strict consistency
+                        // disabled — the escape hatch that lets a job limp past bad data instead of
+                        // crash-looping on it.
                         if !matches!(op, Op::Insert) {
-                            return Err(anyhow::anyhow!(
-                                "MATCH_RECOGNIZE requires append-only input but received a {:?} record",
-                                op
-                            )
-                            .into());
+                            crate::consistency::consistency_panic!(
+                                ?op,
+                                "MATCH_RECOGNIZE requires append-only input",
+                            );
+                            continue;
                         }
                         let order_key = row_ref.datum_at(time_col).to_owned_datum();
                         // A NULL order key has no event time: the sort would never release it in
