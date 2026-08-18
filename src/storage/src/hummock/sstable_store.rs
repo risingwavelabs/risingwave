@@ -1002,7 +1002,6 @@ mod tests {
         SstableBlockIndex, SstableIterator, SstableMeta, SstableStore, get_from_sstable_info,
     };
     use crate::monitor::StoreLocalStatistic;
-    use crate::store::ReadOptions;
 
     const SST_ID: u64 = 1;
 
@@ -1383,13 +1382,15 @@ mod tests {
 
             let mut stats = StoreLocalStatistic::default();
             let key = iterator_test_key_of(0);
-            let read_options = ReadOptions::default();
+            let read_options = Arc::new(SstableIteratorReadOptions {
+                cache_level_hint,
+                ..Default::default()
+            });
             let result = get_from_sstable_info(
                 sstable_store.clone(),
                 &info,
                 key.to_ref(),
-                &read_options,
-                cache_level_hint,
+                read_options,
                 None,
                 &mut stats,
             )

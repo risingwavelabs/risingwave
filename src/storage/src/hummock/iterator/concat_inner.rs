@@ -50,7 +50,6 @@ pub struct ConcatIteratorInner<TI: SstableIteratorType> {
 
     stats: StoreLocalStatistic,
     read_options: Arc<SstableIteratorReadOptions>,
-    cache_level_hint: Option<u32>,
 }
 
 impl<TI: SstableIteratorType> ConcatIteratorInner<TI> {
@@ -62,15 +61,6 @@ impl<TI: SstableIteratorType> ConcatIteratorInner<TI> {
         sstable_store: SstableStoreRef,
         read_options: Arc<SstableIteratorReadOptions>,
     ) -> Self {
-        Self::new_with_cache_level_hint(sstable_infos, sstable_store, read_options, None)
-    }
-
-    pub fn new_with_cache_level_hint(
-        sstable_infos: Vec<SstableInfo>,
-        sstable_store: SstableStoreRef,
-        read_options: Arc<SstableIteratorReadOptions>,
-        cache_level_hint: Option<u32>,
-    ) -> Self {
         Self {
             sstable_iter: None,
             cur_idx: 0,
@@ -78,7 +68,6 @@ impl<TI: SstableIteratorType> ConcatIteratorInner<TI> {
             sstable_store,
             stats: StoreLocalStatistic::default(),
             read_options,
-            cache_level_hint,
         }
     }
 
@@ -98,11 +87,10 @@ impl<TI: SstableIteratorType> ConcatIteratorInner<TI> {
                 .sstable_store
                 .sstable(&self.sstable_infos[idx], &mut self.stats)
                 .await?;
-            let sstable_iter = TI::create_with_cache_level_hint(
+            let sstable_iter = TI::create(
                 table,
                 self.sstable_store.clone(),
                 self.read_options.clone(),
-                self.cache_level_hint,
                 &self.sstable_infos[idx],
             );
 

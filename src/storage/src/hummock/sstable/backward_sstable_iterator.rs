@@ -254,18 +254,17 @@ impl HummockIterator for BackwardSstableIterator {
 }
 
 impl SstableIteratorType for BackwardSstableIterator {
-    fn create_with_cache_level_hint(
+    fn create(
         sstable: TableHolder,
         sstable_store: SstableStoreRef,
-        _options: Arc<SstableIteratorReadOptions>,
-        cache_level_hint: Option<u32>,
+        options: Arc<SstableIteratorReadOptions>,
         sstable_info_ref: &SstableInfo,
     ) -> Self {
         BackwardSstableIterator::new_with_cache_level_hint(
             sstable,
             sstable_store,
             sstable_info_ref,
-            cache_level_hint,
+            options.cache_level_hint,
         )
     }
 }

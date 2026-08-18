@@ -75,14 +75,13 @@ async fn test_get_from_sstable_info_success_settles_nested_stats_once() {
         ..Default::default()
     };
     let full_key = test_key_of(0);
-    let read_options = risingwave_storage::store::ReadOptions::default();
+    let read_options = Arc::new(risingwave_storage::hummock::SstableIteratorReadOptions::default());
 
     let iter = get_from_sstable_info(
         sstable_store,
         &sstable_info,
         full_key.to_ref(),
-        &read_options,
-        None,
+        read_options,
         None,
         &mut parent_stats,
     )
@@ -118,13 +117,12 @@ async fn test_get_from_sstable_info_cancellation_settles_nested_stats() {
     .await;
     let mut parent_stats = StoreLocalStatistic::default();
     let full_key = test_key_of(10);
-    let read_options = risingwave_storage::store::ReadOptions::default();
+    let read_options = Arc::new(risingwave_storage::hummock::SstableIteratorReadOptions::default());
     let mut get = Box::pin(get_from_sstable_info(
         sstable_store,
         &sstable_info,
         full_key.to_ref(),
-        &read_options,
-        None,
+        read_options,
         None,
         &mut parent_stats,
     ));

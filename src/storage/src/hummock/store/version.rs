@@ -692,6 +692,11 @@ impl HummockVersionReader {
             .prefix_hint
             .as_ref()
             .map(|dist_key| Sstable::hash_for_filter(dist_key.as_ref(), table_id.as_raw_id()));
+        let sst_read_options = SstableIteratorReadOptions::from_read_options(&read_options);
+        let l0_sst_read_options = Arc::new(SstableIteratorReadOptions {
+            cache_level_hint: Some(0),
+            ..sst_read_options.clone()
+        });
 
         // Here epoch passed in is pure epoch, and we will seek the constructed `full_key` later.
         // Therefore, it is necessary to construct the `full_key` with `MAX_SPILL_TIMES`, otherwise, the iterator might skip keys with spill offset greater than 0.
@@ -711,8 +716,7 @@ impl HummockVersionReader {
                 self.sstable_store.clone(),
                 local_sst,
                 full_key.to_ref(),
-                &read_options,
-                Some(0),
+                l0_sst_read_options.clone(),
                 dist_key_hash,
                 local_stats,
             )
@@ -747,6 +751,10 @@ impl HummockVersionReader {
             if level.table_infos.is_empty() {
                 continue;
             }
+            let level_sst_read_options = Arc::new(SstableIteratorReadOptions {
+                cache_level_hint: Some(level.level_idx),
+                ..sst_read_options.clone()
+            });
 
             match level.level_type {
                 LevelType::Overlapping | LevelType::Unspecified => {
@@ -771,8 +779,7 @@ impl HummockVersionReader {
                             self.sstable_store.clone(),
                             sstable_info,
                             full_key.to_ref(),
-                            &read_options,
-                            Some(level.level_idx),
+                            level_sst_read_options.clone(),
                             dist_key_hash,
                             local_stats,
                         )
@@ -838,8 +845,7 @@ impl HummockVersionReader {
                         self.sstable_store.clone(),
                         sstable_info,
                         full_key.to_ref(),
-                        &read_options,
-                        Some(level.level_idx),
+                        level_sst_read_options,
                         dist_key_hash,
                         local_stats,
                     )
@@ -1051,6 +1057,10 @@ impl HummockVersionReader {
             sst_read_options.max_preload_retry_times = self.preload_retry_times;
         }
         let sst_read_options = Arc::new(sst_read_options);
+        let l0_sst_read_options = Arc::new(SstableIteratorReadOptions {
+            cache_level_hint: Some(0),
+            ..sst_read_options.as_ref().clone()
+        });
         for sstable_info in &uncommitted_ssts {
             let table_holder = self
                 .sstable_store
@@ -1069,11 +1079,10 @@ impl HummockVersionReader {
             }
 
             staging_sst_iter_count += 1;
-            factory.add_staging_sst_iter(F::SstableIteratorType::create_with_cache_level_hint(
+            factory.add_staging_sst_iter(F::SstableIteratorType::create(
                 table_holder,
                 self.sstable_store.clone(),
-                sst_read_options.clone(),
-                Some(0),
+                l0_sst_read_options.clone(),
                 sstable_info,
             ));
         }
@@ -1085,6 +1094,10 @@ impl HummockVersionReader {
             if level.table_infos.is_empty() {
                 continue;
             }
+            let level_sst_read_options = Arc::new(SstableIteratorReadOptions {
+                cache_level_hint: Some(level.level_idx),
+                ..sst_read_options.as_ref().clone()
+            });
 
             if level.level_type == LevelType::Nonoverlapping {
                 let mut table_infos =
@@ -1099,8 +1112,7 @@ impl HummockVersionReader {
                     factory.add_concat_sst_iter(
                         sstable_infos,
                         self.sstable_store.clone(),
-                        sst_read_options.clone(),
-                        Some(level.level_idx),
+                        level_sst_read_options.clone(),
                     );
                     local_stats.non_overlapping_iter_count += 1;
                 } else {
@@ -1126,15 +1138,12 @@ impl HummockVersionReader {
                     // We put the SstableIterator in `overlapping_iters` just for convenience since
                     // it overlaps with SSTs in other levels. In metrics reporting, we still count
                     // it in `non_overlapping_iter_count`.
-                    factory.add_overlapping_sst_iter(
-                        F::SstableIteratorType::create_with_cache_level_hint(
-                            sstable,
-                            self.sstable_store.clone(),
-                            sst_read_options.clone(),
-                            Some(level.level_idx),
-                            sstable_info,
-                        ),
-                    );
+                    factory.add_overlapping_sst_iter(F::SstableIteratorType::create(
+                        sstable,
+                        self.sstable_store.clone(),
+                        level_sst_read_options.clone(),
+                        sstable_info,
+                    ));
                     local_stats.non_overlapping_iter_count += 1;
                 }
             } else {
@@ -1161,15 +1170,12 @@ impl HummockVersionReader {
                     {
                         continue;
                     }
-                    factory.add_overlapping_sst_iter(
-                        F::SstableIteratorType::create_with_cache_level_hint(
-                            sstable,
-                            self.sstable_store.clone(),
-                            sst_read_options.clone(),
-                            Some(level.level_idx),
-                            sstable_info,
-                        ),
-                    );
+                    factory.add_overlapping_sst_iter(F::SstableIteratorType::create(
+                        sstable,
+                        self.sstable_store.clone(),
+                        level_sst_read_options.clone(),
+                        sstable_info,
+                    ));
                     local_stats.overlapping_iter_count += 1;
                 }
             }
@@ -1223,6 +1229,7 @@ impl HummockVersionReader {
         }
         let read_options = Arc::new(SstableIteratorReadOptions {
             cache_policy: Default::default(),
+            cache_level_hint: None,
             scan_end_user_key: None,
             prefetch: false,
             max_preload_retry_times: 0,
