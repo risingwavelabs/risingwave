@@ -27,7 +27,7 @@ import java.util.Properties;
 import org.apache.kafka.connect.data.SchemaBuilder;
 
 /** Converts PostgreSQL composite and polygon values to their text representations. */
-public class PgCompositeToStringConverter
+public class PgTextRepresentationConverter
         implements CustomConverter<SchemaBuilder, RelationalColumn> {
 
     // PG FirstNormalObjectId: OIDs >= this are user-defined types.
@@ -51,7 +51,7 @@ public class PgCompositeToStringConverter
             RelationalColumn column, ConverterRegistration<SchemaBuilder> registration) {
         if (debug) {
             System.err.printf(
-                    "PgCompositeToStringConverter field=%s.%s jdbcType=%d nativeType=%d typeName=%s typeExpression=%s optional=%s%n",
+                    "PgTextRepresentationConverter field=%s.%s jdbcType=%d nativeType=%d typeName=%s typeExpression=%s optional=%s%n",
                     column.dataCollection(),
                     column.name(),
                     column.jdbcType(),
