@@ -95,7 +95,10 @@ impl HummockManager {
         &self,
         context_ids: impl AsRef<[HummockContextId]>,
     ) -> Result<()> {
-        let mut context_info = self.context_info.write().await;
+        let mut context_info = self
+            .context_info
+            .write_with_process_name("release_contexts")
+            .await;
         context_info
             .release_contexts(context_ids, self.env.meta_store())
             .await?;
@@ -161,7 +164,10 @@ impl HummockManager {
     pub(super) async fn release_invalid_contexts(&self) -> Result<Vec<HummockContextId>> {
         let (active_context_ids, mut context_info) = {
             let compaction_guard = self.compaction.read().await;
-            let context_info = self.context_info.write().await;
+            let context_info = self
+                .context_info
+                .write_with_process_name("release_invalid_contexts")
+                .await;
             let mut active_context_ids = HashSet::new();
             active_context_ids.extend(
                 compaction_guard
@@ -358,7 +364,10 @@ impl HummockManager {
     /// and will be unpinned when `context_id` is invalidated.
     pub async fn pin_version(&self, context_id: HummockContextId) -> Result<Arc<HummockVersion>> {
         let versioning = self.versioning.read().await;
-        let mut context_info = self.context_info.write().await;
+        let mut context_info = self
+            .context_info
+            .write_with_process_name("pin_version")
+            .await;
         self.check_context_with_meta_node(context_id, &context_info)
             .await?;
         let mut pinned_versions = BTreeMapTransaction::new(&mut context_info.pinned_versions);
@@ -397,7 +406,10 @@ impl HummockManager {
         context_id: HummockContextId,
         unpin_before: HummockVersionId,
     ) -> Result<()> {
-        let mut context_info = self.context_info.write().await;
+        let mut context_info = self
+            .context_info
+            .write_with_process_name("unpin_version_before")
+            .await;
         self.check_context_with_meta_node(context_id, &context_info)
             .await?;
         let mut pinned_versions = BTreeMapTransaction::new(&mut context_info.pinned_versions);
@@ -432,7 +444,10 @@ impl HummockManager {
 impl HummockManager {
     pub async fn register_safe_point(&self) -> HummockVersionSafePoint {
         let versioning = self.versioning.read().await;
-        let mut wl = self.context_info.write().await;
+        let mut wl = self
+            .context_info
+            .write_with_process_name("register_safe_point")
+            .await;
         let safe_point = HummockVersionSafePoint {
             id: versioning.current_version.id,
             event_sender: self.event_sender.clone(),
@@ -443,7 +458,10 @@ impl HummockManager {
     }
 
     pub async fn unregister_safe_point(&self, safe_point: HummockVersionId) {
-        let mut wl = self.context_info.write().await;
+        let mut wl = self
+            .context_info
+            .write_with_process_name("unregister_safe_point")
+            .await;
         let version_safe_points = &mut wl.version_safe_points;
         if let Some(pos) = version_safe_points.iter().position(|sp| *sp == safe_point) {
             version_safe_points.remove(pos);

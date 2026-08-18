@@ -185,7 +185,10 @@ impl HummockManager {
     ///
     /// Returns number of deleted deltas
     pub async fn delete_version_deltas(&self) -> Result<usize> {
-        let mut versioning_guard = self.versioning.write().await;
+        let mut versioning_guard = self
+            .versioning
+            .write_with_process_name("delete_version_deltas")
+            .await;
         let versioning = versioning_guard.deref_mut();
         let context_info = self.context_info.read().await;
         // If there is any safe point, skip this to ensure meta backup has required delta logs to
