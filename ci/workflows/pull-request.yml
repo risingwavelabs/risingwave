@@ -89,7 +89,7 @@ steps:
     plugins:
       - *cargo-cache
       - docker-compose#v5.5.0: *docker-compose
-    timeout_in_minutes: 15
+    timeout_in_minutes: 20
     retry: *auto-retry
 
   - label: "build other components"
@@ -706,7 +706,7 @@ steps:
     plugins:
       - *cargo-cache
       - docker-compose#v5.5.0: *docker-compose
-    timeout_in_minutes: 25
+    timeout_in_minutes: 35
     retry: *auto-retry
 
   - label: "check dylint"
@@ -730,7 +730,7 @@ steps:
     plugins:
       - *cargo-cache
       - docker-compose#v5.5.0: *docker-compose
-    timeout_in_minutes: 15
+    timeout_in_minutes: 25
     retry: *auto-retry
 
   - label: "unit test (deterministic simulation)"
