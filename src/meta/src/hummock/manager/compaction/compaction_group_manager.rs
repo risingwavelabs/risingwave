@@ -171,9 +171,15 @@ impl HummockManager {
         if pairs.is_empty() {
             return Ok(());
         }
-        let mut versioning_guard = self.versioning.write().await;
+        let mut versioning_guard = self
+            .versioning
+            .write_with_process_name("register_table_ids_for_test")
+            .await;
         let versioning = versioning_guard.deref_mut();
-        let mut compaction_group_manager = self.compaction_group_manager.write().await;
+        let mut compaction_group_manager = self
+            .compaction_group_manager
+            .write_with_process_name("register_table_ids_for_test")
+            .await;
         let current_version = &versioning.current_version;
         let default_config = compaction_group_manager.default_compaction_config();
         let mut compaction_groups_txn = compaction_group_manager.start_compaction_groups_txn();
@@ -285,7 +291,10 @@ impl HummockManager {
             }
         }
 
-        let mut versioning_guard = self.versioning.write().await;
+        let mut versioning_guard = self
+            .versioning
+            .write_with_process_name("unregister_table_ids")
+            .await;
         let versioning = versioning_guard.deref_mut();
         let mut version = HummockVersionTransaction::new(
             &mut versioning.current_version,
@@ -359,7 +368,10 @@ impl HummockManager {
 
         // Purge may cause write to meta store. If it hurts performance while holding versioning
         // lock, consider to make it in batch.
-        let mut compaction_group_manager = self.compaction_group_manager.write().await;
+        let mut compaction_group_manager = self
+            .compaction_group_manager
+            .write_with_process_name("unregister_table_ids")
+            .await;
         let mut compaction_groups_txn = compaction_group_manager.start_compaction_groups_txn();
 
         compaction_groups_txn.purge(HashSet::from_iter(get_compaction_group_ids(
@@ -378,7 +390,10 @@ impl HummockManager {
     ) -> Result<()> {
         {
             // Avoid lock conflicts with `try_update_write_limits``
-            let mut compaction_group_manager = self.compaction_group_manager.write().await;
+            let mut compaction_group_manager = self
+                .compaction_group_manager
+                .write_with_process_name("update_compaction_config")
+                .await;
             let mut compaction_groups_txn = compaction_group_manager.start_compaction_groups_txn();
             compaction_groups_txn
                 .update_compaction_config(compaction_group_ids, config_to_update)?;
@@ -399,7 +414,10 @@ impl HummockManager {
     /// Gets complete compaction group info.
     /// It is the aggregate of `HummockVersion` and `CompactionGroupConfig`
     pub async fn list_compaction_group(&self) -> Vec<CompactionGroupInfo> {
-        let mut versioning_guard = self.versioning.write().await;
+        let mut versioning_guard = self
+            .versioning
+            .write_with_process_name("list_compaction_group")
+            .await;
         let versioning = versioning_guard.deref_mut();
         let current_version = &versioning.current_version;
         let mut results = vec![];
