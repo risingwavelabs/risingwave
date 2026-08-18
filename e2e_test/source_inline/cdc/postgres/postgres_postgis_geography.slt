@@ -64,6 +64,14 @@ create table test_geography (
     location bytea
 ) from geography_source table 'public.test_geography';
 
+# A geography column cannot be mapped to a non-bytea RisingWave type.
+statement error Incompatible data type of column location
+create table test_geography_invalid_mapping (
+    id int primary key,
+    name varchar,
+    location varchar
+) from geography_source table 'public.test_geography';
+
 statement ok
 create table test_geography_array (*)
 from geography_source table 'public.test_geography_array';
