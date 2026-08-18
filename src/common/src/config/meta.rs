@@ -228,6 +228,13 @@ pub struct MetaConfig {
     #[serde(default)]
     pub disable_recovery: bool,
 
+    /// Whether to clean up all foreground creating streaming jobs during recovery.
+    ///
+    /// This preserves the legacy recovery behavior. When disabled, only creating jobs whose
+    /// creation progress cannot be recovered are cleaned up.
+    #[serde(default)]
+    pub clean_all_foreground_jobs_on_recovery: bool,
+
     /// Whether meta should request pausing all data sources on the next bootstrap.
     /// This allows us to pause the cluster on next bootstrap in an offline way.
     /// It's important for standalone or single node deployments.
