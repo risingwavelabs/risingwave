@@ -456,6 +456,7 @@ impl IcebergCompactionHandle {
                 sink_id: self.sink_id.as_raw_id(),
                 props: param.properties,
                 task_type: self.task_type as i32,
+                pk_index_coordinated: false,
             }));
 
         if result.is_ok() {
