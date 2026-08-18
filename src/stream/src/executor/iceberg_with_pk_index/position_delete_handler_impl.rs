@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::time::Duration;
-
 use anyhow::{Context, anyhow};
 use hashbrown::HashMap;
 use hashbrown::hash_map::Entry;
@@ -41,6 +39,7 @@ use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
+use super::load_table_at_least;
 use super::position_delete_merger::PositionDeleteHandler;
 use super::position_delete_staging::StagingVersion;
 
@@ -52,8 +51,11 @@ use super::position_delete_staging::StagingVersion;
 /// loads the table from the catalog (retrying until it reflects the committed
 /// snapshot) and seeds the per-shard delete state in [`StagingVersion`] from the
 /// delete manifests. The seeded state is awaited lazily at the first flush; the
-/// table handle is kept for object-store I/O and cached metadata and never
-/// reloaded afterwards.
+/// table handle is kept for object-store I/O and cached metadata.
+///
+/// `start_seed` is also called again after each compaction commit. That restart drops the whole
+/// [`SeededState`] — table handle, resident delete vectors and all — and repeats the sequence
+/// against the post-compaction snapshot.
 pub struct PositionDeleteHandlerImpl {
     config: IcebergConfig,
     actor_id: ActorId,
@@ -229,6 +231,16 @@ impl PositionDeleteHandlerImpl {
 #[async_trait::async_trait]
 impl PositionDeleteHandler for PositionDeleteHandlerImpl {
     fn start_seed(&mut self, wait_epoch: u64) {
+        // Restart (post-compaction re-seed): drop everything the previous seed produced. Replacing
+        // `self.inner` below drops any `SeededState`, and with it the whole resident delete-vector
+        // cache; abort a still-running previous seed first so it does not linger as a detached task
+        // pinning the meta wait RPC and catalog-reload retries.
+        if let HandlerInner::Seeding(handle) =
+            std::mem::replace(&mut self.inner, HandlerInner::Unseeded)
+        {
+            handle.abort();
+        }
+
         let config = self.config.clone();
         let actor_id = self.actor_id;
         let vnode_bitmap = self.vnode_bitmap.clone();
@@ -300,34 +312,6 @@ impl PositionDeleteHandler for PositionDeleteHandlerImpl {
     async fn flush(&mut self) -> SinkResult<Option<SinkMetadata>> {
         self.flush_inner().await
     }
-}
-
-/// Load the table, retrying until its snapshot set contains `expected`
-async fn load_table_at_least(config: &IcebergConfig, expected: Option<i64>) -> SinkResult<Table> {
-    const MAX_ATTEMPTS: usize = 10;
-    const BACKOFF: Duration = Duration::from_millis(500);
-    let mut last = None;
-    for _ in 0..MAX_ATTEMPTS {
-        let table = config.load_table().await?;
-        let Some(expected) = expected else {
-            return Ok(table);
-        };
-        if table
-            .metadata()
-            .snapshots()
-            .any(|s| s.snapshot_id() == expected)
-        {
-            return Ok(table);
-        }
-        last = Some(table.metadata().current_snapshot_id());
-        tokio::time::sleep(BACKOFF).await;
-    }
-    Err(SinkError::Iceberg(anyhow!(
-        "iceberg catalog did not reflect committed pk-index snapshot {:?} after {} attempts (last current_snapshot_id={:?})",
-        expected,
-        MAX_ATTEMPTS,
-        last,
-    )))
 }
 
 /// Scan the table's current-snapshot delete manifests once and seed `staging` with
