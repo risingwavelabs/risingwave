@@ -768,9 +768,9 @@ pub struct SessionImpl {
     /// async functions, there should actually be no contention.
     txn: Arc<Mutex<transaction::State>>,
 
-    /// Query cancel flag.
-    /// This flag is set only when current query is executed in local mode, and used to cancel
-    /// local query.
+    /// Cancellation sender for the current command's local execution. It remains installed after
+    /// cancellation so nested execution observes the same state, and is cleared at command
+    /// boundaries.
     current_query_cancel_flag: Mutex<Option<ShutdownSender>>,
 
     /// execution context represents the lifetime of a running SQL in the current session
@@ -1385,16 +1385,28 @@ impl SessionImpl {
         shutdown_rx
     }
 
+    /// Reuse the current query's cancellation channel, or install a new one if none exists.
+    pub fn reuse_or_reset_cancel_query_flag(&self) -> ShutdownToken {
+        let mut flag = self.current_query_cancel_flag.lock();
+        if let Some(shutdown_tx) = flag.as_ref() {
+            return shutdown_tx.subscribe();
+        }
+
+        let (shutdown_tx, shutdown_rx) = ShutdownToken::new();
+        *flag = Some(shutdown_tx);
+        shutdown_rx
+    }
+
     pub fn set_cancel_query_flag(&self, shutdown_tx: ShutdownSender) {
         let mut flag = self.current_query_cancel_flag.lock();
         *flag = Some(shutdown_tx);
     }
 
     pub fn cancel_current_query(&self) {
-        let mut flag_guard = self.current_query_cancel_flag.lock();
-        if let Some(sender) = flag_guard.take() {
+        let flag_guard = self.current_query_cancel_flag.lock();
+        if let Some(sender) = flag_guard.as_ref() {
             info!("Trying to cancel query in local mode.");
-            // Current running query is in local mode
+            // Keep the cancelled channel installed for local executors started by this command.
             sender.cancel();
             info!("Cancel query request sent.");
         }

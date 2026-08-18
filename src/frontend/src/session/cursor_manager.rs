@@ -1333,12 +1333,16 @@ impl CursorManager {
 
 #[cfg(test)]
 mod tests {
+    use futures::stream;
+    use risingwave_sqlparser::parser::Parser;
+    use tokio::sync::oneshot;
+
     use super::*;
     use crate::error::RwError;
+    use crate::handler::query::handle_query;
 
-    async fn slow_cursor_operation() -> Result<()> {
-        tokio::time::sleep(Duration::from_secs(5)).await;
-        Ok(())
+    async fn pending_cursor_operation() -> Result<()> {
+        std::future::pending().await
     }
 
     #[tokio::test]
@@ -1357,38 +1361,113 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_interruptible_cursor_operation_times_out_slow_next_row() {
+    async fn test_interruptible_cursor_operation_times_out_pending_next_row() {
         let mut cancel_handle = FetchCursorCancelHandle::new();
-        let start = Instant::now();
 
         let result = await_interruptible_cursor_operation(
-            slow_cursor_operation(),
-            Some(Instant::now() + Duration::from_secs(1)),
+            pending_cursor_operation(),
+            Some(Instant::now() + Duration::from_millis(5)),
             &mut cancel_handle,
         )
         .await
         .unwrap();
 
         assert!(matches!(result, InterruptibleCursorResult::TimedOut));
-        assert!(start.elapsed() < Duration::from_secs(2));
     }
 
     #[tokio::test]
-    async fn test_interruptible_cursor_operation_cancels_slow_next_row() {
+    async fn test_subscription_fetch_cancels_with_local_query() {
+        let session = Arc::new(SessionImpl::mock());
+        session
+            .set_config("query_mode", "local".to_owned())
+            .unwrap();
+        let _txn_guard = session.txn_begin_implicit();
         let mut cancel_handle = FetchCursorCancelHandle::new();
-        let cancel_tx = cancel_handle.cancel_tx.clone();
-        tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_millis(1000)).await;
-            assert!(cancel_tx.cancel());
-        });
-        let start = Instant::now();
+        // Use FETCH as the cursor operation under test. Keep its primary sender to verify that the
+        // same channel is reused throughout the entire FETCH lifecycle.
+        let fetch_cancel_tx = cancel_handle.cancel_tx.clone();
 
-        let result =
-            await_interruptible_cursor_operation(slow_cursor_operation(), None, &mut cancel_handle)
-                .await
-                .unwrap();
+        let sql: Arc<str> = "select pg_sleep(0) union all select pg_sleep(3600)".into();
+        let statement = Parser::parse_exactly_one(&sql).unwrap();
+        let handler_args = HandlerArgs::new(session.clone(), &statement, sql).unwrap();
+        let (local_query_started_tx, local_query_started_rx) = oneshot::channel();
+        // Initiate the local query lazily so polling `next_row` drives the production query path.
+        let local_query_stream = stream::once({
+            let handler_args = handler_args.clone();
+            async move {
+                let mut response = handle_query(handler_args, statement, vec![])
+                    .await
+                    .map_err(|error| Box::new(error) as BoxedError)?;
 
-        assert!(matches!(result, InterruptibleCursorResult::Cancelled));
-        assert!(start.elapsed() < Duration::from_millis(2000));
+                // Consuming the first UNION ALL branch proves that the lazy local executor has
+                // started. The second branch remains blocked in `pg_sleep` until cancellation.
+                response.values_stream().next().await.ok_or_else(|| {
+                    Box::new(std::io::Error::other(
+                        "local query ended before its first row set",
+                    )) as BoxedError
+                })??;
+                assert!(local_query_started_tx.send(()).is_ok());
+                response.values_stream().next().await.ok_or_else(|| {
+                    Box::new(std::io::Error::other(
+                        "local query ended before its blocking row set",
+                    )) as BoxedError
+                })?
+            }
+        })
+        .boxed();
+
+        let table_catalog = TableCatalog::default();
+        let mut cursor = SubscriptionCursor {
+            cursor_name: "cur".to_owned(),
+            subscription: Arc::new(SubscriptionCatalog {
+                retention_seconds: 60,
+                ..Default::default()
+            }),
+            dependent_table_id: 0.into(),
+            cursor_need_drop_time: Instant::now() + Duration::from_secs(60),
+            state: State::Fetch {
+                from_snapshot: true,
+                rw_timestamp: 0,
+                chunk_stream: CursorDataChunkStream::PgResponse(PgResponseStream::Rows(
+                    local_query_stream,
+                )),
+                remaining_rows: VecDeque::new(),
+                expected_timestamp: None,
+                init_query_timer: Instant::now(),
+            },
+            fields_manager: FieldsManager::new(&table_catalog),
+            cursor_metrics: Arc::new(CursorMetrics::for_test()),
+            last_fetch: Instant::now(),
+            seek_pk_row: None,
+        };
+        let formats = vec![];
+
+        let mut fetch = Box::pin(cursor.next(1, handler_args, &formats, None, &mut cancel_handle));
+        tokio::select! {
+            started = local_query_started_rx => started.expect("local query initiation dropped"),
+            result = &mut fetch => panic!("FETCH completed while initiating local query: {result:?}"),
+        }
+
+        session.cancel_current_query();
+
+        // The session must still hold the original FETCH channel after initiating the local query.
+        assert!(
+            session
+                .current_query_cancel_flag
+                .lock()
+                .as_ref()
+                .is_some_and(|shutdown_tx| shutdown_tx.same_channel(&fetch_cancel_tx))
+        );
+
+        // A local query initiated after the FETCH received CancelRequest must immediately
+        // observe cancellation from the retained channel.
+        let late_shutdown_rx = session.reuse_or_reset_cancel_query_flag();
+        assert!(late_shutdown_rx.is_cancelled());
+
+        let error = tokio::time::timeout(Duration::from_secs(1), fetch)
+            .await
+            .expect("cancelled FETCH should not hang")
+            .expect_err("cancelled FETCH without accumulated rows should return an error");
+        assert!(error.to_string().contains("Cancelled by user"));
     }
 }
