@@ -21,13 +21,13 @@ use futures::TryStreamExt;
 use iceberg::spec::{MAIN_BRANCH, Operation};
 use iceberg::{Catalog, TableIdent};
 use iceberg_compaction_core::compaction::{
-    CommitConsistencyParams, CommitManagerRetryConfig, CompactionBuilder, CompactionPlan,
-    CompactionPlanner, CompactionResult,
+    AutoCompactionPlanner, CommitConsistencyParams, CommitManagerRetryConfig, CompactionBuilder,
+    CompactionPlan, CompactionPlanner, CompactionResult, RewriteResult,
 };
 use iceberg_compaction_core::config::{
-    CompactionExecutionConfigBuilder, CompactionPlanningConfig, FileGroupScope,
-    FilesWithDeletesConfigBuilder, FullCompactionConfigBuilder, GroupFilters,
-    SmallFilesConfigBuilder,
+    AutoCompactionConfig, AutoCompactionConfigBuilder, CompactionExecutionConfigBuilder,
+    CompactionPlanningConfig, FileGroupScope, FilesWithDeletesConfigBuilder,
+    FullCompactionConfigBuilder, GroupFilters, SmallFilesConfigBuilder,
 };
 use iceberg_compaction_core::executor::RewriteFilesStat;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
@@ -46,7 +46,7 @@ use risingwave_pb::id::IcebergCompactionTaskId;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
 
-use super::IcebergTaskMeta;
+use super::{IcebergTaskMeta, PkIndexCompactionResult, build_pk_index_compaction_result};
 use crate::hummock::{HummockError, HummockResult};
 use crate::monitor::CompactorMetrics;
 
@@ -99,6 +99,11 @@ pub struct IcebergCompactionTaskStatistics {
     pub total_eq_del_file_count: u32,
 }
 
+enum IcebergTaskPlanningConfig {
+    Auto(AutoCompactionConfig),
+    Explicit(CompactionPlanningConfig),
+}
+
 impl Debug for IcebergCompactionTaskStatistics {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("IcebergCompactionTaskStatistics")
@@ -129,6 +134,9 @@ pub struct IcebergCompactionPlanRunner {
     pub task_type: TaskType,
     branch: String,
     compaction_plan: CompactionPlan,
+    /// When true, run the rewrite without committing and report the result back to meta for
+    /// pk-index coordinated compaction. When false, behavior is unchanged (rewrite + commit).
+    pk_index_coordinated: bool,
 }
 
 #[derive(Debug)]
@@ -318,6 +326,7 @@ impl IcebergCompactionPlanRunner {
     /// ```
     pub fn unique_ident(&self) -> String {
         let task_type_str = match self.task_type {
+            TaskType::Auto => "auto",
             TaskType::SmallFiles => "small-files",
             TaskType::Full => "full",
             TaskType::FilesWithDelete => "files-with-delete",
@@ -340,7 +349,10 @@ impl IcebergCompactionPlanRunner {
         }
     }
 
-    pub async fn compact(self, shutdown_rx: Receiver<()>) -> HummockResult<RewriteFilesStat> {
+    pub async fn compact(
+        self,
+        shutdown_rx: Receiver<()>,
+    ) -> HummockResult<(RewriteFilesStat, Option<PkIndexCompactionResult>)> {
         let task_id = self.task_id;
         let sink_id = self.sink_id;
         let plan_index = self.plan_index;
@@ -361,6 +373,7 @@ impl IcebergCompactionPlanRunner {
             self.task_type,
             self.branch,
             self.compaction_plan,
+            self.pk_index_coordinated,
         );
 
         tokio::select! {
@@ -381,7 +394,7 @@ impl IcebergCompactionPlanRunner {
             }
             result = compact_task => {
                 match &result {
-                    Ok(stats) => {
+                    Ok((stats, _pk_index_result)) => {
                         tracing::info!(
                             iceberg_component = "compaction_worker",
                             iceberg_operation = "execute_plan",
@@ -418,6 +431,7 @@ impl IcebergCompactionPlanRunner {
         }
     }
 
+    #[expect(clippy::too_many_arguments)]
     async fn compact_impl(
         task_id: IcebergCompactionTaskId,
         plan_index: usize,
@@ -429,7 +443,8 @@ impl IcebergCompactionPlanRunner {
         task_type: TaskType,
         branch: String,
         compaction_plan: CompactionPlan,
-    ) -> HummockResult<RewriteFilesStat> {
+        pk_index_coordinated: bool,
+    ) -> HummockResult<(RewriteFilesStat, Option<PkIndexCompactionResult>)> {
         if !compaction_plan.has_files() {
             tracing::info!(
                 iceberg_component = "compaction_worker",
@@ -441,7 +456,7 @@ impl IcebergCompactionPlanRunner {
                 branch = %branch,
                 "iceberg_compaction_plan_skipped_empty",
             );
-            return Ok(RewriteFilesStat::default());
+            return Ok((RewriteFilesStat::default(), None));
         }
 
         ensure_compaction_plan_is_current(
@@ -512,6 +527,50 @@ impl IcebergCompactionPlanRunner {
                 metrics_guard.compact_task_pending_parallelism.sub(val as _);
             },
         );
+
+        // Capture plan-derived report inputs before the rewrite consumes `compaction_plan`.
+        // Only used by the pk-index coordinated path below.
+        let pk_index_read_snapshot_id = compaction_plan.snapshot_id;
+        let pk_index_input_file_paths: Vec<String> = if pk_index_coordinated {
+            compaction_plan
+                .file_group
+                .data_files
+                .iter()
+                .chain(compaction_plan.file_group.position_delete_files.iter())
+                .chain(compaction_plan.file_group.equality_delete_files.iter())
+                .map(|task| task.data_file_path.clone())
+                .collect()
+        } else {
+            Vec::new()
+        };
+
+        if pk_index_coordinated {
+            // `compact_with_plan` commits its rewrite internally. A pk-index compaction must leave
+            // the input files live until meta has paused the writer and can atomically commit the
+            // overwrite together with the resolved pk-index. Run only the rewrite phase here and
+            // report its output to meta, which is the sole committer for this path.
+            let table = catalog
+                .load_table(&table_ident)
+                .await
+                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+            let RewriteResult {
+                output_data_files: data_files,
+                stats,
+                ..
+            } = compaction
+                .rewrite_plan(compaction_plan, &compaction_execution_config, &table)
+                .await
+                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+
+            let pk_index_result = build_pk_index_compaction_result(
+                &table,
+                data_files,
+                pk_index_input_file_paths,
+                pk_index_read_snapshot_id,
+            )?;
+
+            return Ok((stats, Some(pk_index_result)));
+        }
 
         let compaction_result = compaction
             .compact_with_plan(compaction_plan, &compaction_execution_config)
@@ -600,7 +659,7 @@ impl IcebergCompactionPlanRunner {
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
         }
 
-        Ok(stats)
+        Ok((stats, None))
     }
 }
 
@@ -637,31 +696,11 @@ fn analyze_task_statistics(plan: &CompactionPlan) -> IcebergCompactionTaskStatis
     }
 }
 
-/// Creates a task execution context from an iceberg compaction task.
-pub async fn create_task_execution(
-    iceberg_compaction_task: IcebergCompactionTask,
-    config: IcebergCompactorRunnerConfig,
-    metrics: Arc<CompactorMetrics>,
-) -> HummockResult<IcebergTaskExecution> {
-    let IcebergCompactionTask {
-        task_id,
-        sink_id,
-        props,
-        task_type,
-    } = iceberg_compaction_task;
-
-    let iceberg_config = IcebergConfig::from_btreemap(BTreeMap::from_iter(props))
-        .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-
-    let catalog = iceberg_config
-        .create_catalog()
-        .await
-        .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-
-    let table_ident = iceberg_config
-        .full_table_name()
-        .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-
+fn build_task_planning_config(
+    task_type: TaskType,
+    iceberg_config: &IcebergConfig,
+    config: &IcebergCompactorRunnerConfig,
+) -> HummockResult<IcebergTaskPlanningConfig> {
     let grouping_strategy = match iceberg_config.write_mode {
         IcebergWriteMode::CopyOnWrite => iceberg_compaction_core::config::GroupingStrategy::Single,
         IcebergWriteMode::MergeOnRead => match config.target_binpack_group_size_mb {
@@ -676,7 +715,7 @@ pub async fn create_task_execution(
         },
     };
 
-    let group_filters = {
+    let group_filters =
         if config.min_group_size_mb.is_some() || config.min_group_file_count.is_some() {
             Some(GroupFilters {
                 min_group_size_bytes: config.min_group_size_mb.map(|mb| mb * 1024 * 1024),
@@ -684,15 +723,31 @@ pub async fn create_task_execution(
             })
         } else {
             None
+        };
+
+    let planning_config = match task_type {
+        TaskType::Auto => {
+            let mut builder = AutoCompactionConfigBuilder::default();
+            builder
+                .max_input_parallelism(config.max_parallelism as usize)
+                .max_output_parallelism(config.max_parallelism as usize)
+                .min_size_per_partition(config.min_size_per_partition)
+                .max_file_count_per_partition(config.max_file_count_per_partition as usize)
+                .target_file_size_bytes(iceberg_config.target_file_size_mb() * 1024 * 1024)
+                .enable_heuristic_output_parallelism(config.enable_heuristic_output_parallelism)
+                .small_file_threshold_bytes(iceberg_config.small_files_threshold_mb() * 1024 * 1024)
+                .min_delete_file_count_threshold(iceberg_config.delete_files_count_threshold())
+                .grouping_strategy(grouping_strategy);
+
+            if let Some(group_filters) = group_filters {
+                builder.group_filters(group_filters);
+            }
+
+            let config = builder
+                .build()
+                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+            IcebergTaskPlanningConfig::Auto(config)
         }
-    };
-
-    let parsed_task_type = TaskType::try_from(task_type)
-        .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-    let should_use_cow =
-        should_enable_iceberg_cow(iceberg_config.r#type.as_str(), iceberg_config.write_mode);
-
-    let planning_config = match parsed_task_type {
         TaskType::SmallFiles => {
             let mut builder = SmallFilesConfigBuilder::default();
             builder
@@ -705,18 +760,20 @@ pub async fn create_task_execution(
                 .small_file_threshold_bytes(iceberg_config.small_files_threshold_mb() * 1024 * 1024)
                 .grouping_strategy(grouping_strategy);
 
-            if let Some(group_filters) = group_filters.clone() {
+            if let Some(group_filters) = group_filters {
                 builder.group_filters(group_filters);
             }
 
             let config = builder
                 .build()
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-
-            CompactionPlanningConfig::SmallFiles(config)
+            IcebergTaskPlanningConfig::Explicit(CompactionPlanningConfig::SmallFiles(config))
         }
         TaskType::Full => {
-            let file_group_scope = if should_use_cow {
+            let file_group_scope = if should_enable_iceberg_cow(
+                iceberg_config.r#type.as_str(),
+                iceberg_config.write_mode,
+            ) {
                 FileGroupScope::Table
             } else {
                 FileGroupScope::Partition
@@ -732,10 +789,8 @@ pub async fn create_task_execution(
                 .file_group_scope(file_group_scope)
                 .build()
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-
-            CompactionPlanningConfig::Full(config)
+            IcebergTaskPlanningConfig::Explicit(CompactionPlanningConfig::Full(config))
         }
-
         TaskType::FilesWithDelete => {
             let config = FilesWithDeletesConfigBuilder::default()
                 .max_input_parallelism(config.max_parallelism as usize)
@@ -748,31 +803,78 @@ pub async fn create_task_execution(
                 .min_delete_file_count_threshold(iceberg_config.delete_files_count_threshold())
                 .build()
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-
-            CompactionPlanningConfig::FilesWithDeletes(config)
+            IcebergTaskPlanningConfig::Explicit(CompactionPlanningConfig::FilesWithDeletes(config))
         }
-
-        _ => {
-            unreachable!(
-                "Unsupported task type in iceberg compaction task {}: {:?}",
-                task_id, parsed_task_type
-            )
-        }
+        _ => unreachable!("Unsupported task type in iceberg compaction task: {task_type:?}"),
     };
 
-    let branch = commit_branch(iceberg_config.r#type.as_str(), iceberg_config.write_mode);
+    Ok(planning_config)
+}
 
-    let planner = CompactionPlanner::new(planning_config.clone());
+/// Creates a task execution context from an iceberg compaction task.
+pub async fn create_task_execution(
+    iceberg_compaction_task: IcebergCompactionTask,
+    config: IcebergCompactorRunnerConfig,
+    metrics: Arc<CompactorMetrics>,
+) -> HummockResult<IcebergTaskExecution> {
+    let IcebergCompactionTask {
+        task_id,
+        sink_id,
+        props,
+        task_type,
+        pk_index_coordinated,
+    } = iceberg_compaction_task;
+
+    let iceberg_config = IcebergConfig::from_btreemap(BTreeMap::from_iter(props))
+        .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+
+    let catalog = iceberg_config
+        .create_catalog()
+        .await
+        .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+
+    let table_ident = iceberg_config
+        .full_table_name()
+        .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+
+    let parsed_task_type = TaskType::try_from(task_type)
+        .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+    let planning_config = build_task_planning_config(parsed_task_type, &iceberg_config, &config)?;
+
+    let branch = commit_branch(iceberg_config.r#type.as_str(), iceberg_config.write_mode);
 
     let table = catalog
         .load_table(&table_ident)
         .await
         .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
-    let compaction_plans = planner
-        .plan_compaction_with_branch(&table, &branch)
-        .await
-        .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+    let compaction_plans = match planning_config {
+        IcebergTaskPlanningConfig::Auto(config) => {
+            let report = AutoCompactionPlanner::new(config)
+                .plan_compaction_report_with_branch(&table, &branch)
+                .await
+                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+            tracing::info!(
+                iceberg_component = "compaction_worker",
+                iceberg_operation = "plan_auto_task",
+                task_id = %task_id,
+                sink_id,
+                table = %table_ident,
+                branch = %branch,
+                selected_strategy = ?report.selected_strategy,
+                reason = ?report.reason,
+                planned_input_bytes = report.planned_input_bytes,
+                planned_input_files = report.planned_input_files,
+                rewrite_ratio = report.rewrite_ratio,
+                "iceberg_auto_compaction_strategy_selected",
+            );
+            report.plans
+        }
+        IcebergTaskPlanningConfig::Explicit(config) => CompactionPlanner::new(config)
+            .plan_compaction_with_branch(&table, &branch)
+            .await
+            .map_err(|e| HummockError::compaction_executor(e.as_report()))?,
+    };
 
     if compaction_plans.is_empty() {
         tracing::info!(
@@ -806,6 +908,7 @@ pub async fn create_task_execution(
             task_type: parsed_task_type,
             branch: branch.clone(),
             compaction_plan,
+            pk_index_coordinated,
         });
     }
 
@@ -829,7 +932,7 @@ pub async fn create_task_execution(
 
 #[cfg(test)]
 mod tests {
-    use super::PlannedInputFiles;
+    use super::*;
 
     fn planned_inputs(entries: &[(&str, &[&str])]) -> PlannedInputFiles {
         PlannedInputFiles {
@@ -885,5 +988,73 @@ mod tests {
         inputs.observe("data-a", ["delete-a"]);
 
         assert_eq!(inputs.len(), 1);
+    }
+
+    #[test]
+    fn test_build_auto_compaction_planning_config() {
+        let iceberg_config = IcebergConfig::from_btreemap(BTreeMap::from([
+            ("connector".to_owned(), "iceberg".to_owned()),
+            ("type".to_owned(), "append-only".to_owned()),
+            ("force_append_only".to_owned(), "true".to_owned()),
+            ("catalog.name".to_owned(), "test-catalog".to_owned()),
+            ("catalog.type".to_owned(), "storage".to_owned()),
+            ("warehouse.path".to_owned(), "s3://iceberg".to_owned()),
+            ("database.name".to_owned(), "test_db".to_owned()),
+            ("table.name".to_owned(), "test_table".to_owned()),
+            ("compaction.type".to_owned(), "auto".to_owned()),
+            (
+                "compaction.small_files_threshold_mb".to_owned(),
+                "96".to_owned(),
+            ),
+            (
+                "compaction.delete_files_count_threshold".to_owned(),
+                "7".to_owned(),
+            ),
+            (
+                "compaction.target_file_size_mb".to_owned(),
+                "256".to_owned(),
+            ),
+        ]))
+        .unwrap();
+        let runner_config = IcebergCompactorRunnerConfig {
+            max_parallelism: 8,
+            min_size_per_partition: 512 * 1024 * 1024,
+            max_file_count_per_partition: 16,
+            enable_validate_compaction: false,
+            max_record_batch_rows: 1024,
+            enable_heuristic_output_parallelism: true,
+            max_concurrent_closes: 4,
+            enable_prefetch: false,
+            target_binpack_group_size_mb: Some(64),
+            min_group_size_mb: Some(32),
+            min_group_file_count: Some(3),
+        };
+
+        let IcebergTaskPlanningConfig::Auto(config) =
+            build_task_planning_config(TaskType::Auto, &iceberg_config, &runner_config).unwrap()
+        else {
+            panic!("expected auto planning config");
+        };
+
+        assert_eq!(config.max_input_parallelism, 8);
+        assert_eq!(config.max_output_parallelism, 8);
+        assert_eq!(config.min_size_per_partition, 512 * 1024 * 1024);
+        assert_eq!(config.max_file_count_per_partition, 16);
+        assert_eq!(config.target_file_size_bytes, 256 * 1024 * 1024);
+        assert_eq!(config.small_file_threshold_bytes, 96 * 1024 * 1024);
+        assert_eq!(config.min_delete_file_count_threshold, 7);
+        assert_eq!(config.thresholds.min_small_files_count, 5);
+        assert_eq!(config.thresholds.min_delete_heavy_files_count, 1);
+
+        let iceberg_compaction_core::config::GroupingStrategy::BinPack(bin_pack) =
+            config.grouping_strategy
+        else {
+            panic!("expected bin-pack grouping strategy");
+        };
+        assert_eq!(bin_pack.target_group_size_bytes, 64 * 1024 * 1024);
+
+        let group_filters = config.group_filters.unwrap();
+        assert_eq!(group_filters.min_group_size_bytes, Some(32 * 1024 * 1024));
+        assert_eq!(group_filters.min_group_file_count, Some(3));
     }
 }

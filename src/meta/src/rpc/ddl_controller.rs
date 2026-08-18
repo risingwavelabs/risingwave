@@ -155,7 +155,7 @@ pub enum DdlCommand {
     DropDatabase(DatabaseId),
     CreateSchema(Schema),
     DropSchema(SchemaId, DropMode),
-    CreateNonSharedSource(Source),
+    CreateNonSharedSource(Source, Option<TableId>),
     DropSource(SourceId, DropMode),
     ResetSource(SourceId),
     CreateFunction(Function),
@@ -209,7 +209,7 @@ impl DdlCommand {
             DdlCommand::DropDatabase(id) => Right(id.as_object_id()),
             DdlCommand::CreateSchema(schema) => Left(schema.name.clone()),
             DdlCommand::DropSchema(id, _) => Right(id.as_object_id()),
-            DdlCommand::CreateNonSharedSource(source) => Left(source.name.clone()),
+            DdlCommand::CreateNonSharedSource(source, _) => Left(source.name.clone()),
             DdlCommand::DropSource(id, _) => Right(id.as_object_id()),
             DdlCommand::ResetSource(id) => Right(id.as_object_id()),
             DdlCommand::CreateFunction(function) => Left(function.name.clone()),
@@ -269,7 +269,7 @@ impl DdlCommand {
             | DdlCommand::AlterStreamingJobConfig(_, _, _)
             | DdlCommand::AlterSubscriptionRetention { .. } => true,
             DdlCommand::CreateStreamingJob { .. }
-            | DdlCommand::CreateNonSharedSource(_)
+            | DdlCommand::CreateNonSharedSource(_, _)
             | DdlCommand::ReplaceStreamJob(_)
             | DdlCommand::AlterNonSharedSource(_)
             | DdlCommand::ResetSource(_)
@@ -457,8 +457,9 @@ impl DdlController {
                 DdlCommand::DropSchema(schema_id, drop_mode) => {
                     ctrl.drop_schema(schema_id, drop_mode).await
                 }
-                DdlCommand::CreateNonSharedSource(source) => {
-                    ctrl.create_non_shared_source(source).await
+                DdlCommand::CreateNonSharedSource(source, iceberg_table_id) => {
+                    ctrl.create_non_shared_source(source, iceberg_table_id)
+                        .await
                 }
                 DdlCommand::DropSource(source_id, drop_mode) => {
                     ctrl.drop_source(source_id, drop_mode).await
@@ -682,7 +683,11 @@ impl DdlController {
     }
 
     /// Shared source is handled in [`Self::create_streaming_job`]
-    async fn create_non_shared_source(&self, source: Source) -> MetaResult<NotificationVersion> {
+    async fn create_non_shared_source(
+        &self,
+        source: Source,
+        iceberg_table_id: Option<TableId>,
+    ) -> MetaResult<NotificationVersion> {
         let handle = create_source_worker(
             &source,
             self.source_manager.metrics.clone(),
@@ -694,7 +699,7 @@ impl DdlController {
         let (source_id, version) = self
             .metadata_manager
             .catalog_controller
-            .create_source(source)
+            .create_source(source, iceberg_table_id)
             .await?;
         self.source_manager
             .register_source_with_handle(source_id, handle)
@@ -1106,7 +1111,7 @@ impl DdlController {
         since_timestamp_epoch: Option<u64>,
     ) -> MetaResult<NotificationVersion> {
         let replace_sink_info = if let Some(old_sink_id) = replace_sink {
-            let StreamingJob::Sink(sink) = &streaming_job else {
+            let StreamingJob::Sink(sink, _) = &streaming_job else {
                 bail!("replace sink requires a sink job")
             };
             if sink.target_table.is_some() {
@@ -1115,7 +1120,7 @@ impl DdlController {
 
             Some(old_sink_id)
         } else {
-            if let StreamingJob::Sink(sink) = &streaming_job
+            if let StreamingJob::Sink(sink, _) = &streaming_job
                 && let Some(target_table) = sink.target_table
             {
                 self.validate_table_for_sink(target_table).await?;
@@ -1336,7 +1341,7 @@ impl DdlController {
                     attr,
                 );
             }
-            StreamingJob::Sink(sink) => {
+            StreamingJob::Sink(sink, _) => {
                 if sink.auto_refresh_schema_from_table.is_some() {
                     check_sink_fragments_support_refresh_schema(&stream_job_fragments.fragments)?;
                 }
@@ -1666,7 +1671,7 @@ impl DdlController {
                             self.env.id_gen_manager(),
                         )?;
 
-                    let streaming_job = StreamingJob::Sink(sink);
+                    let streaming_job = StreamingJob::Sink(sink, None);
 
                     let tmp_sink_model = self
                         .metadata_manager
@@ -1674,7 +1679,7 @@ impl DdlController {
                         .create_job_catalog_for_replace(&streaming_job, None, None, None)
                         .await?;
                     let tmp_sink_id = tmp_sink_model.job_id.as_sink_id();
-                    let StreamingJob::Sink(sink) = streaming_job else {
+                    let StreamingJob::Sink(sink, _) = streaming_job else {
                         unreachable!()
                     };
 
@@ -1954,7 +1959,7 @@ impl DdlController {
         if snapshot_backfill_info.is_some() {
             match stream_job {
                 StreamingJob::MaterializedView(_)
-                | StreamingJob::Sink(_)
+                | StreamingJob::Sink(..)
                 | StreamingJob::Index(_, _) => {}
                 StreamingJob::Table(_, _, _) | StreamingJob::Source(_) => {
                     return Err(
@@ -2002,7 +2007,7 @@ impl DdlController {
             stream_job.set_table_vnode_count(mview_fragment.vnode_count());
         }
 
-        let new_upstream_sink = if let StreamingJob::Sink(sink) = &stream_job
+        let new_upstream_sink = if let StreamingJob::Sink(sink, _) = &stream_job
             && let Ok(table_id) = sink.get_target_table()
         {
             let tables = self

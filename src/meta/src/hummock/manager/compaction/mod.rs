@@ -1378,7 +1378,10 @@ impl HummockManager {
         table_stats_change: Option<PbTableStatsMap>,
     ) -> Result<()> {
         if let Some(task) = compact_task {
-            let mut guard = self.compaction.write().await;
+            let mut guard = self
+                .compaction
+                .write_with_process_name("report_compact_task_for_test")
+                .await;
             guard.compact_task_assignment.insert(
                 task_id,
                 CompactTaskAssignment {
