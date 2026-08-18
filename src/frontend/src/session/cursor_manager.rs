@@ -117,6 +117,15 @@ async fn await_interruptible_cursor_operation<T>(
     }
 }
 
+/// Return a cancellation error if FETCH has no accumulated rows. Otherwise, allow the caller to
+/// finish with a partial result.
+fn check_fetch_cancellation(accumulated_rows: &[Row]) -> Result<()> {
+    if accumulated_rows.is_empty() {
+        return Err(SchedulerError::QueryCancelled("Cancelled by user".to_owned()).into());
+    }
+    Ok(())
+}
+
 impl CursorDataChunkStream {
     pub fn init_row_stream(
         &mut self,
@@ -694,7 +703,8 @@ impl SubscriptionCursor {
         }
         while cur < count {
             if cancel_handle.is_cancelled() {
-                return Err(SchedulerError::QueryCancelled("Cancelled by user".to_owned()).into());
+                check_fetch_cancellation(&ans)?;
+                break;
             }
             let fetch_cursor_timer = Instant::now();
             // Register the FETCH-level cancel token before `next_row` so the
@@ -714,9 +724,8 @@ impl SubscriptionCursor {
                 InterruptibleCursorResult::Completed(row) => row,
                 InterruptibleCursorResult::TimedOut => break,
                 InterruptibleCursorResult::Cancelled => {
-                    return Err(
-                        SchedulerError::QueryCancelled("Cancelled by user".to_owned()).into(),
-                    );
+                    check_fetch_cancellation(&ans)?;
+                    break;
                 }
             };
             match row {
@@ -768,10 +777,8 @@ impl SubscriptionCursor {
                             break;
                         }
                         InterruptibleCursorResult::Cancelled => {
-                            return Err(SchedulerError::QueryCancelled(
-                                "Cancelled by user".to_owned(),
-                            )
-                            .into());
+                            check_fetch_cancellation(&ans)?;
+                            break;
                         }
                     }
                 }
@@ -1333,7 +1340,7 @@ impl CursorManager {
 
 #[cfg(test)]
 mod tests {
-    use futures::stream;
+    use futures_async_stream::try_stream;
     use risingwave_sqlparser::parser::Parser;
     use tokio::sync::oneshot;
 
@@ -1343,6 +1350,34 @@ mod tests {
 
     async fn pending_cursor_operation() -> Result<()> {
         std::future::pending().await
+    }
+
+    #[try_stream(ok = Vec<Row>, error = BoxedError)]
+    async fn local_query_row_stream(
+        handler_args: HandlerArgs,
+        statement: risingwave_sqlparser::ast::Statement,
+        local_query_started_tx: oneshot::Sender<()>,
+    ) {
+        let mut response = handle_query(handler_args, statement, vec![])
+            .await
+            .map_err(|error| Box::new(error) as BoxedError)?;
+
+        let first_rows = response.values_stream().next().await.ok_or_else(|| {
+            Box::new(std::io::Error::other(
+                "local query ended before its first row set",
+            )) as BoxedError
+        })??;
+        yield first_rows;
+
+        // This runs when the cursor polls the row set that will block in `pg_sleep`, after the
+        // first row has already been added to `ans`.
+        assert!(local_query_started_tx.send(()).is_ok());
+        let blocking_rows = response.values_stream().next().await.ok_or_else(|| {
+            Box::new(std::io::Error::other(
+                "local query ended before its blocking row set",
+            )) as BoxedError
+        })??;
+        yield blocking_rows;
     }
 
     #[tokio::test]
@@ -1376,7 +1411,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_subscription_fetch_cancels_with_local_query() {
+    async fn test_subscription_fetch_cancellation_returns_accumulated_rows_then_retry_errors() {
         let session = Arc::new(SessionImpl::mock());
         session
             .set_config("query_mode", "local".to_owned())
@@ -1392,29 +1427,8 @@ mod tests {
         let handler_args = HandlerArgs::new(session.clone(), &statement, sql).unwrap();
         let (local_query_started_tx, local_query_started_rx) = oneshot::channel();
         // Initiate the local query lazily so polling `next_row` drives the production query path.
-        let local_query_stream = stream::once({
-            let handler_args = handler_args.clone();
-            async move {
-                let mut response = handle_query(handler_args, statement, vec![])
-                    .await
-                    .map_err(|error| Box::new(error) as BoxedError)?;
-
-                // Consuming the first UNION ALL branch proves that the lazy local executor has
-                // started. The second branch remains blocked in `pg_sleep` until cancellation.
-                response.values_stream().next().await.ok_or_else(|| {
-                    Box::new(std::io::Error::other(
-                        "local query ended before its first row set",
-                    )) as BoxedError
-                })??;
-                assert!(local_query_started_tx.send(()).is_ok());
-                response.values_stream().next().await.ok_or_else(|| {
-                    Box::new(std::io::Error::other(
-                        "local query ended before its blocking row set",
-                    )) as BoxedError
-                })?
-            }
-        })
-        .boxed();
+        let local_query_stream =
+            local_query_row_stream(handler_args.clone(), statement, local_query_started_tx).boxed();
 
         let table_catalog = TableCatalog::default();
         let mut cursor = SubscriptionCursor {
@@ -1442,7 +1456,8 @@ mod tests {
         };
         let formats = vec![];
 
-        let mut fetch = Box::pin(cursor.next(1, handler_args, &formats, None, &mut cancel_handle));
+        let mut fetch =
+            Box::pin(cursor.next(2, handler_args.clone(), &formats, None, &mut cancel_handle));
         tokio::select! {
             started = local_query_started_rx => started.expect("local query initiation dropped"),
             result = &mut fetch => panic!("FETCH completed while initiating local query: {result:?}"),
@@ -1464,10 +1479,24 @@ mod tests {
         let late_shutdown_rx = session.reuse_or_reset_cancel_query_flag();
         assert!(late_shutdown_rx.is_cancelled());
 
-        let error = tokio::time::timeout(Duration::from_secs(1), fetch)
+        let (rows, _) = tokio::time::timeout(Duration::from_secs(1), fetch)
             .await
             .expect("cancelled FETCH should not hang")
-            .expect_err("cancelled FETCH without accumulated rows should return an error");
+            .expect("cancelled FETCH with accumulated rows should return a partial result");
+        assert_eq!(rows.len(), 1);
+
+        // `handle_fetch_cursor` clears the session flag and creates a new cancellation handle for
+        // every FETCH. Retrying the same cursor still observes cancellation from the interrupted
+        // inner query, now without any accumulated rows to return.
+        session.clear_cancel_query_flag();
+        let mut retry_cancel_handle = FetchCursorCancelHandle::new();
+        let error = tokio::time::timeout(
+            Duration::from_secs(1),
+            cursor.next(1, handler_args, &formats, None, &mut retry_cancel_handle),
+        )
+        .await
+        .expect("retried FETCH should not hang")
+        .expect_err("retried FETCH without accumulated rows should return an error");
         assert!(error.to_string().contains("Cancelled by user"));
     }
 }
