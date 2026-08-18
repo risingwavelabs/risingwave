@@ -18,10 +18,10 @@ use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
+use lance::Dataset;
 use lance::dataset::CommitBuilder;
 use lance::dataset::fragment::FileFragment;
 use lance::dataset::transaction::{Operation, TransactionBuilder};
-use lance::Dataset;
 use lance_table::format::Fragment;
 use lancedb::connection::ConnectBuilder;
 use lancedb::{Connection as LanceDbConnection, Table as LanceDbTable};
@@ -259,8 +259,9 @@ impl TryFrom<SinkParam> for LanceDbSink {
 // ---------------------------------------------------------------------------
 
 // Re-export arrow types from the LanceDb arrow module so they're used consistently.
-use risingwave_common::array::arrow::arrow_array_lancedb as arrow_array;
-use risingwave_common::array::arrow::arrow_schema_lancedb as arrow_schema;
+use risingwave_common::array::arrow::{
+    arrow_array_lancedb as arrow_array, arrow_schema_lancedb as arrow_schema,
+};
 
 fn validate_ordered_schema(
     rw_arrow_schema: &arrow_schema::Schema,
@@ -348,8 +349,7 @@ impl LanceDbSinkWriter {
 
         let batches = std::mem::take(&mut self.batches);
         let schema = batches[0].schema();
-        let reader =
-            arrow_array::RecordBatchIterator::new(batches.into_iter().map(Ok), schema);
+        let reader = arrow_array::RecordBatchIterator::new(batches.into_iter().map(Ok), schema);
 
         let fragments = FileFragment::create_fragments(
             &self.dataset_uri,
@@ -522,11 +522,10 @@ impl LanceDbSinkCommitter {
         // This is a metadata-only operation — the data files were already written by workers.
         let operation = Operation::Append { fragments };
 
-        let mut transaction_builder =
-            TransactionBuilder::new(dataset.version().version, operation);
+        let mut transaction_builder = TransactionBuilder::new(dataset.version().version, operation);
         if let Some(transaction_properties) = transaction_properties {
-            transaction_builder = transaction_builder
-                .transaction_properties(Some(Arc::new(transaction_properties)));
+            transaction_builder =
+                transaction_builder.transaction_properties(Some(Arc::new(transaction_properties)));
         }
         let transaction = transaction_builder.build();
 
@@ -539,9 +538,7 @@ impl LanceDbSinkCommitter {
         // Update the lancedb Table's internal dataset to the new version.
         dataset_wrapper.update(new_dataset);
 
-        tracing::debug!(
-            "Succeeded to commit fragments to LanceDB table in epoch {epoch}."
-        );
+        tracing::debug!("Succeeded to commit fragments to LanceDB table in epoch {epoch}.");
         Ok(())
     }
 }
@@ -664,7 +661,10 @@ impl LanceDbPreCommitMetadata {
                 RW_SINK_ID_TRANSACTION_PROPERTY.to_owned(),
                 self.sink_id.clone(),
             ),
-            (RW_EPOCH_TRANSACTION_PROPERTY.to_owned(), self.epoch.to_string()),
+            (
+                RW_EPOCH_TRANSACTION_PROPERTY.to_owned(),
+                self.epoch.to_string(),
+            ),
         ])
     }
 }
@@ -686,12 +686,14 @@ impl From<lancedb::Error> for SinkError {
 #[cfg(all(test, not(madsim)))]
 mod tests {
     use risingwave_common::array::{Array, I32Array, Op, StreamChunk, Utf8Array};
-    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
+    use risingwave_common::id::SinkId;
     use risingwave_common::types::DataType;
 
     use super::*;
-    use crate::sink::{SinglePhaseCommitCoordinator, TwoPhaseCommitCoordinator};
+    use crate::sink::catalog::SinkType;
     use crate::sink::writer::SinkWriter;
+    use crate::sink::{SinglePhaseCommitCoordinator, TwoPhaseCommitCoordinator};
 
     #[tokio::test]
     async fn test_lancedb_sink_roundtrip() {
@@ -781,22 +783,14 @@ mod tests {
         TwoPhaseCommitCoordinator::init(&mut committer)
             .await
             .unwrap();
-        let commit_metadata = TwoPhaseCommitCoordinator::pre_commit(
-            &mut committer,
-            1,
-            vec![metadata],
-            None,
-        )
-        .await
-        .unwrap()
-        .unwrap();
-        TwoPhaseCommitCoordinator::commit_data(
-            &mut committer,
-            1,
-            commit_metadata.clone(),
-        )
-        .await
-        .unwrap();
+        let commit_metadata =
+            TwoPhaseCommitCoordinator::pre_commit(&mut committer, 1, vec![metadata], None)
+                .await
+                .unwrap()
+                .unwrap();
+        TwoPhaseCommitCoordinator::commit_data(&mut committer, 1, commit_metadata.clone())
+            .await
+            .unwrap();
 
         // 7. Verify data was written by reading back
         let table = conn.open_table("test_table").execute().await.unwrap();
@@ -826,20 +820,15 @@ mod tests {
         writer.write_batch(chunk).await.unwrap();
         let metadata = writer.barrier(true).await.unwrap().unwrap();
 
-        let mut single_phase_committer =
-            LanceDbSinkCommitter::new(config, "test-sink".to_owned())
-                .await
-                .unwrap();
+        let mut single_phase_committer = LanceDbSinkCommitter::new(config, "test-sink".to_owned())
+            .await
+            .unwrap();
         SinglePhaseCommitCoordinator::init(&mut single_phase_committer)
             .await
             .unwrap();
-        SinglePhaseCommitCoordinator::commit_data(
-            &mut single_phase_committer,
-            2,
-            vec![metadata],
-        )
-        .await
-        .unwrap();
+        SinglePhaseCommitCoordinator::commit_data(&mut single_phase_committer, 2, vec![metadata])
+            .await
+            .unwrap();
         let table = conn.open_table("test_table").execute().await.unwrap();
         let count = table.count_rows(None).await.unwrap();
         assert_eq!(count, 5);
@@ -857,6 +846,61 @@ mod tests {
         ]);
 
         let err = validate_ordered_schema(&rw_schema, &reordered_lance_schema).unwrap_err();
+        assert!(
+            format!("{err:?}").contains("column order mismatch"),
+            "unexpected error: {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_validate_rejects_reordered_lancedb_table_columns() {
+        let dir = tempfile::tempdir().unwrap();
+        let uri = dir.path().to_str().unwrap();
+
+        let conn = lancedb::connect(uri).execute().await.unwrap();
+        let arrow_schema = Arc::new(arrow_schema::Schema::new(vec![
+            arrow_schema::Field::new("name", arrow_schema::DataType::Utf8, false),
+            arrow_schema::Field::new("id", arrow_schema::DataType::Int32, false),
+        ]));
+        let batch = arrow_array::RecordBatch::try_new(
+            arrow_schema,
+            vec![
+                Arc::new(arrow_array::StringArray::from(vec!["init"])),
+                Arc::new(arrow_array::Int32Array::from(vec![0i32])),
+            ],
+        )
+        .unwrap();
+        conn.create_table("reordered_table", batch)
+            .execute()
+            .await
+            .unwrap();
+
+        let properties: BTreeMap<String, String> = [
+            ("connector".to_owned(), "lancedb".to_owned()),
+            ("type".to_owned(), "append-only".to_owned()),
+            ("lancedb.uri".to_owned(), uri.to_owned()),
+            ("lancedb.table".to_owned(), "reordered_table".to_owned()),
+        ]
+        .into();
+        let config = LanceDbConfig::from_btreemap(properties.clone()).unwrap();
+        let param = SinkParam {
+            sink_id: SinkId::from(1u32),
+            sink_name: "test_sink".to_owned(),
+            properties,
+            columns: vec![
+                ColumnDesc::named("id", ColumnId::new(1), DataType::Int32),
+                ColumnDesc::named("name", ColumnId::new(2), DataType::Varchar),
+            ],
+            downstream_pk: None,
+            sink_type: SinkType::AppendOnly,
+            ignore_delete: false,
+            format_desc: None,
+            db_name: "dev".to_owned(),
+            sink_from_name: "test_sink".to_owned(),
+        };
+
+        let sink = LanceDbSink::new(config, param).unwrap();
+        let err = sink.validate().await.unwrap_err();
         assert!(
             format!("{err:?}").contains("column order mismatch"),
             "unexpected error: {err:?}"

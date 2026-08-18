@@ -26,7 +26,7 @@ download_and_prepare_rw "$profile" source
 LANCEDB_DIR="/tmp/lancedb-e2e"
 
 echo "--- installing Python lancedb package"
-pip3 install --quiet lancedb
+python3 -m pip install --break-system-packages --quiet 'lancedb==0.29.0'
 
 echo "--- preparing LanceDB table"
 rm -rf "$LANCEDB_DIR"
