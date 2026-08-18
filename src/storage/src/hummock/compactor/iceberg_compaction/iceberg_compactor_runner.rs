@@ -12,12 +12,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::fmt::Debug;
 use std::sync::{Arc, LazyLock};
 
 use derive_builder::Builder;
-use iceberg::spec::MAIN_BRANCH;
+use futures::TryStreamExt;
+use iceberg::spec::{MAIN_BRANCH, Operation};
 use iceberg::{Catalog, TableIdent};
 use iceberg_compaction_core::compaction::{
     AutoCompactionPlanner, CommitConsistencyParams, CommitManagerRetryConfig, CompactionBuilder,
@@ -136,6 +137,166 @@ pub struct IcebergCompactionPlanRunner {
     /// When true, run the rewrite without committing and report the result back to meta for
     /// pk-index coordinated compaction. When false, behavior is unchanged (rewrite + commit).
     pk_index_coordinated: bool,
+}
+
+#[derive(Debug)]
+struct PlannedInputFiles {
+    /// Data file path to the exact set of delete files that applied when the plan was built.
+    unresolved: HashMap<String, HashSet<String>>,
+}
+
+impl PlannedInputFiles {
+    fn from_plan(plan: &CompactionPlan) -> Self {
+        let unresolved = plan
+            .file_group
+            .data_files
+            .iter()
+            .map(|data_file| {
+                let delete_files = data_file
+                    .deletes
+                    .iter()
+                    .map(|delete_file| delete_file.data_file_path.clone())
+                    .collect();
+                (data_file.data_file_path.clone(), delete_files)
+            })
+            .collect();
+        Self { unresolved }
+    }
+
+    fn observe<'a>(
+        &mut self,
+        data_file_path: &str,
+        delete_file_paths: impl IntoIterator<Item = &'a str>,
+    ) {
+        let Some(planned_delete_files) = self.unresolved.get(data_file_path) else {
+            return;
+        };
+
+        let current_delete_files = delete_file_paths.into_iter().collect::<HashSet<_>>();
+        let matches_plan = planned_delete_files.len() == current_delete_files.len()
+            && planned_delete_files
+                .iter()
+                .all(|path| current_delete_files.contains(path.as_str()));
+
+        if matches_plan {
+            self.unresolved.remove(data_file_path);
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.unresolved.is_empty()
+    }
+
+    fn len(&self) -> usize {
+        self.unresolved.len()
+    }
+}
+
+/// Reject a queued plan before rewriting files if its inputs changed since planning.
+///
+/// A newer snapshot alone does not make a plan stale: append-only snapshots preserve all
+/// existing inputs. For other operations, compare the planned data files and their exact delete
+/// file sets against the current branch snapshot. Returning an error causes Meta to preserve the
+/// compaction backlog and dispatch a freshly planned task immediately.
+async fn ensure_compaction_plan_is_current(
+    catalog: &dyn Catalog,
+    table_ident: &TableIdent,
+    branch: &str,
+    plan: &CompactionPlan,
+) -> HummockResult<()> {
+    let table = catalog
+        .load_table(table_ident)
+        .await
+        .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+    let current_snapshot_id = table
+        .metadata()
+        .snapshot_for_ref(branch)
+        .ok_or_else(|| {
+            HummockError::compaction_executor(anyhow::anyhow!(
+                "Cannot validate iceberg compaction plan because branch {branch} has no snapshot"
+            ))
+        })?
+        .snapshot_id();
+
+    if current_snapshot_id == plan.snapshot_id {
+        return Ok(());
+    }
+
+    let mut snapshot_id = current_snapshot_id;
+    let mut appends_only = true;
+    loop {
+        if snapshot_id == plan.snapshot_id {
+            break;
+        }
+
+        let Some(snapshot) = table.metadata().snapshot_by_id(snapshot_id) else {
+            return Err(HummockError::compaction_executor(anyhow::anyhow!(
+                "Stale iceberg compaction plan: planned snapshot {} is not an ancestor of branch {branch} snapshot {current_snapshot_id}",
+                plan.snapshot_id
+            )));
+        };
+        appends_only &= matches!(snapshot.summary().operation, Operation::Append);
+        let Some(parent_snapshot_id) = snapshot.parent_snapshot_id() else {
+            return Err(HummockError::compaction_executor(anyhow::anyhow!(
+                "Stale iceberg compaction plan: planned snapshot {} is not an ancestor of branch {branch} snapshot {current_snapshot_id}",
+                plan.snapshot_id
+            )));
+        };
+        snapshot_id = parent_snapshot_id;
+    }
+
+    if appends_only {
+        tracing::debug!(
+            table = %table_ident,
+            branch,
+            planned_snapshot_id = plan.snapshot_id,
+            current_snapshot_id,
+            "iceberg_compaction_plan_kept_after_appends",
+        );
+        return Ok(());
+    }
+
+    let mut planned_inputs = PlannedInputFiles::from_plan(plan);
+    let scan = table
+        .scan()
+        .snapshot_id(current_snapshot_id)
+        .select_all()
+        .build()
+        .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+    let mut scan_tasks = scan
+        .plan_files()
+        .await
+        .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+
+    while let Some(scan_task) = scan_tasks
+        .try_next()
+        .await
+        .map_err(|e| HummockError::compaction_executor(e.as_report()))?
+    {
+        planned_inputs.observe(
+            scan_task.data_file_path(),
+            scan_task
+                .deletes
+                .iter()
+                .map(|delete_file| delete_file.data_file_path()),
+        );
+        if planned_inputs.is_empty() {
+            tracing::debug!(
+                table = %table_ident,
+                branch,
+                planned_snapshot_id = plan.snapshot_id,
+                current_snapshot_id,
+                "iceberg_compaction_plan_inputs_still_current",
+            );
+            return Ok(());
+        }
+    }
+
+    Err(HummockError::compaction_executor(anyhow::anyhow!(
+        "Stale iceberg compaction plan: {} input data files are missing or have different delete files in branch {branch} snapshot {current_snapshot_id} (planned snapshot {})",
+        planned_inputs.len(),
+        plan.snapshot_id
+    )))
 }
 
 impl IcebergCompactionPlanRunner {
@@ -297,6 +458,14 @@ impl IcebergCompactionPlanRunner {
             );
             return Ok((RewriteFilesStat::default(), None));
         }
+
+        ensure_compaction_plan_is_current(
+            catalog.as_ref(),
+            &table_ident,
+            &branch,
+            &compaction_plan,
+        )
+        .await?;
 
         let statistics = analyze_task_statistics(&compaction_plan);
 
@@ -764,6 +933,62 @@ pub async fn create_task_execution(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn planned_inputs(entries: &[(&str, &[&str])]) -> PlannedInputFiles {
+        PlannedInputFiles {
+            unresolved: entries
+                .iter()
+                .map(|(data_file, delete_files)| {
+                    (
+                        (*data_file).to_owned(),
+                        delete_files.iter().map(|path| (*path).to_owned()).collect(),
+                    )
+                })
+                .collect(),
+        }
+    }
+
+    #[test]
+    fn test_plan_inputs_match_after_unrelated_append() {
+        let mut inputs = planned_inputs(&[
+            ("data-a", &["delete-a"]),
+            ("data-b", &["delete-b", "delete-c"]),
+        ]);
+
+        inputs.observe("appended-data", std::iter::empty());
+        inputs.observe("data-a", ["delete-a"]);
+        inputs.observe("data-b", ["delete-c", "delete-b"]);
+
+        assert!(inputs.is_empty());
+    }
+
+    #[test]
+    fn test_plan_inputs_detect_missing_data_file() {
+        let mut inputs = planned_inputs(&[("data-a", &[]), ("data-b", &[])]);
+
+        inputs.observe("data-a", std::iter::empty());
+
+        assert_eq!(inputs.len(), 1);
+        assert!(inputs.unresolved.contains_key("data-b"));
+    }
+
+    #[test]
+    fn test_plan_inputs_detect_added_delete_file() {
+        let mut inputs = planned_inputs(&[("data-a", &["delete-a"])]);
+
+        inputs.observe("data-a", ["delete-a", "delete-b"]);
+
+        assert_eq!(inputs.len(), 1);
+    }
+
+    #[test]
+    fn test_plan_inputs_detect_removed_delete_file() {
+        let mut inputs = planned_inputs(&[("data-a", &["delete-a", "delete-b"])]);
+
+        inputs.observe("data-a", ["delete-a"]);
+
+        assert_eq!(inputs.len(), 1);
+    }
 
     #[test]
     fn test_build_auto_compaction_planning_config() {
