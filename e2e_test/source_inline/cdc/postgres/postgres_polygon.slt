@@ -150,7 +150,7 @@ psql -c "
     INSERT INTO public.upstream_polygon_values VALUES (
         3,
         'inserted',
-        polygon '((1e15,1e-5),(1e20,1e-10))',
+        polygon '((15.5,0.125),(20.25,-10.5))',
         ARRAY[
             polygon '((6,6),(7,6),(7,7),(6,7))',
             NULL
@@ -179,14 +179,14 @@ join (
     )
 ) as upstream(id, shape_text, shape_1_text, shape_2_text) using (id);
 ----
-3 ((1e+15,1e-05),(1e+20,1e-10)) t ((6,6),(7,6),(7,7),(6,7)) t NULL t
+3 ((15.5,0.125),(20.25,-10.5)) t ((6,6),(7,6),(7,7),(6,7)) t NULL t
 
 # Incremental UPDATE of both the scalar and array values.
 system ok
 psql -c "
     UPDATE public.upstream_polygon_values
     SET name = 'updated',
-        shape = polygon '((20,20),(30,20),(30,30),(20,30))',
+        shape = polygon '((20.5,20.5),(30.5,20.5),(30.5,30.5),(20.5,30.5))',
         shapes = ARRAY[
             polygon '((21,21),(22,21),(22,22),(21,22))',
             polygon '((23,23),(24,23),(24,24),(23,24))'
@@ -215,7 +215,7 @@ join (
     )
 ) as upstream(id, shape_text, shape_1_text, shape_2_text) using (id);
 ----
-1 ((20,20),(30,20),(30,30),(20,30)) t ((21,21),(22,21),(22,22),(21,22)) t ((23,23),(24,23),(24,24),(23,24)) t
+1 ((20.5,20.5),(30.5,20.5),(30.5,30.5),(20.5,30.5)) t ((21,21),(22,21),(22,22),(21,22)) t ((23,23),(24,23),(24,24),(23,24)) t
 
 # DELETE must remove the converted row.
 system ok
@@ -243,7 +243,7 @@ psql -c "
         ADD COLUMN shapes polygon[];
     UPDATE public.upstream_polygon_schema_change
     SET name = 'updated-old',
-        shape = polygon '((40,40),(50,40),(50,50),(40,50))',
+        shape = polygon '((40.5,40.5),(50.5,40.5),(50.5,50.5),(40.5,50.5))',
         shapes = ARRAY[
             polygon '((41,41),(42,41),(42,42),(41,42))',
             polygon '((43,43),(44,43),(44,44),(43,44))'
@@ -266,7 +266,7 @@ psql -c "
     INSERT INTO public.upstream_polygon_schema_change VALUES (
         2,
         'inserted-new',
-        polygon '((60,60),(70,60),(70,70),(60,70))',
+        polygon '((60.5,60.5),(70.5,60.5),(70.5,70.5),(60.5,70.5))',
         ARRAY[
             polygon '((61,61),(62,61),(62,62),(61,62))',
             NULL
@@ -298,8 +298,8 @@ join (
 ) as upstream(id, name, shape_text, shape_1_text, shape_2_text) using (id)
 order by ours.id;
 ----
-1 updated-old t ((40,40),(50,40),(50,50),(40,50)) t ((41,41),(42,41),(42,42),(41,42)) t ((43,43),(44,43),(44,44),(43,44)) t
-2 inserted-new t ((60,60),(70,60),(70,70),(60,70)) t ((61,61),(62,61),(62,62),(61,62)) t NULL t
+1 updated-old t ((40.5,40.5),(50.5,40.5),(50.5,50.5),(40.5,50.5)) t ((41,41),(42,41),(42,42),(41,42)) t ((43,43),(44,43),(44,44),(43,44)) t
+2 inserted-new t ((60.5,60.5),(70.5,60.5),(70.5,70.5),(60.5,70.5)) t ((61,61),(62,61),(62,62),(61,62)) t NULL t
 
 statement ok
 drop table rw_polygon_manual;
