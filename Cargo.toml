@@ -159,7 +159,11 @@ clap = { version = "4", features = ["cargo", "derive", "env"] }
 criterion = { version = "0.8", features = ["async_futures"] }
 deltalake = { version = "0.32.0", features = ["s3", "gcs"] }
 faiss = { version = "0.12.2-alpha.0", features = ["static"] }
-foyer = { version = "0.21.2", features = ["serde", "tracing"] }
+foyer = { version = "0.22.3", default-features = false, features = [
+    "runtime-madsim-tokio",
+    "serde",
+    "tracing",
+] }
 futures-async-stream = "0.2.13"
 governor = { version = "0.10", default-features = false, features = ["std"] }
 hashbrown = { version = "0.17", features = ["default-hasher", "inline-more"] }
@@ -172,14 +176,14 @@ hashbrown0_16 = { package = "hashbrown", version = "0.16.1", features = [
 ] }
 hytra = "0.1"
 # branch dev_rebase_main_20260303
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "6bd8e98fe920def857f80024f5a666c9631e80f4", features = [
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "deb4a3c8d5277b76d60f43ecaf6d598b0de50873", features = [
     "storage-s3",
     "storage-gcs",
     "storage-azblob",
     "storage-azdls",
 ] }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "6bd8e98fe920def857f80024f5a666c9631e80f4" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "6bd8e98fe920def857f80024f5a666c9631e80f4" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "deb4a3c8d5277b76d60f43ecaf6d598b0de50873" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "deb4a3c8d5277b76d60f43ecaf6d598b0de50873" }
 indexmap = { version = "2.12.0", features = ["serde"] }
 itertools = "0.14.0"
 jni = { version = "0.21.1", features = ["invocation"] }
@@ -206,8 +210,11 @@ parking_lot = { version = "0.12", features = [
     "arc_lock",
     "deadlock_detection",
 ] }
-parquet = { version = "58", features = ["async"] }
+# `variant_experimental` tags Parquet `VARIANT` columns with the Arrow extension; declared here
+# rather than relying on feature unification from the iceberg crate.
+parquet = { version = "58", features = ["async", "variant_experimental"] }
 parquet-variant = "=58.3.0"
+parquet-variant-compute = "=58.3.0"
 parquet-variant-json = "=58.3.0"
 pin-project-lite = "0.2"
 prost = { version = "=0.14.3" }

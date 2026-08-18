@@ -145,6 +145,7 @@ fn new_test_iceberg_config(
     values.insert(
         "compaction.type".to_owned(),
         match compaction_type {
+            CompactionType::Auto => "auto",
             CompactionType::Full => "full",
             CompactionType::SmallFiles => "small-files",
             CompactionType::FilesWithDelete => "files-with-delete",
@@ -617,7 +618,7 @@ async fn test_apply_sink_update_refreshes_existing_idle_track() {
     manager.inner.write().sink_schedules.insert(sink_id, track);
 
     let refresh_at = now + Duration::from_secs(30);
-    let config = new_test_iceberg_config(300, 3, CompactionType::SmallFiles);
+    let config = new_test_iceberg_config(300, 3, CompactionType::Auto);
     let mut guard = manager.inner.write();
 
     manager.apply_sink_update(
@@ -632,7 +633,7 @@ async fn test_apply_sink_update_refreshes_existing_idle_track() {
     );
 
     let track = guard.sink_schedules.get(&sink_id).unwrap();
-    assert_eq!(track.task_type, TaskType::SmallFiles);
+    assert_eq!(track.task_type, TaskType::Auto);
     assert_eq!(track.trigger_interval_sec, 300);
     assert_eq!(track.trigger_snapshot_count, 3);
     assert_eq!(track.last_config_refresh_at, refresh_at);
@@ -955,6 +956,7 @@ async fn test_apply_sink_update_promotes_temporary_manual_track_when_compaction_
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
+        pk_index_result: None,
     });
 
     let guard = manager.inner.read();
@@ -1098,6 +1100,7 @@ async fn test_handle_report_task_success_consumes_backlog_and_resets_to_idle() {
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
+        pk_index_result: None,
     });
 
     let guard = manager.inner.read();
@@ -1127,6 +1130,7 @@ async fn test_handle_report_task_completes_manual_waiter_on_success() {
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
+        pk_index_result: None,
     });
 
     assert_eq!(rx.await.unwrap().unwrap(), task_id);
@@ -1158,6 +1162,7 @@ async fn test_handle_report_task_completes_manual_waiter_on_failure() {
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Failed as i32,
         error_message: Some("boom".to_owned()),
+        pk_index_result: None,
     });
 
     let error = rx.await.unwrap().unwrap_err();
@@ -1191,6 +1196,7 @@ async fn test_handle_report_task_removes_temporary_manual_track_on_success() {
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
+        pk_index_result: None,
     });
 
     assert_eq!(rx.await.unwrap().unwrap(), task_id);
@@ -1221,6 +1227,7 @@ async fn test_handle_report_task_removes_temporary_manual_track_on_failure() {
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Failed as i32,
         error_message: Some("boom".to_owned()),
+        pk_index_result: None,
     });
 
     let error = rx.await.unwrap().unwrap_err();
@@ -1325,6 +1332,7 @@ async fn test_manual_compaction_waiter_is_not_stolen_during_config_load() {
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
+        pk_index_result: None,
     });
     assert!(
         !manager
@@ -1503,6 +1511,7 @@ async fn test_handle_report_task_failure_preserves_backlog_and_resets_to_idle() 
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Failed as i32,
         error_message: Some("boom".to_owned()),
+        pk_index_result: None,
     });
 
     let guard = manager.inner.read();
@@ -1530,6 +1539,7 @@ async fn test_handle_report_task_ignores_stale_task_id() {
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
+        pk_index_result: None,
     });
 
     let guard = manager.inner.read();

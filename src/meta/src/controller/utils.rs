@@ -399,6 +399,54 @@ pub struct PartialObject {
     pub database_id: Option<DatabaseId>,
 }
 
+impl From<object::Model> for PartialObject {
+    fn from(object: object::Model) -> Self {
+        Self {
+            oid: object.oid,
+            obj_type: object.obj_type,
+            schema_id: object.schema_id,
+            database_id: object.database_id,
+        }
+    }
+}
+
+pub async fn get_belong_objects<C>(db: &C, object_id: ObjectId) -> MetaResult<Vec<object::Model>>
+where
+    C: ConnectionTrait,
+{
+    get_belong_objects_by_ids(db, [object_id]).await
+}
+
+/// Returns all objects that transitively belong to `object_ids`, excluding `object_ids`.
+pub async fn get_belong_objects_by_ids<C>(
+    db: &C,
+    object_ids: impl IntoIterator<Item = ObjectId>,
+) -> MetaResult<Vec<object::Model>>
+where
+    C: ConnectionTrait,
+{
+    let mut parents = object_ids.into_iter().collect_vec();
+    let mut visited = parents.iter().copied().collect::<HashSet<_>>();
+    let mut objects = vec![];
+    loop {
+        let children = Object::find()
+            .filter(object::Column::BelongToOid.is_in(parents))
+            .all(db)
+            .await?
+            .into_iter()
+            .filter(|object| visited.insert(object.oid))
+            .collect_vec();
+        if children.is_empty() {
+            break;
+        }
+
+        parents = children.iter().map(|object| object.oid).collect();
+        objects.extend(children);
+    }
+
+    Ok(objects)
+}
+
 #[derive(Clone, DerivePartialModel, FromQueryResult)]
 #[sea_orm(entity = "Fragment")]
 pub struct PartialFragmentStateTables {
@@ -2357,47 +2405,6 @@ where
     Ok(migrated)
 }
 
-pub async fn try_get_iceberg_table_by_downstream_sink<C>(
-    txn: &C,
-    sink_id: SinkId,
-) -> MetaResult<Option<TableId>>
-where
-    C: ConnectionTrait,
-{
-    let sink = Sink::find_by_id(sink_id).one(txn).await?;
-    let Some(sink) = sink else {
-        return Ok(None);
-    };
-
-    if sink.name.starts_with(ICEBERG_SINK_PREFIX) {
-        let object_ids: Vec<ObjectId> = ObjectDependency::find()
-            .select_only()
-            .column(object_dependency::Column::Oid)
-            .filter(object_dependency::Column::UsedBy.eq(sink_id))
-            .into_tuple()
-            .all(txn)
-            .await?;
-        let mut iceberg_table_ids = vec![];
-        for object_id in object_ids {
-            let table_id = object_id.as_table_id();
-            if let Some(table_engine) = Table::find_by_id(table_id)
-                .select_only()
-                .column(table::Column::Engine)
-                .into_tuple::<table::Engine>()
-                .one(txn)
-                .await?
-                && table_engine == table::Engine::Iceberg
-            {
-                iceberg_table_ids.push(table_id);
-            }
-        }
-        if iceberg_table_ids.len() == 1 {
-            return Ok(Some(iceberg_table_ids[0]));
-        }
-    }
-    Ok(None)
-}
-
 pub async fn check_if_belongs_to_iceberg_table<C>(txn: &C, job_id: JobId) -> MetaResult<bool>
 where
     C: ConnectionTrait,
@@ -2412,13 +2419,18 @@ where
     {
         return Ok(true);
     }
-    if let Some(sink_name) = Sink::find_by_id(job_id.as_sink_id())
+    if let Some(parent_oid) = Object::find_by_id(job_id)
         .select_only()
-        .column(sink::Column::Name)
-        .into_tuple::<String>()
+        .column(object::Column::BelongToOid)
+        .into_tuple::<Option<ObjectId>>()
         .one(txn)
         .await?
-        && sink_name.starts_with(ICEBERG_SINK_PREFIX)
+        .flatten()
+        && Table::find_by_id(parent_oid.as_table_id())
+            .filter(table::Column::Engine.eq(table::Engine::Iceberg))
+            .one(txn)
+            .await?
+            .is_some()
     {
         return Ok(true);
     }

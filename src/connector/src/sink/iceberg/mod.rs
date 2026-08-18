@@ -94,7 +94,8 @@ impl IcebergSink {
         create_and_validate_table_impl(&self.config, &self.param).await
     }
 
-    pub async fn create_table_if_not_exists(&self) -> Result<()> {
+    /// Returns `true` if this call created the table, `false` if it already existed.
+    pub async fn create_table_if_not_exists(&self) -> Result<bool> {
         create_table_if_not_exists_impl(&self.config, &self.param).await
     }
 
@@ -187,6 +188,18 @@ impl Sink for IcebergSink {
         }
 
         match compaction_type {
+            CompactionType::Auto => {
+                risingwave_common::license::Feature::IcebergCompaction
+                    .check_available()
+                    .map_err(|e| anyhow::anyhow!(e))?;
+
+                if self.config.write_mode != IcebergWriteMode::MergeOnRead {
+                    bail!(
+                        "'auto' compaction type only supports 'merge-on-read' write mode, got: '{}'",
+                        self.config.write_mode
+                    );
+                }
+            }
             CompactionType::SmallFiles => {
                 // 1. check license
                 risingwave_common::license::Feature::IcebergCompaction

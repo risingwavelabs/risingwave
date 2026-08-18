@@ -449,29 +449,27 @@ impl GlobalStreamManager {
                             );
 
                             let cancel_result: MetaResult<()> = async {
-                                let Some((cancel_command, cleanup_state_table_ids)) = self
-                                    .metadata_manager
-                                    .catalog_controller
-                                    .build_cancel_command(job_id)
-                                    .await?
-                                else {
-                                    return Ok(());
-                                };
-                                let abort_result = self.metadata_manager.catalog_controller
-                                    .try_abort_creating_streaming_job(job_id, true)
-                                    .await?;
+                                let abort_result = Box::pin(
+                                    self.metadata_manager
+                                        .catalog_controller
+                                        .try_abort_creating_streaming_job(job_id, true),
+                                )
+                                .await?;
                                 self.iceberg_compaction_manager
                                     .clear_maintenance_for_aborted_job(&abort_result);
+                                let Some(cancel_info) = abort_result.cancel_info else {
+                                    return Ok(());
+                                };
 
                                 self.barrier_scheduler
-                                    .run_command(database_id, cancel_command)
+                                    .run_command(database_id, cancel_info.command)
                                     .await?;
                                 cleanup_dropped_streaming_jobs(
                                     &self.refresh_manager,
                                     &self.hummock_manager,
                                     &self.metadata_manager,
-                                    [job_id],
-                                    cleanup_state_table_ids,
+                                    cancel_info.streaming_job_ids,
+                                    cancel_info.state_table_ids,
                                     "cancel_streaming_job",
                                 )
                                 .await?;
@@ -867,15 +865,6 @@ impl GlobalStreamManager {
         // NOTE(kwannoel): For background_job_ids stream jobs that not tracked in streaming manager,
         // we can directly cancel them by running the barrier command.
         let futures = background_job_ids.into_iter().map(|id| async move {
-            let Some((cancel_command, cleanup_state_table_ids)) = self
-                .metadata_manager
-                .catalog_controller
-                .build_cancel_command(id)
-                .await?
-            else {
-                return Ok(None);
-            };
-
             let abort_result = self
                 .metadata_manager
                 .catalog_controller
@@ -883,17 +872,20 @@ impl GlobalStreamManager {
                 .await?;
             self.iceberg_compaction_manager
                 .clear_maintenance_for_aborted_job(&abort_result);
+            let Some(cancel_info) = abort_result.cancel_info else {
+                return Ok(None);
+            };
 
             if let Some(database_id) = abort_result.database_id {
                 self.barrier_scheduler
-                    .run_command(database_id, cancel_command)
+                    .run_command(database_id, cancel_info.command)
                     .await?;
                 cleanup_dropped_streaming_jobs(
                     &self.refresh_manager,
                     &self.hummock_manager,
                     &self.metadata_manager,
-                    [id],
-                    cleanup_state_table_ids,
+                    cancel_info.streaming_job_ids,
+                    cancel_info.state_table_ids,
                     "cancel_streaming_job",
                 )
                 .await?;

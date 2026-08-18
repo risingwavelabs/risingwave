@@ -753,7 +753,11 @@ impl ToStream for LogicalOverWindow {
         let logical_input = if partition_key_indices.is_empty() {
             self.input()
         } else {
-            try_enforce_locality_requirement(self.input(), &partition_key_indices)
+            try_enforce_locality_requirement(
+                self.input(),
+                &partition_key_indices,
+                ctx.locality_backfill_enabled(),
+            )
         };
         let (input, input_col_change) = logical_input.logical_rewrite_for_stream(ctx)?;
         let (new_self, output_col_change) = self.rewrite_with_input(input, input_col_change);
