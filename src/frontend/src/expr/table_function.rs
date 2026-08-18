@@ -28,9 +28,12 @@ use risingwave_connector::source::iceberg::{
 };
 use risingwave_pb::expr::PbTableFunction;
 pub use risingwave_pb::expr::table_function::PbType as TableFunctionType;
+use risingwave_sqlparser::parser::Parser;
+use thiserror_ext::AsReport;
 use tokio_postgres::types::Type as TokioPgType;
 
 use super::{Expr, ExprImpl, ExprRewriter, Literal, RwResult, infer_type};
+use crate::Binder;
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
 use crate::catalog::root_catalog::SchemaPath;
@@ -315,9 +318,28 @@ impl TableFunction {
                 cast_args
             }
             CDC_SOURCE_ARG_LEN => {
-                let source_name = expr_impl_to_string_fn(&args[0])?;
+                let raw_source_name = expr_impl_to_string_fn(&args[0])?;
+                // Accept `schema.source` and quoted identifiers, matching every other SQL surface.
+                // Historical behavior fed the whole string (dot included) into the catalog lookup,
+                // so a qualified name could never match and an unqualified name only searched the
+                // session `search_path` — which broke sources created in non-default schemas.
+                let object_name =
+                    Parser::parse_object_name_str(&raw_source_name).map_err(|e| {
+                        BindError(format!(
+                            "invalid source name `{}` in {}_query: {}",
+                            raw_source_name,
+                            connector_family(expect_connector_name),
+                            e.to_report_string(),
+                        ))
+                    })?;
+                let (explicit_schema, source_name) =
+                    Binder::resolve_schema_qualified_name(db_name, &object_name)?;
+                let source_schema_path = match explicit_schema.as_deref() {
+                    Some(schema) => SchemaPath::Name(schema),
+                    None => schema_path,
+                };
                 let source_catalog = catalog_reader
-                    .get_source_by_name(db_name, schema_path, &source_name)?
+                    .get_source_by_name(db_name, source_schema_path, &source_name)?
                     .0;
                 if !source_catalog
                     .connector_name()
@@ -732,6 +754,14 @@ impl Expr for TableFunction {
 
     fn try_to_expr_proto(&self) -> Result<risingwave_pb::expr::ExprNode, String> {
         Err("Table function should not be converted to ExprNode".to_owned())
+    }
+}
+
+fn connector_family(expect_connector_name: &str) -> &'static str {
+    if expect_connector_name.eq_ignore_ascii_case("postgres-cdc") {
+        "postgres"
+    } else {
+        "mysql"
     }
 }
 

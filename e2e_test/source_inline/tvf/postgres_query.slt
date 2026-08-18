@@ -73,5 +73,57 @@ select * from postgres_query('postgres_cdc_source', 'select * from test where id
 99 t 1 1 1 1 1 1.0 2021-01-01 00:00:00 2021-01-01 00:00:00 2021-01-01 08:00:00+00:00 text varchar 1 day {} \x01
 100 t 1 1 1 1 1 1.0 2021-01-01 00:00:00 2021-01-01 00:00:00 2021-01-01 08:00:00+00:00 text varchar 1 day {} \x01
 
+# --- schema-qualified CDC source lookup ---
+# Regression coverage for the 2-arg form when the CDC source lives outside the
+# default search_path. Prior to the fix, both the qualified and the bare form
+# below returned "source not found".
+
+statement ok
+create schema pg_tvf_schema;
+
+statement ok
+create source pg_tvf_schema.postgres_cdc_source_ns with (
+  ${RISEDEV_POSTGRES_WITH_OPTIONS_COMMON},
+  username = '$PGUSER',
+  password = '$PGPASSWORD',
+  database.name = 'source_test'
+);
+
+query II
+select id from postgres_query('pg_tvf_schema.postgres_cdc_source_ns', 'select id from test where id = 1;');
+----
+1
+
+query II
+select id from postgres_query('"pg_tvf_schema"."postgres_cdc_source_ns"', 'select id from test where id = 1;');
+----
+1
+
+statement ok
+set search_path to pg_tvf_schema, public;
+
+query II
+select id from postgres_query('postgres_cdc_source_ns', 'select id from test where id = 1;');
+----
+1
+
+statement ok
+set search_path to "$user", public;
+
+statement error source not found: postgres_cdc_source_ns
+select id from postgres_query('postgres_cdc_source_ns', 'select id from test where id = 1;');
+
+statement error source not found: not_a_source
+select id from postgres_query('pg_tvf_schema.not_a_source', 'select id from test where id = 1;');
+
+statement error postgres_query
+select id from postgres_query('some.deep.name.that.is.too.long', 'select id from test where id = 1;');
+
+statement ok
+drop source pg_tvf_schema.postgres_cdc_source_ns;
+
+statement ok
+drop schema pg_tvf_schema;
+
 statement ok
 drop source postgres_cdc_source;
