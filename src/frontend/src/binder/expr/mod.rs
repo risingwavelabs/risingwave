@@ -1084,21 +1084,13 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         AstDataType::Char(..) => {
             bail_not_implemented!("CHAR is not supported, please use VARCHAR instead")
         }
-        AstDataType::Struct(types) => {
-            let struct_type = StructType::new(
-                types
-                    .iter()
-                    .map(|f| Ok((f.name.real_value(), bind_data_type(&f.data_type)?)))
-                    .collect::<Result<Vec<_>>>()?,
-            );
-            if let Some(name) = struct_type.find_duplicate_field_name() {
-                return Err(ErrorCode::InvalidInputSyntax(format!(
-                    "struct field \"{name}\" specified more than once"
-                ))
-                .into());
-            }
-            struct_type.into()
-        }
+        AstDataType::Struct(types) => bind_struct_type(
+            types
+                .iter()
+                .map(|f| Ok((f.name.real_value(), bind_data_type(&f.data_type)?)))
+                .collect::<Result<Vec<_>>>()?,
+        )?
+        .into(),
         AstDataType::Map(kv) => {
             let key = bind_data_type(&kv.0)?;
             let value = bind_data_type(&kv.1)?;
@@ -1160,6 +1152,19 @@ pub fn bind_data_type(data_type: &AstDataType) -> Result<DataType> {
         | AstDataType::Time(true) => return Err(new_err().into()),
     };
     Ok(data_type)
+}
+
+pub(crate) fn bind_struct_type(
+    fields: impl IntoIterator<Item = (impl Into<String>, DataType)>,
+) -> Result<StructType> {
+    let struct_type = StructType::new(fields);
+    if let Some(name) = struct_type.find_duplicate_field_name() {
+        return Err(ErrorCode::InvalidInputSyntax(format!(
+            "struct field \"{name}\" specified more than once"
+        ))
+        .into());
+    }
+    Ok(struct_type)
 }
 
 #[cfg(test)]
@@ -1242,5 +1247,11 @@ mod tests {
             struct_type.types().cloned().collect_vec(),
             [DataType::Int32, DataType::Varchar, DataType::Boolean]
         );
+    }
+
+    #[test]
+    fn bind_generated_struct_rejects_duplicate_field_names() {
+        assert!(bind_struct_type([("a", DataType::Int32), ("a", DataType::Varchar)]).is_err());
+        assert!(bind_struct_type([("a", DataType::Int32), ("A", DataType::Varchar)]).is_ok());
     }
 }
