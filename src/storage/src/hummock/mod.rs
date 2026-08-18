@@ -116,7 +116,8 @@ pub async fn get_from_sstable_info(
     sstable_store_ref: SstableStoreRef,
     sstable_info: &SstableInfo,
     full_key: FullKey<&[u8]>,
-    read_options: Arc<SstableIteratorReadOptions>,
+    read_options: &ReadOptions,
+    cache_level_hint: Option<u32>,
     dist_key_hash: Option<u64>,
     local_stats: &mut StoreLocalStatistic,
 ) -> HummockResult<Option<impl HummockIterator>> {
@@ -139,10 +140,11 @@ pub async fn get_from_sstable_info(
     }
 
     let mut iter = IteratorStatsGuard::new(
-        SstableIterator::create(
+        SstableIterator::create_with_cache_level_hint(
             sstable,
             sstable_store_ref.clone(),
-            read_options,
+            Arc::new(SstableIteratorReadOptions::from_read_options(read_options)),
+            cache_level_hint,
             sstable_info,
         ),
         local_stats,
@@ -193,14 +195,12 @@ pub fn get_from_batch<'a>(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use super::get_from_sstable_info;
     use crate::hummock::iterator::test_utils::{iterator_test_key_of, mock_sstable_store};
-    use crate::hummock::sstable::SstableIteratorReadOptions;
     use crate::hummock::test_utils::{default_builder_opt_for_test, gen_test_sstable_info};
     use crate::hummock::value::HummockValue;
     use crate::monitor::StoreLocalStatistic;
+    use crate::store::ReadOptions;
 
     #[tokio::test]
     async fn test_get_collects_stats_when_seek_passes_sst_end() {
@@ -219,13 +219,14 @@ mod tests {
         .await;
         let mut stats = StoreLocalStatistic::default();
         let key = iterator_test_key_of(10);
-        let read_options = Arc::new(SstableIteratorReadOptions::default());
+        let read_options = ReadOptions::default();
 
         let result = get_from_sstable_info(
             sstable_store,
             &sstable_info,
             key.to_ref(),
-            read_options,
+            &read_options,
+            None,
             None,
             &mut stats,
         )

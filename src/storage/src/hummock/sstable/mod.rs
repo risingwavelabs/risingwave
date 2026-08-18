@@ -509,11 +509,9 @@ impl SstableMeta {
     }
 }
 
-#[derive(Clone, Default)]
+#[derive(Default)]
 pub struct SstableIteratorReadOptions {
     pub cache_policy: CachePolicy,
-    /// Level of the SST in the pinned version that created the iterator.
-    pub cache_level_hint: Option<u32>,
     /// The only hard upper bound of this scan. It limits the iterator's block window.
     pub scan_end_user_key: Option<Bound<UserKey<KeyPayloadType>>>,
     /// Whether to prefetch blocks within the already-bounded scan window.
@@ -527,7 +525,6 @@ impl SstableIteratorReadOptions {
     pub fn from_read_options(read_options: &ReadOptions) -> Self {
         Self {
             cache_policy: read_options.cache_policy,
-            cache_level_hint: None,
             scan_end_user_key: None,
             prefetch: false,
             max_preload_retry_times: 0,

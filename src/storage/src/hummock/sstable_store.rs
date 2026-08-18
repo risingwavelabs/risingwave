@@ -381,19 +381,13 @@ impl SstableStore {
         &self.block_cache
     }
 
-    fn block_cache_route(
-        &self,
-        object_id: HummockSstableObjectId,
-        snapshot_level: Option<u32>,
-    ) -> BlockCacheRoute {
+    fn block_cache_route(&self, snapshot_level: Option<u32>) -> BlockCacheRoute {
         if self.l0_block_cache.is_none() {
             return BlockCacheRoute::Stable;
         }
 
-        if let Some(route) = self.live_ssts.route(&object_id) {
-            return route;
-        }
-
+        // Keep read routing local to the pinned-version snapshot. The live-SST admission view can
+        // already point at a newer version queued behind cache refill.
         snapshot_level
             .map(BlockCacheRoute::from_level)
             .unwrap_or(BlockCacheRoute::Stable)
@@ -421,7 +415,7 @@ impl SstableStore {
         snapshot_level: Option<u32>,
     ) -> HummockResult<Box<dyn BlockStream>> {
         let object_id = sst.id;
-        let route = self.block_cache_route(object_id, snapshot_level);
+        let route = self.block_cache_route(snapshot_level);
         if self.prefetch_buffer_usage.load(Ordering::Acquire) > self.prefetch_buffer_capacity {
             let block = self
                 .get_with_level_hint(sst, block_index, policy, stats, snapshot_level)
@@ -589,7 +583,7 @@ impl SstableStore {
             sst_id: object_id,
             block_idx: block_index as _,
         };
-        let route = self.block_cache_route(object_id, snapshot_level);
+        let route = self.block_cache_route(snapshot_level);
 
         self.recent_filter
             .extend([(object_id, usize::MAX), (object_id, block_index)]);
@@ -999,6 +993,7 @@ mod tests {
         get_from_sstable_info,
     };
     use crate::monitor::StoreLocalStatistic;
+    use crate::store::ReadOptions;
 
     const SST_ID: u64 = 1;
 
@@ -1263,7 +1258,7 @@ mod tests {
 
     #[tokio::test]
     #[expect(clippy::borrowed_box)]
-    async fn test_snapshot_level_hint_skips_opposite_cache() {
+    async fn test_snapshot_level_hint_overrides_admission_view() {
         let mut sstable_store = mock_sstable_store().await;
         let l0_block_cache = HybridCacheBuilder::new()
             .memory(1 << 20)
@@ -1283,14 +1278,17 @@ mod tests {
             block_idx: 0,
         };
         l0_block_cache.insert(l0_index, Box::new(test_block().await));
-        let l0_route = sstable_store.block_cache_route(l0_index.sst_id, Some(0));
+        sstable_store
+            .live_ssts
+            .replace_levels_for_test([(l0_index.sst_id, 6)]);
+        let l0_route = sstable_store.block_cache_route(Some(0));
         let entry = sstable_store
             .get_cached_block(&l0_index, l0_route)
             .await
             .unwrap()
             .unwrap();
         assert_eq!(entry.source(), Source::Memory);
-        let stable_route = sstable_store.block_cache_route(l0_index.sst_id, Some(6));
+        let stable_route = sstable_store.block_cache_route(Some(6));
         assert!(
             sstable_store
                 .get_cached_block(&l0_index, stable_route)
@@ -1306,14 +1304,17 @@ mod tests {
         sstable_store
             .block_cache
             .insert(stable_index, Box::new(test_block().await));
-        let stable_route = sstable_store.block_cache_route(stable_index.sst_id, Some(6));
+        sstable_store
+            .live_ssts
+            .replace_levels_for_test([(stable_index.sst_id, 0)]);
+        let stable_route = sstable_store.block_cache_route(Some(6));
         let entry = sstable_store
             .get_cached_block(&stable_index, stable_route)
             .await
             .unwrap()
             .unwrap();
         assert_eq!(entry.source(), Source::Memory);
-        let l0_route = sstable_store.block_cache_route(stable_index.sst_id, Some(0));
+        let l0_route = sstable_store.block_cache_route(Some(0));
         assert!(
             sstable_store
                 .get_cached_block(&stable_index, l0_route)
@@ -1379,15 +1380,13 @@ mod tests {
 
             let mut stats = StoreLocalStatistic::default();
             let key = iterator_test_key_of(0);
-            let read_options = Arc::new(SstableIteratorReadOptions {
-                cache_level_hint,
-                ..Default::default()
-            });
+            let read_options = ReadOptions::default();
             let result = get_from_sstable_info(
                 sstable_store.clone(),
                 &info,
                 key.to_ref(),
-                read_options,
+                &read_options,
+                cache_level_hint,
                 None,
                 &mut stats,
             )
@@ -1406,7 +1405,7 @@ mod tests {
 
     #[tokio::test]
     #[expect(clippy::borrowed_box)]
-    async fn test_current_level_hint_does_not_fallback_to_opposite_cache() {
+    async fn test_missing_level_hint_defaults_to_stable_cache() {
         let mut sstable_store = mock_sstable_store().await;
         let l0_block_cache = HybridCacheBuilder::new()
             .memory(1 << 20)
@@ -1431,8 +1430,8 @@ mod tests {
 
         sstable_store
             .live_ssts
-            .replace_levels_for_test([(index.sst_id, 1)]);
-        let stable_route = sstable_store.block_cache_route(index.sst_id, None);
+            .replace_levels_for_test([(index.sst_id, 0)]);
+        let stable_route = sstable_store.block_cache_route(None);
         assert_eq!(stable_route, BlockCacheRoute::Stable);
         assert!(
             sstable_store

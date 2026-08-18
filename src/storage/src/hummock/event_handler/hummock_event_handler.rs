@@ -741,8 +741,9 @@ impl HummockEventHandler {
             Some(&mut sst_delta_infos),
         ) {
             if may_change_live_objects {
-                // The refiller uses force insertion after its explicit storage-filter check, so
-                // publish the target version's live objects before starting refill tasks.
+                // Cache admission follows the newest queued target version. Read routing uses the
+                // level hint captured from its own pinned-version snapshot and does not observe
+                // this state.
                 self.live_ssts.replace_from_version(&new_pinned_version);
             }
             self.refiller

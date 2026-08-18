@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::HashSet;
 use std::hash::{BuildHasherDefault, Hash, Hasher};
 use std::ops::Deref;
 use std::sync::Arc;
@@ -111,34 +111,44 @@ impl BlockCacheRoute {
     }
 }
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-struct LiveSstInfo {
-    level: u32,
-}
-
-impl LiveSstInfo {
-    fn cache_route(self) -> BlockCacheRoute {
-        BlockCacheRoute::from_level(self.level)
-    }
-}
-
 #[derive(Clone)]
 pub struct LiveSsts {
-    inner: Arc<ArcSwap<HashMap<HummockSstableObjectId, LiveSstInfo>>>,
+    inner: Arc<ArcSwap<LiveSstSnapshot>>,
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+struct LiveSstSnapshot {
+    l0_objects: HashSet<HummockSstableObjectId>,
+    stable_objects: HashSet<HummockSstableObjectId>,
+}
+
+impl LiveSstSnapshot {
+    fn contains(&self, object_id: &HummockSstableObjectId, route: BlockCacheRoute) -> bool {
+        match route {
+            BlockCacheRoute::L0 => self.l0_objects.contains(object_id),
+            BlockCacheRoute::Stable => self.stable_objects.contains(object_id),
+        }
+    }
+
+    fn contains_any(&self, object_id: &HummockSstableObjectId) -> bool {
+        self.l0_objects.contains(object_id) || self.stable_objects.contains(object_id)
+    }
 }
 
 impl Default for LiveSsts {
     fn default() -> Self {
         Self {
-            inner: Arc::new(ArcSwap::from_pointee(HashMap::new())),
+            inner: Arc::new(ArcSwap::from_pointee(LiveSstSnapshot::default())),
         }
     }
 }
 
 impl std::fmt::Debug for LiveSsts {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let snapshot = self.inner.load();
         f.debug_struct("LiveSsts")
-            .field("len", &self.inner.load().len())
+            .field("l0_objects", &snapshot.l0_objects.len())
+            .field("stable_objects", &snapshot.stable_objects.len())
             .finish()
     }
 }
@@ -170,22 +180,16 @@ impl LiveSsts {
         &self,
         object_levels: impl IntoIterator<Item = (HummockSstableObjectId, u32)>,
     ) {
-        let next = HashMap::from_iter(
-            object_levels
-                .into_iter()
-                .map(|(object_id, level)| (object_id, LiveSstInfo { level })),
-        );
+        let mut next = LiveSstSnapshot::default();
+        for (object_id, level) in object_levels {
+            match BlockCacheRoute::from_level(level) {
+                BlockCacheRoute::L0 => next.l0_objects.insert(object_id),
+                BlockCacheRoute::Stable => next.stable_objects.insert(object_id),
+            };
+        }
         if self.inner.load().as_ref() != &next {
             self.inner.store(Arc::new(next));
         }
-    }
-
-    pub(crate) fn route(&self, object_id: &HummockSstableObjectId) -> Option<BlockCacheRoute> {
-        self.inner
-            .load()
-            .get(object_id)
-            .copied()
-            .map(LiveSstInfo::cache_route)
     }
 }
 
@@ -228,12 +232,10 @@ impl LiveSstFilter {
             return false;
         }
         let object_id = HummockSstableObjectId::new(hash >> BLOCK_INDEX_BITS);
-        let Some(route) = self.live_ssts.route(&object_id) else {
-            return false;
-        };
+        let snapshot = self.live_ssts.inner.load();
         match self.selector {
-            LiveSstRouteSelector::Any => true,
-            LiveSstRouteSelector::Route(expected) => route == expected,
+            LiveSstRouteSelector::Any => snapshot.contains_any(&object_id),
+            LiveSstRouteSelector::Route(route) => snapshot.contains(&object_id, route),
         }
     }
 }
@@ -478,6 +480,29 @@ mod tests {
 
         live_ssts.replace_from_version(&version_with_levels(&[(1, &[7])]));
         assert!(any.is_admitted(hash(sst)));
+        assert!(!l0.is_admitted(hash(sst)));
+        assert!(stable.is_admitted(hash(sst)));
+    }
+
+    #[test]
+    fn test_branched_object_is_live_in_both_cache_routes() {
+        let live_ssts = LiveSsts::default();
+        let l0 = LiveSstFilter::l0(live_ssts.clone());
+        let stable = LiveSstFilter::stable(live_ssts.clone());
+        let sst = SstableBlockIndex {
+            sst_id: HummockSstableObjectId::new(7),
+            block_idx: 0,
+        };
+
+        live_ssts.replace_from_version(&version_with_levels(&[(0, &[7]), (1, &[7])]));
+        assert!(l0.is_admitted(hash(sst)));
+        assert!(stable.is_admitted(hash(sst)));
+
+        live_ssts.replace_from_version(&version_with_levels(&[(1, &[7]), (0, &[7])]));
+        assert!(l0.is_admitted(hash(sst)));
+        assert!(stable.is_admitted(hash(sst)));
+
+        live_ssts.replace_from_version(&version_with_levels(&[(1, &[7])]));
         assert!(!l0.is_admitted(hash(sst)));
         assert!(stable.is_admitted(hash(sst)));
     }

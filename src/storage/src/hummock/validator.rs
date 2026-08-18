@@ -65,7 +65,6 @@ pub async fn validate_ssts(task: ValidationTask, sstable_store: SstableStoreRef)
             sstable_store.clone(),
             Arc::new(SstableIteratorReadOptions {
                 cache_policy: CachePolicy::NotFill,
-                cache_level_hint: None,
                 scan_end_user_key: None,
                 prefetch: false,
                 max_preload_retry_times: 0,
