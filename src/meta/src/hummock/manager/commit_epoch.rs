@@ -138,8 +138,10 @@ impl HummockManager {
                         .clone(),
                     )
                 } else {
-                    let compaction_group_manager_guard =
-                        self.compaction_group_manager.write().await;
+                    let compaction_group_manager_guard = self
+                        .compaction_group_manager
+                        .write_with_process_name("commit_epoch")
+                        .await;
                     let new_compaction_group_config =
                         compaction_group_manager_guard.default_compaction_config();
                     compaction_group_config = Some(new_compaction_group_config.clone());

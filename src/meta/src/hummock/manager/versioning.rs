@@ -200,7 +200,10 @@ impl HummockManager {
         target_group_ids: &[CompactionGroupId],
     ) -> bool {
         let versioning = self.versioning.read().await;
-        let mut cg_manager = self.compaction_group_manager.write().await;
+        let mut cg_manager = self
+            .compaction_group_manager
+            .write_with_process_name("try_update_write_limits")
+            .await;
         let target_group_configs = target_group_ids
             .iter()
             .filter_map(|id| {
@@ -247,7 +250,10 @@ impl HummockManager {
     }
 
     pub async fn rebuild_table_stats(&self) -> Result<()> {
-        let mut versioning = self.versioning.write().await;
+        let mut versioning = self
+            .versioning
+            .write_with_process_name("rebuild_table_stats")
+            .await;
         let new_stats = rebuild_table_stats(&versioning.current_version);
         let mut version_stats = VarTransaction::new(&mut versioning.version_stats);
         // version_stats.hummock_version_id is always 0 in meta store.
@@ -257,7 +263,10 @@ impl HummockManager {
     }
 
     pub async fn may_fill_backward_state_table_info(&self) -> Result<()> {
-        let mut versioning = self.versioning.write().await;
+        let mut versioning = self
+            .versioning
+            .write_with_process_name("may_fill_backward_state_table_info")
+            .await;
         if versioning
             .current_version
             .need_fill_backward_compatible_state_table_info_delta()
