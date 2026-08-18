@@ -145,6 +145,7 @@ fn new_test_iceberg_config(
     values.insert(
         "compaction.type".to_owned(),
         match compaction_type {
+            CompactionType::Auto => "auto",
             CompactionType::Full => "full",
             CompactionType::SmallFiles => "small-files",
             CompactionType::FilesWithDelete => "files-with-delete",
@@ -617,7 +618,7 @@ async fn test_apply_sink_update_refreshes_existing_idle_track() {
     manager.inner.write().sink_schedules.insert(sink_id, track);
 
     let refresh_at = now + Duration::from_secs(30);
-    let config = new_test_iceberg_config(300, 3, CompactionType::SmallFiles);
+    let config = new_test_iceberg_config(300, 3, CompactionType::Auto);
     let mut guard = manager.inner.write();
 
     manager.apply_sink_update(
@@ -632,7 +633,7 @@ async fn test_apply_sink_update_refreshes_existing_idle_track() {
     );
 
     let track = guard.sink_schedules.get(&sink_id).unwrap();
-    assert_eq!(track.task_type, TaskType::SmallFiles);
+    assert_eq!(track.task_type, TaskType::Auto);
     assert_eq!(track.trigger_interval_sec, 300);
     assert_eq!(track.trigger_snapshot_count, 3);
     assert_eq!(track.last_config_refresh_at, refresh_at);

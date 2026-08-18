@@ -704,6 +704,7 @@ impl BatchRefreshJobCheckpointControl {
         partial_graph_manager.inject_barrier(
             partial_graph_id,
             mutation,
+            None,
             node_actors,
             state_table_ids.iter().copied(),
             if is_stop {

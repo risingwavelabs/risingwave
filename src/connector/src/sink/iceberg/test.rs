@@ -599,7 +599,7 @@ fn test_parse_compaction_config() {
         ("compaction.delete_files_count_threshold", "50"),
         ("compaction.trigger_snapshot_count", "10"),
         ("compaction.target_file_size_mb", "256"),
-        ("compaction.type", "full"),
+        ("compaction.type", "auto"),
         ("compaction.write_parquet_compression", "zstd"),
         ("compaction.write_parquet_max_row_group_rows", "50000"),
         ("compaction.write_parquet_max_row_group_bytes", "67108864"),
@@ -618,7 +618,7 @@ fn test_parse_compaction_config() {
     assert_eq!(config.delete_files_count_threshold, Some(50));
     assert_eq!(config.trigger_snapshot_count, Some(10));
     assert_eq!(config.target_file_size_mb, Some(256));
-    assert_eq!(config.compaction_type, Some(CompactionType::Full));
+    assert_eq!(config.compaction_type, Some(CompactionType::Auto));
     assert_eq!(config.target_file_size_mb(), 256);
     assert_eq!(config.write_parquet_compression(), "zstd");
     assert_eq!(config.write_parquet_max_row_group_rows(), Some(50000));
