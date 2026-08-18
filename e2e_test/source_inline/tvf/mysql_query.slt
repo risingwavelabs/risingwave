@@ -100,6 +100,58 @@ select * from mysql_query('mysql_cdc_source', 'select * from test;');
 ----
 1 t 1 2 3 4 5 6 7 1.08 1.09 1.10 1.11 char varchar \x000a \x16 \x17 \x18 \x19 2021-01-01 12:34:56 2021-01-01 12:34:56+00:00 {"key1": 1, "key2": "abc"} NULL t 2023 b \x3132333435 \x74657874 \x74696e7974657874 \x6d656469756d74657874 \x6c6f6e6774657874 2021-01-01 12:34:56 \x01020304
 
+# --- schema-qualified CDC source lookup ---
+# Regression coverage for the 2-arg form when the CDC source lives outside the
+# default search_path. Prior to the fix, both the qualified and the bare form
+# below returned "source not found".
+
+statement ok
+create schema mysql_tvf_schema;
+
+statement ok
+create source mysql_tvf_schema.mysql_cdc_source_ns with (
+  ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
+  username = '$RISEDEV_MYSQL_USER',
+  password = '$MYSQL_PWD',
+  database.name = 'tvf',
+);
+
+query
+select id from mysql_query('mysql_tvf_schema.mysql_cdc_source_ns', 'select id from test;');
+----
+1
+
+query
+select id from mysql_query('"mysql_tvf_schema"."mysql_cdc_source_ns"', 'select id from test;');
+----
+1
+
+statement ok
+set search_path to mysql_tvf_schema, public;
+
+query
+select id from mysql_query('mysql_cdc_source_ns', 'select id from test;');
+----
+1
+
+statement ok
+set search_path to "$user", public;
+
+statement error source not found: mysql_cdc_source_ns
+select id from mysql_query('mysql_cdc_source_ns', 'select id from test;');
+
+statement error source not found: not_a_source
+select id from mysql_query('mysql_tvf_schema.not_a_source', 'select id from test;');
+
+statement error mysql_query
+select id from mysql_query('some.deep.name.that.is.too.long', 'select id from test;');
+
+statement ok
+drop source mysql_tvf_schema.mysql_cdc_source_ns cascade;
+
+statement ok
+drop schema mysql_tvf_schema;
+
 
 system ok
 mysql -e "
