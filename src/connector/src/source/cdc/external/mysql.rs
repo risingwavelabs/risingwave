@@ -473,7 +473,7 @@ pub struct MySqlExternalTableReader {
     pk_indices: Vec<usize>,
     field_names: String,
     pool: mysql_async::Pool,
-    upstream_mysql_pk_infos: Vec<(String, ColumnType)>, // (column_name, column_type)
+    pk_column_unsigned_i64_compare_flags: Vec<bool>,
     mysql_version: (u8, u8),
     is_mariadb: bool,
 }
@@ -593,13 +593,25 @@ impl MySqlExternalTableReader {
 
         // Only an RW `Int64` primary key may need MySQL unsigned `BIGINT` comparison and casting.
         // Other primary key types do not depend on upstream primary key metadata.
-        let upstream_mysql_pk_infos = if pk_indices
+        let pk_column_unsigned_i64_compare_flags = if pk_indices
             .iter()
             .any(|&index| rw_schema.fields[index].data_type == DataType::Int64)
         {
-            Self::query_upstream_pk_infos(&pool, &database, &table).await?
+            let upstream_mysql_pk_infos =
+                Self::query_upstream_pk_infos(&pool, &database, &table).await?;
+            pk_indices
+                .iter()
+                .map(|&index| {
+                    let field = &rw_schema.fields[index];
+                    needs_unsigned_i64_compare(
+                        &field.name,
+                        &field.data_type,
+                        &upstream_mysql_pk_infos,
+                    )
+                })
+                .try_collect()?
         } else {
-            vec![]
+            vec![false; pk_indices.len()]
         };
         // Get MySQL version
         let (major_version, minor_version, is_mariadb) = Self::get_mysql_version(&pool).await?;
@@ -616,7 +628,7 @@ impl MySqlExternalTableReader {
             pk_indices,
             field_names,
             pool,
-            upstream_mysql_pk_infos,
+            pk_column_unsigned_i64_compare_flags,
             mysql_version,
             is_mariadb,
         })
@@ -670,21 +682,9 @@ impl MySqlExternalTableReader {
         Ok(column_infos)
     }
 
-    /// For each given primary key column, whether it needs unsigned `i64` comparison.
-    pub(crate) fn pk_column_unsigned_i64_compare_flags(
-        &self,
-        pk_fields: &[Field],
-    ) -> ConnectorResult<Vec<bool>> {
-        pk_fields
-            .iter()
-            .map(|field| {
-                needs_unsigned_i64_compare(
-                    &field.name,
-                    &field.data_type,
-                    &self.upstream_mysql_pk_infos,
-                )
-            })
-            .collect()
+    /// For each primary key column, whether it needs unsigned `i64` comparison.
+    pub(crate) fn pk_column_unsigned_i64_compare_flags(&self) -> Vec<bool> {
+        self.pk_column_unsigned_i64_compare_flags.clone()
     }
 
     /// Convert negative i64 to unsigned u64 based on column type
@@ -737,7 +737,8 @@ impl MySqlExternalTableReader {
             let params: Vec<_> = primary_keys
                 .iter()
                 .zip_eq_fast(start_pk_row.into_iter())
-                .map(|(pk, datum)| {
+                .zip_eq_fast(&self.pk_column_unsigned_i64_compare_flags)
+                .map(|((pk, datum), &needs_unsigned_i64_compare)| {
                     if let Some(value) = datum {
                         let ty = field_map.get(pk.as_str()).unwrap();
                         let val = match ty {
@@ -746,13 +747,7 @@ impl MySqlExternalTableReader {
                             DataType::Int32 => Value::from(value.into_int32()),
                             DataType::Int64 => {
                                 let int64_val = value.into_int64();
-                                if int64_val < 0
-                                    && needs_unsigned_i64_compare(
-                                        pk.as_str(),
-                                        ty,
-                                        &self.upstream_mysql_pk_infos,
-                                    )?
-                                {
+                                if int64_val < 0 && needs_unsigned_i64_compare {
                                     Value::from(self.convert_negative_to_unsigned(int64_val))
                                 } else {
                                     Value::from(int64_val)
