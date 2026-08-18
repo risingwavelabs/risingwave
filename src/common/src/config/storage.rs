@@ -118,17 +118,28 @@ pub struct StorageConfig {
     #[config_doc(nested)]
     pub data_file_cache: FileCacheConfig,
 
-    /// Filter applied before admitting a block into the data file cache. `none` accepts every
-    /// block; `live-sst` accepts only blocks whose SST is live and belongs to the cache's level
-    /// partition.
+    /// Filter applied before admitting a block into the primary data file cache. The primary
+    /// cache stores stable-level blocks when the L0 disk cache is split, and all blocks otherwise.
+    /// `none` accepts every block; `live-sst` accepts only live blocks routed to this cache.
     #[serde(default)]
     pub data_file_cache_admission_filter: DataFileCacheFilter,
 
-    /// Filter applied before reinserting a block during data file cache reclaim. `none` accepts
-    /// every block; `live-sst` accepts only blocks whose SST is live and belongs to the cache's
-    /// level partition.
+    /// Filter applied before reinserting a block during primary data file cache reclaim. The
+    /// primary cache stores stable-level blocks when the L0 disk cache is split, and all blocks
+    /// otherwise. `none` accepts every block; `live-sst` accepts only live blocks routed to this
+    /// cache.
     #[serde(default)]
     pub data_file_cache_reinsertion_filter: DataFileCacheFilter,
+
+    /// Filter applied before admitting a block into the independent L0 data file cache. When
+    /// omitted, it inherits `data_file_cache_admission_filter`.
+    #[serde(default)]
+    pub l0_data_file_cache_admission_filter: Option<DataFileCacheFilter>,
+
+    /// Filter applied before reinserting a block during independent L0 data file cache reclaim.
+    /// When omitted, it inherits `data_file_cache_reinsertion_filter`.
+    #[serde(default)]
+    pub l0_data_file_cache_reinsertion_filter: Option<DataFileCacheFilter>,
 
     /// Percentage of data file cache capacity reserved for the independent L0 cache.
     /// `0` keeps the existing single-disk layout.

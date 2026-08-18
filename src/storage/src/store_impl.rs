@@ -977,8 +977,10 @@ impl StateStoreImpl {
             stable_block_cache_capacity_mb,
             l0_block_cache_capacity_mb,
             l0_memory_eviction = ?l0_memory_eviction_config,
-            data_file_cache_admission_filter = ?opts.data_file_cache_admission_filter,
-            data_file_cache_reinsertion_filter = ?opts.data_file_cache_reinsertion_filter,
+            primary_data_file_cache_admission_filter = ?opts.data_file_cache_admission_filter,
+            primary_data_file_cache_reinsertion_filter = ?opts.data_file_cache_reinsertion_filter,
+            l0_data_file_cache_admission_filter = ?opts.l0_data_file_cache_admission_filter,
+            l0_data_file_cache_reinsertion_filter = ?opts.l0_data_file_cache_reinsertion_filter,
             split_block_cache,
             split_data_file_cache,
             "configured L0 cache topology"
@@ -1094,12 +1096,12 @@ impl StateStoreImpl {
                     .with_eviction_pickers(vec![Box::new(FifoPicker::new(
                         opts.data_file_cache_fifo_probation_ratio,
                     ))]);
-                if opts.data_file_cache_admission_filter == DataFileCacheFilter::LiveSst {
+                if opts.l0_data_file_cache_admission_filter == DataFileCacheFilter::LiveSst {
                     engine_builder = engine_builder.with_admission_filter(
                         StorageFilter::new().with_condition(LiveSstFilter::l0(live_ssts.clone())),
                     );
                 }
-                if opts.data_file_cache_reinsertion_filter == DataFileCacheFilter::LiveSst {
+                if opts.l0_data_file_cache_reinsertion_filter == DataFileCacheFilter::LiveSst {
                     engine_builder = engine_builder.with_reinsertion_filter(
                         StorageFilter::new().with_condition(LiveSstFilter::l0(live_ssts.clone())),
                     );

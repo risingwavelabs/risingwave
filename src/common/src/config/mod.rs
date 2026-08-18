@@ -539,6 +539,8 @@ pub mod tests {
             l0_block_cache_memory_capacity_ratio_in_percent = 2
             data_file_cache_admission_filter = "live-sst"
             data_file_cache_reinsertion_filter = "none"
+            l0_data_file_cache_admission_filter = "none"
+            l0_data_file_cache_reinsertion_filter = "live-sst"
 
             [storage.cache.l0_block_cache_eviction]
             algorithm = "S3Fifo"
@@ -566,6 +568,14 @@ pub mod tests {
         assert_eq!(
             config.storage.data_file_cache_reinsertion_filter,
             DataFileCacheFilter::None
+        );
+        assert_eq!(
+            config.storage.l0_data_file_cache_admission_filter,
+            Some(DataFileCacheFilter::None)
+        );
+        assert_eq!(
+            config.storage.l0_data_file_cache_reinsertion_filter,
+            Some(DataFileCacheFilter::LiveSst)
         );
         assert!(matches!(
             config.storage.cache.l0_block_cache_eviction,

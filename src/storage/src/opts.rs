@@ -94,6 +94,8 @@ pub struct StorageOpts {
     pub data_file_cache_capacity_mb: usize,
     pub data_file_cache_admission_filter: DataFileCacheFilter,
     pub data_file_cache_reinsertion_filter: DataFileCacheFilter,
+    pub l0_data_file_cache_admission_filter: DataFileCacheFilter,
+    pub l0_data_file_cache_reinsertion_filter: DataFileCacheFilter,
     pub l0_block_cache_disk_capacity_ratio_in_percent: usize,
     pub l0_block_cache_memory_capacity_ratio_in_percent: usize,
     pub data_file_cache_file_capacity_mb: usize,
@@ -265,6 +267,14 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             data_file_cache_capacity_mb: c.storage.data_file_cache.capacity_mb,
             data_file_cache_admission_filter: c.storage.data_file_cache_admission_filter,
             data_file_cache_reinsertion_filter: c.storage.data_file_cache_reinsertion_filter,
+            l0_data_file_cache_admission_filter: c
+                .storage
+                .l0_data_file_cache_admission_filter
+                .unwrap_or(c.storage.data_file_cache_admission_filter),
+            l0_data_file_cache_reinsertion_filter: c
+                .storage
+                .l0_data_file_cache_reinsertion_filter
+                .unwrap_or(c.storage.data_file_cache_reinsertion_filter),
             l0_block_cache_disk_capacity_ratio_in_percent: c
                 .storage
                 .l0_block_cache_disk_capacity_ratio_in_percent,
@@ -425,5 +435,37 @@ mod tests {
 
         assert_eq!(opts.data_file_cache_submit_queue_size_threshold_mb, 256);
         assert_eq!(opts.meta_file_cache_submit_queue_size_threshold_mb, 32);
+    }
+
+    #[test]
+    fn test_l0_data_file_cache_filters_override_or_inherit_stable_filters() {
+        let mut config = RwConfig::default();
+        config.storage.data_file_cache_admission_filter = DataFileCacheFilter::LiveSst;
+        config.storage.data_file_cache_reinsertion_filter = DataFileCacheFilter::None;
+        let system_params = SystemParamsReader::from(system_params_for_test());
+        let storage_memory_config = extract_storage_memory_config(&config);
+
+        let opts = StorageOpts::from((&config, &system_params, &storage_memory_config));
+        assert_eq!(
+            opts.l0_data_file_cache_admission_filter,
+            DataFileCacheFilter::LiveSst
+        );
+        assert_eq!(
+            opts.l0_data_file_cache_reinsertion_filter,
+            DataFileCacheFilter::None
+        );
+
+        config.storage.l0_data_file_cache_admission_filter = Some(DataFileCacheFilter::None);
+        config.storage.l0_data_file_cache_reinsertion_filter = Some(DataFileCacheFilter::LiveSst);
+        let storage_memory_config = extract_storage_memory_config(&config);
+        let opts = StorageOpts::from((&config, &system_params, &storage_memory_config));
+        assert_eq!(
+            opts.l0_data_file_cache_admission_filter,
+            DataFileCacheFilter::None
+        );
+        assert_eq!(
+            opts.l0_data_file_cache_reinsertion_filter,
+            DataFileCacheFilter::LiveSst
+        );
     }
 }
