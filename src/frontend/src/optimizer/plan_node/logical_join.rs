@@ -1667,14 +1667,26 @@ impl ToStream for LogicalJoin {
             let lhs_join_key_idx = eq_indexes.iter().map(|(l, _)| *l).collect_vec();
             if self.should_be_temporal_join() {
                 (
-                    try_enforce_locality_requirement(self.left(), &lhs_join_key_idx),
+                    try_enforce_locality_requirement(
+                        self.left(),
+                        &lhs_join_key_idx,
+                        ctx.locality_backfill_enabled(),
+                    ),
                     self.right(),
                 )
             } else {
                 let rhs_join_key_idx = eq_indexes.iter().map(|(_, r)| *r).collect_vec();
                 (
-                    try_enforce_locality_requirement(self.left(), &lhs_join_key_idx),
-                    try_enforce_locality_requirement(self.right(), &rhs_join_key_idx),
+                    try_enforce_locality_requirement(
+                        self.left(),
+                        &lhs_join_key_idx,
+                        ctx.locality_backfill_enabled(),
+                    ),
+                    try_enforce_locality_requirement(
+                        self.right(),
+                        &rhs_join_key_idx,
+                        ctx.locality_backfill_enabled(),
+                    ),
                 )
             }
         };

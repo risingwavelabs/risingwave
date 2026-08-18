@@ -19,6 +19,7 @@ use risingwave_simulation::cluster::{Cluster, Configuration, Session};
 use tokio::time::sleep;
 
 const SET_LOCALITY_BACKFILL: &str = "SET enable_locality_backfill = true;";
+const SET_LOCALITY_BACKFILL_ALWAYS: &str = "SET locality_backfill_mode = always;";
 const SET_BACKGROUND_DDL: &str = "SET background_ddl = true;";
 const SET_RATE_LIMIT_1: &str = "SET backfill_rate_limit = 1;";
 const CREATE_TABLE: &str = "CREATE TABLE t(a int);";
@@ -84,6 +85,7 @@ async fn test_locality_backfill_recovery_internal_tables() -> Result<()> {
 
     // Step 1: Enable locality backfill and configure for slow background DDL
     session.run(SET_LOCALITY_BACKFILL).await?;
+    session.run(SET_LOCALITY_BACKFILL_ALWAYS).await?;
     session.run(SET_BACKGROUND_DDL).await?;
     session.run(SET_RATE_LIMIT_1).await?;
 

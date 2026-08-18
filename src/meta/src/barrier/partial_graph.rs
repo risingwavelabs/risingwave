@@ -25,6 +25,7 @@ use itertools::Itertools;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::id::{ActorId, PartialGraphId, TableId, WorkerId};
+use risingwave_pb::stream_plan::IcebergPkIndexCompactionContext;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use risingwave_pb::stream_service::streaming_control_stream_response::{
@@ -487,6 +488,7 @@ impl PartialGraphManager {
         &mut self,
         partial_graph_id: PartialGraphId,
         mutation: Option<Mutation>,
+        compaction_context: Option<IcebergPkIndexCompactionContext>,
         node_actors: &HashMap<WorkerId, HashSet<ActorId>>,
         table_ids_to_sync: impl Iterator<Item = TableId>,
         nodes_to_sync_table: impl Iterator<Item = WorkerId>,
@@ -500,6 +502,7 @@ impl PartialGraphManager {
         let node_to_collect = self.control_stream_manager.inject_barrier(
             partial_graph_id,
             mutation,
+            compaction_context,
             &info.barrier_info,
             node_actors,
             table_ids_to_sync,
@@ -648,6 +651,7 @@ impl PartialGraphRecoverer<'_> {
         let node_to_collect = self.manager.control_stream_manager.inject_barrier(
             partial_graph_id,
             Some(mutation),
+            None,
             barrier_info,
             node_actors,
             table_ids_to_sync,

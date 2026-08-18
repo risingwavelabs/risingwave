@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod cdc_type_compatibility;
 mod column;
 mod external_table;
 mod internal_table;
