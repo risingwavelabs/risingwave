@@ -37,9 +37,9 @@ use super::{Access, AccessError, AccessResult};
 use crate::parser::DatumCow;
 use crate::schema::{InvalidOptionError, bail_invalid_option_error};
 
-/// Try to parse a Debezium PostGIS spatial object.
+/// Try to parse a Debezium `PostGIS` spatial object.
 ///
-/// Debezium represents PostGIS `geometry` and `geography` values as an object:
+/// Debezium represents `PostGIS` `geometry` and `geography` values as an object:
 /// `{"srid": <int>, "wkb": <base64_string>}`.
 /// For our current Postgres CDC ingestion, the `wkb` field is expected to be EWKB bytes (base64-encoded),
 /// and `srid` is redundant. We decode `wkb` into raw bytes and store it as `bytea`.
