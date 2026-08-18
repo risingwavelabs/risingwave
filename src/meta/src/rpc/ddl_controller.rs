@@ -95,8 +95,8 @@ use crate::stream::{
     FragmentGraphDownstreamContext, FragmentGraphUpstreamContext, GlobalStreamManagerRef,
     ParallelismPolicy, ReplaceStreamJobContext, ReschedulePolicy, SourceChange, SourceManagerRef,
     StreamFragmentGraph, UpstreamSinkInfo, check_sink_fragments_support_refresh_schema,
-    create_source_worker, first_variant_column, rewrite_refresh_schema_sink_fragment, state_match,
-    validate_sink,
+    cleanup_dropped_streaming_jobs, create_source_worker, first_variant_column,
+    rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
 };
 use crate::telemetry::report_event;
 use crate::{MetaError, MetaResult};
@@ -1206,10 +1206,11 @@ impl DdlController {
             .instrument_await("acquire_creating_streaming_job_permit")
             .await
             .unwrap();
-        let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
+        let reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
 
         let name = streaming_job.name();
         let definition = streaming_job.definition();
+        let database_id = streaming_job.database_id();
         let source_id = match &streaming_job {
             StreamingJob::Table(Some(src), _, _) | StreamingJob::Source(src) => Some(src.id),
             _ => None,
@@ -1228,15 +1229,15 @@ impl DdlController {
         {
             Ok((stream_job_fragments, ctx)) => {
                 self.stream_manager
-                    .create_streaming_job(stream_job_fragments, ctx, permit)
+                    .create_streaming_job(stream_job_fragments, ctx, permit, reschedule_job_lock)
                     .await
             }
-            Err(err) => Err(err),
+            Err(err) => Err((err, false, None)),
         };
 
         match create_result {
             Ok(version) => Ok(version),
-            Err(err) => {
+            Err((err, is_cancelled, cancel_notifier)) => {
                 tracing::error!(id = %job_id, error = %err.as_report(), "failed to create streaming job");
                 let event = risingwave_pb::meta::event_log::EventCreateStreamJobFail {
                     id: job_id,
@@ -1250,12 +1251,32 @@ impl DdlController {
                 let abort_result = self
                     .metadata_manager
                     .catalog_controller
-                    .try_abort_creating_streaming_job(job_id, false)
+                    .try_abort_creating_streaming_job(job_id, is_cancelled)
                     .await?;
                 self.iceberg_compaction_manager
                     .clear_maintenance_for_aborted_job(&abort_result);
+                if let Some(cancel_info) = abort_result.cancel_info {
+                    self.stream_manager
+                        .barrier_scheduler
+                        .run_command(database_id, cancel_info.command)
+                        .await?;
+                    cleanup_dropped_streaming_jobs(
+                        &self.stream_manager.refresh_manager,
+                        &self.stream_manager.hummock_manager,
+                        &self.stream_manager.metadata_manager,
+                        cancel_info.streaming_job_ids,
+                        cancel_info.state_table_ids,
+                        "cancel_streaming_job",
+                    )
+                    .await?;
+                }
+                if let Some(cancel_notifier) = cancel_notifier {
+                    let _ = cancel_notifier.send(true).inspect_err(|err| {
+                        tracing::warn!("failed to notify cancellation result: {err}")
+                    });
+                }
                 if abort_result.aborted {
-                    tracing::warn!(id = %job_id, "aborted streaming job");
+                    tracing::warn!(id = %job_id, is_cancelled, "aborted streaming job");
                     // FIXME: might also need other cleanup here
                     if let Some(source_id) = source_id {
                         self.source_manager
