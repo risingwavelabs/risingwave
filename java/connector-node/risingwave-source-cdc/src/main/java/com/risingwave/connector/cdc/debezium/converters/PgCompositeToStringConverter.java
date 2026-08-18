@@ -26,7 +26,7 @@ import java.util.List;
 import java.util.Properties;
 import org.apache.kafka.connect.data.SchemaBuilder;
 
-/** Converts PostgreSQL composite values (and arrays of composites) into plain strings. */
+/** Converts PostgreSQL composite and polygon values to their text representations. */
 public class PgCompositeToStringConverter
         implements CustomConverter<SchemaBuilder, RelationalColumn> {
 
@@ -61,35 +61,46 @@ public class PgCompositeToStringConverter
                     column.isOptional());
         }
 
-        if (column.jdbcType() == Types.STRUCT) {
+        if (isScalarTextType(column)) {
             // Always optional: PG DELETE before-image fills non-PK columns
             // with null under REPLICA IDENTITY DEFAULT, regardless of
             // upstream NOT NULL.
             registration.register(SchemaBuilder.string().optional(), this::convertScalar);
             return;
         }
-        if (isUserDefinedArray(column)) {
+
+        if (isTextArrayType(column)) {
             var elementSchema = SchemaBuilder.string().optional().build();
             registration.register(
                     SchemaBuilder.array(elementSchema).optional(), this::convertArray);
         }
     }
 
-    private static boolean isUserDefinedArray(RelationalColumn column) {
-        // ARRAY columns whose element OID is user-defined are treated as
-        // arrays of composites. Built-in arrays (int[], text[], ...) have OIDs
-        // below PG_FIRST_USER_OID and are skipped. User-defined enum/domain
-        // arrays will also match and get rendered as text — acceptable
-        // since the downstream column is varchar[] anyway.
+    private static boolean isScalarTextType(RelationalColumn column) {
+        return column.jdbcType() == Types.STRUCT
+                || "polygon".equalsIgnoreCase(column.typeName());
+    }
+
+    private static boolean isTextArrayType(RelationalColumn column) {
+        // Polygon arrays are built-in and therefore have an OID below
+        // PG_FIRST_USER_OID, so match them explicitly. Other ARRAY columns
+        // whose element OID is user-defined are treated as arrays of text.
+        // Built-in arrays (int[], text[], ...) are otherwise skipped.
         //
         // Do not intercept extension arrays that Debezium already knows how to
         // encode with a native schema. For example, PostGIS geometry[] arrives
         // as an array of geometry structs and RisingWave decodes each element
         // as EWKB bytea. Re-registering it as array(string) would make the
         // downstream bytea parser treat hex EWKB text as base64.
+
         return column.jdbcType() == Types.ARRAY
-                && column.nativeType() >= PG_FIRST_USER_OID
-                && !isDebeziumNativeExtensionArray(column);
+                && (
+                    isPostgresArrayOf(column, "polygon")
+                    || (
+                        column.nativeType() >= PG_FIRST_USER_OID
+                        && !isDebeziumNativeExtensionArray(column)
+                    )
+                );
     }
 
     private static boolean isDebeziumNativeExtensionArray(RelationalColumn column) {
@@ -131,6 +142,9 @@ public class PgCompositeToStringConverter
     private String convertScalar(Object value) {
         if (value == null) {
             return null;
+        }
+        if (isDebeziumUnavailableValueObject(value)) {
+            return UNAVAILABLE_VALUE_PLACEHOLDER;
         }
         if (value instanceof byte[] bytes) {
             return new String(bytes, StandardCharsets.UTF_8);

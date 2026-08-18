@@ -729,12 +729,12 @@ pub fn sea_type_to_rw_type(col_type: &SeaType) -> ConnectorResult<DataType> {
         | SeaType::TsRange
         | SeaType::TsTzRange
         | SeaType::DateRange
+        | SeaType::Polygon
         | SeaType::Enum(_) => DataType::Varchar,
         SeaType::Line
         | SeaType::Lseg
         | SeaType::Box
         | SeaType::Path
-        | SeaType::Polygon
         | SeaType::Circle
         | SeaType::Bit(_)
         | SeaType::VarBit(_)

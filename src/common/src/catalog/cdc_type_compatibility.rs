@@ -160,7 +160,7 @@ fn postgres_source_column_type_compatible(
         "double precision" => rw_type == PbTypeName::Double,
         "character varying" | "character" | "char" => rw_type == PbTypeName::Varchar,
         "text" | "xml" | "uuid" | "inet" | "cidr" | "macaddr" | "macaddr8" | "int4range"
-        | "int8range" | "numrange" | "tsrange" | "tstzrange" | "daterange" => {
+        | "int8range" | "numrange" | "tsrange" | "tstzrange" | "daterange" | "polygon" => {
             rw_type == PbTypeName::Varchar
         }
         "timestamp with time zone" | "timestamptz" => rw_type == PbTypeName::Timestamptz,
