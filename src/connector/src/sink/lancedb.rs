@@ -23,11 +23,12 @@ use lance::dataset::fragment::FileFragment;
 use lance::dataset::transaction::{Operation, TransactionBuilder};
 use lance::Dataset;
 use lance_table::format::Fragment;
-use lancedb::Connection as LanceDbConnection;
 use lancedb::connection::ConnectBuilder;
+use lancedb::{Connection as LanceDbConnection, Table as LanceDbTable};
 use risingwave_common::array::StreamChunk;
 use risingwave_common::array::arrow::LanceDbConvert;
 use risingwave_common::catalog::Schema;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
 use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
@@ -85,10 +86,26 @@ impl LanceDbCommon {
         Ok(conn)
     }
 
-    /// Get the lance Dataset URI for the table.
-    /// `LanceDB` stores each table as a Lance dataset at `{db_uri}/{table_name}.lance`.
-    pub fn dataset_uri(&self) -> String {
-        format!("{}/{}.lance", self.uri.trim_end_matches('/'), self.table)
+    async fn open_table(&self, conn: &LanceDbConnection) -> Result<LanceDbTable> {
+        conn.open_table(&self.table)
+            .execute()
+            .await
+            .context("failed to open LanceDB table")
+            .map_err(SinkError::LanceDb)
+    }
+
+    /// Get the Lance dataset URI from the opened native `LanceDB` table.
+    async fn dataset_uri(&self, table: &LanceDbTable) -> Result<String> {
+        let dataset_wrapper = table.dataset().ok_or_else(|| {
+            SinkError::LanceDb(anyhow!(
+                "failed to get underlying lance Dataset (table may be remote)"
+            ))
+        })?;
+        let dataset_guard = dataset_wrapper
+            .get()
+            .await
+            .map_err(|e| SinkError::LanceDb(anyhow!(e)))?;
+        Ok(dataset_guard.uri().to_owned())
     }
 }
 
@@ -147,7 +164,7 @@ impl Sink for LanceDbSink {
     const SINK_NAME: &'static str = LANCEDB_SINK;
 
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
-        let inner = LanceDbSinkWriter::new(self.config.clone(), self.param.schema())?;
+        let inner = LanceDbSinkWriter::new(self.config.clone(), self.param.schema()).await?;
 
         let commit_checkpoint_interval =
             NonZeroU64::new(self.config.common.commit_checkpoint_interval).expect(
@@ -190,12 +207,7 @@ impl Sink for LanceDbSink {
         let conn = self.config.common.create_connection().await?;
 
         // Validate table exists and schema is compatible
-        let table = conn
-            .open_table(&self.config.common.table)
-            .execute()
-            .await
-            .context("failed to open LanceDB table")
-            .map_err(SinkError::LanceDb)?;
+        let table = self.config.common.open_table(&conn).await?;
 
         // Get the Lance table schema (Arrow schema)
         let lance_schema = table
@@ -210,36 +222,7 @@ impl Sink for LanceDbSink {
             .rw_schema_to_arrow_schema(&rw_schema)
             .map_err(|e| SinkError::LanceDb(anyhow!(e)))?;
 
-        // Check field count matches
-        if rw_arrow_schema.fields().len() != lance_schema.fields().len() {
-            return Err(SinkError::LanceDb(anyhow!(
-                "Columns mismatch. RisingWave schema has {} fields, LanceDB table has {} fields",
-                rw_arrow_schema.fields().len(),
-                lance_schema.fields().len()
-            )));
-        }
-
-        // Check each field name exists and type is compatible
-        for rw_field in rw_arrow_schema.fields() {
-            match lance_schema.field_with_name(rw_field.name()) {
-                Ok(lance_field) => {
-                    if rw_field.data_type() != lance_field.data_type() {
-                        return Err(SinkError::LanceDb(anyhow!(
-                            "column '{}' type mismatch: LanceDB type is {:?}, RisingWave type is {:?}",
-                            rw_field.name(),
-                            lance_field.data_type(),
-                            rw_field.data_type()
-                        )));
-                    }
-                }
-                Err(_) => {
-                    return Err(SinkError::LanceDb(anyhow!(
-                        "column '{}' not found in LanceDB table",
-                        rw_field.name()
-                    )));
-                }
-            }
-        }
+        validate_ordered_schema(&rw_arrow_schema, lance_schema.as_ref())?;
 
         Ok(())
     }
@@ -279,6 +262,46 @@ impl TryFrom<SinkParam> for LanceDbSink {
 use risingwave_common::array::arrow::arrow_array_lancedb as arrow_array;
 use risingwave_common::array::arrow::arrow_schema_lancedb as arrow_schema;
 
+fn validate_ordered_schema(
+    rw_arrow_schema: &arrow_schema::Schema,
+    lance_schema: &arrow_schema::Schema,
+) -> Result<()> {
+    if rw_arrow_schema.fields().len() != lance_schema.fields().len() {
+        return Err(SinkError::LanceDb(anyhow!(
+            "Columns mismatch. RisingWave schema has {} fields, LanceDB table has {} fields",
+            rw_arrow_schema.fields().len(),
+            lance_schema.fields().len()
+        )));
+    }
+
+    for (idx, (rw_field, lance_field)) in rw_arrow_schema
+        .fields()
+        .iter()
+        .zip_eq_fast(lance_schema.fields().iter())
+        .enumerate()
+    {
+        if rw_field.name() != lance_field.name() {
+            return Err(SinkError::LanceDb(anyhow!(
+                "column order mismatch at position {}: LanceDB column is '{}', RisingWave column is '{}'",
+                idx,
+                lance_field.name(),
+                rw_field.name()
+            )));
+        }
+
+        if rw_field.data_type() != lance_field.data_type() {
+            return Err(SinkError::LanceDb(anyhow!(
+                "column '{}' type mismatch: LanceDB type is {:?}, RisingWave type is {:?}",
+                rw_field.name(),
+                lance_field.data_type(),
+                rw_field.data_type()
+            )));
+        }
+    }
+
+    Ok(())
+}
+
 /// The writer writes data files directly to the Lance dataset storage using the
 /// low-level `FileFragment::create_fragments()` API. On checkpoint, it returns
 /// lightweight `Fragment` metadata (file paths + row counts) instead of the
@@ -298,12 +321,14 @@ pub struct LanceDbSinkWriter {
 }
 
 impl LanceDbSinkWriter {
-    pub fn new(config: LanceDbConfig, schema: Schema) -> Result<Self> {
+    pub async fn new(config: LanceDbConfig, schema: Schema) -> Result<Self> {
         let arrow_schema = LanceDbConvert
             .rw_schema_to_arrow_schema(&schema)
             .map_err(|e| SinkError::LanceDb(anyhow!(e)))?;
 
-        let dataset_uri = config.common.dataset_uri();
+        let conn = config.common.create_connection().await?;
+        let table = config.common.open_table(&conn).await?;
+        let dataset_uri = config.common.dataset_uri(&table).await?;
 
         Ok(Self {
             config,
@@ -716,7 +741,11 @@ mod tests {
 
         let config = LanceDbConfig::from_btreemap(properties).unwrap();
         assert_eq!(config.is_exactly_once, None);
-        let mut writer = LanceDbSinkWriter::new(config.clone(), schema.clone()).unwrap();
+        let mut writer = LanceDbSinkWriter::new(config.clone(), schema.clone())
+            .await
+            .unwrap();
+        let table = conn.open_table("test_table").execute().await.unwrap();
+        assert_eq!(writer.dataset_uri, table.uri().await.unwrap());
 
         // 4. Write a chunk
         let chunk = StreamChunk::new(
@@ -784,7 +813,9 @@ mod tests {
         assert_eq!(count, 4);
 
         // 9. Single-phase commit remains available when exactly-once is disabled.
-        let mut writer = LanceDbSinkWriter::new(config.clone(), schema).unwrap();
+        let mut writer = LanceDbSinkWriter::new(config.clone(), schema)
+            .await
+            .unwrap();
         let chunk = StreamChunk::new(
             vec![Op::Insert],
             vec![
@@ -812,5 +843,23 @@ mod tests {
         let table = conn.open_table("test_table").execute().await.unwrap();
         let count = table.count_rows(None).await.unwrap();
         assert_eq!(count, 5);
+    }
+
+    #[test]
+    fn test_validate_ordered_schema_rejects_reordered_columns() {
+        let rw_schema = arrow_schema::Schema::new(vec![
+            arrow_schema::Field::new("id", arrow_schema::DataType::Int32, false),
+            arrow_schema::Field::new("name", arrow_schema::DataType::Utf8, false),
+        ]);
+        let reordered_lance_schema = arrow_schema::Schema::new(vec![
+            arrow_schema::Field::new("name", arrow_schema::DataType::Utf8, false),
+            arrow_schema::Field::new("id", arrow_schema::DataType::Int32, false),
+        ]);
+
+        let err = validate_ordered_schema(&rw_schema, &reordered_lance_schema).unwrap_err();
+        assert!(
+            format!("{err:?}").contains("column order mismatch"),
+            "unexpected error: {err:?}"
+        );
     }
 }
