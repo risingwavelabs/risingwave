@@ -23,6 +23,7 @@ use std::time::Instant;
 use anyhow::anyhow;
 use bytes::Bytes;
 use futures::StreamExt;
+use futures::future::Either;
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::StatementType;
@@ -101,13 +102,18 @@ async fn await_interruptible_cursor_operation<T>(
         return Ok(InterruptibleCursorResult::Cancelled);
     }
     if let Some(timeout_instant) = timeout_instant {
-        let timeout = tokio::time::sleep(timeout_instant.saturating_duration_since(Instant::now()));
+        let timeout_duration = timeout_instant.saturating_duration_since(Instant::now());
+        let timeout = if timeout_duration.is_zero() {
+            Either::Left(std::future::ready(()))
+        } else {
+            Either::Right(tokio::time::sleep(timeout_duration))
+        };
         tokio::pin!(timeout);
         tokio::select! {
             biased;
             _ = cancel_handle.cancelled() => Ok(InterruptibleCursorResult::Cancelled),
-            result = future => result.map(InterruptibleCursorResult::Completed),
             _ = &mut timeout => Ok(InterruptibleCursorResult::TimedOut),
+            result = future => result.map(InterruptibleCursorResult::Completed),
         }
     } else {
         tokio::select! {
@@ -769,10 +775,6 @@ impl SubscriptionCursor {
                     }
                 }
             }
-            // Timeout, return with the rows accumulated so far.
-            if timeout_instant.is_some_and(|timeout_instant| Instant::now() > timeout_instant) {
-                break;
-            }
         }
         self.last_fetch = Instant::now();
         let (rows, seek_pk_row) = self.fields_manager.process_output_desc_row(ans);
@@ -1381,9 +1383,9 @@ mod tests {
         assert!(matches!(result, InterruptibleCursorResult::Cancelled));
     }
 
-    /// Verifies that an immediately-ready operation wins over an elapsed FETCH deadline.
+    /// Verifies that an elapsed FETCH deadline wins over an immediately-ready operation.
     #[tokio::test]
-    async fn test_interruptible_cursor_operation_prefers_ready_operation() {
+    async fn test_interruptible_cursor_operation_prefers_timeout() {
         let mut cancel_handle = FetchCursorCancelHandle::new();
 
         let result = await_interruptible_cursor_operation(
@@ -1394,7 +1396,7 @@ mod tests {
         .await
         .unwrap();
 
-        assert!(matches!(result, InterruptibleCursorResult::Completed(())));
+        assert!(matches!(result, InterruptibleCursorResult::TimedOut));
     }
 
     /// Covers the `TimedOut => break` arm in `SubscriptionCursor::next` by keeping `next_row`
@@ -1442,10 +1444,9 @@ mod tests {
         assert!(rows.is_empty());
     }
 
-    /// Verifies that a ready row wins over an elapsed timeout, while the post-iteration deadline
-    /// check prevents FETCH from consuming a second ready row.
+    /// Verifies that an elapsed timeout prevents FETCH from consuming an immediately-ready row.
     #[tokio::test]
-    async fn test_subscription_fetch_stops_after_ready_row_when_timeout_elapsed() {
+    async fn test_subscription_fetch_timeout_wins_over_ready_row() {
         let session = Arc::new(SessionImpl::mock());
         let sql: Arc<str> = "select 1".into();
         let statement = Parser::parse_exactly_one(&sql).unwrap();
@@ -1477,7 +1478,7 @@ mod tests {
             .await
             .unwrap();
 
-        assert_eq!(rows.len(), 1);
+        assert!(rows.is_empty());
     }
 
     /// Verifies that FETCH rejects a cursor whose maximum-lifetime deadline is in the past.
