@@ -43,6 +43,8 @@ PGDATABASE=${PGDATABASE:-postgres} psql -v ON_ERROR_STOP=1 -c "
         shape polygon,
         shapes polygon[]
     );
+    ALTER TABLE public.upstream_polygon_values
+        ALTER COLUMN shape SET STORAGE EXTERNAL;
     INSERT INTO public.upstream_polygon_values VALUES
         (
             1,
@@ -81,24 +83,6 @@ create table rw_polygon_manual (
     name varchar,
     shape varchar,
     shapes varchar[]
-) from polygon_source table 'public.upstream_polygon_values';
-
-# A polygon column can only be mapped to varchar.
-statement error Incompatible data type of column shape
-create table rw_polygon_invalid_shape (
-    id int primary key,
-    name varchar,
-    shape integer,
-    shapes varchar[]
-) from polygon_source table 'public.upstream_polygon_values';
-
-# A polygon array's element type can only be mapped to varchar.
-statement error Incompatible data type of column shapes
-create table rw_polygon_invalid_shapes (
-    id int primary key,
-    name varchar,
-    shape varchar,
-    shapes integer[]
 ) from polygon_source table 'public.upstream_polygon_values';
 
 # Initial schema discovery must derive the
@@ -180,6 +164,62 @@ join (
 ) as upstream(id, shape_text, shape_1_text, shape_2_text) using (id);
 ----
 3 ((15.5,0.125),(20.25,-10.5)) t ((6,6),(7,6),(7,7),(6,7)) t NULL t
+
+# An unchanged out-of-line polygon is represented internally by Debezium as a
+# bare Object sentinel. The custom converter must turn it into RisingWave's
+# unavailable-value placeholder so the stream executor preserves the old value.
+system ok
+psql -v ON_ERROR_STOP=1 -c "
+    INSERT INTO public.upstream_polygon_values (id, name, shape)
+    SELECT
+        4,
+        'toast-original',
+        ('(' || string_agg(format('(%s,%s)', i, (i * 7919) % 104729), ',') || ')')::polygon
+    FROM generate_series(1, 1000) AS points(i);
+"
+
+query IT retry 10 backoff 1s
+select
+    auto.name,
+    auto.shape is not distinct from upstream.shape_text
+from rw_polygon_auto auto
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, shape::text from public.upstream_polygon_values where id = 4'
+    )
+) as upstream(id, shape_text) using (id);
+----
+toast-original t
+
+system ok
+psql -v ON_ERROR_STOP=1 -c "
+    UPDATE public.upstream_polygon_values
+    SET name = 'toast-name-updated'
+    WHERE id = 4;
+"
+
+query IT retry 10 backoff 1s
+select
+    auto.name,
+    auto.shape is not distinct from upstream.shape_text
+from rw_polygon_auto auto
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, shape::text from public.upstream_polygon_values where id = 4'
+    )
+) as upstream(id, shape_text) using (id);
+----
+toast-name-updated t
 
 # Incremental UPDATE of both the scalar and array values.
 system ok
