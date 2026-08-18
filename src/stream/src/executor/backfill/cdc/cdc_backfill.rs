@@ -436,13 +436,13 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         // semantics; only `BIGINT UNSIGNED` can overflow into a negative `i64` in RisingWave.
         let pk_needs_unsigned_i64_compare = {
             let schema = self.external_table.schema();
-            let pk_names: Vec<String> = pk_indices
+            let pk_fields = pk_indices
                 .iter()
-                .map(|&i| schema.fields[i].name.clone())
-                .collect();
+                .map(|&i| schema.fields[i].clone())
+                .collect_vec();
             upstream_table_reader
                 .reader
-                .pk_column_unsigned_i64_compare_flags(&pk_names)?
+                .pk_column_unsigned_i64_compare_flags(&pk_fields)?
         };
 
         tracing::info!(

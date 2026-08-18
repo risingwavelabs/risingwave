@@ -387,13 +387,13 @@ impl ExternalTableReaderImpl {
     /// overflow into a negative `i64`; other connectors are always false.
     pub fn pk_column_unsigned_i64_compare_flags(
         &self,
-        pk_names: &[String],
+        pk_fields: &[Field],
     ) -> ConnectorResult<Vec<bool>> {
         match self {
             ExternalTableReaderImpl::MySql(mysql) => {
-                mysql.pk_column_unsigned_i64_compare_flags(pk_names)
+                mysql.pk_column_unsigned_i64_compare_flags(pk_fields)
             }
-            _ => Ok(vec![false; pk_names.len()]),
+            _ => Ok(vec![false; pk_fields.len()]),
         }
     }
 
