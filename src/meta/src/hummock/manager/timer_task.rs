@@ -237,8 +237,10 @@ impl HummockManager {
 
                                 HummockTimerEvent::Report => {
                                     let (current_version, id_to_config, version_stats) = {
-                                        let versioning_guard =
-                                            hummock_manager.versioning.read().await;
+                                        let versioning_guard = hummock_manager
+                                            .versioning
+                                            .read_with_process_name("timer_task_report")
+                                            .await;
 
                                         let configs =
                                             hummock_manager.get_compaction_group_map().await;
@@ -299,7 +301,7 @@ impl HummockManager {
 
                                         let current_version_levels = &hummock_manager
                                             .versioning
-                                            .read()
+                                            .read_with_process_name("timer_task_report")
                                             .await
                                             .current_version
                                             .levels;
@@ -525,7 +527,10 @@ impl HummockManager {
         const MAX_COMPACTION_L0_MULTIPLIER: u64 = 32;
         const MAX_COMPACTION_DURATION_SEC: u64 = 20 * 60;
         let (groups, configs) = {
-            let versioning_guard = self.versioning.read().await;
+            let versioning_guard = self
+                .versioning
+                .read_with_process_name("check_dead_task")
+                .await;
             let g = versioning_guard
                 .current_version
                 .levels
@@ -563,7 +568,10 @@ impl HummockManager {
         let mut pending_tasks: HashMap<u64, (CompactionGroupId, usize, RunningCompactTask)> =
             HashMap::default();
         {
-            let compaction_guard = self.compaction.read().await;
+            let compaction_guard = self
+                .compaction
+                .read_with_process_name("check_dead_task")
+                .await;
             for group_id in slowdown_groups.keys() {
                 if let Some(status) = compaction_guard.compaction_statuses.get(group_id) {
                     for (idx, level_handler) in status.level_handlers.iter().enumerate() {

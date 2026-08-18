@@ -122,7 +122,7 @@ impl Versioning {
 impl HummockManager {
     pub async fn list_pinned_version(&self) -> Vec<HummockPinnedVersion> {
         self.context_info
-            .read()
+            .read_with_process_name("list_pinned_version")
             .await
             .pinned_versions
             .values()
@@ -157,7 +157,12 @@ impl HummockManager {
     }
 
     pub async fn on_current_version<T>(&self, mut f: impl FnMut(&HummockVersion) -> T) -> T {
-        f(self.versioning.read().await.current_version.as_ref())
+        f(self
+            .versioning
+            .read_with_process_name("on_current_version")
+            .await
+            .current_version
+            .as_ref())
     }
 
     pub async fn get_version_id(&self) -> HummockVersionId {
@@ -168,7 +173,13 @@ impl HummockManager {
     pub async fn get_table_compaction_group_id_mapping(
         &self,
     ) -> HashMap<StateTableId, CompactionGroupId> {
-        get_table_compaction_group_id_mapping(&self.versioning.read().await.current_version)
+        get_table_compaction_group_id_mapping(
+            &self
+                .versioning
+                .read_with_process_name("get_table_compaction_group_id_mapping")
+                .await
+                .current_version,
+        )
     }
 
     /// Get version deltas from meta store
@@ -177,7 +188,10 @@ impl HummockManager {
         start_id: HummockVersionId,
         num_limit: u32,
     ) -> Result<Vec<HummockVersionDelta>> {
-        let versioning = self.versioning.read().await;
+        let versioning = self
+            .versioning
+            .read_with_process_name("list_version_deltas")
+            .await;
         let version_deltas = versioning
             .hummock_version_deltas
             .range(start_id..)
@@ -189,7 +203,11 @@ impl HummockManager {
     }
 
     pub async fn get_version_stats(&self) -> HummockVersionStats {
-        self.versioning.read().await.version_stats.clone()
+        self.versioning
+            .read_with_process_name("get_version_stats")
+            .await
+            .version_stats
+            .clone()
     }
 
     /// Updates write limits for `target_groups` and sends notification.
@@ -199,7 +217,10 @@ impl HummockManager {
         &self,
         target_group_ids: &[CompactionGroupId],
     ) -> bool {
-        let versioning = self.versioning.read().await;
+        let versioning = self
+            .versioning
+            .read_with_process_name("try_update_write_limits")
+            .await;
         let mut cg_manager = self
             .compaction_group_manager
             .write_with_process_name("try_update_write_limits")
@@ -240,12 +261,18 @@ impl HummockManager {
     /// Gets write limits.
     /// The implementation acquires `versioning` lock.
     pub async fn write_limits(&self) -> HashMap<CompactionGroupId, WriteLimit> {
-        let guard = self.compaction_group_manager.read().await;
+        let guard = self
+            .compaction_group_manager
+            .read_with_process_name("write_limits")
+            .await;
         guard.write_limit.clone()
     }
 
     pub async fn list_branched_objects(&self) -> BTreeMap<HummockSstableObjectId, BranchedSstInfo> {
-        let guard = self.versioning.read().await;
+        let guard = self
+            .versioning
+            .read_with_process_name("list_branched_objects")
+            .await;
         guard.current_version.build_branched_sst_info()
     }
 

@@ -113,7 +113,7 @@ impl HummockManager {
     /// Checks whether `context_id` is valid.
     pub async fn check_context(&self, context_id: HummockContextId) -> Result<bool> {
         self.context_info
-            .read()
+            .read_with_process_name("check_context")
             .await
             .check_context(context_id, &self.metadata_manager)
             .await
@@ -138,7 +138,10 @@ impl HummockManager {
 
     #[cfg(any(test, feature = "test"))]
     pub async fn get_min_pinned_version_id(&self) -> HummockVersionId {
-        self.context_info.read().await.min_pinned_version_id()
+        self.context_info
+            .read_with_process_name("get_min_pinned_version_id")
+            .await
+            .min_pinned_version_id()
     }
 }
 
@@ -163,7 +166,10 @@ impl HummockManager {
     /// Release invalid contexts, aka worker node ids which are no longer valid in `ClusterManager`.
     pub(super) async fn release_invalid_contexts(&self) -> Result<Vec<HummockContextId>> {
         let (active_context_ids, mut context_info) = {
-            let compaction_guard = self.compaction.read().await;
+            let compaction_guard = self
+                .compaction
+                .read_with_process_name("release_invalid_contexts")
+                .await;
             let context_info = self
                 .context_info
                 .write_with_process_name("release_invalid_contexts")
@@ -214,7 +220,7 @@ impl HummockManager {
             }
             if !self
                 .context_info
-                .read()
+                .read_with_process_name("commit_epoch_sanity_check")
                 .await
                 .check_context(*context_id, &self.metadata_manager)
                 .await?
@@ -360,7 +366,7 @@ impl HummockManager {
     /// Pin the current greatest hummock version. The pin belongs to `context_id`
     /// and will be unpinned when `context_id` is invalidated.
     pub async fn pin_version(&self, context_id: HummockContextId) -> Result<Arc<HummockVersion>> {
-        let versioning = self.versioning.read().await;
+        let versioning = self.versioning.read_with_process_name("pin_version").await;
         let mut context_info = self
             .context_info
             .write_with_process_name("pin_version")
@@ -440,7 +446,10 @@ impl HummockManager {
 // safe point
 impl HummockManager {
     pub async fn register_safe_point(&self) -> HummockVersionSafePoint {
-        let versioning = self.versioning.read().await;
+        let versioning = self
+            .versioning
+            .read_with_process_name("register_safe_point")
+            .await;
         let mut wl = self
             .context_info
             .write_with_process_name("register_safe_point")
