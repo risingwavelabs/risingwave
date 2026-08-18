@@ -223,8 +223,9 @@ impl HummockManager {
     ) -> Result<Vec<HummockObjectId>> {
         // This lock ensures `commit_epoch` and `report_compat_task` can see the latest GC history during sanity check.
         let versioning = self.versioning.read().await;
-        let tracked_object_ids: HashSet<HummockObjectId> = versioning
-            .get_tracked_object_ids(self.context_info.read().await.min_pinned_version_id());
+        let min_pinned_version_id = self.context_info.read().await.min_pinned_version_id();
+        let tracked_object_ids: HashSet<HummockObjectId> =
+            versioning.get_tracked_object_ids(min_pinned_version_id);
         let to_delete = object_ids
             .filter(|object_id| !tracked_object_ids.contains(object_id))
             .collect_vec();
@@ -527,8 +528,8 @@ impl HummockManager {
         // The version_pinned is obtained after the candidate object_ids for deletion, which is new enough for filtering purpose.
         let version_pinned = {
             let versioning = self.versioning.read().await;
-            versioning
-                .get_tracked_object_ids(self.context_info.read().await.min_pinned_version_id())
+            let min_pinned_version_id = self.context_info.read().await.min_pinned_version_id();
+            versioning.get_tracked_object_ids(min_pinned_version_id)
         };
         let object_ids = object_ids
             .into_iter()
