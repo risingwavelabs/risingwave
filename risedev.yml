@@ -815,9 +815,6 @@ profile:
       - use: frontend
       - use: compactor
       - use: pubsub
-        user-managed: true
-        address: localhost
-        port: 8900
         persist-data: true
       - use: kafka
         persist-data: true
@@ -1788,6 +1785,8 @@ template:
     id: pubsub-${port}
 
     user-managed: false
+
+    image: "gcr.io/google.com/cloudsdktool/google-cloud-cli:475.0.0-emulators"
 
     address: "127.0.0.1"
 
