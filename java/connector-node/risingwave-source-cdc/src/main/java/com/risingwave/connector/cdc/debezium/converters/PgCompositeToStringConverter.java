@@ -77,8 +77,7 @@ public class PgCompositeToStringConverter
     }
 
     private static boolean isScalarTextType(RelationalColumn column) {
-        return column.jdbcType() == Types.STRUCT
-                || "polygon".equalsIgnoreCase(column.typeName());
+        return column.jdbcType() == Types.STRUCT || "polygon".equalsIgnoreCase(column.typeName());
     }
 
     private static boolean isTextArrayType(RelationalColumn column) {
@@ -94,13 +93,9 @@ public class PgCompositeToStringConverter
         // downstream bytea parser treat hex EWKB text as base64.
 
         return column.jdbcType() == Types.ARRAY
-                && (
-                    isPostgresArrayOf(column, "polygon")
-                    || (
-                        column.nativeType() >= PG_FIRST_USER_OID
-                        && !isDebeziumNativeExtensionArray(column)
-                    )
-                );
+                && (isPostgresArrayOf(column, "polygon")
+                        || (column.nativeType() >= PG_FIRST_USER_OID
+                                && !isDebeziumNativeExtensionArray(column)));
     }
 
     private static boolean isDebeziumNativeExtensionArray(RelationalColumn column) {
