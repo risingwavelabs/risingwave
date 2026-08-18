@@ -149,7 +149,7 @@ async fn test_get_table_change_logs_with_inverted_epoch_range() {
     let table_id = TableId::new(1);
     hummock_manager
         .versioning
-        .write()
+        .write_with_process_name("test_get_table_change_logs_with_inverted_epoch_range")
         .await
         .table_change_log
         .insert(

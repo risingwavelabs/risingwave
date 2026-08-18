@@ -789,6 +789,8 @@ message MergeNode {
   DispatcherType upstream_dispatcher_type = 3;
   // The schema of input columns. Already deprecated.
   repeated plan_common.Field fields = 4 [deprecated = true];
+  // Allows this merge to start without upstream actors and receive them later through a MergeUpdate.
+  bool allow_no_initial_upstream = 5;
 }
 
 // passed from frontend to meta, used by fragmenter to generate `MergeNode`

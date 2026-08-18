@@ -193,8 +193,14 @@ impl HummockManager {
         group_2: CompactionGroupId,
         created_tables: Option<HashSet<TableId>>,
     ) -> Result<()> {
-        let compaction_guard = self.compaction.write().await;
-        let mut versioning_guard = self.versioning.write().await;
+        let compaction_guard = self
+            .compaction
+            .write_with_process_name("merge_compaction_group_impl")
+            .await;
+        let mut versioning_guard = self
+            .versioning
+            .write_with_process_name("merge_compaction_group_impl")
+            .await;
         let versioning = versioning_guard.deref_mut();
         // Validate parameters.
         if !versioning.current_version.levels.contains_key(&group_1) {
@@ -415,7 +421,10 @@ impl HummockManager {
         });
 
         {
-            let mut compaction_group_manager = self.compaction_group_manager.write().await;
+            let mut compaction_group_manager = self
+                .compaction_group_manager
+                .write_with_process_name("merge_compaction_group_impl")
+                .await;
             let mut compaction_groups_txn = compaction_group_manager.start_compaction_groups_txn();
 
             // for metrics reclaim
@@ -615,8 +624,14 @@ impl HummockManager {
         partition_vnode_count: Option<u32>,
     ) -> Result<Vec<(CompactionGroupId, Vec<StateTableId>)>> {
         let mut result = vec![];
-        let compaction_guard = self.compaction.write().await;
-        let mut versioning_guard = self.versioning.write().await;
+        let compaction_guard = self
+            .compaction
+            .write_with_process_name("split_compaction_group_impl")
+            .await;
+        let mut versioning_guard = self
+            .versioning
+            .write_with_process_name("split_compaction_group_impl")
+            .await;
         let versioning = versioning_guard.deref_mut();
         // Validate parameters.
         if !versioning
@@ -758,7 +773,10 @@ impl HummockManager {
         result.push((new_compaction_group_id, table_ids_right));
 
         {
-            let mut compaction_group_manager = self.compaction_group_manager.write().await;
+            let mut compaction_group_manager = self
+                .compaction_group_manager
+                .write_with_process_name("split_compaction_group_impl")
+                .await;
             let mut compaction_groups_txn = compaction_group_manager.start_compaction_groups_txn();
             compaction_groups_txn
                 .create_compaction_groups(new_compaction_group_id, Arc::new(config));
@@ -977,9 +995,15 @@ impl HummockManager {
 
     async fn apply_normalize_plan(&self, plan: &NormalizePlan) -> Result<bool> {
         let (table_ids_right, boundary_table_id, new_compaction_group_id) = {
-            let mut versioning_guard = self.versioning.write().await;
+            let mut versioning_guard = self
+                .versioning
+                .write_with_process_name("apply_normalize_plan")
+                .await;
             let versioning = versioning_guard.deref_mut();
-            let mut compaction_group_manager = self.compaction_group_manager.write().await;
+            let mut compaction_group_manager = self
+                .compaction_group_manager
+                .write_with_process_name("apply_normalize_plan")
+                .await;
 
             let groups = collect_normalize_group_statistics(
                 &versioning.current_version,
@@ -1101,8 +1125,14 @@ impl HummockManager {
         parent_group_id: CompactionGroupId,
     ) -> Result<()> {
         let mut canceled_tasks = vec![];
-        let compaction_guard = self.compaction.write().await;
-        let mut versioning_guard = self.versioning.write().await;
+        let compaction_guard = self
+            .compaction
+            .write_with_process_name("cancel_expired_normalize_split_tasks")
+            .await;
+        let mut versioning_guard = self
+            .versioning
+            .write_with_process_name("cancel_expired_normalize_split_tasks")
+            .await;
         let versioning = versioning_guard.deref_mut();
         let compact_task_assignments =
             compaction_guard.get_compact_task_assignments_by_group_id(parent_group_id);

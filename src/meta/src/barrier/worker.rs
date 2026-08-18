@@ -1112,10 +1112,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
 
         let recovery_future = tokio_retry::Retry::spawn(retry_strategy, || async {
             self.env.stream_client_pool().invalidate_all();
-            // We need to notify_creating_job_failed in every recovery retry, because in outer create_streaming_job handler,
-            // it holds the reschedule_read_lock and wait for creating job to finish, and caused the following scale_actor fail
-            // to acquire the reschedule_write_lock, and then keep recovering, and then deadlock.
-            // TODO: refactor and fix this hacky implementation.
+            // Notify in every recovery retry so foreground creation handlers can either cancel an
+            // early-failing job or re-register their finish notifier after recovery.
             self.context
                 .notify_creating_job_failed(None, recovery_reason.clone())
                 .await;
@@ -1130,7 +1128,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 mut state_table_committed_epochs,
                 mut state_table_log_epochs,
                 mut mv_depended_subscriptions,
-                mut background_jobs,
+                mut creating_jobs,
                 hummock_version_stats,
                 database_infos,
                 mut cdc_table_snapshot_splits,
@@ -1187,7 +1185,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                             &recovery_context.fragment_relations,
                             &stream_actors,
                             &mut source_splits,
-                            &mut background_jobs,
+                            &mut creating_jobs,
                             &mut mv_depended_subscriptions,
                             is_paused,
                             &hummock_version_stats,
@@ -1295,8 +1293,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     }
                 }
                 debug!("collected initial barrier");
-                if !background_jobs.is_empty() {
-                    warn!(job_ids = ?background_jobs.iter().collect_vec(), "unused recovered background mview in recovery");
+                if !creating_jobs.is_empty() {
+                    warn!(job_ids = ?creating_jobs.iter().collect_vec(), "unused recovered creating jobs in recovery");
                 }
                 if !mv_depended_subscriptions.is_empty() {
                     warn!(?mv_depended_subscriptions, "unused subscription infos in recovery");

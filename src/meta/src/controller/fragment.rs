@@ -141,6 +141,11 @@ pub struct FragmentServingInfo {
 
 #[easy_ext::ext(FragmentTypeMaskExt)]
 pub impl FragmentTypeMask {
+    /// Matches fragments whose creation progress cannot be recovered after a failure.
+    fn contains_non_recoverable_fragment() -> SimpleExpr {
+        Self::intersects(FragmentTypeFlag::Values)
+    }
+
     fn intersects(flag: FragmentTypeFlag) -> SimpleExpr {
         Expr::col(fragment::Column::FragmentTypeMask)
             .bit_and(Expr::value(flag as i32))

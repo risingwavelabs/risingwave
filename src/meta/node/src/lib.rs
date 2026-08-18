@@ -377,6 +377,9 @@ pub fn start(
             config.server.clone(),
             MetaOpts {
                 enable_recovery: !config.meta.disable_recovery,
+                clean_all_foreground_jobs_on_recovery: config
+                    .meta
+                    .clean_all_foreground_jobs_on_recovery,
                 disable_automatic_parallelism_control: config
                     .meta
                     .disable_automatic_parallelism_control,
