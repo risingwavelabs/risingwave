@@ -188,7 +188,10 @@ impl HummockManager {
                 group_id_to_config.insert(*cg_id, compaction_group);
             }
         } else {
-            let compaction_group_manager = self.compaction_group_manager.read().await;
+            let compaction_group_manager = self
+                .compaction_group_manager
+                .read_with_process_name("commit_epoch")
+                .await;
             for cg_id in &modified_compaction_groups {
                 let compaction_group = compaction_group_manager
                     .try_get_compaction_group_config(*cg_id)
