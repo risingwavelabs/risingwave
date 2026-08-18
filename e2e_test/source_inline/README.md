@@ -1,6 +1,6 @@
 # "Inline" style source e2e tests
 
-Compared with prior source tests ( `e2e_test/source` ), tests in this directory are expected to be easy to run locally and easy to write.
+Compared with prior source tests (`e2e_test/source_legacy`), tests in this directory are expected to be easy to run locally and easy to write.
 
 See the [connector development guide](http://risingwavelabs.github.io/risingwave/connector/intro.html#end-to-end-tests) for more information about how to set up the test environment,
 run tests, and write tests.
