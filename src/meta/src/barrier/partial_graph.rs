@@ -25,6 +25,7 @@ use itertools::Itertools;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::id::{ActorId, PartialGraphId, TableId, WorkerId};
+use risingwave_pb::stream_plan::IcebergPkIndexCompactionContext;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use risingwave_pb::stream_service::streaming_control_stream_response::{
@@ -37,7 +38,7 @@ use crate::barrier::BarrierKind;
 use crate::barrier::command::PostCollectCommand;
 use crate::barrier::context::GlobalBarrierWorkerContext;
 use crate::barrier::info::BarrierInfo;
-use crate::barrier::notifier::Notifier;
+use crate::barrier::notifier::{CollectionNotifier, NotifierStarter};
 use crate::barrier::rpc::{ControlStreamManager, WorkerNodeEvent};
 use crate::barrier::utils::{BarrierItemCollector, NodeToCollect, is_valid_after_worker_err};
 use crate::manager::MetaSrvEnv;
@@ -49,7 +50,7 @@ pub(super) struct PartialGraphBarrierInfo {
     enqueue_time: Instant,
     pub(super) post_collect_command: PostCollectCommand,
     pub(super) barrier_info: BarrierInfo,
-    pub(super) notifiers: Vec<Notifier>,
+    pub(super) notifier: Option<CollectionNotifier>,
     pub(super) table_ids_to_commit: HashSet<TableId>,
 }
 
@@ -57,14 +58,14 @@ impl PartialGraphBarrierInfo {
     pub(super) fn new(
         post_collect_command: PostCollectCommand,
         barrier_info: BarrierInfo,
-        notifiers: Vec<Notifier>,
+        notifier: Option<&mut NotifierStarter>,
         table_ids_to_commit: HashSet<TableId>,
     ) -> Self {
         Self {
             enqueue_time: Instant::now(),
             post_collect_command,
             barrier_info,
-            notifiers,
+            notifier: notifier.map(NotifierStarter::add_notify),
             table_ids_to_commit,
         }
     }
@@ -108,13 +109,12 @@ impl PartialGraphRunningState {
             + usize::from(self.completing_epoch.is_some())
     }
 
-    fn enqueue(&mut self, node_to_collect: NodeToCollect, mut info: PartialGraphBarrierInfo) {
+    fn enqueue(&mut self, node_to_collect: NodeToCollect, info: PartialGraphBarrierInfo) {
         let epoch = info.barrier_info.epoch();
         assert_ne!(info.barrier_info.kind, BarrierKind::Initial);
         if info.post_collect_command.should_checkpoint() {
             assert!(info.barrier_info.kind.is_checkpoint());
         }
-        info.notifiers.iter_mut().for_each(|n| n.notify_started());
         self.barrier_item_collector
             .enqueue(epoch, node_to_collect, info);
         self.stat.observe_barrier_num(
@@ -371,7 +371,7 @@ impl PartialGraphManager {
         for (_, graph) in self.graphs.drain() {
             if let PartialGraphStatus::Running(graph) = graph {
                 for info in graph.barrier_item_collector.into_infos() {
-                    for notifier in info.notifiers {
+                    if let Some(notifier) = info.notifier {
                         notifier.notify_collection_failed(err.clone());
                     }
                 }
@@ -488,6 +488,7 @@ impl PartialGraphManager {
         &mut self,
         partial_graph_id: PartialGraphId,
         mutation: Option<Mutation>,
+        compaction_context: Option<IcebergPkIndexCompactionContext>,
         node_actors: &HashMap<WorkerId, HashSet<ActorId>>,
         table_ids_to_sync: impl Iterator<Item = TableId>,
         nodes_to_sync_table: impl Iterator<Item = WorkerId>,
@@ -501,6 +502,7 @@ impl PartialGraphManager {
         let node_to_collect = self.control_stream_manager.inject_barrier(
             partial_graph_id,
             mutation,
+            compaction_context,
             &info.barrier_info,
             node_actors,
             table_ids_to_sync,
@@ -533,12 +535,6 @@ impl PartialGraphManager {
             unreachable!("should be running")
         };
         graph
-    }
-
-    pub(super) fn inflight_barrier_num(&self, partial_graph_id: PartialGraphId) -> usize {
-        self.running_graph(partial_graph_id)
-            .barrier_item_collector
-            .inflight_barrier_num()
     }
 
     pub(super) fn pending_barrier_num(&self, partial_graph_id: PartialGraphId) -> usize {
@@ -588,9 +584,9 @@ impl PartialGraphManager {
             if info.post_collect_command.should_checkpoint() {
                 assert!(info.barrier_info.kind.is_checkpoint());
             } else if !info.barrier_info.kind.is_checkpoint() {
-                info.notifiers
-                    .into_iter()
-                    .for_each(Notifier::notify_collected);
+                if let Some(notifier) = info.notifier {
+                    notifier.notify_collected();
+                }
                 on_non_checkpoint_epoch(epoch, resps, info.post_collect_command);
                 continue;
             }
@@ -655,6 +651,7 @@ impl PartialGraphRecoverer<'_> {
         let node_to_collect = self.manager.control_stream_manager.inject_barrier(
             partial_graph_id,
             Some(mutation),
+            None,
             barrier_info,
             node_actors,
             table_ids_to_sync,
@@ -876,5 +873,65 @@ impl PartialGraphManager {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::util::epoch::Epoch;
+
+    use super::*;
+    use crate::barrier::TracedEpoch;
+
+    struct TestPartialGraphStat;
+
+    impl PartialGraphStat for TestPartialGraphStat {
+        fn observe_barrier_latency(&self, _epoch: EpochPair, _barrier_latency_secs: f64) {}
+
+        fn observe_barrier_num(&self, _inflight_barrier_num: usize, _collected_barrier_num: usize) {
+        }
+    }
+
+    fn barrier_info(prev_epoch: u64, curr_epoch: u64) -> PartialGraphBarrierInfo {
+        PartialGraphBarrierInfo::new(
+            PostCollectCommand::barrier(),
+            BarrierInfo {
+                prev_epoch: TracedEpoch::new(Epoch(prev_epoch)),
+                curr_epoch: TracedEpoch::new(Epoch(curr_epoch)),
+                kind: BarrierKind::Barrier,
+            },
+            None,
+            HashSet::new(),
+        )
+    }
+
+    #[test]
+    fn test_pending_barrier_num_includes_collected_and_completing() {
+        let mut state = PartialGraphRunningState::new(Box::new(TestPartialGraphStat));
+        let worker_id: WorkerId = 1.into();
+        state.barrier_item_collector.enqueue(
+            EpochPair::new(2, 1),
+            HashSet::from([worker_id]),
+            barrier_info(1, 2),
+        );
+        state.barrier_item_collector.enqueue(
+            EpochPair::new(3, 2),
+            HashSet::from([worker_id]),
+            barrier_info(2, 3),
+        );
+        assert_eq!(state.pending_barrier_num(), 2);
+
+        state
+            .barrier_item_collector
+            .collect(1, worker_id, BarrierCompleteResponse::default());
+        state.barrier_item_collector.barrier_collected();
+        assert_eq!(state.pending_barrier_num(), 2);
+
+        state
+            .barrier_item_collector
+            .take_collected_if(|epoch| epoch.prev == 1)
+            .expect("the first barrier should be collected");
+        state.completing_epoch = Some(1);
+        assert_eq!(state.pending_barrier_num(), 2);
     }
 }

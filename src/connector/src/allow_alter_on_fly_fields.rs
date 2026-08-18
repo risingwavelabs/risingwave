@@ -18,9 +18,10 @@
 // `UPDATE_EXPECT=1`.
 // To update content, change source/sink/connection WITH options definitions (for example,
 // `#[with_option(allow_alter_on_fly)]` on struct fields), then run `./risedev generate-with-options`.
-// `./risedev generate-with-options` runs two UPDATE_EXPECT tests:
+// `./risedev generate-with-options` runs three UPDATE_EXPECT tests:
 // 1) refresh `with_options_{source,sink,connection}.yaml`;
-// 2) regenerate this file from those YAML files.
+// 2) regenerate this file from those YAML files;
+// 3) regenerate the Iceberg Engine option classifier.
 
 #![rustfmt::skip]
 
@@ -250,6 +251,9 @@ pub static SINK_ALLOW_ALTER_ON_FLY_FIELDS: LazyLock<HashMap<String, HashSet<Stri
             "snapshot_expiration_retain_last".to_owned(),
             "snapshot_expiration_clear_expired_files".to_owned(),
             "snapshot_expiration_clear_expired_meta_data".to_owned(),
+            "enable_manifest_rewrite".to_owned(),
+            "manifest_rewrite_target_size_bytes".to_owned(),
+            "manifest_rewrite_min_count_to_merge".to_owned(),
             "compaction.max_snapshots_num".to_owned(),
             "compaction.small_files_threshold_mb".to_owned(),
             "compaction.delete_files_count_threshold".to_owned(),

@@ -206,6 +206,7 @@ auth_method = "password"
 [streaming]
 in_flight_barrier_nums = 10000
 snapshot_backfill_finish_max_lagged_barriers = 100
+snapshot_backfill_barrier_amplification_factor = 1
 actor_runtime_worker_threads_num = ""
 async_stack_trace = "ReleaseVerbose"
 unique_user_stream_errors = 10
@@ -265,6 +266,7 @@ sync_log_store_buffer_size = 2048
 disable_sync_log_store_dispatcher = false
 over_window_cache_policy = "full"
 enable_state_table_vnode_stats_pruning = false
+cache_refill_policy = "enabled"
 enable_vnode_key_stats_for_materialize = false
 max_concurrent_kv_log_store_historical_read = 0
 
@@ -366,6 +368,7 @@ insert_rate_limit_mb = 0
 indexer_shards = 64
 compression = "None"
 flush_buffer_threshold_mb = ""
+submit_queue_size_threshold_mb = 16
 fifo_probation_ratio = 0.1
 blob_index_size_kb = 16
 recover_mode = "Quiet"
@@ -394,6 +397,7 @@ insert_rate_limit_mb = 0
 indexer_shards = 64
 compression = "None"
 flush_buffer_threshold_mb = ""
+submit_queue_size_threshold_mb = 16
 fifo_probation_ratio = 0.1
 blob_index_size_kb = 16
 recover_mode = "Quiet"
@@ -422,6 +426,7 @@ recent_filter_shards = 16
 recent_filter_layers = 6
 recent_filter_rotate_interval_ms = 10000
 skip_recent_filter = false
+skip_inheritance_filter = false
 
 [storage.object_store]
 set_atomic_write_dir = false

@@ -59,6 +59,7 @@ pub use self::command::{
 };
 pub(crate) use self::info::{SharedActorInfos, SharedFragmentInfo};
 pub use self::manager::{BarrierManagerRef, GlobalBarrierManager};
+pub(crate) use self::rpc::to_partial_graph_id;
 pub use self::schedule::BarrierScheduler;
 pub use self::trace::TracedEpoch;
 use crate::barrier::cdc_progress::CdcProgress;
@@ -86,11 +87,11 @@ enum BarrierManagerStatus {
     Running,
 }
 
-/// Scheduled command with its notifiers.
+/// Scheduled command with its notifier.
 struct Scheduled {
     database_id: DatabaseId,
     command: Command,
-    notifiers: Vec<Notifier>,
+    notifier: Notifier,
     span: tracing::Span,
 }
 

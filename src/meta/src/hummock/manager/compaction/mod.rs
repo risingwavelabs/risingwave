@@ -1378,7 +1378,10 @@ impl HummockManager {
         table_stats_change: Option<PbTableStatsMap>,
     ) -> Result<()> {
         if let Some(task) = compact_task {
-            let mut guard = self.compaction.write().await;
+            let mut guard = self
+                .compaction
+                .write_with_process_name("report_compact_task_for_test")
+                .await;
             guard.compact_task_assignment.insert(
                 task_id,
                 CompactTaskAssignment {
@@ -1813,16 +1816,6 @@ impl GroupStateValidator {
         }
 
         Self::check_single_group_emergency(levels, compaction_config)
-    }
-}
-
-#[cfg(test)]
-mod prefetched_task_id_tests {
-    use crate::manager::MetaOpts;
-
-    #[test]
-    fn test_compaction_task_id_refill_capacity_default() {
-        assert_eq!(MetaOpts::test(false).compaction_task_id_refill_capacity, 64);
     }
 }
 

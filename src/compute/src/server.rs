@@ -234,6 +234,7 @@ pub async fn compute_node_serve(
     LicenseManager::get().refresh(system_params.license_key());
     let state_store = Box::pin(StateStoreImpl::new(
         state_store_url,
+        opts.role,
         storage_opts.clone(),
         hummock_meta_client.clone(),
         state_store_metrics.clone(),
@@ -315,6 +316,7 @@ pub async fn compute_node_serve(
         config.batch.clone(),
         batch_manager_metrics,
         batch_mem_limit(compute_memory_bytes, opts.role.for_serving()),
+        await_tree_config.clone(),
     ));
 
     let target_memory = if let Some(v) = opts.memory_manager_target_bytes {
@@ -420,21 +422,30 @@ pub async fn compute_node_serve(
     let stream_exchange_srv =
         StreamExchangeServiceImpl::new(stream_mgr.clone(), stream_exchange_srv_metrics);
     let stream_srv = StreamServiceImpl::new(stream_mgr.clone(), stream_env.clone());
-    let (meta_cache, block_cache) = if let Some(hummock) = state_store.as_hummock() {
+    let (meta_cache, block_cache, hummock_storage) = if let Some(hummock) = state_store.as_hummock()
+    {
         (
             Some(hummock.sstable_store().meta_cache().clone()),
             Some(hummock.sstable_store().block_cache().clone()),
+            Some(hummock.clone()),
         )
     } else {
-        (None, None)
+        (None, None, None)
     };
     let monitor_srv = MonitorServiceImpl::new(
         stream_mgr.clone(),
+        batch_mgr.clone(),
         config.server.clone(),
         meta_cache.clone(),
         block_cache.clone(),
+        hummock_storage,
     );
-    let config_srv = ConfigServiceImpl::new(batch_mgr, stream_mgr.clone(), meta_cache, block_cache);
+    let config_srv = ConfigServiceImpl::new(
+        batch_mgr.clone(),
+        stream_mgr.clone(),
+        meta_cache,
+        block_cache,
+    );
     let health_srv = HealthServiceImpl::new();
 
     let telemetry_manager = TelemetryManager::new(
@@ -462,7 +473,18 @@ pub async fn compute_node_serve(
         .http2_max_pending_accept_reset_streams(Some(config.server.grpc_max_reset_stream as usize))
         .layer(TracingExtractLayer::new())
         // XXX: unlimit the max message size to allow arbitrary large SQL input.
-        .add_service(TaskServiceServer::new(batch_srv).max_decoding_message_size(usize::MAX))
+        .add_service({
+            let await_tree_reg = batch_mgr.await_tree_reg().cloned();
+            let srv = TaskServiceServer::new(batch_srv).max_decoding_message_size(usize::MAX);
+            #[cfg(madsim)]
+            {
+                srv
+            }
+            #[cfg(not(madsim))]
+            {
+                AwaitTreeMiddlewareLayer::new_optional(await_tree_reg).layer(srv)
+            }
+        })
         .add_service(
             BatchExchangeServiceServer::new(batch_exchange_srv)
                 .max_decoding_message_size(usize::MAX),

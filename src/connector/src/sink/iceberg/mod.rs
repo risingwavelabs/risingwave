@@ -19,8 +19,11 @@ mod commit;
 pub mod commit_retry;
 mod config;
 mod create_table;
+mod engine_options;
+mod metadata;
 #[cfg(any(test, madsim))]
 pub mod mock_v3_catalog_registry;
+mod position_delete;
 mod prometheus;
 mod writer;
 
@@ -32,7 +35,10 @@ use anyhow::{Context, anyhow};
 pub use commit::*;
 pub use config::*;
 pub use create_table::*;
+pub use engine_options::*;
 use iceberg::table::Table;
+pub use metadata::*;
+pub use position_delete::*;
 use risingwave_common::bail;
 use tokio::sync::mpsc::UnboundedSender;
 pub use writer::*;
@@ -88,7 +94,8 @@ impl IcebergSink {
         create_and_validate_table_impl(&self.config, &self.param).await
     }
 
-    pub async fn create_table_if_not_exists(&self) -> Result<()> {
+    /// Returns `true` if this call created the table, `false` if it already existed.
+    pub async fn create_table_if_not_exists(&self) -> Result<bool> {
         create_table_if_not_exists_impl(&self.config, &self.param).await
     }
 
@@ -181,6 +188,18 @@ impl Sink for IcebergSink {
         }
 
         match compaction_type {
+            CompactionType::Auto => {
+                risingwave_common::license::Feature::IcebergCompaction
+                    .check_available()
+                    .map_err(|e| anyhow::anyhow!(e))?;
+
+                if self.config.write_mode != IcebergWriteMode::MergeOnRead {
+                    bail!(
+                        "'auto' compaction type only supports 'merge-on-read' write mode, got: '{}'",
+                        self.config.write_mode
+                    );
+                }
+            }
             CompactionType::SmallFiles => {
                 // 1. check license
                 risingwave_common::license::Feature::IcebergCompaction
@@ -228,7 +247,9 @@ impl Sink for IcebergSink {
             }
         }
 
-        let _ = self.create_and_validate_table().await?;
+        let table = self.create_and_validate_table().await?;
+        self.config
+            .validate_manifest_rewrite_format(table.metadata().format_version())?;
         Ok(())
     }
 

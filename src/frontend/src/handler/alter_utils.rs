@@ -20,9 +20,33 @@ use risingwave_sqlparser::ast::ObjectName;
 use crate::Binder;
 use crate::catalog::CatalogError;
 use crate::catalog::root_catalog::SchemaPath;
-use crate::catalog::table_catalog::TableType;
+use crate::catalog::table_catalog::{TableCatalog, TableType};
 use crate::error::{Result, bail_invalid_input_syntax};
 use crate::session::SessionImpl;
+
+pub(super) fn validate_table_type_for_alter(
+    table: &TableCatalog,
+    alter_stmt_type: StatementType,
+    alter_target: &str,
+) -> Result<()> {
+    match (table.table_type(), alter_stmt_type) {
+        (TableType::Internal, _) => {
+            // We treat internal tables as not found because they are not user-addressable objects.
+            Err(CatalogError::not_found("table", table.name()).into())
+        }
+        (TableType::Table, StatementType::ALTER_TABLE)
+        | (TableType::MaterializedView, StatementType::ALTER_MATERIALIZED_VIEW)
+        | (TableType::Index, StatementType::ALTER_INDEX) => Ok(()),
+        _ => {
+            bail_invalid_input_syntax!(
+                "cannot alter {alter_target} of {} {} by {}",
+                table.table_type().to_prost().as_str_name(),
+                table.name(),
+                alter_stmt_type,
+            );
+        }
+    }
+}
 
 /// Resolve the **streaming** job id for alter operations.
 ///
@@ -70,23 +94,7 @@ fn resolve_streaming_job_id_for_alter_impl(
                 reader.get_created_table_by_name(db_name, schema_path, &real_table_name)?
             };
 
-            match (table.table_type(), alter_stmt_type) {
-                (TableType::Internal, _) => {
-                    // we treat internal table as NOT FOUND
-                    return Err(CatalogError::not_found("table", table.name()).into());
-                }
-                (TableType::Table, StatementType::ALTER_TABLE)
-                | (TableType::MaterializedView, StatementType::ALTER_MATERIALIZED_VIEW)
-                | (TableType::Index, StatementType::ALTER_INDEX) => {}
-                _ => {
-                    bail_invalid_input_syntax!(
-                        "cannot alter {alter_target} of {} {} by {}",
-                        table.table_type().to_prost().as_str_name(),
-                        table.name(),
-                        alter_stmt_type,
-                    );
-                }
-            }
+            validate_table_type_for_alter(table, alter_stmt_type, alter_target)?;
 
             session.check_privilege_for_drop_alter(schema_name, &**table)?;
             table.id.as_job_id()

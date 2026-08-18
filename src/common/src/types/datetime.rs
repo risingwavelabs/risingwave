@@ -254,6 +254,8 @@ enum ErrorKind {
     TimeOfDay { value: u64, unit: &'static str },
     #[error("Invalid datetime: seconds: {secs}, nanoseconds: {nsecs}")]
     DateTime { secs: i64, nsecs: u32 },
+    #[error("Invalid datetime: {value} {unit} is out of range")]
+    Timestamp { value: i64, unit: &'static str },
     #[error("Can't cast string to date (expected format is YYYY-MM-DD)")]
     ParseDate,
     #[error(
@@ -285,6 +287,10 @@ impl InvalidParamsError {
 
     pub fn datetime(secs: i64, nsecs: u32) -> Self {
         ErrorKind::DateTime { secs, nsecs }.into()
+    }
+
+    pub fn timestamp(value: i64, unit: &'static str) -> Self {
+        ErrorKind::Timestamp { value, unit }.into()
     }
 }
 
@@ -452,11 +458,7 @@ impl Time {
 
     pub fn to_protobuf<T: Write>(self, output: &mut T) -> ArrayResult<usize> {
         output
-            .write(
-                &(self.0.num_seconds_from_midnight() as u64 * 1_000_000_000
-                    + self.0.nanosecond() as u64)
-                    .to_be_bytes(),
-            )
+            .write(&self.nanos_of_day().to_be_bytes())
             .map_err(Into::into)
     }
 
@@ -476,6 +478,16 @@ impl Time {
             (micro / 1_000_000) as u32,
             ((micro % 1_000_000) * 1_000) as u32,
         )
+    }
+
+    /// Nanoseconds since midnight, the inverse of [`Time::with_nano`].
+    pub fn nanos_of_day(self) -> u64 {
+        self.0.num_seconds_from_midnight() as u64 * 1_000_000_000 + self.0.nanosecond() as u64
+    }
+
+    /// Microseconds since midnight, truncating sub-microsecond precision.
+    pub fn micros_of_day(self) -> u64 {
+        self.0.num_seconds_from_midnight() as u64 * 1_000_000 + self.0.nanosecond() as u64 / 1_000
     }
 
     pub fn with_milli(milli: u32) -> Result<Self> {
@@ -539,11 +551,9 @@ impl FirstI64 {
 
 impl Timestamp {
     pub fn with_secs_nsecs(secs: i64, nsecs: u32) -> Result<Self> {
-        Ok(Timestamp::new({
-            DateTime::from_timestamp(secs, nsecs)
-                .map(|t| t.naive_utc())
-                .ok_or_else(|| InvalidParamsError::datetime(secs, nsecs))?
-        }))
+        DateTime::from_timestamp(secs, nsecs)
+            .map(|t| Timestamp(t.naive_utc()))
+            .ok_or_else(|| InvalidParamsError::datetime(secs, nsecs))
     }
 
     pub fn from_protobuf(cur: &mut Cursor<&[u8]>) -> ArrayResult<Timestamp> {
@@ -582,15 +592,20 @@ impl Timestamp {
     }
 
     pub fn with_millis(timestamp_millis: i64) -> Result<Self> {
-        let secs = timestamp_millis.div_euclid(1_000);
-        let nsecs = timestamp_millis.rem_euclid(1_000) * 1_000_000;
-        Self::with_secs_nsecs(secs, nsecs as u32)
+        DateTime::from_timestamp_millis(timestamp_millis)
+            .map(|t| Timestamp(t.naive_utc()))
+            .ok_or_else(|| InvalidParamsError::timestamp(timestamp_millis, "milliseconds"))
     }
 
     pub fn with_micros(timestamp_micros: i64) -> Result<Self> {
-        let secs = timestamp_micros.div_euclid(1_000_000);
-        let nsecs = timestamp_micros.rem_euclid(1_000_000) * 1000;
-        Self::with_secs_nsecs(secs, nsecs as u32)
+        DateTime::from_timestamp_micros(timestamp_micros)
+            .map(|t| Timestamp(t.naive_utc()))
+            .ok_or_else(|| InvalidParamsError::timestamp(timestamp_micros, "microseconds"))
+    }
+
+    /// An `i64` nanosecond count is always representable, so this cannot fail.
+    pub fn with_nanos(timestamp_nanos: i64) -> Self {
+        Timestamp(DateTime::from_timestamp_nanos(timestamp_nanos).naive_utc())
     }
 
     pub fn from_timestamp_uncheck(secs: i64, nsecs: u32) -> Self {

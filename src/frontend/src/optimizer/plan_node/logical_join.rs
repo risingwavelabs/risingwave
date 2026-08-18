@@ -381,15 +381,14 @@ impl LogicalJoin {
             dist_key_in_order_key_pos.push(pos);
         }
         // The shortest prefix of order key that contains distribution key.
+        //
+        // If the lookup table has a singleton distribution (i.e. an empty distribution key),
+        // any non-empty prefix of the order key can be used for the lookup, so we require a
+        // prefix of length at least 1.
         let shortest_prefix_len = dist_key_in_order_key_pos
             .iter()
             .max()
-            .map_or(0, |pos| pos + 1);
-
-        // Distributed lookup join can't support lookup table with a singleton distribution.
-        if shortest_prefix_len == 0 {
-            return Ok(None);
-        }
+            .map_or(1, |pos| pos + 1);
 
         // Reorder the join equal predicate to match the order key.
         let mut reorder_idx = Vec::with_capacity(shortest_prefix_len);
@@ -1668,14 +1667,26 @@ impl ToStream for LogicalJoin {
             let lhs_join_key_idx = eq_indexes.iter().map(|(l, _)| *l).collect_vec();
             if self.should_be_temporal_join() {
                 (
-                    try_enforce_locality_requirement(self.left(), &lhs_join_key_idx),
+                    try_enforce_locality_requirement(
+                        self.left(),
+                        &lhs_join_key_idx,
+                        ctx.locality_backfill_enabled(),
+                    ),
                     self.right(),
                 )
             } else {
                 let rhs_join_key_idx = eq_indexes.iter().map(|(_, r)| *r).collect_vec();
                 (
-                    try_enforce_locality_requirement(self.left(), &lhs_join_key_idx),
-                    try_enforce_locality_requirement(self.right(), &rhs_join_key_idx),
+                    try_enforce_locality_requirement(
+                        self.left(),
+                        &lhs_join_key_idx,
+                        ctx.locality_backfill_enabled(),
+                    ),
+                    try_enforce_locality_requirement(
+                        self.right(),
+                        &rhs_join_key_idx,
+                        ctx.locality_backfill_enabled(),
+                    ),
                 )
             }
         };
@@ -2140,90 +2151,6 @@ mod tests {
         );
     }
 
-    /// Convert
-    /// ```text
-    /// Join(join_type: left outer, on: ($1 = $3) AND ($2 == 42))
-    ///   TableScan(v1, v2, v3)
-    ///   TableScan(v4, v5, v6)
-    /// ```
-    /// to
-    /// ```text
-    /// HashJoin(join_type: left outer, on: ($1 = $3) AND ($2 == 42))
-    ///   TableScan(v1, v2, v3)
-    ///   TableScan(v4, v5, v6)
-    /// ```
-    #[tokio::test]
-    #[ignore] // ignore due to refactor logical scan, but the test seem to duplicate with the explain test
-    // framework, maybe we will remove it?
-    async fn test_join_to_stream() {
-        // let ctx = Rc::new(RefCell::new(QueryContext::mock().await));
-        // let fields: Vec<Field> = (1..7)
-        //     .map(|i| Field {
-        //         data_type: DataType::Int32,
-        //         name: format!("v{}", i),
-        //     })
-        //     .collect();
-        // let left = LogicalScan::new(
-        //     "left".to_string(),
-        //     TableId::new(0),
-        //     vec![1.into(), 2.into(), 3.into()],
-        //     Schema {
-        //         fields: fields[0..3].to_vec(),
-        //     },
-        //     ctx.clone(),
-        // );
-        // let right = LogicalScan::new(
-        //     "right".to_string(),
-        //     TableId::new(0),
-        //     vec![4.into(), 5.into(), 6.into()],
-        //     Schema {
-        //                 fields: fields[3..6].to_vec(),
-        //     },
-        //     ctx,
-        // );
-        // let eq_cond = ExprImpl::FunctionCall(Box::new(
-        //     FunctionCall::new(
-        //         Type::Equal,
-        //         vec![
-        //             ExprImpl::InputRef(Box::new(InputRef::new(1, DataType::Int32))),
-        //             ExprImpl::InputRef(Box::new(InputRef::new(3, DataType::Int32))),
-        //         ],
-        //     )
-        //     .unwrap(),
-        // ));
-        // let non_eq_cond = ExprImpl::FunctionCall(Box::new(
-        //     FunctionCall::new(
-        //         Type::Equal,
-        //         vec![
-        //             ExprImpl::InputRef(Box::new(InputRef::new(2, DataType::Int32))),
-        //             ExprImpl::Literal(Box::new(Literal::new(
-        //                 Datum::Some(42_i32.into()),
-        //                 DataType::Int32,
-        //             ))),
-        //         ],
-        //     )
-        //     .unwrap(),
-        // ));
-        // // Condition: ($1 = $3) AND ($2 == 42)
-        // let on_cond = ExprImpl::FunctionCall(Box::new(
-        //     FunctionCall::new(Type::And, vec![eq_cond, non_eq_cond]).unwrap(),
-        // ));
-
-        // let join_type = JoinType::LeftOuter;
-        // let logical_join = LogicalJoin::new(
-        //     left.clone().into(),
-        //     right.clone().into(),
-        //     join_type,
-        //     Condition::with_expr(on_cond.clone()),
-        // );
-
-        // // Perform `to_stream`
-        // let result = logical_join.to_stream();
-
-        // // Expected plan: HashJoin(($1 = $3) AND ($2 == 42))
-        // let hash_join = result.as_stream_hash_join().unwrap();
-        // assert_eq!(hash_join.eq_join_predicate().all_cond().as_expr(), on_cond);
-    }
     /// Pruning
     /// ```text
     /// Join(on: input_ref(1)=input_ref(3))

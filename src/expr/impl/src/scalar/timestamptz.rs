@@ -46,7 +46,7 @@ pub fn f64_sec_to_timestamptz(elem: F64) -> Result<Timestamptz> {
         .into_ordered()
         .try_into()
         .map_err(|_| ExprError::NumericOutOfRange)?;
-    Ok(Timestamptz::from_micros(micros))
+    Timestamptz::from_micros(micros).ok_or(ExprError::NumericOutOfRange)
 }
 
 #[function("at_time_zone(timestamptz, varchar) -> timestamp")]
@@ -93,7 +93,7 @@ pub fn timestamp_at_time_zone_internal(input: Timestamp, time_zone: Tz) -> Resul
         LocalResult::Ambiguous(_, latest) => latest,
     };
     let usec = instant_local.timestamp_micros();
-    Ok(Timestamptz::from_micros(usec))
+    Ok(Timestamptz::from_micros_uncheck(usec))
 }
 
 #[function("cast_with_time_zone(timestamptz, varchar) -> varchar")]
@@ -214,7 +214,7 @@ fn timestamptz_interval_quantitative(
     }
     let delta_usecs = r.usecs();
     let usecs = f(l.timestamp_micros(), delta_usecs).ok_or(ExprError::NumericOutOfRange)?;
-    Ok(Timestamptz::from_micros(usecs))
+    Timestamptz::from_micros(usecs).ok_or(ExprError::NumericOutOfRange)
 }
 
 #[cfg(test)]
@@ -222,11 +222,6 @@ mod tests {
     use risingwave_common::util::iter_util::ZipEqFast;
 
     use super::*;
-
-    #[test]
-    fn test_clock_timestamp() {
-        assert!(clock_timestamp().timestamp_micros() > 0);
-    }
 
     #[test]
     fn test_time_zone_conversion() {

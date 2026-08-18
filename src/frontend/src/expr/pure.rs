@@ -291,6 +291,10 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::JsonbPopulateMap
             | Type::IsJson
             | Type::ToJsonb
+            | Type::ToVariant
+            | Type::VariantGet
+            | Type::TryVariantGet
+            | Type::VariantTypeof
             | Type::Sind
             | Type::Cosd
             | Type::Cotd

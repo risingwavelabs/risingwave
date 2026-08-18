@@ -29,6 +29,7 @@ use risingwave_connector::sink::catalog::{SinkCatalog, SinkId};
 use risingwave_connector::sink::iceberg::{ICEBERG_SINK, IcebergConfig};
 use risingwave_connector::source::UPSTREAM_SOURCE_KEY;
 use risingwave_pb::iceberg_compaction::SubscribeIcebergCompactionEventRequest;
+use risingwave_pb::id::IcebergCompactionTaskId;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tonic::Streaming;
 
@@ -47,7 +48,7 @@ pub(crate) type CompactorChangeTx =
 pub(crate) type CompactorChangeRx =
     UnboundedReceiver<(WorkerId, Streaming<SubscribeIcebergCompactionEventRequest>)>;
 
-type ManualCompactionWaiter = tokio::sync::oneshot::Sender<MetaResult<u64>>;
+type ManualCompactionWaiter = tokio::sync::oneshot::Sender<MetaResult<IcebergCompactionTaskId>>;
 
 use schedule::CompactionTrack;
 pub use schedule::IcebergCompactionScheduleStatus;
@@ -67,6 +68,7 @@ pub struct IcebergCompactionManager {
 struct IcebergCompactionManagerInner {
     sink_schedules: HashMap<SinkId, CompactionTrack>,
     snapshot_expiration_sink_ids: HashSet<SinkId>,
+    manifest_rewrite_sink_ids: HashSet<SinkId>,
     manual_compaction_waiters: HashMap<SinkId, ManualCompactionWaiter>,
 }
 
@@ -93,6 +95,7 @@ impl IcebergCompactionManager {
                 inner: Arc::new(RwLock::new(IcebergCompactionManagerInner {
                     sink_schedules: HashMap::default(),
                     snapshot_expiration_sink_ids: HashSet::default(),
+                    manifest_rewrite_sink_ids: HashSet::default(),
                     manual_compaction_waiters: HashMap::default(),
                 })),
                 metadata_manager,
@@ -125,7 +128,7 @@ impl IcebergCompactionManager {
     /// Clear the iceberg maintenance state of the sink aborted by
     /// `try_abort_creating_streaming_job`, if any.
     pub fn clear_maintenance_for_aborted_job(&self, abort_result: &AbortCreatingJobResult) {
-        if let Some(sink_id) = abort_result.aborted_sink_id {
+        for &sink_id in &abort_result.aborted_sink_ids {
             self.clear_iceberg_maintenance_by_sink_id(sink_id);
         }
     }
