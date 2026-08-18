@@ -34,6 +34,7 @@ use crate::hummock::HummockError;
 
 const BLOCK_INDEX_BITS: u32 = 16;
 const BLOCK_INDEX_LIMIT: u64 = 1 << BLOCK_INDEX_BITS;
+const BLOCK_INDEX_MASK: u64 = BLOCK_INDEX_LIMIT - 1;
 // The POC keeps the full SST object ID under the current 32-bit deployment bound. Bit 63 marks
 // keys that cannot use the extractable layout, so the live-SST filter rejects them fail-closed.
 const SST_ID_LIMIT: u64 = 1 << 32;
@@ -49,7 +50,11 @@ impl SstableBlockIndex {
     fn encoded_hash(&self) -> u64 {
         let sst_id = self.sst_id.as_raw_id();
         if sst_id < SST_ID_LIMIT && self.block_idx < BLOCK_INDEX_LIMIT {
-            return (sst_id << BLOCK_INDEX_BITS) | self.block_idx;
+            // Keep the SST ID directly extractable while mixing it into the low bits used by
+            // Foyer for shard selection. XOR is reversible, so the block index can still be
+            // recovered from the encoded hash when needed.
+            let mixed_block_idx = (self.block_idx ^ sst_id) & BLOCK_INDEX_MASK;
+            return (sst_id << BLOCK_INDEX_BITS) | mixed_block_idx;
         }
 
         let mut bytes = [0; 16];
@@ -94,9 +99,32 @@ type HybridCachedBlockEntry =
 type HybridBlockGetOrFetch =
     HybridGetOrFetch<SstableBlockIndex, Box<Block>, SstableBlockHashBuilder>;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) enum BlockCacheRoute {
+    L0,
+    Stable,
+}
+
+impl BlockCacheRoute {
+    pub(crate) fn from_level(level: u32) -> Self {
+        if level == 0 { Self::L0 } else { Self::Stable }
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+struct LiveSstInfo {
+    level: u32,
+}
+
+impl LiveSstInfo {
+    fn cache_route(self) -> BlockCacheRoute {
+        BlockCacheRoute::from_level(self.level)
+    }
+}
+
 #[derive(Clone)]
 pub struct LiveSsts {
-    inner: Arc<ArcSwap<HashMap<HummockSstableObjectId, u32>>>,
+    inner: Arc<ArcSwap<HashMap<HummockSstableObjectId, LiveSstInfo>>>,
 }
 
 impl Default for LiveSsts {
@@ -142,49 +170,56 @@ impl LiveSsts {
         &self,
         object_levels: impl IntoIterator<Item = (HummockSstableObjectId, u32)>,
     ) {
-        let next = HashMap::from_iter(object_levels);
+        let next = HashMap::from_iter(
+            object_levels
+                .into_iter()
+                .map(|(object_id, level)| (object_id, LiveSstInfo { level })),
+        );
         if self.inner.load().as_ref() != &next {
             self.inner.store(Arc::new(next));
         }
     }
 
-    pub(crate) fn level(&self, object_id: &HummockSstableObjectId) -> Option<u32> {
-        self.inner.load().get(object_id).copied()
+    pub(crate) fn route(&self, object_id: &HummockSstableObjectId) -> Option<BlockCacheRoute> {
+        self.inner
+            .load()
+            .get(object_id)
+            .copied()
+            .map(LiveSstInfo::cache_route)
     }
 }
 
 #[derive(Clone, Copy, Debug)]
-enum LiveSstLevelSelector {
+enum LiveSstRouteSelector {
     Any,
-    L0,
-    Stable,
+    Route(BlockCacheRoute),
 }
 
 #[derive(Clone, Debug)]
 pub struct LiveSstFilter {
     live_ssts: LiveSsts,
-    selector: LiveSstLevelSelector,
+    selector: LiveSstRouteSelector,
 }
 
 impl LiveSstFilter {
     pub fn new(live_ssts: LiveSsts) -> Self {
         Self {
             live_ssts,
-            selector: LiveSstLevelSelector::Any,
+            selector: LiveSstRouteSelector::Any,
         }
     }
 
     pub(crate) fn l0(live_ssts: LiveSsts) -> Self {
         Self {
             live_ssts,
-            selector: LiveSstLevelSelector::L0,
+            selector: LiveSstRouteSelector::Route(BlockCacheRoute::L0),
         }
     }
 
     pub(crate) fn stable(live_ssts: LiveSsts) -> Self {
         Self {
             live_ssts,
-            selector: LiveSstLevelSelector::Stable,
+            selector: LiveSstRouteSelector::Route(BlockCacheRoute::Stable),
         }
     }
 
@@ -193,13 +228,12 @@ impl LiveSstFilter {
             return false;
         }
         let object_id = HummockSstableObjectId::new(hash >> BLOCK_INDEX_BITS);
-        let Some(level) = self.live_ssts.level(&object_id) else {
+        let Some(route) = self.live_ssts.route(&object_id) else {
             return false;
         };
         match self.selector {
-            LiveSstLevelSelector::Any => true,
-            LiveSstLevelSelector::L0 => level == 0,
-            LiveSstLevelSelector::Stable => level > 0,
+            LiveSstRouteSelector::Any => true,
+            LiveSstRouteSelector::Route(expected) => route == expected,
         }
     }
 }
@@ -303,7 +337,7 @@ impl BlockResponse {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::collections::{HashMap, HashSet};
     use std::hash::BuildHasher;
     use std::sync::Arc;
 
@@ -313,8 +347,8 @@ mod tests {
     use risingwave_hummock_sdk::{HummockSstableObjectId, HummockVersionId};
 
     use super::{
-        BLOCK_INDEX_LIMIT, INVALID_HASH_BIT, LiveSstFilter, LiveSsts, SST_ID_LIMIT,
-        SstableBlockHashBuilder, SstableBlockIndex,
+        BLOCK_INDEX_LIMIT, BLOCK_INDEX_MASK, INVALID_HASH_BIT, LiveSstFilter, LiveSsts,
+        SST_ID_LIMIT, SstableBlockHashBuilder, SstableBlockIndex,
     };
 
     fn hash(key: SstableBlockIndex) -> u64 {
@@ -368,13 +402,14 @@ mod tests {
             block_idx: 3,
         })));
 
-        assert_eq!(
-            hash(SstableBlockIndex {
-                sst_id: live,
-                block_idx: 3,
-            }),
-            (live.as_raw_id() << super::BLOCK_INDEX_BITS) | 3
-        );
+        let encoded = hash(SstableBlockIndex {
+            sst_id: live,
+            block_idx: 3,
+        });
+        let decoded_sst_id = encoded >> super::BLOCK_INDEX_BITS;
+        let decoded_block_idx = (encoded & BLOCK_INDEX_MASK) ^ (decoded_sst_id & BLOCK_INDEX_MASK);
+        assert_eq!(decoded_sst_id, live.as_raw_id());
+        assert_eq!(decoded_block_idx, 3);
 
         live_ssts.replace([live]);
         assert!(filter.is_admitted(hash(SstableBlockIndex {
@@ -385,6 +420,19 @@ mod tests {
             sst_id: stale,
             block_idx: 3,
         })));
+    }
+
+    #[test]
+    fn test_sstable_block_hash_mixes_sst_id_into_shard_bits() {
+        let shards = (0..64)
+            .map(|sst_id| {
+                hash(SstableBlockIndex {
+                    sst_id: HummockSstableObjectId::new(sst_id),
+                    block_idx: 0,
+                }) % 64
+            })
+            .collect::<HashSet<_>>();
+        assert_eq!(shards.len(), 64);
     }
 
     #[test]

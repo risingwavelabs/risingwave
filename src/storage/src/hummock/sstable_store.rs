@@ -43,8 +43,8 @@ use thiserror_ext::AsReport;
 use tokio::time::Instant;
 
 use super::{
-    BatchUploadWriter, Block, BlockMeta, BlockResponse, LiveSsts, RecentFilter, Sstable,
-    SstableBlockCache, SstableBlockHashBuilder, SstableBlockIndex, SstableMeta,
+    BatchUploadWriter, Block, BlockCacheRoute, BlockMeta, BlockResponse, LiveSsts, RecentFilter,
+    Sstable, SstableBlockCache, SstableBlockHashBuilder, SstableBlockIndex, SstableMeta,
     SstableWriterOptions,
 };
 use crate::hummock::block_stream::{
@@ -115,11 +115,6 @@ impl<T> Deref for VectorMetaFileHolder<T> {
 pub type TableHolder = HybridCacheEntry<HummockSstableObjectId, Box<Sstable>>;
 
 pub type VectorBlockHolder = CacheEntry<(HummockVectorFileId, usize), Box<VectorBlock>>;
-
-#[derive(Clone, Copy)]
-struct BlockCacheLookup {
-    level: u32,
-}
 
 pub type VectorFileHolder = VectorMetaFileHolder<VectorFileMeta>;
 pub type HnswGraphFileHolder = VectorMetaFileHolder<PbHnswGraph>;
@@ -348,32 +343,37 @@ impl SstableStore {
     async fn get_cached_block(
         &self,
         index: &SstableBlockIndex,
-        lookup: BlockCacheLookup,
+        route: BlockCacheRoute,
     ) -> HummockResult<
         Option<HybridCacheEntry<SstableBlockIndex, Box<Block>, SstableBlockHashBuilder>>,
     > {
         let entry = self
-            .block_cache_for_level(lookup.level)
+            .block_cache_for_route(route)
             .get(index)
             .await
             .map_err(HummockError::foyer_error)?;
         Ok(entry)
     }
 
-    fn contains_cached_block(&self, index: &SstableBlockIndex, lookup: BlockCacheLookup) -> bool {
-        self.block_cache_for_level(lookup.level).contains(index)
+    fn contains_cached_block(&self, index: &SstableBlockIndex, route: BlockCacheRoute) -> bool {
+        self.block_cache_for_route(route).contains(index)
     }
 
     pub(crate) fn insert_new_l0_cache(&self, index: SstableBlockIndex, block: Block, hint: Hint) {
-        self.block_cache_for_level(0).insert_with_properties(
-            index,
-            Box::new(block),
-            HybridCacheProperties::default().with_hint(hint),
-        );
+        self.block_cache_for_route(BlockCacheRoute::L0)
+            .insert_with_properties(
+                index,
+                Box::new(block),
+                HybridCacheProperties::default().with_hint(hint),
+            );
     }
 
     pub(crate) fn block_cache_for_level(&self, level: u32) -> &SstableBlockCache {
-        if level == 0
+        self.block_cache_for_route(BlockCacheRoute::from_level(level))
+    }
+
+    fn block_cache_for_route(&self, route: BlockCacheRoute) -> &SstableBlockCache {
+        if route == BlockCacheRoute::L0
             && let Some(cache) = &self.l0_block_cache
         {
             return cache;
@@ -381,24 +381,22 @@ impl SstableStore {
         &self.block_cache
     }
 
-    fn block_cache_lookup(
+    fn block_cache_route(
         &self,
         object_id: HummockSstableObjectId,
         snapshot_level: Option<u32>,
-    ) -> BlockCacheLookup {
+    ) -> BlockCacheRoute {
         if self.l0_block_cache.is_none() {
-            return BlockCacheLookup { level: 1 };
+            return BlockCacheRoute::Stable;
         }
 
-        if let Some(level) = self.live_ssts.level(&object_id) {
-            return BlockCacheLookup { level };
+        if let Some(route) = self.live_ssts.route(&object_id) {
+            return route;
         }
 
-        if let Some(level) = snapshot_level {
-            return BlockCacheLookup { level };
-        }
-
-        BlockCacheLookup { level: 1 }
+        snapshot_level
+            .map(BlockCacheRoute::from_level)
+            .unwrap_or(BlockCacheRoute::Stable)
     }
 
     pub async fn prefetch_blocks(
@@ -423,7 +421,7 @@ impl SstableStore {
         snapshot_level: Option<u32>,
     ) -> HummockResult<Box<dyn BlockStream>> {
         let object_id = sst.id;
-        let lookup = self.block_cache_lookup(object_id, snapshot_level);
+        let route = self.block_cache_route(object_id, snapshot_level);
         if self.prefetch_buffer_usage.load(Ordering::Acquire) > self.prefetch_buffer_capacity {
             let block = self
                 .get_with_level_hint(sst, block_index, policy, stats, snapshot_level)
@@ -440,7 +438,7 @@ impl SstableStore {
                     sst_id: object_id,
                     block_idx: block_index as _,
                 },
-                lookup,
+                route,
             )
             .await?
         {
@@ -466,7 +464,7 @@ impl SstableStore {
                     sst_id: object_id,
                     block_idx: idx as _,
                 },
-                lookup,
+                route,
             ) {
                 if min_hit_index > idx && idx > block_index {
                     min_hit_index = idx;
@@ -532,13 +530,11 @@ impl SstableStore {
                     sst_id: object_id,
                     block_idx: idx as _,
                 };
-                let entry = self
-                    .block_cache_for_level(lookup.level)
-                    .insert_with_properties(
-                        index,
-                        Box::new(block),
-                        HybridCacheProperties::default().with_hint(hint),
-                    );
+                let entry = self.block_cache_for_route(route).insert_with_properties(
+                    index,
+                    Box::new(block),
+                    HybridCacheProperties::default().with_hint(hint),
+                );
                 BlockHolder::from_hybrid_cache_entry(entry)
             } else {
                 BlockHolder::from_owned_block(Box::new(block))
@@ -593,7 +589,7 @@ impl SstableStore {
             sst_id: object_id,
             block_idx: block_index as _,
         };
-        let lookup = self.block_cache_lookup(object_id, snapshot_level);
+        let route = self.block_cache_route(object_id, snapshot_level);
 
         self.recent_filter
             .extend([(object_id, usize::MAX), (object_id, block_index)]);
@@ -623,13 +619,13 @@ impl SstableStore {
             CachePolicy::Fill(hint) => {
                 let properties = HybridCacheProperties::default().with_hint(hint);
                 let fetch = self
-                    .block_cache_for_level(lookup.level)
+                    .block_cache_for_route(route)
                     .get_or_fetch(&idx, move || {
                         fetch_block.map(move |res| res.map(|block| (block, properties)))
                     });
                 Ok(BlockResponse::Fetch(fetch))
             }
-            CachePolicy::NotFill => match self.get_cached_block(&idx, lookup).await? {
+            CachePolicy::NotFill => match self.get_cached_block(&idx, route).await? {
                 Some(entry) => Ok(BlockResponse::Block(BlockHolder::from_hybrid_cache_entry(
                     entry,
                 ))),
@@ -998,8 +994,9 @@ mod tests {
     };
     use crate::hummock::value::HummockValue;
     use crate::hummock::{
-        Block, CachePolicy, LiveSstFilter, LiveSsts, SstableBlockCache, SstableBlockHashBuilder,
-        SstableBlockIndex, SstableIterator, SstableMeta, SstableStore, get_from_sstable_info,
+        Block, BlockCacheRoute, CachePolicy, LiveSstFilter, LiveSsts, SstableBlockCache,
+        SstableBlockHashBuilder, SstableBlockIndex, SstableIterator, SstableMeta, SstableStore,
+        get_from_sstable_info,
     };
     use crate::monitor::StoreLocalStatistic;
 
@@ -1286,17 +1283,17 @@ mod tests {
             block_idx: 0,
         };
         l0_block_cache.insert(l0_index, Box::new(test_block().await));
-        let l0_lookup = sstable_store.block_cache_lookup(l0_index.sst_id, Some(0));
+        let l0_route = sstable_store.block_cache_route(l0_index.sst_id, Some(0));
         let entry = sstable_store
-            .get_cached_block(&l0_index, l0_lookup)
+            .get_cached_block(&l0_index, l0_route)
             .await
             .unwrap()
             .unwrap();
         assert_eq!(entry.source(), Source::Memory);
-        let stable_lookup = sstable_store.block_cache_lookup(l0_index.sst_id, Some(6));
+        let stable_route = sstable_store.block_cache_route(l0_index.sst_id, Some(6));
         assert!(
             sstable_store
-                .get_cached_block(&l0_index, stable_lookup)
+                .get_cached_block(&l0_index, stable_route)
                 .await
                 .unwrap()
                 .is_none()
@@ -1309,17 +1306,17 @@ mod tests {
         sstable_store
             .block_cache
             .insert(stable_index, Box::new(test_block().await));
-        let stable_lookup = sstable_store.block_cache_lookup(stable_index.sst_id, Some(6));
+        let stable_route = sstable_store.block_cache_route(stable_index.sst_id, Some(6));
         let entry = sstable_store
-            .get_cached_block(&stable_index, stable_lookup)
+            .get_cached_block(&stable_index, stable_route)
             .await
             .unwrap()
             .unwrap();
         assert_eq!(entry.source(), Source::Memory);
-        let l0_lookup = sstable_store.block_cache_lookup(stable_index.sst_id, Some(0));
+        let l0_route = sstable_store.block_cache_route(stable_index.sst_id, Some(0));
         assert!(
             sstable_store
-                .get_cached_block(&stable_index, l0_lookup)
+                .get_cached_block(&stable_index, l0_route)
                 .await
                 .unwrap()
                 .is_none()
@@ -1435,22 +1432,22 @@ mod tests {
         sstable_store
             .live_ssts
             .replace_levels_for_test([(index.sst_id, 1)]);
-        let stable_lookup = sstable_store.block_cache_lookup(index.sst_id, None);
-        assert_eq!(stable_lookup.level, 1);
+        let stable_route = sstable_store.block_cache_route(index.sst_id, None);
+        assert_eq!(stable_route, BlockCacheRoute::Stable);
         assert!(
             sstable_store
-                .get_cached_block(&index, stable_lookup)
+                .get_cached_block(&index, stable_route)
                 .await
                 .unwrap()
                 .is_none()
         );
-        assert!(!sstable_store.contains_cached_block(&index, stable_lookup));
+        assert!(!sstable_store.contains_cached_block(&index, stable_route));
 
         sstable_store
             .block_cache
             .insert(index, Box::new(test_block().await));
         let entry = sstable_store
-            .get_cached_block(&index, stable_lookup)
+            .get_cached_block(&index, stable_route)
             .await
             .unwrap()
             .unwrap();
