@@ -1467,6 +1467,31 @@ async fn test_extend_objects_to_delete() {
         );
         assert_eq!(checkpoint.object_ids, expected_checkpoint_object_ids);
 
+        let change_log_object_id = 10_000;
+        let table_change_log = HashMap::from([(
+            TableId::new(1),
+            TableChangeLog::new([EpochNewChangeLog {
+                new_value: vec![gen_sstable_info(
+                    change_log_object_id,
+                    vec![1],
+                    test_epoch(1),
+                )],
+                old_value: vec![],
+                non_checkpoint_epochs: vec![],
+                checkpoint_epoch: test_epoch(1),
+            }]),
+        )]);
+        let checkpoint_with_change_log = HummockVersionCheckpoint::new(
+            checkpoint.version.clone(),
+            Default::default(),
+            &table_change_log,
+        );
+        assert!(
+            checkpoint_with_change_log
+                .object_ids
+                .contains(&HummockObjectId::Sstable(change_log_object_id.into()))
+        );
+
         let restored_checkpoint =
             HummockVersionCheckpoint::from_protobuf(&checkpoint.to_protobuf());
         assert_eq!(restored_checkpoint.object_ids, expected_version_object_ids);
@@ -3141,6 +3166,7 @@ async fn test_old_version_dropped_table_sst_does_not_make_new_compaction_fail() 
         .write_checkpoint(&HummockVersionCheckpoint::new(
             Arc::new(dirty_version),
             Default::default(),
+            &Default::default(),
         ))
         .await
         .unwrap();

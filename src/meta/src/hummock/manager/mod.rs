@@ -499,6 +499,7 @@ impl HummockManager {
             versioning_guard.checkpoint = HummockVersionCheckpoint::new(
                 Arc::new(checkpoint_version.clone()),
                 Default::default(),
+                &Default::default(),
             );
             self.write_checkpoint(&versioning_guard.checkpoint).await?;
             checkpoint_version
@@ -567,6 +568,12 @@ impl HummockManager {
                     )
                 })
                 .collect();
+        versioning_guard.checkpoint.object_ids.extend(
+            versioning_guard
+                .table_change_log
+                .values()
+                .flat_map(|change_log| change_log.get_object_ids()),
+        );
 
         context_info.pinned_versions = hummock_pinned_version::Entity::find()
             .all(&meta_store.conn)

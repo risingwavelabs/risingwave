@@ -19,6 +19,7 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use bytes::BytesMut;
+use risingwave_hummock_sdk::change_log::TableChangeLogs;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::version_object_size_map;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{HummockObjectId, HummockVersionId, get_stale_object_ids};
@@ -65,12 +66,20 @@ pub struct HummockVersionCheckpoint {
 }
 
 impl HummockVersionCheckpoint {
-    /// Creates a checkpoint and builds its in-memory object-id index.
+    /// Creates a checkpoint and indexes object ids from both the version and table change logs.
     pub fn new(
         version: Arc<HummockVersion>,
         stale_objects: HashMap<HummockVersionId, PbStaleObjects>,
+        table_change_log: &TableChangeLogs,
     ) -> Self {
-        let object_ids = version.get_object_ids().collect();
+        let object_ids = version
+            .get_object_ids()
+            .chain(
+                table_change_log
+                    .values()
+                    .flat_map(|change_log| change_log.get_object_ids()),
+            )
+            .collect();
         Self {
             version,
             object_ids,
@@ -100,6 +109,7 @@ impl HummockVersionCheckpoint {
                 .iter()
                 .map(|(version_id, objects)| (*version_id, objects.clone()))
                 .collect(),
+            &Default::default(),
         )
     }
 
@@ -111,6 +121,7 @@ impl HummockVersionCheckpoint {
         Self::new(
             HummockVersion::from_persisted_protobuf_owned(version).into(),
             checkpoint.stale_objects,
+            &Default::default(),
         )
     }
 
