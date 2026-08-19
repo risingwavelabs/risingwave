@@ -384,7 +384,7 @@ impl LogSinker for RemoteLogSinker {
                         .observe(start_time.elapsed().as_secs_f64());
                 }
 
-                log_reader.truncate(persisted_offset)?;
+                log_reader.truncate(persisted_offset, vec![])?;
                 Ok(())
             }
 

@@ -81,7 +81,7 @@ impl LogSinker for BatchingLogSinker {
                     if sink_writer.try_commit().await? {
                         // The file has been successfully written and is now visible to downstream consumers.
                         // Truncate up to this chunk, which also covers any preceding barriers.
-                        log_reader.truncate(TruncateOffset::Chunk { epoch, chunk_id })?;
+                        log_reader.truncate(TruncateOffset::Chunk { epoch, chunk_id }, vec![])?;
                     }
                 }
                 LogStoreReadItem::Barrier { .. } => {
@@ -95,7 +95,8 @@ impl LogSinker for BatchingLogSinker {
                     // 2. there is no pending data (no active writer), so the barrier can be safely discarded.
                     // This avoids accumulating barriers in the log store during idle periods with no data.
                     if sink_writer.try_commit().await? || !sink_writer.has_pending_data() {
-                        log_reader.truncate(TruncateOffset::Barrier { epoch: prev_epoch })?;
+                        log_reader
+                            .truncate(TruncateOffset::Barrier { epoch: prev_epoch }, vec![])?;
                     }
 
                     state = LogConsumerState::BarrierReceived { prev_epoch }
