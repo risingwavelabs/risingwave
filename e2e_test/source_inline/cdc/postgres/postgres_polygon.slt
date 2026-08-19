@@ -295,10 +295,16 @@ create table rw_polygon_schema_change (*)
 from polygon_source table 'public.upstream_polygon_schema_change';
 
 system ok
-psql -c "
+psql -v ON_ERROR_STOP=1 -c "
     ALTER TABLE public.upstream_polygon_schema_change
         ADD COLUMN shape polygon,
         ADD COLUMN shapes polygon[];
+    INSERT INTO public.upstream_polygon_schema_change VALUES (
+        1,
+        'schema-change',
+        polygon '((40,40),(50,40),(50,50),(40,50))',
+        ARRAY[polygon '((41,41),(42,41),(42,42),(41,42))']::polygon[]
+    );
 "
 
 query TT rowsort retry 20 backoff 1s
@@ -310,6 +316,13 @@ where t.name = 'rw_polygon_schema_change'
 ----
 shape character varying
 shapes character varying[]
+
+query ITT retry 20 backoff 1s
+select id, shape, shapes[1]
+from rw_polygon_schema_change
+where id = 1;
+----
+1 ((40,40),(50,40),(50,50),(40,50)) ((41,41),(42,41),(42,42),(41,42))
 
 statement ok
 drop table rw_polygon_manual;
