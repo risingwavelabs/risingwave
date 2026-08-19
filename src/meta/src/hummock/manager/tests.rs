@@ -1457,12 +1457,19 @@ async fn test_extend_objects_to_delete() {
             .read_with_process_name("test_extend_objects_to_delete")
             .await;
         let checkpoint = &versioning.checkpoint;
-        let expected_object_ids = checkpoint.version.get_object_ids().collect();
-        assert_eq!(checkpoint.object_ids, expected_object_ids);
+        let expected_version_object_ids: HashSet<_> = checkpoint.version.get_object_ids().collect();
+        let mut expected_checkpoint_object_ids = expected_version_object_ids.clone();
+        expected_checkpoint_object_ids.extend(
+            versioning
+                .table_change_log
+                .values()
+                .flat_map(|change_log| change_log.get_object_ids()),
+        );
+        assert_eq!(checkpoint.object_ids, expected_checkpoint_object_ids);
 
         let restored_checkpoint =
             HummockVersionCheckpoint::from_protobuf(&checkpoint.to_protobuf());
-        assert_eq!(restored_checkpoint.object_ids, expected_object_ids);
+        assert_eq!(restored_checkpoint.object_ids, expected_version_object_ids);
     }
     // since version1 is still pinned, the sst removed in compaction can not be reclaimed.
     assert_eq!(

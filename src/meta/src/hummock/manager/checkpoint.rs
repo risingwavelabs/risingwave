@@ -49,10 +49,11 @@ pub(crate) fn xxhash64_checksum(data: &[u8]) -> u64 {
 pub struct HummockVersionCheckpoint {
     pub version: Arc<HummockVersion>,
 
-    /// Object ids referenced by `version`.
+    /// Object ids known to be referenced when this checkpoint was built.
     ///
-    /// This index is only kept in memory. Checkpoint creation already materializes the same set to
-    /// find removed objects, so retaining it avoids rebuilding a large hash set during every GC.
+    /// This in-memory index includes separately managed table change logs for newly created
+    /// checkpoints. Restored checkpoints rebuild the version object ids, while live table change
+    /// logs are filtered separately during GC.
     pub(super) object_ids: HashSet<HummockObjectId>,
 
     /// stale objects of versions before the current checkpoint.
@@ -527,14 +528,15 @@ impl HummockManager {
 
         // Object ids that once exist in any hummock version but not exist in the latest hummock
         // version or its separately managed table change logs.
-        let current_version_object_ids = current_version.get_object_ids().collect();
-        let mut removed_object_ids = &versions_object_ids - &current_version_object_ids;
-        for object_id in current_table_change_log
-            .values()
-            .flat_map(|change_log| change_log.get_object_ids())
-        {
-            removed_object_ids.remove(&object_id);
-        }
+        let current_version_object_ids = current_version
+            .get_object_ids()
+            .chain(
+                current_table_change_log
+                    .values()
+                    .flat_map(|change_log| change_log.get_object_ids()),
+            )
+            .collect();
+        let removed_object_ids = &versions_object_ids - &current_version_object_ids;
         let total_file_size = removed_object_ids
             .iter()
             .map(|t| {
