@@ -19,7 +19,6 @@ use std::sync::Arc;
 use std::sync::atomic::Ordering;
 
 use bytes::BytesMut;
-use risingwave_hummock_sdk::change_log::TableChangeLogs;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::version_object_size_map;
 use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{HummockObjectId, HummockVersionId, get_stale_object_ids};
@@ -50,11 +49,11 @@ pub(crate) fn xxhash64_checksum(data: &[u8]) -> u64 {
 pub struct HummockVersionCheckpoint {
     pub version: Arc<HummockVersion>,
 
-    /// Object ids known to be referenced when this checkpoint was built.
+    /// Object ids referenced by `version`.
     ///
-    /// This in-memory index includes separately managed table change logs for newly created
-    /// checkpoints. Restored checkpoints rebuild the version object ids, while live table change
-    /// logs are filtered separately during GC.
+    /// This index deliberately excludes separately managed table change logs because their
+    /// membership can change without replacing the checkpoint. GC filters live table change logs
+    /// separately.
     pub(super) object_ids: HashSet<HummockObjectId>,
 
     /// stale objects of versions before the current checkpoint.
@@ -66,20 +65,12 @@ pub struct HummockVersionCheckpoint {
 }
 
 impl HummockVersionCheckpoint {
-    /// Creates a checkpoint and indexes object ids from both the version and table change logs.
+    /// Creates a checkpoint and builds its in-memory version object-id index.
     pub fn new(
         version: Arc<HummockVersion>,
         stale_objects: HashMap<HummockVersionId, PbStaleObjects>,
-        table_change_log: &TableChangeLogs,
     ) -> Self {
-        let object_ids = version
-            .get_object_ids()
-            .chain(
-                table_change_log
-                    .values()
-                    .flat_map(|change_log| change_log.get_object_ids()),
-            )
-            .collect();
+        let object_ids = version.get_object_ids().collect();
         Self {
             version,
             object_ids,
@@ -109,7 +100,6 @@ impl HummockVersionCheckpoint {
                 .iter()
                 .map(|(version_id, objects)| (*version_id, objects.clone()))
                 .collect(),
-            &Default::default(),
         )
     }
 
@@ -121,7 +111,6 @@ impl HummockVersionCheckpoint {
         Self::new(
             HummockVersion::from_persisted_protobuf_owned(version).into(),
             checkpoint.stale_objects,
-            &Default::default(),
         )
     }
 
@@ -539,15 +528,14 @@ impl HummockManager {
 
         // Object ids that once exist in any hummock version but not exist in the latest hummock
         // version or its separately managed table change logs.
-        let current_version_object_ids = current_version
-            .get_object_ids()
-            .chain(
-                current_table_change_log
-                    .values()
-                    .flat_map(|change_log| change_log.get_object_ids()),
-            )
-            .collect();
-        let removed_object_ids = &versions_object_ids - &current_version_object_ids;
+        let checkpoint_version_object_ids = current_version.get_object_ids().collect();
+        let mut removed_object_ids = &versions_object_ids - &checkpoint_version_object_ids;
+        for object_id in current_table_change_log
+            .values()
+            .flat_map(|change_log| change_log.get_object_ids())
+        {
+            removed_object_ids.remove(&object_id);
+        }
         let total_file_size = removed_object_ids
             .iter()
             .map(|t| {
@@ -610,7 +598,7 @@ impl HummockManager {
         stale_objects.retain(|version_id, _| *version_id >= min_pinned_version_id);
         let new_checkpoint = HummockVersionCheckpoint::with_object_ids(
             current_version.clone(),
-            current_version_object_ids,
+            checkpoint_version_object_ids,
             stale_objects,
         );
         // 2. persist the new checkpoint without holding lock
