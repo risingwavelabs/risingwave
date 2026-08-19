@@ -16,13 +16,9 @@ use anyhow::{Context, anyhow};
 use hashbrown::{HashMap, HashSet};
 use iceberg::delete_vector::DeleteVector;
 use iceberg::io::FileIO;
-use iceberg::spec::{
-    DataContentType, DataFileFormat, FormatVersion, ManifestContentType, SnapshotRef,
-};
+use iceberg::spec::{DataContentType, ManifestContentType, SnapshotRef};
 use iceberg::table::Table;
-use iceberg::writer::file_writer::location_generator::{
-    DefaultFileNameGenerator, DefaultLocationGenerator,
-};
+use iceberg::writer::file_writer::location_generator::DefaultLocationGenerator;
 use parquet::arrow::{ParquetRecordBatchStreamBuilder, ProjectionMask};
 use parquet::schema::types::SchemaDescriptor;
 use risingwave_common::array::DataChunk;
@@ -32,8 +28,8 @@ use risingwave_common::row::RowExt;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_connector::sink::SinkError;
 use risingwave_connector::sink::iceberg::{
-    IcebergConfig, IcebergPositionDeleteCommitResult, read_position_deletes_from_file,
-    serialize_data_files_default_spec, write_dv_puffin_file, write_parquet_position_delete_file,
+    IcebergConfig, IcebergPositionDeleteCommitResult, PositionDeleteFileNameGenerators,
+    read_position_deletes_from_file, serialize_data_files_default_spec, write_position_delete_file,
 };
 use risingwave_connector::source::iceberg::ParquetFileReader;
 use risingwave_pb::connector_service::SinkMetadata;
@@ -492,19 +488,9 @@ async fn write_conflict_delete_files(
     }
 
     let location_generator = DefaultLocationGenerator::new(table.metadata().clone())?;
-    // A fresh uuid per resolve keeps file names unique across the vnode-aligned resolver actors.
     let uuid_suffix = Uuid::now_v7();
-    let puffin_file_name_generator = DefaultFileNameGenerator::new(
-        "resolver".to_owned(),
-        Some(format!("delvec-{uuid_suffix}")),
-        DataFileFormat::Puffin,
-    );
-    let parquet_file_name_generator = DefaultFileNameGenerator::new(
-        "resolver".to_owned(),
-        Some(format!("pos-del-{uuid_suffix}")),
-        DataFileFormat::Parquet,
-    );
-    let use_puffin = table.metadata().format_version() >= FormatVersion::V3;
+    let file_name_generators = PositionDeleteFileNameGenerators::new(uuid_suffix);
+    let format_version = table.metadata().format_version();
 
     let mut delete_files = Vec::with_capacity(conflicts.len());
     for (output_file, delete_vector) in conflicts {
@@ -512,28 +498,17 @@ async fn write_conflict_delete_files(
         // Meta retains the full output data-file metadata through B2 and backfills each
         // resolver/merger delete file's partition from its referenced data file during pre-commit.
         // Therefore these provisional delete artifacts intentionally omit `PartitionKey` here.
-        let file = if use_puffin {
-            write_dv_puffin_file(
-                table,
-                &location_generator,
-                &puffin_file_name_generator,
-                output_file,
-                &delete_vector,
-                None,
-            )
-            .await?
-        } else {
-            write_parquet_position_delete_file(
-                table,
-                &location_generator,
-                &parquet_file_name_generator,
-                config,
-                output_file,
-                &delete_vector,
-                None,
-            )
-            .await?
-        };
+        let file = write_position_delete_file(
+            table,
+            config,
+            &location_generator,
+            &file_name_generators,
+            format_version,
+            output_file,
+            &delete_vector,
+            None,
+        )
+        .await?;
         delete_files.push(file);
     }
 

@@ -21,19 +21,16 @@ use iceberg::spec::{
     SerializedDataFile,
 };
 use iceberg::table::Table;
-use iceberg::writer::file_writer::location_generator::{
-    DefaultFileNameGenerator, DefaultLocationGenerator,
-};
+use iceberg::writer::file_writer::location_generator::DefaultLocationGenerator;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::id::SinkId;
 use risingwave_connector::sink::iceberg::{
-    IcebergConfig, IcebergPositionDeleteCommitResult, read_position_deletes_from_file,
-    resolve_partition_type, serialize_data_files_default_spec, write_dv_puffin_file,
-    write_parquet_position_delete_file,
+    IcebergConfig, IcebergPositionDeleteCommitResult, PositionDeleteFileNameGenerators,
+    read_position_deletes_from_file, resolve_partition_type, serialize_data_files_default_spec,
+    write_position_delete_file,
 };
 use risingwave_connector::sink::{Result as SinkResult, SinkError};
 use risingwave_pb::connector_service::SinkMetadata;
-use risingwave_pb::id::ActorId;
 use risingwave_rpc_client::MetaClient;
 use thiserror_ext::AsReport;
 use tokio::task::JoinHandle;
@@ -58,7 +55,6 @@ use super::position_delete_staging::StagingVersion;
 /// against the post-compaction snapshot.
 pub struct PositionDeleteHandlerImpl {
     config: IcebergConfig,
-    actor_id: ActorId,
     vnode_bitmap: Option<Bitmap>,
     sink_id: SinkId,
     meta_client: MetaClient,
@@ -73,9 +69,7 @@ struct SeededState {
     table: Table,
     location_generator: DefaultLocationGenerator,
     /// File-name generator for V3 Puffin deletion vector files.
-    puffin_file_name_generator: DefaultFileNameGenerator,
-    /// File-name generator for V2 Parquet position-delete files.
-    parquet_file_name_generator: DefaultFileNameGenerator,
+    file_name_generators: PositionDeleteFileNameGenerators,
     schema_id: i32,
     partition_spec_id: i32,
     format_version: FormatVersion,
@@ -103,14 +97,12 @@ impl Drop for PositionDeleteHandlerImpl {
 impl PositionDeleteHandlerImpl {
     pub fn new(
         config: IcebergConfig,
-        actor_id: ActorId,
         vnode_bitmap: Option<Bitmap>,
         sink_id: SinkId,
         meta_client: MetaClient,
     ) -> Self {
         Self {
             config,
-            actor_id,
             vnode_bitmap,
             sink_id,
             meta_client,
@@ -175,34 +167,18 @@ impl PositionDeleteHandlerImpl {
                 overwrite_files.push(overwrite);
             }
 
-            // V3 tables use Puffin deletion vectors; V2 tables use file-scoped Parquet
-            // position-delete files. The internal representation is a roaring bitmap
-            // (`DeleteVector`) in both cases; only the on-disk format differs.
-            let use_puffin = state.format_version >= FormatVersion::V3;
-            let new_file = if use_puffin {
-                write_dv_puffin_file(
-                    &state.table,
-                    &state.location_generator,
-                    &state.puffin_file_name_generator,
-                    data_file_path.clone(),
-                    &plan.merged,
-                    None,
-                )
-                .await
-                .map_err(SinkError::Iceberg)?
-            } else {
-                write_parquet_position_delete_file(
-                    &state.table,
-                    &state.location_generator,
-                    &state.parquet_file_name_generator,
-                    &config,
-                    data_file_path.clone(),
-                    &plan.merged,
-                    None,
-                )
-                .await
-                .map_err(SinkError::Iceberg)?
-            };
+            let new_file = write_position_delete_file(
+                &state.table,
+                &config,
+                &state.location_generator,
+                &state.file_name_generators,
+                state.format_version,
+                data_file_path.clone(),
+                &plan.merged,
+                None,
+            )
+            .await
+            .map_err(SinkError::Iceberg)?;
 
             state
                 .staging
@@ -242,7 +218,6 @@ impl PositionDeleteHandler for PositionDeleteHandlerImpl {
         }
 
         let config = self.config.clone();
-        let actor_id = self.actor_id;
         let vnode_bitmap = self.vnode_bitmap.clone();
         let sink_id = self.sink_id;
         let meta_client = self.meta_client.clone();
@@ -265,16 +240,7 @@ impl PositionDeleteHandler for PositionDeleteHandlerImpl {
                 // 3. Derive per-table state + seed staging (shard-filtered).
                 let location_generator = DefaultLocationGenerator::new(table.metadata().clone())?;
                 let uuid_suffix = Uuid::now_v7();
-                let puffin_file_name_generator = DefaultFileNameGenerator::new(
-                    actor_id.to_string(),
-                    Some(format!("delvec-{}", uuid_suffix)),
-                    DataFileFormat::Puffin,
-                );
-                let parquet_file_name_generator = DefaultFileNameGenerator::new(
-                    actor_id.to_string(),
-                    Some(format!("pos-del-{}", uuid_suffix)),
-                    DataFileFormat::Parquet,
-                );
+                let file_name_generators = PositionDeleteFileNameGenerators::new(uuid_suffix);
                 let schema_id = table.metadata().current_schema_id();
                 let partition_spec_id = table.metadata().default_partition_spec_id();
                 let format_version = table.metadata().format_version();
@@ -285,8 +251,7 @@ impl PositionDeleteHandler for PositionDeleteHandlerImpl {
                 Ok(SeededState {
                     table,
                     location_generator,
-                    puffin_file_name_generator,
-                    parquet_file_name_generator,
+                    file_name_generators,
                     schema_id,
                     partition_spec_id,
                     format_version,
