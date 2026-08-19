@@ -20,8 +20,14 @@ import com.mongodb.ConnectionString;
 import com.mongodb.MongoClientSettings;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
+import com.risingwave.connector.api.source.SourceTypeE;
+import com.risingwave.connector.cdc.mongodb.MongoDbTlsUtils;
+import io.debezium.config.Configuration;
+import io.debezium.connector.mongodb.MongoDbConnector;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 import org.bson.BsonDocument;
 import org.bson.Document;
@@ -37,6 +43,8 @@ public class MongoDbValidator extends DatabaseValidator implements AutoCloseable
 
     ConnectionString connStr;
     MongoClient client;
+    private final long sourceId;
+    private final Map<String, String> userProps;
 
     @Override
     public void close() {
@@ -50,11 +58,14 @@ public class MongoDbValidator extends DatabaseValidator implements AutoCloseable
     static final String INHERITED_ROLES = "inheritedRoles";
     static final String INHERITED_PRIVILEGES = "inheritedPrivileges";
 
-    public MongoDbValidator(Map<String, String> userProps) {
+    public MongoDbValidator(Map<String, String> userProps, long sourceId) {
+        this.sourceId = sourceId;
+        this.userProps = new HashMap<>(userProps);
+        this.userProps.put("source.id", Long.toString(sourceId));
         this.mongodbUrl = userProps.get("mongodb.url");
-        this.connStr = new ConnectionString(mongodbUrl);
+        this.connStr = new ConnectionString(MongoDbTlsUtils.withoutTlsFileOptions(mongodbUrl));
         this.isShardedCluster = false;
-        this.client = MongoClients.create(connStr.toString());
+        this.client = MongoClients.create(createClientSettingsBuilder().build());
     }
 
     @Override
@@ -64,10 +75,8 @@ public class MongoDbValidator extends DatabaseValidator implements AutoCloseable
         final int validationTimeoutSeconds = 5;
 
         try {
-            var connStr = new ConnectionString(mongodbUrl);
             var settings =
-                    MongoClientSettings.builder()
-                            .applyConnectionString(connStr)
+                    createClientSettingsBuilder()
                             // Set shorter timeouts for validation
                             .applyToServerSettings(
                                     builder ->
@@ -96,6 +105,8 @@ public class MongoDbValidator extends DatabaseValidator implements AutoCloseable
                         .runCommand(org.bson.BsonDocument.parse("{ping: 1}"));
                 LOG.info("MongoDB connection validated successfully");
             }
+
+            validateMatchingCollections();
         } catch (CdcConnectorException e) {
             // Re-throw our custom exceptions
             LOG.error("MongoDB validation failed: {}", e.getMessage(), e);
@@ -113,6 +124,52 @@ public class MongoDbValidator extends DatabaseValidator implements AutoCloseable
                             mongodbUrl, validationTimeoutSeconds, e.getMessage()),
                     e);
         }
+    }
+
+    private void validateMatchingCollections() {
+        final String validationTimeoutMillis = "5000";
+        var connectorConfig =
+                new DbzConnectorConfig(
+                        SourceTypeE.MONGODB, sourceId, null, userProps, false, false);
+        var validationProperties = new Properties();
+        validationProperties.putAll(connectorConfig.getResolvedDebeziumProps());
+        validationProperties.setProperty("mongodb.connect.timeout.ms", validationTimeoutMillis);
+        validationProperties.setProperty(
+                "mongodb.server.selection.timeout.ms", validationTimeoutMillis);
+        validationProperties.setProperty("mongodb.socket.timeout.ms", validationTimeoutMillis);
+
+        try {
+            var matchingCollections =
+                    new MongoDbConnector()
+                            .getMatchingCollections(Configuration.from(validationProperties));
+            LOG.info(
+                    "MongoDB collection discovery validated successfully; {} collection(s) match",
+                    matchingCollections.size());
+        } catch (Exception e) {
+            throw new CdcConnectorException(
+                    String.format(
+                            "Failed to discover MongoDB collections with the configured user: %s",
+                            rootCauseMessage(e)),
+                    e);
+        }
+    }
+
+    private static String rootCauseMessage(Throwable exception) {
+        var cause = exception;
+        while (cause.getCause() != null && cause.getCause() != cause) {
+            cause = cause.getCause();
+        }
+        return cause.getMessage();
+    }
+
+    private MongoClientSettings.Builder createClientSettingsBuilder() {
+        var builder = MongoClientSettings.builder().applyConnectionString(connStr);
+        MongoDbTlsUtils.createTlsSslContext(mongodbUrl)
+                .ifPresent(
+                        context ->
+                                builder.applyToSslSettings(
+                                        ssl -> ssl.enabled(true).context(context)));
+        return builder;
     }
 
     boolean checkReadRoleForAdminDb(List<Document> roles) {
