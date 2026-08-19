@@ -22,6 +22,7 @@ use lance::Dataset;
 use lance::dataset::CommitBuilder;
 use lance::dataset::fragment::FileFragment;
 use lance::dataset::transaction::{Operation, TransactionBuilder};
+use lance::dataset::write::WriteParams;
 use lance_table::format::Fragment;
 use lancedb::connection::ConnectBuilder;
 use lancedb::{Connection as LanceDbConnection, Table as LanceDbTable};
@@ -317,6 +318,8 @@ pub struct LanceDbSinkWriter {
     arrow_schema: Arc<arrow_schema::Schema>,
     /// Dataset URI for the target Lance table (e.g., `/tmp/lancedb/my_table.lance`)
     dataset_uri: String,
+    /// Lance write parameters matching the target dataset format.
+    write_params: WriteParams,
     /// Buffered record batches for the current epoch
     batches: Vec<arrow_array::RecordBatch>,
 }
@@ -329,6 +332,22 @@ impl LanceDbSinkWriter {
 
         let conn = config.common.create_connection().await?;
         let table = config.common.open_table(&conn).await?;
+        let dataset_wrapper = table.dataset().ok_or_else(|| {
+            SinkError::LanceDb(anyhow!(
+                "failed to get underlying lance Dataset (table may be remote)"
+            ))
+        })?;
+        let dataset_guard = dataset_wrapper
+            .get()
+            .await
+            .map_err(|e| SinkError::LanceDb(anyhow!(e)))?;
+        let data_storage_version = dataset_guard
+            .manifest
+            .data_storage_format
+            .lance_file_version()
+            .context("failed to get LanceDB table storage version")
+            .map_err(SinkError::LanceDb)?;
+        drop(dataset_guard);
         let dataset_uri = config.common.dataset_uri(&table).await?;
 
         Ok(Self {
@@ -336,6 +355,10 @@ impl LanceDbSinkWriter {
             schema,
             arrow_schema: Arc::new(arrow_schema),
             dataset_uri,
+            write_params: WriteParams {
+                data_storage_version: Some(data_storage_version),
+                ..Default::default()
+            },
             batches: Vec::new(),
         })
     }
@@ -354,7 +377,7 @@ impl LanceDbSinkWriter {
         let fragments = FileFragment::create_fragments(
             &self.dataset_uri,
             reader,
-            None, // default WriteParams
+            Some(self.write_params.clone()),
         )
         .await
         .context("failed to write lance data files")
@@ -508,6 +531,13 @@ impl LanceDbSinkCommitter {
         let dataset = (*dataset_guard).clone();
         drop(dataset_guard);
 
+        let data_storage_version = dataset
+            .manifest
+            .data_storage_format
+            .lance_file_version()
+            .context("failed to get LanceDB table storage version")
+            .map_err(SinkError::LanceDb)?;
+
         if let Some(properties) = &transaction_properties
             && let Some(sink_id) = properties.get(RW_SINK_ID_TRANSACTION_PROPERTY)
             && self.is_epoch_committed(&dataset, sink_id, epoch).await?
@@ -530,6 +560,7 @@ impl LanceDbSinkCommitter {
         let transaction = transaction_builder.build();
 
         let new_dataset = CommitBuilder::new(Arc::new(dataset))
+            .with_storage_format(data_storage_version)
             .execute(transaction)
             .await
             .context("failed to commit fragments to lance dataset")
@@ -704,19 +735,12 @@ mod tests {
         // 2. Create a LanceDB table with a schema
         let conn = lancedb::connect(uri).execute().await.unwrap();
 
-        // Create initial data to define the table schema
+        // Create a schema-only table, matching the e2e test setup.
         let arrow_schema = Arc::new(arrow_schema::Schema::new(vec![
             arrow_schema::Field::new("id", arrow_schema::DataType::Int32, false),
             arrow_schema::Field::new("name", arrow_schema::DataType::Utf8, false),
         ]));
-        let id_array = arrow_array::Int32Array::from(vec![0i32]);
-        let name_array = arrow_array::StringArray::from(vec!["init"]);
-        let init_batch = arrow_array::RecordBatch::try_new(
-            arrow_schema.clone(),
-            vec![Arc::new(id_array), Arc::new(name_array)],
-        )
-        .unwrap();
-        conn.create_table("test_table", init_batch)
+        conn.create_table("test_table", arrow_array::RecordBatch::new_empty(arrow_schema.clone()))
             .execute()
             .await
             .unwrap();
@@ -795,8 +819,7 @@ mod tests {
         // 7. Verify data was written by reading back
         let table = conn.open_table("test_table").execute().await.unwrap();
         let count = table.count_rows(None).await.unwrap();
-        // 1 initial row + 3 new rows = 4
-        assert_eq!(count, 4);
+        assert_eq!(count, 3);
 
         // 8. Retrying the same committed epoch should be idempotent in two-phase mode.
         TwoPhaseCommitCoordinator::commit_data(&mut committer, 1, commit_metadata)
@@ -804,7 +827,7 @@ mod tests {
             .unwrap();
         let table = conn.open_table("test_table").execute().await.unwrap();
         let count = table.count_rows(None).await.unwrap();
-        assert_eq!(count, 4);
+        assert_eq!(count, 3);
 
         // 9. Single-phase commit remains available when exactly-once is disabled.
         let mut writer = LanceDbSinkWriter::new(config.clone(), schema)
@@ -831,7 +854,7 @@ mod tests {
             .unwrap();
         let table = conn.open_table("test_table").execute().await.unwrap();
         let count = table.count_rows(None).await.unwrap();
-        assert_eq!(count, 5);
+        assert_eq!(count, 4);
     }
 
     #[test]
