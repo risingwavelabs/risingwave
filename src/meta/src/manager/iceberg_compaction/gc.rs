@@ -291,7 +291,8 @@ impl IcebergCompactionManager {
 
         let mut expired_snapshots = txn
             .expire_snapshots()
-            .expire_older_than_ms(snapshot_expiration_timestamp_ms);
+            .expire_older_than_ms(snapshot_expiration_timestamp_ms)
+            .clear_expired_meta_data(iceberg_config.snapshot_expiration_clear_expired_meta_data);
 
         if let Some(retain_last) = iceberg_config.snapshot_expiration_retain_last {
             expired_snapshots = expired_snapshots.retain_last(

@@ -919,12 +919,7 @@ impl IcebergSinkCommitter {
     /// This function uses Transaction API to atomically update the table schema
     /// with optimistic locking to prevent concurrent conflicts.
     async fn commit_schema_change_impl(&mut self, schema_change: PbSinkSchemaChange) -> Result<()> {
-        // Step 1: Get current table metadata
-        let metadata = self.table.metadata();
-        let mut next_field_id = metadata.last_column_id() + 1;
-        tracing::debug!("Starting schema change, next_field_id: {}", next_field_id);
-
-        // Step 2: Build new fields to add
+        // Step 1: Build new fields to add
         let iceberg_create_table_arrow_convert = IcebergCreateTableArrowConvert::default();
         let mut new_fields = Vec::new();
 
@@ -953,8 +948,7 @@ impl IcebergSinkCommitter {
                         })?;
 
                     new_fields.push(AddColumn::optional(&field.name, iceberg_type));
-                    tracing::info!("Prepared field '{}' with ID {}", field.name, next_field_id);
-                    next_field_id += 1;
+                    tracing::info!("Prepared field '{}' for schema change", field.name);
                 }
             }
             Some(risingwave_pb::stream_plan::sink_schema_change::Op::DropColumns(
@@ -970,7 +964,7 @@ impl IcebergSinkCommitter {
             }
         }
 
-        // Step 3: Create Transaction with UpdateSchemaAction
+        // Step 2: Create Transaction with UpdateSchemaAction
         tracing::info!(
             "Committing schema change to catalog for table {}",
             self.table.identifier()
