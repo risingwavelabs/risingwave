@@ -157,6 +157,37 @@ join (
 ----
 3 ((15.5,0.125),(20.25,-10.5)) t ((6,6),(7,6),(7,7),(6,7)) t NULL t
 
+# Incremental scalar polygons must use PostgreSQL's float8 text formatting,
+# including integer-valued coordinates and scientific notation.
+system ok
+psql -c "
+    INSERT INTO public.upstream_polygon_values (
+        id, name, shape
+    ) VALUES (
+        5,
+        'postgres-text-format',
+        polygon '((20,1e15),(-20,-1e15))'
+    );
+"
+
+query IT retry 10 backoff 1s
+select
+    auto.shape,
+    auto.shape is not distinct from upstream.shape_text
+from rw_polygon_auto auto
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, shape::text from public.upstream_polygon_values where id = 5'
+    )
+) as upstream(id, shape_text) using (id);
+----
+((20,1e+15),(-20,-1e+15)) t
+
 # An unchanged out-of-line polygon is represented internally by Debezium as a
 # bare Object sentinel. The custom converter must turn it into RisingWave's
 # unavailable-value placeholder so the stream executor preserves the old value.
