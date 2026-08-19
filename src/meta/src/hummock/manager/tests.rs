@@ -1451,6 +1451,19 @@ async fn test_extend_objects_to_delete() {
         hummock_manager.create_version_checkpoint(1).await.unwrap(),
         6
     );
+    {
+        let versioning = hummock_manager
+            .versioning
+            .read_with_process_name("test_extend_objects_to_delete")
+            .await;
+        let checkpoint = &versioning.checkpoint;
+        let expected_object_ids = checkpoint.version.get_object_ids().collect();
+        assert_eq!(checkpoint.object_ids, expected_object_ids);
+
+        let restored_checkpoint =
+            HummockVersionCheckpoint::from_protobuf(&checkpoint.to_protobuf());
+        assert_eq!(restored_checkpoint.object_ids, expected_object_ids);
+    }
     // since version1 is still pinned, the sst removed in compaction can not be reclaimed.
     assert_eq!(
         hummock_manager
@@ -3118,10 +3131,10 @@ async fn test_old_version_dropped_table_sst_does_not_make_new_compaction_fail() 
     // in SST metadata and remove SSTs whose `table_ids` become empty. Otherwise the new compactor
     // will pass the stale read set to catalog acquire and fail before compaction can run.
     initial_manager
-        .write_checkpoint(&HummockVersionCheckpoint {
-            version: Arc::new(dirty_version),
-            stale_objects: Default::default(),
-        })
+        .write_checkpoint(&HummockVersionCheckpoint::new(
+            Arc::new(dirty_version),
+            Default::default(),
+        ))
         .await
         .unwrap();
 
