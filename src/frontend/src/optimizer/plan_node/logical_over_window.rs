@@ -24,9 +24,9 @@ use super::generic::{GenericPlanRef, OverWindow, PlanWindowFunction, ProjectBuil
 use super::utils::impl_distill_by_unit;
 use super::{
     BatchOverWindow, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef,
-    LogicalProject, PlanBase, PlanTreeNodeUnary, PredicatePushdown,
-    StreamEowcOverWindow, StreamEowcSort, StreamOverWindow, ToBatch, ToStream,
-    gen_filter_and_pushdown, try_enforce_locality_requirement,
+    LogicalProject, PlanBase, PlanTreeNodeUnary, PredicatePushdown, StreamEowcOverWindow,
+    StreamEowcSort, StreamOverWindow, ToBatch, ToStream, gen_filter_and_pushdown,
+    try_enforce_locality_requirement,
 };
 use crate::error::{ErrorCode, Result, RwError};
 use crate::expr::{
