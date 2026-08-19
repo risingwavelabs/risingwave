@@ -14,4 +14,9 @@
 
 mod message;
 mod parser;
+#[allow(
+    dead_code,
+    reason = "used by the Confluent Protobuf decoder introduced in the follow-up change"
+)]
+mod schema_cache;
 pub use parser::*;
