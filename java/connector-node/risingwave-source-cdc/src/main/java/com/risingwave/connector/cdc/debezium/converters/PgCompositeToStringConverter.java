@@ -71,10 +71,11 @@ public class PgCompositeToStringConverter
     }
 
     private static boolean isUserDefinedArray(RelationalColumn column) {
-        // Polygon arrays are built-in and therefore have an OID below
-        // PG_FIRST_USER_OID, so match them explicitly. Other ARRAY columns
-        // whose element OID is user-defined are treated as arrays of text.
-        // Built-in arrays (int[], text[], ...) are otherwise skipped.
+        // ARRAY columns whose element OID is user-defined are treated as
+        // arrays of composites. Built-in arrays (int[], text[], ...) have OIDs
+        // below PG_FIRST_USER_OID and are skipped. User-defined enum/domain
+        // arrays will also match and get rendered as text — acceptable
+        // since the downstream column is varchar[] anyway.
         //
         // Do not intercept extension arrays that Debezium already knows how to
         // encode with a native schema. For example, PostGIS geometry[] arrives

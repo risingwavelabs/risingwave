@@ -28,7 +28,13 @@ import java.util.List;
 final class PgTextConversionUtils {
 
     // Must match `DEBEZIUM_UNAVAILABLE_VALUE` on the Rust side
-    // (src/common/src/types/mod.rs).
+    // (src/common/src/types/mod.rs). When a vector column is TOAST'd and the
+    // UPDATE does not touch it, Debezium hands us a bare `java.lang.Object`
+    // singleton instead of the usual placeholder string, because the default
+    // schema for vector is ARRAY (a String placeholder would fail schema
+    // validation). We translate that sentinel back to the canonical string so
+    // the downstream RisingWave parser + materialize executor handle it
+    // through the same path as varchar/jsonb/bytea TOAST columns.
     private static final String UNAVAILABLE_VALUE_PLACEHOLDER = "__debezium_unavailable_value";
 
     private PgTextConversionUtils() {}

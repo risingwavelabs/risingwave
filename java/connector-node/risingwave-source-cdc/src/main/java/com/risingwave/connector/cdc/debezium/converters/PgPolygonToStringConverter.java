@@ -38,8 +38,6 @@ public class PgPolygonToStringConverter
             return;
         }
 
-        // `polygon[]` is a built-in type, so its OID sits below PG_FIRST_USER_OID and
-        // PgCompositeToStringConverter's user-OID rule never sees it. Match it by name instead.
         if (column.jdbcType() == Types.ARRAY
                 && PgTextConversionUtils.isPostgresArrayOf(column, "polygon")) {
             var elementSchema = SchemaBuilder.string().optional().build();
