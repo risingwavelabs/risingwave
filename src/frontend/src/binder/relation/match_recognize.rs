@@ -23,6 +23,7 @@ use risingwave_sqlparser::ast::{
     MatchRecognizePattern, MatchRecognizeSymbol, Measure, OrderByExpr, RowsPerMatch,
     SubsetDefinition, SymbolDefinition, TableAlias, TableFactor, Value as AstValue,
 };
+use thiserror_ext::AsReport;
 
 use super::{Binder, Relation};
 use crate::error::Result as RwResult;
@@ -309,7 +310,19 @@ impl Binder {
         };
         let variables = collect_pattern_variables(pattern, symbols);
         for var in &variables {
-            self.bind_table_to_context(input_columns.clone(), var.clone(), None, None)?;
+            // `collect_pattern_variables` deduplicates, so the only way this registration can fail
+            // is a collision with a relation name already in scope — in practice the MATCH_RECOGNIZE
+            // input itself (`FROM t ... PATTERN (t ...)`). Left unmapped that surfaces as
+            // "internal error: Duplicated table name", which blames the engine for a user-visible
+            // naming clash in legal-looking SQL.
+            self.bind_table_to_context(input_columns.clone(), var.clone(), None, None)
+                .map_err(|_| {
+                    crate::error::ErrorCode::InvalidInputSyntax(format!(
+                        "pattern variable `{var}` collides with the name of a relation in scope \
+                         (the MATCH_RECOGNIZE input table, most likely); rename the variable or \
+                         give the input a different alias"
+                    ))
+                })?;
         }
 
         // SUBSET union variables: each must be made of declared pattern variables, and is registered
@@ -338,7 +351,14 @@ impl Binder {
                     .into());
                 }
             }
-            self.bind_table_to_context(input_columns.clone(), name.clone(), None, None)?;
+            self.bind_table_to_context(input_columns.clone(), name.clone(), None, None)
+                .map_err(|_| {
+                    crate::error::ErrorCode::InvalidInputSyntax(format!(
+                        "SUBSET name `{name}` collides with the name of a relation in scope \
+                         (the MATCH_RECOGNIZE input table, most likely); rename it or give the \
+                         input a different alias"
+                    ))
+                })?;
             alias_names.push(name.clone());
             subset_defs.push((name, members));
         }
@@ -719,7 +739,14 @@ impl Binder {
         // General case: bare `var.col` and arithmetic over such references. Binding succeeds via the
         // per-variable alias blocks; each resulting InputRef is then rewritten to a synthetic
         // LAST(var.col) slot.
-        let expr = self.bind_expr(&m.expr)?;
+        let expr = self.bind_expr(&m.expr).map_err(|e| {
+            crate::error::ErrorCode::BindError(format!(
+                "{}\nwhile binding MEASURES item `{name}`; pattern variables in scope \
+                 (case-sensitive as written): {}",
+                e.as_report(),
+                resolver.alias_names.join(", ")
+            ))
+        })?;
         // An aggregate call that is not the whole measure expression has no lowering: the slot
         // rewriter below maps variable-qualified columns to LAST slots and nothing else, so an
         // embedded `sum(a.v) + 1` would carry a live AggCall into a scalar-projection plan and fail
@@ -825,7 +852,17 @@ impl Binder {
             self.bind_table_to_context(cols, prefix.clone(), None, None)?;
         }
 
-        let expr = self.bind_expr(&cond)?;
+        // On failure, list the variables actually in scope: the classic trap is identifier case
+        // folding — `PATTERN ("A" ...)` registers `"A"` while an unquoted `A.v` in the predicate
+        // folds to `a.v` and misses it, and the generic bind error gives no way to see that.
+        let expr = self.bind_expr(&cond).map_err(|e| {
+            crate::error::ErrorCode::BindError(format!(
+                "{}\nwhile binding the DEFINE predicate of `{symbol}`; pattern variables in scope \
+                 (case-sensitive as written): {}",
+                e.as_report(),
+                resolver.alias_names.join(", ")
+            ))
+        })?;
         // A DEFINE predicate is evaluated per candidate row by the executor, from a serialized scalar
         // expression; a subquery has no representation there and would otherwise be carried all the
         // way to the plan-to-proto conversion before failing, i.e. after the statement looked fine.

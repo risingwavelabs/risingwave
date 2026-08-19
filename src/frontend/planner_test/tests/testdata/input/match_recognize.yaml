@@ -794,3 +794,31 @@
     );
   expected_outputs:
     - stream_error
+- name: a pattern variable colliding with the input table name is a naming error, not an internal one
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures count(*) as n
+      one row per match
+      after match skip past last row
+      pattern (t b)
+      define t as t.v > 0, b as b.v < 0
+    );
+  expected_outputs:
+    - binder_error
+- name: a case-folded reference to a quoted pattern variable names the variables actually in scope
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures count(*) as n
+      one row per match
+      after match skip past last row
+      pattern ("A" b)
+      define "A" as A.v > 0, b as b.v < 0
+    );
+  expected_outputs:
+    - binder_error
