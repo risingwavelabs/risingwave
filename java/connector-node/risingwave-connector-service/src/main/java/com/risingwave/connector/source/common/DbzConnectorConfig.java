@@ -20,6 +20,7 @@ import com.mongodb.ConnectionString;
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.cdc.debezium.internal.ConfigurableOffsetBackingStore;
 import com.risingwave.connector.cdc.debezium.internal.OpendalSchemaHistory;
+import com.risingwave.connector.cdc.mongodb.MongoDbTlsUtils;
 import java.io.IOException;
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
@@ -290,8 +291,23 @@ public class DbzConnectorConfig {
             }
 
             var mongodbUrl = userProps.get(MongoDb.MONGO_URL);
+            var tlsFiles = MongoDbTlsUtils.tlsFiles(mongodbUrl);
+            var javaMongoDbUrl = MongoDbTlsUtils.withoutTlsFileOptions(mongodbUrl);
+            mongodbProps.setProperty("mongodb.connection.string", javaMongoDbUrl);
+            tlsFiles.caFile()
+                    .ifPresent(
+                            path ->
+                                    mongodbProps.setProperty(
+                                            MongoDbTlsUtils.TLS_CA_FILE_CONFIG, path.toString()));
+            tlsFiles.certificateKeyFile()
+                    .ifPresent(
+                            path ->
+                                    mongodbProps.setProperty(
+                                            MongoDbTlsUtils.TLS_CERTIFICATE_KEY_FILE_CONFIG,
+                                            path.toString()));
+
             var collection = userProps.get(MongoDb.MONGO_COLLECTION_NAME);
-            var connectionStr = new ConnectionString(mongodbUrl);
+            var connectionStr = new ConnectionString(javaMongoDbUrl);
             var connectorName =
                     String.format(
                             "MongoDB_%d:%s:%s", sourceId, connectionStr.getHosts(), collection);
