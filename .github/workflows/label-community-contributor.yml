@@ -10,11 +10,13 @@ permissions:
 
 jobs:
   label-community-contributor:
-    # External collaborators are included; only organization members and owners are excluded.
+    # Only label unaffiliated users and contributors, not owners, members, or collaborators.
     if: >-
       github.event.pull_request.user.type == 'User' &&
-      github.event.pull_request.author_association != 'MEMBER' &&
-      github.event.pull_request.author_association != 'OWNER'
+      contains(
+        fromJSON('["NONE", "CONTRIBUTOR", "FIRST_TIMER", "FIRST_TIME_CONTRIBUTOR"]'),
+        github.event.pull_request.author_association
+      )
     runs-on: ubuntu-latest
     steps:
       - name: Add community label
