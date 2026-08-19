@@ -23,7 +23,8 @@ use crate::expr::NowProcTimeFinder;
 use crate::optimizer::PlanRef;
 use crate::optimizer::heuristic_optimizer::{ApplyOrder, HeuristicOptimizer};
 use crate::optimizer::plan_node::{
-    ColumnPruningContext, PredicatePushdownContext, VisitExprsRecursive,
+    ColPrunable, ColumnPruningContext, PredicatePushdown, PredicatePushdownContext,
+    VisitExprsRecursive,
 };
 use crate::optimizer::plan_rewriter::ShareSourceRewriter;
 #[cfg(debug_assertions)]
@@ -611,8 +612,10 @@ impl LogicalOptimizer {
         explain_trace: bool,
         ctx: &OptimizerContextRef,
     ) -> LogicalPlanRef {
+        // Go through the trait method instead of `PredicatePushdownContext::run` so that the
+        // top-level `check_equivalent_plan` debug check covers the whole pass.
         let mut pushdown_ctx = PredicatePushdownContext::new(plan.clone());
-        let plan = pushdown_ctx.run(plan, Condition::true_cond());
+        let plan = plan.predicate_pushdown(Condition::true_cond(), &mut pushdown_ctx);
         if explain_trace {
             ctx.trace("Predicate Push Down:");
             ctx.trace(plan.explain_to_string());
@@ -660,8 +663,10 @@ impl LogicalOptimizer {
         ctx: &OptimizerContextRef,
     ) -> LogicalPlanRef {
         let required_cols = (0..plan.schema().len()).collect_vec();
+        // Go through the trait method instead of `ColumnPruningContext::run` so that the
+        // top-level `check_equivalent_plan` debug check covers the whole pass.
         let mut column_pruning_ctx = ColumnPruningContext::new(plan.clone());
-        plan = column_pruning_ctx.run(plan, &required_cols);
+        plan = plan.prune_col(&required_cols, &mut column_pruning_ctx);
         // Column pruning may introduce additional projects, and filter can be pushed again.
         if explain_trace {
             ctx.trace("Prune Columns:");
@@ -833,6 +838,14 @@ impl LogicalOptimizer {
             ctx.trace(plan.explain_to_string());
         }
 
+        // Convert the dag back to the tree, because we don't support DAG plan for batch.
+        //
+        // This must happen before MV selection: `LogicalShare` compares by `ShareId`
+        // identity, and candidate plans are planned independently of the query plan, so
+        // their shares can never share ids with the query's. Expanding shares on both
+        // sides (see `register_batch_mview_candidates`) restores structural comparison.
+        plan = plan.optimize_by_rules(&DAG_TO_TREE)?;
+
         if ctx.session_ctx().config().enable_mv_selection() {
             let query_relations =
                 RelationCollectorVisitor::collect_with(HashSet::new(), plan.clone());
@@ -842,9 +855,6 @@ impl LogicalOptimizer {
 
         // Inline `NOW()` and `PROCTIME()`, only for batch queries.
         plan = Self::inline_now_proc_time(plan, &ctx);
-
-        // Convert the dag back to the tree, because we don't support DAG plan for batch.
-        plan = plan.optimize_by_rules(&DAG_TO_TREE)?;
 
         plan = plan.optimize_by_rules(&REWRITE_SOURCE_FOR_BATCH)?;
         plan = plan.optimize_by_rules(&GROUPING_SETS)?;
@@ -1007,7 +1017,12 @@ impl LogicalOptimizer {
                 let Ok(plan_root) = planner.plan_query(bound_query) else {
                     continue;
                 };
-                context.add_batch_mview_candidate(mv.clone(), plan_root.plan.clone());
+                // Expand shares like the query plan (see `gen_optimized_logical_plan_for_batch`)
+                // so that `MvSelectionRule` compares share-free plans structurally.
+                let Ok(candidate_plan) = plan_root.plan.optimize_by_rules(&DAG_TO_TREE) else {
+                    continue;
+                };
+                context.add_batch_mview_candidate(mv.clone(), candidate_plan);
             }
         }
     }

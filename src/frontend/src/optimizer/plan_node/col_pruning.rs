@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use super::*;
 use crate::optimizer::plan_visitor::ShareParentCounter;
@@ -53,6 +53,7 @@ pub struct ColumnPruningContext {
     collected_shares: HashMap<ShareId, ShareColumnPruning>,
     share_parent_counter: ShareParentCounter,
     share_mappings: HashMap<ShareId, ColIndexMapping>,
+    skipped_shares: HashSet<ShareId>,
     phase: ColumnPruningPhase,
 }
 
@@ -65,6 +66,7 @@ impl ColumnPruningContext {
             collected_shares: HashMap::new(),
             share_parent_counter,
             share_mappings: HashMap::new(),
+            skipped_shares: HashSet::new(),
             phase: ColumnPruningPhase::Idle,
         }
     }
@@ -145,7 +147,17 @@ impl ColumnPruningContext {
             required_cols,
         }) = self.collected_shares.remove(&share_id)
         else {
-            panic!("share {share_id:?} has no collected column requirements");
+            // The share was skipped during collection (see `run`): it never received a
+            // requirement from every parent, so it must keep its original definition and
+            // full schema. Parents prune with their own projections above the share.
+            assert!(
+                self.skipped_shares.contains(&share_id),
+                "share {share_id:?} has no collected column requirements"
+            );
+            self.share_mappings
+                .try_insert(share_id, ColIndexMapping::identity(share.schema().len()))
+                .expect("a logical share must be rebuilt once");
+            return;
         };
         let old_schema_len = original_input.schema().len();
         let rebuilt_input = original_input.prune_col(&required_cols, self);
@@ -161,9 +173,16 @@ impl ColumnPruningContext {
     pub(in crate::optimizer) fn run(&mut self, root: PlanRef, required_cols: &[usize]) -> PlanRef {
         self.phase = ColumnPruningPhase::Collect;
         let collected = root.prune_col_inner(required_cols, self);
-        assert!(
-            self.pending_required_cols.is_empty(),
-            "all shares must receive column requirements from every parent"
+        // `ShareParentCounter` counts parents via the visitor walk, but the transformation
+        // walk is not guaranteed to reach a share from every parent: some `ColPrunable`
+        // impls (e.g. `LogicalVectorSearchLookupJoin`, which never prunes its lookup side)
+        // legitimately stop recursing into an input. Pruning with a subset of the parents'
+        // requirements would drop columns still referenced by the parents that never
+        // contributed, so such shares are skipped and keep their original definition.
+        self.skipped_shares.extend(
+            self.pending_required_cols
+                .drain()
+                .map(|(share_id, _)| share_id),
         );
         if self.collected_shares.is_empty() {
             self.phase = ColumnPruningPhase::Idle;

@@ -103,6 +103,7 @@ pub struct PredicatePushdownContext {
     collected_shares: HashMap<ShareId, SharePredicatePushdown>,
     share_parent_counter: ShareParentCounter,
     rebuilt_shares: HashSet<ShareId>,
+    skipped_shares: HashSet<ShareId>,
     phase: PredicatePushdownPhase,
 }
 
@@ -115,6 +116,7 @@ impl PredicatePushdownContext {
             collected_shares: HashMap::new(),
             share_parent_counter,
             rebuilt_shares: HashSet::new(),
+            skipped_shares: HashSet::new(),
             phase: PredicatePushdownPhase::Idle,
         }
     }
@@ -179,7 +181,14 @@ impl PredicatePushdownContext {
             predicate,
         }) = self.collected_shares.remove(&share_id)
         else {
-            panic!("share {share_id:?} has no collected predicates");
+            // The share was skipped during collection (see `run`): it never received a
+            // predicate from every parent, so it must keep its original definition.
+            // Parents re-create their filters above the share during the rewrite walk.
+            assert!(
+                self.skipped_shares.contains(&share_id),
+                "share {share_id:?} has no collected predicates"
+            );
+            return;
         };
         let rebuilt_input = original_input.predicate_pushdown(predicate, self);
         share.ctx().update_logical_share(share_id, rebuilt_input);
@@ -189,9 +198,16 @@ impl PredicatePushdownContext {
     pub(in crate::optimizer) fn run(&mut self, root: PlanRef, predicate: Condition) -> PlanRef {
         self.phase = PredicatePushdownPhase::Collect;
         let collected = root.predicate_pushdown_inner(predicate.clone(), self);
-        assert!(
-            self.pending_predicates.is_empty(),
-            "all shares must receive predicates from every parent"
+        // `ShareParentCounter` counts parents via the visitor walk, but the transformation
+        // walk is not guaranteed to reach a share from every parent: some `PredicatePushdown`
+        // impls (e.g. `LogicalOverWindow`, `LogicalGapFill`) legitimately stop recursing into
+        // their inputs. A predicate merged from a subset of parents must not be pushed below
+        // the share — it would drop rows required by the parents that never contributed — so
+        // such shares are skipped and keep their original definition, like on the base plan.
+        self.skipped_shares.extend(
+            self.pending_predicates
+                .drain()
+                .map(|(share_id, _)| share_id),
         );
         if self.collected_shares.is_empty() {
             self.phase = PredicatePushdownPhase::Idle;
