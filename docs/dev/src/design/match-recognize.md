@@ -213,7 +213,13 @@ or version-skewed plan fails with an error instead of allocating).
 Backtracking over predicates is worst-case exponential, so every walk — the match finder itself,
 liveness checks, extension probes — runs under two defenses:
 
-- a **scan budget** (a per-visit cap on predicate evaluations). Exhaustion is never converted into a
+- a **scan budget** — a per-visit cap on walk *steps*: predicate evaluations plus every recursion
+  descent, ε-transitions included. Metering only predicate evaluations, as it originally did, left
+  ε-traversal free, so a large compiled NFA could spend arbitrary CPU per metered evaluation and
+  the budget was not actually a CPU bound. The same descent accounting carries a hard recursion
+  depth cap (`MAX_WALK_DEPTH`): the walkers recurse per consumed row, so without it a long enough
+  single match was a stack overflow rather than a catchable error. A depth overrun is folded into
+  ordinary exhaustion. Exhaustion is never converted into a
   *structural* verdict: the walk stops, the caller treats the position as undecided, nothing is
   frozen, the condition is counted in a metric and reported once per pass, and the next visit retries
   with a fresh budget. The budget is scoped per row on the data path and per partition visit on the
