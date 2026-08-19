@@ -38,6 +38,12 @@ use crate::hummock::metrics_utils::{gc_stale_object_stats, trigger_gc_stat, trig
 pub struct HummockVersionCheckpoint {
     pub version: Arc<HummockVersion>,
 
+    /// Object ids referenced by `version`.
+    ///
+    /// This index is only kept in memory. Checkpoint creation already materializes the same set to
+    /// find removed objects, so retaining it avoids rebuilding a large hash set during every GC.
+    pub(super) object_ids: HashSet<HummockObjectId>,
+
     /// stale objects of versions before the current checkpoint.
     ///
     /// Previously we stored the stale object of each single version.
@@ -47,17 +53,42 @@ pub struct HummockVersionCheckpoint {
 }
 
 impl HummockVersionCheckpoint {
-    pub fn from_protobuf(checkpoint: &PbHummockVersionCheckpoint) -> Self {
+    /// Creates a checkpoint and builds its in-memory object-id index.
+    pub fn new(
+        version: Arc<HummockVersion>,
+        stale_objects: HashMap<HummockVersionId, PbStaleObjects>,
+    ) -> Self {
+        let object_ids = version.get_object_ids(false).collect();
         Self {
-            version: Arc::new(HummockVersion::from_persisted_protobuf(
+            version,
+            object_ids,
+            stale_objects,
+        }
+    }
+
+    fn with_object_ids(
+        version: Arc<HummockVersion>,
+        object_ids: HashSet<HummockObjectId>,
+        stale_objects: HashMap<HummockVersionId, PbStaleObjects>,
+    ) -> Self {
+        Self {
+            version,
+            object_ids,
+            stale_objects,
+        }
+    }
+
+    pub fn from_protobuf(checkpoint: &PbHummockVersionCheckpoint) -> Self {
+        Self::new(
+            Arc::new(HummockVersion::from_persisted_protobuf(
                 checkpoint.version.as_ref().unwrap(),
             )),
-            stale_objects: checkpoint
+            checkpoint
                 .stale_objects
                 .iter()
                 .map(|(version_id, objects)| (*version_id, objects.clone()))
                 .collect(),
-        }
+        )
     }
 
     pub fn to_protobuf(&self) -> PbHummockVersionCheckpoint {
@@ -218,8 +249,8 @@ impl HummockManager {
         }
 
         // Object ids that once exist in any hummock version but not exist in the latest hummock version
-        let removed_object_ids =
-            &versions_object_ids - &current_version.get_object_ids(false).collect();
+        let current_version_object_ids = current_version.get_object_ids(false).collect();
+        let removed_object_ids = &versions_object_ids - &current_version_object_ids;
         let total_file_size = removed_object_ids
             .iter()
             .map(|t| {
@@ -280,10 +311,11 @@ impl HummockManager {
             .flatten();
         self.gc_manager.add_may_delete_object_ids(may_delete_object);
         stale_objects.retain(|version_id, _| *version_id >= min_pinned_version_id);
-        let new_checkpoint = HummockVersionCheckpoint {
-            version: current_version.clone(),
+        let new_checkpoint = HummockVersionCheckpoint::with_object_ids(
+            current_version.clone(),
+            current_version_object_ids,
             stale_objects,
-        };
+        );
         // 2. persist the new checkpoint without holding lock
         self.write_checkpoint(&new_checkpoint).await?;
         if let Some(archive) = archive
