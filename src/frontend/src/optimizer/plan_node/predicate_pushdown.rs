@@ -204,6 +204,18 @@ impl PredicatePushdownContext {
         // their inputs. A predicate merged from a subset of parents must not be pushed below
         // the share — it would drop rows required by the parents that never contributed — so
         // such shares are skipped and keep their original definition, like on the base plan.
+        //
+        // Every non-leaf `PredicatePushdown` impl is expected to recurse into all of its
+        // inputs, pushing `Condition::true_cond()` when nothing can be pushed (like
+        // `LogicalExpand`), so this should never happen: fail loudly in debug builds and
+        // degrade to skipping the share in release builds.
+        debug_assert!(
+            self.pending_predicates.is_empty(),
+            "shares {:?} did not receive predicates from every parent; some \
+             `PredicatePushdown` impl likely failed to recurse into an input — push \
+             `Condition::true_cond()` instead of returning early",
+            self.pending_predicates.keys().collect::<Vec<_>>(),
+        );
         self.skipped_shares.extend(
             self.pending_predicates
                 .drain()

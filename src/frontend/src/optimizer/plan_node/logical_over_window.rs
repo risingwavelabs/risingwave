@@ -600,7 +600,9 @@ impl PredicatePushdown for LogicalOverWindow {
     ) -> PlanRef {
         if !self.core.funcs_have_same_partition_and_order() {
             // Window function calls with different PARTITION BY and ORDER BY clauses are not split yet.
-            return LogicalFilter::create(self.clone().into(), predicate);
+            // No pushdown, but keep recursing with a `true` condition so that shares below
+            // still receive a contribution from this parent (see `PredicatePushdownContext`).
+            return gen_filter_and_pushdown(self, predicate, Condition::true_cond(), ctx);
         }
 
         let all_out_cols: FixedBitSet = (0..self.schema().len()).collect();
