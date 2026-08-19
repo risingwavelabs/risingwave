@@ -504,10 +504,20 @@ impl DebeziumSplitEnumerator<Mysql> {
             .properties
             .get("password")
             .ok_or_else(|| anyhow::anyhow!("password not found in CDC properties"))?;
-        let database = self
+        // `database.name` may be a comma-separated list of databases (see #19038).
+        // `SHOW BINARY LOGS` is a global command that does not require a default database,
+        // but `build_mysql_connection_pool` requires a valid db name for the JDBC connection.
+        // Use the first database from the list (mirroring MySqlValidator.java's fix in #19038).
+        let database_raw = self
             .properties
             .get("database.name")
             .ok_or_else(|| anyhow::anyhow!("database.name not found in CDC properties"))?;
+        let database = database_raw
+            .split(',')
+            .next()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| anyhow::anyhow!("database.name is empty"))?;
 
         // Get SSL mode configuration (default to Disabled if not specified)
         let ssl_mode = self
