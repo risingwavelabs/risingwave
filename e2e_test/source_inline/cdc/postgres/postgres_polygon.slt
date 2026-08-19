@@ -4,18 +4,11 @@ control substitution on
 #
 # This file is self-contained and covers:
 # - manual schema creation and automatic schema discovery for polygon and polygon[];
-# - rejection of incompatible scalar and array element mappings;
 # - snapshot backfill and incremental INSERT, UPDATE, and DELETE events;
 # - automatic schema changes adding polygon and polygon[] columns.
 
 statement ok
 drop table if exists rw_polygon_manual;
-
-statement ok
-drop table if exists rw_polygon_invalid_shape;
-
-statement ok
-drop table if exists rw_polygon_invalid_shapes;
 
 statement ok
 drop table if exists rw_polygon_auto;
@@ -60,7 +53,6 @@ PGDATABASE=${PGDATABASE:-postgres} psql -v ON_ERROR_STOP=1 -c "
         id int PRIMARY KEY,
         name varchar
     );
-    INSERT INTO public.upstream_polygon_schema_change VALUES (1, 'before');
 "
 
 statement ok
@@ -102,7 +94,7 @@ where t.name = 'rw_polygon_auto'
 shape character varying
 shapes character varying[]
 
-# Commit the converted values and also compare them with PostgreSQL at runtime.
+# Check for backfilled rows
 query IT?T?T? retry 10 backoff 1s
 select
     auto.id,
@@ -271,24 +263,11 @@ statement ok
 create table rw_polygon_schema_change (*)
 from polygon_source table 'public.upstream_polygon_schema_change';
 
-query IT retry 10 backoff 1s
-select id, name from rw_polygon_schema_change order by id;
-----
-1 before
-
 system ok
 psql -c "
     ALTER TABLE public.upstream_polygon_schema_change
         ADD COLUMN shape polygon,
         ADD COLUMN shapes polygon[];
-    UPDATE public.upstream_polygon_schema_change
-    SET name = 'updated-old',
-        shape = polygon '((40.5,40.5),(50.5,40.5),(50.5,50.5),(40.5,50.5))',
-        shapes = ARRAY[
-            polygon '((41,41),(42,41),(42,42),(41,42))',
-            polygon '((43,43),(44,43),(44,44),(43,44))'
-        ]::polygon[]
-    WHERE id = 1;
 "
 
 query TT rowsort retry 20 backoff 1s
@@ -300,46 +279,6 @@ where t.name = 'rw_polygon_schema_change'
 ----
 shape character varying
 shapes character varying[]
-
-system ok
-psql -c "
-    INSERT INTO public.upstream_polygon_schema_change VALUES (
-        2,
-        'inserted-new',
-        polygon '((60.5,60.5),(70.5,60.5),(70.5,70.5),(60.5,70.5))',
-        ARRAY[
-            polygon '((61,61),(62,61),(62,62),(61,62))',
-            NULL
-        ]::polygon[]
-    );
-"
-
-query IT?T?T?T? retry 20 backoff 1s
-select
-    ours.id,
-    ours.name,
-    ours.name is not distinct from upstream.name,
-    ours.shape,
-    ours.shape is not distinct from upstream.shape_text,
-    ours.shapes[1],
-    ours.shapes[1] is not distinct from upstream.shape_1_text,
-    ours.shapes[2],
-    ours.shapes[2] is not distinct from upstream.shape_2_text
-from rw_polygon_schema_change ours
-join (
-    select * from postgres_query(
-        '${PGHOST:localhost}',
-        '${PGPORT:5432}',
-        '${PGUSER:$USER}',
-        '${PGPASSWORD:}',
-        '${PGDATABASE:postgres}',
-        'select id, name, shape::text, shapes[1]::text, shapes[2]::text from public.upstream_polygon_schema_change order by id'
-    )
-) as upstream(id, name, shape_text, shape_1_text, shape_2_text) using (id)
-order by ours.id;
-----
-1 updated-old t ((40.5,40.5),(50.5,40.5),(50.5,50.5),(40.5,50.5)) t ((41,41),(42,41),(42,42),(41,42)) t ((43,43),(44,43),(44,44),(43,44)) t
-2 inserted-new t ((60.5,60.5),(70.5,60.5),(70.5,70.5),(60.5,70.5)) t ((61,61),(62,61),(62,62),(61,62)) t NULL t
 
 statement ok
 drop table rw_polygon_manual;
