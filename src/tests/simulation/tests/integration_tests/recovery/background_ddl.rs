@@ -812,7 +812,7 @@ async fn test_late_foreground_ddl_recovery() -> Result<()> {
         .await
         .expect_err("duplicate CREATE should observe the recovered job");
     assert!(
-        err.to_string().contains("exists but under creation"),
+        err.to_string().contains("still being created"),
         "unexpected duplicate CREATE error: {err}"
     );
 
