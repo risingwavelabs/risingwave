@@ -21,7 +21,8 @@ WITH (
     type = 'append-only',
     force_append_only = 'true',
     lancedb.uri = '/tmp/lancedb-e2e',
-    lancedb.table = 'e2e_test'
+    lancedb.table = 'e2e_test',
+    commit_checkpoint_interval = '1'
 );
 
 statement ok
