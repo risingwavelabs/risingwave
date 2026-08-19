@@ -276,7 +276,12 @@ pub(super) mod handlers {
 
         let compute_client = choose_fast_insert_client(table_id, frontend_env, request_id)
             .await
-            .unwrap();
+            .map_err(|e| {
+                err(
+                    anyhow!(e).context("Failed to choose a compute node for fast insert"),
+                    StatusCode::SERVICE_UNAVAILABLE,
+                )
+            })?;
 
         Ok(WebhookTableInsertContext {
             webhook_source_info,
