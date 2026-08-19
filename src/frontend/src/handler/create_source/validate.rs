@@ -123,6 +123,28 @@ fn validate_license(connector: &str) -> Result<()> {
     Ok(())
 }
 
+fn validate_mongodb_debezium_filter_options(
+    connector: &str,
+    props: &BTreeMap<String, String>,
+) -> Result<()> {
+    if connector != MONGODB_CDC_CONNECTOR {
+        return Ok(());
+    }
+
+    for (debezium_option, risingwave_option) in [
+        ("debezium.database.include.list", "database.list"),
+        ("debezium.collection.include.list", "collection.name"),
+    ] {
+        if props.contains_key(debezium_option) {
+            return Err(RwError::from(ProtocolError(format!(
+                "MongoDB CDC option '{debezium_option}' is not supported; use '{risingwave_option}' instead"
+            ))));
+        }
+    }
+
+    Ok(())
+}
+
 pub fn validate_compatibility(
     format_encode: &FormatEncodeOptions,
     props: &mut BTreeMap<String, String>,
@@ -145,6 +167,8 @@ pub fn validate_compatibility(
         *entry = OPENDAL_S3_CONNECTOR.to_owned();
         connector = OPENDAL_S3_CONNECTOR.to_owned();
     }
+
+    validate_mongodb_debezium_filter_options(&connector, props)?;
 
     let compatible_formats = CONNECTORS_COMPATIBLE_FORMATS
         .get(&connector)
@@ -284,4 +308,48 @@ pub fn validate_compatibility(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reject_mongodb_debezium_filter_options() {
+        for (debezium_option, risingwave_option) in [
+            ("debezium.database.include.list", "database.list"),
+            ("debezium.collection.include.list", "collection.name"),
+        ] {
+            let props = BTreeMap::from([(debezium_option.to_owned(), "ignored".to_owned())]);
+            let error = validate_mongodb_debezium_filter_options(MONGODB_CDC_CONNECTOR, &props)
+                .unwrap_err();
+
+            assert!(
+                error.to_string().contains(&format!(
+                    "MongoDB CDC option '{debezium_option}' is not supported; use '{risingwave_option}' instead"
+                )),
+                "unexpected error: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn allow_mongodb_risingwave_filter_options() {
+        let props = BTreeMap::from([
+            ("database.list".to_owned(), "db1,db2".to_owned()),
+            ("collection.name".to_owned(), ".*[.]events".to_owned()),
+        ]);
+
+        validate_mongodb_debezium_filter_options(MONGODB_CDC_CONNECTOR, &props).unwrap();
+    }
+
+    #[test]
+    fn ignore_debezium_filter_options_for_other_connectors() {
+        let props = BTreeMap::from([(
+            "debezium.database.include.list".to_owned(),
+            "db1".to_owned(),
+        )]);
+
+        validate_mongodb_debezium_filter_options(MYSQL_CDC_CONNECTOR, &props).unwrap();
+    }
 }

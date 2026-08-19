@@ -23,10 +23,21 @@ WITH (
 );
 
 # This user can list databases and read the requested collection, but cannot list
-# collections in the config database. Debezium performs that discovery before applying
-# collection.name when database.include.list is absent, so DDL validation must reject it.
+# collections in the config database. The wildcard collection filter does not identify
+# an exact database, so Debezium discovers every database and validation must reject it.
 statement error Failed to discover MongoDB collections with the configured user:.*not authorized on config to execute command.*listCollections
 CREATE TABLE users_insufficient_discovery_privilege (
+  _id JSONB PRIMARY KEY,
+  payload JSONB
+) WITH (
+  connector = 'mongodb-cdc',
+  mongodb.url = 'mongodb://rw_limited:risingwave@mongodb-auth:27017/?replicaSet=rs-auth&authSource=admin',
+  collection.name = '.*[.]events'
+);
+
+# Infer Debezium's database include list from the exact database prefix in collection.name.
+statement ok
+CREATE TABLE users_inferred_database_discovery (
   _id JSONB PRIMARY KEY,
   payload JSONB
 ) WITH (
@@ -35,26 +46,59 @@ CREATE TABLE users_insufficient_discovery_privilege (
   collection.name = 'rw_allowed.events'
 );
 
-# Restricting Debezium's database discovery to the authorized database avoids touching
-# config and allows both validation and ingestion to proceed.
+query I retry 20 backoff 1s
+SELECT count(*) FROM users_inferred_database_discovery;
+----
+1
+
 statement ok
-CREATE TABLE users_restricted_database_discovery (
+DROP TABLE users_inferred_database_discovery;
+
+# database.list passes directly to Debezium's database.include.list, while collection.name
+# remains unchanged as the fully qualified collection filter.
+statement ok
+CREATE TABLE users_explicit_database_list (
+  _id JSONB PRIMARY KEY,
+  payload JSONB
+) WITH (
+  connector = 'mongodb-cdc',
+  mongodb.url = 'mongodb://rw_limited:risingwave@mongodb-auth:27017/?replicaSet=rs-auth&authSource=admin',
+  database.list = 'rw_allowed',
+  collection.name = '.*[.]events'
+);
+
+query I retry 20 backoff 1s
+SELECT count(*) FROM users_explicit_database_list;
+----
+1
+
+statement ok
+DROP TABLE users_explicit_database_list;
+
+# New tables must use RisingWave's database.list option instead of bypassing it with the
+# equivalent Debezium option. Runtime keeps reading this option for historical catalogs.
+statement error MongoDB CDC option 'debezium.database.include.list' is not supported; use 'database.list' instead
+CREATE TABLE users_legacy_debezium_database_list (
+  _id JSONB PRIMARY KEY,
+  payload JSONB
+) WITH (
+  connector = 'mongodb-cdc',
+  mongodb.url = 'mongodb://rw_limited:risingwave@mongodb-auth:27017/?replicaSet=rs-auth&authSource=admin',
+  collection.name = '.*[.]events',
+  debezium.database.include.list = 'rw_allowed'
+);
+
+# collection.name is also the only supported public collection filter for new tables.
+statement error MongoDB CDC option 'debezium.collection.include.list' is not supported; use 'collection.name' instead
+CREATE TABLE users_legacy_debezium_collection_list (
   _id JSONB PRIMARY KEY,
   payload JSONB
 ) WITH (
   connector = 'mongodb-cdc',
   mongodb.url = 'mongodb://rw_limited:risingwave@mongodb-auth:27017/?replicaSet=rs-auth&authSource=admin',
   collection.name = 'rw_allowed.events',
-  debezium.database.include.list = 'rw_allowed'
+  debezium.collection.include.list = 'rw_allowed.events'
 );
-
-query I retry 20 backoff 1s
-SELECT count(*) FROM users_restricted_database_discovery;
-----
-1
-
-statement ok
-DROP TABLE users_restricted_database_discovery;
 
 system ok
 mongosh 'mongodb://mongodb:27017' <<EOF
