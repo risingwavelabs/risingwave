@@ -23,8 +23,8 @@ use risingwave_expr::window_function::{Frame, FrameBound, WindowFuncKind};
 use super::generic::{GenericPlanRef, OverWindow, PlanWindowFunction, ProjectBuilder};
 use super::utils::impl_distill_by_unit;
 use super::{
-    BatchOverWindow, ColPrunable, ExprRewritable, Logical, LogicalFilter,
-    LogicalPlanRef as PlanRef, LogicalProject, PlanBase, PlanTreeNodeUnary, PredicatePushdown,
+    BatchOverWindow, ColPrunable, ExprRewritable, Logical, LogicalPlanRef as PlanRef,
+    LogicalProject, PlanBase, PlanTreeNodeUnary, PredicatePushdown,
     StreamEowcOverWindow, StreamEowcSort, StreamOverWindow, ToBatch, ToStream,
     gen_filter_and_pushdown, try_enforce_locality_requirement,
 };
