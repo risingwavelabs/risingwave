@@ -27,7 +27,9 @@ use crate::controller::SqlMetaStore;
 // Code is copied from src/meta/src/rpc/server.rs. TODO #6482: extract method.
 pub async fn get_meta_store(opts: RestoreOpts) -> BackupResult<SqlMetaStore> {
     let meta_store_backend = match opts.meta_store_type {
-        MetaBackend::Mem => MetaStoreBackend::Mem,
+        MetaBackend::Mem => MetaStoreBackend::Mem {
+            config: MetaStoreConfig::default(),
+        },
         MetaBackend::Sql => MetaStoreBackend::Sql {
             endpoint: opts.sql_endpoint,
             config: MetaStoreConfig::default(),

@@ -139,6 +139,7 @@ connect_timeout_secs = 5
 pool_setup_concurrency = 0
 
 [meta.meta_store_config]
+slow_query_threshold_ms = 1000
 max_connections = 10
 min_connections = 1
 connection_timeout_sec = 10

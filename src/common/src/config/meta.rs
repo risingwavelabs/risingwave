@@ -393,10 +393,13 @@ pub struct MetaConfig {
     pub meta_store_config: MetaStoreConfig,
 }
 
-/// Note: only applies to meta store backends other than `SQLite`.
+/// Configuration for SQL-backed meta stores.
 #[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]
 #[derive(Clone, Debug, Serialize, Deserialize, DefaultFromSerde, ConfigDoc)]
 pub struct MetaStoreConfig {
+    /// Threshold in milliseconds for logging slow queries issued to the meta store.
+    #[serde(default = "default::meta_store_config::slow_query_threshold_ms")]
+    pub slow_query_threshold_ms: u64,
     /// Maximum number of connections for the meta store connection pool.
     #[serde(default = "default::meta_store_config::max_connections")]
     pub max_connections: u32,
@@ -805,11 +808,16 @@ pub mod default {
     }
 
     pub mod meta_store_config {
+        const DEFAULT_SLOW_QUERY_THRESHOLD_MS: u64 = 1000;
         const DEFAULT_MAX_CONNECTIONS: u32 = 10;
         const DEFAULT_MIN_CONNECTIONS: u32 = 1;
         const DEFAULT_CONNECTION_TIMEOUT_SEC: u64 = 10;
         const DEFAULT_IDLE_TIMEOUT_SEC: u64 = 30;
         const DEFAULT_ACQUIRE_TIMEOUT_SEC: u64 = 30;
+
+        pub fn slow_query_threshold_ms() -> u64 {
+            DEFAULT_SLOW_QUERY_THRESHOLD_MS
+        }
 
         pub fn max_connections() -> u32 {
             DEFAULT_MAX_CONNECTIONS

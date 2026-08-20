@@ -242,7 +242,9 @@ pub fn start(
                 if opts.sql_endpoint.is_some() {
                     tracing::warn!("`--sql-endpoint` is ignored when using `mem` backend");
                 }
-                MetaStoreBackend::Mem
+                MetaStoreBackend::Mem {
+                    config: meta_store_config,
+                }
             }
             MetaBackend::Sql => MetaStoreBackend::Sql {
                 endpoint: opts
