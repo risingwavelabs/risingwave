@@ -57,6 +57,7 @@ pub async fn handle_create_function(
         bail_not_implemented!("CREATE TEMPORARY FUNCTION");
     }
 
+    let is_immutable = matches!(&params.behavior, Some(FunctionBehavior::Immutable));
     let udf_config = handler_args.session.env().udf_config();
 
     // e.g., `language [ python / javascript / ...etc]`
@@ -98,6 +99,27 @@ pub async fn handle_create_function(
         }
         None => None,
     };
+
+    let always_retry_on_network_error = with_options
+        .always_retry_on_network_error
+        .unwrap_or_default();
+    let skip_materializing_eval_result = with_options
+        .skip_materializing_eval_result
+        .unwrap_or_default();
+    if skip_materializing_eval_result && !always_retry_on_network_error {
+        return Err(ErrorCode::InvalidParameterValue(
+            "`always_retry_on_network_error` must be true when `skip_materializing_eval_result` is true"
+                .to_owned(),
+        )
+        .into());
+    }
+    if skip_materializing_eval_result && !is_immutable {
+        return Err(ErrorCode::InvalidParameterValue(
+            "`IMMUTABLE` must be specified when `skip_materializing_eval_result` is true"
+                .to_owned(),
+        )
+        .into());
+    }
 
     let return_type;
     let kind = match returns {
@@ -200,9 +222,8 @@ pub async fn handle_create_function(
         body: output.body,
         compressed_binary: output.compressed_binary,
         owner: session.user_id(),
-        always_retry_on_network_error: with_options
-            .always_retry_on_network_error
-            .unwrap_or_default(),
+        always_retry_on_network_error,
+        skip_materializing_eval_result,
         is_async: with_options.r#async,
         is_batched: with_options.batch,
         created_at_epoch: None,
@@ -213,4 +234,207 @@ pub async fn handle_create_function(
     catalog_writer.create_function(function).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_FUNCTION))
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+    use risingwave_common::types::DataType;
+    use risingwave_expr::sig::{CreateFunctionOutput, UDF_IMPLS, UdfImplDescriptor};
+
+    use crate::catalog::root_catalog::SchemaPath;
+    use crate::test_utils::{LocalFrontend, get_explain_output};
+
+    #[linkme::distributed_slice(UDF_IMPLS)]
+    static TEST_UDF: UdfImplDescriptor = UdfImplDescriptor {
+        match_fn: |language, runtime, link| {
+            language.is_empty() && runtime.is_none() && link.is_none()
+        },
+        create_fn: |opts| {
+            Ok(CreateFunctionOutput {
+                name_in_runtime: opts.name.to_owned(),
+                body: opts.as_.map(ToOwned::to_owned),
+                compressed_binary: None,
+            })
+        },
+        build_fn: |_| unreachable!("the planner test does not execute the UDF"),
+    };
+
+    /// Verifies option dependencies, catalog propagation, recursive purity, and top-level
+    /// materialization for a regular scalar UDF.
+    #[tokio::test]
+    async fn test_skip_materializing_eval_result() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+
+        frontend.run_sql("create table t(v int)").await.unwrap();
+
+        // Isolate the retry validation by providing IMMUTABLE.
+        let error = frontend
+            .run_sql(
+                r#"create function rejected_without_retry(v int)
+                   returns int immutable
+                   with (skip_materializing_eval_result = true)"#,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains(
+                "`always_retry_on_network_error` must be true when `skip_materializing_eval_result` is true"
+            ),
+            "{error}"
+        );
+
+        // Isolate the determinism validation by enabling retries.
+        let error = frontend
+            .run_sql(
+                r#"create function rejected_without_immutable(v int)
+                   returns int
+                   with (
+                       skip_materializing_eval_result = true,
+                       always_retry_on_network_error = true
+                   )"#,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains(
+                "`IMMUTABLE` must be specified when `skip_materializing_eval_result` is true"
+            ),
+            "{error}"
+        );
+
+        frontend
+            .run_sql(
+                r#"create function identity_without_stored_result(v int)
+                   returns int immutable
+                   with (
+                       skip_materializing_eval_result = true,
+                       always_retry_on_network_error = true
+                   )"#,
+            )
+            .await
+            .unwrap();
+
+        let session = frontend.session_ref();
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let (function, _) = catalog_reader
+            .get_function_by_name_args(
+                DEFAULT_DATABASE_NAME,
+                SchemaPath::Name(DEFAULT_SCHEMA_NAME),
+                "identity_without_stored_result",
+                &[DataType::Int32],
+            )
+            .unwrap();
+        // The validated option must survive catalog creation so expression planning sees the
+        // same materialization policy that was specified in CREATE FUNCTION.
+        assert!(function.skip_materializing_eval_result);
+        drop(catalog_reader);
+
+        // An opted-out immutable UDF with only pure arguments is recursively pure, so its project
+        // needs no StreamMaterializedExprs state table.
+        let plan = frontend
+            .get_explain_output(
+                "explain create materialized view mv as \
+                 select identity_without_stored_result(v) as v from t",
+            )
+            .await;
+        assert!(plan.contains("StreamProject"), "{plan}");
+        assert!(!plan.contains("StreamMaterializedExprs"), "{plan}");
+
+        // An opted-out UDF does not hide an impure descendant. Recursive purity marks the complete
+        // projected expression as impure, so the planner materializes the top-level result.
+        let plan = frontend
+            .get_explain_output(
+                "explain create materialized view mv_random as \
+                 select identity_without_stored_result(random()::int) as v from t",
+            )
+            .await;
+        let materialized_line = plan
+            .lines()
+            .find(|line| line.contains("StreamMaterializedExprs"))
+            .expect("the complete impure project expression should be materialized");
+        // Both names on the same operator line prove that it stores the complete outer expression,
+        // with RANDOM still nested inside it, rather than storing nested descendants separately.
+        assert!(materialized_line.contains("Random"), "{plan}");
+        assert!(
+            materialized_line.contains("identity_without_stored_result"),
+            "{plan}"
+        );
+    }
+
+    /// Verifies that the per-UDF policy controls materialization when the projected expression
+    /// occupies an UPSERT stream-key position.
+    #[tokio::test]
+    async fn test_upsert_key_materialization_policy() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+
+        frontend
+            .run_sql("create table upsert_input(id int primary key, v int)")
+            .await
+            .unwrap();
+        frontend
+            .run_sql("create table upsert_output(id int primary key, v int)")
+            .await
+            .unwrap();
+        frontend
+            .run_sql(
+                r#"create function identity_without_stored_result(v int)
+                   returns int immutable
+                   with (
+                       skip_materializing_eval_result = true,
+                       always_retry_on_network_error = true
+                   )"#,
+            )
+            .await
+            .unwrap();
+        frontend
+            .run_sql(
+                r#"create function identity_with_stored_result(v int)
+                   returns int immutable
+                   with (always_retry_on_network_error = true)"#,
+            )
+            .await
+            .unwrap();
+
+        // The transformed key is deterministic for these test UDFs, but the planner cannot infer
+        // that it remains equivalent to the input key. Allow that orthogonal mismatch so this test
+        // isolates the expression-materialization decision.
+        let session = frontend.session_ref();
+        frontend
+            .run_sql_with_session(
+                session.clone(),
+                "set streaming_unsafe_allow_upsert_sink_pk_mismatch = true",
+            )
+            .await
+            .unwrap();
+
+        let response = frontend
+            .run_sql_with_session(
+                session.clone(),
+                "explain create sink skipped_sink into upsert_output as \
+                 select identity_without_stored_result(id) as id, v \
+                 from upsert_input with (snapshot = 'false')",
+            )
+            .await
+            .unwrap();
+        let plan = get_explain_output(response).await;
+        assert!(plan.contains("StreamProject"), "{plan}");
+        assert!(!plan.contains("StreamMaterializedExprs"), "{plan}");
+
+        let error = frontend
+            .run_sql_with_session(
+                session,
+                "explain create sink materialized_sink into upsert_output as \
+                 select identity_with_stored_result(id) as id, v \
+                 from upsert_input with (snapshot = 'false')",
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("upsert stream is not supported as input of StreamMaterializedExprs"),
+            "{error}"
+        );
+    }
 }
