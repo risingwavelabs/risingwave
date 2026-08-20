@@ -17,7 +17,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
-use prometheus::core::{AtomicF64, GenericGaugeVec};
+use prometheus::core::{AtomicF64, Collector, GenericGaugeVec, MetricVec, MetricVecBuilder};
 use prometheus::{
     GaugeVec, Histogram, HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Registry,
     exponential_buckets, histogram_opts, register_gauge_vec_with_registry,
@@ -242,9 +242,9 @@ pub struct MetaMetrics {
     pub merge_compaction_group_count: IntCounterVec,
 
     // ********************************** Auto Schema Change ************************************
-    pub auto_schema_change_failure_cnt: LabelGuardedIntCounterVec,
-    pub auto_schema_change_success_cnt: LabelGuardedIntCounterVec,
-    pub auto_schema_change_latency: LabelGuardedHistogramVec,
+    pub auto_schema_change_failure_cnt: IntCounterVec,
+    pub auto_schema_change_success_cnt: IntCounterVec,
+    pub auto_schema_change_latency: HistogramVec,
 
     pub time_travel_version_replay_latency: Histogram,
 
@@ -691,7 +691,7 @@ impl MetaMetrics {
         let recovery_latency =
             register_histogram_vec_with_registry!(opts, &["recovery_type"], registry).unwrap();
 
-        let auto_schema_change_failure_cnt = register_guarded_int_counter_vec_with_registry!(
+        let auto_schema_change_failure_cnt = register_int_counter_vec_with_registry!(
             "auto_schema_change_failure_cnt",
             "Number of failed auto schema change",
             &["table_id", "table_name"],
@@ -699,7 +699,7 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let auto_schema_change_success_cnt = register_guarded_int_counter_vec_with_registry!(
+        let auto_schema_change_success_cnt = register_int_counter_vec_with_registry!(
             "auto_schema_change_success_cnt",
             "Number of success auto schema change",
             &["table_id", "table_name"],
@@ -712,12 +712,9 @@ impl MetaMetrics {
             "Latency of the auto schema change process",
             exponential_buckets(0.1, 1.5, 20).unwrap() // max 221s
         );
-        let auto_schema_change_latency = register_guarded_histogram_vec_with_registry!(
-            opts,
-            &["table_id", "table_name"],
-            registry
-        )
-        .unwrap();
+        let auto_schema_change_latency =
+            register_histogram_vec_with_registry!(opts, &["table_id", "table_name"], registry)
+                .unwrap();
 
         let source_is_up = register_guarded_int_gauge_vec_with_registry!(
             "source_status_is_up",
@@ -1335,7 +1332,10 @@ pub async fn refresh_relation_info_metrics(
         .streaming_table_change_log_retention_seconds
         .reset();
 
+    let mut active_table_labels = HashSet::with_capacity(table_objects.len());
     for (id, db, schema, name, resource_group, table_type) in table_objects {
+        let table_id = id.to_string();
+        active_table_labels.insert((table_id.clone(), name.clone()));
         let relation_type = match table_type {
             TableType::Table => "table",
             TableType::MaterializedView => "materialized_view",
@@ -1345,7 +1345,7 @@ pub async fn refresh_relation_info_metrics(
         meta_metrics
             .relation_info
             .with_label_values(&[
-                &id.to_string(),
+                &table_id,
                 &db,
                 &schema,
                 &name,
@@ -1354,6 +1354,19 @@ pub async fn refresh_relation_info_metrics(
             ])
             .set(1);
     }
+
+    retain_table_metric_series(
+        &meta_metrics.auto_schema_change_failure_cnt,
+        &active_table_labels,
+    );
+    retain_table_metric_series(
+        &meta_metrics.auto_schema_change_success_cnt,
+        &active_table_labels,
+    );
+    retain_table_metric_series(
+        &meta_metrics.auto_schema_change_latency,
+        &active_table_labels,
+    );
 
     for (id, db, schema, name, resource_group) in source_objects {
         meta_metrics
@@ -1398,6 +1411,41 @@ pub async fn refresh_relation_info_metrics(
             .with_label_values(&[&table_id.to_string()])
             .set(retention_seconds as _);
     }
+}
+
+fn retain_table_metric_series<T>(
+    metric_vec: &MetricVec<T>,
+    active_table_labels: &HashSet<(String, String)>,
+) where
+    T: MetricVecBuilder,
+{
+    for (table_id, table_name) in collect_table_labels(metric_vec).difference(active_table_labels) {
+        let labels = [table_id.as_str(), table_name.as_str()];
+        metric_vec.remove_label_values(&labels).ok();
+    }
+}
+
+fn collect_table_labels(collector: &impl Collector) -> HashSet<(String, String)> {
+    collector
+        .collect()
+        .into_iter()
+        .flat_map(|mut family| family.take_metric())
+        .filter_map(|metric| {
+            let table_id = metric
+                .get_label()
+                .iter()
+                .find(|label| label.name() == "table_id")?
+                .value()
+                .to_owned();
+            let table_name = metric
+                .get_label()
+                .iter()
+                .find(|label| label.name() == "table_name")?
+                .value()
+                .to_owned();
+            Some((table_id, table_name))
+        })
+        .collect()
 }
 
 pub async fn refresh_database_info_metrics(
@@ -1679,4 +1727,72 @@ pub fn start_info_monitor(
     });
 
     (join_handle, shutdown_tx)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_remove_stale_auto_schema_change_metrics() {
+        let meta_metrics = MetaMetrics::for_test(&Registry::new());
+        let active_labels = ["1", "active"];
+        let stale_labels = ["2", "stale"];
+
+        let active_failure = meta_metrics
+            .auto_schema_change_failure_cnt
+            .with_label_values(&active_labels);
+        let active_success = meta_metrics
+            .auto_schema_change_success_cnt
+            .with_label_values(&active_labels);
+        let active_latency = meta_metrics
+            .auto_schema_change_latency
+            .with_label_values(&active_labels);
+        active_failure.inc();
+        active_success.inc_by(2);
+        active_latency.observe(1.0);
+
+        meta_metrics
+            .auto_schema_change_failure_cnt
+            .with_label_values(&stale_labels)
+            .inc();
+        meta_metrics
+            .auto_schema_change_success_cnt
+            .with_label_values(&stale_labels)
+            .inc();
+        meta_metrics
+            .auto_schema_change_latency
+            .with_label_values(&stale_labels)
+            .observe(2.0);
+
+        let active_table_labels = HashSet::from([("1".to_owned(), "active".to_owned())]);
+        retain_table_metric_series(
+            &meta_metrics.auto_schema_change_failure_cnt,
+            &active_table_labels,
+        );
+        retain_table_metric_series(
+            &meta_metrics.auto_schema_change_success_cnt,
+            &active_table_labels,
+        );
+        retain_table_metric_series(
+            &meta_metrics.auto_schema_change_latency,
+            &active_table_labels,
+        );
+
+        assert_eq!(1, active_failure.get());
+        assert_eq!(2, active_success.get());
+        assert_eq!(1, active_latency.get_sample_count());
+        assert_eq!(
+            active_table_labels,
+            collect_table_labels(&meta_metrics.auto_schema_change_failure_cnt)
+        );
+        assert_eq!(
+            active_table_labels,
+            collect_table_labels(&meta_metrics.auto_schema_change_success_cnt)
+        );
+        assert_eq!(
+            active_table_labels,
+            collect_table_labels(&meta_metrics.auto_schema_change_latency)
+        );
+    }
 }
