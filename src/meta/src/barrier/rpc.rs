@@ -263,12 +263,18 @@ impl ControlStreamManager {
                     // It may happen that the dns information of newly registered worker node
                     // has not been propagated to the meta node and cause error. Wait for a while and retry
                     let delay = backoff.next().unwrap();
-                    error!(attempt = i, backoff_delay = ?delay, err = %e.as_report(), ?node_host, "fail to resolve worker node address");
+                    error!(
+                        attempt = i,
+                        backoff_delay = ?delay,
+                        err = %e.as_report(),
+                        ?node_host,
+                        "failed to resolve the worker node address",
+                    );
                     sleep(delay).await;
                 }
             }
         }
-        error!(?node_host, "fail to create worker node after retry");
+        error!(?node_host, "failed to create the worker node after retries");
         assert!(
             self.workers
                 .insert(
@@ -321,7 +327,7 @@ impl ControlStreamManager {
                         return handle;
                     }
                     Err(e) => {
-                        warn!(e = %e.as_report(), ?node, attempt, "fail to create control stream worker");
+                        warn!(e = %e.as_report(), ?node, attempt, "failed to create the control stream worker");
                     }
                 }
             }
@@ -638,7 +644,7 @@ impl PartialGraphRecoverer<'_> {
         fragment_relations: &FragmentDownstreamRelation,
         stream_actors: &HashMap<ActorId, StreamActor>,
         source_splits: &mut HashMap<ActorId, Vec<SplitImpl>>,
-        background_jobs: &mut HashSet<JobId>,
+        creating_jobs: &mut HashSet<JobId>,
         mv_depended_subscriptions: &mut HashMap<TableId, HashMap<SubscriptionId, u64>>,
         is_paused: bool,
         hummock_version_stats: &HummockVersionStats,
@@ -769,7 +775,7 @@ impl PartialGraphRecoverer<'_> {
         let mut snapshot_backfill_jobs = HashMap::new();
 
         for (job_id, job_fragments) in jobs {
-            if background_jobs.remove(&job_id) {
+            if creating_jobs.remove(&job_id) {
                 if job_fragments.values().any(|fragment| {
                     fragment
                         .fragment_type_mask
@@ -884,8 +890,8 @@ impl PartialGraphRecoverer<'_> {
         let database_jobs: HashMap<JobId, InflightStreamingJobInfo> = {
             database_jobs
                 .into_iter()
-                .map(|(job_id, (fragment_infos, is_background_creating))| {
-                    let status = if is_background_creating {
+                .map(|(job_id, (fragment_infos, is_creating))| {
+                    let status = if is_creating {
                         let backfill_ordering = job_backfill_orders(job_extra_info, job_id);
                         let backfill_ordering = StreamFragmentGraph::extend_fragment_backfill_ordering_with_locality_backfill(
                             backfill_ordering,
@@ -1125,7 +1131,7 @@ impl PartialGraphRecoverer<'_> {
         // Recover batch refresh jobs (both idle and consuming snapshot).
         // Actors were already rendered by `render_runtime_info()`.
         for (job_id, render_result) in batch_refresh {
-            background_jobs.remove(&job_id);
+            creating_jobs.remove(&job_id);
             debug!(%job_id, "recovered batch refresh job");
 
             // Resolve committed epoch from state tables.
@@ -1404,7 +1410,7 @@ impl ControlStreamManager {
                     ),
                 }).is_err() {
                 let (database_id, creating_job_id) = from_partial_graph_id(partial_graph_id);
-                warn!(%database_id, ?creating_job_id, worker_id = %node.worker_id, "fail to add partial graph to worker")
+                warn!(%database_id, ?creating_job_id, worker_id = %node.worker_id, "failed to add the partial graph to the worker")
             }
         });
     }
