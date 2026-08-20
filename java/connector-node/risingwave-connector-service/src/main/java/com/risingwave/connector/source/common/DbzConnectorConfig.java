@@ -92,6 +92,8 @@ public class DbzConnectorConfig {
 
         private static final String DEBEZIUM_DATABASE_INCLUDE_LIST =
                 "debezium.database.include.list";
+        private static final String DEBEZIUM_DATABASE_EXCLUDE_LIST =
+                "debezium.database.exclude.list";
         private static final String DATABASE_INCLUDE_LIST = "database.include.list";
     }
 
@@ -316,19 +318,25 @@ public class DbzConnectorConfig {
 
             var collection = userProps.get(MongoDb.MONGO_COLLECTION_NAME);
             var databaseList = userProps.get(MongoDb.MONGO_DATABASE_LIST);
-            if (databaseList != null) {
-                mongodbProps.setProperty(MongoDb.DATABASE_INCLUDE_LIST, databaseList);
-            } else if (!userProps.containsKey(MongoDb.DEBEZIUM_DATABASE_INCLUDE_LIST)) {
-                inferMongoDatabaseList(collection)
-                        .ifPresent(
-                                inferredDatabaseList -> {
-                                    LOG.info(
-                                            "Inferred MongoDB database list '{}' from collection filter '{}'",
-                                            inferredDatabaseList,
-                                            collection);
-                                    mongodbProps.setProperty(
-                                            MongoDb.DATABASE_INCLUDE_LIST, inferredDatabaseList);
-                                });
+            var hasLegacyDatabaseFilter =
+                    userProps.containsKey(MongoDb.DEBEZIUM_DATABASE_INCLUDE_LIST)
+                            || userProps.containsKey(MongoDb.DEBEZIUM_DATABASE_EXCLUDE_LIST);
+            if (!hasLegacyDatabaseFilter) {
+                if (databaseList != null) {
+                    mongodbProps.setProperty(MongoDb.DATABASE_INCLUDE_LIST, databaseList);
+                } else {
+                    inferMongoDatabaseList(collection)
+                            .ifPresent(
+                                    inferredDatabaseList -> {
+                                        LOG.info(
+                                                "Inferred MongoDB database list '{}' from collection filter '{}'",
+                                                inferredDatabaseList,
+                                                collection);
+                                        mongodbProps.setProperty(
+                                                MongoDb.DATABASE_INCLUDE_LIST,
+                                                inferredDatabaseList);
+                                    });
+                }
             }
 
             var connectionStr = new ConnectionString(javaMongoDbUrl);

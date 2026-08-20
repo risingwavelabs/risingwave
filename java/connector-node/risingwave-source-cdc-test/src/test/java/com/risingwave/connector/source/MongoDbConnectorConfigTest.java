@@ -80,7 +80,7 @@ public class MongoDbConnectorConfigTest {
     }
 
     @Test
-    public void testDatabaseListTakesPrecedenceOverLegacyDebeziumOption() {
+    public void testLegacyDebeziumDatabaseListTakesPrecedenceOverDatabaseList() {
         var properties =
                 resolvedProperties(
                         "db1.events",
@@ -88,7 +88,18 @@ public class MongoDbConnectorConfigTest {
                                 "database.list", "db1",
                                 "debezium.database.include.list", "legacy_db"));
 
-        assertThat(properties).containsEntry("database.include.list", "db1");
+        assertThat(properties).containsEntry("database.include.list", "legacy_db");
+    }
+
+    @Test
+    public void testLegacyDebeziumDatabaseExcludeListPreventsInference() {
+        var properties =
+                resolvedProperties(
+                        "db1.events", Map.of("debezium.database.exclude.list", "legacy_db"));
+
+        assertThat(properties)
+                .doesNotContainKey("database.include.list")
+                .containsEntry("database.exclude.list", "legacy_db");
     }
 
     @Test

@@ -75,8 +75,9 @@ SELECT count(*) FROM users_explicit_database_list;
 statement ok
 DROP TABLE users_explicit_database_list;
 
-# Keep accepting the existing Debezium-prefixed database filter.
-statement ok
+# New tables must use RisingWave's database.list option instead of bypassing it with the
+# equivalent Debezium option. Runtime keeps reading this option for historical catalogs.
+statement error MongoDB CDC option 'debezium.database.include.list' is not supported; use 'database.list' instead
 CREATE TABLE users_legacy_debezium_database_list (
   _id JSONB PRIMARY KEY,
   payload JSONB
@@ -87,13 +88,17 @@ CREATE TABLE users_legacy_debezium_database_list (
   debezium.database.include.list = 'rw_allowed'
 );
 
-query I retry 20 backoff 1s
-SELECT count(*) FROM users_legacy_debezium_database_list;
-----
-1
-
-statement ok
-DROP TABLE users_legacy_debezium_database_list;
+# collection.name is also the only supported public collection filter for new tables.
+statement error MongoDB CDC option 'debezium.collection.include.list' is not supported; use 'collection.name' instead
+CREATE TABLE users_legacy_debezium_collection_list (
+  _id JSONB PRIMARY KEY,
+  payload JSONB
+) WITH (
+  connector = 'mongodb-cdc',
+  mongodb.url = 'mongodb://rw_limited:risingwave@mongodb-auth:27017/?replicaSet=rs-auth&authSource=admin',
+  collection.name = 'rw_allowed.events',
+  debezium.collection.include.list = 'rw_allowed.events'
+);
 
 system ok
 mongosh 'mongodb://mongodb:27017' <<EOF
