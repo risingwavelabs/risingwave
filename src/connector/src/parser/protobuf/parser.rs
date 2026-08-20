@@ -15,26 +15,25 @@
 use std::collections::HashSet;
 
 use anyhow::Context;
-use prost_reflect::{DescriptorPool, DynamicMessage, FileDescriptor, MessageDescriptor};
+use prost_reflect::{DescriptorPool, FileDescriptor, MessageDescriptor};
 use risingwave_common::catalog::Field;
 use risingwave_common::{bail, try_match_expand};
 use risingwave_connector_codec::decoder::protobuf::ProtobufAccess;
 pub use risingwave_connector_codec::decoder::protobuf::parser::{PROTOBUF_MESSAGES_AS_JSONB, *};
 
-use super::message::parse_confluent_protobuf_message;
+use super::decoder::ProtobufDecoder;
 use crate::error::ConnectorResult;
 use crate::parser::unified::AccessImpl;
 use crate::parser::utils::bytes_from_url;
 use crate::parser::{AccessBuilder, EncodingProperties, SchemaLocation};
 use crate::schema::schema_registry::{Client, handle_sr_list};
 use crate::schema::{
-    ConfluentSchemaLoader, InvalidOptionError, SchemaLoader, bail_invalid_option_error,
+    ConfluentSchemaLoader, InvalidOptionError, SchemaVersion, bail_invalid_option_error,
 };
 
 #[derive(Debug)]
 pub struct ProtobufAccessBuilder {
-    wire_type: WireType,
-    message_descriptor: MessageDescriptor,
+    decoder: ProtobufDecoder,
 
     // A HashSet containing protobuf message type full names (e.g. "google.protobuf.Any")
     // that should be mapped to JSONB type when storing in RisingWave
@@ -47,17 +46,7 @@ impl AccessBuilder for ProtobufAccessBuilder {
         payload: Vec<u8>,
         _: &crate::source::SourceMeta,
     ) -> ConnectorResult<AccessImpl<'_>> {
-        let payload = match self.wire_type {
-            WireType::Confluent => {
-                parse_confluent_protobuf_message(&payload)
-                    .map_err(anyhow::Error::new)?
-                    .payload
-            }
-            WireType::None => &payload,
-        };
-
-        let message = DynamicMessage::decode(self.message_descriptor.clone(), payload)
-            .context("failed to parse message")?;
+        let message = self.decoder.decode(&payload).await?;
 
         Ok(AccessImpl::Protobuf(ProtobufAccess::new(
             message,
@@ -69,44 +58,21 @@ impl AccessBuilder for ProtobufAccessBuilder {
 impl ProtobufAccessBuilder {
     pub fn new(config: ProtobufParserConfig) -> ConnectorResult<Self> {
         let ProtobufParserConfig {
-            wire_type,
-            message_descriptor,
+            decoder,
             messages_as_jsonb,
+            ..
         } = config;
 
         Ok(Self {
-            wire_type,
-            message_descriptor,
+            decoder,
             messages_as_jsonb,
         })
     }
 }
 
-#[derive(Debug, Clone)]
-enum WireType {
-    None,
-    Confluent,
-    // Glue,
-    // Pulsar,
-}
-
-impl TryFrom<&SchemaLocation> for WireType {
-    type Error = InvalidOptionError;
-
-    fn try_from(value: &SchemaLocation) -> Result<Self, Self::Error> {
-        match value {
-            SchemaLocation::File { .. } => Ok(Self::None),
-            SchemaLocation::Confluent { .. } => Ok(Self::Confluent),
-            SchemaLocation::Glue { .. } => bail_invalid_option_error!(
-                "encode protobuf from aws glue schema registry not supported yet"
-            ),
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ProtobufParserConfig {
-    wire_type: WireType,
+    decoder: ProtobufDecoder,
     pub(crate) message_descriptor: MessageDescriptor,
     messages_as_jsonb: HashSet<String>,
 }
@@ -114,14 +80,12 @@ pub struct ProtobufParserConfig {
 impl ProtobufParserConfig {
     pub async fn new(encoding_properties: EncodingProperties) -> ConnectorResult<Self> {
         let protobuf_config = try_match_expand!(encoding_properties, EncodingProperties::Protobuf)?;
-        let message_name = &protobuf_config.message_name;
-
-        let wire_type = (&protobuf_config.schema_location).try_into()?;
         if protobuf_config.key_message_name.is_some() {
             // https://docs.confluent.io/platform/7.5/control-center/topics/schema.html#c3-schemas-best-practices-key-value-pairs
             bail!("protobuf key is not supported");
         }
-        let pool = match protobuf_config.schema_location {
+        let message_name = protobuf_config.message_name;
+        let (message_descriptor, decoder) = match protobuf_config.schema_location {
             SchemaLocation::Confluent {
                 urls,
                 client_config,
@@ -130,18 +94,32 @@ impl ProtobufParserConfig {
             } => {
                 let url = handle_sr_list(urls.as_str())?;
                 let client = Client::new(url, &client_config)?;
-                let loader = SchemaLoader::Confluent(ConfluentSchemaLoader {
+                let loader = ConfluentSchemaLoader {
                     client,
                     name_strategy,
                     topic,
                     key_record_name: None,
                     val_record_name: Some(message_name.clone()),
-                });
-                let (_schema_id, root_file_descriptor) = loader
+                };
+                let (schema_version, root_file_descriptor) = loader
                     .load_val_schema::<FileDescriptor>()
                     .await
                     .context("load schema failed")?;
-                root_file_descriptor.parent_pool().clone()
+                let SchemaVersion::Confluent(schema_id) = schema_version else {
+                    unreachable!("ConfluentSchemaLoader must return a Confluent schema version")
+                };
+                let message_descriptor = root_file_descriptor
+                    .parent_pool()
+                    .get_message_by_name(&message_name)
+                    .with_context(|| format!("cannot find message `{message_name}` in schema"))?;
+                let decoder = ProtobufDecoder::confluent(
+                    message_name.clone(),
+                    loader,
+                    (schema_id, root_file_descriptor),
+                )
+                .await;
+
+                (message_descriptor, decoder)
             }
             SchemaLocation::File {
                 url,
@@ -150,21 +128,24 @@ impl ProtobufParserConfig {
                 let url = handle_sr_list(url.as_str())?;
                 let url = url.first().unwrap();
                 let schema_bytes = bytes_from_url(url, aws_auth_props.as_ref()).await?;
-                DescriptorPool::decode(schema_bytes.as_slice())
-                    .with_context(|| format!("cannot build descriptor pool from schema `{url}`"))?
+                let pool = DescriptorPool::decode(schema_bytes.as_slice())
+                    .with_context(|| format!("cannot build descriptor pool from schema `{url}`"))?;
+                let message_descriptor = pool
+                    .get_message_by_name(&message_name)
+                    .with_context(|| format!("cannot find message `{message_name}` in schema"))?;
+                (
+                    message_descriptor.clone(),
+                    ProtobufDecoder::Static(message_descriptor),
+                )
             }
             SchemaLocation::Glue { .. } => bail_invalid_option_error!(
                 "encode protobuf from aws glue schema registry not supported yet"
             ),
         };
 
-        let message_descriptor = pool
-            .get_message_by_name(message_name)
-            .with_context(|| format!("cannot find message `{message_name}` in schema"))?;
-
         Ok(Self {
             message_descriptor,
-            wire_type,
+            decoder,
             messages_as_jsonb: protobuf_config.messages_as_jsonb,
         })
     }
