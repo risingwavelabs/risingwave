@@ -841,7 +841,7 @@ impl Command {
         barrier_info: &PartialGraphBarrierInfo,
         task: &mut CompleteBarrierTask,
         resps: Vec<BarrierCompleteResponse>,
-        backfill_pinned_log_epoch: HashMap<JobId, (u64, HashSet<TableId>)>,
+        backfill_pinned_upstream_tables: HashSet<TableId>,
     ) {
         let (
             sst_to_context,
@@ -874,14 +874,8 @@ impl Command {
 
         let mut log_store_table_ids = HashSet::new();
         // TODO: may collect cross db snapshot backfill
-        for (mv_table_id, _) in database_info.max_subscription_retention() {
-            log_store_table_ids.insert(mv_table_id);
-        }
-        for (_, (_, upstream_mv_table_ids)) in backfill_pinned_log_epoch {
-            for mv_table_id in upstream_mv_table_ids {
-                log_store_table_ids.insert(mv_table_id);
-            }
-        }
+        log_store_table_ids.extend(database_info.subscribed_tables());
+        log_store_table_ids.extend(backfill_pinned_upstream_tables);
 
         let table_new_change_log = build_table_change_log_delta(
             old_value_ssts.into_iter(),

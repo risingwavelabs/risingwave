@@ -430,7 +430,7 @@ impl MetaOpts {
             serverless_backfill_controller_addr: String::new(),
             table_change_log_insert_batch_size: 1000,
             table_change_log_delete_batch_size: 1000,
-            table_change_log_truncate_interval_sec: 30,
+            table_change_log_truncate_interval_sec: 600,
         }
     }
 }
