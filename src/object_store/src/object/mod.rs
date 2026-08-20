@@ -880,6 +880,7 @@ pub async fn build_remote_object_store(
     metrics: Arc<ObjectStoreMetrics>,
     ident: &str,
     config: Arc<ObjectStoreConfig>,
+    probe_prefix: &str,
 ) -> ObjectStoreImpl {
     tracing::debug!(config=?config, "object store {ident}");
     match url {
@@ -909,7 +910,11 @@ pub async fn build_remote_object_store(
             // first real access. Using `list` (rather than reimplementing bucket naming
             // rules) also works for S3 Access Point aliases and S3-compatible services
             // (e.g. Ceph) that don't follow AWS's own bucket naming rules.
-            match store.list("", None, Some(1)).await {
+            // The probe is scoped to `probe_prefix` (typically the configured data
+            // directory) rather than the bucket root, since cloud deployments commonly
+            // grant `s3:prefix`-restricted permissions that don't allow listing the
+            // bucket root.
+            match store.list(probe_prefix, None, Some(1)).await {
                 Ok(mut stream) => {
                     if let Some(Err(e)) = stream.next().await {
                         panic!(
