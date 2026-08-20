@@ -25,6 +25,7 @@ use futures::{FutureExt, Stream, TryFutureExt};
 use iceberg::io::{
     FileIOBuilder, FileMetadata, FileRead, S3_ACCESS_KEY_ID, S3_REGION, S3_SECRET_ACCESS_KEY,
 };
+use iceberg_storage_opendal::OpenDalStorageFactory;
 use itertools::Itertools;
 use opendal::Operator;
 use opendal::layers::{LoggingLayer, RetryLayer};
@@ -90,8 +91,9 @@ pub async fn create_parquet_stream_builder(
     props.insert(S3_ACCESS_KEY_ID, s3_access_key.clone());
     props.insert(S3_SECRET_ACCESS_KEY, s3_secret_key.clone());
 
-    let file_io_builder = FileIOBuilder::new("s3");
-    let file_io = file_io_builder.with_props(props).build()?;
+    let file_io = FileIOBuilder::new(Arc::new(OpenDalStorageFactory::s3()))
+        .with_props(props)
+        .build();
     let parquet_file = file_io.new_input(&location)?;
 
     let parquet_metadata = parquet_file.metadata().await?;
