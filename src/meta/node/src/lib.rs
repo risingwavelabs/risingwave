@@ -377,6 +377,9 @@ pub fn start(
             config.server.clone(),
             MetaOpts {
                 enable_recovery: !config.meta.disable_recovery,
+                clean_all_foreground_jobs_on_recovery: config
+                    .meta
+                    .clean_all_foreground_jobs_on_recovery,
                 disable_automatic_parallelism_control: config
                     .meta
                     .disable_automatic_parallelism_control,
@@ -612,43 +615,43 @@ pub fn start(
 
 fn validate_config(config: &RwConfig) {
     if config.meta.meta_leader_lease_secs <= 2 {
-        let error_msg = "meta leader lease secs should be larger than 2";
+        let error_msg = "`meta_leader_lease_secs` must be greater than 2";
         tracing::error!(error_msg);
         panic!("{}", error_msg);
     }
 
     if config.meta.parallelism_control_batch_size == 0 {
-        let error_msg = "parallelism control batch size should be larger than 0";
+        let error_msg = "`parallelism_control_batch_size` must be greater than 0";
         tracing::error!(error_msg);
         panic!("{}", error_msg);
     }
 
     if config.meta.checkpoint_read_chunk_size == 0 {
-        let error_msg = "checkpoint read chunk size should be larger than 0";
+        let error_msg = "`checkpoint_read_chunk_size` must be greater than 0";
         tracing::error!(error_msg);
         panic!("{}", error_msg);
     }
 
     if config.meta.checkpoint_read_max_in_flight_chunks == 0 {
-        let error_msg = "checkpoint read max in flight chunks should be larger than 0";
+        let error_msg = "`checkpoint_read_max_in_flight_chunks` must be greater than 0";
         tracing::error!(error_msg);
         panic!("{}", error_msg);
     }
 
     if config.meta.compaction_task_id_refill_capacity == 0 {
-        let error_msg = "compaction task id refill capacity should be larger than 0";
+        let error_msg = "`compaction_task_id_refill_capacity` must be greater than 0";
         tracing::error!(error_msg);
         panic!("{}", error_msg);
     }
 
     if config.meta.iceberg_compaction_report_timeout_sec == 0 {
-        let error_msg = "iceberg compaction report timeout sec should be larger than 0";
+        let error_msg = "`iceberg_compaction_report_timeout_sec` must be greater than 0";
         tracing::error!(error_msg);
         panic!("{}", error_msg);
     }
 
     if config.meta.iceberg_compaction_config_refresh_interval_sec == 0 {
-        let error_msg = "iceberg compaction config refresh interval sec should be larger than 0";
+        let error_msg = "`iceberg_compaction_config_refresh_interval_sec` must be greater than 0";
         tracing::error!(error_msg);
         panic!("{}", error_msg);
     }
