@@ -36,7 +36,8 @@ public class MongoDbTlsUtilsTest {
             """
             -----BEGIN CERTIFICATE-----
             MIIDKzCCAhOgAwIBAgIUasoPCQmxVsB1pHcu26t1oFXqPwMwDQYJKoZIhvcNAQEL
-            BQAwJTEjMCEGA1UEAwwaUmlzaW5nV2F2ZSBNb25nb0RCIFRlc3QgQ0EwHhcNMjYw
+            BQAwJTEjMCEGA1U
+            EAwwaUmlzaW5nV2F2ZSBNb25nb0RCIFRlc3QgQ0EwHhcNMjYw
             ODE4MTAxMTIzWhcNMjYwODE5MTAxMTIzWjAlMSMwIQYDVQQDDBpSaXNpbmdXYXZl
             IE1vbmdvREIgVGVzdCBDQTCCASIwDQYJKoZIhvcNAQEBBQADggEPADCCAQoCggEB
             AK4WHBdiDKGN+g9VNPT+Q6saCT2273vsBU9y55JybUQac5Yk6rRJMFgBL5L6hr18
@@ -45,7 +46,8 @@ public class MongoDbTlsUtilsTest {
             NnG41U8iKvpDp1QzV8fHgko3+qXgXvuFG+kLa4HoPGauuOdfUXMpnEHEfBYfljzM
             ayMOTtiYlbMLjvo9CFhegpTB/rtENVUYr8hx+CsJ1Z/iOOJrtWL0OPnz4nzCbpC7
             OMXudPuJM5qYWGaMV8fxz1cCAwEAAaNTMFEwHQYDVR0OBBYEFNg2m6oK6npxoFd7
-            5sHMQpdApv1NMB8GA1UdIwQYMBaAFNg2m6oK6npxoFd75sHMQpdApv1NMA8GA1Ud
+            5sHMQpdApv1NMB8GA1UdIwQYMB
+            aAFNg2m6oK6npxoFd75sHMQpdApv1NMA8GA1Ud
             EwEB/wQFMAMBAf8wDQYJKoZIhvcNAQELBQADggEBABwehLFu4Che+Rh0gLuSQg/W
             0o0wQuf6li8jgsAHn9sBUVnl/hS86GhvmXQoBD3UWELclFqCAwPtASXj+3182BEa
             Pd4AG+GHOPF0DDkPJgBalcLgoNHAaDqrTeThaYLAU9vwQGYHPVv19LzEKsPdLIJt

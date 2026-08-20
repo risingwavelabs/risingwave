@@ -24,10 +24,16 @@ done
 mongosh "${mongo_args[@]}" --eval 'db.runCommand({ ping: 1 }).ok' >/dev/null
 
 mongosh "${mongo_args[@]}" --eval "
-    rs.initiate({
-        _id: '${MONGODB_REPLICA_SET}',
-        members: [{ _id: 0, host: '${MONGODB_HOST}:27017' }]
-    })
+    try {
+        rs.initiate({
+            _id: '${MONGODB_REPLICA_SET}',
+            members: [{ _id: 0, host: '${MONGODB_HOST}:27017' }]
+        });
+    } catch (error) {
+        if (error.code !== 23 && error.codeName !== 'AlreadyInitialized') {
+            throw error;
+        }
+    }
 "
 
 for _ in $(seq 1 60); do

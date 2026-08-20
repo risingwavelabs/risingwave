@@ -6,6 +6,17 @@ set -eu
 cert_dir="${MONGODB_TLS_CERT_DIR:-/mongodb-tls}"
 
 mkdir -p "$cert_dir"
+
+# The CI Docker Compose plugin can start completed dependency services again before
+# running the test container. Do not replace certificates already loaded by mongod.
+if [ -f "$cert_dir/.ready" ]; then
+    openssl verify \
+        -CAfile "$cert_dir/ca.pem" \
+        "$cert_dir/server.pem" \
+        "$cert_dir/client.pem"
+    exit 0
+fi
+
 rm -f "$cert_dir"/*
 
 openssl genpkey \
@@ -108,3 +119,4 @@ rm -f \
     "$cert_dir/client.crt" \
     "$cert_dir/client.ext" \
     "$cert_dir/client-rsa-pkcs1.key"
+touch "$cert_dir/.ready"
