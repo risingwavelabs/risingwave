@@ -12,11 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod decoder;
 mod message;
 mod parser;
-#[allow(
-    dead_code,
-    reason = "used by the Confluent Protobuf decoder introduced in the follow-up change"
-)]
 mod schema_cache;
 pub use parser::*;
