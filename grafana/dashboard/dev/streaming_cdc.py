@@ -125,11 +125,21 @@ def _(outer_panels: Panels):
                         ),
                         panels.target(
                             f"{metric('mysql_cdc_binlog_file_seq_min')}",
-                            "{{hostname}}:{{port}} - Upstream Binlog File Min Seq (oldest)",
+                            "source_id {{source_id}} {{hostname}}:{{port}} - Upstream Binlog File Min Seq (oldest)",
                         ),
                         panels.target(
                             f"{metric('mysql_cdc_binlog_file_seq_max')}",
-                            "{{hostname}}:{{port}} - Upstream Binlog File Max Seq (newest)",
+                            "source_id {{source_id}} {{hostname}}:{{port}} - Upstream Binlog File Max Seq (newest)",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
+                    "MySQL CDC Binlog File Lag",
+                    "Lag measured as the number of binlog files between the upstream newest file and the RisingWave checkpoint.",
+                    [
+                        panels.target(
+                            f"clamp_min({metric('mysql_cdc_binlog_file_seq_max')} - on(source_id) {metric('stream_mysql_cdc_state_binlog_file_seq')}, 0)",
+                            "source_id {{source_id}} {{hostname}}:{{port}} - Binlog File Lag",
                         ),
                     ],
                 ),

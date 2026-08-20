@@ -32,8 +32,9 @@ def _(outer_panels: Panels):
     - Join Amplification: If the join amplification is high, it means the join is not able to process the data in time.
 - Cross-DB Log Retention Expiring: a cross-database MV changelog consumer's last consumed changelog epoch will expire within 12 hours.
 - PG CDC WAL Lag Too High: the PostgreSQL CDC WAL lag (upstream_max_lsn - state_table_lsn) exceeds 20 GiB. Check `Streaming CDC` > `PostgreSQL CDC State Table WAL Lag` and verify replication slot health.
+- MySQL CDC Binlog File Lag Too High: the MySQL CDC checkpoint is at least 20 binlog files behind the upstream newest file. Check `Streaming CDC` > `MySQL CDC Binlog File Lag`.
 """,
-                    height=9,
+                    height=10,
                 ),
                 panels.timeseries_count(
                     "Streaming Alert Signals",
@@ -64,6 +65,13 @@ def _(outer_panels: Panels):
                                 20 * 1024 * 1024 * 1024,
                             ),
                             "PG CDC WAL Lag Too High slot {{slot_name}} source {{source_id}}",
+                        ),
+                        panels.target(
+                            alert_threshold(
+                                f"clamp_min({metric('mysql_cdc_binlog_file_seq_max')} - on(source_id) {metric('stream_mysql_cdc_state_binlog_file_seq')}, 0)",
+                                20,
+                            ),
+                            "MySQL CDC Binlog File Lag Too High source {{source_id}} {{hostname}}:{{port}}",
                         ),
                     ],
                     ["last"],
