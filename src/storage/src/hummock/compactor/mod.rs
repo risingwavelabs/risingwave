@@ -344,6 +344,7 @@ impl Compactor {
 pub fn start_iceberg_compactor(
     compactor_context: CompactorContext,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
+    iceberg_compaction_memory_limit_bytes: usize,
 ) -> (JoinHandle<()>, Sender<()>) {
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
     let stream_retry_interval = Duration::from_secs(30);
@@ -373,8 +374,12 @@ pub fn start_iceberg_compactor(
                 .storage_opts
                 .iceberg_compaction_pending_parallelism_budget_multiplier)
             .ceil() as u32;
-        let mut task_queue =
-            IcebergTaskQueue::new(max_task_parallelism, pending_parallelism_budget);
+        let mut task_queue = IcebergTaskQueue::new_with_metrics(
+            max_task_parallelism,
+            pending_parallelism_budget,
+            iceberg_compaction_memory_limit_bytes,
+            compactor_context.compactor_metrics.clone(),
+        );
 
         // Shutdown tracking for running tasks (task_key -> shutdown_sender)
         let shutdown_map = Arc::new(Mutex::new(HashMap::<TaskKey, Sender<()>>::new()));
@@ -589,6 +594,7 @@ pub fn start_iceberg_compactor(
                                     iceberg_compaction_task,
                                     compactor_runner_config,
                                     compactor_context.compactor_metrics.clone(),
+                                    iceberg_compaction_memory_limit_bytes,
                                 ).await {
                                     Ok(task_execution) => task_execution,
                                     Err(e) => {
