@@ -196,6 +196,7 @@ tokio = { workspace = true, features = ["fs"] }
 tokio-postgres = { version = "0.7", features = ["with-uuid-1"] }
 tokio-retry = "0.3"
 tokio-stream = { workspace = true }
+tokio-tungstenite = { version = "0.28", features = ["rustls-tls-native-roots"] }
 tokio-util = { workspace = true, features = ["codec", "io"] }
 tonic = { workspace = true }
 tracing = "0.1"

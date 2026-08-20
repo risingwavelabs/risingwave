@@ -1,0 +1,113 @@
+# Test the `websocket` source connector against a local WebSocket server fixture.
+# The fixture is spawned as a background process and binds fixed local ports,
+# hence the `.slt.serial` suffix.
+
+control substitution on
+
+# Test 1: basic ingestion with an init (subscribe) message.
+
+system ok
+python3 e2e_test/source_inline/websocket/ws_server.py start --port 18765 --count 100 --require-init 'SUBSCRIBE'
+
+statement ok
+create table t_websocket (
+  id int,
+  value varchar
+) with (
+  connector = 'websocket',
+  url = 'ws://127.0.0.1:18765',
+  init.message = 'SUBSCRIBE'
+) format plain encode json;
+
+# The server sends exactly 100 messages per connection and then keeps the
+# connection open, so at least 100 rows are expected. WebSocket is at-least-once:
+# a reader reconnect would redeliver the full batch, so use `>=` rather than `=`.
+query T retry 10 backoff 1s
+select count(*) >= 100 from t_websocket;
+----
+t
+
+query T
+select count(distinct id) = 100 from t_websocket;
+----
+t
+
+query T
+select count(*) > 0 from t_websocket where id = 0 and value = 'message_0';
+----
+t
+
+query T
+select count(*) > 0 from t_websocket where id = 99 and value = 'message_99';
+----
+t
+
+statement ok
+drop table t_websocket;
+
+# Test 2: invalid properties are rejected at creation time.
+
+statement error must be prefixed with `ws://` or `wss://`
+create table t_websocket_bad_scheme (
+  id int
+) with (
+  connector = 'websocket',
+  url = 'http://127.0.0.1:18765'
+) format plain encode json;
+
+statement error failed to connect to WebSocket server
+create table t_websocket_unreachable (
+  id int
+) with (
+  connector = 'websocket',
+  url = 'ws://127.0.0.1:18999'
+) format plain encode json;
+
+# Test 3: custom handshake headers (bearer auth) and INCLUDE offset.
+
+system ok
+python3 e2e_test/source_inline/websocket/ws_server.py start --port 18766 --count 50 --auth-token 'test-token'
+
+# Without the required header the handshake is rejected.
+statement error failed to connect to WebSocket server
+create table t_websocket_no_auth (
+  id int,
+  value varchar
+) with (
+  connector = 'websocket',
+  url = 'ws://127.0.0.1:18766'
+) format plain encode json;
+
+statement ok
+create table t_websocket_auth (
+  id int,
+  value varchar
+)
+include offset as msg_offset
+with (
+  connector = 'websocket',
+  url = 'ws://127.0.0.1:18766',
+  headers = '{"Authorization": "Bearer test-token"}'
+) format plain encode json;
+
+query T retry 10 backoff 1s
+select count(*) >= 50 from t_websocket_auth;
+----
+t
+
+# The offset column is a per-reader message counter, monotonic across reconnections.
+query T
+select count(distinct msg_offset) >= 50 from t_websocket_auth;
+----
+t
+
+statement ok
+drop table t_websocket_auth;
+
+# Cleanup.
+
+system ok
+python3 e2e_test/source_inline/websocket/ws_server.py stop --port 18765
+
+system ok
+python3 e2e_test/source_inline/websocket/ws_server.py stop --port 18766
