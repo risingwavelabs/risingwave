@@ -243,7 +243,7 @@ mod tests {
     use risingwave_expr::sig::{CreateFunctionOutput, UDF_IMPLS, UdfImplDescriptor};
 
     use crate::catalog::root_catalog::SchemaPath;
-    use crate::test_utils::{LocalFrontend, get_explain_output};
+    use crate::test_utils::LocalFrontend;
 
     #[linkme::distributed_slice(UDF_IMPLS)]
     static TEST_UDF: UdfImplDescriptor = UdfImplDescriptor {
@@ -362,10 +362,11 @@ mod tests {
         );
     }
 
-    /// Verifies that the per-UDF policy controls materialization when the projected expression
-    /// occupies an UPSERT stream-key position.
+    /// Verifies that an UPSERT project does not materialize impure computed expressions. Project
+    /// stream keys are always direct input references, including hidden references appended by
+    /// stream-plan rewriting, so computed impure expressions are necessarily non-key columns.
     #[tokio::test]
-    async fn test_upsert_key_materialization_policy() {
+    async fn test_upsert_project_skips_impure_expr_materialization() {
         let frontend = LocalFrontend::new(Default::default()).await;
 
         frontend
@@ -373,7 +374,11 @@ mod tests {
             .await
             .unwrap();
         frontend
-            .run_sql("create table upsert_output(id int primary key, v int)")
+            .run_sql("create table upsert_output(v int, id int primary key)")
+            .await
+            .unwrap();
+        frontend
+            .run_sql("create table computed_key_output(key int primary key, v int)")
             .await
             .unwrap();
         frontend
@@ -396,44 +401,43 @@ mod tests {
             .await
             .unwrap();
 
-        // The transformed key is deterministic for these test UDFs, but the planner cannot infer
-        // that it remains equivalent to the input key. Allow that orthogonal mismatch so this test
-        // isolates the expression-materialization decision.
-        let session = frontend.session_ref();
-        frontend
-            .run_sql_with_session(
-                session.clone(),
-                "set streaming_unsafe_allow_upsert_sink_pk_mismatch = true",
-            )
-            .await
-            .unwrap();
-
-        let response = frontend
-            .run_sql_with_session(
-                session.clone(),
+        // No matter the UDF is marked or not, the project on an UPSERT stream does not materialize
+        // them.
+        let plan = frontend
+            .get_explain_output(
                 "explain create sink skipped_sink into upsert_output as \
-                 select identity_without_stored_result(id) as id, v \
+                 select identity_without_stored_result(v) as v, id \
                  from upsert_input with (snapshot = 'false')",
             )
-            .await
-            .unwrap();
-        let plan = get_explain_output(response).await;
+            .await;
         assert!(plan.contains("StreamProject"), "{plan}");
         assert!(!plan.contains("StreamMaterializedExprs"), "{plan}");
 
+        let plan = frontend
+            .get_explain_output(
+                "explain create sink unmarked_sink into upsert_output as \
+                 select identity_with_stored_result(v) as v, id \
+                 from upsert_input with (snapshot = 'false')",
+            )
+            .await;
+        assert!(plan.contains("StreamProject"), "{plan}");
+        assert!(!plan.contains("StreamMaterializedExprs"), "{plan}");
+
+        // Skipping UPSERT expression materialization is safe because a sink cannot use a computed
+        // impure output as its downstream primary key. Such a key does not match the one derived
+        // from the internal stream and is rejected later by sink planning.
         let error = frontend
-            .run_sql_with_session(
-                session,
-                "explain create sink materialized_sink into upsert_output as \
-                 select identity_with_stored_result(id) as id, v \
+            .run_sql(
+                "create sink computed_key_sink into computed_key_output as \
+                 select identity_with_stored_result(id) as key, v \
                  from upsert_input with (snapshot = 'false')",
             )
             .await
             .unwrap_err();
         assert!(
-            error
-                .to_string()
-                .contains("upsert stream is not supported as input of StreamMaterializedExprs"),
+            error.to_string().contains(
+                "the downstream primary key must be the same as or a subset of the one derived from the stream"
+            ),
             "{error}"
         );
     }
