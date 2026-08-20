@@ -93,6 +93,7 @@ impl HummockManager {
         assert!(!tables_to_commit.is_empty());
 
         let versioning: &mut Versioning = &mut versioning_guard;
+        let _timer = self.metrics.commit_epoch_latency.start_timer();
         self.commit_epoch_sanity_check(
             &tables_to_commit,
             &sstables,

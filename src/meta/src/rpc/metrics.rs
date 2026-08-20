@@ -176,6 +176,8 @@ pub struct MetaMetrics {
     pub table_change_log_get_latency: Histogram,
     /// The number of hummock version delta log.
     pub delta_log_count: IntGauge,
+    /// Latency of committing an epoch after acquiring the versioning lock.
+    pub commit_epoch_latency: Histogram,
     /// latency of version checkpoint
     pub version_checkpoint_latency: Histogram,
     /// Latency for hummock manager to acquire lock
@@ -594,6 +596,13 @@ impl MetaMetrics {
         .unwrap();
 
         let opts = histogram_opts!(
+            "storage_commit_epoch_latency",
+            "hummock commit epoch latency after acquiring the versioning lock",
+            exponential_buckets(0.1, 1.5, 20).unwrap()
+        );
+        let commit_epoch_latency = register_histogram_with_registry!(opts, registry).unwrap();
+
+        let opts = histogram_opts!(
             "storage_version_checkpoint_latency",
             "hummock version checkpoint latency",
             exponential_buckets(0.1, 1.5, 20).unwrap()
@@ -1010,6 +1019,7 @@ impl MetaMetrics {
             table_change_log_min_epoch,
             table_change_log_get_latency,
             delta_log_count,
+            commit_epoch_latency,
             version_checkpoint_latency,
             current_version_id,
             checkpoint_version_id,
