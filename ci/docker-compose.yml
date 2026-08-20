@@ -712,7 +712,13 @@ services:
     command:
       - /bin/sh
       - -c
-      - openssl rand -base64 756 > /mongodb-auth/keyfile && chown 999:999 /mongodb-auth/keyfile && chmod 400 /mongodb-auth/keyfile
+      - |
+        set -eu
+        if [ ! -s /mongodb-auth/keyfile ]; then
+          openssl rand -base64 756 > /mongodb-auth/keyfile
+        fi
+        chown 999:999 /mongodb-auth/keyfile
+        chmod 400 /mongodb-auth/keyfile
     volumes:
       - mongodb-auth-key:/mongodb-auth
     restart: "no"
