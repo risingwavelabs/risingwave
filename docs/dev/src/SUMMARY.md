@@ -28,6 +28,7 @@
 
 - [Develop Connectors](./connector/intro.md)
     - [Source](./connector/source.md)
+    - [File sink Hive-style partitioning](./connector/file_sink_hive_partitioning.md)
 - [Continuous Integration](./ci.md)
 
 ---
