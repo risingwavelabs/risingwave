@@ -93,7 +93,16 @@ impl HummockManager {
         assert!(!tables_to_commit.is_empty());
 
         let versioning: &mut Versioning = &mut versioning_guard;
-        let _timer = self.metrics.commit_epoch_latency.start_timer();
+        let total_timer = self
+            .metrics
+            .commit_epoch_latency
+            .with_label_values(&["total"])
+            .start_timer();
+        let timer = self
+            .metrics
+            .commit_epoch_latency
+            .with_label_values(&["sanity_check"])
+            .start_timer();
         self.commit_epoch_sanity_check(
             &tables_to_commit,
             &sstables,
@@ -101,7 +110,13 @@ impl HummockManager {
             &versioning.current_version,
         )
         .await?;
+        timer.observe_duration();
 
+        let timer = self
+            .metrics
+            .commit_epoch_latency
+            .with_label_values(&["prepare_version"])
+            .start_timer();
         // Consume and aggregate table stats.
         let mut table_stats_change = PbTableStatsMap::default();
         for s in &mut sstables {
@@ -126,7 +141,13 @@ impl HummockManager {
         let mut new_compaction_groups = Vec::new();
         let mut compaction_group_manager_txn = None;
         let mut compaction_group_config: Option<Arc<CompactionConfig>> = None;
+        timer.observe_duration();
 
+        let timer = self
+            .metrics
+            .commit_epoch_latency
+            .with_label_values(&["add_new_tables"])
+            .start_timer();
         // Add new table
         for NewTableFragmentInfo { table_ids } in new_table_fragment_infos {
             let (compaction_group_manager, compaction_group_config) =
@@ -172,11 +193,23 @@ impl HummockManager {
                 &mut new_table_ids,
             )?;
         }
+        timer.observe_duration();
 
+        let timer = self
+            .metrics
+            .commit_epoch_latency
+            .with_label_values(&["correct_commit_ssts"])
+            .start_timer();
         let commit_sstables = self
             .correct_commit_ssts(sstables, &table_compaction_group_mapping)
             .await?;
+        timer.observe_duration();
 
+        let timer = self
+            .metrics
+            .commit_epoch_latency
+            .with_label_values(&["get_compaction_group_configs"])
+            .start_timer();
         let modified_compaction_groups = commit_sstables.keys().cloned().collect_vec();
         // fill compaction_groups
         let mut group_id_to_config = HashMap::new();
@@ -201,7 +234,13 @@ impl HummockManager {
                 group_id_to_config.insert(*cg_id, compaction_group);
             }
         }
+        timer.observe_duration();
 
+        let timer = self
+            .metrics
+            .commit_epoch_latency
+            .with_label_values(&["build_version_delta"])
+            .start_timer();
         let group_id_to_sub_levels =
             rewrite_commit_sstables_to_sub_level(commit_sstables, &group_id_to_config);
 
@@ -237,7 +276,13 @@ impl HummockManager {
             // Unable to invoke mark_next_time_travel_version_snapshot because versioning is already mutable borrowed.
             versioning.time_travel_snapshot_interval_counter = u64::MAX;
         }
+        timer.observe_duration();
 
+        let timer = self
+            .metrics
+            .commit_epoch_latency
+            .with_label_values(&["update_version_stats"])
+            .start_timer();
         // Apply stats changes.
         let mut version_stats = HummockVersionStatsTransaction::new(
             &mut versioning.version_stats,
@@ -293,6 +338,13 @@ impl HummockManager {
                         .get(table_id)
                         .map(|committed_epoch| (table_id, cg_id, *committed_epoch))
                 });
+        timer.observe_duration();
+
+        let timer = self
+            .metrics
+            .commit_epoch_latency
+            .with_label_values(&["list_time_travel_table_ids"])
+            .start_timer();
         let time_travel_table_ids: HashSet<_> = self
             .metadata_manager
             .catalog_controller
@@ -301,6 +353,13 @@ impl HummockManager {
             .map_err(|e| Error::Internal(e.into()))?
             .into_iter()
             .collect();
+        timer.observe_duration();
+
+        let timer = self
+            .metrics
+            .commit_epoch_latency
+            .with_label_values(&["write_time_travel_metadata"])
+            .start_timer();
         let mut txn = self.env.meta_store_ref().conn.begin().await?;
         let version_snapshot_sst_ids = self
             .write_time_travel_metadata(
@@ -312,12 +371,26 @@ impl HummockManager {
                 time_travel_tables_to_commit,
             )
             .await?;
+        timer.observe_duration();
+
+        let timer = self
+            .metrics
+            .commit_epoch_latency
+            .with_label_values(&["commit_metadata"])
+            .start_timer();
         commit_multi_var_with_provided_txn!(
             txn,
             version,
             version_stats,
             compaction_group_manager_txn
         )?;
+        timer.observe_duration();
+
+        let timer = self
+            .metrics
+            .commit_epoch_latency
+            .with_label_values(&["update_metrics"])
+            .start_timer();
         if let Some(version_snapshot_sst_ids) = version_snapshot_sst_ids {
             versioning.last_time_travel_snapshot_sst_ids = version_snapshot_sst_ids;
         }
@@ -331,9 +404,15 @@ impl HummockManager {
             );
         }
         trigger_epoch_stat(&self.metrics, &versioning.current_version);
+        timer.observe_duration();
 
         drop(versioning_guard);
 
+        let timer = self
+            .metrics
+            .commit_epoch_latency
+            .with_label_values(&["trigger_compaction"])
+            .start_timer();
         // Don't trigger compactions if we enable deterministic compaction
         if !self.env.opts.compaction_deterministic_test {
             // commit_epoch may contains SSTs from any compaction group
@@ -345,14 +424,23 @@ impl HummockManager {
                     .await;
             }
         }
+        timer.observe_duration();
+
+        let timer = self
+            .metrics
+            .commit_epoch_latency
+            .with_label_values(&["update_write_limits"])
+            .start_timer();
         if !modified_compaction_groups.is_empty() {
             self.try_update_write_limits(&modified_compaction_groups)
                 .await;
         }
+        timer.observe_duration();
         #[cfg(test)]
         {
             self.check_state_consistency().await;
         }
+        total_timer.observe_duration();
         Ok(())
     }
 
