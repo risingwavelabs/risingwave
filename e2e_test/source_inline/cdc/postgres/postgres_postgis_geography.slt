@@ -2,47 +2,12 @@ control substitution on
 
 # PostGIS geography type CDC test
 
+# Shared setup
 system ok
-psql -c "
-    CREATE EXTENSION IF NOT EXISTS postgis;
-    DROP TABLE IF EXISTS test_geography CASCADE;
-    DROP TABLE IF EXISTS test_geography_array CASCADE;
-    DROP TABLE IF EXISTS test_geography_auto_discovery CASCADE;
-    DROP TABLE IF EXISTS test_geography_schema_change CASCADE;
-    CREATE TABLE test_geography (
-        id int PRIMARY KEY,
-        name varchar,
-        location geography(Point, 4326)
-    );
-    INSERT INTO test_geography VALUES
-        (1, 'Chicago', ST_SetSRID(ST_MakePoint(-87.6298, 41.8781), 4326)),
-        (2, 'NewYork', ST_SetSRID(ST_MakePoint(-74.0060, 40.7128), 4326));
-    CREATE TABLE test_geography_array (
-        id int PRIMARY KEY,
-        name varchar,
-        locations geography(Point, 4326)[]
-    );
-    INSERT INTO test_geography_array VALUES
-        (
-            1,
-            'InitialRoute',
-            ARRAY[
-                ST_SetSRID(ST_MakePoint(-87.6298, 41.8781), 4326),
-                ST_SetSRID(ST_MakePoint(-74.0060, 40.7128), 4326)
-            ]::geography(Point, 4326)[]
-        );
-    CREATE TABLE test_geography_auto_discovery (
-        id int PRIMARY KEY,
-        location geography(Point, 4326)
-    );
-    INSERT INTO test_geography_auto_discovery VALUES
-        (1, ST_SetSRID(ST_MakePoint(-122.4194, 37.7749), 4326));
-    CREATE TABLE test_geography_schema_change (
-        id int PRIMARY KEY,
-        name varchar
-    );
-    INSERT INTO test_geography_schema_change VALUES (1, 'Before');
-"
+psql -c "CREATE EXTENSION IF NOT EXISTS postgis;"
+
+statement ok
+drop source if exists geography_source cascade;
 
 statement ok
 create source geography_source with (
@@ -57,6 +22,25 @@ create source geography_source with (
   auto.schema.change = 'true'
 );
 
+# Test: accept correct explicit schemas
+
+# Scalar geography maps to bytea and backfill preserves the complete EWKB bytes.
+system ok
+psql -c "
+    DROP TABLE IF EXISTS test_geography CASCADE;
+    CREATE TABLE test_geography (
+        id int PRIMARY KEY,
+        name varchar,
+        location geography(Point, 4326)
+    );
+    INSERT INTO test_geography VALUES
+        (1, 'Chicago', ST_SetSRID(ST_MakePoint(-87.6298, 41.8781), 4326)),
+        (2, 'NewYork', ST_SetSRID(ST_MakePoint(-74.0060, 40.7128), 4326));
+"
+
+statement ok
+drop table if exists test_geography;
+
 statement ok
 create table test_geography (
     id int primary key,
@@ -64,19 +48,67 @@ create table test_geography (
     location bytea
 ) from geography_source table 'public.test_geography';
 
-# A geography column cannot be mapped to a non-bytea RisingWave type.
-statement error Incompatible data type of column location
-create table test_geography_invalid_mapping (
-    id int primary key,
-    name varchar,
-    location varchar
-) from geography_source table 'public.test_geography';
+query T
+select c.data_type
+from rw_catalog.rw_columns c
+join rw_catalog.rw_tables t on c.relation_id = t.id
+where t.name = 'test_geography' and c.name = 'location';
+----
+bytea
+
+query ITTT retry 10 backoff 1s
+select
+    ours.id,
+    encode(ours.location, 'hex'),
+    upstream.upstream_hex,
+    encode(ours.location, 'hex') = upstream.upstream_hex
+from test_geography as ours
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, encode(location, ''hex'') as upstream_hex from test_geography'
+    )
+) as upstream(id, upstream_hex) on ours.id = upstream.id
+order by ours.id;
+----
+1 0101000020e610000055c1a8a44ee855c00e4faf9465f04440 0101000020e610000055c1a8a44ee855c00e4faf9465f04440 t
+2 0101000020e6100000aaf1d24d628052c05e4bc8073d5b4440 0101000020e6100000aaf1d24d628052c05e4bc8073d5b4440 t
+
+# Geography arrays map to bytea[] and backfill preserves each EWKB value.
+system ok
+psql -c "
+    DROP TABLE IF EXISTS test_geography_array CASCADE;
+    CREATE TABLE test_geography_array (
+        id int PRIMARY KEY,
+        name varchar,
+        locations geography(Point, 4326)[]
+    );
+    INSERT INTO test_geography_array VALUES
+        (
+            1,
+            'InitialRoute',
+            ARRAY[
+                ST_SetSRID(ST_MakePoint(-87.6298, 41.8781), 4326),
+                ST_SetSRID(ST_MakePoint(-74.0060, 40.7128), 4326)
+            ]::geography(Point, 4326)[]
+        );
+"
 
 statement ok
-create table test_geography_array (*)
-from geography_source table 'public.test_geography_array';
+drop table if exists test_geography_array;
 
-query T retry 10 backoff 1s
+statement ok
+create table test_geography_array (
+    id int primary key,
+    name varchar,
+    locations bytea[]
+) from geography_source table 'public.test_geography_array';
+
+query T
 select c.data_type
 from rw_catalog.rw_columns c
 join rw_catalog.rw_tables t on c.relation_id = t.id
@@ -84,57 +116,244 @@ where t.name = 'test_geography_array' and c.name = 'locations';
 ----
 bytea[]
 
-# Backfill preserves the complete EWKB bytes.
-query IT retry 10 backoff 1s
-select id, encode(location, 'hex') from test_geography order by id;
+query ITTTTTTT retry 10 backoff 1s
+select
+    ours.id,
+    ours.name,
+    encode(ours.locations[1], 'hex'),
+    upstream.upstream_hex_1,
+    encode(ours.locations[1], 'hex') = upstream.upstream_hex_1,
+    encode(ours.locations[2], 'hex'),
+    upstream.upstream_hex_2,
+    encode(ours.locations[2], 'hex') = upstream.upstream_hex_2
+from test_geography_array as ours
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, encode(locations[1], ''hex'') as upstream_hex_1, encode(locations[2], ''hex'') as upstream_hex_2 from test_geography_array where id = 1'
+    )
+) as upstream(id, upstream_hex_1, upstream_hex_2) on ours.id = upstream.id
+where ours.id = 1;
 ----
-1 0101000020e610000055c1a8a44ee855c00e4faf9465f04440
-2 0101000020e6100000aaf1d24d628052c05e4bc8073d5b4440
+1 InitialRoute 0101000020e610000055c1a8a44ee855c00e4faf9465f04440 0101000020e610000055c1a8a44ee855c00e4faf9465f04440 t 0101000020e6100000aaf1d24d628052c05e4bc8073d5b4440 0101000020e6100000aaf1d24d628052c05e4bc8073d5b4440 t
 
-# Test incremental INSERT.
+# Other geography subtypes also map to bytea.
 system ok
-psql -c "INSERT INTO test_geography VALUES (3, 'London', ST_SetSRID(ST_MakePoint(-0.1278, 51.5074), 4326));"
+psql -c "
+    DROP TABLE IF EXISTS test_geography_line CASCADE;
+    CREATE TABLE test_geography_line (
+        id int PRIMARY KEY,
+        name varchar,
+        path geography(LineString, 4326)
+    );
+    INSERT INTO test_geography_line VALUES
+        (1, 'Route1', ST_SetSRID(ST_MakeLine(ST_MakePoint(-87.6298, 41.8781), ST_MakePoint(-74.0060, 40.7128)), 4326));
+"
 
-query IT retry 10 backoff 1s
-select id, encode(location, 'hex') from test_geography where id = 3;
+statement ok
+drop table if exists test_geography_line;
+
+statement ok
+create table test_geography_line (
+    id int primary key,
+    name varchar,
+    path bytea
+) from geography_source table 'public.test_geography_line';
+
+query T
+select c.data_type
+from rw_catalog.rw_columns c
+join rw_catalog.rw_tables t on c.relation_id = t.id
+where t.name = 'test_geography_line' and c.name = 'path';
 ----
-3 0101000020e6100000ebe2361ac05bc0bfc5feb27bf2c04940
+bytea
 
-# Test incremental UPDATE.
-system ok
-psql -c "UPDATE test_geography SET location = ST_SetSRID(ST_MakePoint(0, 0), 4326) WHERE id = 1;"
-
-query IT retry 10 backoff 1s
-select id, encode(location, 'hex') from test_geography where id = 1;
-----
-1 0101000020e610000000000000000000000000000000000000
-
-# Test incremental DELETE.
-system ok
-psql -c "DELETE FROM test_geography WHERE id = 2;"
-
-query I retry 10 backoff 1s
-select count(*) from test_geography where id = 2;
-----
-0
-
-# Test NULL geography.
-system ok
-psql -c "INSERT INTO test_geography VALUES (4, 'NullLocation', NULL);"
-
-query ITI retry 10 backoff 1s
-select id, name, location from test_geography where id = 4;
-----
-4 NullLocation NULL
-
-# Test geography[] backfill.
 query ITTT retry 10 backoff 1s
-select id, name, encode(locations[1], 'hex'), encode(locations[2], 'hex')
-from test_geography_array where id = 1;
+select
+    ours.id,
+    encode(ours.path, 'hex'),
+    upstream.upstream_hex,
+    encode(ours.path, 'hex') = upstream.upstream_hex
+from test_geography_line as ours
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, encode(path, ''hex'') as upstream_hex from test_geography_line where id = 1'
+    )
+) as upstream(id, upstream_hex) on ours.id = upstream.id
+where ours.id = 1;
 ----
-1 InitialRoute 0101000020e610000055c1a8a44ee855c00e4faf9465f04440 0101000020e6100000aaf1d24d628052c05e4bc8073d5b4440
+1 0102000020e61000000200000055c1a8a44ee855c00e4faf9465f04440aaf1d24d628052c05e4bc8073d5b4440 0102000020e61000000200000055c1a8a44ee855c00e4faf9465f04440aaf1d24d628052c05e4bc8073d5b4440 t
 
-# Test incremental INSERT into geography[].
+# Test: reject an incorrect explicit scalar schema
+system ok
+psql -c "
+    DROP TABLE IF EXISTS test_geography_invalid_mapping_upstream CASCADE;
+    CREATE TABLE test_geography_invalid_mapping_upstream (
+        id int PRIMARY KEY,
+        name varchar,
+        location geography(Point, 4326)
+    );
+"
+
+statement ok
+drop table if exists test_geography_invalid_mapping;
+
+statement error Incompatible data type of column location
+create table test_geography_invalid_mapping (
+    id int primary key,
+    name varchar,
+    location varchar
+) from geography_source table 'public.test_geography_invalid_mapping_upstream';
+
+# TODO: Enable this after explicit array type validation is implemented correctly.
+# statement ok
+# drop table if exists test_geography_array_invalid_mapping;
+#
+# statement error Incompatible data type of column locations
+# create table test_geography_array_invalid_mapping (
+#     id int primary key,
+#     name varchar,
+#     locations varchar[]
+# ) from geography_source table 'public.test_geography_array';
+
+# Test: automatic schema discovery maps geography correctly
+
+# Scalar geography is discovered as bytea.
+system ok
+psql -c "
+    DROP TABLE IF EXISTS test_geography_auto_discovery CASCADE;
+    CREATE TABLE test_geography_auto_discovery (
+        id int PRIMARY KEY,
+        location geography(Point, 4326)
+    );
+    INSERT INTO test_geography_auto_discovery VALUES
+        (1, ST_SetSRID(ST_MakePoint(-122.4194, 37.7749), 4326));
+"
+
+statement ok
+drop table if exists test_geography_auto_discovery_rw;
+
+statement ok
+create table test_geography_auto_discovery_rw (*)
+from geography_source table 'public.test_geography_auto_discovery';
+
+query T retry 10 backoff 1s
+select c.data_type
+from rw_catalog.rw_columns c
+join rw_catalog.rw_tables t on c.relation_id = t.id
+where t.name = 'test_geography_auto_discovery_rw' and c.name = 'location';
+----
+bytea
+
+query ITTT retry 10 backoff 1s
+select
+    ours.id,
+    encode(ours.location, 'hex'),
+    upstream.upstream_hex,
+    encode(ours.location, 'hex') = upstream.upstream_hex
+from test_geography_auto_discovery_rw as ours
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, encode(location, ''hex'') as upstream_hex from test_geography_auto_discovery where id = 1'
+    )
+) as upstream(id, upstream_hex) on ours.id = upstream.id
+where ours.id = 1;
+----
+1 0101000020e610000050fc1873d79a5ec0d0d556ec2fe34240 0101000020e610000050fc1873d79a5ec0d0d556ec2fe34240 t
+
+# Geography arrays are discovered as bytea[].
+system ok
+psql -c "
+    DROP TABLE IF EXISTS test_geography_array_auto_discovery CASCADE;
+    CREATE TABLE test_geography_array_auto_discovery (
+        id int PRIMARY KEY,
+        locations geography(Point, 4326)[]
+    );
+"
+
+statement ok
+drop table if exists test_geography_array_auto_discovery_rw;
+
+statement ok
+create table test_geography_array_auto_discovery_rw (*)
+from geography_source table 'public.test_geography_array_auto_discovery';
+
+query T retry 10 backoff 1s
+select c.data_type
+from rw_catalog.rw_columns c
+join rw_catalog.rw_tables t on c.relation_id = t.id
+where t.name = 'test_geography_array_auto_discovery_rw' and c.name = 'locations';
+----
+bytea[]
+
+# Test: incremental INSERT
+
+# Insert non-NULL and NULL scalar geography values.
+system ok
+psql -c "
+    INSERT INTO test_geography VALUES
+        (3, 'London', ST_SetSRID(ST_MakePoint(-0.1278, 51.5074), 4326)),
+        (4, 'NullLocation', NULL);
+"
+
+query ITTT retry 10 backoff 1s
+select
+    ours.id,
+    encode(ours.location, 'hex'),
+    upstream.upstream_hex,
+    encode(ours.location, 'hex') = upstream.upstream_hex
+from test_geography as ours
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, encode(location, ''hex'') as upstream_hex from test_geography where id = 3'
+    )
+) as upstream(id, upstream_hex) on ours.id = upstream.id
+where ours.id = 3;
+----
+3 0101000020e6100000ebe2361ac05bc0bfc5feb27bf2c04940 0101000020e6100000ebe2361ac05bc0bfc5feb27bf2c04940 t
+
+query ITTTT retry 10 backoff 1s
+select
+    ours.id,
+    ours.name,
+    ours.location is null,
+    upstream.upstream_is_null,
+    (ours.location is null) = upstream.upstream_is_null
+from test_geography as ours
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, location is null as upstream_is_null from test_geography where id = 4'
+    )
+) as upstream(id, upstream_is_null) on ours.id = upstream.id
+where ours.id = 4;
+----
+4 NullLocation t t t
+
+# Insert a geography array.
 system ok
 psql -c "
     INSERT INTO test_geography_array VALUES
@@ -148,13 +367,59 @@ psql -c "
         );
 "
 
-query ITTT retry 10 backoff 1s
-select id, name, encode(locations[1], 'hex'), encode(locations[2], 'hex')
-from test_geography_array where id = 2;
+query ITTTTTTT retry 10 backoff 1s
+select
+    ours.id,
+    ours.name,
+    encode(ours.locations[1], 'hex'),
+    upstream.upstream_hex_1,
+    encode(ours.locations[1], 'hex') = upstream.upstream_hex_1,
+    encode(ours.locations[2], 'hex'),
+    upstream.upstream_hex_2,
+    encode(ours.locations[2], 'hex') = upstream.upstream_hex_2
+from test_geography_array as ours
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, encode(locations[1], ''hex'') as upstream_hex_1, encode(locations[2], ''hex'') as upstream_hex_2 from test_geography_array where id = 2'
+    )
+) as upstream(id, upstream_hex_1, upstream_hex_2) on ours.id = upstream.id
+where ours.id = 2;
 ----
-2 InsertedRoute 0101000020e6100000ebe2361ac05bc0bfc5feb27bf2c04940 0101000020e610000050fc1873d79a5ec0d0d556ec2fe34240
+2 InsertedRoute 0101000020e6100000ebe2361ac05bc0bfc5feb27bf2c04940 0101000020e6100000ebe2361ac05bc0bfc5feb27bf2c04940 t 0101000020e610000050fc1873d79a5ec0d0d556ec2fe34240 0101000020e610000050fc1873d79a5ec0d0d556ec2fe34240 t
 
-# Test incremental UPDATE of geography[].
+# Test: incremental UPDATE
+
+# Update a scalar geography value.
+system ok
+psql -c "UPDATE test_geography SET location = ST_SetSRID(ST_MakePoint(0, 0), 4326) WHERE id = 1;"
+
+query ITTT retry 10 backoff 1s
+select
+    ours.id,
+    encode(ours.location, 'hex'),
+    upstream.upstream_hex,
+    encode(ours.location, 'hex') = upstream.upstream_hex
+from test_geography as ours
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, encode(location, ''hex'') as upstream_hex from test_geography where id = 1'
+    )
+) as upstream(id, upstream_hex) on ours.id = upstream.id
+where ours.id = 1;
+----
+1 0101000020e610000000000000000000000000000000000000 0101000020e610000000000000000000000000000000000000 t
+
+# Update a geography array.
 system ok
 psql -c "
     UPDATE test_geography_array
@@ -165,48 +430,114 @@ psql -c "
     WHERE id = 1;
 "
 
-query ITT retry 10 backoff 1s
-select id, encode(locations[1], 'hex'), encode(locations[2], 'hex')
-from test_geography_array where id = 1;
+query ITTTTTT retry 10 backoff 1s
+select
+    ours.id,
+    encode(ours.locations[1], 'hex'),
+    upstream.upstream_hex_1,
+    encode(ours.locations[1], 'hex') = upstream.upstream_hex_1,
+    encode(ours.locations[2], 'hex'),
+    upstream.upstream_hex_2,
+    encode(ours.locations[2], 'hex') = upstream.upstream_hex_2
+from test_geography_array as ours
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, encode(locations[1], ''hex'') as upstream_hex_1, encode(locations[2], ''hex'') as upstream_hex_2 from test_geography_array where id = 1'
+    )
+) as upstream(id, upstream_hex_1, upstream_hex_2) on ours.id = upstream.id
+where ours.id = 1;
 ----
-1 0101000020e610000000000000000000000000000000000000 0101000020e6100000a54e4013613f5ac0029a081b9ede4340
+1 0101000020e610000000000000000000000000000000000000 0101000020e610000000000000000000000000000000000000 t 0101000020e6100000a54e4013613f5ac0029a081b9ede4340 0101000020e6100000a54e4013613f5ac0029a081b9ede4340 t
 
-# Test incremental DELETE from geography[].
+# Test: incremental DELETE
+
+# Delete a scalar geography row.
+system ok
+psql -c "DELETE FROM test_geography WHERE id = 2;"
+
+query IIT retry 10 backoff 1s
+select
+    (select count(*) from test_geography where id = 2),
+    upstream.upstream_count,
+    (select count(*) from test_geography where id = 2) = upstream.upstream_count
+from (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select count(*)::int as upstream_count from test_geography where id = 2'
+    )
+) as upstream(upstream_count);
+----
+0 0 t
+
+# Delete a geography array row.
 system ok
 psql -c "DELETE FROM test_geography_array WHERE id = 2;"
 
-query I retry 10 backoff 1s
-select count(*) from test_geography_array where id = 2;
+query IIT retry 10 backoff 1s
+select
+    (select count(*) from test_geography_array where id = 2),
+    upstream.upstream_count,
+    (select count(*) from test_geography_array where id = 2) = upstream.upstream_count
+from (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select count(*)::int as upstream_count from test_geography_array where id = 2'
+    )
+) as upstream(upstream_count);
 ----
-0
+0 0 t
 
-# Test automatic schema discovery.
+# Test: automatic schema change
+system ok
+psql -c "
+    DROP TABLE IF EXISTS test_geography_schema_change CASCADE;
+    CREATE TABLE test_geography_schema_change (
+        id int PRIMARY KEY,
+        name varchar
+    );
+    INSERT INTO test_geography_schema_change VALUES (1, 'Before');
+"
+
 statement ok
-create table test_geography_auto_discovery_rw (*)
-from geography_source table 'public.test_geography_auto_discovery';
+drop table if exists test_geography_schema_change_rw;
 
-query T retry 10 backoff 1s
-select c.data_type
-from rw_catalog.rw_columns c
-join rw_catalog.rw_tables t on c.relation_id = t.id
-where t.name = 'test_geography_auto_discovery_rw' and c.name = 'location';
-----
-bytea
-
-query IT retry 10 backoff 1s
-select id, encode(location, 'hex') from test_geography_auto_discovery_rw where id = 1;
-----
-1 0101000020e610000050fc1873d79a5ec0d0d556ec2fe34240
-
-# Test automatic schema changes.
 statement ok
 create table test_geography_schema_change_rw (*)
 from geography_source table 'public.test_geography_schema_change';
 
-query IT retry 10 backoff 1s
-select id, name from test_geography_schema_change_rw where id = 1;
+query ITTT retry 10 backoff 1s
+select
+    ours.id,
+    ours.name,
+    upstream.upstream_name,
+    ours.name = upstream.upstream_name
+from test_geography_schema_change_rw as ours
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, name as upstream_name from test_geography_schema_change where id = 1'
+    )
+) as upstream(id, upstream_name) on ours.id = upstream.id
+where ours.id = 1;
 ----
-1 Before
+1 Before Before t
 
 system ok
 psql -c "
@@ -236,71 +567,88 @@ order by c.name;
 location bytea
 locations bytea[]
 
-query ITT retry 10 backoff 1s
-select id, location is null, locations is null
-from test_geography_schema_change_rw where id = 1;
-----
-1 t t
-
-query ITTT retry 10 backoff 1s
+query ITTTTTT retry 10 backoff 1s
 select
-    id,
-    encode(location, 'hex'),
-    encode(locations[1], 'hex'),
-    encode(locations[2], 'hex')
-from test_geography_schema_change_rw where id = 2;
+    ours.id,
+    ours.location is null,
+    upstream.upstream_location_is_null,
+    (ours.location is null) = upstream.upstream_location_is_null,
+    ours.locations is null,
+    upstream.upstream_locations_is_null,
+    (ours.locations is null) = upstream.upstream_locations_is_null
+from test_geography_schema_change_rw as ours
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, location is null as upstream_location_is_null, locations is null as upstream_locations_is_null from test_geography_schema_change where id = 1'
+    )
+) as upstream(id, upstream_location_is_null, upstream_locations_is_null)
+on ours.id = upstream.id
+where ours.id = 1;
 ----
-2 0101000020e6100000a54e4013613f5ac0029a081b9ede4340 0101000020e610000055c1a8a44ee855c00e4faf9465f04440 0101000020e6100000aaf1d24d628052c05e4bc8073d5b4440
+1 t t t t t t
 
-# Test a different geography type.
+query ITTTTTTTTT retry 10 backoff 1s
+select
+    ours.id,
+    encode(ours.location, 'hex'),
+    upstream.upstream_location_hex,
+    encode(ours.location, 'hex') = upstream.upstream_location_hex,
+    encode(ours.locations[1], 'hex'),
+    upstream.upstream_location_1_hex,
+    encode(ours.locations[1], 'hex') = upstream.upstream_location_1_hex,
+    encode(ours.locations[2], 'hex'),
+    upstream.upstream_location_2_hex,
+    encode(ours.locations[2], 'hex') = upstream.upstream_location_2_hex
+from test_geography_schema_change_rw as ours
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, encode(location, ''hex'') as upstream_location_hex, encode(locations[1], ''hex'') as upstream_location_1_hex, encode(locations[2], ''hex'') as upstream_location_2_hex from test_geography_schema_change where id = 2'
+    )
+) as upstream(id, upstream_location_hex, upstream_location_1_hex, upstream_location_2_hex)
+on ours.id = upstream.id
+where ours.id = 2;
+----
+2 0101000020e6100000a54e4013613f5ac0029a081b9ede4340 0101000020e6100000a54e4013613f5ac0029a081b9ede4340 t 0101000020e610000055c1a8a44ee855c00e4faf9465f04440 0101000020e610000055c1a8a44ee855c00e4faf9465f04440 t 0101000020e6100000aaf1d24d628052c05e4bc8073d5b4440 0101000020e6100000aaf1d24d628052c05e4bc8073d5b4440 t
+
+# Teardown
+statement ok
+drop table if exists test_geography_line;
+
+statement ok
+drop table if exists test_geography;
+
+statement ok
+drop table if exists test_geography_array;
+
+statement ok
+drop table if exists test_geography_auto_discovery_rw;
+
+statement ok
+drop table if exists test_geography_array_auto_discovery_rw;
+
+statement ok
+drop table if exists test_geography_schema_change_rw;
+
+statement ok
+drop source if exists geography_source;
+
 system ok
 psql -c "
-    DROP TABLE IF EXISTS test_geography_line CASCADE;
-    CREATE TABLE test_geography_line (
-        id int PRIMARY KEY,
-        name varchar,
-        path geography(LineString, 4326)
-    );
-    INSERT INTO test_geography_line VALUES
-        (1, 'Route1', ST_SetSRID(ST_MakeLine(ST_MakePoint(-87.6298, 41.8781), ST_MakePoint(-74.0060, 40.7128)), 4326));
-"
-
-statement ok
-create table test_geography_line (
-    id int primary key,
-    name varchar,
-    path bytea
-) from geography_source table 'public.test_geography_line';
-
-query IT retry 10 backoff 1s
-select id, encode(path, 'hex') from test_geography_line where id = 1;
-----
-1 0102000020e61000000200000055c1a8a44ee855c00e4faf9465f04440aaf1d24d628052c05e4bc8073d5b4440
-
-# Clean up.
-statement ok
-drop table test_geography_line;
-
-statement ok
-drop table test_geography;
-
-statement ok
-drop table test_geography_array;
-
-statement ok
-drop table test_geography_auto_discovery_rw;
-
-statement ok
-drop table test_geography_schema_change_rw;
-
-statement ok
-drop source geography_source;
-
-system ok
-psql -c "
-    DROP TABLE IF EXISTS test_geography CASCADE;
-    DROP TABLE IF EXISTS test_geography_array CASCADE;
-    DROP TABLE IF EXISTS test_geography_auto_discovery CASCADE;
-    DROP TABLE IF EXISTS test_geography_schema_change CASCADE;
-    DROP TABLE IF EXISTS test_geography_line CASCADE;
+    DROP TABLE IF EXISTS test_geography;
+    DROP TABLE IF EXISTS test_geography_array;
+    DROP TABLE IF EXISTS test_geography_line;
+    DROP TABLE IF EXISTS test_geography_invalid_mapping_upstream;
+    DROP TABLE IF EXISTS test_geography_auto_discovery;
+    DROP TABLE IF EXISTS test_geography_array_auto_discovery;
+    DROP TABLE IF EXISTS test_geography_schema_change;
 "
