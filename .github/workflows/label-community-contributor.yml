@@ -1,0 +1,59 @@
+name: Label community pull requests
+
+on:
+  pull_request_target:
+    types: [opened]
+
+permissions:
+  issues: write
+  pull-requests: write
+
+jobs:
+  label-community-contributor:
+    # Only label unaffiliated users and contributors, not owners, members, or collaborators.
+    if: >-
+      github.event.pull_request.user.type == 'User' &&
+      contains(
+        fromJSON('["NONE", "CONTRIBUTOR", "FIRST_TIMER", "FIRST_TIME_CONTRIBUTOR"]'),
+        github.event.pull_request.author_association
+      )
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add community label
+        uses: actions/github-script@v9
+        with:
+          script: |
+            const label = {
+              name: "community",
+              color: "0e8a16",
+              description: "Pull request from an external community contributor",
+            };
+
+            try {
+              await github.rest.issues.getLabel({
+                ...context.repo,
+                name: label.name,
+              });
+            } catch (error) {
+              if (error.status !== 404) {
+                throw error;
+              }
+
+              try {
+                await github.rest.issues.createLabel({
+                  ...context.repo,
+                  ...label,
+                });
+              } catch (createError) {
+                // Another workflow run may have created the label concurrently.
+                if (createError.status !== 422) {
+                  throw createError;
+                }
+              }
+            }
+
+            await github.rest.issues.addLabels({
+              ...context.repo,
+              issue_number: context.issue.number,
+              labels: [label.name],
+            });

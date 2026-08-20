@@ -1781,13 +1781,6 @@ fn check_ban_alter_table_operation_for_iceberg_engine_table(
                 table_name
             );
         }
-        AlterTableOperation::SetSchema { .. } => {
-            bail!(
-                "ALTER TABLE SET SCHEMA is not supported for iceberg table: {}.{}",
-                schema_name,
-                table_name
-            );
-        }
         AlterTableOperation::RefreshSchema => {
             bail!(
                 "ALTER TABLE REFRESH SCHEMA is not supported for iceberg table: {}.{}",

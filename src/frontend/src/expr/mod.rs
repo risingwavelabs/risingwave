@@ -17,7 +17,9 @@ use fixedbitset::FixedBitSet;
 use futures::FutureExt;
 use paste::paste;
 use risingwave_common::array::ListValue;
-use risingwave_common::types::{DataType, Datum, JsonbVal, MapType, Scalar, ScalarImpl};
+use risingwave_common::types::{
+    DataType, Datum, JsonbVal, MapType, Scalar, ScalarImpl, ToOwnedDatum,
+};
 use risingwave_expr::aggregate::PbAggKind;
 use risingwave_expr::expr::build_from_prost;
 use risingwave_pb::expr::expr_node::RexNode;
@@ -937,6 +939,52 @@ impl ExprImpl {
             }
 
             Some((input_ref, list.to_vec()))
+        } else {
+            None
+        }
+    }
+
+    pub fn as_some_eq_const_list(&self) -> Option<(InputRef, Vec<ExprImpl>)> {
+        if let ExprImpl::FunctionCall(function_call) = self
+            && function_call.func_type() == ExprType::Some
+        {
+            let (_, inner) = function_call.clone().decompose_as_unary();
+            let ExprImpl::FunctionCall(inner_call) = inner else {
+                return None;
+            };
+            if inner_call.func_type() != ExprType::Equal {
+                return None;
+            }
+
+            let (_, left, right) = inner_call.decompose_as_binary();
+            let (input_ref, list_expr) = match (left, right) {
+                (ExprImpl::InputRef(input_ref), list_expr) if list_expr.is_const() => {
+                    (input_ref.as_ref().clone(), list_expr)
+                }
+                (list_expr, ExprImpl::InputRef(input_ref)) if list_expr.is_const() => {
+                    (input_ref.as_ref().clone(), list_expr)
+                }
+                _ => return None,
+            };
+
+            let literal = list_expr.as_literal()?;
+            let DataType::List(list_type) = literal.return_type() else {
+                return None;
+            };
+            let list = literal
+                .get_data()
+                .as_ref()?
+                .as_list()
+                .iter()
+                .map(|datum| {
+                    ExprImpl::Literal(Box::new(Literal::new(
+                        datum.to_owned_datum(),
+                        list_type.elem().clone(),
+                    )))
+                })
+                .collect();
+
+            Some((input_ref, list))
         } else {
             None
         }

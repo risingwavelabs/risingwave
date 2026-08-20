@@ -146,8 +146,10 @@ impl HummockManager {
                         .clone(),
                     )
                 } else {
-                    let compaction_group_manager_guard =
-                        self.compaction_group_manager.write().await;
+                    let compaction_group_manager_guard = self
+                        .compaction_group_manager
+                        .write_with_process_name("commit_epoch")
+                        .await;
                     let new_compaction_group_config =
                         compaction_group_manager_guard.default_compaction_config();
                     compaction_group_config = Some(new_compaction_group_config.clone());
@@ -194,7 +196,10 @@ impl HummockManager {
                 group_id_to_config.insert(*cg_id, compaction_group);
             }
         } else {
-            let compaction_group_manager = self.compaction_group_manager.read().await;
+            let compaction_group_manager = self
+                .compaction_group_manager
+                .read_with_process_name("commit_epoch")
+                .await;
             for cg_id in &modified_compaction_groups {
                 let compaction_group = compaction_group_manager
                     .try_get_compaction_group_config(*cg_id)
