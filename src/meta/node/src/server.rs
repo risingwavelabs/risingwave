@@ -135,7 +135,7 @@ pub async fn rpc_serve(
     let meta_store_impl = SqlMetaStore::connect(meta_store_backend.clone()).await?;
 
     let election_client = match meta_store_backend {
-        MetaStoreBackend::Mem => {
+        MetaStoreBackend::Mem { .. } => {
             // Use a dummy election client.
             Arc::new(DummyElectionClient::new(
                 address_info.advertise_addr.clone(),

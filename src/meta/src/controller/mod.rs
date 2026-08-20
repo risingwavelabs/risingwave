@@ -71,6 +71,13 @@ impl SqlMetaStore {
 
         #[easy_ext::ext]
         impl ConnectOptions {
+            fn configure_slow_query_log(&mut self, threshold_ms: u64) -> &mut Self {
+                self.sqlx_slow_statements_logging_settings(
+                    tracing::log::LevelFilter::Warn,
+                    Duration::from_millis(threshold_ms),
+                )
+            }
+
             /// Apply common settings for `SQLite` connections.
             fn sqlite_common(&mut self) -> &mut Self {
                 self
@@ -87,12 +94,13 @@ impl SqlMetaStore {
         }
 
         Ok(match backend {
-            MetaStoreBackend::Mem => {
+            MetaStoreBackend::Mem { config } => {
                 const IN_MEMORY_STORE: &str = "sqlite::memory:";
 
                 let mut options = ConnectOptions::new(IN_MEMORY_STORE);
 
                 options
+                    .configure_slow_query_log(config.slow_query_threshold_ms)
                     .sqlite_common()
                     // Releasing the connection to in-memory SQLite database is unacceptable
                     // because it will clear the database. Set a large enough timeout to prevent it.
@@ -110,6 +118,7 @@ impl SqlMetaStore {
             MetaStoreBackend::Sql { endpoint, config } => {
                 let mut options = ConnectOptions::new(endpoint.clone());
                 options
+                    .configure_slow_query_log(config.slow_query_threshold_ms)
                     .max_connections(config.max_connections)
                     .min_connections(config.min_connections)
                     .connect_timeout(Duration::from_secs(config.connection_timeout_sec))
@@ -133,7 +142,11 @@ impl SqlMetaStore {
 
     #[cfg(any(test, feature = "test"))]
     pub async fn for_test() -> Self {
-        let this = Self::connect(MetaStoreBackend::Mem).await.unwrap();
+        let this = Self::connect(MetaStoreBackend::Mem {
+            config: Default::default(),
+        })
+        .await
+        .unwrap();
         Migrator::up(&this.conn, None).await.unwrap();
         this
     }

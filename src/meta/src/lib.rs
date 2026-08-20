@@ -52,7 +52,9 @@ use crate::manager::MetaOpts;
 
 #[derive(Debug, Clone)]
 pub enum MetaStoreBackend {
-    Mem,
+    Mem {
+        config: MetaStoreConfig,
+    },
     Sql {
         endpoint: String,
         config: MetaStoreConfig,
