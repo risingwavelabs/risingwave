@@ -474,8 +474,9 @@ pub fn is_pure(expr: &ExprImpl) -> bool {
 ///
 /// This is the inverse of [`is_pure`]. It returns `true` when any node is semantically impure or
 /// when a UDF has `skip_materializing_eval_result = false`. In the latter case, streaming
-/// projection planning materializes the complete top-level expression on retract and upsert
-/// inputs so the evaluated result can be preserved.
+/// projection planning materializes the complete top-level expression on retract inputs so the
+/// evaluated result can be preserved. UPSERT projects bypass result materialization independently
+/// of this classification.
 ///
 /// Consequently, `true` can describe a semantically pure UDF that merely requests result caching;
 /// it does not necessarily mean that the UDF is non-deterministic or has side effects.

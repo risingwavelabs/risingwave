@@ -423,9 +423,9 @@ mod tests {
         assert!(plan.contains("StreamProject"), "{plan}");
         assert!(!plan.contains("StreamMaterializedExprs"), "{plan}");
 
-        // Skipping UPSERT expression materialization is safe because a sink cannot use a computed
-        // impure output as its downstream primary key. Such a key does not match the one derived
-        // from the internal stream and is rejected later by sink planning.
+        // By default, sink planning rejects a computed impure output as the downstream primary key
+        // because it does not match the key derived from the internal stream. The explicit unsafe
+        // `streaming_unsafe_allow_upsert_sink_pk_mismatch` setting can bypass that validation.
         let error = frontend
             .run_sql(
                 "create sink computed_key_sink into computed_key_output as \
