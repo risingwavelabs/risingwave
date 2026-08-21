@@ -14,6 +14,9 @@
 
 //! bind columns from external schema
 
+use risingwave_connector::schema::pulsar_schema_registry::{
+    PulsarSchemaRegistryConfig, PulsarSchemaSupplier, PulsarSchemaType,
+};
 use risingwave_connector::source::ADBC_SNOWFLAKE_CONNECTOR;
 
 use super::*;
@@ -63,6 +66,84 @@ feature_gated_function!(
         with_properties: &WithOptionsSecResolved,
     ) -> anyhow::Result<Vec<ColumnCatalog>>
 );
+
+fn pulsar_schema_type_to_encode(schema_type: PulsarSchemaType) -> Result<Encode> {
+    match schema_type {
+        PulsarSchemaType::Avro => Ok(Encode::Avro),
+        PulsarSchemaType::Unsupported(schema_type) => Err(RwError::from(ProtocolError(format!(
+            "Pulsar schema type `{schema_type}` is not supported by `ENCODE AUTO`; currently only `AVRO` is supported"
+        )))),
+    }
+}
+
+/// Resolve the transient `AUTO` encoding through the connector-specific schema backend.
+/// Returns `None` when the statement already contains a concrete encoding.
+pub(super) async fn resolve_auto_encode(
+    session: &SessionImpl,
+    format_encode: &FormatEncodeOptions,
+    source_options: &WithOptions,
+) -> Result<Option<Encode>> {
+    if format_encode.row_encode != Encode::Auto {
+        return Ok(None);
+    }
+    if format_encode.format != Format::Plain {
+        return Err(RwError::from(ProtocolError(
+            "ENCODE AUTO is only supported with FORMAT PLAIN".to_owned(),
+        )));
+    }
+    if !source_options.is_pulsar_connector() {
+        return Err(RwError::from(ProtocolError(
+            "ENCODE AUTO is only supported for Pulsar sources".to_owned(),
+        )));
+    }
+
+    Ok(Some(
+        resolve_pulsar_auto_encode(session, format_encode, source_options).await?,
+    ))
+}
+
+async fn resolve_pulsar_auto_encode(
+    session: &SessionImpl,
+    format_encode: &FormatEncodeOptions,
+    source_options: &WithOptions,
+) -> Result<Encode> {
+    let (resolved_source_options, connection_type, _) = resolve_connection_ref_and_secret_ref(
+        source_options.clone(),
+        session,
+        Some(TelemetryDatabaseObject::Source),
+    )?;
+    if !SOURCE_ALLOWED_CONNECTION_CONNECTOR.contains(&connection_type) {
+        return Err(RwError::from(ProtocolError(format!(
+            "connection type {:?} is not allowed, allowed types: {:?}",
+            connection_type, SOURCE_ALLOWED_CONNECTION_CONNECTOR
+        ))));
+    }
+    let (source_options, source_secret_refs) = resolved_source_options.into_parts();
+    let source_options =
+        LocalSecretManager::global().fill_secrets(source_options, source_secret_refs)?;
+
+    let (resolved_format_options, connection_type, _) = resolve_connection_ref_and_secret_ref(
+        WithOptions::try_from(format_encode.row_options())?,
+        session,
+        Some(TelemetryDatabaseObject::Source),
+    )?;
+    ensure_connection_type_allowed(connection_type, &SOURCE_ALLOWED_CONNECTION_SCHEMA_REGISTRY)?;
+    let (format_options, format_secret_refs) = resolved_format_options.into_parts();
+    let format_options =
+        LocalSecretManager::global().fill_secrets(format_options, format_secret_refs)?;
+
+    let registry_url = format_options.get("schema.registry").ok_or_else(|| {
+        RwError::from(ProtocolError(
+            "missing `schema.registry` for Pulsar ENCODE AUTO".to_owned(),
+        ))
+    })?;
+    let config =
+        PulsarSchemaRegistryConfig::new(registry_url.clone(), &format_options, &source_options)?;
+    let schema = PulsarSchemaSupplier::new(config)?
+        .get_latest_schema()
+        .await?;
+    pulsar_schema_type_to_encode(schema.schema_type())
+}
 
 /// Resolves the schema of the source from external schema file.
 /// See <https://docs.risingwave.com/sql/commands/sql-create-source> for more information.
@@ -433,6 +514,7 @@ fn format_to_prost(format: &Format) -> FormatType {
 }
 fn row_encode_to_prost(row_encode: &Encode) -> EncodeType {
     match row_encode {
+        Encode::Auto => unreachable!("ENCODE AUTO must be resolved before source binding"),
         Encode::Native => EncodeType::Native,
         Encode::Json => EncodeType::Json,
         Encode::Avro => EncodeType::Avro,
@@ -481,5 +563,25 @@ fn get_name_strategy_or_default(name_strategy: Option<AstString>) -> Result<Opti
         Some(name) => Ok(Some(name_strategy_from_str(name.0.as_str())
             .ok_or_else(|| RwError::from(ProtocolError(format!("\
             expect strategy name in topic_name_strategy, record_name_strategy and topic_record_name_strategy, but got {}", name))))? as i32)),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_pulsar_schema_type_to_encode() {
+        assert_eq!(
+            pulsar_schema_type_to_encode(PulsarSchemaType::Avro).unwrap(),
+            Encode::Avro
+        );
+
+        let error = pulsar_schema_type_to_encode(PulsarSchemaType::Unsupported(
+            "PROTOBUF_NATIVE".to_owned(),
+        ))
+        .unwrap_err()
+        .to_string();
+        assert!(error.contains("currently only `AVRO` is supported"));
     }
 }

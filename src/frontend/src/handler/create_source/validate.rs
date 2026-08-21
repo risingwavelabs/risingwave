@@ -123,6 +123,18 @@ fn validate_license(connector: &str) -> Result<()> {
     Ok(())
 }
 
+fn uses_schema_registry(format_encode: &FormatEncodeOptions) -> Result<bool> {
+    match (&format_encode.format, &format_encode.row_encode) {
+        (Format::Plain, Encode::Protobuf) | (Format::Plain, Encode::Avro) => {
+            let mut options = WithOptions::try_from(format_encode.row_options())?;
+            let (_, use_schema_registry) = get_schema_location(options.inner_mut())?;
+            Ok(use_schema_registry)
+        }
+        (Format::Debezium, Encode::Avro) => Ok(true),
+        (_, _) => Ok(false),
+    }
+}
+
 pub fn validate_compatibility(
     format_encode: &FormatEncodeOptions,
     props: &mut BTreeMap<String, String>,
@@ -157,22 +169,14 @@ pub fn validate_compatibility(
         })?;
 
     validate_license(&connector)?;
-    if connector != KAFKA_CONNECTOR {
-        let res = match (&format_encode.format, &format_encode.row_encode) {
-            (Format::Plain, Encode::Protobuf) | (Format::Plain, Encode::Avro) => {
-                let mut options = WithOptions::try_from(format_encode.row_options())?;
-                let (_, use_schema_registry) = get_schema_location(options.inner_mut())?;
-                use_schema_registry
-            }
-            (Format::Debezium, Encode::Avro) => true,
-            (_, _) => false,
-        };
-        if res {
-            return Err(RwError::from(ProtocolError(format!(
-                "The {} must be kafka when schema registry is used",
-                UPSTREAM_SOURCE_KEY
-            ))));
-        }
+    if connector != KAFKA_CONNECTOR
+        && connector != PULSAR_CONNECTOR
+        && uses_schema_registry(format_encode)?
+    {
+        return Err(RwError::from(ProtocolError(format!(
+            "The {} must be kafka or pulsar when schema registry is used",
+            UPSTREAM_SOURCE_KEY
+        ))));
     }
 
     let compatible_encodes = compatible_formats
