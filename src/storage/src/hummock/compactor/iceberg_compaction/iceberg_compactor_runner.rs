@@ -12,16 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::fmt::Debug;
 use std::sync::{Arc, LazyLock};
 
 use derive_builder::Builder;
-use iceberg::spec::MAIN_BRANCH;
+use iceberg::spec::{DataContentType, DataFile, MAIN_BRANCH};
+use iceberg::table::Table;
 use iceberg::{Catalog, TableIdent};
 use iceberg_compaction_core::compaction::{
-    AutoCompactionPlanner, CommitConsistencyParams, CommitManagerRetryConfig, CompactionBuilder,
-    CompactionPlan, CompactionPlanner, CompactionResult, RewriteResult,
+    AutoCompactionPlanner, CommitConsistencyParams, CommitManagerRetryConfig, Compaction,
+    CompactionBuilder, CompactionPlan, CompactionPlanner, CompactionResult, RewriteResult,
 };
 use iceberg_compaction_core::config::{
     AutoCompactionConfig, AutoCompactionConfigBuilder, CompactionExecutionConfigBuilder,
@@ -29,6 +30,7 @@ use iceberg_compaction_core::config::{
     FullCompactionConfigBuilder, GroupFilters, SmallFilesConfigBuilder,
 };
 use iceberg_compaction_core::executor::RewriteFilesStat;
+use iceberg_compaction_core::file_selection::FileGroup;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use parquet_58::file::properties::WriterProperties;
 use risingwave_common::config::storage::default::storage::{
@@ -103,6 +105,49 @@ enum IcebergTaskPlanningConfig {
     Explicit(CompactionPlanningConfig),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(crate) enum IcebergCompactionKind {
+    Auto,
+    SmallFiles,
+    Full,
+    FilesWithDelete,
+    CopyOnWrite,
+}
+
+impl IcebergCompactionKind {
+    fn resolve(task_type: TaskType, iceberg_config: &IcebergConfig) -> HummockResult<Self> {
+        if task_type == TaskType::Full
+            && should_enable_iceberg_cow(iceberg_config.r#type.as_str(), iceberg_config.write_mode)
+        {
+            return Ok(Self::CopyOnWrite);
+        }
+
+        match task_type {
+            TaskType::Auto => Ok(Self::Auto),
+            TaskType::SmallFiles => Ok(Self::SmallFiles),
+            TaskType::Full => Ok(Self::Full),
+            TaskType::FilesWithDelete => Ok(Self::FilesWithDelete),
+            _ => Err(HummockError::compaction_executor(anyhow::anyhow!(
+                "Unsupported task type in iceberg compaction task: {task_type:?}"
+            ))),
+        }
+    }
+
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::SmallFiles => "small-files",
+            Self::Full => "full",
+            Self::FilesWithDelete => "files-with-delete",
+            Self::CopyOnWrite => "copy-on-write",
+        }
+    }
+
+    fn is_copy_on_write(self) -> bool {
+        self == Self::CopyOnWrite
+    }
+}
+
 impl Debug for IcebergCompactionTaskStatistics {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("IcebergCompactionTaskStatistics")
@@ -130,7 +175,7 @@ pub struct IcebergCompactionPlanRunner {
     config: IcebergCompactorRunnerConfig,
     metrics: Arc<CompactorMetrics>,
 
-    pub task_type: TaskType,
+    compaction_kind: IcebergCompactionKind,
     branch: String,
     compaction_plan: CompactionPlan,
     /// When true, run the rewrite without committing and report the result back to meta for
@@ -143,10 +188,14 @@ impl IcebergCompactionPlanRunner {
         self.compaction_plan.recommended_executor_parallelism() as u32
     }
 
+    pub(crate) fn compaction_kind(&self) -> IcebergCompactionKind {
+        self.compaction_kind
+    }
+
     /// Returns a human-readable identifier for this plan, used for logging and debugging.
     ///
-    /// The identifier includes catalog, table, task-type, and plan-index to provide context
-    /// in logs. Format: `{catalog}-{table}-{task_type}-plan-{index}`
+    /// The identifier includes catalog, table, compaction kind, and plan-index to provide context
+    /// in logs. Format: `{catalog}-{table}-{compaction_kind}-plan-{index}`
     ///
     /// # Note
     ///
@@ -158,24 +207,17 @@ impl IcebergCompactionPlanRunner {
     /// ```text
     /// catalog: "glue"
     /// table: "my_db.my_table"
-    /// task_type: SmallFiles
+    /// compaction_kind: SmallFiles
     /// plan_index: 0
     ///
     /// → unique_ident: "glue-my_db.my_table-small-plan-0"
     /// ```
     pub fn unique_ident(&self) -> String {
-        let task_type_str = match self.task_type {
-            TaskType::Auto => "auto",
-            TaskType::SmallFiles => "small-files",
-            TaskType::Full => "full",
-            TaskType::FilesWithDelete => "files-with-delete",
-            _ => "unknown",
-        };
         format!(
             "{}-{}-{}-plan-{}",
             self.iceberg_config.catalog_name(),
             self.table_ident,
-            task_type_str,
+            self.compaction_kind.as_str(),
             self.plan_index
         )
     }
@@ -195,7 +237,7 @@ impl IcebergCompactionPlanRunner {
         let task_id = self.task_id;
         let sink_id = self.sink_id;
         let plan_index = self.plan_index;
-        let task_type = self.task_type;
+        let compaction_kind = self.compaction_kind;
         let table_ident = self.table_ident.clone();
         let branch = self.branch.clone();
         let unique_ident = self.unique_ident();
@@ -209,7 +251,7 @@ impl IcebergCompactionPlanRunner {
             self.iceberg_config,
             self.config,
             self.metrics,
-            self.task_type,
+            self.compaction_kind,
             self.branch,
             self.compaction_plan,
             self.pk_index_coordinated,
@@ -223,7 +265,7 @@ impl IcebergCompactionPlanRunner {
                     task_id = %task_id,
                     sink_id = sink_id,
                     plan_index = plan_index,
-                    task_type = ?task_type,
+                    task_type = ?compaction_kind,
                     table = %table_ident,
                     branch = %branch,
                     unique_ident = %unique_ident,
@@ -240,7 +282,7 @@ impl IcebergCompactionPlanRunner {
                             task_id = %task_id,
                             sink_id = sink_id,
                             plan_index = plan_index,
-                            task_type = ?task_type,
+                            task_type = ?compaction_kind,
                             table = %table_ident,
                             branch = %branch,
                             unique_ident = %unique_ident,
@@ -257,7 +299,7 @@ impl IcebergCompactionPlanRunner {
                             task_id = %task_id,
                             sink_id = sink_id,
                             plan_index = plan_index,
-                            task_type = ?task_type,
+                            task_type = ?compaction_kind,
                             table = %table_ident,
                             branch = %branch,
                             unique_ident = %unique_ident,
@@ -279,18 +321,34 @@ impl IcebergCompactionPlanRunner {
         iceberg_config: IcebergConfig,
         config: IcebergCompactorRunnerConfig,
         metrics: Arc<CompactorMetrics>,
-        task_type: TaskType,
+        compaction_kind: IcebergCompactionKind,
         branch: String,
         compaction_plan: CompactionPlan,
         pk_index_coordinated: bool,
     ) -> HummockResult<(RewriteFilesStat, Option<PkIndexCompactionResult>)> {
+        let retry_config = CommitManagerRetryConfig::default();
+        let compaction = CompactionBuilder::new(catalog.clone(), table_ident.clone())
+            .with_catalog_name(iceberg_config.catalog_name())
+            .with_executor_type(iceberg_compaction_core::executor::ExecutorType::DataFusion)
+            .with_registry(ICEBERG_COMPACTION_METRICS_REGISTRY.clone())
+            .with_retry_config(retry_config)
+            .with_to_branch(branch.clone())
+            .build();
+
         if !compaction_plan.has_files() {
+            if compaction_kind.is_copy_on_write() {
+                let table = catalog
+                    .load_table(&table_ident)
+                    .await
+                    .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+                publish_cow_branch_to_main(&compaction, &table, &branch).await?;
+            }
             tracing::info!(
                 iceberg_component = "compaction_worker",
                 iceberg_operation = "plan_compaction",
                 task_id = %task_id,
                 plan_index,
-                task_type = ?task_type,
+                task_type = ?compaction_kind,
                 table = %table_ident,
                 branch = %branch,
                 "iceberg_compaction_plan_skipped_empty",
@@ -327,7 +385,7 @@ impl IcebergCompactionPlanRunner {
             iceberg_operation = "execute_plan",
             task_id = %task_id,
             plan_index = plan_index,
-            task_type = ?task_type,
+            task_type = ?compaction_kind,
             table = %table_ident,
             branch = %branch,
             input_parallelism = compaction_plan.recommended_executor_parallelism(),
@@ -335,15 +393,6 @@ impl IcebergCompactionPlanRunner {
             statistics = ?statistics,
             "iceberg_compaction_plan_started",
         );
-
-        let retry_config = CommitManagerRetryConfig::default();
-        let compaction = CompactionBuilder::new(catalog.clone(), table_ident.clone())
-            .with_catalog_name(iceberg_config.catalog_name())
-            .with_executor_type(iceberg_compaction_core::executor::ExecutorType::DataFusion)
-            .with_registry(ICEBERG_COMPACTION_METRICS_REGISTRY.clone())
-            .with_retry_config(retry_config)
-            .with_to_branch(branch.clone())
-            .build();
 
         metrics.compact_task_pending_num.inc();
         let input_parallelism = compaction_plan.recommended_executor_parallelism() as u32;
@@ -413,86 +462,119 @@ impl IcebergCompactionPlanRunner {
                 ))
             })?;
 
-        let CompactionResult {
-            data_files,
-            stats,
-            table,
-        } = compaction_result;
+        let CompactionResult { stats, table, .. } = compaction_result;
 
         if let Some(committed_table) = table
-            && should_enable_iceberg_cow(iceberg_config.r#type.as_str(), iceberg_config.write_mode)
+            && compaction_kind.is_copy_on_write()
         {
-            let ingestion_branch =
-                commit_branch(iceberg_config.r#type.as_str(), iceberg_config.write_mode);
-
-            // Overwrite Main branch
-            let consistency_params = CommitConsistencyParams {
-                starting_snapshot_id: committed_table
-                    .metadata()
-                    .snapshot_for_ref(ingestion_branch.as_str())
-                    .ok_or(HummockError::compaction_executor(anyhow::anyhow!(
-                        "Don't find current_snapshot for ingestion_branch {}",
-                        ingestion_branch
-                    )))?
-                    .snapshot_id(),
-                use_starting_sequence_number: true,
-                basic_schema_id: committed_table.metadata().current_schema().schema_id(),
-            };
-
-            let commit_manager = compaction.build_commit_manager(consistency_params);
-
-            let input_files = {
-                let mut input_files = vec![];
-                if let Some(snapshot) = committed_table.metadata().snapshot_for_ref(MAIN_BRANCH) {
-                    let manifest_list = committed_table
-                        .object_cache()
-                        .get_manifest_list(snapshot, &committed_table.metadata_ref())
-                        .await
-                        .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-
-                    for manifest_file in manifest_list
-                        .entries()
-                        .iter()
-                        .filter(|entry| entry.has_added_files() || entry.has_existing_files())
-                    {
-                        let manifest = manifest_file
-                            .load_manifest(committed_table.file_io())
-                            .await
-                            .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-                        let (entry, _) = manifest.into_parts();
-                        for i in entry {
-                            match i.content_type() {
-                                iceberg::spec::DataContentType::Data => {
-                                    input_files.push(i.data_file().clone());
-                                }
-                                iceberg::spec::DataContentType::EqualityDeletes => {
-                                    unreachable!(
-                                        "Equality deletes are not supported in main branch"
-                                    );
-                                }
-                                iceberg::spec::DataContentType::PositionDeletes => {
-                                    unreachable!(
-                                        "Position deletes are not supported in main branch"
-                                    );
-                                }
-                            }
-                        }
-                    }
-
-                    input_files
-                } else {
-                    vec![]
-                }
-            };
-
-            let _new_table = commit_manager
-                .overwrite_files(data_files, input_files, MAIN_BRANCH)
-                .await
-                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+            publish_cow_branch_to_main(&compaction, &committed_table, &branch).await?;
         }
 
         Ok((stats, None))
     }
+}
+
+async fn live_data_files_for_branch(table: &Table, branch: &str) -> HummockResult<Vec<DataFile>> {
+    let Some(snapshot) = table.metadata().snapshot_for_ref(branch) else {
+        return Ok(vec![]);
+    };
+
+    let manifest_list = table
+        .object_cache()
+        .get_manifest_list(snapshot, &table.metadata_ref())
+        .await
+        .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+    let mut data_files = vec![];
+
+    for manifest_file in manifest_list
+        .entries()
+        .iter()
+        .filter(|entry| entry.has_added_files() || entry.has_existing_files())
+    {
+        let manifest = manifest_file
+            .load_manifest(table.file_io())
+            .await
+            .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+        let (entries, _) = manifest.into_parts();
+        data_files.extend(
+            entries
+                .into_iter()
+                .filter(|entry| entry.is_alive())
+                .filter(|entry| entry.content_type() == DataContentType::Data)
+                .map(|entry| entry.data_file().clone()),
+        );
+    }
+
+    Ok(data_files)
+}
+
+fn diff_data_files(
+    source_files: Vec<DataFile>,
+    target_files: Vec<DataFile>,
+) -> (Vec<DataFile>, Vec<DataFile>) {
+    let source_paths = source_files
+        .iter()
+        .map(|file| file.file_path().to_owned())
+        .collect::<HashSet<_>>();
+    let target_paths = target_files
+        .iter()
+        .map(|file| file.file_path().to_owned())
+        .collect::<HashSet<_>>();
+
+    let added_files = source_files
+        .into_iter()
+        .filter(|file| !target_paths.contains(file.file_path()))
+        .collect();
+    let deleted_files = target_files
+        .into_iter()
+        .filter(|file| !source_paths.contains(file.file_path()))
+        .collect();
+    (added_files, deleted_files)
+}
+
+async fn publish_cow_branch_to_main(
+    compaction: &Compaction,
+    table: &Table,
+    ingestion_branch: &str,
+) -> HummockResult<()> {
+    let ingestion_snapshot = table
+        .metadata()
+        .snapshot_for_ref(ingestion_branch)
+        .ok_or_else(|| {
+            HummockError::compaction_executor(anyhow::anyhow!(
+                "No current snapshot found for COW ingestion branch {ingestion_branch}"
+            ))
+        })?;
+    let ingestion_files = live_data_files_for_branch(table, ingestion_branch).await?;
+    let main_files = live_data_files_for_branch(table, MAIN_BRANCH).await?;
+    let (added_files, deleted_files) = diff_data_files(ingestion_files, main_files);
+
+    if added_files.is_empty() && deleted_files.is_empty() {
+        return Ok(());
+    }
+
+    let added_file_count = added_files.len();
+    let deleted_file_count = deleted_files.len();
+    let consistency_params = CommitConsistencyParams {
+        starting_snapshot_id: ingestion_snapshot.snapshot_id(),
+        use_starting_sequence_number: true,
+        basic_schema_id: table.metadata().current_schema().schema_id(),
+    };
+    let commit_manager = compaction.build_commit_manager(consistency_params);
+    commit_manager
+        .overwrite_files(added_files, deleted_files, MAIN_BRANCH)
+        .await
+        .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+
+    tracing::info!(
+        iceberg_component = "compaction_worker",
+        iceberg_operation = "publish_cow_snapshot",
+        ingestion_branch,
+        added_file_count,
+        deleted_file_count,
+        "iceberg_cow_snapshot_published",
+    );
+    Ok(())
 }
 
 fn analyze_task_statistics(plan: &CompactionPlan) -> IcebergCompactionTaskStatistics {
@@ -529,7 +611,7 @@ fn analyze_task_statistics(plan: &CompactionPlan) -> IcebergCompactionTaskStatis
 }
 
 fn build_task_planning_config(
-    task_type: TaskType,
+    compaction_kind: IcebergCompactionKind,
     iceberg_config: &IcebergConfig,
     config: &IcebergCompactorRunnerConfig,
 ) -> HummockResult<IcebergTaskPlanningConfig> {
@@ -557,8 +639,8 @@ fn build_task_planning_config(
             None
         };
 
-    let planning_config = match task_type {
-        TaskType::Auto => {
+    let planning_config = match compaction_kind {
+        IcebergCompactionKind::Auto => {
             let mut builder = AutoCompactionConfigBuilder::default();
             builder
                 .max_input_parallelism(config.max_parallelism as usize)
@@ -580,7 +662,7 @@ fn build_task_planning_config(
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
             IcebergTaskPlanningConfig::Auto(config)
         }
-        TaskType::SmallFiles => {
+        IcebergCompactionKind::SmallFiles => {
             let mut builder = SmallFilesConfigBuilder::default();
             builder
                 .max_input_parallelism(config.max_parallelism as usize)
@@ -601,15 +683,7 @@ fn build_task_planning_config(
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
             IcebergTaskPlanningConfig::Explicit(CompactionPlanningConfig::SmallFiles(config))
         }
-        TaskType::Full => {
-            let file_group_scope = if should_enable_iceberg_cow(
-                iceberg_config.r#type.as_str(),
-                iceberg_config.write_mode,
-            ) {
-                FileGroupScope::Table
-            } else {
-                FileGroupScope::Partition
-            };
+        IcebergCompactionKind::Full => {
             let config = FullCompactionConfigBuilder::default()
                 .max_input_parallelism(config.max_parallelism as usize)
                 .max_output_parallelism(config.max_parallelism as usize)
@@ -618,12 +692,12 @@ fn build_task_planning_config(
                 .target_file_size_bytes(iceberg_config.target_file_size_mb() * 1024 * 1024)
                 .enable_heuristic_output_parallelism(config.enable_heuristic_output_parallelism)
                 .grouping_strategy(grouping_strategy)
-                .file_group_scope(file_group_scope)
+                .file_group_scope(FileGroupScope::Partition)
                 .build()
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
             IcebergTaskPlanningConfig::Explicit(CompactionPlanningConfig::Full(config))
         }
-        TaskType::FilesWithDelete => {
+        IcebergCompactionKind::FilesWithDelete => {
             let config = FilesWithDeletesConfigBuilder::default()
                 .max_input_parallelism(config.max_parallelism as usize)
                 .max_output_parallelism(config.max_parallelism as usize)
@@ -637,7 +711,24 @@ fn build_task_planning_config(
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
             IcebergTaskPlanningConfig::Explicit(CompactionPlanningConfig::FilesWithDeletes(config))
         }
-        _ => unreachable!("Unsupported task type in iceberg compaction task: {task_type:?}"),
+        IcebergCompactionKind::CopyOnWrite => {
+            // A COW task publishes the complete ingestion-branch state, but only data files
+            // affected by deletes need a physical rewrite. Clean files are carried to main by
+            // the metadata diff in `publish_cow_branch_to_main`.
+            let config = FilesWithDeletesConfigBuilder::default()
+                .max_input_parallelism(config.max_parallelism as usize)
+                .max_output_parallelism(config.max_parallelism as usize)
+                .min_size_per_partition(config.min_size_per_partition)
+                .max_file_count_per_partition(config.max_file_count_per_partition as usize)
+                .target_file_size_bytes(iceberg_config.target_file_size_mb() * 1024 * 1024)
+                .enable_heuristic_output_parallelism(config.enable_heuristic_output_parallelism)
+                .grouping_strategy(grouping_strategy)
+                .file_group_scope(FileGroupScope::Table)
+                .min_delete_file_count_threshold(1_usize)
+                .build()
+                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+            IcebergTaskPlanningConfig::Explicit(CompactionPlanningConfig::FilesWithDeletes(config))
+        }
     };
 
     Ok(planning_config)
@@ -671,7 +762,8 @@ pub async fn create_task_execution(
 
     let parsed_task_type = TaskType::try_from(task_type)
         .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-    let planning_config = build_task_planning_config(parsed_task_type, &iceberg_config, &config)?;
+    let compaction_kind = IcebergCompactionKind::resolve(parsed_task_type, &iceberg_config)?;
+    let planning_config = build_task_planning_config(compaction_kind, &iceberg_config, &config)?;
 
     let branch = commit_branch(iceberg_config.r#type.as_str(), iceberg_config.write_mode);
 
@@ -708,13 +800,31 @@ pub async fn create_task_execution(
             .map_err(|e| HummockError::compaction_executor(e.as_report()))?,
     };
 
+    let compaction_plans = if compaction_plans.is_empty() && compaction_kind.is_copy_on_write() {
+        // Keep a publish-only COW task executable when no data file needs a rewrite, for example
+        // after inserts that produced only clean data files.
+        table
+            .metadata()
+            .snapshot_for_ref(&branch)
+            .map(|snapshot| {
+                vec![CompactionPlan::new(
+                    FileGroup::empty(),
+                    branch.clone(),
+                    snapshot.snapshot_id(),
+                )]
+            })
+            .unwrap_or_default()
+    } else {
+        compaction_plans
+    };
+
     if compaction_plans.is_empty() {
         tracing::info!(
             iceberg_component = "compaction_worker",
             iceberg_operation = "plan_task",
             task_id = %task_id,
             sink_id = sink_id,
-            task_type = ?parsed_task_type,
+            task_type = ?compaction_kind,
             table = %table_ident,
             branch = %branch,
             "iceberg_compaction_task_skipped_no_files",
@@ -737,7 +847,7 @@ pub async fn create_task_execution(
             iceberg_config: iceberg_config.clone(),
             config: config.clone(),
             metrics: metrics.clone(),
-            task_type: parsed_task_type,
+            compaction_kind,
             branch: branch.clone(),
             compaction_plan,
             pk_index_coordinated,
@@ -749,7 +859,7 @@ pub async fn create_task_execution(
         iceberg_operation = "plan_task",
         task_id = %task_id,
         sink_id = sink_id,
-        task_type = ?parsed_task_type,
+        task_type = ?compaction_kind,
         table = %table_ident,
         branch = %branch,
         plan_count = runners.len(),
@@ -806,9 +916,12 @@ mod tests {
             min_group_file_count: Some(3),
         };
 
-        let IcebergTaskPlanningConfig::Auto(config) =
-            build_task_planning_config(TaskType::Auto, &iceberg_config, &runner_config).unwrap()
-        else {
+        let IcebergTaskPlanningConfig::Auto(config) = build_task_planning_config(
+            IcebergCompactionKind::Auto,
+            &iceberg_config,
+            &runner_config,
+        )
+        .unwrap() else {
             panic!("expected auto planning config");
         };
 
