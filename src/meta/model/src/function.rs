@@ -50,8 +50,9 @@ pub struct Model {
     pub body: Option<String>,
     pub compressed_binary: Option<Vec<u8>>,
     pub kind: FunctionKind,
-    // To keep compatible with legacy code, this is not included in `options`.
+    // Keep these as dedicated columns rather than entries in `options`.
     pub always_retry_on_network_error: bool,
+    pub skip_materializing_eval_result: bool,
     pub options: Option<Property>,
 }
 
@@ -118,6 +119,7 @@ impl From<PbFunction> for ActiveModel {
             compressed_binary: Set(function.compressed_binary),
             kind: Set(function.kind.unwrap().into()),
             always_retry_on_network_error: Set(function.always_retry_on_network_error),
+            skip_materializing_eval_result: Set(function.skip_materializing_eval_result),
             options: Set(Some(options.into())),
         }
     }

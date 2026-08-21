@@ -366,6 +366,9 @@ message Function {
   optional uint64 created_at_epoch = 22;
   // Cluster version (tracked by git commit) when created
   optional string created_at_cluster_version = 23;
+  // Whether to skip materializing evaluated results of this function for retractable streams.
+  // False by default so legacy functions continue to have their results materialized.
+  bool skip_materializing_eval_result = 24;
 
   oneof kind {
     ScalarFunction scalar = 11;

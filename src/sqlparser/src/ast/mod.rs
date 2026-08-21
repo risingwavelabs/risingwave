@@ -3745,6 +3745,8 @@ impl fmt::Display for CreateFunctionBody {
 pub struct CreateFunctionWithOptions {
     /// Always retry on network errors.
     pub always_retry_on_network_error: Option<bool>,
+    /// Skip materializing evaluated results of this function for retractable streams.
+    pub skip_materializing_eval_result: Option<bool>,
     /// Use async functions (only available for JS UDF)
     pub r#async: Option<bool>,
     /// Call in batch mode (only available for JS UDF)
@@ -3761,6 +3763,12 @@ impl TryFrom<Vec<SqlOption>> for CreateFunctionWithOptions {
             match option.name.to_string().to_lowercase().as_str() {
                 "always_retry_on_network_error" => {
                     options.always_retry_on_network_error = Some(matches!(
+                        option.value,
+                        SqlOptionValue::Value(Value::Boolean(true))
+                    ));
+                }
+                "skip_materializing_eval_result" => {
+                    options.skip_materializing_eval_result = Some(matches!(
                         option.value,
                         SqlOptionValue::Value(Value::Boolean(true))
                     ));
@@ -3794,6 +3802,9 @@ impl Display for CreateFunctionWithOptions {
         let mut options = vec![];
         if let Some(v) = self.always_retry_on_network_error {
             options.push(format!("always_retry_on_network_error = {}", v));
+        }
+        if let Some(v) = self.skip_materializing_eval_result {
+            options.push(format!("skip_materializing_eval_result = {}", v));
         }
         if let Some(v) = self.r#async {
             options.push(format!("async = {}", v));
@@ -4139,6 +4150,7 @@ mod tests {
             },
             with_options: CreateFunctionWithOptions {
                 always_retry_on_network_error: None,
+                skip_materializing_eval_result: None,
                 r#async: None,
                 batch: None,
             },
@@ -4164,12 +4176,13 @@ mod tests {
             },
             with_options: CreateFunctionWithOptions {
                 always_retry_on_network_error: Some(true),
+                skip_materializing_eval_result: Some(true),
                 r#async: None,
                 batch: None,
             },
         };
         assert_eq!(
-            "CREATE FUNCTION foo(INT) RETURNS INT LANGUAGE python IMMUTABLE AS 'SELECT 1' WITH ( always_retry_on_network_error = true )",
+            "CREATE FUNCTION foo(INT) RETURNS INT LANGUAGE python IMMUTABLE AS 'SELECT 1' WITH ( always_retry_on_network_error = true, skip_materializing_eval_result = true )",
             format!("{}", create_function)
         );
     }
