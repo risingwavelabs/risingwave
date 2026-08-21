@@ -834,9 +834,7 @@ impl iter::Iterator for BitmapOnesIter<'_> {
                     };
                 }
                 cur_bits.map(|bits| {
-                    // TODO: Check whether we can use `bits.isolate_lowest_one()` here instead.
-                    #[allow(clippy::manual_isolate_lowest_one)]
-                    let low_bit = bits & bits.wrapping_neg();
+                    let low_bit = bits.isolate_lowest_one();
                     let low_bit_idx = bits.trailing_zeros();
                     *cur_bits = Some(bits ^ low_bit);
                     *cur_idx * BITS + low_bit_idx as usize
@@ -1064,9 +1062,7 @@ mod tests {
             ],
             vec![0..=2, 5..=7, 9..=9],
         );
-        // TODO: Check whether we can use the lint's recommended range collection here instead.
-        #[allow(clippy::single_range_in_vec_init)]
-        test(vec![true, true, true], vec![0..=2]);
+        test(vec![true, true, true], std::iter::once(0..=2).collect());
         test(vec![false, false, false], vec![]);
     }
 
