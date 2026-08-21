@@ -1256,3 +1256,36 @@ impl MongodbCommon {
         Ok(client)
     }
 }
+
+/// TCP keepalive knobs for long-lived Postgres clients, see `create_pg_client`.
+#[serde_as]
+#[derive(Debug, Clone, Deserialize, WithOptions)]
+pub struct TcpKeepaliveConfig {
+    #[serde(rename = "tcp.keepalive.idle", default = "default_tcp_keepalive_idle")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub tcp_keepalive_idle: u32,
+    #[serde(
+        rename = "tcp.keepalive.interval",
+        default = "default_tcp_keepalive_interval"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    pub tcp_keepalive_interval: u32,
+    #[serde(
+        rename = "tcp.keepalive.count",
+        default = "default_tcp_keepalive_count"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    pub tcp_keepalive_count: u32,
+}
+
+const fn default_tcp_keepalive_idle() -> u32 {
+    10 * 60
+}
+
+const fn default_tcp_keepalive_interval() -> u32 {
+    10
+}
+
+const fn default_tcp_keepalive_count() -> u32 {
+    3
+}
