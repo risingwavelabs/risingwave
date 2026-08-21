@@ -597,7 +597,7 @@ impl MetaMetrics {
 
         let opts = histogram_opts!(
             "storage_commit_epoch_latency",
-            "latency of each hummock commit epoch section after acquiring the versioning lock",
+            "latency of each hummock commit epoch section while holding the versioning lock",
             exponential_buckets(0.001, 5.0, 8).unwrap()
         );
         let commit_epoch_latency =
