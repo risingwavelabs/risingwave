@@ -1,4 +1,4 @@
-// Copyright 2025 RisingWave Labs
+// Copyright 2026 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -400,7 +400,8 @@ impl Binder {
         // synthetic row of navigation slots (the candidate row's columns, physical PREV/NEXT, and
         // running references to other variables), evaluated per candidate during matching.
         let input_fields: Vec<Field> = input_columns.iter().map(|(_, f)| f.clone()).collect();
-        // Reject a variable defined twice. The executor keys DEFINEs by symbol, so without this
+        // Reject a variable defined twice. The executor keys DEFINE predicates by symbol, so
+        // without this
         // check `DEFINE a AS x > 0, a AS x < 0` silently keeps whichever lowered last — the user's
         // first predicate simply stops existing, with nothing to say so.
         {
