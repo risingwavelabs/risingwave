@@ -405,7 +405,7 @@
   binder_error: |-
     Feature is not yet implemented: IGNORE NULLS on PREV() in MATCH_RECOGNIZE DEFINE
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
-- name: MATCH_RECOGNIZE rejects AFTER MATCH SKIP TO a variable that only appears in DEFINE (it degraded on every match)
+- name: MATCH_RECOGNIZE rejects AFTER MATCH SKIP TO a variable absent from PATTERN (it degraded on every match)
   sql: |
     create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
     select * from t match_recognize (
@@ -415,11 +415,11 @@
       one row per match
       after match skip to last x
       pattern (a b)
-      define a as a.v > 0, b as b.v < 0, x as x.v > 100
+      define a as a.v > 0, b as b.v < 0
     );
   binder_error: |-
-    Not supported: AFTER MATCH SKIP TO FIRST/LAST x, which is defined in DEFINE but does not appear in PATTERN
-    HINT: the skip target must be a variable of the pattern
+    Feature is not yet implemented: AFTER MATCH SKIP TO FIRST/LAST references unknown pattern variable x
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
 - name: MATCH_RECOGNIZE DEFINE navigation nested in a CASE expression
   sql: |
     create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
@@ -924,3 +924,92 @@
   binder_error: |-
     Bind error: Failed to bind expression: A.v > 0: Item not found: missing FROM-clause entry for table "a"
     while binding the DEFINE predicate of `A`; pattern variables in scope (case-sensitive as written): A, b
+- name: MATCH_RECOGNIZE rejects a DEFINE for a symbol that does not appear in PATTERN
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures count(*) as n
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as a.v > 0, b as b.v < 0, ghost as ghost.v = 0
+    );
+  binder_error: 'Invalid input syntax: DEFINE names `ghost`, which does not appear in PATTERN; its predicate could never be evaluated'
+- name: MATCH_RECOGNIZE DEFINE rejects PREV over an undeclared variable qualifier
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures count(*) as n
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as a.v > 0, b as b.v < prev(zzz.v)
+    );
+  binder_error: 'Invalid input syntax: PREV/NEXT in DEFINE references unknown pattern variable `zzz`'
+- name: MATCH_RECOGNIZE DEFINE rejects PREV anchored to another declared variable
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures count(*) as n
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as a.v > 0, b as b.v < prev(a.v)
+    );
+  binder_error: |-
+    Feature is not yet implemented: PREV/NEXT anchored to another pattern variable's rows in DEFINE (`a` inside the definition of `b`); qualify with the symbol being defined, or leave the column unqualified, for physical navigation from the current row
+    No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- name: MATCH_RECOGNIZE DEFINE allows PREV qualified by the symbol being defined
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures count(*) as n
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as a.v > 0, b as b.v < prev(b.v)
+    );
+  logical_plan: |-
+    LogicalProject { exprs: [partition_0, n] }
+    └─LogicalMatchRecognize { partition_by: [t.id], order_by: [t.ts], measures: ["n"], pattern: a b }
+      └─LogicalScan { table: t, columns: [t.id, t.ts, t.v, t._row_id, t._rw_timestamp] }
+  stream_plan: |-
+    StreamMaterialize { columns: [partition_0, n, _match_id(hidden)], stream_key: [partition_0, _match_id], pk_columns: [partition_0, _match_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [partition_0, n, _match_id] }
+      └─StreamMatchRecognize { partition_by: [t.id], order_by: [t.ts], measures: ["n"], pattern: a b }
+        └─StreamWatermarkSort { sort_column: t.ts }
+          └─StreamExchange { dist: HashShard(t.id) }
+            └─StreamFilter { predicate: IsNotNull(t.ts) }
+              └─StreamTableScan { table: t, columns: [t.id, t.ts, t.v, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: MATCH_RECOGNIZE plans with a timestamp ORDER BY key and an interval WITHIN bound
+  sql: |
+    create table t(id int, ts timestamp, v int, watermark for ts as ts - interval '10' second) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures count(*) as n
+      one row per match
+      after match skip past last row
+      pattern (a b) within interval '5' minute
+      define a as a.v > 0, b as b.v < 0
+    );
+  logical_plan: |-
+    LogicalProject { exprs: [partition_0, n] }
+    └─LogicalMatchRecognize { partition_by: [t.id], order_by: [t.ts], measures: ["n"], pattern: a b }
+      └─LogicalScan { table: t, columns: [t.id, t.ts, t.v, t._row_id, t._rw_timestamp] }
+  stream_plan: |-
+    StreamMaterialize { columns: [partition_0, n, _match_id(hidden)], stream_key: [partition_0, _match_id], pk_columns: [partition_0, _match_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [partition_0, n, _match_id] }
+      └─StreamMatchRecognize { partition_by: [t.id], order_by: [t.ts], measures: ["n"], pattern: a b }
+        └─StreamWatermarkSort { sort_column: t.ts }
+          └─StreamExchange { dist: HashShard(t.id) }
+            └─StreamFilter { predicate: IsNotNull(t.ts) }
+              └─StreamTableScan { table: t, columns: [t.id, t.ts, t.v, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
