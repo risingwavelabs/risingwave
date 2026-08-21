@@ -47,7 +47,7 @@ use tracing::warn;
 use super::init_selectors;
 use crate::hummock::HummockManager;
 use crate::hummock::compaction::CompactionSelector;
-use crate::hummock::compactor_manager::Compactor;
+use crate::hummock::compactor_manager::{Compactor, IcebergCompactorPullDecision};
 use crate::hummock::error::{Error, Result};
 use crate::hummock::sequence::next_compaction_task_id;
 use crate::manager::MetaOpts;
@@ -678,38 +678,57 @@ impl IcebergCompactionEventHandler {
         pull_task_count: usize,
     ) -> bool {
         assert_ne!(0, pull_task_count);
-        if let Some(compactor) = self
+        if let Some(pull_decision) = self
             .compaction_manager
             .iceberg_compactor_manager
-            .get_compactor(context_id)
+            .acquire_pull_turn(context_id)
         {
+            let (compactor, should_dispatch) = match pull_decision {
+                IcebergCompactorPullDecision::Dispatch(compactor) => (compactor, true),
+                IcebergCompactorPullDecision::Wait(compactor) => (compactor, false),
+            };
             let mut compactor_alive = true;
+            let mut dispatched_task = false;
 
-            let iceberg_compaction_handles = self
-                .compaction_manager
-                .get_top_n_iceberg_commit_sink_ids(pull_task_count);
+            if should_dispatch {
+                let iceberg_compaction_handles = self
+                    .compaction_manager
+                    .get_top_n_iceberg_commit_sink_ids(pull_task_count);
 
-            for handle in iceberg_compaction_handles {
-                let compactor = compactor.clone();
-                // send iceberg commit task to compactor
-                if let Err(e) = async move {
-                    handle
-                        .send_compact_task(
-                            compactor,
-                            next_compaction_task_id(&self.compaction_manager.env).await?,
-                        )
-                        .await
+                for handle in iceberg_compaction_handles {
+                    let compactor = compactor.clone();
+                    // send iceberg commit task to compactor
+                    match async move {
+                        handle
+                            .send_compact_task(
+                                compactor,
+                                next_compaction_task_id(&self.compaction_manager.env).await?,
+                            )
+                            .await
+                    }
+                    .await
+                    {
+                        Ok(()) => dispatched_task = true,
+                        Err(e) => {
+                            tracing::warn!(
+                                error = %e.as_report(),
+                                "Failed to send iceberg commit task to {}",
+                                context_id,
+                            );
+                            compactor_alive = false;
+                        }
+                    }
                 }
-                .await
-                {
-                    tracing::warn!(
-                        error = %e.as_report(),
-                        "Failed to send iceberg commit task to {}",
-                        context_id,
-                    );
-                    compactor_alive = false;
-                }
+            } else {
+                tracing::debug!(
+                    %context_id,
+                    "Deferred iceberg compaction pull to preserve round-robin dispatch"
+                );
             }
+
+            self.compaction_manager
+                .iceberg_compactor_manager
+                .finish_pull_turn(context_id, dispatched_task);
 
             if let Err(e) =
                 compactor.send_event(IcebergResponseEvent::PullTaskAck(IcebergPullTaskAck {}))
