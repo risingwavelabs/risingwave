@@ -128,9 +128,11 @@ pub(crate) enum ReportSendResult {
 pub(crate) struct IcebergTaskTracker {
     sink_id: u32,
     total_plans: usize,
+    admitted_plans: usize,
     remaining_plans: usize,
     successful_plans: usize,
     failed_plans: usize,
+    rejected_plans: usize,
     first_error: Option<String>,
     /// Pk-index coordinated rewrite results, aggregated across all plans of the task. Empty for
     /// non-coordinated tasks.
@@ -138,14 +140,23 @@ pub(crate) struct IcebergTaskTracker {
 }
 
 impl IcebergTaskTracker {
-    pub(crate) fn new(sink_id: u32, remaining_plans: usize) -> Self {
+    pub(crate) fn new(sink_id: u32, total_plans: usize, admitted_plans: usize) -> Self {
+        debug_assert!(admitted_plans > 0);
+        debug_assert!(admitted_plans <= total_plans);
+        let rejected_plans = total_plans.saturating_sub(admitted_plans);
         Self {
             sink_id,
-            total_plans: remaining_plans,
-            remaining_plans,
+            total_plans,
+            admitted_plans,
+            remaining_plans: admitted_plans,
             successful_plans: 0,
             failed_plans: 0,
-            first_error: None,
+            rejected_plans,
+            first_error: (rejected_plans > 0).then(|| {
+                format!(
+                    "Failed to admit {rejected_plans} of {total_plans} iceberg compaction plans"
+                )
+            }),
             pk_index_results: Vec::new(),
         }
     }
@@ -182,6 +193,10 @@ impl IcebergTaskTracker {
         self.total_plans
     }
 
+    pub(crate) fn admitted_plans(&self) -> usize {
+        self.admitted_plans
+    }
+
     pub(crate) fn successful_plans(&self) -> usize {
         self.successful_plans
     }
@@ -190,14 +205,26 @@ impl IcebergTaskTracker {
         self.failed_plans
     }
 
+    pub(crate) fn rejected_plans(&self) -> usize {
+        self.rejected_plans
+    }
+
     pub(crate) fn into_report(self, task_id: IcebergCompactionTaskId) -> IcebergTaskReport {
-        let error_message = if self.successful_plans > 0 {
+        debug_assert_eq!(self.remaining_plans, 0);
+        debug_assert_eq!(
+            self.successful_plans + self.failed_plans,
+            self.admitted_plans
+        );
+
+        let error_message = if self.successful_plans == self.total_plans {
             None
         } else {
-            Some(
-                self.first_error
-                    .unwrap_or_else(|| "All admitted iceberg compaction plans failed".to_owned()),
-            )
+            Some(self.first_error.unwrap_or_else(|| {
+                format!(
+                    "Only {} of {} iceberg compaction plans succeeded",
+                    self.successful_plans, self.total_plans
+                )
+            }))
         };
         let mut report = build_iceberg_task_report(task_id, self.sink_id, error_message);
         populate_pk_index_report_fields(&mut report, self.pk_index_results);
@@ -369,8 +396,8 @@ mod tests {
     }
 
     #[test]
-    fn test_build_iceberg_task_result_partial_enqueue_is_success_if_admitted_plan_succeeds() {
-        let mut tracker = IcebergTaskTracker::new(9, 1);
+    fn test_build_iceberg_task_result_succeeds_if_all_plans_succeed() {
+        let mut tracker = IcebergTaskTracker::new(9, 1, 1);
         tracker.record_completion(None, None);
 
         let report = tracker.into_report(7.into());
@@ -383,8 +410,40 @@ mod tests {
     }
 
     #[test]
+    fn test_build_iceberg_task_result_partial_admission_fails() {
+        let mut tracker = IcebergTaskTracker::new(9, 2, 1);
+        tracker.record_completion(None, None);
+
+        let report = tracker.into_report(7.into());
+
+        assert_eq!(
+            report.status,
+            subscribe_iceberg_compaction_event_request::report_task::Status::Failed as i32
+        );
+        assert_eq!(
+            report.error_message.as_deref(),
+            Some("Failed to admit 1 of 2 iceberg compaction plans")
+        );
+    }
+
+    #[test]
+    fn test_build_iceberg_task_result_fails_if_any_admitted_plan_fails() {
+        let mut tracker = IcebergTaskTracker::new(9, 2, 2);
+        tracker.record_completion(None, None);
+        tracker.record_completion(Some("second plan failed".to_owned()), None);
+
+        let report = tracker.into_report(7.into());
+
+        assert_eq!(
+            report.status,
+            subscribe_iceberg_compaction_event_request::report_task::Status::Failed as i32
+        );
+        assert_eq!(report.error_message.as_deref(), Some("second plan failed"));
+    }
+
+    #[test]
     fn test_into_report_populates_pk_index_fields_when_pk_index_result_present() {
-        let mut tracker = IcebergTaskTracker::new(9, 2);
+        let mut tracker = IcebergTaskTracker::new(9, 2, 2);
         tracker.record_completion(
             None,
             Some(PkIndexCompactionResult {
@@ -418,7 +477,7 @@ mod tests {
     fn test_into_report_rejects_mismatched_pk_index_plan_metadata() {
         for (read_snapshot_id, schema_id, partition_spec_id) in [(43, 1, 2), (42, 3, 2), (42, 1, 4)]
         {
-            let mut tracker = IcebergTaskTracker::new(9, 2);
+            let mut tracker = IcebergTaskTracker::new(9, 2, 2);
             tracker.record_completion(
                 None,
                 Some(PkIndexCompactionResult {
@@ -452,7 +511,7 @@ mod tests {
 
     #[test]
     fn test_into_report_leaves_pk_index_fields_none_for_non_pk_index_task() {
-        let mut tracker = IcebergTaskTracker::new(9, 1);
+        let mut tracker = IcebergTaskTracker::new(9, 1, 1);
         tracker.record_completion(None, None);
 
         let report = tracker.into_report(7.into());
@@ -462,7 +521,7 @@ mod tests {
 
     #[test]
     fn test_build_iceberg_task_result_fails_if_all_admitted_plans_fail() {
-        let mut tracker = IcebergTaskTracker::new(9, 2);
+        let mut tracker = IcebergTaskTracker::new(9, 2, 2);
         tracker.record_completion(Some("first failure".to_owned()), None);
         tracker.record_completion(Some("second failure".to_owned()), None);
 
