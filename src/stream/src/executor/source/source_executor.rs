@@ -21,7 +21,9 @@ use itertools::Itertools;
 use prometheus::core::{AtomicU64, GenericCounter};
 use risingwave_common::array::ArrayRef;
 use risingwave_common::catalog::TableId;
-use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedMetric};
+use risingwave_common::metrics::{
+    GLOBAL_ERROR_METRICS, LabelGuardedIntGauge, LabelGuardedIntGaugeVec, LabelGuardedMetric,
+};
 use risingwave_common::system_param::local_manager::SystemParamsReaderRef;
 use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_common::types::JsonbVal;
@@ -60,6 +62,26 @@ fn lsn_u128_to_i64(lsn: u128) -> i64 {
     lsn.min(i64::MAX as u128) as i64
 }
 
+#[derive(Default)]
+struct CdcStateMetricGuards {
+    pg_cdc_state_table_lsn: Option<LabelGuardedIntGauge>,
+    mysql_cdc_state_binlog_file_seq: Option<LabelGuardedIntGauge>,
+    mysql_cdc_state_binlog_position: Option<LabelGuardedIntGauge>,
+    sqlserver_cdc_state_change_lsn: Option<LabelGuardedIntGauge>,
+    sqlserver_cdc_state_commit_lsn: Option<LabelGuardedIntGauge>,
+}
+
+fn set_guarded_int_gauge(
+    guard: &mut Option<LabelGuardedIntGauge>,
+    metric: &LabelGuardedIntGaugeVec,
+    source_id: &str,
+    value: i64,
+) {
+    guard
+        .get_or_insert_with(|| metric.with_guarded_label_values(&[source_id]))
+        .set(value);
+}
+
 pub struct SourceExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
 
@@ -68,6 +90,9 @@ pub struct SourceExecutor<S: StateStore> {
 
     /// Metrics for monitor.
     metrics: Arc<StreamingMetrics>,
+
+    /// Keep CDC state metric labels alive while this executor is running.
+    cdc_state_metric_guards: CdcStateMetricGuards,
 
     /// Receiver of barrier channel.
     barrier_receiver: Option<UnboundedReceiver<Barrier>>,
@@ -100,6 +125,7 @@ impl<S: StateStore> SourceExecutor<S> {
             actor_ctx,
             stream_source_core,
             metrics,
+            cdc_state_metric_guards: Default::default(),
             barrier_receiver: Some(barrier_receiver),
             system_params,
             rate_limit_rps,
@@ -442,6 +468,7 @@ impl<S: StateStore> SourceExecutor<S> {
         epoch: EpochPair,
     ) -> StreamExecutorResult<HashMap<SplitId, SplitImpl>> {
         let core = &mut self.stream_source_core;
+        let metric_guards = &mut self.cdc_state_metric_guards;
 
         let cache = core
             .updated_splits_in_epoch
@@ -459,37 +486,47 @@ impl<S: StateStore> SourceExecutor<S> {
                 match split_impl {
                     SplitImpl::PostgresCdc(pg_split) => {
                         if let Some(lsn_value) = pg_split.pg_lsn() {
-                            self.metrics
-                                .pg_cdc_state_table_lsn
-                                .with_guarded_label_values(&[&source_id])
-                                .set(lsn_value as i64);
+                            set_guarded_int_gauge(
+                                &mut metric_guards.pg_cdc_state_table_lsn,
+                                &self.metrics.pg_cdc_state_table_lsn,
+                                &source_id,
+                                lsn_value as i64,
+                            );
                         }
                     }
                     SplitImpl::MysqlCdc(mysql_split) => {
                         if let Some((file_seq, position)) = mysql_split.mysql_binlog_offset() {
-                            self.metrics
-                                .mysql_cdc_state_binlog_file_seq
-                                .with_guarded_label_values(&[&source_id])
-                                .set(file_seq as i64);
+                            set_guarded_int_gauge(
+                                &mut metric_guards.mysql_cdc_state_binlog_file_seq,
+                                &self.metrics.mysql_cdc_state_binlog_file_seq,
+                                &source_id,
+                                file_seq as i64,
+                            );
 
-                            self.metrics
-                                .mysql_cdc_state_binlog_position
-                                .with_guarded_label_values(&[&source_id])
-                                .set(position as i64);
+                            set_guarded_int_gauge(
+                                &mut metric_guards.mysql_cdc_state_binlog_position,
+                                &self.metrics.mysql_cdc_state_binlog_position,
+                                &source_id,
+                                position as i64,
+                            );
                         }
                     }
                     SplitImpl::SqlServerCdc(sqlserver_split) => {
                         if let Some(lsn) = sqlserver_split.sql_server_change_lsn() {
-                            self.metrics
-                                .sqlserver_cdc_state_change_lsn
-                                .with_guarded_label_values(&[&source_id])
-                                .set(lsn_u128_to_i64(lsn));
+                            set_guarded_int_gauge(
+                                &mut metric_guards.sqlserver_cdc_state_change_lsn,
+                                &self.metrics.sqlserver_cdc_state_change_lsn,
+                                &source_id,
+                                lsn_u128_to_i64(lsn),
+                            );
                         }
                         if let Some(lsn) = sqlserver_split.sql_server_commit_lsn() {
-                            self.metrics
-                                .sqlserver_cdc_state_commit_lsn
-                                .with_guarded_label_values(&[&source_id])
-                                .set(lsn_u128_to_i64(lsn));
+                            set_guarded_int_gauge(
+                                &mut metric_guards.sqlserver_cdc_state_commit_lsn,
+                                &self.metrics.sqlserver_cdc_state_commit_lsn,
+                                &source_id,
+                                lsn_u128_to_i64(lsn),
+                            );
                         }
                     }
                     _ => {}
@@ -1271,6 +1308,7 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
 #[cfg(test)]
 mod tests {
     use maplit::{btreemap, convert_args, hashmap};
+    use prometheus::core::Collector;
     use risingwave_common::catalog::{ColumnId, Field};
     use risingwave_common::id::SourceId;
     use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
@@ -1290,6 +1328,27 @@ mod tests {
     use crate::task::LocalBarrierManager;
 
     const MOCK_SOURCE_NAME: &str = "mock_source";
+
+    #[test]
+    fn test_retained_cdc_state_gauge_survives_idle_collections() {
+        let metric = LabelGuardedIntGaugeVec::test_int_gauge_vec::<1>();
+        let mut guard = None;
+
+        set_guarded_int_gauge(&mut guard, &metric, "1", 100);
+
+        for _ in 0..2 {
+            let collected = metric.collect().pop().unwrap();
+            assert_eq!(1, collected.get_metric().len());
+            assert_eq!(
+                100.0,
+                collected.get_metric()[0]
+                    .get_gauge()
+                    .as_ref()
+                    .unwrap()
+                    .value()
+            );
+        }
+    }
 
     #[tokio::test]
     async fn test_source_executor() {
