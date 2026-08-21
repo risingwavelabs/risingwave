@@ -16,7 +16,7 @@ pub mod compaction;
 pub mod compactor_manager;
 pub mod error;
 mod manager;
-
+pub(crate) use manager::checkpoint::{compress_payload, xxhash64_checksum};
 pub use manager::*;
 use thiserror_ext::AsReport;
 

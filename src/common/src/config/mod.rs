@@ -24,7 +24,10 @@ pub use frontend::FrontendConfig;
 pub mod hba;
 pub use hba::{AddressPattern, AuthMethod, ConnectionType, HbaConfig, HbaEntry};
 pub mod meta;
-pub use meta::{CompactionConfig, DefaultParallelism, MetaBackend, MetaConfig, MetaStoreConfig};
+pub use meta::{
+    CheckpointCompression, CompactionConfig, DefaultParallelism, MetaBackend, MetaConfig,
+    MetaStoreConfig,
+};
 pub mod streaming;
 pub use streaming::{AsyncStackTraceOption, StreamingConfig};
 pub mod server;
