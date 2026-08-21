@@ -190,7 +190,10 @@ impl HummockManager {
             .write_with_process_name("delete_version_deltas")
             .await;
         let versioning = versioning_guard.deref_mut();
-        let context_info = self.context_info.read().await;
+        let context_info = self
+            .context_info
+            .read_with_process_name("delete_version_deltas")
+            .await;
         // If there is any safe point, skip this to ensure meta backup has required delta logs to
         // replay version.
         if !context_info.version_safe_points.is_empty() {
@@ -222,8 +225,15 @@ impl HummockManager {
         object_ids: impl Iterator<Item = HummockObjectId>,
     ) -> Result<Vec<HummockObjectId>> {
         // This lock ensures `commit_epoch` and `report_compat_task` can see the latest GC history during sanity check.
-        let versioning = self.versioning.read().await;
-        let min_pinned_version_id = self.context_info.read().await.min_pinned_version_id();
+        let versioning = self
+            .versioning
+            .read_with_process_name("finalize_objects_to_delete")
+            .await;
+        let min_pinned_version_id = self
+            .context_info
+            .read_with_process_name("finalize_objects_to_delete")
+            .await
+            .min_pinned_version_id();
         let tracked_object_ids: HashSet<HummockObjectId> =
             versioning.get_tracked_object_ids(min_pinned_version_id);
         let to_delete = object_ids
@@ -527,8 +537,15 @@ impl HummockManager {
         let backup_pinned: HashSet<_> = backup_manager.list_pinned_object_ids().await;
         // The version_pinned is obtained after the candidate object_ids for deletion, which is new enough for filtering purpose.
         let version_pinned = {
-            let versioning = self.versioning.read().await;
-            let min_pinned_version_id = self.context_info.read().await.min_pinned_version_id();
+            let versioning = self
+                .versioning
+                .read_with_process_name("try_start_minor_gc")
+                .await;
+            let min_pinned_version_id = self
+                .context_info
+                .read_with_process_name("try_start_minor_gc")
+                .await
+                .min_pinned_version_id();
             versioning.get_tracked_object_ids(min_pinned_version_id)
         };
         let object_ids = object_ids

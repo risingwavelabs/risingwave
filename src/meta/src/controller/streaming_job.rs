@@ -91,6 +91,7 @@ use crate::controller::utils::{
     ensure_object_id, ensure_user_id, fetch_target_fragments, get_belong_objects,
     get_belong_objects_by_ids, get_table_columns, grant_default_privileges_automatically,
     insert_fragment_relations, list_object_dependencies_by_object_id, list_user_info_by_ids,
+    upsert_user_privileges,
 };
 use crate::error::MetaErrorInner;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
@@ -1751,7 +1752,7 @@ impl CatalogController {
                             });
                         }
                     }
-                    UserPrivilege::insert_many(new_privileges).exec(txn).await?;
+                    upsert_user_privileges(txn, new_privileges).await?;
 
                     updated_user_info = list_user_info_by_ids(
                         primary_table_privileges.into_iter().map(|p| p.user_id),
