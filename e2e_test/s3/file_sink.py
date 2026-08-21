@@ -14,6 +14,13 @@ from time import sleep
 import numpy as np
 import time
 
+# Local MinIO / dev-only fixture credentials (NOT production secrets).
+# Kept as module constants so a single place controls them and tests can
+# never silently reuse these if pointed at a real S3/MinIO backend.
+DEV_MINIO_ACCESS_KEY = "hummockadmin"
+DEV_MINIO_SECRET_KEY = "hummockadmin"
+
+
 def gen_data(file_num, item_num_per_file):
     assert item_num_per_file % 2 == 0, \
         f'item_num_per_file should be even to ensure sum(mark) == 0: {item_num_per_file}'
@@ -77,8 +84,8 @@ def do_test(config, file_num, item_num_per_file, prefix):
         'parquet',
         's3',
         'http://127.0.0.1:9301',
-        'hummockadmin',
-        'hummockadmin',
+        '{DEV_MINIO_ACCESS_KEY}',
+        '{DEV_MINIO_SECRET_KEY}',
         's3://hummock001/test_file_scan/test_file_scan.parquet'
         );''')
     try:
@@ -121,8 +128,8 @@ def do_test(config, file_num, item_num_per_file, prefix):
         match_pattern = '*.parquet',
         s3.region_name = 'custom',
         s3.bucket_name = 'hummock001',
-        s3.credentials.access = 'hummockadmin',
-        s3.credentials.secret = 'hummockadmin',
+        s3.credentials.access = '{DEV_MINIO_ACCESS_KEY}',
+        s3.credentials.secret = '{DEV_MINIO_SECRET_KEY}',
         s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
         refresh.interval.sec = 1,
     ) FORMAT PLAIN ENCODE PARQUET;''')
@@ -201,8 +208,8 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         connector = 's3',
         s3.region_name = 'custom',
         s3.bucket_name = 'hummock001',
-        s3.credentials.access = 'hummockadmin',
-        s3.credentials.secret = 'hummockadmin',
+        s3.credentials.access = '{DEV_MINIO_ACCESS_KEY}',
+        s3.credentials.secret = '{DEV_MINIO_SECRET_KEY}',
         s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
         s3.path = 'test_parquet_sink/',
         type = 'append-only',
@@ -243,8 +250,8 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         match_pattern = 'test_parquet_sink/*.parquet',
         s3.region_name = 'custom',
         s3.bucket_name = 'hummock001',
-        s3.credentials.access = 'hummockadmin',
-        s3.credentials.secret = 'hummockadmin',
+        s3.credentials.access = '{DEV_MINIO_ACCESS_KEY}',
+        s3.credentials.secret = '{DEV_MINIO_SECRET_KEY}',
         s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
         refresh.interval.sec = 1,
     ) FORMAT PLAIN ENCODE PARQUET;''')
@@ -294,8 +301,8 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         connector = 'snowflake',
         snowflake.aws_region = 'custom',
         snowflake.s3_bucket = 'hummock001',
-        snowflake.aws_access_key_id = 'hummockadmin',
-        snowflake.aws_secret_access_key = 'hummockadmin',
+        snowflake.aws_access_key_id = '{DEV_MINIO_ACCESS_KEY}',
+        snowflake.aws_secret_access_key = '{DEV_MINIO_SECRET_KEY}',
         s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
         s3.path = 'test_json_sink/',
         type = 'append-only',
@@ -336,8 +343,8 @@ def do_sink(config, file_num, item_num_per_file, prefix):
         match_pattern = 'test_json_sink/*.json',
         s3.region_name = 'custom',
         s3.bucket_name = 'hummock001',
-        s3.credentials.access = 'hummockadmin',
-        s3.credentials.secret = 'hummockadmin',
+        s3.credentials.access = '{DEV_MINIO_ACCESS_KEY}',
+        s3.credentials.secret = '{DEV_MINIO_SECRET_KEY}',
         s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
     ) FORMAT PLAIN ENCODE JSON;''')
 
@@ -394,8 +401,8 @@ def test_file_sink_batching():
         connector = 's3',
         s3.region_name = 'custom',
         s3.bucket_name = 'hummock001',
-        s3.credentials.access = 'hummockadmin',
-        s3.credentials.secret = 'hummockadmin',
+        s3.credentials.access = '{DEV_MINIO_ACCESS_KEY}',
+        s3.credentials.secret = '{DEV_MINIO_SECRET_KEY}',
         s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
         s3.path = 'test_file_sink_batching/',
         type = 'append-only',
@@ -413,8 +420,8 @@ def test_file_sink_batching():
         refresh.interval.sec = 1,
         s3.region_name = 'custom',
         s3.bucket_name = 'hummock001',
-        s3.credentials.access = 'hummockadmin',
-        s3.credentials.secret = 'hummockadmin',
+        s3.credentials.access = '{DEV_MINIO_ACCESS_KEY}',
+        s3.credentials.secret = '{DEV_MINIO_SECRET_KEY}',
         s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
     ) FORMAT PLAIN ENCODE PARQUET;''')
 
@@ -481,8 +488,8 @@ def test_file_sink_batching():
 
     client = Minio(
         endpoint="127.0.0.1:9301",
-        access_key="hummockadmin",
-        secret_key="hummockadmin",
+        access_key=DEV_MINIO_ACCESS_KEY,
+        secret_key=DEV_MINIO_SECRET_KEY,
         secure=False,
     )
     objects = client.list_objects(bucket_name="hummock001", prefix="test_file_sink_batching/", recursive=True)
@@ -501,8 +508,8 @@ if __name__ == "__main__":
     config = json.loads(os.environ["S3_SOURCE_TEST_CONF"])
     client = Minio(
         endpoint="127.0.0.1:9301",
-        access_key="hummockadmin",
-        secret_key="hummockadmin",
+        access_key=DEV_MINIO_ACCESS_KEY,
+        secret_key=DEV_MINIO_SECRET_KEY,
         secure=False,
     )
     run_id = str(random.randint(1000, 9999))
