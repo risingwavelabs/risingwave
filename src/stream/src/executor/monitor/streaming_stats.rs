@@ -159,6 +159,11 @@ pub struct StreamingMetrics {
     over_window_compute_count: LabelGuardedIntCounterVec,
     over_window_same_output_count: LabelGuardedIntCounterVec,
 
+    // Match recognize
+    match_recognize_matches_emitted_count: LabelGuardedIntCounterVec,
+    match_recognize_evicted_rows_count: LabelGuardedIntCounterVec,
+    match_recognize_scan_budget_exhausted_count: LabelGuardedIntCounterVec,
+
     /// The duration from receipt of barrier to all actors collection.
     /// The max of all nodes' `barrier_inflight_latency` for a partial graph is the latency for a
     /// barrier to flow through that partial graph.
@@ -926,6 +931,31 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let match_recognize_matches_emitted_count =
+            register_guarded_int_counter_vec_with_registry!(
+                "stream_match_recognize_matches_emitted_count",
+                "Matches emitted by the match recognize executor",
+                &["table_id", "actor_id", "fragment_id"],
+                registry
+            )
+            .unwrap();
+
+        let match_recognize_evicted_rows_count = register_guarded_int_counter_vec_with_registry!(
+            "stream_match_recognize_evicted_rows_count",
+            "Buffered rows evicted by the match recognize executor",
+            &["table_id", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
+        let match_recognize_scan_budget_exhausted_count = register_guarded_int_counter_vec_with_registry!(
+            "stream_match_recognize_scan_budget_exhausted_count",
+            "Partition visits that exhausted the match recognize scan budget and degraded conservatively",
+            &["table_id", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
         let barrier_inflight_latency = register_guarded_histogram_vec_with_registry!(
             "stream_barrier_inflight_duration_seconds",
             "barrier_inflight_latency",
@@ -1404,6 +1434,9 @@ impl StreamingMetrics {
             over_window_accessed_entry_count,
             over_window_compute_count,
             over_window_same_output_count,
+            match_recognize_matches_emitted_count,
+            match_recognize_evicted_rows_count,
+            match_recognize_scan_budget_exhausted_count,
             barrier_inflight_latency,
             barrier_sync_latency,
             barrier_batch_size,
@@ -1779,6 +1812,30 @@ impl StreamingMetrics {
         }
     }
 
+    pub fn new_match_recognize_metrics(
+        &self,
+        table_id: TableId,
+        actor_id: ActorId,
+        fragment_id: FragmentId,
+    ) -> MatchRecognizeMetrics {
+        let label_list: &[&str; 3] = &[
+            &table_id.to_string(),
+            &actor_id.to_string(),
+            &fragment_id.to_string(),
+        ];
+        MatchRecognizeMetrics {
+            match_recognize_matches_emitted_count: self
+                .match_recognize_matches_emitted_count
+                .with_guarded_label_values(label_list),
+            match_recognize_evicted_rows_count: self
+                .match_recognize_evicted_rows_count
+                .with_guarded_label_values(label_list),
+            match_recognize_scan_budget_exhausted_count: self
+                .match_recognize_scan_budget_exhausted_count
+                .with_guarded_label_values(label_list),
+        }
+    }
+
     pub fn new_materialize_cache_metrics(
         &self,
         table_id: TableId,
@@ -1942,6 +1999,12 @@ pub struct OverWindowMetrics {
     pub over_window_accessed_entry_count: LabelGuardedIntCounter,
     pub over_window_compute_count: LabelGuardedIntCounter,
     pub over_window_same_output_count: LabelGuardedIntCounter,
+}
+
+pub struct MatchRecognizeMetrics {
+    pub match_recognize_matches_emitted_count: LabelGuardedIntCounter,
+    pub match_recognize_evicted_rows_count: LabelGuardedIntCounter,
+    pub match_recognize_scan_budget_exhausted_count: LabelGuardedIntCounter,
 }
 
 #[derive(Clone)]

@@ -54,8 +54,9 @@ pub use insert::BoundInsert;
 use pgwire::pg_server::{Session, SessionId};
 pub use query::BoundQuery;
 pub use relation::{
-    BoundBaseTable, BoundGapFill, BoundIcebergMetadataTable, BoundJoin, BoundShare,
-    BoundShareInput, BoundSource, BoundSystemTable, BoundWatermark, BoundWindowTableFunction,
+    BoundBaseTable, BoundGapFill, BoundIcebergMetadataTable, BoundJoin, BoundMatchRecognize,
+    BoundMeasure, BoundShare, BoundShareInput, BoundSource, BoundSymbolDefinition,
+    BoundSystemTable, BoundWatermark, BoundWindowTableFunction, DefineSlotKind, MeasureSlotKind,
     Relation, ResolveQualifiedNameError, WindowTableFunctionKind,
 };
 // Re-export common types
