@@ -1,5 +1,5 @@
 /*
- * Copyright 2024 RisingWave Labs
+ * Copyright 2026 RisingWave Labs
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -14,22 +14,20 @@
  * limitations under the License.
  */
 
-package com.risingwave.connector.source;
+package io.debezium.connector.mongodb.connection.client;
 
-import com.risingwave.connector.source.common.MongoDbValidator;
-import java.util.HashMap;
-import org.junit.Ignore;
+import static org.junit.Assert.assertEquals;
+
+import java.util.List;
 import org.junit.Test;
 
-public class MongoDbValidatorTest {
+public class MongoDbTlsUtilsQueryOptionsTest {
 
-    @Ignore // manual test
     @Test
-    public void testValidate() {
-        var userProps = new HashMap<String, String>();
-        userProps.put("mongodb.url", "mongodb://rwcdc:123456@localhost:27017/?authSource=admin");
-        userProps.put("collection.name", "test.users");
-        MongoDbValidator validator = new MongoDbValidator(userProps, 1);
-        validator.validateAll();
+    public void splitsRawQueryLikeMongoDbConnectionString() {
+        assertEquals(
+                List.of("tls=true", "tlsCAFile=%2Ftmp%2Fca%3Bprod.pem", "appName=rising=wave"),
+                MongoDbTlsUtils.splitQueryOptions(
+                        "tls=true&&tlsCAFile=%2Ftmp%2Fca%3Bprod.pem;appName=rising=wave;" + ";"));
     }
 }
