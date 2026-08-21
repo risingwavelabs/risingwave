@@ -63,8 +63,8 @@ pub use iceberg_compaction::set_simulated_pk_index_compaction_result;
 use iceberg_compaction::simulated_pk_index_compaction_result;
 use iceberg_compaction::{
     IcebergPlanCompletion, IcebergTaskQueue, IcebergTaskReport, IcebergTaskTracker, PushResult,
-    ReportSendResult, build_iceberg_task_report, create_task_execution,
-    flush_pending_iceberg_task_reports, send_or_buffer_iceberg_task_report,
+    ReportSendResult, build_iceberg_task_report, build_iceberg_task_report_with_planning_empty,
+    create_task_execution, flush_pending_iceberg_task_reports, send_or_buffer_iceberg_task_report,
 };
 pub use iterator::{ConcatSstableIterator, SstableStreamIterator};
 use more_asserts::assert_ge;
@@ -646,6 +646,7 @@ pub fn start_iceberg_compactor(
                                 // Note: write_parquet_properties is now built from sink config (IcebergConfig) in create_task_execution
                                 let compactor_runner_config = match IcebergCompactorRunnerConfigBuilder::default()
                                     .max_parallelism((worker_num as f32 * compactor_context.storage_opts.iceberg_compaction_task_parallelism_ratio) as u32)
+                                    .max_input_parallelism(Some(max_task_parallelism))
                                     .min_size_per_partition(compactor_context.storage_opts.iceberg_compaction_min_size_per_partition_mb as u64 * 1024 * 1024)
                                     .max_file_count_per_partition(compactor_context.storage_opts.iceberg_compaction_max_file_count_per_partition)
                                     .enable_validate_compaction(compactor_context.storage_opts.iceberg_compaction_enable_validate)
@@ -734,6 +735,7 @@ pub fn start_iceberg_compactor(
                                 };
 
                                 let sink_id = task_execution.sink_id;
+                                let planning_empty = task_execution.planning_empty;
                                 let plan_runners = task_execution.plan_runners;
 
                                 if plan_runners.is_empty() {
@@ -744,7 +746,11 @@ pub fn start_iceberg_compactor(
                                         sink_id = sink_id,
                                         "iceberg_compaction_task_skipped_no_plans",
                                     );
-                                    let report = build_iceberg_task_report(task_id, sink_id, None);
+                                    let report = build_iceberg_task_report_with_planning_empty(
+                                        task_id,
+                                        sink_id,
+                                        planning_empty,
+                                    );
                                     if matches!(
                                         send_or_buffer_iceberg_task_report(
                                             &request_sender,

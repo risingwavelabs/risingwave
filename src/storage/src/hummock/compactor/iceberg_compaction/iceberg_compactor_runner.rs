@@ -17,7 +17,7 @@ use std::fmt::Debug;
 use std::sync::{Arc, LazyLock};
 
 use derive_builder::Builder;
-use iceberg::spec::MAIN_BRANCH;
+use iceberg::spec::{FormatVersion, MAIN_BRANCH};
 use iceberg::{Catalog, TableIdent};
 use iceberg_compaction_core::compaction::{
     AutoCompactionPlanner, CommitConsistencyParams, CommitManagerRetryConfig, CompactionBuilder,
@@ -52,6 +52,7 @@ use crate::monitor::CompactorMetrics;
 pub struct IcebergTaskExecution {
     pub sink_id: u32,
     pub plan_runners: Vec<IcebergCompactionPlanRunner>,
+    pub planning_empty: bool,
 }
 
 static ICEBERG_COMPACTION_METRICS_REGISTRY: LazyLock<Box<PrometheusMetricsRegistry>> =
@@ -65,6 +66,10 @@ static ICEBERG_COMPACTION_METRICS_REGISTRY: LazyLock<Box<PrometheusMetricsRegist
 pub struct IcebergCompactorRunnerConfig {
     #[builder(default = "4")]
     pub max_parallelism: u32,
+    /// Optional planner input limit. When unset, use `max_parallelism` for
+    /// backwards-compatible standalone runner construction.
+    #[builder(default)]
+    pub max_input_parallelism: Option<u32>,
     #[builder(default = "1024 * 1024 * 1024")] // 1GB"
     pub min_size_per_partition: u64,
     #[builder(default = "32")]
@@ -532,7 +537,11 @@ fn build_task_planning_config(
     task_type: TaskType,
     iceberg_config: &IcebergConfig,
     config: &IcebergCompactorRunnerConfig,
+    max_file_sequence_number: Option<i64>,
 ) -> HummockResult<IcebergTaskPlanningConfig> {
+    let max_input_parallelism = config
+        .max_input_parallelism
+        .unwrap_or(config.max_parallelism);
     let grouping_strategy = match iceberg_config.write_mode {
         IcebergWriteMode::CopyOnWrite => iceberg_compaction_core::config::GroupingStrategy::Single,
         IcebergWriteMode::MergeOnRead => match config.target_binpack_group_size_mb {
@@ -561,7 +570,7 @@ fn build_task_planning_config(
         TaskType::Auto => {
             let mut builder = AutoCompactionConfigBuilder::default();
             builder
-                .max_input_parallelism(config.max_parallelism as usize)
+                .max_input_parallelism(max_input_parallelism as usize)
                 .max_output_parallelism(config.max_parallelism as usize)
                 .min_size_per_partition(config.min_size_per_partition)
                 .max_file_count_per_partition(config.max_file_count_per_partition as usize)
@@ -570,6 +579,9 @@ fn build_task_planning_config(
                 .small_file_threshold_bytes(iceberg_config.small_files_threshold_mb() * 1024 * 1024)
                 .min_delete_file_count_threshold(iceberg_config.delete_files_count_threshold())
                 .grouping_strategy(grouping_strategy);
+            if let Some(boundary) = max_file_sequence_number {
+                builder.max_file_sequence_number(boundary);
+            }
 
             if let Some(group_filters) = group_filters {
                 builder.group_filters(group_filters);
@@ -583,7 +595,7 @@ fn build_task_planning_config(
         TaskType::SmallFiles => {
             let mut builder = SmallFilesConfigBuilder::default();
             builder
-                .max_input_parallelism(config.max_parallelism as usize)
+                .max_input_parallelism(max_input_parallelism as usize)
                 .max_output_parallelism(config.max_parallelism as usize)
                 .min_size_per_partition(config.min_size_per_partition)
                 .max_file_count_per_partition(config.max_file_count_per_partition as usize)
@@ -591,6 +603,9 @@ fn build_task_planning_config(
                 .enable_heuristic_output_parallelism(config.enable_heuristic_output_parallelism)
                 .small_file_threshold_bytes(iceberg_config.small_files_threshold_mb() * 1024 * 1024)
                 .grouping_strategy(grouping_strategy);
+            if let Some(boundary) = max_file_sequence_number {
+                builder.max_file_sequence_number(boundary);
+            }
 
             if let Some(group_filters) = group_filters {
                 builder.group_filters(group_filters);
@@ -610,29 +625,39 @@ fn build_task_planning_config(
             } else {
                 FileGroupScope::Partition
             };
-            let config = FullCompactionConfigBuilder::default()
-                .max_input_parallelism(config.max_parallelism as usize)
+            let mut builder = FullCompactionConfigBuilder::default();
+            builder
+                .max_input_parallelism(max_input_parallelism as usize)
                 .max_output_parallelism(config.max_parallelism as usize)
                 .min_size_per_partition(config.min_size_per_partition)
                 .max_file_count_per_partition(config.max_file_count_per_partition as usize)
                 .target_file_size_bytes(iceberg_config.target_file_size_mb() * 1024 * 1024)
                 .enable_heuristic_output_parallelism(config.enable_heuristic_output_parallelism)
                 .grouping_strategy(grouping_strategy)
-                .file_group_scope(file_group_scope)
+                .file_group_scope(file_group_scope);
+            if let Some(boundary) = max_file_sequence_number {
+                builder.max_file_sequence_number(boundary);
+            }
+            let config = builder
                 .build()
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
             IcebergTaskPlanningConfig::Explicit(CompactionPlanningConfig::Full(config))
         }
         TaskType::FilesWithDelete => {
-            let config = FilesWithDeletesConfigBuilder::default()
-                .max_input_parallelism(config.max_parallelism as usize)
+            let mut builder = FilesWithDeletesConfigBuilder::default();
+            builder
+                .max_input_parallelism(max_input_parallelism as usize)
                 .max_output_parallelism(config.max_parallelism as usize)
                 .min_size_per_partition(config.min_size_per_partition)
                 .max_file_count_per_partition(config.max_file_count_per_partition as usize)
                 .target_file_size_bytes(iceberg_config.target_file_size_mb() * 1024 * 1024)
                 .enable_heuristic_output_parallelism(config.enable_heuristic_output_parallelism)
                 .grouping_strategy(grouping_strategy)
-                .min_delete_file_count_threshold(iceberg_config.delete_files_count_threshold())
+                .min_delete_file_count_threshold(iceberg_config.delete_files_count_threshold());
+            if let Some(boundary) = max_file_sequence_number {
+                builder.max_file_sequence_number(boundary);
+            }
+            let config = builder
                 .build()
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
             IcebergTaskPlanningConfig::Explicit(CompactionPlanningConfig::FilesWithDeletes(config))
@@ -655,6 +680,7 @@ pub async fn create_task_execution(
         props,
         task_type,
         pk_index_coordinated,
+        max_file_sequence_number,
     } = iceberg_compaction_task;
 
     let iceberg_config = IcebergConfig::from_btreemap(BTreeMap::from_iter(props))
@@ -671,7 +697,11 @@ pub async fn create_task_execution(
 
     let parsed_task_type = TaskType::try_from(task_type)
         .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-    let planning_config = build_task_planning_config(parsed_task_type, &iceberg_config, &config)?;
+    if max_file_sequence_number.is_some() && pk_index_coordinated {
+        return Err(HummockError::compaction_executor(anyhow::anyhow!(
+            "bounded automatic compaction is not supported for pk-index coordinated tasks"
+        )));
+    }
 
     let branch = commit_branch(iceberg_config.r#type.as_str(), iceberg_config.write_mode);
 
@@ -679,6 +709,33 @@ pub async fn create_task_execution(
         .load_table(&table_ident)
         .await
         .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+
+    if let Some(boundary) = max_file_sequence_number {
+        if table.metadata().format_version() < FormatVersion::V2 {
+            return Err(HummockError::compaction_executor(anyhow::anyhow!(
+                "bounded compaction requires Iceberg format V2 or V3"
+            )));
+        }
+        let head = table.metadata().snapshot_for_ref(&branch).ok_or_else(|| {
+            HummockError::compaction_executor(anyhow::anyhow!(
+                "bounded compaction branch {branch} has no snapshot"
+            ))
+        })?;
+        if head.sequence_number() < boundary {
+            return Err(HummockError::compaction_executor(anyhow::anyhow!(
+                "bounded compaction head sequence {} is older than boundary {}",
+                head.sequence_number(),
+                boundary
+            )));
+        }
+    }
+
+    let planning_config = build_task_planning_config(
+        parsed_task_type,
+        &iceberg_config,
+        &config,
+        max_file_sequence_number,
+    )?;
 
     let compaction_plans = match planning_config {
         IcebergTaskPlanningConfig::Auto(config) => {
@@ -708,6 +765,7 @@ pub async fn create_task_execution(
             .map_err(|e| HummockError::compaction_executor(e.as_report()))?,
     };
 
+    let planning_empty = max_file_sequence_number.is_some() && compaction_plans.is_empty();
     if compaction_plans.is_empty() {
         tracing::info!(
             iceberg_component = "compaction_worker",
@@ -722,6 +780,7 @@ pub async fn create_task_execution(
         return Ok(IcebergTaskExecution {
             sink_id,
             plan_runners: vec![],
+            planning_empty,
         });
     }
 
@@ -759,6 +818,7 @@ pub async fn create_task_execution(
     Ok(IcebergTaskExecution {
         sink_id,
         plan_runners: runners,
+        planning_empty: false,
     })
 }
 
@@ -794,6 +854,7 @@ mod tests {
         .unwrap();
         let runner_config = IcebergCompactorRunnerConfig {
             max_parallelism: 8,
+            max_input_parallelism: Some(3),
             min_size_per_partition: 512 * 1024 * 1024,
             max_file_count_per_partition: 16,
             enable_validate_compaction: false,
@@ -807,12 +868,13 @@ mod tests {
         };
 
         let IcebergTaskPlanningConfig::Auto(config) =
-            build_task_planning_config(TaskType::Auto, &iceberg_config, &runner_config).unwrap()
+            build_task_planning_config(TaskType::Auto, &iceberg_config, &runner_config, None)
+                .unwrap()
         else {
             panic!("expected auto planning config");
         };
 
-        assert_eq!(config.max_input_parallelism, 8);
+        assert_eq!(config.max_input_parallelism, 3);
         assert_eq!(config.max_output_parallelism, 8);
         assert_eq!(config.min_size_per_partition, 512 * 1024 * 1024);
         assert_eq!(config.max_file_count_per_partition, 16);
