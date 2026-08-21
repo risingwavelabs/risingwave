@@ -144,6 +144,16 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_count(
+                    "MySQL CDC Binlog Retention Gap",
+                    "A positive value means the RisingWave checkpoint file is older than the upstream oldest retained binlog file.",
+                    [
+                        panels.target(
+                            f"clamp_min({metric('mysql_cdc_binlog_file_seq_min')} - on(source_id) {metric('stream_mysql_cdc_state_binlog_file_seq')}, 0)",
+                            "source_id {{source_id}} {{hostname}}:{{port}} - Retention Gap",
+                        ),
+                    ],
+                ),
+                panels.timeseries_count(
                     "SQL Server CDC LSN Progression",
                     "LSN progression through the SQL Server CDC pipeline by source_id",
                     [
