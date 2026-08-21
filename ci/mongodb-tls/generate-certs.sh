@@ -1,6 +1,6 @@
-#!/usr/bin/env sh
+#!/usr/bin/env bash
 
-set -eu
+set -euo pipefail
 
 # Certificates are shared through the CI-only named volume at this path.
 cert_dir="${MONGODB_TLS_CERT_DIR:-/mongodb-tls}"
