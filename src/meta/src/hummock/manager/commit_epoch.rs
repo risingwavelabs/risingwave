@@ -405,14 +405,10 @@ impl HummockManager {
         }
         trigger_epoch_stat(&self.metrics, &versioning.current_version);
         timer.observe_duration();
+        total_timer.observe_duration();
 
         drop(versioning_guard);
 
-        let timer = self
-            .metrics
-            .commit_epoch_latency
-            .with_label_values(&["trigger_compaction"])
-            .start_timer();
         // Don't trigger compactions if we enable deterministic compaction
         if !self.env.opts.compaction_deterministic_test {
             // commit_epoch may contains SSTs from any compaction group
@@ -424,23 +420,15 @@ impl HummockManager {
                     .await;
             }
         }
-        timer.observe_duration();
 
-        let timer = self
-            .metrics
-            .commit_epoch_latency
-            .with_label_values(&["update_write_limits"])
-            .start_timer();
         if !modified_compaction_groups.is_empty() {
             self.try_update_write_limits(&modified_compaction_groups)
                 .await;
         }
-        timer.observe_duration();
         #[cfg(test)]
         {
             self.check_state_consistency().await;
         }
-        total_timer.observe_duration();
         Ok(())
     }
 
