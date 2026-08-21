@@ -54,6 +54,11 @@ use crate::pg_message::{
 use crate::pg_server::{Session, SessionManager, UserAuthenticator};
 use crate::types::Format;
 
+/// Flush streamed query results after accumulating this many bytes.
+///
+/// A single pgwire message can exceed this threshold because messages must be encoded atomically.
+const STREAM_FLUSH_THRESHOLD: usize = 64 * 1024;
+
 /// Truncates query log if it's longer than `RW_QUERY_LOG_TRUNCATE_LEN`, to avoid log file being too
 /// large.
 static RW_QUERY_LOG_TRUNCATE_LEN: LazyLock<usize> =
@@ -893,7 +898,9 @@ where
             while let Some(row_set) = res.values_stream().next().await {
                 let row_set = row_set.map_err(PsqlError::SimpleQueryError)?;
                 for row in row_set {
-                    self.stream.write_no_flush(BeMessage::CopyData(&row))?;
+                    self.stream
+                        .write_streaming(BeMessage::CopyData(&row))
+                        .await?;
                     count += 1;
                 }
             }
@@ -917,7 +924,9 @@ where
             while let Some(row_set) = res.values_stream().next().await {
                 let row_set = row_set.map_err(PsqlError::SimpleQueryError)?;
                 for row in row_set {
-                    self.stream.write_no_flush(BeMessage::DataRow(&row))?;
+                    self.stream
+                        .write_streaming(BeMessage::DataRow(&row))
+                        .await?;
                     rows_cnt += 1;
                 }
             }
@@ -1439,6 +1448,16 @@ where
         BeMessage::write(&mut self.write_buf, message)
     }
 
+    /// Write a message that is part of a potentially large response, flushing periodically to
+    /// bound the write buffer and propagate network backpressure to the result stream.
+    pub(crate) async fn write_streaming(&mut self, message: BeMessage<'_>) -> io::Result<()> {
+        self.write_no_flush(message)?;
+        if self.write_buf.len() >= STREAM_FLUSH_THRESHOLD {
+            self.flush().await?;
+        }
+        Ok(())
+    }
+
     async fn write(&mut self, message: BeMessage<'_>) -> io::Result<()> {
         self.write_no_flush(message)?;
         self.flush().await?;
@@ -1661,7 +1680,34 @@ fn parse_options(options: &str) -> PsqlResult<Vec<(String, String)>> {
 mod tests {
     use std::collections::HashSet;
 
+    use tokio::io::AsyncReadExt;
+
     use super::*;
+    use crate::types::Row;
+
+    #[tokio::test]
+    async fn test_streaming_write_flushes_at_threshold() {
+        let (server, mut client) = tokio::io::duplex(STREAM_FLUSH_THRESHOLD * 2);
+        let mut stream = PgStream::new(server);
+
+        let small_row = Row::new(vec![Some(Bytes::from_static(b"small"))]);
+        stream
+            .write_streaming(BeMessage::DataRow(&small_row))
+            .await
+            .unwrap();
+        assert!(!stream.write_buf.is_empty());
+
+        let large_row = Row::new(vec![Some(Bytes::from(vec![0; STREAM_FLUSH_THRESHOLD]))]);
+        stream
+            .write_streaming(BeMessage::DataRow(&large_row))
+            .await
+            .unwrap();
+        assert!(stream.write_buf.is_empty());
+
+        let mut message_tag = [0];
+        client.read_exact(&mut message_tag).await.unwrap();
+        assert_eq!(message_tag[0], b'D');
+    }
 
     #[test]
     fn test_redact_parsable_sql() {
