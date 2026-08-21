@@ -186,7 +186,7 @@ pub fn start_checkpoint_loop(
                     tracing::warn!(error = %err.as_report(), "Hummock version checkpoint error.");
                 }
                 Err(err) => {
-                    tracing::warn!(error = %err, "Hummock version checkpoint task failed.");
+                    tracing::warn!(error = %err.as_report(), "Hummock version checkpoint task failed.");
                 }
                 Ok(Ok(_)) => {
                     let backup_manager_2 = backup_manager.clone();
