@@ -2332,6 +2332,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "234113d19d0d7d613b40e86fb654acf958910802bcceab913a4f9e7cda03b1a4"
 dependencies = [
  "memchr",
+ "serde",
 ]
 
 [[package]]
@@ -14092,7 +14093,7 @@ dependencies = [
  "clap",
  "madsim-tokio",
  "path-absolutize",
- "similar",
+ "similar 3.1.2",
  "tracing",
  "tracing-subscriber",
  "workspace-hack",
@@ -14262,7 +14263,7 @@ dependencies = [
  "risingwave_sqlparser",
  "serde",
  "serde_yaml",
- "similar",
+ "similar 3.1.2",
  "strum 0.28.0",
  "thiserror-ext",
  "tokio-postgres",
@@ -15813,6 +15814,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
 
 [[package]]
+name = "similar"
+version = "3.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "85ee016af5d736b69fc89e19254540fa4b5f5492853fb5503920f084011c78b6"
+dependencies = [
+ "bstr",
+]
+
+[[package]]
 name = "simple_asn1"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -16017,7 +16027,7 @@ dependencies = [
  "owo-colors",
  "rand 0.8.5",
  "regex",
- "similar",
+ "similar 2.7.0",
  "subst",
  "tempfile",
  "thiserror 2.0.17",
