@@ -1,0 +1,72 @@
+control substitution on
+
+# PostgreSQL point explicit-schema validation test.
+# Only struct<x double precision, y double precision> is a valid RW mapping.
+
+statement ok
+drop source if exists point_validation_source cascade;
+
+system ok
+psql -v ON_ERROR_STOP=1 -c "
+    SELECT pg_terminate_backend(active_pid)
+    FROM pg_replication_slots
+    WHERE slot_name = 'point_validation_issue_25517_slot' AND active_pid IS NOT NULL;
+    SELECT pg_sleep(1);
+    SELECT pg_drop_replication_slot(slot_name)
+    FROM pg_replication_slots
+    WHERE slot_name = 'point_validation_issue_25517_slot';
+    DROP TABLE IF EXISTS public.test_point_validation CASCADE;
+    CREATE TABLE public.test_point_validation (
+        id int PRIMARY KEY,
+        location point
+    );
+"
+
+statement ok
+create source point_validation_source with (
+  connector = 'postgres-cdc',
+  hostname = '${PGHOST:localhost}',
+  port = '${PGPORT:5432}',
+  username = '${PGUSER:$USER}',
+  password = '${PGPASSWORD:}',
+  database.name = '${PGDATABASE:postgres}',
+  schema.name = 'public',
+  slot.name = 'point_validation_issue_25517_slot'
+);
+
+# Test: reject a non-struct mapping
+statement error Incompatible data type of column location
+create table test_point_invalid_scalar (
+    id int primary key,
+    location varchar
+) from point_validation_source table 'public.test_point_validation';
+
+# Test: reject a struct with narrowed coordinate types
+statement error Incompatible data type of column location
+create table test_point_invalid_coordinate_types (
+    id int primary key,
+    location struct<x real, y real>
+) from point_validation_source table 'public.test_point_validation';
+
+# Test: reject a struct whose fields do not match Debezium's x/y fields
+statement error Incompatible data type of column location
+create table test_point_invalid_field_names (
+    id int primary key,
+    location struct<latitude double precision, longitude double precision>
+) from point_validation_source table 'public.test_point_validation';
+
+# Teardown
+statement ok
+drop source if exists point_validation_source cascade;
+
+system ok
+psql -v ON_ERROR_STOP=1 -c "
+    SELECT pg_terminate_backend(active_pid)
+    FROM pg_replication_slots
+    WHERE slot_name = 'point_validation_issue_25517_slot' AND active_pid IS NOT NULL;
+    SELECT pg_sleep(1);
+    SELECT pg_drop_replication_slot(slot_name)
+    FROM pg_replication_slots
+    WHERE slot_name = 'point_validation_issue_25517_slot';
+    DROP TABLE IF EXISTS public.test_point_validation CASCADE;
+"
