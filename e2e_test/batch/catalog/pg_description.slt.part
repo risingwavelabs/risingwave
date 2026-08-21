@@ -13,6 +13,9 @@ comment on materialized view t is 'this should fail';
 statement error Invalid column: missing_col
 comment on column t.missing_col is 'this should fail';
 
+statement error Invalid column: a
+comment on column a is 'this should fail';
+
 statement ok
 comment on materialized view mv_t is 'Materialized view description';
 

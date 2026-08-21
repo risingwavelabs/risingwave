@@ -62,6 +62,13 @@ pub async fn handle_comment(
                     ))
                     .into());
                 };
+                if tab.is_empty() {
+                    return Err(ErrorCode::BindError(format!(
+                        "Invalid column: {}",
+                        object_name.real_value()
+                    ))
+                    .into());
+                }
 
                 let (schema, table) = Binder::resolve_schema_qualified_name(
                     &session.database(),
