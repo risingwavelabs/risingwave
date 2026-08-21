@@ -17,6 +17,7 @@
 package com.risingwave.connector.source.common;
 
 import com.mongodb.ConnectionString;
+import com.mongodb.MongoNamespace;
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.cdc.debezium.internal.ConfigurableOffsetBackingStore;
 import com.risingwave.connector.cdc.debezium.internal.OpendalSchemaHistory;
@@ -25,7 +26,9 @@ import java.io.IOException;
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Properties;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.text.StringSubstitutor;
@@ -84,7 +87,14 @@ public class DbzConnectorConfig {
 
     public static class MongoDb {
         public static final String MONGO_URL = "mongodb.url";
+        public static final String MONGO_DATABASE_LIST = "database.list";
         public static final String MONGO_COLLECTION_NAME = "collection.name";
+
+        private static final String DEBEZIUM_DATABASE_INCLUDE_LIST =
+                "debezium.database.include.list";
+        private static final String DEBEZIUM_DATABASE_EXCLUDE_LIST =
+                "debezium.database.exclude.list";
+        private static final String DATABASE_INCLUDE_LIST = "database.include.list";
     }
 
     private static Map<String, String> extractDebeziumProperties(
@@ -307,6 +317,28 @@ public class DbzConnectorConfig {
                                             path.toString()));
 
             var collection = userProps.get(MongoDb.MONGO_COLLECTION_NAME);
+            var databaseList = userProps.get(MongoDb.MONGO_DATABASE_LIST);
+            var hasLegacyDatabaseFilter =
+                    userProps.containsKey(MongoDb.DEBEZIUM_DATABASE_INCLUDE_LIST)
+                            || userProps.containsKey(MongoDb.DEBEZIUM_DATABASE_EXCLUDE_LIST);
+            if (!hasLegacyDatabaseFilter) {
+                if (databaseList != null) {
+                    mongodbProps.setProperty(MongoDb.DATABASE_INCLUDE_LIST, databaseList);
+                } else {
+                    inferMongoDatabaseList(collection)
+                            .ifPresent(
+                                    inferredDatabaseList -> {
+                                        LOG.info(
+                                                "Inferred MongoDB database list '{}' from collection filter '{}'",
+                                                inferredDatabaseList,
+                                                collection);
+                                        mongodbProps.setProperty(
+                                                MongoDb.DATABASE_INCLUDE_LIST,
+                                                inferredDatabaseList);
+                                    });
+                }
+            }
+
             var connectionStr = new ConnectionString(javaMongoDbUrl);
             var connectorName =
                     String.format(
@@ -372,6 +404,30 @@ public class DbzConnectorConfig {
         this.resolvedDbzProps = dbzProps;
         this.isBackfillSource = isCdcBackfill;
         this.waitStreamingStartTimeout = waitStreamingStartTimeout;
+    }
+
+    private static Optional<String> inferMongoDatabaseList(String collectionList) {
+        if (collectionList == null) {
+            return Optional.empty();
+        }
+
+        var databaseNames = new LinkedHashSet<String>();
+        for (var collection : collectionList.split(",")) {
+            var namespace = collection.trim();
+            var separator = namespace.indexOf('.');
+            if (separator <= 0) {
+                return Optional.empty();
+            }
+
+            var databaseName = namespace.substring(0, separator);
+            try {
+                MongoNamespace.checkDatabaseNameValidity(databaseName);
+            } catch (IllegalArgumentException e) {
+                return Optional.empty();
+            }
+            databaseNames.add(databaseName);
+        }
+        return Optional.of(String.join(",", databaseNames));
     }
 
     private Properties initiateDbConfig(String fileName, StringSubstitutor substitutor) {
