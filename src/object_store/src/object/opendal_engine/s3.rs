@@ -90,10 +90,12 @@ impl OpendalObjectStore {
 
         let http_client = Self::new_http_client(&config)?;
 
-        let op: Operator = Operator::new(builder)?
-            .layer(HttpClientLayer::new(http_client))
-            .layer(LoggingLayer::default())
-            .finish();
+        let op = new_operator(
+            &config,
+            Operator::new(builder)?
+                .layer(HttpClientLayer::new(http_client))
+                .layer(LoggingLayer::default()),
+        );
 
         Ok(Self {
             op,
@@ -115,5 +117,52 @@ impl OpendalObjectStore {
         }
         #[expect(deprecated)]
         Ok(HttpClient::build(client_builder)?)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn minio_operator(config: ObjectStoreConfig) -> Operator {
+        let store = OpendalObjectStore::new_minio_engine(
+            "minio://access:secret@127.0.0.1:9000/bucket",
+            Arc::new(config),
+            Arc::new(ObjectStoreMetrics::unused()),
+        )
+        .unwrap();
+        store.op
+    }
+
+    fn assert_has_one_logging_layer(operator: &Operator) {
+        assert_eq!(
+            format!("{:?}", operator.inner())
+                .matches("LoggingAccessor")
+                .count(),
+            1
+        );
+    }
+
+    #[test]
+    fn test_minio_concurrency_limits() {
+        let operator = minio_operator(ObjectStoreConfig::default());
+        assert!(!format!("{:?}", operator.inner()).contains("ConcurrentLimitAccessor"));
+        assert_has_one_logging_layer(&operator);
+
+        let config = ObjectStoreConfig {
+            req_concurrency_limit: 1,
+            ..Default::default()
+        };
+        let operator = minio_operator(config);
+        assert!(format!("{:?}", operator.inner()).contains("ConcurrentLimitAccessor"));
+        assert_has_one_logging_layer(&operator);
+
+        let config = ObjectStoreConfig {
+            http_concurrent_limit: 1,
+            ..Default::default()
+        };
+        let operator = minio_operator(config);
+        assert!(format!("{:?}", operator.inner()).contains("ConcurrentLimitAccessor"));
+        assert_has_one_logging_layer(&operator);
     }
 }
