@@ -30,6 +30,7 @@ use thiserror_ext::AsReport;
 use tokio_postgres::types::{PgLsn, Type as PgType};
 
 use crate::connector_common::create_pg_client;
+use crate::connector_common::postgres::postgres_point_type;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::parser::scalar_adapter::ScalarAdapter;
 use crate::parser::{
@@ -925,10 +926,7 @@ pub fn pg_type_to_rw_type(pg_type: &PgType) -> ConnectorResult<DataType> {
         PgType::DATE => DataType::Date,
         PgType::TIME => DataType::Time,
         PgType::TIMETZ => DataType::Time,
-        PgType::POINT => DataType::Struct(risingwave_common::types::StructType::new(vec![
-            ("x", DataType::Float32),
-            ("y", DataType::Float32),
-        ])),
+        PgType::POINT => postgres_point_type(),
         PgType::TIMESTAMP => DataType::Timestamp,
         PgType::TIMESTAMPTZ => DataType::Timestamptz,
         PgType::INTERVAL => DataType::Interval,
@@ -958,10 +956,10 @@ pub fn pg_type_to_rw_type(pg_type: &PgType) -> ConnectorResult<DataType> {
         PgType::OID => DataType::Int64,
         PgType::OID_ARRAY => DataType::Int64.list(),
         PgType::MONEY_ARRAY => DataType::Decimal.list(),
+        // Debezium does not implement POINT_ARRAY schema conversion.
+        // https://github.com/debezium/debezium/blob/main/debezium-connector-postgres/src/main/java/io/debezium/connector/postgresql/PostgresValueConverter.java#L339-L348
         PgType::POINT_ARRAY => {
-            DataType::list(DataType::Struct(risingwave_common::types::StructType::new(
-                vec![("x", DataType::Float32), ("y", DataType::Float32)],
-            )))
+            return Err(anyhow::anyhow!("unsupported postgres type: {}", pg_type).into());
         }
         _ => {
             return Err(anyhow::anyhow!("unsupported postgres type: {}", pg_type).into());
