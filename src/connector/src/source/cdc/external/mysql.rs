@@ -346,6 +346,33 @@ fn mysql_type_is_unsigned_bigint(col_type: &ColumnType) -> bool {
     }
 }
 
+/// Whether an RW primary key needs to recover MySQL's unsigned `BIGINT` ordering.
+///
+/// Narrower unsigned integers are widened by the frontend and remain non-negative in RW, so
+/// their native RW comparison is already correct. Only an RW `Int64` primary key can contain the
+/// wrapped representation of a MySQL `BIGINT UNSIGNED`, and therefore requires upstream type
+/// metadata to decide whether to compare it as `u64`.
+fn needs_unsigned_i64_compare(
+    column_name: &str,
+    rw_data_type: &DataType,
+    upstream_mysql_pk_infos: &[(String, ColumnType)],
+) -> ConnectorResult<bool> {
+    if rw_data_type != &DataType::Int64 {
+        return Ok(false);
+    }
+
+    upstream_mysql_pk_infos
+        .iter()
+        .find(|(col_name, _)| col_name.eq_ignore_ascii_case(column_name))
+        .map(|(_, col_type)| mysql_type_is_unsigned_bigint(col_type))
+        .ok_or_else(|| {
+            anyhow!(
+                "primary key column `{column_name}` not found in upstream MySQL primary key info"
+            )
+            .into()
+        })
+}
+
 pub fn mysql_type_to_rw_type(col_type: &ColumnType) -> ConnectorResult<DataType> {
     let dtype = match col_type {
         ColumnType::Serial => DataType::Decimal,
@@ -446,7 +473,7 @@ pub struct MySqlExternalTableReader {
     pk_indices: Vec<usize>,
     field_names: String,
     pool: mysql_async::Pool,
-    upstream_mysql_pk_infos: Vec<(String, ColumnType)>, // (column_name, column_type)
+    pk_column_unsigned_i64_compare_flags: Vec<bool>,
     mysql_version: (u8, u8),
     is_mariadb: bool,
 }
@@ -564,9 +591,28 @@ impl MySqlExternalTableReader {
             .map(|f| Self::quote_column(f.name.as_str()))
             .join(",");
 
-        // Query MySQL primary key infos for type casting.
-        let upstream_mysql_pk_infos =
-            Self::query_upstream_pk_infos(&pool, &database, &table).await?;
+        // Only an RW `Int64` primary key may need MySQL unsigned `BIGINT` comparison and casting.
+        // Other primary key types do not depend on upstream primary key metadata.
+        let pk_column_unsigned_i64_compare_flags = if pk_indices
+            .iter()
+            .any(|&index| rw_schema.fields[index].data_type == DataType::Int64)
+        {
+            let upstream_mysql_pk_infos =
+                Self::query_upstream_pk_infos(&pool, &database, &table).await?;
+            pk_indices
+                .iter()
+                .map(|&index| {
+                    let field = &rw_schema.fields[index];
+                    needs_unsigned_i64_compare(
+                        &field.name,
+                        &field.data_type,
+                        &upstream_mysql_pk_infos,
+                    )
+                })
+                .try_collect()?
+        } else {
+            vec![false; pk_indices.len()]
+        };
         // Get MySQL version
         let (major_version, minor_version, is_mariadb) = Self::get_mysql_version(&pool).await?;
         let mysql_version = (major_version, minor_version);
@@ -582,7 +628,7 @@ impl MySqlExternalTableReader {
             pk_indices,
             field_names,
             pool,
-            upstream_mysql_pk_infos,
+            pk_column_unsigned_i64_compare_flags,
             mysql_version,
             is_mariadb,
         })
@@ -636,34 +682,9 @@ impl MySqlExternalTableReader {
         Ok(column_infos)
     }
 
-    /// Check whether a column is `BIGINT UNSIGNED`.
-    ///
-    /// Frontend up-casts narrower unsigned integer types, and non-integer unsigned types
-    /// (`FLOAT`/`DOUBLE`/`DECIMAL UNSIGNED`) keep their own comparison semantics. Only
-    /// `BIGINT UNSIGNED` can be represented as a negative `i64` in RisingWave and needs
-    /// unsigned `u64` comparison/conversion.
-    fn needs_unsigned_i64_compare(&self, column_name: &str) -> ConnectorResult<bool> {
-        self.upstream_mysql_pk_infos
-            .iter()
-            .find(|(col_name, _)| col_name.eq_ignore_ascii_case(column_name))
-            .map(|(_, col_type)| mysql_type_is_unsigned_bigint(col_type))
-            .ok_or_else(|| {
-                anyhow!(
-                    "primary key column `{column_name}` not found in upstream MySQL primary key info"
-                )
-                .into()
-            })
-    }
-
-    /// For each given primary key column (by name), whether it needs unsigned `i64` comparison.
-    pub(crate) fn pk_column_unsigned_i64_compare_flags(
-        &self,
-        pk_names: &[String],
-    ) -> ConnectorResult<Vec<bool>> {
-        pk_names
-            .iter()
-            .map(|name| self.needs_unsigned_i64_compare(name))
-            .collect()
+    /// For each primary key column, whether it needs unsigned `i64` comparison.
+    pub(crate) fn pk_column_unsigned_i64_compare_flags(&self) -> Vec<bool> {
+        self.pk_column_unsigned_i64_compare_flags.clone()
     }
 
     /// Convert negative i64 to unsigned u64 based on column type
@@ -716,7 +737,8 @@ impl MySqlExternalTableReader {
             let params: Vec<_> = primary_keys
                 .iter()
                 .zip_eq_fast(start_pk_row.into_iter())
-                .map(|(pk, datum)| {
+                .zip_eq_fast(&self.pk_column_unsigned_i64_compare_flags)
+                .map(|((pk, datum), &needs_unsigned_i64_compare)| {
                     if let Some(value) = datum {
                         let ty = field_map.get(pk.as_str()).unwrap();
                         let val = match ty {
@@ -725,7 +747,7 @@ impl MySqlExternalTableReader {
                             DataType::Int32 => Value::from(value.into_int32()),
                             DataType::Int64 => {
                                 let int64_val = value.into_int64();
-                                if int64_val < 0 && self.needs_unsigned_i64_compare(pk.as_str())? {
+                                if int64_val < 0 && needs_unsigned_i64_compare {
                                     Value::from(self.convert_negative_to_unsigned(int64_val))
                                 } else {
                                     Value::from(int64_val)
@@ -851,7 +873,10 @@ mod tests {
     use risingwave_common::types::DataType;
     use sea_schema::mysql::def::ColumnType;
 
-    use super::{mysql_type_is_unsigned_bigint, mysql_type_to_rw_type, type_name_to_mysql_type};
+    use super::{
+        mysql_type_is_unsigned_bigint, mysql_type_to_rw_type, needs_unsigned_i64_compare,
+        type_name_to_mysql_type,
+    };
     use crate::source::cdc::external::mysql::MySqlExternalTable;
     use crate::source::cdc::external::{
         CdcOffset, ExternalTableConfig, ExternalTableReader, MySqlExternalTableReader, MySqlOffset,
@@ -890,6 +915,48 @@ mod tests {
                 "{ty_name}"
             );
         }
+    }
+
+    #[test]
+    fn test_unsigned_i64_compare_only_requires_metadata_for_int64() {
+        assert!(
+            !needs_unsigned_i64_compare("id", &DataType::Int32, &[]).unwrap(),
+            "non-Int64 primary keys must not depend on upstream metadata"
+        );
+        assert!(
+            needs_unsigned_i64_compare("id", &DataType::Int64, &[]).is_err(),
+            "Int64 primary keys must fail closed when upstream metadata is missing"
+        );
+
+        let upstream_pk_infos = vec![
+            (
+                "unsigned_bigint".to_owned(),
+                parse_mysql_type_name("BIGINT UNSIGNED"),
+            ),
+            (
+                "unsigned_int".to_owned(),
+                parse_mysql_type_name("INT UNSIGNED"),
+            ),
+            ("signed_bigint".to_owned(), parse_mysql_type_name("BIGINT")),
+        ];
+
+        assert!(
+            needs_unsigned_i64_compare("unsigned_bigint", &DataType::Int64, &upstream_pk_infos,)
+                .unwrap()
+        );
+        assert!(
+            !needs_unsigned_i64_compare("unsigned_int", &DataType::Int64, &upstream_pk_infos,)
+                .unwrap()
+        );
+        assert!(
+            !needs_unsigned_i64_compare("signed_bigint", &DataType::Int64, &upstream_pk_infos,)
+                .unwrap()
+        );
+        assert!(
+            !needs_unsigned_i64_compare("unsigned_bigint", &DataType::Decimal, &upstream_pk_infos,)
+                .unwrap(),
+            "native non-Int64 comparisons must not use the unsigned i64 flag"
+        );
     }
 
     #[test]
