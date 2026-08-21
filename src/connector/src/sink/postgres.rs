@@ -635,13 +635,20 @@ impl PostgresSinkWriter {
 
         // Statements are prepared before the transaction; after warm-up every size hits the cache.
         let write_kind = self.write_kind();
-        let mut batches = self
+        let delete_batches = self
             .prepare_batches(StatementKind::Delete, &deletes)
             .await?;
-        batches.extend(self.prepare_batches(write_kind, &upserts).await?);
+        let upsert_batches = self.prepare_batches(write_kind, &upserts).await?;
 
         let transaction = self.client.transaction().await?;
-        if let Err(e) = execute_batches(&transaction, &batches).await {
+        // Deletes are awaited before upserts are sent, so that no delete can land after a
+        // PG-equal upsert and erase a live row; costs one extra round trip on mixed flushes.
+        let result = async {
+            execute_batches(&transaction, &delete_batches).await?;
+            execute_batches(&transaction, &upsert_batches).await
+        }
+        .await;
+        if let Err(e) = result {
             // Retry any failed batch row by row: keys distinct to RisingWave but equal to
             // PostgreSQL fail a multi-row upsert with SQLSTATE 21000 yet apply cleanly one row at
             // a time; other errors recover on retry or resurface localized to a single row.
@@ -736,8 +743,10 @@ async fn execute_batches(
     transaction: &tokio_postgres::Transaction<'_>,
     batches: &[(tokio_postgres::Statement, &[PgRow])],
 ) -> std::result::Result<(), tokio_postgres::Error> {
-    // Polling all statements concurrently pipelines them into a single round trip; they still
-    // execute in wire order, i.e. in the order of `batches`.
+    // Polling all statements concurrently pipelines them into a single round trip; they execute
+    // in first-poll order, i.e. the order of `batches` — an unstated implementation detail of
+    // `futures` and `tokio-postgres`. If it ever breaks, only the winner among PG-equal upsert
+    // keys can change, which is best-effort anyway.
     let executions = batches.iter().map(|(statement, tuples)| {
         let mut params = Vec::with_capacity(tuples.len() * tuples.first().map_or(0, |t| t.len()));
         params.extend(tuples.iter().flatten());
