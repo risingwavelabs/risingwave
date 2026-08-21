@@ -136,6 +136,53 @@ CREATE SINK s_auto_schema_change FROM t_auto_schema_change WITH (
 statement ok
 DROP TABLE t_auto_schema_change;
 
+# ---- Validation: batch_size must be positive ----
+statement ok
+CREATE TABLE t_bad_batch_size (payload jsonb);
+
+statement error `batch_size` must be greater than 0
+CREATE SINK s_bad_batch_size FROM t_bad_batch_size WITH (
+    connector = 'http',
+    url = 'http://localhost:18081',
+    type = 'append-only',
+    force_append_only = 'true',
+    batch_size = '0'
+);
+
+statement ok
+DROP TABLE t_bad_batch_size;
+
+# ---- Validation: text payloads do not support batch_size ----
+statement ok
+CREATE TABLE t_text_batch_size (payload varchar);
+
+statement error HTTP sink batch_size option only supports jsonb payload
+CREATE SINK s_text_batch_size FROM t_text_batch_size WITH (
+    connector = 'http',
+    url = 'http://localhost:18081',
+    type = 'append-only',
+    force_append_only = 'true',
+    batch_size = '2'
+);
+
+statement ok
+DROP TABLE t_text_batch_size;
+
+# ---- Validation: batched payloads require static url ----
+statement ok
+CREATE TABLE t_dynamic_url_batch_size (payload jsonb, url varchar);
+
+statement error HTTP sink batch_size greater than 1 does not support dynamic url column
+CREATE SINK s_dynamic_url_batch_size FROM t_dynamic_url_batch_size WITH (
+    connector = 'http',
+    type = 'append-only',
+    force_append_only = 'true',
+    batch_size = '2'
+);
+
+statement ok
+DROP TABLE t_dynamic_url_batch_size;
+
 # ---- Success: ignore_delete allows non-append-only input ----
 statement ok
 CREATE TABLE t_ignore_delete_src (payload varchar);
@@ -273,3 +320,28 @@ DROP SINK s_dynamic_url_as_select;
 
 statement ok
 DROP TABLE t_dynamic_url_as_select_src;
+
+# ---- Success: batched payloads are line-separated ----
+statement ok
+CREATE TABLE t_batched_payload (payload jsonb);
+
+statement ok
+CREATE SINK s_batched_payload FROM t_batched_payload WITH (
+    connector = 'http',
+    url = 'http://localhost:18081',
+    type = 'append-only',
+    force_append_only = 'true',
+    batch_size = '2'
+);
+
+statement ok
+INSERT INTO t_batched_payload VALUES ('{"batch":1}'::jsonb), ('{"batch":2}'::jsonb), ('{"batch":3}'::jsonb);
+
+statement ok
+FLUSH;
+
+statement ok
+DROP SINK s_batched_payload;
+
+statement ok
+DROP TABLE t_batched_payload;
