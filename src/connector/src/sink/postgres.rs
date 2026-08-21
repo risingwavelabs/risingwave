@@ -25,7 +25,6 @@ use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use simd_json::prelude::ArrayTrait;
 use thiserror_ext::AsReport;
-use tokio_postgres::error::SqlState;
 use tokio_postgres::types::Type as PgType;
 use with_options::WithOptions;
 
@@ -643,34 +642,33 @@ impl PostgresSinkWriter {
 
         let transaction = self.client.transaction().await?;
         if let Err(e) = execute_batches(&transaction, &batches).await {
-            // Keys the dedup kept apart may still be equal to PostgreSQL (e.g. `char(n)` padding
-            // or a case-insensitive collation), which a multi-row upsert rejects with SQLSTATE
-            // 21000. Retry such batches row by row.
-            if e.code() == Some(&SqlState::CARDINALITY_VIOLATION) {
-                transaction.rollback().await?;
-                tracing::warn!(
-                    error = %e.as_report(),
-                    rows = upserts.len(),
-                    "batch contains keys equal to PostgreSQL but distinct to RisingWave, retrying row by row"
-                );
-                return self.flush_row_by_row(&deletes, &upserts).await;
-            }
-            return Err(anyhow::Error::new(e)
-                .context(format!(
+            // Retry any failed batch row by row: keys distinct to RisingWave but equal to
+            // PostgreSQL fail a multi-row upsert with SQLSTATE 21000 yet apply cleanly one row at
+            // a time; other errors recover on retry or resurface localized to a single row.
+            let context = || {
+                format!(
                     "failed to execute batched {} statements ({} delete rows, {} write rows)",
                     write_kind.as_str(),
                     deletes.len(),
                     upserts.len()
-                ))
-                .into());
+                )
+            };
+            if let Err(rollback_err) = transaction.rollback().await {
+                tracing::warn!(
+                    error = %rollback_err.as_report(),
+                    "failed to roll back failed batch"
+                );
+                return Err(anyhow::Error::new(e).context(context()).into());
+            }
+            tracing::warn!(error = %e.as_report(), "{}, retrying row by row", context());
+            return self.flush_row_by_row(&deletes, &upserts).await;
         }
         transaction.commit().await?;
 
         Ok(())
     }
 
-    /// Applies a batch whose upsert keys collide under PostgreSQL's equality: batched deletes
-    /// first, then one upsert per statement.
+    /// Fallback for a failed batched flush: batched deletes first, then one upsert per statement.
     async fn flush_row_by_row(&mut self, deletes: &[PgRow], upserts: &[PgRow]) -> Result<()> {
         let delete_batches = self.prepare_batches(StatementKind::Delete, deletes).await?;
         let statement = self.cached_statement(self.write_kind(), 1).await?;
