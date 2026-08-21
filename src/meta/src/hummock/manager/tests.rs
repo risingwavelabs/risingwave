@@ -1007,6 +1007,42 @@ async fn test_invalid_sst_id() {
 }
 
 #[tokio::test]
+async fn test_sst_retention_check_is_disabled_without_gc_history() {
+    let mut opts = MetaOpts::test(false);
+    opts.gc_history_retention_time_sec = 0;
+    let (_env, hummock_manager, _cluster_manager, _worker_id) =
+        setup_compute_env_with_meta_opts(80, opts).await;
+    let current_version = hummock_manager.get_current_version().await;
+
+    assert!(hummock_manager.load_now().await.unwrap().is_none());
+    hummock_manager
+        .commit_epoch_sanity_check(
+            &HashMap::new(),
+            &[gen_local_sstable_info(1, vec![1], test_epoch(1))],
+            &HashMap::new(),
+            &current_version,
+        )
+        .await
+        .unwrap();
+    assert!(hummock_manager.load_now().await.unwrap().is_none());
+
+    hummock_manager
+        .commit_epoch_sanity_check(
+            &HashMap::new(),
+            &[LocalSstableInfo {
+                sst_info: gen_sstable_info(2, vec![1], test_epoch(1)),
+                table_stats: Default::default(),
+                created_at: 0,
+            }],
+            &HashMap::new(),
+            &current_version,
+        )
+        .await
+        .unwrap();
+    assert!(hummock_manager.load_now().await.unwrap().is_none());
+}
+
+#[tokio::test]
 async fn test_trigger_manual_compaction() {
     let (_, hummock_manager, _, worker_id) = setup_compute_env(80).await;
     let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(

@@ -254,20 +254,17 @@ impl HummockManager {
         }
 
         // HummockManager::now requires a write to the meta store. Thus, it should be avoided whenever feasible.
-        if !sstables.is_empty() {
+        if self.env.opts.gc_history_retention_time_sec != 0 && !sstables.is_empty() {
             // Sanity check to ensure SSTs to commit have not been full GCed yet.
-            let now = self.now().await?;
             check_sst_retention(
-                now,
+                self.now().await?,
                 self.env.opts.min_sst_retention_time_sec,
                 sstables
                     .iter()
                     .map(|s| (s.sst_info.object_id, s.created_at)),
             )?;
-            if self.env.opts.gc_history_retention_time_sec != 0 {
-                let ids = sstables.iter().map(|s| s.sst_info.object_id).collect_vec();
-                check_gc_history(&self.meta_store_ref().conn, ids).await?;
-            }
+            let ids = sstables.iter().map(|s| s.sst_info.object_id).collect_vec();
+            check_gc_history(&self.meta_store_ref().conn, ids).await?;
         }
 
         async {
@@ -314,19 +311,16 @@ impl HummockManager {
         object_timestamps: &HashMap<HummockSstableObjectId, u64>,
     ) -> Result<()> {
         // HummockManager::now requires a write to the meta store. Thus, it should be avoided whenever feasible.
-        if object_timestamps.is_empty() {
+        if self.env.opts.gc_history_retention_time_sec == 0 || object_timestamps.is_empty() {
             return Ok(());
         }
-        let now = self.now().await?;
         check_sst_retention(
-            now,
+            self.now().await?,
             self.env.opts.min_sst_retention_time_sec,
             object_timestamps.iter().map(|(k, v)| (*k, *v)),
         )?;
-        if self.env.opts.gc_history_retention_time_sec != 0 {
-            let ids = object_timestamps.keys().copied().collect_vec();
-            check_gc_history(&self.meta_store_ref().conn, ids).await?;
-        }
+        let ids = object_timestamps.keys().copied().collect_vec();
+        check_gc_history(&self.meta_store_ref().conn, ids).await?;
         Ok(())
     }
 }
