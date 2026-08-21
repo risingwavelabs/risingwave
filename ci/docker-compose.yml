@@ -763,10 +763,7 @@ services:
 
   mongodb-tls-cert-generator:
     image: mongo:8
-    command:
-      - /bin/sh
-      - -c
-      - /bin/sh /scripts/generate-certs.sh
+    entrypoint: ["/bin/bash", "/scripts/generate-certs.sh"]
     volumes:
       - ./mongodb-tls:/scripts:ro
       - mongodb-tls-certs:/mongodb-tls

@@ -20,7 +20,7 @@ import com.mongodb.ConnectionString;
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.cdc.debezium.internal.ConfigurableOffsetBackingStore;
 import com.risingwave.connector.cdc.debezium.internal.OpendalSchemaHistory;
-import com.risingwave.connector.cdc.mongodb.MongoDbTlsUtils;
+import io.debezium.connector.mongodb.connection.client.MongoDbTlsUtils;
 import java.io.IOException;
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
