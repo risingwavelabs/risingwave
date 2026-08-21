@@ -37,10 +37,10 @@ use risingwave_storage::hummock::multi_builder::{CapacitySplitTableBuilder, Tabl
 use risingwave_storage::hummock::none::NoneRecentFilter;
 use risingwave_storage::hummock::value::HummockValue;
 use risingwave_storage::hummock::{
-    BackwardSstableIterator, BatchSstableWriterFactory, CachePolicy, HummockResult, MemoryLimiter,
-    SstableBuilder, SstableBuilderOptions, SstableIteratorReadOptions, SstableStore,
-    SstableStoreConfig, SstableWriterFactory, SstableWriterOptions, StreamingSstableWriterFactory,
-    Xor16FilterBuilder,
+    BackwardSstableIterator, BatchSstableWriterFactory, CachePolicy, HummockResult, LiveSsts,
+    MemoryLimiter, SstableBlockHashBuilder, SstableBuilder, SstableBuilderOptions,
+    SstableIteratorReadOptions, SstableStore, SstableStoreConfig, SstableWriterFactory,
+    SstableWriterOptions, StreamingSstableWriterFactory, Xor16FilterBuilder,
 };
 use risingwave_storage::monitor::{ObjectStoreMetrics, global_hummock_state_store_metrics};
 
@@ -151,6 +151,7 @@ async fn generate_sstable_store(object_store: Arc<ObjectStoreImpl>) -> Arc<Sstab
         .unwrap();
     let block_cache = HybridCacheBuilder::new()
         .memory(128 << 20)
+        .with_hash_builder(SstableBlockHashBuilder::default())
         .with_shards(2)
         .storage()
         .build()
@@ -167,6 +168,8 @@ async fn generate_sstable_store(object_store: Arc<ObjectStoreImpl>) -> Arc<Sstab
         skip_bloom_filter_in_serde: false,
         meta_cache,
         block_cache,
+        l0_block_cache: None,
+        live_ssts: LiveSsts::default(),
         vector_meta_cache: CacheBuilder::new(1 << 10).build(),
         vector_block_cache: CacheBuilder::new(1 << 10).build(),
     }))

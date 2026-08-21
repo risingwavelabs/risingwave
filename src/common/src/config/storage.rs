@@ -118,6 +118,43 @@ pub struct StorageConfig {
     #[config_doc(nested)]
     pub data_file_cache: FileCacheConfig,
 
+    /// Filter applied before admitting a block into the primary data file cache. The primary
+    /// cache stores stable-level blocks when the L0 disk cache is split, and all blocks otherwise.
+    /// `none` accepts every block; `live-sst` accepts only live blocks routed to this cache.
+    #[serde(default)]
+    pub data_file_cache_admission_filter: DataFileCacheFilter,
+
+    /// Filter applied before reinserting a block during primary data file cache reclaim. The
+    /// primary cache stores stable-level blocks when the L0 disk cache is split, and all blocks
+    /// otherwise. `none` accepts every block; `live-sst` accepts only live blocks routed to this
+    /// cache.
+    #[serde(default)]
+    pub data_file_cache_reinsertion_filter: DataFileCacheFilter,
+
+    /// Filter applied before admitting a block into the independent L0 data file cache. When
+    /// omitted, it inherits `data_file_cache_admission_filter`.
+    #[serde(default)]
+    pub l0_data_file_cache_admission_filter: Option<DataFileCacheFilter>,
+
+    /// Filter applied before reinserting a block during independent L0 data file cache reclaim.
+    /// When omitted, it inherits `data_file_cache_reinsertion_filter`.
+    #[serde(default)]
+    pub l0_data_file_cache_reinsertion_filter: Option<DataFileCacheFilter>,
+
+    /// Percentage of data file cache capacity reserved for the independent L0 cache.
+    /// `0` keeps the existing single-disk layout.
+    #[serde(
+        default = "default::storage::l0_block_cache_disk_capacity_ratio_in_percent",
+        alias = "l0_block_cache_capacity_ratio_in_percent"
+    )]
+    pub l0_block_cache_disk_capacity_ratio_in_percent: usize,
+
+    /// Percentage of block-cache memory reserved for the independent L0 cache.
+    /// This is independent from `l0_block_cache_disk_capacity_ratio_in_percent`. `0` keeps all
+    /// block cache memory in the stable cache.
+    #[serde(default = "default::storage::l0_block_cache_memory_capacity_ratio_in_percent")]
+    pub l0_block_cache_memory_capacity_ratio_in_percent: usize,
+
     #[serde(default)]
     #[config_doc(nested)]
     pub meta_file_cache: FileCacheConfig,
@@ -301,6 +338,12 @@ pub struct CacheConfig {
     #[config_doc(omitted)]
     pub block_cache_eviction: CacheEvictionConfig,
 
+    /// Configure the eviction policy of the independent L0 block cache. When omitted, it inherits
+    /// `block_cache_eviction`.
+    #[serde(default)]
+    #[config_doc(omitted)]
+    pub l0_block_cache_eviction: Option<CacheEvictionConfig>,
+
     /// Configure the capacity of the block cache in MB explicitly.
     /// The overridden value will only be effective if:
     /// 1. `block_cache_capacity_mb` and `shared_buffer_capacity_mb` are also configured explicitly.
@@ -446,6 +489,17 @@ pub enum FileCacheRuntimeConfig {
         read_runtime_options: FileCacheTokioRuntimeConfig,
         write_runtime_options: FileCacheTokioRuntimeConfig,
     },
+}
+
+/// A filter applied to data file cache entries.
+#[derive(Copy, Clone, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DataFileCacheFilter {
+    /// Do not filter entries.
+    #[default]
+    None,
+    /// Accept entries only when the SST is live and belongs to the cache's level partition.
+    LiveSst,
 }
 
 /// The subsection `[storage.data_file_cache]` and `[storage.meta_file_cache]` in `risingwave.toml`.
@@ -792,6 +846,7 @@ pub struct StorageMemoryConfig {
     pub compactor_memory_limit_mb: usize,
     pub prefetch_buffer_capacity_mb: usize,
     pub block_cache_eviction_config: EvictionConfig,
+    pub l0_block_cache_eviction_config: EvictionConfig,
     pub meta_cache_eviction_config: EvictionConfig,
     pub vector_block_cache_eviction_config: EvictionConfig,
     pub vector_meta_cache_eviction_config: EvictionConfig,
@@ -887,6 +942,13 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
     };
 
     let block_cache_eviction_config = get_eviction_config(&s.storage.cache.block_cache_eviction);
+    let l0_block_cache_eviction_config = s
+        .storage
+        .cache
+        .l0_block_cache_eviction
+        .as_ref()
+        .map(get_eviction_config)
+        .unwrap_or_else(|| block_cache_eviction_config.clone());
     let meta_cache_eviction_config = get_eviction_config(&s.storage.cache.meta_cache_eviction);
     let vector_block_cache_eviction_config =
         get_eviction_config(&s.storage.cache.vector_block_cache_eviction_config);
@@ -932,6 +994,7 @@ pub fn extract_storage_memory_config(s: &RwConfig) -> StorageMemoryConfig {
         compactor_memory_limit_mb,
         prefetch_buffer_capacity_mb,
         block_cache_eviction_config,
+        l0_block_cache_eviction_config,
         meta_cache_eviction_config,
         vector_block_cache_eviction_config,
         vector_meta_cache_eviction_config,
@@ -977,6 +1040,14 @@ pub mod default {
 
         pub fn block_cache_capacity_mb() -> usize {
             512
+        }
+
+        pub fn l0_block_cache_disk_capacity_ratio_in_percent() -> usize {
+            0
+        }
+
+        pub fn l0_block_cache_memory_capacity_ratio_in_percent() -> usize {
+            0
         }
 
         pub fn high_priority_ratio_in_percent() -> usize {

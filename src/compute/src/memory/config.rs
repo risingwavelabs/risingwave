@@ -347,6 +347,12 @@ pub fn storage_memory_config(
 
     let block_cache_eviction_config =
         get_eviction_config(&storage_config.cache.block_cache_eviction);
+    let l0_block_cache_eviction_config = storage_config
+        .cache
+        .l0_block_cache_eviction
+        .as_ref()
+        .map(get_eviction_config)
+        .unwrap_or_else(|| block_cache_eviction_config.clone());
     let meta_cache_eviction_config = get_eviction_config(&storage_config.cache.meta_cache_eviction);
     let vector_block_cache_eviction_config =
         get_eviction_config(&storage_config.cache.vector_block_cache_eviction_config);
@@ -366,6 +372,7 @@ pub fn storage_memory_config(
         compactor_memory_limit_mb,
         prefetch_buffer_capacity_mb,
         block_cache_eviction_config,
+        l0_block_cache_eviction_config,
         meta_cache_eviction_config,
         vector_block_cache_eviction_config,
         vector_meta_cache_eviction_config,

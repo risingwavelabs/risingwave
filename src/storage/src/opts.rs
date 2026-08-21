@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::config::storage::FileCacheRuntimeConfig;
+use risingwave_common::config::storage::{DataFileCacheFilter, FileCacheRuntimeConfig};
 use risingwave_common::config::streaming::CacheRefillPolicy;
 use risingwave_common::config::{
     EvictionConfig, ObjectStoreConfig, RwConfig, StorageMemoryConfig, extract_storage_memory_config,
@@ -56,6 +56,8 @@ pub struct StorageOpts {
     pub block_cache_shard_num: usize,
     /// Eviction config for block cache.
     pub block_cache_eviction_config: EvictionConfig,
+    /// Eviction config for the independent L0 block cache.
+    pub l0_block_cache_eviction_config: EvictionConfig,
     /// Capacity of sstable meta cache.
     pub meta_cache_capacity_mb: usize,
     /// the number of meta-cache shard. Less shard means that more concurrent-conflict.
@@ -90,6 +92,12 @@ pub struct StorageOpts {
 
     pub data_file_cache_dir: String,
     pub data_file_cache_capacity_mb: usize,
+    pub data_file_cache_admission_filter: DataFileCacheFilter,
+    pub data_file_cache_reinsertion_filter: DataFileCacheFilter,
+    pub l0_data_file_cache_admission_filter: DataFileCacheFilter,
+    pub l0_data_file_cache_reinsertion_filter: DataFileCacheFilter,
+    pub l0_block_cache_disk_capacity_ratio_in_percent: usize,
+    pub l0_block_cache_memory_capacity_ratio_in_percent: usize,
     pub data_file_cache_file_capacity_mb: usize,
     pub data_file_cache_flushers: usize,
     pub data_file_cache_reclaimers: usize,
@@ -241,6 +249,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             block_cache_capacity_mb: s.block_cache_capacity_mb,
             block_cache_shard_num: s.block_cache_shard_num,
             block_cache_eviction_config: s.block_cache_eviction_config.clone(),
+            l0_block_cache_eviction_config: s.l0_block_cache_eviction_config.clone(),
             meta_cache_capacity_mb: s.meta_cache_capacity_mb,
             meta_cache_shard_num: s.meta_cache_shard_num,
             meta_cache_eviction_config: s.meta_cache_eviction_config.clone(),
@@ -256,6 +265,22 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             max_version_pinning_duration_sec: c.storage.max_version_pinning_duration_sec,
             data_file_cache_dir: c.storage.data_file_cache.dir.clone(),
             data_file_cache_capacity_mb: c.storage.data_file_cache.capacity_mb,
+            data_file_cache_admission_filter: c.storage.data_file_cache_admission_filter,
+            data_file_cache_reinsertion_filter: c.storage.data_file_cache_reinsertion_filter,
+            l0_data_file_cache_admission_filter: c
+                .storage
+                .l0_data_file_cache_admission_filter
+                .unwrap_or(c.storage.data_file_cache_admission_filter),
+            l0_data_file_cache_reinsertion_filter: c
+                .storage
+                .l0_data_file_cache_reinsertion_filter
+                .unwrap_or(c.storage.data_file_cache_reinsertion_filter),
+            l0_block_cache_disk_capacity_ratio_in_percent: c
+                .storage
+                .l0_block_cache_disk_capacity_ratio_in_percent,
+            l0_block_cache_memory_capacity_ratio_in_percent: c
+                .storage
+                .l0_block_cache_memory_capacity_ratio_in_percent,
             data_file_cache_file_capacity_mb: c.storage.data_file_cache.file_capacity_mb,
             data_file_cache_flushers: c.storage.data_file_cache.flushers,
             data_file_cache_reclaimers: c.storage.data_file_cache.reclaimers,
@@ -410,5 +435,37 @@ mod tests {
 
         assert_eq!(opts.data_file_cache_submit_queue_size_threshold_mb, 256);
         assert_eq!(opts.meta_file_cache_submit_queue_size_threshold_mb, 32);
+    }
+
+    #[test]
+    fn test_l0_data_file_cache_filters_override_or_inherit_stable_filters() {
+        let mut config = RwConfig::default();
+        config.storage.data_file_cache_admission_filter = DataFileCacheFilter::LiveSst;
+        config.storage.data_file_cache_reinsertion_filter = DataFileCacheFilter::None;
+        let system_params = SystemParamsReader::from(system_params_for_test());
+        let storage_memory_config = extract_storage_memory_config(&config);
+
+        let opts = StorageOpts::from((&config, &system_params, &storage_memory_config));
+        assert_eq!(
+            opts.l0_data_file_cache_admission_filter,
+            DataFileCacheFilter::LiveSst
+        );
+        assert_eq!(
+            opts.l0_data_file_cache_reinsertion_filter,
+            DataFileCacheFilter::None
+        );
+
+        config.storage.l0_data_file_cache_admission_filter = Some(DataFileCacheFilter::None);
+        config.storage.l0_data_file_cache_reinsertion_filter = Some(DataFileCacheFilter::LiveSst);
+        let storage_memory_config = extract_storage_memory_config(&config);
+        let opts = StorageOpts::from((&config, &system_params, &storage_memory_config));
+        assert_eq!(
+            opts.l0_data_file_cache_admission_filter,
+            DataFileCacheFilter::None
+        );
+        assert_eq!(
+            opts.l0_data_file_cache_reinsertion_filter,
+            DataFileCacheFilter::LiveSst
+        );
     }
 }
