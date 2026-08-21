@@ -237,6 +237,16 @@ pub enum ShutdownMsg {
 pub struct ShutdownSender(tokio::sync::watch::Sender<ShutdownMsg>);
 
 impl ShutdownSender {
+    /// Create another receiver for this shutdown channel.
+    pub fn subscribe(&self) -> ShutdownToken {
+        ShutdownToken(self.0.subscribe())
+    }
+
+    /// Return whether both senders belong to the same channel.
+    pub fn same_channel(&self, other: &Self) -> bool {
+        self.0.same_channel(&other.0)
+    }
+
     /// Send a cancel message. Return true if the message is sent successfully.
     pub fn cancel(&self) -> bool {
         self.0.send(ShutdownMsg::Cancel).is_ok()

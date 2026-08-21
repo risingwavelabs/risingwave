@@ -85,12 +85,18 @@ impl LocalQueryExecution {
         }
     }
 
+    /// Subscribes to the current command's cancellation channel, or installs one if this is the
+    /// first local execution. Helper queries of the command therefore share one cancellation
+    /// identity until the session clears it at a command boundary.
     fn shutdown_rx(&self) -> ShutdownToken {
-        self.session.reset_cancel_query_flag()
+        self.session.reuse_or_reset_cancel_query_flag()
     }
 
+    /// Runs with the cancellation receiver selected before spawning this lazily-polled stream.
+    /// Passing it in keeps the executor on the command's channel even if the session slot is
+    /// cleared before the stream receives its first poll.
     #[try_stream(ok = DataChunk, error = RwError)]
-    pub async fn run_inner(self) {
+    pub async fn run_inner(self, shutdown_rx: ShutdownToken) {
         debug!(
             query_id = %self.query.query_id,
             "Starting to run query"
@@ -105,7 +111,7 @@ impl LocalQueryExecution {
         let plan_fragment = self.create_plan_fragment()?;
         let plan_node = plan_fragment.root.unwrap();
 
-        let executor = ExecutorBuilder::new(&plan_node, &task_id, context, self.shutdown_rx());
+        let executor = ExecutorBuilder::new(&plan_node, &task_id, context, shutdown_rx);
         let executor = executor.build().await?;
         // The following loop can be slow.
         // Release potential large object in Query and PlanNode early.
@@ -118,15 +124,17 @@ impl LocalQueryExecution {
         }
     }
 
-    fn run(self) -> BoxStream<'static, Result<DataChunk, RwError>> {
+    fn run(self, shutdown_rx: ShutdownToken) -> BoxStream<'static, Result<DataChunk, RwError>> {
         let span = tracing::info_span!("local_execute", query_id = self.query.query_id.id,);
-        Box::pin(self.run_inner().instrument(span))
+        Box::pin(self.run_inner(shutdown_rx).instrument(span))
     }
 
     pub fn stream_rows(self) -> LocalQueryStream {
         let compute_runtime = self.front_env.compute_runtime();
         let (sender, receiver) = mpsc::channel(10);
-        let shutdown_rx = self.shutdown_rx();
+        let poller_shutdown_rx = self.shutdown_rx();
+        // The row-stream poller and executor each need a receiver for the same channel.
+        let executor_shutdown_rx = poller_shutdown_rx.clone();
 
         let catalog_reader = self.front_env.catalog_reader().clone();
         let user_info_reader = self.front_env.user_info_reader().clone();
@@ -140,10 +148,12 @@ impl LocalQueryExecution {
 
         let sender1 = sender.clone();
         let exec = async move {
-            let mut data_stream = self.run().map(|r| r.map_err(|e| Box::new(e) as BoxedError));
+            let mut data_stream = self
+                .run(executor_shutdown_rx)
+                .map(|r| r.map_err(|e| Box::new(e) as BoxedError));
             while let Some(mut r) = data_stream.next().await {
                 // append a query cancelled error if the query is cancelled.
-                if r.is_err() && shutdown_rx.is_cancelled() {
+                if r.is_err() && poller_shutdown_rx.is_cancelled() {
                     r = Err(Box::new(SchedulerError::QueryCancelled(
                         "Cancelled by user".to_owned(),
                     )) as BoxedError);
