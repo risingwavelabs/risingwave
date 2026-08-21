@@ -1,0 +1,724 @@
+control substitution on
+
+# PostgreSQL polygon type CDC test
+
+# Shared setup
+statement ok
+drop source if exists polygon_source cascade;
+
+system ok
+psql -v ON_ERROR_STOP=1 -c "
+    SELECT pg_terminate_backend(active_pid)
+    FROM pg_replication_slots
+    WHERE slot_name = 'polygon_issue_25517_slot' AND active_pid IS NOT NULL;
+    SELECT pg_sleep(1);
+    SELECT pg_drop_replication_slot(slot_name)
+    FROM pg_replication_slots
+    WHERE slot_name = 'polygon_issue_25517_slot';
+"
+
+statement ok
+create source polygon_source with (
+  connector = 'postgres-cdc',
+  hostname = '${PGHOST:localhost}',
+  port = '${PGPORT:5432}',
+  username = '${PGUSER:$USER}',
+  password = '${PGPASSWORD:}',
+  database.name = '${PGDATABASE:postgres}',
+  schema.name = 'public',
+  slot.name = 'polygon_issue_25517_slot',
+  auto.schema.change = 'true',
+  debezium.include.unknown.datatypes = 'true'
+);
+
+# Test: accept correct explicit schemas
+
+# A scalar polygon maps to varchar and backfill preserves PostgreSQL's text representation.
+system ok
+psql -v ON_ERROR_STOP=1 -c "
+    DROP TABLE IF EXISTS public.test_polygon CASCADE;
+    CREATE TABLE public.test_polygon (
+        id int PRIMARY KEY,
+        name varchar,
+        shape polygon
+    );
+    INSERT INTO public.test_polygon VALUES
+        (1, 'square', polygon '((0,0),(10,0),(10,10),(0,10))'),
+        (2, 'triangle', polygon '((1,1),(5,1),(3,4))');
+"
+
+statement ok
+drop table if exists test_polygon;
+
+statement ok
+create table test_polygon (
+    id int primary key,
+    name varchar,
+    shape varchar
+) from polygon_source table 'public.test_polygon';
+
+query T
+select c.data_type
+from rw_catalog.rw_columns c
+join rw_catalog.rw_tables t on c.relation_id = t.id
+where t.name = 'test_polygon' and c.name = 'shape';
+----
+character varying
+
+query ITTT retry 10 backoff 1s
+select
+    ours.id,
+    ours.shape,
+    upstream.upstream_text,
+    ours.shape is not distinct from upstream.upstream_text
+from test_polygon as ours
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, shape::text as upstream_text from public.test_polygon'
+    )
+) as upstream(id, upstream_text) on ours.id = upstream.id
+order by ours.id;
+----
+1 ((0,0),(10,0),(10,10),(0,10)) ((0,0),(10,0),(10,10),(0,10)) t
+2 ((1,1),(5,1),(3,4)) ((1,1),(5,1),(3,4)) t
+
+# Polygon arrays map to varchar[] and backfill preserves each element's text representation.
+system ok
+psql -v ON_ERROR_STOP=1 -c "
+    DROP TABLE IF EXISTS public.test_polygon_array CASCADE;
+    CREATE TABLE public.test_polygon_array (
+        id int PRIMARY KEY,
+        name varchar,
+        shapes polygon[]
+    );
+    INSERT INTO public.test_polygon_array VALUES
+        (
+            1,
+            'initial-shapes',
+            ARRAY[
+                polygon '((1,1),(2,1),(2,2),(1,2))',
+                polygon '((3,3),(4,3),(4,4),(3,4))'
+            ]::polygon[]
+        );
+"
+
+statement ok
+drop table if exists test_polygon_array;
+
+statement ok
+create table test_polygon_array (
+    id int primary key,
+    name varchar,
+    shapes varchar[]
+) from polygon_source table 'public.test_polygon_array';
+
+query T
+select c.data_type
+from rw_catalog.rw_columns c
+join rw_catalog.rw_tables t on c.relation_id = t.id
+where t.name = 'test_polygon_array' and c.name = 'shapes';
+----
+character varying[]
+
+query ITTTTTTT retry 10 backoff 1s
+select
+    ours.id,
+    ours.name,
+    ours.shapes[1],
+    upstream.upstream_text_1,
+    ours.shapes[1] is not distinct from upstream.upstream_text_1,
+    ours.shapes[2],
+    upstream.upstream_text_2,
+    ours.shapes[2] is not distinct from upstream.upstream_text_2
+from test_polygon_array as ours
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, shapes[1]::text as upstream_text_1, shapes[2]::text as upstream_text_2 from public.test_polygon_array where id = 1'
+    )
+) as upstream(id, upstream_text_1, upstream_text_2) on ours.id = upstream.id
+where ours.id = 1;
+----
+1 initial-shapes ((1,1),(2,1),(2,2),(1,2)) ((1,1),(2,1),(2,2),(1,2)) t ((3,3),(4,3),(4,4),(3,4)) ((3,3),(4,3),(4,4),(3,4)) t
+
+# Test: reject an incorrect explicit scalar schema
+system ok
+psql -v ON_ERROR_STOP=1 -c "
+    DROP TABLE IF EXISTS public.test_polygon_invalid_mapping_upstream CASCADE;
+    CREATE TABLE public.test_polygon_invalid_mapping_upstream (
+        id int PRIMARY KEY,
+        name varchar,
+        shape polygon
+    );
+"
+
+statement ok
+drop table if exists test_polygon_invalid_mapping;
+
+statement error Incompatible data type of column shape
+create table test_polygon_invalid_mapping (
+    id int primary key,
+    name varchar,
+    shape integer
+) from polygon_source table 'public.test_polygon_invalid_mapping_upstream';
+
+# TODO: Enable this after explicit array element type validation is implemented correctly.
+# statement ok
+# drop table if exists test_polygon_array_invalid_mapping;
+#
+# statement error Incompatible data type of column shapes
+# create table test_polygon_array_invalid_mapping (
+#     id int primary key,
+#     name varchar,
+#     shapes integer[]
+# ) from polygon_source table 'public.test_polygon_array';
+
+# Test: automatic schema discovery maps polygon correctly
+
+# A scalar polygon is discovered as varchar and backfill preserves its text representation.
+system ok
+psql -v ON_ERROR_STOP=1 -c "
+    DROP TABLE IF EXISTS public.test_polygon_auto_discovery CASCADE;
+    CREATE TABLE public.test_polygon_auto_discovery (
+        id int PRIMARY KEY,
+        shape polygon
+    );
+    INSERT INTO public.test_polygon_auto_discovery VALUES
+        (1, polygon '((10,10),(20,10),(20,20),(10,20))');
+"
+
+statement ok
+drop table if exists test_polygon_auto_discovery_rw;
+
+statement ok
+create table test_polygon_auto_discovery_rw (*)
+from polygon_source table 'public.test_polygon_auto_discovery';
+
+query T retry 10 backoff 1s
+select c.data_type
+from rw_catalog.rw_columns c
+join rw_catalog.rw_tables t on c.relation_id = t.id
+where t.name = 'test_polygon_auto_discovery_rw' and c.name = 'shape';
+----
+character varying
+
+query ITTT retry 10 backoff 1s
+select
+    ours.id,
+    ours.shape,
+    upstream.upstream_text,
+    ours.shape is not distinct from upstream.upstream_text
+from test_polygon_auto_discovery_rw as ours
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, shape::text as upstream_text from public.test_polygon_auto_discovery where id = 1'
+    )
+) as upstream(id, upstream_text) on ours.id = upstream.id
+where ours.id = 1;
+----
+1 ((10,10),(20,10),(20,20),(10,20)) ((10,10),(20,10),(20,20),(10,20)) t
+
+# A polygon array is discovered as varchar[].
+system ok
+psql -v ON_ERROR_STOP=1 -c "
+    DROP TABLE IF EXISTS public.test_polygon_array_auto_discovery CASCADE;
+    CREATE TABLE public.test_polygon_array_auto_discovery (
+        id int PRIMARY KEY,
+        shapes polygon[]
+    );
+    INSERT INTO public.test_polygon_array_auto_discovery VALUES
+        (
+            1,
+            ARRAY[
+                polygon '((11,11),(12,11),(12,12),(11,12))',
+                polygon '((13,13),(14,13),(14,14),(13,14))'
+            ]::polygon[]
+        );
+"
+
+statement ok
+drop table if exists test_polygon_array_auto_discovery_rw;
+
+statement ok
+create table test_polygon_array_auto_discovery_rw (*)
+from polygon_source table 'public.test_polygon_array_auto_discovery';
+
+query T retry 10 backoff 1s
+select c.data_type
+from rw_catalog.rw_columns c
+join rw_catalog.rw_tables t on c.relation_id = t.id
+where t.name = 'test_polygon_array_auto_discovery_rw' and c.name = 'shapes';
+----
+character varying[]
+
+query ITTTTTT retry 10 backoff 1s
+select
+    ours.id,
+    ours.shapes[1],
+    upstream.upstream_text_1,
+    ours.shapes[1] is not distinct from upstream.upstream_text_1,
+    ours.shapes[2],
+    upstream.upstream_text_2,
+    ours.shapes[2] is not distinct from upstream.upstream_text_2
+from test_polygon_array_auto_discovery_rw as ours
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, shapes[1]::text as upstream_text_1, shapes[2]::text as upstream_text_2 from public.test_polygon_array_auto_discovery where id = 1'
+    )
+) as upstream(id, upstream_text_1, upstream_text_2) on ours.id = upstream.id
+where ours.id = 1;
+----
+1 ((11,11),(12,11),(12,12),(11,12)) ((11,11),(12,11),(12,12),(11,12)) t ((13,13),(14,13),(14,14),(13,14)) ((13,13),(14,13),(14,14),(13,14)) t
+
+# Test: incremental INSERT
+
+# Insert non-NULL and NULL scalar polygon values.
+system ok
+psql -v ON_ERROR_STOP=1 -c "
+    INSERT INTO public.test_polygon VALUES
+        (3, 'inserted', polygon '((15.5,0.125),(20.25,-10.5))'),
+        (4, 'null-shape', NULL);
+"
+
+query ITTTT retry 10 backoff 1s
+select
+    ours.id,
+    ours.name,
+    ours.shape,
+    upstream.upstream_text,
+    ours.shape is not distinct from upstream.upstream_text
+from test_polygon as ours
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, shape::text as upstream_text from public.test_polygon where id in (3, 4)'
+    )
+) as upstream(id, upstream_text) on ours.id = upstream.id
+where ours.id in (3, 4)
+order by ours.id;
+----
+3 inserted ((15.5,0.125),(20.25,-10.5)) ((15.5,0.125),(20.25,-10.5)) t
+4 null-shape NULL NULL t
+
+# Insert a polygon array with a NULL element and a NULL polygon array.
+system ok
+psql -v ON_ERROR_STOP=1 -c "
+    INSERT INTO public.test_polygon_array VALUES
+        (
+            2,
+            'inserted-shapes',
+            ARRAY[
+                polygon '((6,6),(7,6),(7,7),(6,7))',
+                NULL
+            ]::polygon[]
+        ),
+        (3, 'null-shapes', NULL);
+"
+
+query ITTTT retry 10 backoff 1s
+select
+    ours.id,
+    ours.name,
+    ours.shapes[1],
+    upstream.upstream_text_1,
+    (ours.shapes is null) = upstream.upstream_array_is_null
+        and (ours.shapes[1] is not distinct from upstream.upstream_text_1)
+        and (ours.shapes[2] is null) = upstream.upstream_element_is_null
+from test_polygon_array as ours
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, shapes is null as upstream_array_is_null, shapes[1]::text as upstream_text_1, shapes[2] is null as upstream_element_is_null from public.test_polygon_array where id in (2, 3)'
+    )
+) as upstream(id, upstream_array_is_null, upstream_text_1, upstream_element_is_null)
+on ours.id = upstream.id
+where ours.id in (2, 3)
+order by ours.id;
+----
+2 inserted-shapes ((6,6),(7,6),(7,7),(6,7)) ((6,6),(7,6),(7,7),(6,7)) t
+3 null-shapes NULL NULL t
+
+# Test: incremental UPDATE
+
+# Update a scalar polygon value.
+system ok
+psql -v ON_ERROR_STOP=1 -c "
+    UPDATE public.test_polygon
+    SET name = 'updated',
+        shape = polygon '((20.5,20.5),(30.5,20.5),(30.5,30.5),(20.5,30.5))'
+    WHERE id = 1;
+"
+
+query ITTT retry 10 backoff 1s
+select
+    ours.id,
+    ours.shape,
+    upstream.upstream_text,
+    ours.shape is not distinct from upstream.upstream_text
+from test_polygon as ours
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, shape::text as upstream_text from public.test_polygon where id = 1'
+    )
+) as upstream(id, upstream_text) on ours.id = upstream.id
+where ours.id = 1;
+----
+1 ((20.5,20.5),(30.5,20.5),(30.5,30.5),(20.5,30.5)) ((20.5,20.5),(30.5,20.5),(30.5,30.5),(20.5,30.5)) t
+
+# Update a polygon array.
+system ok
+psql -v ON_ERROR_STOP=1 -c "
+    UPDATE public.test_polygon_array
+    SET shapes = ARRAY[
+        polygon '((21,21),(22,21),(22,22),(21,22))',
+        polygon '((23,23),(24,23),(24,24),(23,24))'
+    ]::polygon[]
+    WHERE id = 1;
+"
+
+query ITTTTTT retry 10 backoff 1s
+select
+    ours.id,
+    ours.shapes[1],
+    upstream.upstream_text_1,
+    ours.shapes[1] is not distinct from upstream.upstream_text_1,
+    ours.shapes[2],
+    upstream.upstream_text_2,
+    ours.shapes[2] is not distinct from upstream.upstream_text_2
+from test_polygon_array as ours
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, shapes[1]::text as upstream_text_1, shapes[2]::text as upstream_text_2 from public.test_polygon_array where id = 1'
+    )
+) as upstream(id, upstream_text_1, upstream_text_2) on ours.id = upstream.id
+where ours.id = 1;
+----
+1 ((21,21),(22,21),(22,22),(21,22)) ((21,21),(22,21),(22,22),(21,22)) t ((23,23),(24,23),(24,24),(23,24)) ((23,23),(24,23),(24,24),(23,24)) t
+
+# Test: incremental DELETE
+
+# Delete a scalar polygon row.
+system ok
+psql -v ON_ERROR_STOP=1 -c "DELETE FROM public.test_polygon WHERE id = 2;"
+
+query IIT retry 10 backoff 1s
+select
+    (select count(*) from test_polygon where id = 2),
+    upstream.upstream_count,
+    (select count(*) from test_polygon where id = 2) = upstream.upstream_count
+from (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select count(*)::int as upstream_count from public.test_polygon where id = 2'
+    )
+) as upstream(upstream_count);
+----
+0 0 t
+
+# Delete a polygon array row.
+system ok
+psql -v ON_ERROR_STOP=1 -c "DELETE FROM public.test_polygon_array WHERE id = 2;"
+
+query IIT retry 10 backoff 1s
+select
+    (select count(*) from test_polygon_array where id = 2),
+    upstream.upstream_count,
+    (select count(*) from test_polygon_array where id = 2) = upstream.upstream_count
+from (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select count(*)::int as upstream_count from public.test_polygon_array where id = 2'
+    )
+) as upstream(upstream_count);
+----
+0 0 t
+
+# Test: preserve PostgreSQL polygon text formatting
+system ok
+psql -v ON_ERROR_STOP=1 -c "
+    INSERT INTO public.test_polygon (
+        id, name, shape
+    ) VALUES (
+        5,
+        'postgres-text-format',
+        polygon '((20,1e15),(-20,-1e15))'
+    );
+"
+
+query ITTT retry 10 backoff 1s
+select
+    ours.id,
+    ours.shape,
+    upstream.upstream_text,
+    ours.shape is not distinct from upstream.upstream_text
+from test_polygon as ours
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, shape::text as upstream_text from public.test_polygon where id = 5'
+    )
+) as upstream(id, upstream_text) on ours.id = upstream.id
+where ours.id = 5;
+----
+5 ((20,1e+15),(-20,-1e+15)) ((20,1e+15),(-20,-1e+15)) t
+
+# Test: preserve an unchanged TOASTed polygon
+system ok
+psql -v ON_ERROR_STOP=1 -c "
+    ALTER TABLE public.test_polygon ALTER COLUMN shape SET STORAGE EXTERNAL;
+    INSERT INTO public.test_polygon (id, name, shape)
+    SELECT
+        6,
+        'toast-original',
+        ('(' || string_agg(format('(%s,%s)', i, (i * 7919) % 104729), ',') || ')')::polygon
+    FROM generate_series(1, 1000) AS points(i);
+"
+
+query IT retry 10 backoff 1s
+select
+    ours.name,
+    ours.shape is not distinct from upstream.upstream_text
+from test_polygon as ours
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, shape::text as upstream_text from public.test_polygon where id = 6'
+    )
+) as upstream(id, upstream_text) on ours.id = upstream.id
+where ours.id = 6;
+----
+toast-original t
+
+system ok
+psql -v ON_ERROR_STOP=1 -c "
+    UPDATE public.test_polygon
+    SET name = 'toast-name-updated'
+    WHERE id = 6;
+"
+
+query IT retry 10 backoff 1s
+select
+    ours.name,
+    ours.shape is not distinct from upstream.upstream_text
+from test_polygon as ours
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, shape::text as upstream_text from public.test_polygon where id = 6'
+    )
+) as upstream(id, upstream_text) on ours.id = upstream.id
+where ours.id = 6;
+----
+toast-name-updated t
+
+# Test: automatic schema change
+system ok
+psql -v ON_ERROR_STOP=1 -c "
+    DROP TABLE IF EXISTS public.test_polygon_schema_change CASCADE;
+    CREATE TABLE public.test_polygon_schema_change (
+        id int PRIMARY KEY,
+        name varchar
+    );
+    INSERT INTO public.test_polygon_schema_change VALUES (1, 'Before');
+"
+
+statement ok
+drop table if exists test_polygon_schema_change_rw;
+
+statement ok
+create table test_polygon_schema_change_rw (*)
+from polygon_source table 'public.test_polygon_schema_change';
+
+query ITTT retry 10 backoff 1s
+select
+    ours.id,
+    ours.name,
+    upstream.upstream_name,
+    ours.name = upstream.upstream_name
+from test_polygon_schema_change_rw as ours
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, name as upstream_name from public.test_polygon_schema_change where id = 1'
+    )
+) as upstream(id, upstream_name) on ours.id = upstream.id
+where ours.id = 1;
+----
+1 Before Before t
+
+system ok
+psql -v ON_ERROR_STOP=1 -c "
+    ALTER TABLE public.test_polygon_schema_change
+        ADD COLUMN shape polygon,
+        ADD COLUMN shapes polygon[];
+    INSERT INTO public.test_polygon_schema_change VALUES
+        (
+            2,
+            'After',
+            polygon '((40,40),(50,40),(50,50),(40,50))',
+            ARRAY[
+                polygon '((41,41),(42,41),(42,42),(41,42))',
+                polygon '((43,43),(44,43),(44,44),(43,44))'
+            ]::polygon[]
+        );
+"
+
+query TT rowsort retry 20 backoff 1s
+select c.name, c.data_type
+from rw_catalog.rw_columns c
+join rw_catalog.rw_tables t on c.relation_id = t.id
+where t.name = 'test_polygon_schema_change_rw'
+  and c.name in ('shape', 'shapes');
+----
+shape character varying
+shapes character varying[]
+
+query ITTTTTT retry 20 backoff 1s
+select
+    ours.id,
+    ours.shape is null,
+    upstream.upstream_shape_is_null,
+    (ours.shape is null) = upstream.upstream_shape_is_null,
+    ours.shapes is null,
+    upstream.upstream_shapes_is_null,
+    (ours.shapes is null) = upstream.upstream_shapes_is_null
+from test_polygon_schema_change_rw as ours
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, shape is null as upstream_shape_is_null, shapes is null as upstream_shapes_is_null from public.test_polygon_schema_change where id = 1'
+    )
+) as upstream(id, upstream_shape_is_null, upstream_shapes_is_null)
+on ours.id = upstream.id
+where ours.id = 1;
+----
+1 t t t t t t
+
+query ITTTTTTTTT retry 20 backoff 1s
+select
+    ours.id,
+    ours.shape,
+    upstream.upstream_shape_text,
+    ours.shape is not distinct from upstream.upstream_shape_text,
+    ours.shapes[1],
+    upstream.upstream_shape_1_text,
+    ours.shapes[1] is not distinct from upstream.upstream_shape_1_text,
+    ours.shapes[2],
+    upstream.upstream_shape_2_text,
+    ours.shapes[2] is not distinct from upstream.upstream_shape_2_text
+from test_polygon_schema_change_rw as ours
+join (
+    select * from postgres_query(
+        '${PGHOST:localhost}',
+        '${PGPORT:5432}',
+        '${PGUSER:$USER}',
+        '${PGPASSWORD:}',
+        '${PGDATABASE:postgres}',
+        'select id, shape::text as upstream_shape_text, shapes[1]::text as upstream_shape_1_text, shapes[2]::text as upstream_shape_2_text from public.test_polygon_schema_change where id = 2'
+    )
+) as upstream(id, upstream_shape_text, upstream_shape_1_text, upstream_shape_2_text)
+on ours.id = upstream.id
+where ours.id = 2;
+----
+2 ((40,40),(50,40),(50,50),(40,50)) ((40,40),(50,40),(50,50),(40,50)) t ((41,41),(42,41),(42,42),(41,42)) ((41,41),(42,41),(42,42),(41,42)) t ((43,43),(44,43),(44,44),(43,44)) ((43,43),(44,43),(44,44),(43,44)) t
+
+# Teardown
+statement ok
+drop table if exists test_polygon;
+
+statement ok
+drop table if exists test_polygon_array;
+
+statement ok
+drop table if exists test_polygon_auto_discovery_rw;
+
+statement ok
+drop table if exists test_polygon_array_auto_discovery_rw;
+
+statement ok
+drop table if exists test_polygon_schema_change_rw;
+
+statement ok
+drop source if exists polygon_source;
+
+system ok
+psql -v ON_ERROR_STOP=1 -c "
+    SELECT pg_terminate_backend(active_pid)
+    FROM pg_replication_slots
+    WHERE slot_name = 'polygon_issue_25517_slot' AND active_pid IS NOT NULL;
+    SELECT pg_sleep(1);
+    SELECT pg_drop_replication_slot(slot_name)
+    FROM pg_replication_slots
+    WHERE slot_name = 'polygon_issue_25517_slot';
+    DROP TABLE IF EXISTS public.test_polygon CASCADE;
+    DROP TABLE IF EXISTS public.test_polygon_array CASCADE;
+    DROP TABLE IF EXISTS public.test_polygon_invalid_mapping_upstream CASCADE;
+    DROP TABLE IF EXISTS public.test_polygon_auto_discovery CASCADE;
+    DROP TABLE IF EXISTS public.test_polygon_array_auto_discovery CASCADE;
+    DROP TABLE IF EXISTS public.test_polygon_schema_change CASCADE;
+"

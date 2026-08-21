@@ -900,6 +900,13 @@ public class PgOutputMessageDecoder extends AbstractMessageDecoder {
                             public Object getValue(
                                     PgConnectionSupplier connection,
                                     boolean includeUnknownDatatypes) {
+                                // pgoutput already supplies PostgreSQL's canonical text. Preserve
+                                // it for polygon instead of letting Debezium parse it into a
+                                // PGpolygon whose toString() uses Java double formatting.
+                                if ("polygon".equals(columnType.getName())) {
+                                    return valueStr;
+                                }
+
                                 return PgOutputReplicationMessage.getValue(
                                         columnName,
                                         columnType,

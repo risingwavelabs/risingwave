@@ -119,12 +119,13 @@ async fn fetch_pgvector_dimensions_for_table(
 /// time.
 ///
 /// Right now the answer is "yes iff the array's element type is a user-defined
-/// enum or composite". Debezium does not expose element enum/composite metadata
+/// enum or composite or polygon". Debezium does not expose element enum/composite metadata
 /// on the array column (the `enumValues` field is only set for scalar enum
 /// columns, and `jdbcType == STRUCT` is only set for scalar composite columns),
 /// so we ask the upstream catalog directly: follow the array type's `typelem`
-/// to its element type and check `typtype IN ('e', 'c')`. Enum values are plain
-/// text, and composite values are converted to text by our `CustomConverter`,
+/// to its element type and check
+/// `typtype IN ('e', 'c')` OR `typname = 'polygon' and n_elemn.nspname = 'pg_catalog'`.
+/// Enum values are plain text, and composite values and polygons are converted to text by our `CustomConverter`,
 /// hence `varchar[]`.
 async fn can_fallback_array_to_varchar(
     connector_props: &ConnectorProperties,
@@ -146,8 +147,10 @@ async fn can_fallback_array_to_varchar(
     let row = client
         .query_opt(
             "SELECT t_elem.typtype IN ('e', 'c') \
+                    OR (t_elem.typname = 'polygon' AND n_elem.nspname = 'pg_catalog') \
              FROM pg_type t \
              JOIN pg_type t_elem ON t.typelem = t_elem.oid \
+             JOIN pg_namespace n_elem ON t_elem.typnamespace = n_elem.oid \
              WHERE t.typname = $1 \
              LIMIT 1",
             &[&array_type_name],
@@ -342,21 +345,30 @@ pub async fn parse_schema_change(
                     //  - Enum: has a non-null `enumValues` field in the column descriptor.
                     //  - Composite (STRUCT): identified by `jdbcType == 2002`.
                     // Both are mapped to Varchar — enum values are plain strings, and
-                    // composite values are converted to text by our CustomConverter.
+                    // composites/polygons are converted to text by our CustomConverter.
                     let is_enum = matches!(col.access_object_field("enumValues"), Some(val) if !val.is_jsonb_null());
                     let jdbc_type = col
                         .access_object_field("jdbcType")
                         .and_then(|v| v.as_number().ok())
                         .map(|n| n.0 as i32);
                     let is_composite = jdbc_type == Some(debezium_sql_types::STRUCT);
+                    let is_polygon = type_name.eq_ignore_ascii_case("polygon");
 
                     let data_type = match *connector_props {
                         ConnectorProperties::PostgresCdc(_) => {
-                            if is_composite || is_enum {
+                            if is_composite || is_enum || is_polygon {
+                                let type_kind = if is_composite {
+                                    "composite"
+                                } else if is_enum {
+                                    "enum"
+                                } else {
+                                    "polygon"
+                                };
+
                                 tracing::debug!(target: "auto_schema_change",
-                                    "Convert PostgreSQL user-defined type '{}' ({}) to VARCHAR",
+                                    "Convert PostgreSQL type '{}' ({}) to VARCHAR",
                                     type_name,
-                                    if is_composite { "composite" } else { "enum" });
+                                    type_kind);
                                 DataType::Varchar
                             } else if type_name.eq_ignore_ascii_case("vector") {
                                 let Some((schema_name, table_name_only)) =

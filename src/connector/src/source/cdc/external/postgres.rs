@@ -244,27 +244,42 @@ impl PostgresExternalTableReader {
         // No TCP keepalive for CDC source
         let client = create_pg_client(&config.pg_connection_config()?, None).await?;
 
-        // Discover user-defined composite columns and arrays of composites.
-        // tokio-postgres cannot decode composite values natively, so for these
+        // Discover T or T[] where T can be:
+        // - user-defined composite
+        // - PostgreSQL's built-in polygon type
+        //
+        // tokio-postgres cannot decode these values natively, so for these
         // columns we cast to text in the snapshot SELECT. Scalar composites
         // become `(a,b,c)`; arrays become `text[]` so tokio-postgres can
         // decode them directly as `Vec<Option<String>>` matching the RW
         // `List(Varchar)` column. Other varchar columns stay as-is to
         // preserve RW's own text rendering (e.g. numeric -> "NaN").
-        let composite_columns = client
+        let text_cast_columns = client
             .query(
                 "SELECT a.attname, (t.typcategory = 'A') AS is_array \
                  FROM pg_attribute a \
                  JOIN pg_class c ON a.attrelid = c.oid \
                  JOIN pg_namespace n ON c.relnamespace = n.oid \
                  JOIN pg_type t ON a.atttypid = t.oid \
+                 JOIN pg_namespace tn ON t.typnamespace = tn.oid \
                  LEFT JOIN pg_type t_elem ON t.typelem = t_elem.oid \
+                 LEFT JOIN pg_namespace t_elem_n ON t_elem.typnamespace = t_elem_n.oid \
                  WHERE n.nspname = $1 \
                    AND c.relname = $2 \
                    AND a.attnum > 0 \
                    AND NOT a.attisdropped \
-                   AND (t.typtype = 'c' \
-                        OR (t.typcategory = 'A' AND t_elem.typtype = 'c'))",
+                   AND (
+                        /* composites */ \
+                        t.typtype = 'c' \
+                        /* array of composites */ \
+                        OR (t.typcategory = 'A' AND t_elem.typtype = 'c') \
+                        /* polygons */ \
+                        OR (t.typname = 'polygon' AND tn.nspname = 'pg_catalog') \
+                        /* array of polygons */ \
+                        OR (t.typcategory = 'A' \
+                            AND t_elem.typname = 'polygon' \
+                            AND t_elem_n.nspname = 'pg_catalog')
+                    )",
                 &[
                     &schema_table_name.schema_name,
                     &schema_table_name.table_name,
@@ -281,7 +296,7 @@ impl PostgresExternalTableReader {
                     error = %err.as_report(),
                     schema = %schema_table_name.schema_name,
                     table = %schema_table_name.table_name,
-                    "failed to discover postgres composite columns; falling back to no text cast"
+                    "failed to discover postgres columns requiring text casts; falling back to no text cast"
                 );
                 std::collections::HashMap::new()
             });
@@ -291,7 +306,7 @@ impl PostgresExternalTableReader {
             .iter()
             .map(|f| {
                 let quoted = Self::quote_column(&f.name);
-                match composite_columns.get(&f.name) {
+                match text_cast_columns.get(&f.name) {
                     Some(false) if matches!(f.data_type, DataType::Varchar) => {
                         format!("{quoted}::text AS {quoted}")
                     }
