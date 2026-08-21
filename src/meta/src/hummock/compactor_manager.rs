@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet, VecDeque};
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant, SystemTime};
 
@@ -516,18 +516,10 @@ impl IcebergCompactor {
 
 pub struct IcebergCompactorManagerInner {
     pub compactor_map: HashMap<HummockContextId, Arc<IcebergCompactor>>,
-    pull_order: VecDeque<HummockContextId>,
-    pull_attempts: HashMap<HummockContextId, u64>,
-    deferred_pull_targets: HashMap<HummockContextId, (HummockContextId, u64)>,
 }
 
 pub struct IcebergCompactorManager {
     inner: Arc<RwLock<IcebergCompactorManagerInner>>,
-}
-
-pub(crate) enum IcebergCompactorPullDecision {
-    Dispatch(Arc<IcebergCompactor>),
-    Wait(Arc<IcebergCompactor>),
 }
 
 impl IcebergCompactorManager {
@@ -535,9 +527,6 @@ impl IcebergCompactorManager {
         Self {
             inner: Arc::new(RwLock::new(IcebergCompactorManagerInner {
                 compactor_map: HashMap::new(),
-                pull_order: VecDeque::new(),
-                pull_attempts: HashMap::new(),
-                deferred_pull_targets: HashMap::new(),
             })),
         }
     }
@@ -547,29 +536,22 @@ impl IcebergCompactorManager {
         context_id: HummockContextId,
     ) -> IcebergCompactorSubscribeStreamReceiver {
         let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
-        let mut inner = self.inner.write();
-        let is_new_compactor = !inner.compactor_map.contains_key(&context_id);
-        inner
+        self.inner
+            .write()
             .compactor_map
             .insert(context_id, Arc::new(IcebergCompactor::new(context_id, tx)));
-        if is_new_compactor {
-            inner.pull_order.push_back(context_id);
-            inner.pull_attempts.insert(context_id, 0);
-        }
-        drop(inner);
         tracing::info!(context_id = %context_id, "Added iceberg compactor session");
         rx
     }
 
     pub fn remove_compactor(&self, context_id: HummockContextId) {
-        let mut inner = self.inner.write();
-        if inner.compactor_map.remove(&context_id).is_some() {
-            inner.pull_order.retain(|id| *id != context_id);
-            inner.pull_attempts.remove(&context_id);
-            inner
-                .deferred_pull_targets
-                .retain(|requester, (target, _)| *requester != context_id && *target != context_id);
-            drop(inner);
+        if self
+            .inner
+            .write()
+            .compactor_map
+            .remove(&context_id)
+            .is_some()
+        {
             tracing::info!(context_id = %context_id, "Removed iceberg compactor session");
         }
     }
@@ -588,65 +570,6 @@ impl IcebergCompactorManager {
         compactor_map.values().nth(rand_index).cloned()
     }
 
-    /// Decides whether this pull request owns the current round-robin turn.
-    ///
-    /// A compactor that requests while another compactor owns the turn waits for one pull cycle.
-    /// If the owner does not pull during that cycle, the requester may dispatch work without
-    /// advancing the turn. This keeps an idle compactor productive when the owner is saturated,
-    /// while preserving strict round-robin dispatch among compactors that are actively pulling.
-    pub(crate) fn acquire_pull_turn(
-        &self,
-        context_id: HummockContextId,
-    ) -> Option<IcebergCompactorPullDecision> {
-        let mut inner = self.inner.write();
-        let compactor = inner.compactor_map.get(&context_id)?.clone();
-
-        let pull_attempt = inner.pull_attempts.entry(context_id).or_default();
-        *pull_attempt = pull_attempt.saturating_add(1);
-
-        let next_context_id = *inner.pull_order.front()?;
-        if next_context_id == context_id {
-            inner.deferred_pull_targets.remove(&context_id);
-            return Some(IcebergCompactorPullDecision::Dispatch(compactor));
-        }
-
-        let next_pull_attempt = inner
-            .pull_attempts
-            .get(&next_context_id)
-            .copied()
-            .unwrap_or_default();
-        let can_bypass = inner.deferred_pull_targets.get(&context_id).is_some_and(
-            |(target, target_pull_attempt)| {
-                *target == next_context_id && *target_pull_attempt == next_pull_attempt
-            },
-        );
-        inner
-            .deferred_pull_targets
-            .insert(context_id, (next_context_id, next_pull_attempt));
-
-        if can_bypass {
-            Some(IcebergCompactorPullDecision::Dispatch(compactor))
-        } else {
-            Some(IcebergCompactorPullDecision::Wait(compactor))
-        }
-    }
-
-    /// Advances the round-robin turn after the current owner dispatched at least one task.
-    /// A bypass dispatch deliberately leaves the owner unchanged so that it remains prioritized
-    /// as soon as it has capacity to pull again.
-    pub(crate) fn finish_pull_turn(&self, context_id: HummockContextId, dispatched_task: bool) {
-        if !dispatched_task {
-            return;
-        }
-
-        let mut inner = self.inner.write();
-        if inner.pull_order.front().copied() == Some(context_id) {
-            let context_id = inner.pull_order.pop_front().unwrap();
-            inner.pull_order.push_back(context_id);
-            inner.deferred_pull_targets.clear();
-        }
-    }
-
     pub fn compactor_num(&self) -> usize {
         self.inner.read().compactor_map.len()
     }
@@ -662,7 +585,6 @@ mod tests {
     use risingwave_rpc_client::HummockMetaClient;
 
     use crate::hummock::compaction::selector::default_compaction_selector;
-    use crate::hummock::compactor_manager::IcebergCompactorPullDecision;
     use crate::hummock::test_utils::{
         add_ssts, register_table_ids_to_compaction_group, setup_compute_env,
     };
@@ -779,104 +701,5 @@ mod tests {
                 .get_compactor(iceberg_context_id)
                 .is_none()
         );
-    }
-
-    #[test]
-    fn test_iceberg_compactor_pull_round_robin() {
-        let first_context_id = 1000.into();
-        let second_context_id = 1001.into();
-        let manager = IcebergCompactorManager::new();
-        let _first_receiver = manager.add_compactor(first_context_id);
-        let _second_receiver = manager.add_compactor(second_context_id);
-
-        assert!(matches!(
-            manager.acquire_pull_turn(first_context_id),
-            Some(IcebergCompactorPullDecision::Dispatch(_))
-        ));
-        manager.finish_pull_turn(first_context_id, true);
-
-        assert!(matches!(
-            manager.acquire_pull_turn(first_context_id),
-            Some(IcebergCompactorPullDecision::Wait(_))
-        ));
-        assert!(matches!(
-            manager.acquire_pull_turn(second_context_id),
-            Some(IcebergCompactorPullDecision::Dispatch(_))
-        ));
-        manager.finish_pull_turn(second_context_id, true);
-
-        assert!(matches!(
-            manager.acquire_pull_turn(first_context_id),
-            Some(IcebergCompactorPullDecision::Dispatch(_))
-        ));
-    }
-
-    #[test]
-    fn test_iceberg_compactor_pull_bypasses_inactive_turn_owner() {
-        let first_context_id = 1000.into();
-        let second_context_id = 1001.into();
-        let manager = IcebergCompactorManager::new();
-        let _first_receiver = manager.add_compactor(first_context_id);
-        let _second_receiver = manager.add_compactor(second_context_id);
-
-        assert!(matches!(
-            manager.acquire_pull_turn(first_context_id),
-            Some(IcebergCompactorPullDecision::Dispatch(_))
-        ));
-        manager.finish_pull_turn(first_context_id, true);
-
-        assert!(matches!(
-            manager.acquire_pull_turn(first_context_id),
-            Some(IcebergCompactorPullDecision::Wait(_))
-        ));
-        assert!(matches!(
-            manager.acquire_pull_turn(second_context_id),
-            Some(IcebergCompactorPullDecision::Dispatch(_))
-        ));
-        manager.finish_pull_turn(second_context_id, false);
-
-        // The owner pulled since the first compactor was deferred, so preserve its turn.
-        assert!(matches!(
-            manager.acquire_pull_turn(first_context_id),
-            Some(IcebergCompactorPullDecision::Wait(_))
-        ));
-        // If the owner does not pull again, let the idle compactor use the otherwise idle slot.
-        assert!(matches!(
-            manager.acquire_pull_turn(first_context_id),
-            Some(IcebergCompactorPullDecision::Dispatch(_))
-        ));
-        manager.finish_pull_turn(first_context_id, true);
-
-        // A bypass does not take the original owner's next turn.
-        assert!(matches!(
-            manager.acquire_pull_turn(second_context_id),
-            Some(IcebergCompactorPullDecision::Dispatch(_))
-        ));
-        manager.finish_pull_turn(second_context_id, true);
-        assert!(matches!(
-            manager.acquire_pull_turn(first_context_id),
-            Some(IcebergCompactorPullDecision::Dispatch(_))
-        ));
-    }
-
-    #[test]
-    fn test_iceberg_compactor_pull_removes_disconnected_owner() {
-        let first_context_id = 1000.into();
-        let second_context_id = 1001.into();
-        let manager = IcebergCompactorManager::new();
-        let _first_receiver = manager.add_compactor(first_context_id);
-        let _second_receiver = manager.add_compactor(second_context_id);
-
-        assert!(matches!(
-            manager.acquire_pull_turn(first_context_id),
-            Some(IcebergCompactorPullDecision::Dispatch(_))
-        ));
-        manager.finish_pull_turn(first_context_id, true);
-        manager.remove_compactor(second_context_id);
-
-        assert!(matches!(
-            manager.acquire_pull_turn(first_context_id),
-            Some(IcebergCompactorPullDecision::Dispatch(_))
-        ));
     }
 }
