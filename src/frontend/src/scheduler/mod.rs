@@ -28,6 +28,34 @@ mod distributed;
 pub use distributed::*;
 pub mod plan_fragmenter;
 pub use plan_fragmenter::BatchPlanFragmenter;
+
+pub mod await_tree_key {
+    use std::fmt::{Display, Formatter};
+
+    use super::plan_fragmenter::{QueryId, StageId};
+
+    /// Await-tree key type for query and stage tasks driven by the frontend.
+    #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+    pub enum FrontendTask {
+        Query(QueryId),
+        Stage {
+            query_id: QueryId,
+            stage_id: StageId,
+        },
+    }
+
+    impl Display for FrontendTask {
+        fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+            match self {
+                Self::Query(query_id) => write!(f, "{}", query_id.id),
+                Self::Stage { query_id, stage_id } => {
+                    write!(f, "{}/stage/{}", query_id.id, stage_id)
+                }
+            }
+        }
+    }
+}
+
 mod snapshot;
 pub use snapshot::*;
 mod local;
