@@ -20,10 +20,8 @@ use iceberg_compaction_core::compaction::CompactionPlan;
 
 /// `DataFusion`'s `datafusion.execution.sort_spill_reservation_bytes` default.
 ///
-/// Setting `max_memory_bytes` makes `iceberg-compaction-core` build a `DiskManager` alongside the
-/// bounded pool. Each `ExternalSorter` partition then resizes a merge reservation to this value
-/// before it sorts a single row, on a consumer registered *without* `can_spill` -- so the pool can
-/// neither spill nor shrink it.
+/// Each `ExternalSorter` partition resizes a merge reservation to this value before it sorts a
+/// single row. Account for it even when `DataFusion` uses its default unbounded memory pool.
 const DATAFUSION_SORT_SPILL_RESERVATION_BYTES: usize = 10 * 1024 * 1024;
 
 /// Fixed task-context, operator, and allocator overhead observed for small streaming plans.
@@ -71,7 +69,7 @@ pub struct PlanMemoryEstimate {
 }
 
 impl PlanMemoryEstimate {
-    pub fn expected_heap_peak_bytes(&self, pool_limit_bytes: usize) -> usize {
+    fn expected_heap_peak_bytes(&self, pool_limit_bytes: usize) -> usize {
         let heap_peak_bytes = if self.large_sorted {
             self.fixed_heap_peak_bytes.max(
                 self.non_spillable_bytes
@@ -89,38 +87,8 @@ impl PlanMemoryEstimate {
         heap_peak_bytes.saturating_add(heap_peak_bytes / 50)
     }
 
-    pub fn minimum_heap_bytes(&self) -> usize {
-        self.expected_heap_peak_bytes(self.minimum_pool_bytes)
-    }
-
-    pub fn pool_limit_for_heap_budget(
-        &self,
-        heap_budget_bytes: usize,
-        maximum_pool_bytes: usize,
-    ) -> Option<usize> {
-        let maximum_pool_bytes = maximum_pool_bytes.min(self.preferred_pool_bytes);
-        if maximum_pool_bytes < self.minimum_pool_bytes
-            || self.minimum_heap_bytes() > heap_budget_bytes
-        {
-            return None;
-        }
-        if self.expected_heap_peak_bytes(maximum_pool_bytes) <= heap_budget_bytes {
-            return Some(maximum_pool_bytes);
-        }
-
-        debug_assert!(self.large_sorted);
-        let heap_before_margin = heap_budget_bytes
-            .saturating_mul(50)
-            .checked_div(51)
-            .unwrap_or_default()
-            .saturating_sub(HEAP_FIXED_HEADROOM_BYTES);
-        let pool_limit_bytes = heap_before_margin
-            .saturating_sub(self.non_spillable_bytes)
-            .saturating_sub(SORT_TEMPORARY_HEADROOM_BYTES)
-            .saturating_mul(2)
-            .min(maximum_pool_bytes);
-
-        (pool_limit_bytes >= self.minimum_pool_bytes).then_some(pool_limit_bytes)
+    pub fn estimated_heap_peak_bytes(&self) -> usize {
+        self.expected_heap_peak_bytes(self.preferred_pool_bytes)
     }
 }
 
@@ -766,6 +734,39 @@ mod tests {
             4 * DATAFUSION_SORT_SPILL_RESERVATION_BYTES
                 + DATAFUSION_STREAMING_DECODED_WINDOW_BYTES
                 + 8
+        );
+    }
+
+    #[test]
+    fn unbounded_sorted_plan_reserves_preferred_heap_peak() {
+        let schema = schema(vec![Type::Primitive(PrimitiveType::Int)]);
+        let file_size = 1024 * 1024;
+        let data_files = (0..100)
+            .map(|index| {
+                scan_task(
+                    schema.clone(),
+                    &format!("data-{index}.parquet"),
+                    DataContentType::Data,
+                    file_size,
+                    Some(250_000),
+                )
+            })
+            .collect();
+        let mut file_group = FileGroup::new(data_files);
+        file_group.executor_parallelism = 1;
+        let plan = CompactionPlan::new(file_group, "main", 1);
+
+        let estimate =
+            estimate_plan_memory(&plan, &schema, FormatVersion::V2, 1024, false, true, 1);
+
+        assert!(estimate.preferred_pool_bytes > estimate.minimum_pool_bytes);
+        assert_eq!(
+            estimate.estimated_heap_peak_bytes(),
+            estimate.expected_heap_peak_bytes(estimate.preferred_pool_bytes)
+        );
+        assert!(
+            estimate.estimated_heap_peak_bytes()
+                > estimate.expected_heap_peak_bytes(estimate.minimum_pool_bytes)
         );
     }
 
