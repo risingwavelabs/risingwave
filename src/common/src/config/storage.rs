@@ -215,6 +215,10 @@ pub struct StorageConfig {
     pub table_change_log_cache_capacity: u64,
 
     // iceberg compaction
+    /// Maximum heap memory for compaction tasks in the dedicated Iceberg compactor, in megabytes.
+    /// When unset, the budget is derived from the compactor's available memory.
+    #[serde(default)]
+    pub iceberg_compaction_memory_limit_mb: Option<usize>,
     #[serde(default = "default::storage::iceberg_compaction_enable_validate")]
     pub iceberg_compaction_enable_validate: bool,
     #[serde(default = "default::storage::iceberg_compaction_max_record_batch_rows")]
