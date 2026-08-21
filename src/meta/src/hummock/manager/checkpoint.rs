@@ -240,6 +240,34 @@ pub(crate) fn compress_payload(
     }
 }
 
+/// Encodes a checkpoint for object storage.
+///
+/// `None` deliberately uses the legacy raw protobuf format rather than an uncompressed envelope.
+/// Besides avoiding compression, this keeps newly written checkpoints readable by versions that
+/// predate [`PbHummockVersionCheckpointEnvelope`]. Readers still accept uncompressed envelopes
+/// because they may have been written by an earlier version of the envelope implementation.
+pub(crate) fn encode_checkpoint_data(
+    checkpoint: &PbHummockVersionCheckpoint,
+    compression: risingwave_common::config::CheckpointCompression,
+) -> Result<Vec<u8>> {
+    use prost::Message;
+    use risingwave_common::config::CheckpointCompression;
+
+    let raw_bytes = checkpoint.encode_to_vec();
+    if compression == CheckpointCompression::None {
+        return Ok(raw_bytes);
+    }
+
+    let payload = compress_payload(compression, &raw_bytes)?;
+    let checksum = xxhash64_checksum(&payload);
+    Ok(PbHummockVersionCheckpointEnvelope {
+        compression_algorithm: compression as i32,
+        payload,
+        checksum: Some(checksum),
+    }
+    .encode_to_vec())
+}
+
 async fn read_bytes_in_chunks<F, Fut>(
     total_size: usize,
     chunk_size: usize,
@@ -361,31 +389,20 @@ impl HummockManager {
         &self,
         checkpoint: &HummockVersionCheckpoint,
     ) -> Result<()> {
-        use prost::Message;
-        let raw_bytes = checkpoint.to_protobuf().encode_to_vec();
-        let raw_size = raw_bytes.len();
-
         let compression = self.env.opts.checkpoint_compression_algorithm;
-        let compressed = compress_payload(compression, &raw_bytes)?;
-        let checksum = xxhash64_checksum(&compressed);
+        let checkpoint = checkpoint.to_protobuf();
+        let raw_size = prost::Message::encoded_len(&checkpoint);
+        let buf = encode_checkpoint_data(&checkpoint, compression)?;
 
         tracing::info!(
             raw_size,
-            compressed_size = compressed.len(),
+            encoded_size = buf.len(),
             compression_ratio =
-                format!("{:.2}x", raw_size as f64 / compressed.len().max(1) as f64),
+                format!("{:.2}x", raw_size as f64 / buf.len().max(1) as f64),
             compression = ?compression,
-            checksum = format!("{:#x}", checksum),
-            "writing compressed checkpoint"
+            legacy_format = compression == risingwave_common::config::CheckpointCompression::None,
+            "writing checkpoint"
         );
-
-        let envelope = PbHummockVersionCheckpointEnvelope {
-            compression_algorithm: compression as i32,
-            payload: compressed,
-            checksum: Some(checksum),
-        };
-
-        let buf = envelope.encode_to_vec();
         self.object_store
             .upload(&self.version_checkpoint_path, buf.into())
             .await?;
@@ -644,7 +661,8 @@ mod tests {
     };
 
     use super::{
-        compress_payload, decode_checkpoint_data, read_bytes_in_chunks, xxhash64_checksum,
+        compress_payload, decode_checkpoint_data, encode_checkpoint_data, read_bytes_in_chunks,
+        xxhash64_checksum,
     };
 
     #[allow(deprecated)]
@@ -710,6 +728,44 @@ mod tests {
             let decoded = decode_checkpoint_data(data).expect("envelope checkpoint should decode");
             assert_eq!(decoded, checkpoint);
         }
+    }
+
+    #[test]
+    fn encode_checkpoint_data_writes_legacy_format_when_compression_is_disabled() {
+        let checkpoint = make_checkpoint(42);
+        let encoded = encode_checkpoint_data(&checkpoint, CheckpointCompression::None)
+            .expect("checkpoint encoding should succeed");
+
+        // This is intentionally byte-for-byte the old format so a pre-envelope binary can read it.
+        assert_eq!(encoded, checkpoint.encode_to_vec());
+        assert_eq!(
+            PbHummockVersionCheckpoint::decode(encoded.as_slice())
+                .expect("legacy reader should decode checkpoint"),
+            checkpoint
+        );
+    }
+
+    #[test]
+    fn encode_checkpoint_data_compresses_when_enabled() {
+        let checkpoint = make_checkpoint(42);
+        let encoded = encode_checkpoint_data(&checkpoint, CheckpointCompression::Zstd)
+            .expect("checkpoint encoding should succeed");
+        let envelope = PbHummockVersionCheckpointEnvelope::decode(encoded.as_slice())
+            .expect("compressed checkpoint should use envelope format");
+
+        assert_eq!(
+            envelope.compression_algorithm,
+            CheckpointCompression::Zstd as i32
+        );
+        assert_eq!(
+            envelope.checksum,
+            Some(xxhash64_checksum(&envelope.payload))
+        );
+        assert_eq!(
+            decode_checkpoint_data(Bytes::from(encoded))
+                .expect("current reader should decode compressed checkpoint"),
+            checkpoint
+        );
     }
 
     #[test]
