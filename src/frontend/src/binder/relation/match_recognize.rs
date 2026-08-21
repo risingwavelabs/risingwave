@@ -279,13 +279,20 @@ impl Binder {
             }
             None => {
                 // No WITHIN: an unmatched partial can be completed by an arbitrarily distant future
-                // row, so it is retained until matched. State is then bounded only by PARTITION BY
-                // key cardinality, not by time. Warn the author (a client NOTICE, visible in the
-                // CREATE output); we do not forbid it, matching SQL semantics and Flink's behaviour.
+                // row, so it is retained until matched. For patterns whose live partial spans a
+                // bounded number of rows that bounds state by PARTITION BY key cardinality — but a
+                // pattern with an unbounded quantifier that stays satisfiable (`(A+ B)` where rows
+                // keep satisfying A and B never arrives) retains EVERY row of the partition, with
+                // no bound from key cardinality. Warn the author about both regimes (a client
+                // NOTICE, visible in the CREATE output); we do not forbid it, matching SQL
+                // semantics and Flink's behaviour.
                 crate::session::current::notice_to_user(
                     "MATCH_RECOGNIZE without a WITHIN clause retains unmatched partial matches \
-                     indefinitely: its state is bounded by the number of distinct PARTITION BY keys, \
-                     not by time. Add a WITHIN clause to bound state to a time window.",
+                     indefinitely. If every partial the pattern can hold spans a bounded number \
+                     of rows, state is bounded by the number of distinct PARTITION BY keys; but a \
+                     pattern with an unbounded quantifier that keeps matching (e.g. (A+ B) on a \
+                     partition where A stays true and B never arrives) retains every row of that \
+                     partition. Add a WITHIN clause to bound state to a time window.",
                 );
                 (None, None)
             }
@@ -308,6 +315,20 @@ impl Binder {
             collect_from_pattern(pattern, &mut vars);
             vars
         };
+        // A DEFINE for a symbol that never appears in PATTERN is dead: no row can be labeled with
+        // it, so its predicate is never evaluated. Accepting it silently turns a typo into a
+        // pattern that matches something other than what the author wrote (the standard requires
+        // every DEFINE symbol to be a primary pattern variable).
+        for s in symbols {
+            let symbol = s.symbol.real_value();
+            if !pattern_variables.contains(&symbol) {
+                return Err(crate::error::ErrorCode::InvalidInputSyntax(format!(
+                    "DEFINE names `{symbol}`, which does not appear in PATTERN; its predicate \
+                     could never be evaluated"
+                ))
+                .into());
+            }
+        }
         let variables = collect_pattern_variables(pattern, symbols);
         for var in &variables {
             // `collect_pattern_variables` deduplicates, so the only way this registration can fail
@@ -369,25 +390,13 @@ impl Binder {
         };
 
         // AFTER MATCH SKIP TO FIRST/LAST <var> must name a variable that appears in PATTERN: the skip
-        // target is looked up among the labels of a completed match, so a variable that exists only
-        // as a DEFINE symbol can never be found there and the executor would silently fall back to
-        // skipping past the last row on every match. `variables` unions in the DEFINE symbols, so
-        // check against the pattern-only set.
+        // target is looked up among the labels of a completed match, so a variable absent from the
+        // pattern can never be found there and the executor would silently fall back to skipping
+        // past the last row on every match. (A DEFINE-only symbol cannot reach here — it is
+        // rejected above — so absence from the pattern means the name is unknown outright.)
         if let Some(AfterMatchSkip::ToFirst(sym) | AfterMatchSkip::ToLast(sym)) = after_match_skip {
             let target = sym.real_value();
             if !pattern_variables.contains(&target) {
-                if variables.contains(&target) {
-                    // Not `bail_not_implemented!`: nothing is missing, the target is just not a
-                    // variable of the pattern.
-                    return Err(crate::error::ErrorCode::NotSupported(
-                        format!(
-                            "AFTER MATCH SKIP TO FIRST/LAST {target}, which is defined in DEFINE but \
-                             does not appear in PATTERN"
-                        ),
-                        "the skip target must be a variable of the pattern".to_owned(),
-                    )
-                    .into());
-                }
                 bail_not_implemented!(
                     "AFTER MATCH SKIP TO FIRST/LAST references unknown pattern variable {}",
                     target
@@ -826,6 +835,7 @@ impl Binder {
         let mut extractor = NavExtractor {
             input_fields,
             resolver,
+            symbol: &symbol,
             prefix: &prefix,
             nav_slots: Vec::new(),
             nav_fields: Vec::new(),
@@ -1150,6 +1160,9 @@ const NAV_TABLE: &str = "__mr_nav";
 struct NavExtractor<'a> {
     input_fields: &'a [Field],
     resolver: &'a VarResolver<'a>,
+    /// The symbol whose `DEFINE` predicate is being lowered — the only variable qualifier a
+    /// physical `PREV` may carry (see [`NavExtractor::physical_col`]).
+    symbol: &'a str,
     /// Per-DEFINE prefix for the synthetic placeholder column names (kept unique across DEFINE items).
     prefix: &'a str,
     nav_slots: Vec<DefineSlot>,
@@ -1424,12 +1437,38 @@ impl NavExtractor<'_> {
         }
     }
 
-    /// Resolves a physical-navigation argument (`col` or `var.col`) to its input column index; the
-    /// variable qualifier, if any, does not matter for physical navigation.
+    /// Resolves a physical-navigation argument (`col` or `var.col`) to its input column index.
+    ///
+    /// A variable qualifier is accepted only when it is the symbol being defined: under the
+    /// standard's running semantics `PREV(B.col)` inside `DEFINE B` reads from the row before the
+    /// current candidate — exactly the physical previous row this engine navigates to. A qualifier
+    /// naming ANOTHER variable anchors the read to that variable's last mapped row instead
+    /// (`PREV(A.col)` ≡ `PREV(LAST(A.col, 0), 1)`), which is different semantics this engine does
+    /// not implement — silently treating it as the physical previous row would answer a question
+    /// the author did not ask. An undeclared qualifier is plain wrong SQL.
     fn physical_col(&self, expr: &AstExpr) -> RwResult<usize> {
         let col = match expr {
             AstExpr::Identifier(c) => c.real_value(),
-            AstExpr::CompoundIdentifier(parts) if parts.len() == 2 => parts[1].real_value(),
+            AstExpr::CompoundIdentifier(parts) if parts.len() == 2 => {
+                let var = parts[0].real_value();
+                if !self.resolver.alias_names.iter().any(|n| n == &var) {
+                    return Err(crate::error::ErrorCode::InvalidInputSyntax(format!(
+                        "PREV/NEXT in DEFINE references unknown pattern variable `{var}`"
+                    ))
+                    .into());
+                }
+                if var != self.symbol {
+                    bail_not_implemented!(
+                        "PREV/NEXT anchored to another pattern variable's rows in DEFINE \
+                         (`{}` inside the definition of `{}`); qualify with the symbol being \
+                         defined, or leave the column unqualified, for physical navigation from \
+                         the current row",
+                        var,
+                        self.symbol
+                    );
+                }
+                parts[1].real_value()
+            }
             _ => bail_not_implemented!("PREV/NEXT argument must be a column reference in DEFINE"),
         };
         self.col_idx(&col)
@@ -1572,8 +1611,9 @@ impl ExprRewriter for DefineSlotRewriter<'_> {
     }
 }
 
-/// Collect the distinct pattern-variable names appearing in a pattern, together with any defined in
-/// `DEFINE` (a variable may be defined but, e.g., excluded, or referenced only in `MEASURES`).
+/// Collect the distinct pattern-variable names appearing in a pattern, unioned with the `DEFINE`
+/// symbols. The union is defensive: `bind_match_recognize` rejects any `DEFINE` symbol absent from
+/// the pattern before this runs, so the two sets are equal there.
 fn collect_pattern_variables(
     pattern: &MatchRecognizePattern,
     symbols: &[SymbolDefinition],

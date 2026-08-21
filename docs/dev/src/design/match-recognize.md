@@ -435,9 +435,14 @@ depends on whether the pattern carries a `WITHIN` clause:
   scales with the partition's input rate over that window and with the pattern's retention.
 - **Without `WITHIN`** a partial can be completed by an arbitrarily distant future row — `PATTERN
   (A B)` retains an `A` until some later `B` arrives, however long that takes. This is correct SQL
-  semantics (a streaming join without a time bound retains its build side the same way), but state
-  is then bounded only by the number of distinct `PARTITION BY` keys. The binder emits a `NOTICE`
-  in this case.
+  semantics (a streaming join without a time bound retains its build side the same way), but the
+  resulting bound depends on the pattern's shape. A pattern whose live partial spans a bounded
+  number of rows (like `(A B)`) retains a bounded suffix per partition, so state is bounded by the
+  number of distinct `PARTITION BY` keys. A pattern with an unbounded quantifier that stays
+  satisfiable — `(A+ B)` on a partition whose rows keep satisfying `A` while `B` never arrives —
+  keeps position 0 boundary-alive forever, so the dead-prefix prune never advances and **every row
+  of that partition is retained**: state grows linearly with that partition's input, with no bound
+  from key cardinality at all. The binder emits a `NOTICE` naming both regimes.
 
 Unlike the previous EOWC-based design, the retained rows are **resident in executor memory** (each
 partition's run holds them alongside the matcher), not merely persisted: the in-process footprint

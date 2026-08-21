@@ -364,7 +364,7 @@
     );
   expected_outputs:
     - binder_error
-- name: MATCH_RECOGNIZE rejects AFTER MATCH SKIP TO a variable that only appears in DEFINE (it degraded on every match)
+- name: MATCH_RECOGNIZE rejects AFTER MATCH SKIP TO a variable absent from PATTERN (it degraded on every match)
   sql: |
     create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
     select * from t match_recognize (
@@ -374,7 +374,7 @@
       one row per match
       after match skip to last x
       pattern (a b)
-      define a as a.v > 0, b as b.v < 0, x as x.v > 100
+      define a as a.v > 0, b as b.v < 0
     );
   expected_outputs:
     - binder_error
@@ -822,3 +822,75 @@
     );
   expected_outputs:
     - binder_error
+- name: MATCH_RECOGNIZE rejects a DEFINE for a symbol that does not appear in PATTERN
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures count(*) as n
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as a.v > 0, b as b.v < 0, ghost as ghost.v = 0
+    );
+  expected_outputs:
+    - binder_error
+- name: MATCH_RECOGNIZE DEFINE rejects PREV over an undeclared variable qualifier
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures count(*) as n
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as a.v > 0, b as b.v < prev(zzz.v)
+    );
+  expected_outputs:
+    - binder_error
+- name: MATCH_RECOGNIZE DEFINE rejects PREV anchored to another declared variable
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures count(*) as n
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as a.v > 0, b as b.v < prev(a.v)
+    );
+  expected_outputs:
+    - binder_error
+- name: MATCH_RECOGNIZE DEFINE allows PREV qualified by the symbol being defined
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures count(*) as n
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as a.v > 0, b as b.v < prev(b.v)
+    );
+  expected_outputs:
+    - logical_plan
+    - stream_plan
+- name: MATCH_RECOGNIZE plans with a timestamp ORDER BY key and an interval WITHIN bound
+  sql: |
+    create table t(id int, ts timestamp, v int, watermark for ts as ts - interval '10' second) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures count(*) as n
+      one row per match
+      after match skip past last row
+      pattern (a b) within interval '5' minute
+      define a as a.v > 0, b as b.v < 0
+    );
+  expected_outputs:
+    - logical_plan
+    - stream_plan
