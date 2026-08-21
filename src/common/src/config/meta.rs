@@ -32,7 +32,7 @@ pub enum MetaBackend {
 #[serde(rename_all = "lowercase")]
 #[repr(i32)]
 pub enum CheckpointCompression {
-    /// No compression.
+    /// Disable compression and write checkpoints in the legacy raw protobuf format.
     ///
     /// NOTE: The numeric values are aligned with protobuf `CheckpointCompressionAlgorithm`.
     None = 0,
@@ -175,7 +175,8 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::hummock_version_checkpoint_interval_sec")]
     pub hummock_version_checkpoint_interval_sec: u64,
 
-    /// Compression algorithm for hummock version checkpoint.
+    /// Compression algorithm for hummock version checkpoint. Set to `none` to write checkpoints
+    /// in the legacy raw protobuf format.
     #[serde(default)]
     pub checkpoint_compression_algorithm: CheckpointCompression,
 
