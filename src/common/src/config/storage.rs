@@ -217,7 +217,8 @@ pub struct StorageConfig {
     pub table_change_log_cache_capacity: u64,
 
     // iceberg compaction
-    /// Maximum heap memory for compaction tasks in the dedicated Iceberg compactor, in megabytes.
+    /// Estimated heap memory budget used to schedule tasks in the dedicated Iceberg compactor, in
+    /// megabytes. This controls admission only; it is not a hard `DataFusion` allocation limit.
     /// When unset, the budget is derived from the compactor's available memory.
     #[serde(default)]
     pub iceberg_compaction_memory_limit_mb: Option<usize>,
