@@ -14,9 +14,10 @@
  * limitations under the License.
  */
 
-package com.risingwave.connector.cdc.mongodb;
+package io.debezium.connector.mongodb.connection.client;
 
 import com.mongodb.ConnectionString;
+import io.debezium.connector.mongodb.MongoDbConnectorConfig;
 import java.io.ByteArrayInputStream;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -61,6 +62,8 @@ public final class MongoDbTlsUtils {
         }
     }
 
+    record TlsManagers(KeyManager[] keyManagers, TrustManager[] trustManagers) {}
+
     /** Returns the custom CA and client certificate paths from a MongoDB connection string. */
     public static TlsFiles tlsFiles(String connectionString) {
         return new TlsFiles(
@@ -103,12 +106,6 @@ public final class MongoDbTlsUtils {
 
     /** Builds an in-memory TLS context from previously extracted PEM file paths. */
     public static SSLContext createTlsSslContext(String connectionString, TlsFiles tlsFiles) {
-        ConnectionString parsed = new ConnectionString(connectionString);
-        if (Boolean.FALSE.equals(parsed.getSslEnabled())) {
-            throw new IllegalArgumentException(
-                    "MongoDB TLS certificate file options cannot be set when TLS is disabled");
-        }
-
         try {
             TrustManager[] trustManagers = null;
             if (tlsFiles.caFile().isPresent()) {
@@ -120,13 +117,62 @@ public final class MongoDbTlsUtils {
                 keyManagers = createKeyManagers(tlsFiles.certificateKeyFile().orElseThrow());
             }
 
-            SSLContext sslContext = SSLContext.getInstance("TLS");
-            sslContext.init(keyManagers, trustManagers, null);
-            return sslContext;
+            return createTlsSslContext(
+                    connectionString, new TlsManagers(keyManagers, trustManagers));
         } catch (IOException | GeneralSecurityException e) {
             throw new IllegalArgumentException(
                     "Failed to load MongoDB TLS certificate files: " + tlsFiles, e);
         }
+    }
+
+    /** Builds a TLS context by selecting PEM or Debezium store configuration per manager side. */
+    static SSLContext createTlsSslContext(
+            String connectionString, TlsFiles tlsFiles, MongoDbConnectorConfig connectorConfig) {
+        try {
+            return createTlsSslContext(
+                    connectionString, createTlsManagers(tlsFiles, connectorConfig));
+        } catch (IOException | GeneralSecurityException e) {
+            throw new IllegalArgumentException(
+                    "Failed to load MongoDB TLS certificate files: " + tlsFiles, e);
+        }
+    }
+
+    static TlsManagers createTlsManagers(TlsFiles tlsFiles, MongoDbConnectorConfig connectorConfig)
+            throws IOException, GeneralSecurityException {
+        if (tlsFiles.certificateKeyFile().isPresent()
+                && connectorConfig.getSslKeyStore().isPresent()) {
+            throw new IllegalArgumentException(
+                    "MongoDB TLS client identity must not be configured with both "
+                            + "tlsCertificateKeyFile and mongodb.ssl.keystore");
+        }
+        if (tlsFiles.caFile().isPresent() && connectorConfig.getSslTrustStore().isPresent()) {
+            throw new IllegalArgumentException(
+                    "MongoDB TLS trust must not be configured with both "
+                            + "tlsCAFile and mongodb.ssl.truststore");
+        }
+
+        KeyManager[] keyManagers =
+                tlsFiles.certificateKeyFile().isPresent()
+                        ? createKeyManagers(tlsFiles.certificateKeyFile().orElseThrow())
+                        : createKeyManagers(connectorConfig);
+        TrustManager[] trustManagers =
+                tlsFiles.caFile().isPresent()
+                        ? createTrustManagers(tlsFiles.caFile().orElseThrow())
+                        : createTrustManagers(connectorConfig);
+        return new TlsManagers(keyManagers, trustManagers);
+    }
+
+    private static SSLContext createTlsSslContext(String connectionString, TlsManagers tlsManagers)
+            throws GeneralSecurityException {
+        ConnectionString parsed = new ConnectionString(connectionString);
+        if (Boolean.FALSE.equals(parsed.getSslEnabled())) {
+            throw new IllegalArgumentException(
+                    "MongoDB TLS certificate file options cannot be set when TLS is disabled");
+        }
+
+        SSLContext sslContext = SSLContext.getInstance("TLS");
+        sslContext.init(tlsManagers.keyManagers(), tlsManagers.trustManagers(), null);
+        return sslContext;
     }
 
     private static TrustManager[] createTrustManagers(Path caFile)
@@ -169,6 +215,41 @@ public final class MongoDbTlsUtils {
                 KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
         keyManagerFactory.init(keyStore, password);
         return keyManagerFactory.getKeyManagers();
+    }
+
+    private static KeyManager[] createKeyManagers(MongoDbConnectorConfig connectorConfig)
+            throws GeneralSecurityException {
+        if (connectorConfig.getSslKeyStore().isEmpty()) {
+            return null;
+        }
+
+        char[] password = connectorConfig.getSslKeyStorePassword();
+        KeyStore keyStore =
+                MongoDbClientFactory.loadKeyStore(
+                        connectorConfig.getSslKeyStoreType(),
+                        connectorConfig.getSslKeyStore().orElseThrow(),
+                        password);
+        KeyManagerFactory keyManagerFactory =
+                KeyManagerFactory.getInstance(KeyManagerFactory.getDefaultAlgorithm());
+        keyManagerFactory.init(keyStore, password);
+        return keyManagerFactory.getKeyManagers();
+    }
+
+    private static TrustManager[] createTrustManagers(MongoDbConnectorConfig connectorConfig)
+            throws GeneralSecurityException {
+        if (connectorConfig.getSslTrustStore().isEmpty()) {
+            return null;
+        }
+
+        KeyStore trustStore =
+                MongoDbClientFactory.loadKeyStore(
+                        connectorConfig.getSslTrustStoreType(),
+                        connectorConfig.getSslTrustStore().orElseThrow(),
+                        connectorConfig.getSslTrustStorePassword());
+        TrustManagerFactory trustManagerFactory =
+                TrustManagerFactory.getInstance(TrustManagerFactory.getDefaultAlgorithm());
+        trustManagerFactory.init(trustStore);
+        return trustManagerFactory.getTrustManagers();
     }
 
     private static List<X509Certificate> readCertificates(Path path)
@@ -254,7 +335,25 @@ public final class MongoDbTlsUtils {
         if (fragmentStart >= 0) {
             query = query.substring(0, fragmentStart);
         }
-        return List.of(query.split("&"));
+        return splitQueryOptions(query);
+    }
+
+    /**
+     * Splits a raw MongoDB URI query using the driver's option delimiters and empty-part behavior.
+     *
+     * <p>Keep this behavior aligned with MongoDB Java driver's {@code
+     * ConnectionString.parseOptions}: <a
+     * href="https://github.com/mongodb/mongo-java-driver/blob/e34283d11e0624ced3ef60ea11970d16a377d2bd/driver-core/src/main/com/mongodb/ConnectionString.java#L1042-L1066">MongoDB
+     * Java Driver 5.2.0 source</a>.
+     */
+    static List<String> splitQueryOptions(String query) {
+        List<String> options = new ArrayList<>();
+        for (String option : query.split("&|;")) {
+            if (!option.isEmpty()) {
+                options.add(option);
+            }
+        }
+        return options;
     }
 
     private static boolean isOption(String option, String optionName) {

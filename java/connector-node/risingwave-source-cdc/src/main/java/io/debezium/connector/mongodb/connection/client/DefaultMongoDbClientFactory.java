@@ -23,7 +23,6 @@
 package io.debezium.connector.mongodb.connection.client;
 
 import com.mongodb.MongoClientSettings;
-import com.risingwave.connector.cdc.mongodb.MongoDbTlsUtils;
 import io.debezium.config.Configuration;
 import io.debezium.connector.mongodb.MongoDbConnectorConfig;
 import io.debezium.connector.mongodb.connection.MongoDbAuthProvider;
@@ -73,7 +72,8 @@ public class DefaultMongoDbClientFactory implements MongoDbClientFactory {
                 tlsFiles.isEmpty()
                         ? Optional.empty()
                         : Optional.of(
-                                MongoDbTlsUtils.createTlsSslContext(connectionString, tlsFiles));
+                                MongoDbTlsUtils.createTlsSslContext(
+                                        connectionString, tlsFiles, connectorConfig));
         SSLContext sslContext =
                 tlsSslContext.orElseGet(
                         () -> MongoDbClientFactory.createSSLContext(connectorConfig));

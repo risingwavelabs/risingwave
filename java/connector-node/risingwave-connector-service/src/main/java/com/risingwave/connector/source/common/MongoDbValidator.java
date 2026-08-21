@@ -21,9 +21,10 @@ import com.mongodb.MongoClientSettings;
 import com.mongodb.client.MongoClient;
 import com.mongodb.client.MongoClients;
 import com.risingwave.connector.api.source.SourceTypeE;
-import com.risingwave.connector.cdc.mongodb.MongoDbTlsUtils;
 import io.debezium.config.Configuration;
 import io.debezium.connector.mongodb.MongoDbConnector;
+import io.debezium.connector.mongodb.connection.client.DefaultMongoDbClientFactory;
+import io.debezium.connector.mongodb.connection.client.MongoDbTlsUtils;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -163,13 +164,14 @@ public class MongoDbValidator extends DatabaseValidator implements AutoCloseable
     }
 
     private MongoClientSettings.Builder createClientSettingsBuilder() {
-        var builder = MongoClientSettings.builder().applyConnectionString(connStr);
-        MongoDbTlsUtils.createTlsSslContext(mongodbUrl)
-                .ifPresent(
-                        context ->
-                                builder.applyToSslSettings(
-                                        ssl -> ssl.enabled(true).context(context)));
-        return builder;
+        var connectorConfig =
+                new DbzConnectorConfig(
+                        SourceTypeE.MONGODB, sourceId, null, userProps, false, false);
+        var clientSettings =
+                new DefaultMongoDbClientFactory(
+                                Configuration.from(connectorConfig.getResolvedDebeziumProps()))
+                        .getMongoClientSettings();
+        return MongoClientSettings.builder(clientSettings);
     }
 
     boolean checkReadRoleForAdminDb(List<Document> roles) {
