@@ -13,12 +13,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "adbc_core"
+version = "0.24.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "365059b13a01bbf6f324b5bfe328232a819679731431f78105e2883256236858"
+dependencies = [
+ "arrow-array 58.4.0",
+ "arrow-schema 58.4.0",
+]
+
+[[package]]
 name = "adbc_driver_manager"
 version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "12aa1ae565ec6d45cfe71c20b5c2b3cbd6ba5d7176ecd0c0a448e970a93c35e4"
 dependencies = [
- "adbc_core",
+ "adbc_core 0.23.0",
  "adbc_ffi",
  "arrow-array 58.4.0",
  "arrow-schema 58.4.0",
@@ -36,7 +46,7 @@ version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e6851c2ab953511cf7a244aadcbc0586442fd3c67dfe371457369048880dd513"
 dependencies = [
- "adbc_core",
+ "adbc_core 0.23.0",
  "arrow-array 58.4.0",
  "arrow-schema 58.4.0",
 ]
@@ -47,7 +57,7 @@ version = "0.23.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "51e808b220c5f825b2cc06945c6ffa99b0e2c093aae78502c3be439e5908d826"
 dependencies = [
- "adbc_core",
+ "adbc_core 0.23.0",
  "adbc_driver_manager",
  "adbc_ffi",
  "arrow-array 58.4.0",
@@ -7544,7 +7554,7 @@ dependencies = [
  "libc",
  "percent-encoding",
  "pin-project-lite",
- "socket2 0.5.10",
+ "socket2 0.6.5",
  "system-configuration",
  "tokio",
  "tower-service",
@@ -13181,7 +13191,7 @@ dependencies = [
 name = "risingwave_connector"
 version = "3.2.0-alpha"
 dependencies = [
- "adbc_core",
+ "adbc_core 0.24.0",
  "adbc_snowflake",
  "anyhow",
  "apache-avro 0.21.0 (git+https://github.com/risingwavelabs/avro-rs?rev=1f2723802d4fb77b97fa084f7bb81e3b60b9e03f)",
