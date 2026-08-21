@@ -121,7 +121,7 @@ async fn restore_hummock_version(
 
     // Use zstd compression by default. The next checkpoint written by the cluster
     // will use the configured compression algorithm from the config file.
-    let buf = encode_checkpoint_data(&checkpoint, CheckpointCompression::Zstd)
+    let (_, buf) = encode_checkpoint_data(&checkpoint, CheckpointCompression::Zstd)
         .map_err(|error| BackupError::Other(anyhow!(error)))?;
     object_store
         .upload(&checkpoint_path, buf.into())
