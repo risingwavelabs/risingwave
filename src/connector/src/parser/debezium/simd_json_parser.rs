@@ -637,8 +637,8 @@ mod tests {
                 SourceColumnDesc {
                     name: "o_point".to_owned(),
                     data_type: DataType::Struct(StructType::new(vec![
-                        ("x", DataType::Float32),
-                        ("y", DataType::Float32),
+                        ("x", DataType::Float64),
+                        ("y", DataType::Float64),
                     ])),
                     column_id: 7.into(),
                     column_type: SourceColumnType::Normal,
@@ -797,8 +797,8 @@ mod tests {
                 "60f14fe2-f857-404a-b586-3b5375b3259f".into()
             ))));
             assert!(row[7].eq(&Some(ScalarImpl::Struct(StructValue::new(vec![
-                Some(ScalarImpl::Float32(1.into())),
-                Some(ScalarImpl::Float32(2.into()))
+                Some(ScalarImpl::Float64(1.into())),
+                Some(ScalarImpl::Float64(2.into()))
             ])))));
             assert!(row[8].eq(&Some(ScalarImpl::Utf8("polar".into()))));
             assert!(row[9].eq(&Some(ScalarImpl::Utf8("h".into()))));
