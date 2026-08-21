@@ -259,6 +259,7 @@ impl IcebergSinkCommitter {
                 branch,
                 snapshot_id: snapshot.snapshot_id(),
                 timestamp_ms: snapshot.timestamp_ms(),
+                sequence_number: snapshot.sequence_number(),
             })
     }
 

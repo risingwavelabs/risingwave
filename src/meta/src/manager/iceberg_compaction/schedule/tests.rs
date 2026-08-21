@@ -58,6 +58,7 @@ fn new_track(
         last_config_refresh_at: now,
         pending_commit_count,
         latest_observed_snapshot: None,
+        active_round: None,
         finish_action: CompactionTrackFinishAction::KeepTrack,
         state: CompactionTrackState::Idle {
             next_compaction_time: now + Duration::from_secs(trigger_interval_sec),
@@ -95,6 +96,7 @@ fn committed_snapshot(snapshot_id: i64, timestamp_ms: i64) -> IcebergCommittedSn
         branch: "main".to_owned(),
         snapshot_id,
         timestamp_ms,
+        sequence_number: snapshot_id,
     }
 }
 
@@ -282,7 +284,7 @@ async fn test_commit_update_freezes_gc_watermark_after_task_start() {
             .latest_observed_snapshot
             .as_ref()
             .map(|s| s.snapshot_id),
-        Some(12)
+        Some(13)
     );
     match track.processing_gc_watermark_snapshot() {
         Some(Some(snapshot)) => assert_eq!(snapshot.snapshot_id, 10),
@@ -291,7 +293,7 @@ async fn test_commit_update_freezes_gc_watermark_after_task_start() {
 }
 
 #[tokio::test]
-async fn test_force_update_records_observed_snapshot_only_for_idle_track() {
+async fn test_force_update_records_observed_snapshot_while_processing() {
     let manager = build_test_manager().await;
     let idle_sink_id = SinkId::new(405);
     let processing_sink_id = SinkId::new(406);
@@ -342,7 +344,7 @@ async fn test_force_update_records_observed_snapshot_only_for_idle_track() {
             .latest_observed_snapshot
             .as_ref()
             .map(|s| s.snapshot_id),
-        Some(20)
+        Some(21)
     );
     match track.processing_gc_watermark_snapshot() {
         Some(Some(snapshot)) => assert_eq!(snapshot.snapshot_id, 20),
@@ -393,6 +395,64 @@ fn test_finish_success_clears_dispatched_baseline_and_starts_cooldown() {
 }
 
 #[test]
+fn test_active_round_keeps_sequence_boundary_until_empty_scan() {
+    let now = Instant::now();
+    let mut track = new_track(now, 120, 10, 1);
+    track.record_observed_snapshot(committed_snapshot(10, 1000));
+    start_in_flight(&mut track, 1, now);
+
+    assert_eq!(track.bounded_sequence_number(), Some(10));
+    track.record_observed_snapshot(committed_snapshot(11, 2000));
+    track.record_commit();
+    track.finish_success_with_planning_empty(now, false);
+
+    assert_eq!(track.bounded_sequence_number(), Some(10));
+    assert!(track.should_trigger(now));
+    track.start_processing();
+    track.mark_dispatched(2.into(), 1.into(), now);
+    track.finish_success_with_planning_empty(now, true);
+
+    assert_eq!(track.bounded_sequence_number(), None);
+    assert!(!track.should_trigger(now));
+    assert_eq!(track.pending_commit_count, 1);
+}
+
+#[test]
+fn test_force_during_active_round_idle_gap_only_advances_next_attempt() {
+    let now = Instant::now();
+    let mut track = new_track(now, 120, 10, 1);
+    track.record_observed_snapshot(committed_snapshot(10, 1000));
+    start_in_flight(&mut track, 1, now);
+    track.finish_success_with_planning_empty(now, false);
+
+    assert_eq!(track.pending_commit_count, 0);
+    assert_eq!(track.bounded_sequence_number(), Some(10));
+
+    let force_at = now + Duration::from_secs(5);
+    track.record_force_compaction(force_at, None);
+
+    assert_eq!(track.pending_commit_count, 0);
+    assert_eq!(track.bounded_sequence_number(), Some(10));
+    assert!(track.should_trigger(force_at));
+}
+
+#[test]
+fn test_active_round_failure_backoff_ignores_commit_threshold() {
+    let now = Instant::now();
+    let mut track = new_track(now, 120, 3, 1);
+    track.record_observed_snapshot(committed_snapshot(10, 1000));
+    start_in_flight(&mut track, 1, now);
+    record_commits(&mut track, 3);
+
+    track.finish_failed(now);
+
+    assert_eq!(track.bounded_sequence_number(), Some(10));
+    assert_eq!(track.pending_commit_count, 3);
+    assert!(!track.should_trigger(now));
+    assert!(track.should_trigger(now + Duration::from_secs(1)));
+}
+
+#[test]
 fn test_finish_failed_preserves_backlog_and_allows_retry() {
     let now = Instant::now();
     let mut track = new_track(now, 120, 10, 4);
@@ -401,12 +461,13 @@ fn test_finish_failed_preserves_backlog_and_allows_retry() {
     track.finish_failed(now);
 
     assert_eq!(track.pending_commit_count, 4);
-    assert!(track.should_trigger(now));
+    assert!(!track.should_trigger(now));
+    assert!(track.should_trigger(now + Duration::from_secs(1)));
     match track.state {
         CompactionTrackState::Idle {
             next_compaction_time,
             ..
-        } => assert!(next_compaction_time <= now),
+        } => assert_eq!(next_compaction_time, now + Duration::from_secs(1)),
         CompactionTrackState::PendingDispatch { .. } | CompactionTrackState::InFlight { .. } => {
             panic!("track should be idle")
         }
@@ -447,7 +508,7 @@ fn test_revert_pre_dispatch_failure_requeues_at_now_without_losing_backlog() {
             CompactionTrackState::Idle {
                 next_compaction_time,
                 ..
-            } => assert_eq!(next_compaction_time, revert_at),
+            } => assert_eq!(next_compaction_time, revert_at + Duration::from_secs(1)),
             CompactionTrackState::PendingDispatch { .. }
             | CompactionTrackState::InFlight { .. } => {
                 panic!("track should be restored to idle")
@@ -489,7 +550,8 @@ fn test_finish_failed_after_force_keeps_force_backlog() {
     track.finish_failed(now);
 
     assert_eq!(track.pending_commit_count, 1);
-    assert!(track.should_trigger(now));
+    assert!(!track.should_trigger(now));
+    assert!(track.should_trigger(now + Duration::from_secs(1)));
 }
 
 #[test]
@@ -780,6 +842,61 @@ async fn test_apply_manual_force_update_allows_disabled_compaction() {
 }
 
 #[tokio::test]
+async fn test_start_manual_compaction_rejects_active_automatic_round() {
+    let manager = build_test_manager().await;
+    let sink_id = SinkId::new(407);
+    let now = Instant::now();
+    let mut track = new_track(now, 300, 10, 1);
+    track.record_observed_snapshot(committed_snapshot(10, 1000));
+    start_in_flight(&mut track, 1, now);
+    track.finish_success_with_planning_empty(now, false);
+
+    assert!(matches!(track.state, CompactionTrackState::Idle { .. }));
+    assert_eq!(track.bounded_sequence_number(), Some(10));
+
+    manager.inner.write().sink_schedules.insert(sink_id, track);
+
+    let error = manager.start_manual_compaction(sink_id).await.unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("manual Full compaction is rejected")
+    );
+
+    let guard = manager.inner.read();
+    let track = guard.sink_schedules.get(&sink_id).unwrap();
+    assert_eq!(track.bounded_sequence_number(), Some(10));
+    assert!(matches!(track.state, CompactionTrackState::Idle { .. }));
+}
+
+#[tokio::test]
+async fn test_refresh_schedule_config_preserves_active_round_task_type() {
+    let manager = build_test_manager().await;
+    let now = Instant::now();
+    let mut track = new_track(now, 300, 3, 1);
+    track.task_type = TaskType::SmallFiles;
+    track.record_observed_snapshot(committed_snapshot(10, 1000));
+    start_in_flight(&mut track, 1, now);
+    track.finish_success_with_planning_empty(now, false);
+
+    let refresh_at = now + Duration::from_secs(5);
+    let refreshed_config = new_test_iceberg_config(42, 7, CompactionType::FilesWithDelete);
+    manager.refresh_schedule_config(&mut track, &refreshed_config, refresh_at);
+
+    assert_eq!(track.task_type, TaskType::SmallFiles);
+    assert_eq!(track.trigger_snapshot_count, 7);
+    assert_eq!(track.trigger_interval_sec, 42);
+    assert_eq!(track.bounded_sequence_number(), Some(10));
+    assert!(matches!(
+        track.state,
+        CompactionTrackState::Idle {
+            next_compaction_time,
+            ..
+        } if next_compaction_time == refresh_at + Duration::from_secs(42)
+    ));
+}
+
+#[tokio::test]
 async fn test_manual_force_update_uses_selected_task_type_once() {
     let manager = build_test_manager().await;
     let sink_id = SinkId::new(147);
@@ -822,9 +939,24 @@ async fn test_manual_force_update_uses_selected_task_type_once() {
     assert_eq!(handles[0].task_type, TaskType::FilesWithDelete);
     drop(handles);
 
+    {
+        let retry_now = Instant::now();
+        let mut guard = manager.inner.write();
+        let track = guard.sink_schedules.get_mut(&sink_id).unwrap();
+        let CompactionTrackState::Idle {
+            next_compaction_time,
+            ..
+        } = &mut track.state
+        else {
+            panic!("track should be idle after pre-dispatch failure");
+        };
+        *next_compaction_time = retry_now;
+    }
+
     let handles = manager.get_top_n_iceberg_commit_sink_ids(1);
     assert_eq!(handles.len(), 1);
     assert_eq!(handles[0].task_type, TaskType::SmallFiles);
+    drop(handles);
 }
 
 #[tokio::test]
@@ -957,6 +1089,7 @@ async fn test_apply_sink_update_promotes_temporary_manual_track_when_compaction_
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
         pk_index_result: None,
+        planning_empty: false,
     });
 
     let guard = manager.inner.read();
@@ -1074,6 +1207,7 @@ async fn test_pre_dispatch_failure_notifies_manual_waiter_and_removes_temporary_
     drop(IcebergCompactionHandle::new(
         sink_id,
         TaskType::Full,
+        None,
         manager.inner.clone(),
         manager.metadata_manager.clone(),
     ));
@@ -1101,6 +1235,7 @@ async fn test_handle_report_task_success_consumes_backlog_and_resets_to_idle() {
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
         pk_index_result: None,
+        planning_empty: false,
     });
 
     let guard = manager.inner.read();
@@ -1131,6 +1266,7 @@ async fn test_handle_report_task_completes_manual_waiter_on_success() {
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
         pk_index_result: None,
+        planning_empty: false,
     });
 
     assert_eq!(rx.await.unwrap().unwrap(), task_id);
@@ -1163,6 +1299,7 @@ async fn test_handle_report_task_completes_manual_waiter_on_failure() {
         status: IcebergReportTaskStatus::Failed as i32,
         error_message: Some("boom".to_owned()),
         pk_index_result: None,
+        planning_empty: false,
     });
 
     let error = rx.await.unwrap().unwrap_err();
@@ -1197,6 +1334,7 @@ async fn test_handle_report_task_removes_temporary_manual_track_on_success() {
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
         pk_index_result: None,
+        planning_empty: false,
     });
 
     assert_eq!(rx.await.unwrap().unwrap(), task_id);
@@ -1228,6 +1366,7 @@ async fn test_handle_report_task_removes_temporary_manual_track_on_failure() {
         status: IcebergReportTaskStatus::Failed as i32,
         error_message: Some("boom".to_owned()),
         pk_index_result: None,
+        planning_empty: false,
     });
 
     let error = rx.await.unwrap().unwrap_err();
@@ -1333,6 +1472,7 @@ async fn test_manual_compaction_waiter_is_not_stolen_during_config_load() {
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
         pk_index_result: None,
+        planning_empty: false,
     });
     assert!(
         !manager
@@ -1373,7 +1513,7 @@ async fn test_get_top_n_notifies_manual_waiter_on_report_timeout() {
 
     let handles = manager.get_top_n_iceberg_commit_sink_ids(1);
 
-    assert_eq!(handles.len(), 1);
+    assert_eq!(handles.len(), 0);
     let error = rx.await.unwrap().unwrap_err();
     assert!(error.to_string().contains("timed out"));
     let guard = manager.inner.read();
@@ -1512,6 +1652,7 @@ async fn test_handle_report_task_failure_preserves_backlog_and_resets_to_idle() 
         status: IcebergReportTaskStatus::Failed as i32,
         error_message: Some("boom".to_owned()),
         pk_index_result: None,
+        planning_empty: false,
     });
 
     let guard = manager.inner.read();
@@ -1526,6 +1667,7 @@ async fn test_handle_report_task_ignores_stale_task_id() {
     let sink_id = SinkId::new(48);
     let now = Instant::now();
     let mut track = new_track(now, 120, 10, 2);
+    track.record_observed_snapshot(committed_snapshot(10, 1000));
     start_in_flight(&mut track, 9, now);
     let (tx, _rx) = tokio::sync::oneshot::channel();
     {
@@ -1540,11 +1682,13 @@ async fn test_handle_report_task_ignores_stale_task_id() {
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
         pk_index_result: None,
+        planning_empty: false,
     });
 
     let guard = manager.inner.read();
     let track = guard.sink_schedules.get(&sink_id).unwrap();
-    assert_eq!(track.pending_commit_count, 2);
+    assert_eq!(track.pending_commit_count, 0);
+    assert_eq!(track.bounded_sequence_number(), Some(10));
     assert!(matches!(
         track.state,
         CompactionTrackState::InFlight { task_id, .. } if task_id.as_raw_id() == 9
@@ -1553,24 +1697,23 @@ async fn test_handle_report_task_ignores_stale_task_id() {
 }
 
 #[tokio::test]
-async fn test_get_top_n_retries_timed_out_inflight_task() {
+async fn test_get_top_n_backs_off_after_timed_out_inflight_task() {
     let manager = build_test_manager().await;
     let sink_id = SinkId::new(49);
     let now = Instant::now();
     let mut track = new_track(now, 120, 10, 2);
     track.report_timeout = Duration::from_secs(1);
+    track.record_observed_snapshot(committed_snapshot(10, 1000));
     start_in_flight(&mut track, 7, now - Duration::from_secs(5));
     manager.inner.write().sink_schedules.insert(sink_id, track);
 
     let handles = manager.get_top_n_iceberg_commit_sink_ids(1);
 
-    assert_eq!(handles.len(), 1);
+    assert_eq!(handles.len(), 0);
     let guard = manager.inner.read();
     let track = guard.sink_schedules.get(&sink_id).unwrap();
-    assert!(matches!(
-        track.state,
-        CompactionTrackState::PendingDispatch { .. }
-    ));
+    assert!(matches!(track.state, CompactionTrackState::Idle { .. }));
+    assert_eq!(track.bounded_sequence_number(), Some(10));
 }
 
 #[tokio::test]
@@ -1581,6 +1724,7 @@ async fn test_pre_dispatch_failure_requeues_track_behind_overdue_candidates() {
     let now = Instant::now();
     // The failing track is the most overdue, so it wins the only slot first.
     let mut failing_track = new_track(now, 120, 10, 1);
+    failing_track.record_observed_snapshot(committed_snapshot(10, 1000));
     failing_track.state = CompactionTrackState::Idle {
         next_compaction_time: now - Duration::from_secs(100),
         next_task_type_override: None,
@@ -1601,6 +1745,16 @@ async fn test_pre_dispatch_failure_requeues_track_behind_overdue_candidates() {
     assert_eq!(handles[0].sink_id, failing);
     // Dropping the handle simulates a pre-dispatch failure.
     drop(handles);
+
+    let guard = manager.inner.read();
+    assert_eq!(
+        guard
+            .sink_schedules
+            .get(&failing)
+            .and_then(|track| track.bounded_sequence_number()),
+        Some(10)
+    );
+    drop(guard);
 
     // The failing track is re-queued at the revert time, so the still-overdue
     // healthy track wins the next slot instead of being starved.
