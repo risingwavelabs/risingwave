@@ -290,13 +290,14 @@ impl IcebergCompactionManager {
         let txn = Transaction::new(&table);
 
         let mut expired_snapshots = txn
-            .expire_snapshot()
-            .expire_older_than(snapshot_expiration_timestamp_ms)
-            .clear_expire_files(iceberg_config.snapshot_expiration_clear_expired_files)
+            .expire_snapshots()
+            .expire_older_than_ms(snapshot_expiration_timestamp_ms)
             .clear_expired_meta_data(iceberg_config.snapshot_expiration_clear_expired_meta_data);
 
         if let Some(retain_last) = iceberg_config.snapshot_expiration_retain_last {
-            expired_snapshots = expired_snapshots.retain_last(retain_last);
+            expired_snapshots = expired_snapshots.retain_last(
+                usize::try_from(retain_last).map_err(|e| SinkError::Config(e.into()))?,
+            );
         }
 
         let before_metadata = table.metadata_ref();
@@ -374,8 +375,9 @@ impl IcebergCompactionManager {
             return Ok(());
         };
         let current_snapshot_id = current_snapshot.snapshot_id();
-        let manifest_list = current_snapshot
-            .load_manifest_list(table.file_io(), table.metadata())
+        let manifest_list = table
+            .object_cache()
+            .get_manifest_list(current_snapshot, &table.metadata_ref())
             .await
             .map_err(|e| SinkError::Iceberg(e.into()))?;
 

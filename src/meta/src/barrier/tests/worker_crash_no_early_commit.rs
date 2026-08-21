@@ -361,7 +361,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
         ]),
         state_table_log_epochs: HashMap::new(),
         mv_depended_subscriptions: HashMap::new(),
-        background_jobs: HashSet::new(),
+        creating_jobs: HashSet::new(),
         hummock_version_stats: HummockVersionStats::default(),
         database_infos: vec![Database {
             id: database_id,
