@@ -87,11 +87,15 @@ psql -v ON_ERROR_STOP=1 -c "
         (3, 'inserted', point(-16777217, -0.987654321098765));
 "
 
-query ITTTT retry 10 backoff 1s
+query ITRRTRRTT retry 10 backoff 1s
 select
     ours.id,
     ours.name,
+    (ours.location).x,
+    upstream.upstream_x,
     (ours.location).x = upstream.upstream_x,
+    (ours.location).y,
+    upstream.upstream_y,
     (ours.location).y = upstream.upstream_y,
     ours.location is not null
 from test_point_explicit as ours
@@ -106,7 +110,7 @@ join (
     )
 ) as upstream(id, upstream_x, upstream_y) on ours.id = upstream.id;
 ----
-3 inserted t t t
+3 inserted -16777217 -16777217 t -0.987654321098765 -0.987654321098765 t t
 
 # Test: incremental UPDATE
 system ok
@@ -117,11 +121,15 @@ psql -v ON_ERROR_STOP=1 -c "
     WHERE id = 1;
 "
 
-query ITTTT retry 10 backoff 1s
+query ITRRTRRTT retry 10 backoff 1s
 select
     ours.id,
     ours.name,
+    (ours.location).x,
+    upstream.upstream_x,
     (ours.location).x = upstream.upstream_x,
+    (ours.location).y,
+    upstream.upstream_y,
     (ours.location).y = upstream.upstream_y,
     ours.location is not null
 from test_point_explicit as ours
@@ -136,7 +144,7 @@ join (
     )
 ) as upstream(id, upstream_x, upstream_y) on ours.id = upstream.id;
 ----
-1 updated t t t
+1 updated 9007199254740991 9007199254740991 t 2.220446049250313e-16 2.220446049250313e-16 t t
 
 # Test: incremental DELETE
 system ok
@@ -163,10 +171,14 @@ where t.name = 'test_point_auto_discovery_rw' and c.name = 'location';
 ----
 struct<x double precision, y double precision>
 
-query ITT retry 10 backoff 1s
+query IRRTRRT retry 10 backoff 1s
 select
     ours.id,
+    (ours.location).x,
+    upstream.upstream_x,
     (ours.location).x = upstream.upstream_x,
+    (ours.location).y,
+    upstream.upstream_y,
     (ours.location).y = upstream.upstream_y
 from test_point_auto_discovery_rw as ours
 join (
@@ -180,7 +192,7 @@ join (
     )
 ) as upstream(id, upstream_x, upstream_y) on ours.id = upstream.id;
 ----
-1 t t
+1 9007199254740991 9007199254740991 t 2.220446049250313e-16 2.220446049250313e-16 t
 
 # Test: automatic schema change
 system ok
@@ -215,10 +227,14 @@ where t.name = 'test_point_schema_change_rw' and c.name = 'location';
 ----
 struct<x double precision, y double precision>
 
-query ITT retry 20 backoff 1s
+query IRRTRRT retry 20 backoff 1s
 select
     ours.id,
+    (ours.location).x,
+    upstream.upstream_x,
     (ours.location).x = upstream.upstream_x,
+    (ours.location).y,
+    upstream.upstream_y,
     (ours.location).y = upstream.upstream_y
 from test_point_schema_change_rw as ours
 join (
@@ -232,7 +248,7 @@ join (
     )
 ) as upstream(id, upstream_x, upstream_y) on ours.id = upstream.id;
 ----
-2 t t
+2 16777217.25 16777217.25 t -16777217.75 -16777217.75 t
 
 # Teardown
 statement ok
