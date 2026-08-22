@@ -17,19 +17,14 @@
 package com.risingwave.connector.source.common;
 
 import com.mongodb.ConnectionString;
-import com.mongodb.MongoClientSettings;
-import com.mongodb.client.MongoClient;
-import com.mongodb.client.MongoClients;
 import com.risingwave.connector.api.source.SourceTypeE;
 import io.debezium.config.Configuration;
-import io.debezium.connector.mongodb.MongoDbConnector;
-import io.debezium.connector.mongodb.connection.client.DefaultMongoDbClientFactory;
-import io.debezium.connector.mongodb.connection.client.MongoDbTlsUtils;
-import java.util.HashMap;
+import io.debezium.connector.mongodb.MongoDbConnectorConfig;
+import io.debezium.connector.mongodb.connection.MongoDbConnection;
+import io.debezium.connector.mongodb.connection.MongoDbConnections;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
-import java.util.concurrent.TimeUnit;
 import org.bson.BsonDocument;
 import org.bson.Document;
 import org.bson.conversions.Bson;
@@ -38,19 +33,19 @@ import org.slf4j.LoggerFactory;
 
 public class MongoDbValidator extends DatabaseValidator implements AutoCloseable {
     private static final Logger LOG = LoggerFactory.getLogger(MongoDbValidator.class);
+    private static final int VALIDATION_TIMEOUT_SECONDS = 5;
+    private static final String VALIDATION_TIMEOUT_MILLIS = "5000";
 
     String mongodbUrl;
     boolean isShardedCluster;
 
     ConnectionString connStr;
-    MongoClient client;
-    private final long sourceId;
-    private final Map<String, String> userProps;
+    MongoDbConnection connection;
 
     @Override
     public void close() {
-        if (client != null) {
-            client.close();
+        if (connection != null) {
+            connection.close();
         }
     }
 
@@ -60,54 +55,41 @@ public class MongoDbValidator extends DatabaseValidator implements AutoCloseable
     static final String INHERITED_PRIVILEGES = "inheritedPrivileges";
 
     public MongoDbValidator(Map<String, String> userProps, long sourceId) {
-        this.sourceId = sourceId;
-        this.userProps = new HashMap<>(userProps);
-        this.userProps.put("source.id", Long.toString(sourceId));
         this.mongodbUrl = userProps.get("mongodb.url");
-        this.connStr = new ConnectionString(MongoDbTlsUtils.withoutTlsFileOptions(mongodbUrl));
+        this.connStr = new ConnectionString(mongodbUrl);
         this.isShardedCluster = false;
-        this.client = MongoClients.create(createClientSettingsBuilder().build());
+
+        var connectorConfig =
+                new DbzConnectorConfig(
+                        SourceTypeE.MONGODB, sourceId, null, userProps, false, false);
+        var validationProperties = new Properties();
+        validationProperties.putAll(connectorConfig.getResolvedDebeziumProps());
+        validationProperties.setProperty(
+                MongoDbConnectorConfig.CONNECT_TIMEOUT_MS.name(), VALIDATION_TIMEOUT_MILLIS);
+        validationProperties.setProperty(
+                MongoDbConnectorConfig.SERVER_SELECTION_TIMEOUT_MS.name(),
+                VALIDATION_TIMEOUT_MILLIS);
+        validationProperties.setProperty(
+                MongoDbConnectorConfig.SOCKET_TIMEOUT_MS.name(), VALIDATION_TIMEOUT_MILLIS);
+        validationProperties.setProperty(
+                MongoDbConnectorConfig.HEARTBEAT_FREQUENCY_MS.name(), VALIDATION_TIMEOUT_MILLIS);
+        this.connection = MongoDbConnections.create(Configuration.from(validationProperties));
     }
 
     @Override
     public void validateDbConfig() {
-        // check connectivity with shorter timeout for validation (5 seconds)
-        // This ensures validation fails fast if MongoDB is not reachable
-        final int validationTimeoutSeconds = 5;
-
         try {
-            var settings =
-                    createClientSettingsBuilder()
-                            // Set shorter timeouts for validation
-                            .applyToServerSettings(
-                                    builder ->
-                                            builder.heartbeatFrequency(
-                                                    validationTimeoutSeconds * 1000,
-                                                    TimeUnit.MILLISECONDS))
-                            .applyToSocketSettings(
-                                    builder ->
-                                            builder.connectTimeout(
-                                                            validationTimeoutSeconds,
-                                                            TimeUnit.SECONDS)
-                                                    .readTimeout(
-                                                            validationTimeoutSeconds,
-                                                            TimeUnit.SECONDS))
-                            .applyToClusterSettings(
-                                    builder ->
-                                            builder.serverSelectionTimeout(
-                                                    validationTimeoutSeconds, TimeUnit.SECONDS))
-                            .build();
-
-            try (MongoClient mongoClient = MongoClients.create(settings)) {
-                // Verify that we can actually connect to the cluster
-                // Use ping command which is lightweight and fast
-                mongoClient
-                        .getDatabase("admin")
-                        .runCommand(org.bson.BsonDocument.parse("{ping: 1}"));
-                LOG.info("MongoDB connection validated successfully");
-            }
+            connection.execute(
+                    "ping MongoDB",
+                    client -> {
+                        client.getDatabase("admin")
+                                .runCommand(org.bson.BsonDocument.parse("{ping: 1}"));
+                    });
+            LOG.info("MongoDB connection validated successfully");
 
             validateMatchingCollections();
+        } catch (InterruptedException e) {
+            throw interrupted("validating the MongoDB connection", e);
         } catch (CdcConnectorException e) {
             // Re-throw our custom exceptions
             LOG.error("MongoDB validation failed: {}", e.getMessage(), e);
@@ -117,35 +99,24 @@ public class MongoDbValidator extends DatabaseValidator implements AutoCloseable
             LOG.error(
                     "Failed to connect to MongoDB at {} within {} seconds",
                     mongodbUrl,
-                    validationTimeoutSeconds,
+                    VALIDATION_TIMEOUT_SECONDS,
                     e);
             throw new CdcConnectorException(
                     String.format(
                             "Failed to connect to MongoDB at %s within %d seconds: %s",
-                            mongodbUrl, validationTimeoutSeconds, e.getMessage()),
+                            mongodbUrl, VALIDATION_TIMEOUT_SECONDS, e.getMessage()),
                     e);
         }
     }
 
-    private void validateMatchingCollections() {
-        final String validationTimeoutMillis = "5000";
-        var connectorConfig =
-                new DbzConnectorConfig(
-                        SourceTypeE.MONGODB, sourceId, null, userProps, false, false);
-        var validationProperties = new Properties();
-        validationProperties.putAll(connectorConfig.getResolvedDebeziumProps());
-        validationProperties.setProperty("mongodb.connect.timeout.ms", validationTimeoutMillis);
-        validationProperties.setProperty(
-                "mongodb.server.selection.timeout.ms", validationTimeoutMillis);
-        validationProperties.setProperty("mongodb.socket.timeout.ms", validationTimeoutMillis);
-
+    private void validateMatchingCollections() throws InterruptedException {
         try {
-            var matchingCollections =
-                    new MongoDbConnector()
-                            .getMatchingCollections(Configuration.from(validationProperties));
+            var matchingCollections = connection.collections();
             LOG.info(
                     "MongoDB collection discovery validated successfully; {} collection(s) match",
                     matchingCollections.size());
+        } catch (InterruptedException e) {
+            throw e;
         } catch (Exception e) {
             throw new CdcConnectorException(
                     String.format(
@@ -163,15 +134,10 @@ public class MongoDbValidator extends DatabaseValidator implements AutoCloseable
         return cause.getMessage();
     }
 
-    private MongoClientSettings.Builder createClientSettingsBuilder() {
-        var connectorConfig =
-                new DbzConnectorConfig(
-                        SourceTypeE.MONGODB, sourceId, null, userProps, false, false);
-        var clientSettings =
-                new DefaultMongoDbClientFactory(
-                                Configuration.from(connectorConfig.getResolvedDebeziumProps()))
-                        .getMongoClientSettings();
-        return MongoClientSettings.builder(clientSettings);
+    private static CdcConnectorException interrupted(
+            String operation, InterruptedException exception) {
+        Thread.currentThread().interrupt();
+        return new CdcConnectorException("Interrupted while " + operation, exception);
     }
 
     boolean checkReadRoleForAdminDb(List<Document> roles) {
@@ -201,7 +167,6 @@ public class MongoDbValidator extends DatabaseValidator implements AutoCloseable
 
         if (null != connStr.getCredential()) {
             var secret = connStr.getCredential();
-            var authDb = client.getDatabase(secret.getSource());
 
             Bson command =
                     BsonDocument.parse(
@@ -209,7 +174,18 @@ public class MongoDbValidator extends DatabaseValidator implements AutoCloseable
                                     "{usersInfo: \"%s\", showPrivileges: true}",
                                     secret.getUserName()));
 
-            Document ret = authDb.runCommand(command);
+            Document ret;
+            try {
+                ret =
+                        connection.execute(
+                                "read MongoDB user privileges",
+                                client -> {
+                                    return client.getDatabase(secret.getSource())
+                                            .runCommand(command);
+                                });
+            } catch (InterruptedException e) {
+                throw interrupted("validating MongoDB user privileges", e);
+            }
             LOG.info("mongodb userInfo: {}", ret.toJson());
 
             List<Document> users = ret.getEmbedded(List.of(USERS), List.class);

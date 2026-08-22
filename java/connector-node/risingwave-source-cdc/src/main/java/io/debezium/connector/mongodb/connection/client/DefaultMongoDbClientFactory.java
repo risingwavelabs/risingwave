@@ -47,17 +47,17 @@ public class DefaultMongoDbClientFactory implements MongoDbClientFactory {
     private final MongoDbTlsUtils.TlsFiles tlsFiles;
 
     public DefaultMongoDbClientFactory(Configuration config) {
-        this.connectorConfig = new MongoDbConnectorConfig(config);
+        String rawConnectionString = config.getString(MongoDbConnectorConfig.CONNECTION_STRING);
+        this.tlsFiles = MongoDbTlsUtils.tlsFiles(rawConnectionString);
+        Configuration effectiveConfig =
+                config.edit()
+                        .with(
+                                MongoDbConnectorConfig.CONNECTION_STRING,
+                                MongoDbTlsUtils.withoutTlsFileOptions(rawConnectionString))
+                        .build();
+        this.connectorConfig = new MongoDbConnectorConfig(effectiveConfig);
         this.authProvider = connectorConfig.getAuthProvider();
-        this.authProvider.init(config);
-        this.tlsFiles =
-                new MongoDbTlsUtils.TlsFiles(
-                        Optional.ofNullable(config.getString(MongoDbTlsUtils.TLS_CA_FILE_CONFIG))
-                                .map(java.nio.file.Path::of),
-                        Optional.ofNullable(
-                                        config.getString(
-                                                MongoDbTlsUtils.TLS_CERTIFICATE_KEY_FILE_CONFIG))
-                                .map(java.nio.file.Path::of));
+        this.authProvider.init(effectiveConfig);
         this.clientSettings = createMongoClientSettings();
     }
 

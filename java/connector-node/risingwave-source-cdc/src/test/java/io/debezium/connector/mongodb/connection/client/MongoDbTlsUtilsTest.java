@@ -21,8 +21,6 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
-import com.risingwave.connector.api.source.SourceTypeE;
-import com.risingwave.connector.source.common.DbzConnectorConfig;
 import io.debezium.config.Configuration;
 import io.debezium.connector.mongodb.MongoDbConnectorConfig;
 import java.io.ByteArrayInputStream;
@@ -34,9 +32,9 @@ import java.security.KeyStore;
 import java.security.cert.Certificate;
 import java.security.cert.CertificateFactory;
 import java.util.Base64;
-import java.util.HashMap;
 import java.util.Optional;
 import java.util.Properties;
+import org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
 import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
@@ -157,6 +155,39 @@ public class MongoDbTlsUtilsTest {
     }
 
     @Test
+    public void clientFactoryConsumesPemOptionsDirectlyFromConnectionString() throws Exception {
+        Path caFile = temporaryFolder.newFile("factory-ca.pem").toPath();
+        Files.writeString(caFile, TEST_CA);
+        var config =
+                Configuration.create()
+                        .with(
+                                MongoDbConnectorConfig.CONNECTION_STRING,
+                                "mongodb://localhost/?replicaSet=rs0&tlsCAFile=" + caFile)
+                        .build();
+
+        var settings = new DefaultMongoDbClientFactory(config).getMongoClientSettings();
+
+        assertTrue(settings.getSslSettings().isEnabled());
+        assertNotNull(settings.getSslSettings().getContext());
+    }
+
+    @Test
+    public void rejectsMalformedPem() throws Exception {
+        Path caFile = temporaryFolder.newFile("malformed-ca.pem").toPath();
+        Files.writeString(
+                caFile, "-----BEGIN CERTIFICATE-----\nnot-base64!\n-----END CERTIFICATE-----\n");
+
+        var error =
+                assertThrows(
+                        IllegalArgumentException.class,
+                        () ->
+                                MongoDbTlsUtils.createTlsSslContext(
+                                        "mongodb://localhost/?tlsCAFile=" + caFile));
+
+        assertTrue(error.getCause().getMessage().contains("Invalid PEM content"));
+    }
+
+    @Test
     public void combinesPemTrustWithDebeziumKeyStore() throws Exception {
         Path caFile = writeCaPem("ca.pem");
         Path keyStore = writeKeyStore("client.p12");
@@ -184,6 +215,21 @@ public class MongoDbTlsUtilsTest {
 
         assertNotNull(managers.keyManagers());
         assertNotNull(managers.trustManagers());
+    }
+
+    @Test
+    public void createsKeyManagersFromPkcs1RsaPrivateKey() throws Exception {
+        var keyPair = KeyPairGenerator.getInstance("RSA").generateKeyPair();
+        var privateKeyInfo = PrivateKeyInfo.getInstance(keyPair.getPrivate().getEncoded());
+        byte[] pkcs1 = privateKeyInfo.parsePrivateKey().toASN1Primitive().getEncoded();
+        Path clientPem = writeClientPem("client-pkcs1.pem", "RSA PRIVATE KEY", pkcs1);
+
+        var sslContext =
+                MongoDbTlsUtils.createTlsSslContext(
+                        "mongodb://localhost/?tls=true",
+                        new MongoDbTlsUtils.TlsFiles(Optional.empty(), Optional.of(clientPem)));
+
+        assertNotNull(sslContext.getSocketFactory());
     }
 
     @Test
@@ -251,28 +297,6 @@ public class MongoDbTlsUtilsTest {
         assertTrue(error.getMessage().contains("private key"));
     }
 
-    @Test
-    public void passesTlsFilePathsSeparatelyToDebezium() {
-        var userProps = new HashMap<String, String>();
-        userProps.put(
-                "mongodb.url",
-                "mongodb://localhost/?replicaSet=rs0&tlsCAFile=%2Fetc%2Fmongo%2Fca.pem"
-                        + "&tlsCertificateKeyFile=%2Fetc%2Fmongo%2Fclient.pem");
-        userProps.put("collection.name", "test.users");
-
-        var config = new DbzConnectorConfig(SourceTypeE.MONGODB, 1, null, userProps, false, false);
-        var properties = config.getResolvedDebeziumProps();
-
-        assertEquals(
-                "mongodb://localhost/?replicaSet=rs0",
-                properties.getProperty("mongodb.connection.string"));
-        assertEquals(
-                "/etc/mongo/ca.pem", properties.getProperty(MongoDbTlsUtils.TLS_CA_FILE_CONFIG));
-        assertEquals(
-                "/etc/mongo/client.pem",
-                properties.getProperty(MongoDbTlsUtils.TLS_CERTIFICATE_KEY_FILE_CONFIG));
-    }
-
     private Path writeCaPem(String fileName) throws Exception {
         Path path = temporaryFolder.newFile(fileName).toPath();
         Files.writeString(path, TEST_CA);
@@ -281,16 +305,22 @@ public class MongoDbTlsUtilsTest {
 
     private Path writeClientPem(String fileName) throws Exception {
         var keyPair = KeyPairGenerator.getInstance("RSA").generateKeyPair();
-        String privateKey =
-                Base64.getMimeEncoder(64, new byte[] {'\n'})
-                        .encodeToString(keyPair.getPrivate().getEncoded());
+        return writeClientPem(fileName, "PRIVATE KEY", keyPair.getPrivate().getEncoded());
+    }
+
+    private Path writeClientPem(String fileName, String keyLabel, byte[] key) throws Exception {
+        String privateKey = Base64.getMimeEncoder(64, new byte[] {'\n'}).encodeToString(key);
         Path path = temporaryFolder.newFile(fileName).toPath();
         Files.writeString(
                 path,
                 TEST_CA
-                        + "\n-----BEGIN PRIVATE KEY-----\n"
+                        + "\n-----BEGIN "
+                        + keyLabel
+                        + "-----\n"
                         + privateKey
-                        + "\n-----END PRIVATE KEY-----\n");
+                        + "\n-----END "
+                        + keyLabel
+                        + "-----\n");
         return path;
     }
 

@@ -20,7 +20,6 @@ import com.mongodb.ConnectionString;
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.cdc.debezium.internal.ConfigurableOffsetBackingStore;
 import com.risingwave.connector.cdc.debezium.internal.OpendalSchemaHistory;
-import io.debezium.connector.mongodb.connection.client.MongoDbTlsUtils;
 import java.io.IOException;
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
@@ -135,7 +134,9 @@ public class DbzConnectorConfig {
             boolean snapshotDone,
             boolean isCdcSourceJob) {
 
-        StringSubstitutor substitutor = new StringSubstitutor(userProps);
+        var substitutionProps = new HashMap<>(userProps);
+        substitutionProps.put("source.id", Long.toString(sourceId));
+        StringSubstitutor substitutor = new StringSubstitutor(substitutionProps);
         var dbzProps = initiateDbConfig(DBZ_CONFIG_FILE, substitutor);
         var isCdcBackfill =
                 null != userProps.get(SNAPSHOT_MODE_KEY)
@@ -291,23 +292,8 @@ public class DbzConnectorConfig {
             }
 
             var mongodbUrl = userProps.get(MongoDb.MONGO_URL);
-            var tlsFiles = MongoDbTlsUtils.tlsFiles(mongodbUrl);
-            var javaMongoDbUrl = MongoDbTlsUtils.withoutTlsFileOptions(mongodbUrl);
-            mongodbProps.setProperty("mongodb.connection.string", javaMongoDbUrl);
-            tlsFiles.caFile()
-                    .ifPresent(
-                            path ->
-                                    mongodbProps.setProperty(
-                                            MongoDbTlsUtils.TLS_CA_FILE_CONFIG, path.toString()));
-            tlsFiles.certificateKeyFile()
-                    .ifPresent(
-                            path ->
-                                    mongodbProps.setProperty(
-                                            MongoDbTlsUtils.TLS_CERTIFICATE_KEY_FILE_CONFIG,
-                                            path.toString()));
-
             var collection = userProps.get(MongoDb.MONGO_COLLECTION_NAME);
-            var connectionStr = new ConnectionString(javaMongoDbUrl);
+            var connectionStr = new ConnectionString(mongodbUrl);
             var connectorName =
                     String.format(
                             "MongoDB_%d:%s:%s", sourceId, connectionStr.getHosts(), collection);

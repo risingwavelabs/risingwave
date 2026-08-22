@@ -18,40 +18,39 @@ package io.debezium.connector.mongodb.connection.client;
 
 import com.mongodb.ConnectionString;
 import io.debezium.connector.mongodb.MongoDbConnectorConfig;
-import java.io.ByteArrayInputStream;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.io.InputStream;
+import java.io.StringReader;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.GeneralSecurityException;
-import java.security.KeyFactory;
 import java.security.KeyStore;
 import java.security.PrivateKey;
 import java.security.cert.Certificate;
-import java.security.cert.CertificateFactory;
 import java.security.cert.X509Certificate;
-import java.security.spec.PKCS8EncodedKeySpec;
 import java.util.ArrayList;
-import java.util.Base64;
 import java.util.List;
 import java.util.Optional;
-import java.util.regex.Pattern;
 import javax.net.ssl.KeyManager;
 import javax.net.ssl.KeyManagerFactory;
 import javax.net.ssl.SSLContext;
 import javax.net.ssl.TrustManager;
 import javax.net.ssl.TrustManagerFactory;
+import org.bouncycastle.asn1.pkcs.PKCSObjectIdentifiers;
+import org.bouncycastle.asn1.pkcs.PrivateKeyInfo;
+import org.bouncycastle.cert.X509CertificateHolder;
+import org.bouncycastle.cert.jcajce.JcaX509CertificateConverter;
+import org.bouncycastle.openssl.PEMEncryptedKeyPair;
+import org.bouncycastle.openssl.PEMKeyPair;
+import org.bouncycastle.openssl.PEMParser;
+import org.bouncycastle.openssl.jcajce.JcaPEMKeyConverter;
+import org.bouncycastle.pkcs.PKCS8EncryptedPrivateKeyInfo;
 
 /** Utilities for applying MongoDB TLS URI options that are not handled by the Java driver. */
 public final class MongoDbTlsUtils {
     private static final String TLS_CA_FILE = "tlsCAFile";
     private static final String TLS_CERTIFICATE_KEY_FILE = "tlsCertificateKeyFile";
-    public static final String TLS_CA_FILE_CONFIG = "risingwave.mongodb.tls.ca.file";
-    public static final String TLS_CERTIFICATE_KEY_FILE_CONFIG =
-            "risingwave.mongodb.tls.certificate.key.file";
 
     private MongoDbTlsUtils() {}
 
@@ -258,16 +257,12 @@ public final class MongoDbTlsUtils {
     }
 
     private static List<X509Certificate> readCertificates(String pem, Path path)
-            throws GeneralSecurityException {
-        var matcher = pemPattern("CERTIFICATE").matcher(pem);
-        CertificateFactory certificateFactory = CertificateFactory.getInstance("X.509");
+            throws IOException, GeneralSecurityException {
+        var converter = new JcaX509CertificateConverter();
         List<X509Certificate> certificates = new ArrayList<>();
-        while (matcher.find()) {
-            byte[] der = decodePemBlock(matcher.group(1), "certificate", path);
-            try (InputStream input = new ByteArrayInputStream(der)) {
-                certificates.add((X509Certificate) certificateFactory.generateCertificate(input));
-            } catch (IOException e) {
-                throw new GeneralSecurityException(e);
+        for (Object object : readPemObjects(pem, path)) {
+            if (object instanceof X509CertificateHolder certificate) {
+                certificates.add(converter.getCertificate(certificate));
             }
         }
         return certificates;
@@ -275,27 +270,40 @@ public final class MongoDbTlsUtils {
 
     private static PrivateKey readPrivateKey(
             String pem, X509Certificate certificate, Path certificateKeyFile)
-            throws GeneralSecurityException {
-        if (pem.contains("-----BEGIN ENCRYPTED PRIVATE KEY-----")) {
-            throw new IllegalArgumentException(
-                    "Encrypted MongoDB client private keys are not supported: "
-                            + certificateKeyFile);
-        }
-
-        byte[] pkcs8 = findPemBlock(pem, "PRIVATE KEY", certificateKeyFile).orElse(null);
-        if (pkcs8 == null) {
-            byte[] pkcs1 = findPemBlock(pem, "RSA PRIVATE KEY", certificateKeyFile).orElse(null);
-            if (pkcs1 != null) {
-                pkcs8 = wrapPkcs1RsaPrivateKey(pkcs1);
+            throws IOException, GeneralSecurityException {
+        PrivateKeyInfo privateKeyInfo = null;
+        for (Object object : readPemObjects(pem, certificateKeyFile)) {
+            if (object instanceof PEMEncryptedKeyPair
+                    || object instanceof PKCS8EncryptedPrivateKeyInfo) {
+                throw new IllegalArgumentException(
+                        "Encrypted MongoDB client private keys are not supported: "
+                                + certificateKeyFile);
+            }
+            if (privateKeyInfo == null && object instanceof PrivateKeyInfo keyInfo) {
+                privateKeyInfo = keyInfo;
+            }
+            if (privateKeyInfo == null && object instanceof PEMKeyPair keyPair) {
+                PrivateKeyInfo keyInfo = keyPair.getPrivateKeyInfo();
+                if (PKCSObjectIdentifiers.rsaEncryption.equals(
+                        keyInfo.getPrivateKeyAlgorithm().getAlgorithm())) {
+                    privateKeyInfo = keyInfo;
+                }
             }
         }
-        if (pkcs8 == null) {
+        if (privateKeyInfo == null) {
             throw new IllegalArgumentException(
                     "No unencrypted PKCS#8 or RSA private key found in " + certificateKeyFile);
         }
 
-        String algorithm = certificate.getPublicKey().getAlgorithm();
-        return KeyFactory.getInstance(algorithm).generatePrivate(new PKCS8EncodedKeySpec(pkcs8));
+        PrivateKey privateKey = new JcaPEMKeyConverter().getPrivateKey(privateKeyInfo);
+        if (!privateKey
+                .getAlgorithm()
+                .equalsIgnoreCase(certificate.getPublicKey().getAlgorithm())) {
+            throw new GeneralSecurityException(
+                    "MongoDB client private key algorithm does not match its certificate in "
+                            + certificateKeyFile);
+        }
+        return privateKey;
     }
 
     private static Optional<Path> tlsFile(String connectionString, String optionName) {
@@ -362,79 +370,17 @@ public final class MongoDbTlsUtils {
         return optionName.equalsIgnoreCase(key);
     }
 
-    private static Optional<byte[]> findPemBlock(String pem, String label, Path path)
-            throws GeneralSecurityException {
-        var matcher = pemPattern(label).matcher(pem);
-        if (!matcher.find()) {
-            return Optional.empty();
-        }
-        return Optional.of(decodePemBlock(matcher.group(1), label, path));
-    }
-
-    private static Pattern pemPattern(String label) {
-        return Pattern.compile(
-                "-----BEGIN "
-                        + Pattern.quote(label)
-                        + "-----\\s*(.*?)\\s*-----END "
-                        + Pattern.quote(label)
-                        + "-----",
-                Pattern.DOTALL);
-    }
-
-    private static byte[] decodePemBlock(String value, String label, Path path)
-            throws GeneralSecurityException {
-        try {
-            return Base64.getMimeDecoder().decode(value);
-        } catch (IllegalArgumentException e) {
-            throw new GeneralSecurityException("Invalid " + label + " in " + path, e);
-        }
-    }
-
-    private static byte[] wrapPkcs1RsaPrivateKey(byte[] pkcs1) {
-        byte[] version = {0x02, 0x01, 0x00};
-        byte[] rsaAlgorithmIdentifier = {
-            0x30,
-            0x0d,
-            0x06,
-            0x09,
-            0x2a,
-            (byte) 0x86,
-            0x48,
-            (byte) 0x86,
-            (byte) 0xf7,
-            0x0d,
-            0x01,
-            0x01,
-            0x01,
-            0x05,
-            0x00
-        };
-        return derValue(0x30, concatenate(version, rsaAlgorithmIdentifier, derValue(0x04, pkcs1)));
-    }
-
-    private static byte[] derValue(int tag, byte[] value) {
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        output.write(tag);
-        int length = value.length;
-        if (length < 128) {
-            output.write(length);
-        } else {
-            int byteCount = (Integer.SIZE - Integer.numberOfLeadingZeros(length) + 7) / 8;
-            output.write(0x80 | byteCount);
-            for (int shift = (byteCount - 1) * 8; shift >= 0; shift -= 8) {
-                output.write((length >> shift) & 0xff);
+    private static List<Object> readPemObjects(String pem, Path path) throws IOException {
+        List<Object> objects = new ArrayList<>();
+        try (var parser = new PEMParser(new StringReader(pem))) {
+            Object object;
+            while ((object = parser.readObject()) != null) {
+                objects.add(object);
             }
+        } catch (IOException | RuntimeException e) {
+            throw new IOException("Invalid PEM content in " + path, e);
         }
-        output.writeBytes(value);
-        return output.toByteArray();
-    }
-
-    private static byte[] concatenate(byte[]... values) {
-        ByteArrayOutputStream output = new ByteArrayOutputStream();
-        for (byte[] value : values) {
-            output.writeBytes(value);
-        }
-        return output.toByteArray();
+        return objects;
     }
 
     private static String decode(String value) {
