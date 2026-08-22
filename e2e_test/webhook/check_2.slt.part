@@ -10,6 +10,11 @@ select data ->> 'source', data->> 'auth_algo' from github_hmac_sha1;
 github hmac_sha1
 github hmac_sha1
 
+query IITTTTT
+select count(*), min("schemaVersion"), min("eventType"), min("streamEventId"), min("occurredAt")::varchar, min(username), min(data->>'id') from xquik_hmac_sha256;
+----
+2 1 tweet.new event-9001 2026-08-22 07:30:00+00:00 risingwave tweet-1
+
 query TT
 select data ->> 'source', data->> 'auth_algo' from rudderstack;
 ----

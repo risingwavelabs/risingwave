@@ -15,6 +15,9 @@ system ok
 python3 e2e_test/webhook/sender.py --secret TEST_WEBHOOK
 
 system ok
+python3 e2e_test/webhook/expect_failure.py --secret TEST_WEBHOOK --table xquik_hmac_sha256 --payload '{"streamEventId":"invalid-signature"}' --expected-status '401' --expected-error 'Signature verification failed' --header 'X-Xquik-Timestamp: 1787383800000' --header 'X-Xquik-Nonce: 00112233445566778899aabbccddeeff' --header 'X-Xquik-Signature: sha256=0000000000000000000000000000000000000000000000000000000000000000'
+
+system ok
 python3 e2e_test/webhook/expect_failure.py --secret TEST_WEBHOOK --table multi_column_validate --payload '{"id":1234,"customer_name":"Alice","amount":99.99}' --expected-status '400' --expected-error 'unsupported webhook payload encoding' --header 'x-rw-webhook-encode: csv'
 
 system ok
