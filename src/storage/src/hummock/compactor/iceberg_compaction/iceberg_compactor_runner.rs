@@ -148,6 +148,26 @@ impl IcebergCompactionKind {
     }
 }
 
+#[derive(Debug)]
+struct CowPublishPlan {
+    snapshot_id: i64,
+    rewritten_data_file_paths: HashSet<String>,
+}
+
+impl CowPublishPlan {
+    fn from_compaction_plan(plan: &CompactionPlan) -> Self {
+        Self {
+            snapshot_id: plan.snapshot_id,
+            rewritten_data_file_paths: plan
+                .file_group
+                .data_files
+                .iter()
+                .map(|task| task.data_file_path.clone())
+                .collect(),
+        }
+    }
+}
+
 impl Debug for IcebergCompactionTaskStatistics {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("IcebergCompactionTaskStatistics")
@@ -335,13 +355,27 @@ impl IcebergCompactionPlanRunner {
             .with_to_branch(branch.clone())
             .build();
 
+        // COW publishing must stay bound to the snapshot used for planning. The ingestion branch
+        // may advance while the rewrite is running, and publishing that newer branch state without
+        // its delete files would make stale or duplicate rows visible on `main`.
+        let cow_publish_plan = compaction_kind
+            .is_copy_on_write()
+            .then(|| CowPublishPlan::from_compaction_plan(&compaction_plan));
+
         if !compaction_plan.has_files() {
-            if compaction_kind.is_copy_on_write() {
+            if let Some(cow_publish_plan) = cow_publish_plan {
                 let table = catalog
                     .load_table(&table_ident)
                     .await
                     .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-                publish_cow_branch_to_main(&compaction, &table, &branch).await?;
+                publish_cow_snapshot_to_main(
+                    &compaction,
+                    &table,
+                    &branch,
+                    &cow_publish_plan,
+                    vec![],
+                )
+                .await?;
             }
             tracing::info!(
                 iceberg_component = "compaction_worker",
@@ -462,22 +496,39 @@ impl IcebergCompactionPlanRunner {
                 ))
             })?;
 
-        let CompactionResult { stats, table, .. } = compaction_result;
+        let CompactionResult {
+            data_files,
+            stats,
+            table,
+        } = compaction_result;
 
-        if let Some(committed_table) = table
-            && compaction_kind.is_copy_on_write()
-        {
-            publish_cow_branch_to_main(&compaction, &committed_table, &branch).await?;
+        if let (Some(committed_table), Some(cow_publish_plan)) = (table, cow_publish_plan) {
+            publish_cow_snapshot_to_main(
+                &compaction,
+                &committed_table,
+                &branch,
+                &cow_publish_plan,
+                data_files,
+            )
+            .await?;
         }
 
         Ok((stats, None))
     }
 }
 
-async fn live_data_files_for_branch(table: &Table, branch: &str) -> HummockResult<Vec<DataFile>> {
-    let Some(snapshot) = table.metadata().snapshot_for_ref(branch) else {
-        return Ok(vec![]);
-    };
+async fn live_data_files_for_snapshot(
+    table: &Table,
+    snapshot_id: i64,
+) -> HummockResult<Vec<DataFile>> {
+    let snapshot = table
+        .metadata()
+        .snapshot_by_id(snapshot_id)
+        .ok_or_else(|| {
+            HummockError::compaction_executor(anyhow::anyhow!(
+                "No snapshot found with ID {snapshot_id} while publishing COW compaction"
+            ))
+        })?;
 
     let manifest_list = table
         .object_cache()
@@ -508,6 +559,28 @@ async fn live_data_files_for_branch(table: &Table, branch: &str) -> HummockResul
     Ok(data_files)
 }
 
+async fn live_data_files_for_branch(table: &Table, branch: &str) -> HummockResult<Vec<DataFile>> {
+    let Some(snapshot_id) = table
+        .metadata()
+        .snapshot_for_ref(branch)
+        .map(|snapshot| snapshot.snapshot_id())
+    else {
+        return Ok(vec![]);
+    };
+
+    live_data_files_for_snapshot(table, snapshot_id).await
+}
+
+fn build_cow_publish_data_files(
+    mut planned_snapshot_files: Vec<DataFile>,
+    rewritten_data_file_paths: &HashSet<String>,
+    output_data_files: Vec<DataFile>,
+) -> Vec<DataFile> {
+    planned_snapshot_files.retain(|file| !rewritten_data_file_paths.contains(file.file_path()));
+    planned_snapshot_files.extend(output_data_files);
+    planned_snapshot_files
+}
+
 fn diff_data_files(
     source_files: Vec<DataFile>,
     target_files: Vec<DataFile>,
@@ -532,22 +605,22 @@ fn diff_data_files(
     (added_files, deleted_files)
 }
 
-async fn publish_cow_branch_to_main(
+async fn publish_cow_snapshot_to_main(
     compaction: &Compaction,
     table: &Table,
     ingestion_branch: &str,
+    publish_plan: &CowPublishPlan,
+    output_data_files: Vec<DataFile>,
 ) -> HummockResult<()> {
-    let ingestion_snapshot = table
-        .metadata()
-        .snapshot_for_ref(ingestion_branch)
-        .ok_or_else(|| {
-            HummockError::compaction_executor(anyhow::anyhow!(
-                "No current snapshot found for COW ingestion branch {ingestion_branch}"
-            ))
-        })?;
-    let ingestion_files = live_data_files_for_branch(table, ingestion_branch).await?;
+    let planned_snapshot_files =
+        live_data_files_for_snapshot(table, publish_plan.snapshot_id).await?;
+    let published_files = build_cow_publish_data_files(
+        planned_snapshot_files,
+        &publish_plan.rewritten_data_file_paths,
+        output_data_files,
+    );
     let main_files = live_data_files_for_branch(table, MAIN_BRANCH).await?;
-    let (added_files, deleted_files) = diff_data_files(ingestion_files, main_files);
+    let (added_files, deleted_files) = diff_data_files(published_files, main_files);
 
     if added_files.is_empty() && deleted_files.is_empty() {
         return Ok(());
@@ -556,7 +629,7 @@ async fn publish_cow_branch_to_main(
     let added_file_count = added_files.len();
     let deleted_file_count = deleted_files.len();
     let consistency_params = CommitConsistencyParams {
-        starting_snapshot_id: ingestion_snapshot.snapshot_id(),
+        starting_snapshot_id: publish_plan.snapshot_id,
         use_starting_sequence_number: true,
         basic_schema_id: table.metadata().current_schema().schema_id(),
     };
@@ -570,6 +643,7 @@ async fn publish_cow_branch_to_main(
         iceberg_component = "compaction_worker",
         iceberg_operation = "publish_cow_snapshot",
         ingestion_branch,
+        planned_snapshot_id = publish_plan.snapshot_id,
         added_file_count,
         deleted_file_count,
         "iceberg_cow_snapshot_published",
@@ -874,7 +948,259 @@ pub async fn create_task_execution(
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
+
+    use iceberg::io::FileIO;
+    use iceberg::spec::{
+        DataFileBuilder, DataFileFormat, FormatVersion, ManifestListWriter, ManifestWriterBuilder,
+        NestedField, Operation, PrimitiveType, Schema, Snapshot, SnapshotReference,
+        SnapshotRetention, SortOrder, Struct, Summary, TableMetadataBuilder, Type,
+        UnboundPartitionSpec,
+    };
+    use iceberg::{NamespaceIdent, Runtime};
+
     use super::*;
+
+    fn test_data_file(path: &str) -> DataFile {
+        DataFileBuilder::default()
+            .content(DataContentType::Data)
+            .file_path(path.to_owned())
+            .file_format(DataFileFormat::Parquet)
+            .partition(Struct::empty())
+            .partition_spec_id(0)
+            .record_count(1)
+            .file_size_in_bytes(1)
+            .build()
+            .unwrap()
+    }
+
+    fn test_equality_delete_file(path: &str) -> DataFile {
+        DataFileBuilder::default()
+            .content(DataContentType::EqualityDeletes)
+            .file_path(path.to_owned())
+            .file_format(DataFileFormat::Parquet)
+            .partition(Struct::empty())
+            .partition_spec_id(0)
+            .record_count(1)
+            .file_size_in_bytes(1)
+            .equality_ids(Some(vec![1]))
+            .build()
+            .unwrap()
+    }
+
+    fn test_snapshot(
+        snapshot_id: i64,
+        parent_snapshot_id: Option<i64>,
+        manifest_list: String,
+        timestamp_ms: i64,
+    ) -> Snapshot {
+        Snapshot::builder()
+            .with_snapshot_id(snapshot_id)
+            .with_parent_snapshot_id(parent_snapshot_id)
+            .with_sequence_number(snapshot_id)
+            .with_timestamp_ms(timestamp_ms)
+            .with_manifest_list(manifest_list)
+            .with_summary(Summary {
+                operation: Operation::Append,
+                additional_properties: HashMap::new(),
+            })
+            .with_schema_id(0)
+            .build()
+    }
+
+    fn test_snapshot_ref(snapshot_id: i64) -> SnapshotReference {
+        SnapshotReference::new(snapshot_id, SnapshotRetention::branch(None, None, None))
+    }
+
+    fn test_table() -> Table {
+        let metadata = TableMetadataBuilder::new(
+            Schema::builder()
+                .with_fields(vec![
+                    NestedField::new(1, "id", Type::Primitive(PrimitiveType::Int), false).into(),
+                ])
+                .build()
+                .unwrap(),
+            UnboundPartitionSpec::builder().build(),
+            SortOrder::unsorted_order(),
+            "memory://warehouse/test_table".to_owned(),
+            FormatVersion::V2,
+            HashMap::new(),
+        )
+        .unwrap()
+        .build()
+        .unwrap()
+        .metadata;
+
+        Table::builder()
+            .identifier(TableIdent::new(
+                NamespaceIdent::new("test".to_owned()),
+                "table".to_owned(),
+            ))
+            .file_io(FileIO::new_with_memory())
+            .runtime(Runtime::try_current().unwrap())
+            .metadata(metadata)
+            .build()
+            .unwrap()
+    }
+
+    async fn write_snapshot_manifests(
+        table: &Table,
+        snapshot_id: i64,
+        parent_snapshot_id: Option<i64>,
+        data_files: Vec<DataFile>,
+        delete_files: Vec<DataFile>,
+    ) -> String {
+        let mut manifests = vec![];
+
+        if !data_files.is_empty() {
+            let path =
+                format!("memory://warehouse/test_table/metadata/snapshot-{snapshot_id}-data.avro");
+            let mut writer = ManifestWriterBuilder::new(
+                table.file_io().new_output(&path).unwrap(),
+                Some(snapshot_id),
+                table.metadata().current_schema().clone(),
+                table.metadata().default_partition_spec().as_ref().clone(),
+            )
+            .build_v2_data();
+            for file in data_files {
+                writer.add_file(file, snapshot_id).unwrap();
+            }
+            manifests.push(writer.write_manifest_file().await.unwrap());
+        }
+
+        if !delete_files.is_empty() {
+            let path = format!(
+                "memory://warehouse/test_table/metadata/snapshot-{snapshot_id}-deletes.avro"
+            );
+            let mut writer = ManifestWriterBuilder::new(
+                table.file_io().new_output(&path).unwrap(),
+                Some(snapshot_id),
+                table.metadata().current_schema().clone(),
+                table.metadata().default_partition_spec().as_ref().clone(),
+            )
+            .build_v2_deletes();
+            for file in delete_files {
+                writer.add_file(file, snapshot_id).unwrap();
+            }
+            manifests.push(writer.write_manifest_file().await.unwrap());
+        }
+
+        let manifest_list_path = format!(
+            "memory://warehouse/test_table/metadata/snapshot-{snapshot_id}-manifest-list.avro"
+        );
+        let output = table
+            .file_io()
+            .new_output(&manifest_list_path)
+            .unwrap()
+            .writer()
+            .await
+            .unwrap();
+        let mut writer =
+            ManifestListWriter::v2(output, snapshot_id, parent_snapshot_id, snapshot_id);
+        writer.add_manifests(manifests.into_iter()).unwrap();
+        writer.close().await.unwrap();
+        manifest_list_path
+    }
+
+    fn sorted_file_paths(files: &[DataFile]) -> Vec<&str> {
+        let mut paths = files
+            .iter()
+            .map(|file| file.file_path())
+            .collect::<Vec<_>>();
+        paths.sort_unstable();
+        paths
+    }
+
+    #[tokio::test]
+    async fn test_cow_publish_uses_planned_snapshot_before_concurrent_update() {
+        let table = test_table();
+        let old_file = test_data_file("data/old.parquet");
+        let clean_file = test_data_file("data/clean.parquet");
+        let late_replacement = test_data_file("data/late-replacement.parquet");
+        let equality_delete = test_equality_delete_file("data/late-equality-delete.parquet");
+
+        let planned_manifest_list = write_snapshot_manifests(
+            &table,
+            1,
+            None,
+            vec![old_file.clone(), clean_file.clone()],
+            vec![],
+        )
+        .await;
+        let latest_manifest_list = write_snapshot_manifests(
+            &table,
+            2,
+            Some(1),
+            vec![old_file, clean_file, late_replacement],
+            vec![equality_delete],
+        )
+        .await;
+        let base_timestamp_ms = table.metadata().last_updated_ms();
+        let metadata = table
+            .metadata()
+            .clone()
+            .into_builder(None)
+            .add_snapshot(test_snapshot(
+                1,
+                None,
+                planned_manifest_list,
+                base_timestamp_ms + 1,
+            ))
+            .unwrap()
+            .add_snapshot(test_snapshot(
+                2,
+                Some(1),
+                latest_manifest_list,
+                base_timestamp_ms + 2,
+            ))
+            .unwrap()
+            .set_ref("ingestion", test_snapshot_ref(2))
+            .unwrap()
+            .build()
+            .unwrap()
+            .metadata;
+        let table = Table::builder()
+            .identifier(table.identifier().clone())
+            .file_io(table.file_io().clone())
+            .runtime(Runtime::try_current().unwrap())
+            .metadata(metadata)
+            .build()
+            .unwrap();
+
+        assert_eq!(
+            sorted_file_paths(
+                &live_data_files_for_branch(&table, "ingestion")
+                    .await
+                    .unwrap()
+            ),
+            vec![
+                "data/clean.parquet",
+                "data/late-replacement.parquet",
+                "data/old.parquet",
+            ]
+        );
+
+        let planned_files = live_data_files_for_snapshot(&table, 1).await.unwrap();
+        let published_files = build_cow_publish_data_files(
+            planned_files,
+            &HashSet::from(["data/old.parquet".to_owned()]),
+            vec![test_data_file("data/compacted.parquet")],
+        );
+        assert_eq!(
+            sorted_file_paths(&published_files),
+            vec!["data/clean.parquet", "data/compacted.parquet"]
+        );
+
+        let publish_only_files = build_cow_publish_data_files(
+            live_data_files_for_snapshot(&table, 1).await.unwrap(),
+            &HashSet::new(),
+            vec![],
+        );
+        assert_eq!(
+            sorted_file_paths(&publish_only_files),
+            vec!["data/clean.parquet", "data/old.parquet"]
+        );
+    }
 
     #[test]
     fn test_build_auto_compaction_planning_config() {
