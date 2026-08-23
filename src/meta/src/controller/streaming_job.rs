@@ -2797,8 +2797,10 @@ impl CatalogController {
             source_id,
             options_with_secret
         );
-        // check if the alter-ed props are valid for each Connector
-        let _ = ConnectorProperties::extract(options_with_secret.clone(), true)?;
+        // SQL ALTER validates every changed key with the alter-on-fly check above. Extract
+        // permissively so historical unknown properties do not block an unrelated ALTER. The
+        // risectl administrative path intentionally bypasses both restrictions.
+        let _ = ConnectorProperties::extract(options_with_secret.clone(), false)?;
         // todo: validate via source manager
 
         let mut associate_table_id = None;
@@ -3351,8 +3353,9 @@ impl CatalogController {
                     source_options_with_secret
                         .handle_update(alter_props.clone(), alter_secret_refs.clone())?;
 
-                // Validate the updated source properties
-                let _ = ConnectorProperties::extract(source_options_with_secret.clone(), true)?;
+                // The connection alter-on-fly check validates every changed key. Extract
+                // permissively so historical unknown source properties do not block ALTER.
+                let _ = ConnectorProperties::extract(source_options_with_secret.clone(), false)?;
 
                 // Keep source-level secret dependencies in sync with the source properties that
                 // are rewritten from the altered connection.

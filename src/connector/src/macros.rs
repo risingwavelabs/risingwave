@@ -363,6 +363,18 @@ macro_rules! impl_connector_properties {
 }
 
 #[macro_export]
+macro_rules! impl_cdc_source_type_validate_properties {
+    (Mongodb) => {
+        fn validate_properties(
+            properties: &std::collections::BTreeMap<std::string::String, std::string::String>,
+        ) -> $crate::error::ConnectorResult<()> {
+            $crate::source::cdc::validate_mongodb_debezium_filter_options(properties)
+        }
+    };
+    ($cdc_source_type:ident) => {};
+}
+
+#[macro_export]
 macro_rules! impl_cdc_source_type {
     (
         {$({$cdc_source_type:tt}),*},
@@ -377,6 +389,7 @@ macro_rules! impl_cdc_source_type {
                     fn source_type() -> CdcSourceType {
                         CdcSourceType::$cdc_source_type
                     }
+                    $crate::impl_cdc_source_type_validate_properties!($cdc_source_type);
                 }
                 pub type [<$cdc_source_type CdcProperties>] = CdcProperties<$cdc_source_type>;
             }

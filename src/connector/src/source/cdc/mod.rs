@@ -21,6 +21,7 @@ pub mod split;
 use std::collections::{BTreeMap, HashMap};
 use std::marker::PhantomData;
 
+use anyhow::anyhow;
 pub use enumerator::*;
 use itertools::Itertools;
 use risingwave_common::id::{ActorId, SourceId};
@@ -88,6 +89,10 @@ pub fn normalize_simple_postgres_quoted_table_name(table_name: &str) -> Option<S
 pub trait CdcSourceTypeTrait: Send + Sync + Clone + std::fmt::Debug + 'static {
     const CDC_CONNECTOR_NAME: &'static str;
     fn source_type() -> CdcSourceType;
+
+    fn validate_properties(_properties: &BTreeMap<String, String>) -> ConnectorResult<()> {
+        Ok(())
+    }
 }
 
 for_all_classified_sources!(impl_cdc_source_type);
@@ -154,8 +159,12 @@ pub fn table_schema_exclude_additional_columns(table_schema: &TableSchema) -> Ta
 impl<T: CdcSourceTypeTrait> TryFromBTreeMap for CdcProperties<T> {
     fn try_from_btreemap(
         properties: BTreeMap<String, String>,
-        _deny_unknown_fields: bool,
+        deny_unknown_fields: bool,
     ) -> ConnectorResult<Self> {
+        if deny_unknown_fields {
+            T::validate_properties(&properties)?;
+        }
+
         let is_share_source: bool = properties
             .get(CDC_SHARING_MODE_KEY)
             .is_some_and(|v| v == "true");
@@ -168,6 +177,24 @@ impl<T: CdcSourceTypeTrait> TryFromBTreeMap for CdcProperties<T> {
             _phantom: PhantomData,
         })
     }
+}
+
+fn validate_mongodb_debezium_filter_options(
+    properties: &BTreeMap<String, String>,
+) -> ConnectorResult<()> {
+    for (debezium_option, risingwave_option) in [
+        ("debezium.database.include.list", "database.list"),
+        ("debezium.collection.include.list", "collection.name"),
+    ] {
+        if properties.contains_key(debezium_option) {
+            return Err(anyhow!(
+                "MongoDB CDC option '{debezium_option}' is not supported; use '{risingwave_option}' instead"
+            )
+            .into());
+        }
+    }
+
+    Ok(())
 }
 
 impl<T: CdcSourceTypeTrait> EnforceSecret for CdcProperties<T> {} // todo: enforce jdbc like properties
@@ -371,6 +398,82 @@ impl CdcScanOptions {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reject_debezium_mongodb_filter_options_during_strict_extraction() {
+        for (debezium_option, risingwave_option) in [
+            ("debezium.database.include.list", "database.list"),
+            ("debezium.collection.include.list", "collection.name"),
+        ] {
+            let properties = BTreeMap::from([(debezium_option.to_owned(), "ignored".to_owned())]);
+            let error = CdcProperties::<Mongodb>::try_from_btreemap(properties, true).unwrap_err();
+
+            assert!(
+                error.to_string().contains(&format!(
+                    "MongoDB CDC option '{debezium_option}' is not supported; use '{risingwave_option}' instead"
+                )),
+                "unexpected error: {error}"
+            );
+        }
+    }
+
+    #[test]
+    fn allow_debezium_mongodb_filter_options_during_permissive_extraction() {
+        let properties = BTreeMap::from([(
+            "debezium.database.include.list".to_owned(),
+            "legacy_db".to_owned(),
+        )]);
+
+        let properties = CdcProperties::<Mongodb>::try_from_btreemap(properties, false).unwrap();
+        assert_eq!(
+            properties
+                .properties
+                .get("debezium.database.include.list")
+                .map(String::as_str),
+            Some("legacy_db")
+        );
+    }
+
+    #[test]
+    fn allow_public_mongodb_filter_options_during_strict_extraction() {
+        let properties = BTreeMap::from([
+            ("database.list".to_owned(), "db1,db2".to_owned()),
+            ("collection.name".to_owned(), ".*[.]events".to_owned()),
+        ]);
+
+        CdcProperties::<Mongodb>::try_from_btreemap(properties, true).unwrap();
+    }
+
+    #[test]
+    fn allow_debezium_filter_options_for_other_cdc_connectors() {
+        let properties = BTreeMap::from([(
+            "debezium.database.include.list".to_owned(),
+            "db1".to_owned(),
+        )]);
+
+        CdcProperties::<Mysql>::try_from_btreemap(properties, true).unwrap();
+    }
+
+    #[test]
+    fn mongodb_alter_on_fly_rejects_debezium_filter_options() {
+        for debezium_option in [
+            "debezium.database.include.list",
+            "debezium.collection.include.list",
+        ] {
+            let error = crate::allow_alter_on_fly_fields::check_source_allow_alter_on_fly_fields(
+                Mongodb::CDC_CONNECTOR_NAME,
+                &[debezium_option.to_owned()],
+            )
+            .unwrap_err();
+
+            assert!(
+                error
+                    .to_string()
+                    .contains(&format!("Field '{debezium_option}' is not allowed")),
+                "unexpected error: {error}"
+            );
+        }
+    }
 
     #[test]
     fn test_normalize_simple_postgres_quoted_table_name() {
