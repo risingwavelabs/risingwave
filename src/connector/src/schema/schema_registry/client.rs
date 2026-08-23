@@ -252,7 +252,7 @@ impl Client {
             let (result, _index, remaining) = select_all(fut_req).await;
             match result {
                 Ok(Ok(res)) => {
-                    let _ = remaining.iter().map(|ele| ele.abort());
+                    let _ = remaining.iter().for_each(|task| task.abort());
                     return Ok(res);
                 }
                 Ok(Err(e)) => errs.push(itertools::Either::Left(e)),
