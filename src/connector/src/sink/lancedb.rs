@@ -18,12 +18,16 @@ use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
 use async_trait::async_trait;
+use futures::StreamExt;
 use lance::Dataset;
 use lance::dataset::CommitBuilder;
 use lance::dataset::fragment::FileFragment;
 use lance::dataset::transaction::{Operation, TransactionBuilder};
 use lance::dataset::write::WriteParams;
 use lance_table::format::Fragment;
+use lancedb::arrow::{
+    SendableRecordBatchStream, SendableRecordBatchStreamExt, SimpleRecordBatchStream,
+};
 use lancedb::connection::ConnectBuilder;
 use lancedb::{Connection as LanceDbConnection, Table as LanceDbTable};
 use risingwave_common::array::StreamChunk;
@@ -36,7 +40,9 @@ use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{self, UnboundedSender};
+use tokio::task::JoinHandle;
+use tokio_stream::wrappers::ReceiverStream;
 use with_options::WithOptions;
 
 use crate::connector_common::IcebergSinkCompactionUpdate;
@@ -52,8 +58,8 @@ use crate::sink::{
 
 pub const LANCEDB_SINK: &str = "lancedb";
 
-const RW_SINK_ID_TRANSACTION_PROPERTY: &str = "risingwave.sink_id";
 const RW_EPOCH_TRANSACTION_PROPERTY: &str = "risingwave.epoch";
+const WRITE_CHANNEL_CAPACITY: usize = 16;
 
 // ---------------------------------------------------------------------------
 // Config
@@ -306,8 +312,9 @@ fn validate_ordered_schema(
 
 /// The writer writes data files directly to the Lance dataset storage using the
 /// low-level `FileFragment::create_fragments()` API. On checkpoint, it returns
-/// lightweight `Fragment` metadata (file paths + row counts) instead of the
-/// actual data payload. The coordinator then commits these fragments atomically.
+/// lightweight `Fragment` metadata instead of the actual data payload. A fragment
+/// is a logical row segment that references one or more files containing columns
+/// for those rows. The coordinator then commits these fragments atomically.
 ///
 /// This follows the same pattern as the Iceberg sink, where writers handle I/O
 /// and the coordinator only performs a metadata-only commit.
@@ -320,8 +327,20 @@ pub struct LanceDbSinkWriter {
     dataset_uri: String,
     /// Lance write parameters matching the target dataset format.
     write_params: WriteParams,
-    /// Buffered record batches for the current epoch
-    batches: Vec<arrow_array::RecordBatch>,
+    fragment_write: Option<FragmentWrite>,
+}
+
+struct FragmentWrite {
+    sender: Option<mpsc::Sender<arrow_array::RecordBatch>>,
+    task: Option<JoinHandle<Result<Vec<Fragment>>>>,
+}
+
+impl Drop for FragmentWrite {
+    fn drop(&mut self) {
+        if let Some(task) = &self.task {
+            task.abort();
+        }
+    }
 }
 
 impl LanceDbSinkWriter {
@@ -359,31 +378,46 @@ impl LanceDbSinkWriter {
                 data_storage_version: Some(data_storage_version),
                 ..Default::default()
             },
-            batches: Vec::new(),
+            fragment_write: None,
         })
     }
 
-    /// Flush buffered batches by writing them as lance data files directly to storage.
-    /// Returns a list of `Fragment` metadata describing the written files.
-    async fn flush_to_fragments(&mut self) -> Result<Vec<Fragment>> {
-        if self.batches.is_empty() {
-            return Ok(Vec::new());
+    fn start_fragment_write(&self) -> FragmentWrite {
+        let (sender, receiver) = mpsc::channel(WRITE_CHANNEL_CAPACITY);
+        let stream = ReceiverStream::new(receiver).map(Ok::<_, lancedb::Error>);
+        let stream: SendableRecordBatchStream = Box::pin(SimpleRecordBatchStream::new(
+            stream,
+            self.arrow_schema.clone(),
+        ));
+        let stream = stream.into_df_stream();
+        let dataset_uri = self.dataset_uri.clone();
+        let write_params = self.write_params.clone();
+        let task = tokio::spawn(async move {
+            FileFragment::create_fragments(&dataset_uri, stream, Some(write_params))
+                .await
+                .context("failed to write lance data files")
+                .map_err(SinkError::LanceDb)
+        });
+
+        FragmentWrite {
+            sender: Some(sender),
+            task: Some(task),
         }
+    }
 
-        let batches = std::mem::take(&mut self.batches);
-        let schema = batches[0].schema();
-        let reader = arrow_array::RecordBatchIterator::new(batches.into_iter().map(Ok), schema);
+    async fn finish_fragment_write(&mut self) -> Result<Vec<Fragment>> {
+        let Some(mut fragment_write) = self.fragment_write.take() else {
+            return Ok(Vec::new());
+        };
 
-        let fragments = FileFragment::create_fragments(
-            &self.dataset_uri,
-            reader,
-            Some(self.write_params.clone()),
-        )
-        .await
-        .context("failed to write lance data files")
-        .map_err(SinkError::LanceDb)?;
-
-        Ok(fragments)
+        drop(fragment_write.sender.take());
+        fragment_write
+            .task
+            .take()
+            .expect("fragment write task should be initialized")
+            .await
+            .context("Lance fragment write task failed")
+            .map_err(SinkError::LanceDb)?
     }
 }
 
@@ -396,7 +430,23 @@ impl SinkWriter for LanceDbSinkWriter {
             .to_record_batch(self.arrow_schema.clone(), &chunk)
             .context("failed to convert DataChunk to RecordBatch for LanceDB")
             .map_err(SinkError::LanceDb)?;
-        self.batches.push(record_batch);
+
+        if self.fragment_write.is_none() {
+            self.fragment_write = Some(self.start_fragment_write());
+        }
+        self.fragment_write
+            .as_ref()
+            .expect("fragment write should be initialized")
+            .sender
+            .as_ref()
+            .expect("fragment write sender should be initialized")
+            .send(record_batch)
+            .await
+            .map_err(|_| {
+                SinkError::LanceDb(anyhow!(
+                    "Lance fragment write task stopped before accepting a record batch"
+                ))
+            })?;
         Ok(())
     }
 
@@ -405,7 +455,30 @@ impl SinkWriter for LanceDbSinkWriter {
     }
 
     async fn abort(&mut self) -> Result<()> {
-        self.batches.clear();
+        let Some(mut fragment_write) = self.fragment_write.take() else {
+            return Ok(());
+        };
+
+        drop(fragment_write.sender.take());
+        match fragment_write
+            .task
+            .take()
+            .expect("fragment write task should be initialized")
+            .await
+        {
+            Ok(Ok(fragments)) => {
+                tracing::debug!(
+                    fragment_count = fragments.len(),
+                    "Discarded uncommitted Lance fragments after sink writer abort"
+                );
+            }
+            Ok(Err(error)) => {
+                tracing::warn!(%error, "Lance fragment write failed while aborting sink writer");
+            }
+            Err(error) => {
+                tracing::warn!(%error, "Lance fragment write task failed while aborting sink writer");
+            }
+        }
         Ok(())
     }
 
@@ -414,8 +487,7 @@ impl SinkWriter for LanceDbSinkWriter {
             return Ok(None);
         }
 
-        // Write data files directly to storage and get fragment metadata.
-        let fragments = self.flush_to_fragments().await?;
+        let fragments = self.finish_fragment_write().await?;
 
         // Serialize fragment metadata as JSON — this is lightweight (file paths + row counts).
         let metadata = serde_json::to_vec(&fragments)
@@ -467,13 +539,14 @@ impl LanceDbSinkCommitter {
     async fn is_epoch_committed(
         &self,
         dataset: &Dataset,
-        target_sink_id: &str,
         target_epoch: u64,
     ) -> Result<bool> {
-        let target_epoch = target_epoch.to_string();
         let latest_version = dataset.version().version;
 
-        for version in 1..=latest_version {
+        // Lance's transaction history API traverses versions the same way, from the latest
+        // version towards version 1:
+        // https://docs.rs/lance/6.0.0/lance/dataset/struct.Dataset.html#method.get_transactions
+        for version in (1..=latest_version).rev() {
             let Some(transaction) = dataset
                 .read_transaction_by_version(version)
                 .await
@@ -484,14 +557,13 @@ impl LanceDbSinkCommitter {
             };
 
             if let Some(properties) = transaction.transaction_properties
-                && properties
-                    .get(RW_SINK_ID_TRANSACTION_PROPERTY)
-                    .is_some_and(|sink_id| sink_id == target_sink_id)
-                && properties
-                    .get(RW_EPOCH_TRANSACTION_PROPERTY)
-                    .is_some_and(|epoch| epoch == &target_epoch)
+                && let Some(committed_epoch) = properties.get(RW_EPOCH_TRANSACTION_PROPERTY)
             {
-                return Ok(true);
+                let committed_epoch = committed_epoch
+                    .parse::<u64>()
+                    .context("invalid RisingWave epoch in Lance transaction history")
+                    .map_err(SinkError::LanceDb)?;
+                return Ok(committed_epoch >= target_epoch);
             }
         }
 
@@ -538,9 +610,7 @@ impl LanceDbSinkCommitter {
             .context("failed to get LanceDB table storage version")
             .map_err(SinkError::LanceDb)?;
 
-        if let Some(properties) = &transaction_properties
-            && let Some(sink_id) = properties.get(RW_SINK_ID_TRANSACTION_PROPERTY)
-            && self.is_epoch_committed(&dataset, sink_id, epoch).await?
+        if transaction_properties.is_some() && self.is_epoch_committed(&dataset, epoch).await?
         {
             tracing::info!(
                 "LanceDB epoch {epoch} has already been committed, skipping duplicate commit."
@@ -687,16 +757,10 @@ impl LanceDbPreCommitMetadata {
     }
 
     fn transaction_properties(&self) -> HashMap<String, String> {
-        HashMap::from([
-            (
-                RW_SINK_ID_TRANSACTION_PROPERTY.to_owned(),
-                self.sink_id.clone(),
-            ),
-            (
-                RW_EPOCH_TRANSACTION_PROPERTY.to_owned(),
-                self.epoch.to_string(),
-            ),
-        ])
+        HashMap::from([(
+            RW_EPOCH_TRANSACTION_PROPERTY.to_owned(),
+            self.epoch.to_string(),
+        )])
     }
 }
 
@@ -773,12 +837,30 @@ mod tests {
         let table = conn.open_table("test_table").execute().await.unwrap();
         assert_eq!(writer.dataset_uri, table.uri().await.unwrap());
 
-        // 4. Write a chunk
+        // 4. Abort one streamed batch, then write two batches for the checkpoint.
         let chunk = StreamChunk::new(
-            vec![Op::Insert, Op::Insert, Op::Insert],
+            vec![Op::Insert],
             vec![
-                I32Array::from_iter(vec![1, 2, 3]).into_ref(),
-                Utf8Array::from_iter(vec!["Alice", "Bob", "Clare"]).into_ref(),
+                I32Array::from_iter(vec![0]).into_ref(),
+                Utf8Array::from_iter(vec!["Aborted"]).into_ref(),
+            ],
+        );
+        writer.write_batch(chunk).await.unwrap();
+        writer.abort().await.unwrap();
+
+        let chunk = StreamChunk::new(
+            vec![Op::Insert, Op::Insert],
+            vec![
+                I32Array::from_iter(vec![1, 2]).into_ref(),
+                Utf8Array::from_iter(vec!["Alice", "Bob"]).into_ref(),
+            ],
+        );
+        writer.write_batch(chunk).await.unwrap();
+        let chunk = StreamChunk::new(
+            vec![Op::Insert],
+            vec![
+                I32Array::from_iter(vec![3]).into_ref(),
+                Utf8Array::from_iter(vec!["Clare"]).into_ref(),
             ],
         );
         writer.write_batch(chunk).await.unwrap();
@@ -820,8 +902,38 @@ mod tests {
         let table = conn.open_table("test_table").execute().await.unwrap();
         let count = table.count_rows(None).await.unwrap();
         assert_eq!(count, 3);
+        let dataset_wrapper = table.dataset().unwrap();
+        let dataset_guard = dataset_wrapper.get().await.unwrap();
+        assert!(committer.is_epoch_committed(&dataset_guard, 0).await.unwrap());
+        assert!(committer.is_epoch_committed(&dataset_guard, 1).await.unwrap());
+        assert!(!committer.is_epoch_committed(&dataset_guard, 2).await.unwrap());
+        drop(dataset_guard);
 
-        // 8. Retrying the same committed epoch should be idempotent in two-phase mode.
+        // 8. A replacement sink ID must still recognize the committed epoch.
+        let pre_commit_metadata =
+            LanceDbPreCommitMetadata::try_from_bytes(&commit_metadata).unwrap();
+        let replacement_commit_metadata = LanceDbPreCommitMetadata {
+            sink_id: "replacement-sink".to_owned(),
+            ..pre_commit_metadata
+        }
+        .try_into_bytes()
+        .unwrap();
+        let mut replacement_committer =
+            LanceDbSinkCommitter::new(config.clone(), "replacement-sink".to_owned())
+                .await
+                .unwrap();
+        TwoPhaseCommitCoordinator::commit_data(
+            &mut replacement_committer,
+            1,
+            replacement_commit_metadata,
+        )
+        .await
+        .unwrap();
+        let table = conn.open_table("test_table").execute().await.unwrap();
+        let count = table.count_rows(None).await.unwrap();
+        assert_eq!(count, 3);
+
+        // 9. Retrying the same committed epoch should be idempotent in two-phase mode.
         TwoPhaseCommitCoordinator::commit_data(&mut committer, 1, commit_metadata)
             .await
             .unwrap();
@@ -829,7 +941,7 @@ mod tests {
         let count = table.count_rows(None).await.unwrap();
         assert_eq!(count, 3);
 
-        // 9. Single-phase commit remains available when exactly-once is disabled.
+        // 10. Single-phase commit remains available when exactly-once is disabled.
         let mut writer = LanceDbSinkWriter::new(config.clone(), schema)
             .await
             .unwrap();
