@@ -104,7 +104,7 @@ public class MongoDbValidator extends DatabaseValidator implements AutoCloseable
             throw new CdcConnectorException(
                     String.format(
                             "Failed to connect to MongoDB at %s within %d seconds: %s",
-                            mongodbUrl, VALIDATION_TIMEOUT_SECONDS, e.getMessage()),
+                            mongodbUrl, VALIDATION_TIMEOUT_SECONDS, causeMessage(e)),
                     e);
         }
     }
@@ -132,6 +132,12 @@ public class MongoDbValidator extends DatabaseValidator implements AutoCloseable
             cause = cause.getCause();
         }
         return cause.getMessage();
+    }
+
+    static String causeMessage(Throwable exception) {
+        return exception.getCause() == null
+                ? exception.getMessage()
+                : exception.getCause().getMessage();
     }
 
     private static CdcConnectorException interrupted(
