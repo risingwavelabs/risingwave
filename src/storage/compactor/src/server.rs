@@ -183,12 +183,6 @@ pub async fn prepare_start_parameters(
     )
 }
 
-/// Share of the locally available memory used to admit Iceberg compaction tasks.
-///
-/// The remainder covers the task-independent runtime, catalog, object-store client, allocator, and
-/// estimation error.
-const ICEBERG_TASK_HEAP_BUDGET_RATIO: f64 = 0.8;
-
 /// Resolves the memory budget dedicated to Iceberg compaction.
 fn resolve_iceberg_compaction_memory_budget(
     configured_limit_mb: Option<usize>,
@@ -200,11 +194,7 @@ fn resolve_iceberg_compaction_memory_budget(
         Some(limit_mb) => limit_mb
             .checked_mul(MB)
             .expect("Iceberg compaction memory limit overflows usize"),
-        None => {
-            (compactor_total_memory_bytes as f64
-                * available_proportion
-                * ICEBERG_TASK_HEAP_BUDGET_RATIO) as usize
-        }
+        None => (compactor_total_memory_bytes as f64 * available_proportion) as usize,
     };
     assert!(
         budget > 0,
