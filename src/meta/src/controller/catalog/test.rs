@@ -2348,7 +2348,6 @@ mod tests {
             .into_active_model();
         job.job_status = Set(JobStatus::Creating);
         job.update(&txn).await?;
-        let snapshot_epoch = 456;
         fragment::ActiveModel {
             fragment_id: Set(FragmentId::new(100)),
             job_id: Set(job_id),
@@ -2358,7 +2357,7 @@ mod tests {
                 node_body: Some(PbNodeBody::StreamScan(Box::new(StreamScanNode {
                     table_id: upstream_table_id,
                     stream_scan_type: StreamScanType::SnapshotBackfill as i32,
-                    snapshot_backfill_epoch: Some(snapshot_epoch),
+                    snapshot_backfill_epoch: None,
                     ..Default::default()
                 }))),
                 ..Default::default()
@@ -2378,16 +2377,16 @@ mod tests {
             truncate_info.subscription_retention_seconds,
             HashMap::from([(upstream_table_id, 123)])
         );
-        assert_eq!(truncate_info.snapshot_backfill_jobs.len(), 1);
-        let snapshot_job = &truncate_info.snapshot_backfill_jobs[0];
-        assert_eq!(snapshot_job.job_id, job_id);
+        assert_eq!(truncate_info.independent_jobs.len(), 1);
+        let independent_job = &truncate_info.independent_jobs[0];
+        assert_eq!(independent_job.job_id, job_id);
         assert_eq!(
-            snapshot_job.state_table_ids,
+            independent_job.state_table_ids,
             HashSet::from([state_table_id])
         );
         assert_eq!(
-            snapshot_job.upstream_table_snapshot_epochs,
-            HashMap::from([(upstream_table_id, Some(snapshot_epoch))])
+            independent_job.upstream_table_snapshot_epochs,
+            HashMap::from([(upstream_table_id, None)])
         );
 
         Ok(())

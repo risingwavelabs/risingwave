@@ -25,6 +25,7 @@ use prometheus::core::Collector;
 use prometheus::proto::MetricFamily;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
+use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::{EpochExt, test_epoch};
 use risingwave_hummock_sdk::change_log::{EpochNewChangeLog, TableChangeLog};
 use risingwave_hummock_sdk::compact::compact_task_to_string;
@@ -54,7 +55,7 @@ use thiserror_ext::AsReport;
 
 use crate::controller::catalog::CatalogController;
 use crate::controller::cluster::ClusterController;
-use crate::controller::streaming_job::TableChangeLogTruncateInfo;
+use crate::controller::streaming_job::{IndependentJobChangeLogInfo, TableChangeLogTruncateInfo};
 use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
 use crate::hummock::compaction::selector::{ManualCompactionOption, default_compaction_selector};
 use crate::hummock::error::Error;
@@ -198,6 +199,7 @@ async fn test_get_table_change_logs_with_inverted_epoch_range() {
 async fn test_truncate_table_change_log_persisted_and_in_memory() {
     let (env, hummock_manager, _, _) = setup_compute_env(80).await;
     let table_id = TableId::new(1);
+    let state_table_id = TableId::new(2);
     let old_epoch = test_epoch(10_000);
     let truncate_epoch = test_epoch(20_000);
     let committed_epoch = test_epoch(30_000);
@@ -220,6 +222,13 @@ async fn test_truncate_table_change_log_persisted_and_in_memory() {
                 compaction_group_id: 1.into(),
             },
         );
+        delta.state_table_info_delta.insert(
+            state_table_id,
+            risingwave_pb::hummock::StateTableInfoDelta {
+                committed_epoch: truncate_epoch,
+                compaction_group_id: 1.into(),
+            },
+        );
         version.apply_version_delta(&delta);
         versioning.current_version = Arc::new(version);
         versioning
@@ -237,8 +246,12 @@ async fn test_truncate_table_change_log_persisted_and_in_memory() {
 
     hummock_manager
         .truncate_table_change_log(TableChangeLogTruncateInfo {
-            subscription_retention_seconds: HashMap::from([(table_id, 10)]),
-            snapshot_backfill_jobs: vec![],
+            subscription_retention_seconds: HashMap::new(),
+            independent_jobs: vec![IndependentJobChangeLogInfo {
+                job_id: JobId::new(3),
+                state_table_ids: HashSet::from([state_table_id]),
+                upstream_table_snapshot_epochs: HashMap::from([(table_id, Some(truncate_epoch))]),
+            }],
         })
         .await
         .unwrap();

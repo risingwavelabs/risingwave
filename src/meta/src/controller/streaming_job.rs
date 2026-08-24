@@ -127,17 +127,16 @@ pub struct CancelStreamingJobInfo {
 }
 
 #[derive(Debug)]
-pub struct SnapshotBackfillChangeLogInfo {
+pub struct IndependentJobChangeLogInfo {
     pub job_id: JobId,
     pub state_table_ids: HashSet<TableId>,
     pub upstream_table_snapshot_epochs: HashMap<TableId, Option<u64>>,
-    pub is_batch_refresh: bool,
 }
 
 #[derive(Debug)]
 pub struct TableChangeLogTruncateInfo {
     pub subscription_retention_seconds: HashMap<TableId, u64>,
-    pub snapshot_backfill_jobs: Vec<SnapshotBackfillChangeLogInfo>,
+    pub independent_jobs: Vec<IndependentJobChangeLogInfo>,
 }
 
 fn serverless_backfill_resource_group_placeholder(job_id: JobId) -> String {
@@ -269,30 +268,26 @@ impl CatalogController {
                 .or_insert(retention_seconds);
         }
 
-        let jobs: Vec<(JobId, Option<i64>)> = StreamingJobModel::find()
+        let jobs: Vec<JobId> = StreamingJobModel::find()
             .select_only()
-            .columns([
-                streaming_job::Column::JobId,
-                streaming_job::Column::RefreshIntervalSec,
-            ])
+            .column(streaming_job::Column::JobId)
             .filter(
                 Condition::any()
                     .add(streaming_job::Column::JobStatus.eq(JobStatus::Creating))
                     .add(streaming_job::Column::RefreshIntervalSec.is_not_null()),
             )
-            .into_tuple()
+            .into_tuple::<JobId>()
             .all(&inner.db)
             .await?;
         let mut job_info: HashMap<_, _> = jobs
             .into_iter()
-            .map(|(job_id, refresh_interval_sec)| {
+            .map(|job_id| {
                 (
                     job_id,
-                    SnapshotBackfillChangeLogInfo {
+                    IndependentJobChangeLogInfo {
                         job_id,
                         state_table_ids: HashSet::new(),
                         upstream_table_snapshot_epochs: HashMap::new(),
-                        is_batch_refresh: refresh_interval_sec.is_some(),
                     },
                 )
             })
@@ -323,13 +318,7 @@ impl CatalogController {
                             return;
                         }
                     };
-                    if !matches!(
-                        scan_type,
-                        StreamScanType::SnapshotBackfill | StreamScanType::CrossDbSnapshotBackfill
-                    ) {
-                        return;
-                    }
-                    if stream_scan.snapshot_backfill_epoch.is_none() && !info.is_batch_refresh {
+                    if scan_type != StreamScanType::SnapshotBackfill {
                         return;
                     }
                     match info
@@ -355,13 +344,13 @@ impl CatalogController {
                 }
             }
         }
-        let snapshot_backfill_jobs = job_info
+        let independent_jobs = job_info
             .into_values()
             .filter(|info| !info.upstream_table_snapshot_epochs.is_empty())
             .collect();
         Ok(TableChangeLogTruncateInfo {
             subscription_retention_seconds,
-            snapshot_backfill_jobs,
+            independent_jobs,
         })
     }
 

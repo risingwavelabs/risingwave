@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use anyhow::{Context, anyhow};
 use risingwave_common::catalog::TableId;
@@ -38,29 +38,50 @@ fn update_truncate_epoch(
 fn resolve_table_change_log_truncate_epochs(
     info: &TableChangeLogTruncateInfo,
     version: &HummockVersion,
+    current_time_epoch: Epoch,
 ) -> anyhow::Result<HashMap<TableId, u64>> {
     let mut truncate_epochs = HashMap::new();
+    let mut untruncatable_table_ids = HashSet::new();
     for (table_id, retention_seconds) in &info.subscription_retention_seconds {
-        let Some(committed_epoch) = version.table_committed_epoch(*table_id) else {
+        if version.table_committed_epoch(*table_id).is_none() {
             // A concurrently dropped table is cleaned up by its commit-epoch transaction.
+            tracing::warn!(
+                %table_id,
+                "cannot get committed epoch for subscribed table, skip table change log truncation"
+            );
             continue;
-        };
-        let truncate_epoch = Epoch(committed_epoch)
+        }
+        let truncate_epoch = current_time_epoch
             .subtract_ms(retention_seconds.saturating_mul(1000))
             .0;
         update_truncate_epoch(&mut truncate_epochs, *table_id, truncate_epoch);
     }
 
-    for job in &info.snapshot_backfill_jobs {
+    for job in &info.independent_jobs {
+        let mut all_snapshot_epochs_none = true;
+        for (upstream_table_id, snapshot_epoch) in &job.upstream_table_snapshot_epochs {
+            match snapshot_epoch {
+                Some(_) => all_snapshot_epochs_none = false,
+                None => {
+                    // The independent job has not fixed a safe snapshot epoch yet. This vetoes
+                    // truncation even when another consumer provides a concrete cutoff.
+                    untruncatable_table_ids.insert(*upstream_table_id);
+                }
+            }
+        }
+        if all_snapshot_epochs_none {
+            continue;
+        }
+
         let mut state_table_ids = job.state_table_ids.iter();
         let first_table_id = state_table_ids
             .next()
-            .ok_or_else(|| anyhow!("snapshot backfill job {} has no state table", job.job_id))?;
+            .ok_or_else(|| anyhow!("independent job {} has no state table", job.job_id))?;
         let committed_epoch = version
             .table_committed_epoch(*first_table_id)
             .ok_or_else(|| {
                 anyhow!(
-                    "cannot get committed epoch of state table {} in snapshot backfill job {}",
+                    "cannot get committed epoch of state table {} in independent job {}",
                     first_table_id,
                     job.job_id
                 )
@@ -69,14 +90,14 @@ fn resolve_table_change_log_truncate_epochs(
             let table_committed_epoch =
                 version.table_committed_epoch(*table_id).ok_or_else(|| {
                     anyhow!(
-                        "cannot get committed epoch of state table {} in snapshot backfill job {}",
+                        "cannot get committed epoch of state table {} in independent job {}",
                         table_id,
                         job.job_id
                     )
                 })?;
             if table_committed_epoch != committed_epoch {
                 return Err(anyhow!(
-                    "state tables {} and {} in snapshot backfill job {} have different committed epochs {} and {}",
+                    "state tables {} and {} in independent job {} have different committed epochs {} and {}",
                     first_table_id,
                     table_id,
                     job.job_id,
@@ -87,12 +108,13 @@ fn resolve_table_change_log_truncate_epochs(
         }
 
         for (upstream_table_id, snapshot_epoch) in &job.upstream_table_snapshot_epochs {
-            let pinned_epoch = snapshot_epoch
-                .map(|snapshot_epoch| committed_epoch.max(snapshot_epoch))
-                .unwrap_or(committed_epoch);
-            update_truncate_epoch(&mut truncate_epochs, *upstream_table_id, pinned_epoch);
+            if let Some(snapshot_epoch) = snapshot_epoch {
+                let pinned_epoch = committed_epoch.max(*snapshot_epoch);
+                update_truncate_epoch(&mut truncate_epochs, *upstream_table_id, pinned_epoch);
+            }
         }
     }
+    truncate_epochs.retain(|table_id, _| !untruncatable_table_ids.contains(table_id));
     Ok(truncate_epochs)
 }
 
@@ -103,9 +125,13 @@ impl HummockManager {
             .versioning
             .write_with_process_name("truncate_table_change_log")
             .await;
-        let truncate_epochs =
-            resolve_table_change_log_truncate_epochs(&info, versioning.current_version.as_ref())
-                .map_err(Error::Internal)?;
+        let current_time_epoch = Epoch::now();
+        let truncate_epochs = resolve_table_change_log_truncate_epochs(
+            &info,
+            versioning.current_version.as_ref(),
+            current_time_epoch,
+        )
+        .map_err(Error::Internal)?;
         let truncate_epochs: Vec<_> = truncate_epochs
             .into_iter()
             .filter(|(table_id, _)| versioning.table_change_log.contains_key(table_id))
@@ -162,7 +188,7 @@ mod tests {
     use risingwave_pb::hummock::StateTableInfoDelta;
 
     use super::*;
-    use crate::controller::streaming_job::SnapshotBackfillChangeLogInfo;
+    use crate::controller::streaming_job::IndependentJobChangeLogInfo;
 
     fn version_with_committed_epochs(
         committed_epochs: impl IntoIterator<Item = (TableId, u64)>,
@@ -186,7 +212,8 @@ mod tests {
     fn test_resolve_table_change_log_truncate_epochs() {
         let upstream_table_id = TableId::new(1);
         let job_state_table_id = TableId::new(2);
-        let subscription_epoch = Epoch::from_physical_time(100_000).0;
+        let current_time_epoch = Epoch::from_physical_time(100_000);
+        let subscription_epoch = Epoch::from_physical_time(70_000).0;
         let job_committed_epoch = Epoch::from_physical_time(80_000).0;
         let snapshot_epoch = Epoch::from_physical_time(85_000).0;
         let version = version_with_committed_epochs([
@@ -195,39 +222,47 @@ mod tests {
         ]);
         let info = TableChangeLogTruncateInfo {
             subscription_retention_seconds: HashMap::from([(upstream_table_id, 10)]),
-            snapshot_backfill_jobs: vec![SnapshotBackfillChangeLogInfo {
+            independent_jobs: vec![IndependentJobChangeLogInfo {
                 job_id: JobId::new(3),
                 state_table_ids: HashSet::from([job_state_table_id]),
                 upstream_table_snapshot_epochs: HashMap::from([(
                     upstream_table_id,
                     Some(snapshot_epoch),
                 )]),
-                is_batch_refresh: false,
             }],
         };
 
-        let truncate_epochs = resolve_table_change_log_truncate_epochs(&info, &version).unwrap();
+        let truncate_epochs =
+            resolve_table_change_log_truncate_epochs(&info, &version, current_time_epoch).unwrap();
         assert_eq!(truncate_epochs[&upstream_table_id], snapshot_epoch);
     }
 
     #[test]
-    fn test_batch_refresh_without_snapshot_uses_committed_epoch() {
+    fn test_missing_snapshot_epoch_prevents_truncation() {
         let upstream_table_id = TableId::new(1);
         let job_state_table_id = TableId::new(2);
+        let upstream_committed_epoch = Epoch::from_physical_time(100_000).0;
         let job_committed_epoch = Epoch::from_physical_time(80_000).0;
-        let version = version_with_committed_epochs([(job_state_table_id, job_committed_epoch)]);
+        let version = version_with_committed_epochs([
+            (upstream_table_id, upstream_committed_epoch),
+            (job_state_table_id, job_committed_epoch),
+        ]);
         let info = TableChangeLogTruncateInfo {
-            subscription_retention_seconds: HashMap::new(),
-            snapshot_backfill_jobs: vec![SnapshotBackfillChangeLogInfo {
+            subscription_retention_seconds: HashMap::from([(upstream_table_id, 10)]),
+            independent_jobs: vec![IndependentJobChangeLogInfo {
                 job_id: JobId::new(3),
                 state_table_ids: HashSet::from([job_state_table_id]),
                 upstream_table_snapshot_epochs: HashMap::from([(upstream_table_id, None)]),
-                is_batch_refresh: true,
             }],
         };
 
-        let truncate_epochs = resolve_table_change_log_truncate_epochs(&info, &version).unwrap();
-        assert_eq!(truncate_epochs[&upstream_table_id], job_committed_epoch);
+        let truncate_epochs = resolve_table_change_log_truncate_epochs(
+            &info,
+            &version,
+            Epoch::from_physical_time(100_000),
+        )
+        .unwrap();
+        assert!(!truncate_epochs.contains_key(&upstream_table_id));
     }
 
     #[test]
@@ -240,17 +275,23 @@ mod tests {
         ]);
         let info = TableChangeLogTruncateInfo {
             subscription_retention_seconds: HashMap::new(),
-            snapshot_backfill_jobs: vec![SnapshotBackfillChangeLogInfo {
+            independent_jobs: vec![IndependentJobChangeLogInfo {
                 job_id: JobId::new(3),
                 state_table_ids: HashSet::from([state_table_id_1, state_table_id_2]),
                 upstream_table_snapshot_epochs: HashMap::from([(
                     TableId::new(4),
                     Some(Epoch::from_physical_time(1).0),
                 )]),
-                is_batch_refresh: false,
             }],
         };
 
-        assert!(resolve_table_change_log_truncate_epochs(&info, &version).is_err());
+        assert!(
+            resolve_table_change_log_truncate_epochs(
+                &info,
+                &version,
+                Epoch::from_physical_time(100_000),
+            )
+            .is_err()
+        );
     }
 }
