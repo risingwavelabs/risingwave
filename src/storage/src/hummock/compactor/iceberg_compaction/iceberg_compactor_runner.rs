@@ -788,7 +788,7 @@ fn build_task_planning_config(
         IcebergCompactionKind::CopyOnWrite => {
             // A COW task publishes the complete ingestion-branch state, but only data files
             // affected by deletes need a physical rewrite. Clean files are carried to main by
-            // the metadata diff in `publish_cow_branch_to_main`.
+            // the metadata diff in `publish_cow_snapshot_to_main`.
             let config = FilesWithDeletesConfigBuilder::default()
                 .max_input_parallelism(config.max_parallelism as usize)
                 .max_output_parallelism(config.max_parallelism as usize)

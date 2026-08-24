@@ -310,6 +310,114 @@ and content in ('PositionDeletes', 'EqualityDeletes');
 ----
 0
 
+# An ordinary V2 DeltaWriter can put deletes for multiple rolled data files into one unscoped
+# position-delete file. Path bounds must keep earlier clean files out of the COW rewrite.
+statement ok
+create table t_cow_position_delete(id int primary key, payload varchar)
+with(
+    commit_checkpoint_interval = 20,
+    format_version = 2,
+    compaction.target_file_size_mb = 1,
+    write_mode = 'copy-on-write',
+    enable_snapshot_expiration = 'false'
+) engine = iceberg;
+
+statement ok
+alter sink __iceberg_sink_t_cow_position_delete set parallelism = 1;
+
+statement ok
+insert into t_cow_position_delete
+select id, string_agg(md5(concat(id, '-', salt)), '' order by salt)
+from generate_series(1, 5000) as ids(id)
+cross join generate_series(1, 16) as salts(salt)
+group by id;
+
+statement ok
+flush;
+
+statement ok
+insert into t_cow_position_delete
+select id, string_agg(md5(concat(id, '-', salt)), '' order by salt)
+from generate_series(5001, 10000) as ids(id)
+cross join generate_series(1, 16) as salts(salt)
+group by id;
+
+statement ok
+flush;
+
+statement ok
+insert into t_cow_position_delete
+select id, string_agg(md5(concat(id, '-', salt)), '' order by salt)
+from generate_series(10001, 15000) as ids(id)
+cross join generate_series(1, 16) as salts(salt)
+group by id;
+
+statement ok
+flush;
+
+statement ok
+delete from t_cow_position_delete where id > 5000;
+
+statement ok
+flush;
+
+query T retry 30 backoff 2s
+select count(*) > 0 from rw_iceberg_all_files
+where schema_name = 'public'
+and source_name = '__iceberg_source_t_cow_position_delete'
+and content = 1;
+----
+t
+
+let position_delete_snapshot_id
+select snapshot_id from "t_cow_position_delete\$snapshots"
+order by committed_at desc
+limit 1
+
+query TT
+select
+    count(*) filter (where content = 'Data') >= 3,
+    count(*) filter (
+        where content = 'PositionDeletes' and referenced_data_file is null
+    ) > 0
+from "t_cow_position_delete\$files"
+for system_version as of ${position_delete_snapshot_id};
+----
+t t
+
+let clean_position_delete_file_path
+select min(file_path) from "t_cow_position_delete\$files"
+for system_version as of ${position_delete_snapshot_id}
+where content = 'Data'
+
+statement ok
+VACUUM FULL t_cow_position_delete;
+
+query I retry 20 backoff 1s
+select count(*) from t_cow_position_delete;
+----
+5000
+
+query I retry 20 backoff 1s
+select count(*) from rw_iceberg_files
+where schema_name = 'public'
+and source_name = '__iceberg_source_t_cow_position_delete'
+and content = 'Data'
+and file_path = '${clean_position_delete_file_path}';
+----
+1
+
+query I retry 20 backoff 1s
+select count(*) from rw_iceberg_files
+where schema_name = 'public'
+and source_name = '__iceberg_source_t_cow_position_delete'
+and content in ('PositionDeletes', 'EqualityDeletes');
+----
+0
+
+statement ok
+DROP TABLE t_cow_position_delete;
+
 statement ok
 DROP TABLE t_cow_partitioned;
 
