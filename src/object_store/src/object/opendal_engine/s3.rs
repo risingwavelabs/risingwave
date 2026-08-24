@@ -20,6 +20,7 @@ use opendal::services::S3;
 use opendal::{HttpTransporter, OperationContext, Operator};
 use opendal_http_transport_reqwest::ReqwestTransport;
 use risingwave_common::config::ObjectStoreConfig;
+use thiserror_ext::AsReport as _;
 
 use super::{MediaType, OpendalObjectStore, new_operator};
 use crate::object::object_metrics::ObjectStoreMetrics;
@@ -114,8 +115,8 @@ impl OpendalObjectStore {
         if let Some(nodelay) = config.s3.nodelay.as_ref() {
             client_builder = client_builder.tcp_nodelay(*nodelay);
         }
-        client_builder
-            .build()
-            .map_err(|e| ObjectError::internal(format!("failed to build HTTP client: {e}")))
+        client_builder.build().map_err(|e| {
+            ObjectError::internal(format!("failed to build HTTP client: {}", e.as_report()))
+        })
     }
 }
