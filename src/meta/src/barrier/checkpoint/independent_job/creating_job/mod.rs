@@ -45,7 +45,9 @@ use crate::barrier::command::{
     PostCollectCommand, TableLogEpochs, ThrottleConfigMap, UpstreamTableLogEpochs,
 };
 use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
-use crate::barrier::edge_builder::FragmentEdgeBuildResult;
+use crate::barrier::edge_builder::{
+    EdgeBuilderFragmentInfo, FragmentEdgeBuildResult, FragmentEdgeBuilder,
+};
 use crate::barrier::info::BarrierInfo;
 use crate::barrier::notifier::NotifierStarter;
 use crate::barrier::partial_graph::{
@@ -613,7 +615,7 @@ impl CreatingStreamingJobControl {
         backfill_order: ExtendedFragmentBackfillOrder,
         fragment_relations: &FragmentDownstreamRelation,
         version_stat: &HummockVersionStats,
-        new_actors: StreamJobActorsToCreate,
+        stream_actors: &HashMap<ActorId, StreamActor>,
         initial_mutation: Mutation,
         partial_graph_recoverer: &mut PartialGraphRecoverer<'_>,
     ) -> MetaResult<Self> {
@@ -625,6 +627,41 @@ impl CreatingStreamingJobControl {
         let node_actors = InflightFragmentInfo::actor_ids_to_collect(fragment_infos.values());
         let state_table_ids: HashSet<_> =
             InflightFragmentInfo::existing_table_ids(fragment_infos.values()).collect();
+
+        let partial_graph_id = to_partial_graph_id(database_id, Some(job_id));
+        let mut builder = FragmentEdgeBuilder::new(fragment_infos.values().map(|fragment| {
+            (
+                fragment.fragment_id,
+                EdgeBuilderFragmentInfo::from_inflight(
+                    fragment,
+                    partial_graph_id,
+                    partial_graph_recoverer.control_stream_manager(),
+                ),
+            )
+        }));
+        for fragment_id in fragment_infos.keys() {
+            if let Some(downstreams) = fragment_relations.get(fragment_id) {
+                for downstream in downstreams {
+                    if fragment_infos.contains_key(&downstream.downstream_fragment_id) {
+                        builder.add_edge(*fragment_id, downstream);
+                    }
+                }
+            }
+        }
+        let mut edges = builder.build();
+        let new_actors = edges.collect_actors_to_create(fragment_infos.values().map(|fragment| {
+            (
+                fragment.fragment_id,
+                &fragment.nodes,
+                fragment.actors.iter().map(|(actor_id, actor)| {
+                    (
+                        stream_actors.get(actor_id).expect("should exist"),
+                        actor.worker_id,
+                    )
+                }),
+                vec![], // no subscribers for backfilling jobs
+            )
+        }));
 
         let mut upstream_fragment_downstreams: FragmentDownstreamRelation = Default::default();
         for (upstream_fragment_id, downstreams) in fragment_relations {
@@ -643,9 +680,25 @@ impl CreatingStreamingJobControl {
         let downstreams = fragment_infos
             .keys()
             .filter_map(|fragment_id| {
-                fragment_relations
-                    .get(fragment_id)
-                    .map(|relation| (*fragment_id, relation.clone()))
+                let downstreams = fragment_relations
+                    .get(fragment_id)?
+                    .iter()
+                    .filter(|relation| {
+                        fragment_infos.contains_key(&relation.downstream_fragment_id)
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                (!downstreams.is_empty()).then_some((*fragment_id, downstreams))
+            })
+            .collect();
+        let job_stream_actors = fragment_infos
+            .values()
+            .flat_map(|fragment| fragment.actors.keys())
+            .map(|actor_id| {
+                (
+                    *actor_id,
+                    stream_actors.get(actor_id).expect("should exist").clone(),
+                )
             })
             .collect();
 
@@ -654,16 +707,7 @@ impl CreatingStreamingJobControl {
             upstream_fragment_downstreams,
             downstreams,
             snapshot_backfill_upstream_tables: snapshot_backfill_upstream_tables.clone(),
-            stream_actors: new_actors
-                .values()
-                .flat_map(|fragments| {
-                    fragments.values().flat_map(|(_, actors, _)| {
-                        actors
-                            .iter()
-                            .map(|(actor, _, _)| (actor.actor_id, actor.clone()))
-                    })
-                })
-                .collect(),
+            stream_actors: job_stream_actors,
         };
 
         let (status, first_barrier_info) = if committed_epoch < snapshot_epoch {
@@ -694,7 +738,6 @@ impl CreatingStreamingJobControl {
             )?
         };
 
-        let partial_graph_id = to_partial_graph_id(database_id, Some(job_id));
         let max_lagged_barrier_num = partial_graph_recoverer
             .control_stream_manager()
             .env

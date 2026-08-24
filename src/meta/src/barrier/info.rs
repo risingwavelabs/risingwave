@@ -1179,7 +1179,7 @@ impl InflightDatabaseInfo {
 
     pub(super) fn build_edge(
         &self,
-        info: Option<(&CreateStreamingJobCommandInfo, bool)>,
+        info: Option<&CreateStreamingJobCommandInfo>,
         replace_job: Option<&ReplaceStreamJobPlan>,
         new_upstream_sink: Option<&UpstreamSinkInfo>,
         control_stream_manager: &ControlStreamManager,
@@ -1195,13 +1195,13 @@ impl InflightDatabaseInfo {
         //  - should contain the `fragment_id` of the downstream table.
         let existing_fragment_ids = info
             .into_iter()
-            .flat_map(|(info, _)| info.upstream_fragment_downstreams.keys())
+            .flat_map(|info| info.upstream_fragment_downstreams.keys())
             .chain(replace_job.into_iter().flat_map(|replace_job| {
                 replace_job
                     .upstream_fragment_downstreams
                     .keys()
                     .filter(|fragment_id| {
-                        info.map(|(info, _)| {
+                        info.map(|info| {
                             !info
                                 .stream_job_fragments
                                 .fragments
@@ -1220,11 +1220,8 @@ impl InflightDatabaseInfo {
         // Collect new fragments with their partial graph IDs
         let new_fragments = info
             .into_iter()
-            .flat_map(|(info, is_snapshot_backfill)| {
-                let partial_graph_id = to_partial_graph_id(
-                    self.database_id,
-                    is_snapshot_backfill.then_some(info.streaming_job.id()),
-                );
+            .flat_map(|info| {
+                let partial_graph_id = to_partial_graph_id(self.database_id, None);
                 info.stream_job_fragments
                     .fragments
                     .values()
@@ -1278,10 +1275,8 @@ impl InflightDatabaseInfo {
                     )
                 })),
         );
-        if let Some((info, is_snapshot_backfill)) = info {
-            if !is_snapshot_backfill {
-                builder.add_relations(&info.upstream_fragment_downstreams);
-            }
+        if let Some(info) = info {
+            builder.add_relations(&info.upstream_fragment_downstreams);
             builder.add_relations(&info.stream_job_fragments.downstreams);
         }
         if let Some(replace_job) = replace_job {

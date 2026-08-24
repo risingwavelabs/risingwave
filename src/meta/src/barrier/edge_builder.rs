@@ -224,19 +224,9 @@ impl FragmentEdgeBuilder {
     }
 
     pub(super) fn add_relations(&mut self, relations: &FragmentDownstreamRelation) {
-        self.add_relations_if(relations, |_, _| true);
-    }
-
-    pub(super) fn add_relations_if(
-        &mut self,
-        relations: &FragmentDownstreamRelation,
-        mut predicate: impl FnMut(FragmentId, &DownstreamFragmentRelation) -> bool,
-    ) {
         for (fragment_id, relations) in relations {
             for relation in relations {
-                if predicate(*fragment_id, relation) {
-                    self.add_edge(*fragment_id, relation);
-                }
+                self.add_edge(*fragment_id, relation);
             }
         }
     }
@@ -426,17 +416,15 @@ mod tests {
                 vec![relation(backfill_output_fragment_id)],
             ),
         ]);
-        let partial_graphs = HashMap::from([
-            (upstream_fragment_id, database_graph_id),
-            (backfill_input_fragment_id, backfill_graph_id),
-            (backfill_output_fragment_id, backfill_graph_id),
-        ]);
-
-        let mut builder = FragmentEdgeBuilder::new(fragments());
-        builder.add_relations_if(&relations, |upstream_fragment_id, relation| {
-            partial_graphs[&upstream_fragment_id]
-                == partial_graphs[&relation.downstream_fragment_id]
-        });
+        let mut builder = FragmentEdgeBuilder::new(
+            fragments()
+                .into_iter()
+                .filter(|(fragment_id, _)| *fragment_id != upstream_fragment_id),
+        );
+        builder.add_relations(&HashMap::from([(
+            backfill_input_fragment_id,
+            vec![relation(backfill_output_fragment_id)],
+        )]));
         let edges = builder.build();
 
         assert!(!edges.dispatchers.contains_key(&upstream_fragment_id));

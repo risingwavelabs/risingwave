@@ -166,37 +166,6 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
         };
         let first_recv_barrier = receive_next_barrier(&mut self.barrier_rx).await?;
         trace!(epoch = ?first_recv_barrier.epoch, "get first inject barrier");
-        let should_snapshot_backfill: Option<u64> = if let Some(snapshot_epoch) =
-            self.snapshot_epoch
-        {
-            if let Some((first_upstream_barrier, _)) = &upstream {
-                if first_upstream_barrier.epoch != first_recv_barrier.epoch {
-                    assert!(snapshot_epoch <= first_upstream_barrier.epoch.prev);
-                    Some(snapshot_epoch)
-                } else {
-                    None
-                }
-            } else {
-                // must go through snapshot backfill when having no upstream
-                Some(snapshot_epoch)
-            }
-        } else {
-            // when snapshot epoch is not set, the StreamNode must be created previously and has finished the backfill
-            if cfg!(debug_assertions) {
-                panic!(
-                    "snapshot epoch not set. first_upstream_epoch: {:?}, first_recv_epoch: {:?}",
-                    upstream.map(|(first_upstream_barrier, _)| first_upstream_barrier.epoch),
-                    first_recv_barrier.epoch
-                );
-            } else {
-                let (first_upstream_barrier, _) = upstream
-                    .as_ref()
-                    .ok_or_else(|| anyhow!("no upstream while snapshot epoch not set"))?;
-                warn!(first_upstream_epoch = ?first_upstream_barrier.epoch, first_recv_epoch=?first_recv_barrier.epoch, "snapshot epoch not set");
-                assert_eq!(first_upstream_barrier.epoch, first_recv_barrier.epoch);
-                None
-            }
-        };
         let first_recv_barrier_epoch = first_recv_barrier.epoch;
         let initial_backfill_paused =
             first_recv_barrier.is_backfill_pause_on_startup(self.actor_ctx.fragment_id);
@@ -208,13 +177,10 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
         )
         .await?;
 
-        let (mut barrier_epoch, mut need_report_finish, upstream) = if let Some(snapshot_epoch) =
-            should_snapshot_backfill
-        {
-            assert!(
-                upstream.is_none(),
-                "snapshot backfill must not have a physical upstream edge before merging"
-            );
+        let Some((first_upstream_barrier, upstream)) = upstream else {
+            let snapshot_epoch = self
+                .snapshot_epoch
+                .ok_or_else(|| anyhow!("no snapshot epoch for independent snapshot backfill"))?;
             let table_id_str = format!("{}", self.upstream_table.table_id());
             let actor_id_str = format!("{}", self.actor_ctx.id);
 
@@ -345,35 +311,38 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                     .into());
                 }
             }
-        } else {
-            let (first_upstream_barrier, _) = upstream
-                .as_ref()
-                .expect("should have upstream when skipping snapshot backfill");
-            backfill_state
-                .latest_progress()
-                .for_each(|(vnode, progress)| {
-                    let progress = progress.expect("should not be empty");
-                    assert_eq!(
-                        progress.epoch, first_upstream_barrier.epoch.prev,
-                        "vnode: {:?}",
-                        vnode
-                    );
-                    assert_eq!(
-                        progress.progress,
-                        EpochBackfillProgress::Consumed,
-                        "vnode: {:?}",
-                        vnode
-                    );
-                });
-            trace!(
-                table_id = %self.upstream_table.table_id(),
-                "skip backfill"
-            );
-            let (first_upstream_barrier, upstream) =
-                upstream.expect("should have upstream when skipping snapshot backfill");
-            assert_eq!(first_upstream_barrier.epoch, first_recv_barrier_epoch);
-            (first_upstream_barrier.epoch, true, upstream)
         };
+
+        if self.snapshot_epoch.is_none() {
+            warn!(
+                first_upstream_epoch = ?first_upstream_barrier.epoch,
+                first_recv_epoch = ?first_recv_barrier_epoch,
+                "snapshot epoch not set for recreated snapshot backfill actor"
+            );
+        };
+        assert_eq!(first_upstream_barrier.epoch, first_recv_barrier_epoch);
+        backfill_state
+            .latest_progress()
+            .for_each(|(vnode, progress)| {
+                let progress = progress.expect("should not be empty");
+                assert_eq!(
+                    progress.epoch, first_upstream_barrier.epoch.prev,
+                    "vnode: {:?}",
+                    vnode
+                );
+                assert_eq!(
+                    progress.progress,
+                    EpochBackfillProgress::Consumed,
+                    "vnode: {:?}",
+                    vnode
+                );
+            });
+        trace!(
+            table_id = %self.upstream_table.table_id(),
+            "skip backfill"
+        );
+        let mut barrier_epoch = first_upstream_barrier.epoch;
+        let mut need_report_finish = true;
         let current_stream_key_indices = self
             .stream_key
             .iter()
