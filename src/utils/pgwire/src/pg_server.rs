@@ -654,6 +654,7 @@ mod tests {
                     redact_sql_option_keywords: None,
                     message_memory_manager: MessageMemoryManager::new(u64::MAX, u64::MAX, u64::MAX)
                         .into(),
+                    stream_flush_threshold_bytes: 64 * 1024,
                 },
                 CancellationToken::new(), // dummy
             )
@@ -727,6 +728,7 @@ mod tests {
                     redact_sql_option_keywords: None,
                     message_memory_manager: MessageMemoryManager::new(u64::MAX, u64::MAX, u64::MAX)
                         .into(),
+                    stream_flush_threshold_bytes: 64 * 1024,
                 },
                 server_cancellation,
             )

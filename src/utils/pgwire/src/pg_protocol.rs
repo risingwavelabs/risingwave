@@ -54,11 +54,6 @@ use crate::pg_message::{
 use crate::pg_server::{Session, SessionManager, UserAuthenticator};
 use crate::types::Format;
 
-/// Flush streamed query results after accumulating this many bytes.
-///
-/// A single pgwire message can exceed this threshold because messages must be encoded atomically.
-const STREAM_FLUSH_THRESHOLD: usize = 64 * 1024;
-
 /// Truncates query log if it's longer than `RW_QUERY_LOG_TRUNCATE_LEN`, to avoid log file being too
 /// large.
 static RW_QUERY_LOG_TRUNCATE_LEN: LazyLock<usize> =
@@ -252,6 +247,7 @@ pub struct ConnectionContext {
     pub tls_config: Option<TlsConfig>,
     pub redact_sql_option_keywords: Option<RedactSqlOptionKeywordsRef>,
     pub message_memory_manager: MessageMemoryManagerRef,
+    pub stream_flush_threshold_bytes: usize,
 }
 
 impl<S, SM> PgProtocol<S, SM>
@@ -269,9 +265,10 @@ where
             tls_config,
             redact_sql_option_keywords,
             message_memory_manager,
+            stream_flush_threshold_bytes,
         } = context;
         Self {
-            stream: PgStream::new(stream),
+            stream: PgStream::new(stream, stream_flush_threshold_bytes),
             is_terminate: false,
             state: PgProtocolState::Startup,
             session_mgr,
@@ -1319,17 +1316,19 @@ pub struct PgStream<S> {
     stream: Arc<Mutex<PgStreamInner<S>>>,
     /// Write into buffer before flush to stream.
     write_buf: BytesMut,
+    stream_flush_threshold_bytes: usize,
     read_header: Option<FeMessageHeader>,
 }
 
 impl<S> PgStream<S> {
-    /// Create a new `PgStream` with the given stream and default write buffer capacity.
-    pub fn new(stream: S) -> Self {
+    /// Create a new `PgStream` with the given stream and streaming flush threshold.
+    pub fn new(stream: S, stream_flush_threshold_bytes: usize) -> Self {
         const DEFAULT_WRITE_BUF_CAPACITY: usize = 10 * 1024;
 
         Self {
             stream: Arc::new(Mutex::new(PgStreamInner::Unencrypted(stream))),
             write_buf: BytesMut::with_capacity(DEFAULT_WRITE_BUF_CAPACITY),
+            stream_flush_threshold_bytes,
             read_header: None,
         }
     }
@@ -1346,6 +1345,7 @@ impl<S> Clone for PgStream<S> {
         Self {
             stream: Arc::clone(&self.stream),
             write_buf: BytesMut::with_capacity(self.write_buf.capacity()),
+            stream_flush_threshold_bytes: self.stream_flush_threshold_bytes,
             read_header: self.read_header.clone(),
         }
     }
@@ -1452,7 +1452,7 @@ where
     /// bound the write buffer and propagate network backpressure to the result stream.
     pub(crate) async fn write_streaming(&mut self, message: BeMessage<'_>) -> io::Result<()> {
         self.write_no_flush(message)?;
-        if self.write_buf.len() >= STREAM_FLUSH_THRESHOLD {
+        if self.write_buf.len() >= self.stream_flush_threshold_bytes {
             self.flush().await?;
         }
         Ok(())
@@ -1687,8 +1687,10 @@ mod tests {
 
     #[tokio::test]
     async fn test_streaming_write_flushes_at_threshold() {
+        const STREAM_FLUSH_THRESHOLD: usize = 64 * 1024;
+
         let (server, mut client) = tokio::io::duplex(STREAM_FLUSH_THRESHOLD * 2);
-        let mut stream = PgStream::new(server);
+        let mut stream = PgStream::new(server, STREAM_FLUSH_THRESHOLD);
 
         let small_row = Row::new(vec![Some(Bytes::from_static(b"small"))]);
         stream
