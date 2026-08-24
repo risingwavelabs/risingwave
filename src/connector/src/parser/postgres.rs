@@ -97,13 +97,6 @@ impl PgPointAdapter {
             y: buf.get_f64(),
         })
     }
-
-    fn into_struct(self) -> ScalarImpl {
-        ScalarImpl::Struct(StructValue::new(vec![
-            Some(ScalarImpl::Float64(self.x.into())),
-            Some(ScalarImpl::Float64(self.y.into())),
-        ]))
-    }
 }
 
 macro_rules! try_handle_data_type {
@@ -256,18 +249,23 @@ pub fn postgres_cell_to_scalar_impl_strict(
                 }
             }
         },
-        DataType::Struct(_) => match *row.columns()[i].type_() {
-            Type::POINT => row
+        DataType::Struct(_) => {
+            match row
                 .try_get::<_, Option<PgPointAdapter>>(i)
-                .map(|value| value.map(PgPointAdapter::into_struct))
                 .with_context(|| {
                     format!("failed to decode PostgreSQL snapshot point column `{name}`")
-                }),
-            _ => bail!(
-                "unsupported PostgreSQL snapshot struct source type {} for column `{name}`",
-                row.columns()[i].type_()
-            ),
-        },
+                })? {
+                Some(PgPointAdapter { x, y }) => {
+                    let point = StructValue::new(vec![
+                        Some(ScalarImpl::Float64(x.into())),
+                        Some(ScalarImpl::Float64(y.into())),
+                    ]);
+
+                    Ok(Some(ScalarImpl::Struct(point)))
+                }
+                None => Ok(None),
+            }
+        }
         DataType::Serial | DataType::Map(_) | DataType::Variant => {
             bail!("unsupported PostgreSQL snapshot data type {data_type} for column `{name}`")
         }
