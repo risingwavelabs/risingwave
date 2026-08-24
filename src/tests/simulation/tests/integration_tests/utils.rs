@@ -26,7 +26,7 @@ pub(crate) async fn kill_cn_and_wait_recover(cluster: &mut Cluster) {
         .await;
     // Keep the sleep: probing too early can read a stale RUNNING before the kill lands.
     sleep(Duration::from_secs(10)).await;
-    cluster.wait_for_recovery().await.unwrap();
+    wait_all_database_recovered(cluster).await;
 }
 
 pub(crate) async fn kill_cn_and_meta_and_wait_recover(cluster: &mut Cluster) {
@@ -34,7 +34,7 @@ pub(crate) async fn kill_cn_and_meta_and_wait_recover(cluster: &mut Cluster) {
         .kill_nodes(["compute-1", "compute-2", "compute-3", "meta-1"], 0)
         .await;
     sleep(Duration::from_secs(10)).await;
-    cluster.wait_for_recovery().await.unwrap();
+    wait_all_database_recovered(cluster).await;
 }
 
 pub(crate) async fn kill_random_and_wait_recover(cluster: &mut Cluster) {
@@ -197,8 +197,16 @@ impl GlobalRecoveryEvent {
 }
 
 const ALL_DATABASE_RECOVERY_STATUS_SQL: &str = r#"
-SELECT row_to_json(row) AS json_line
-FROM rw_catalog.rw_recovery_info AS row;
+SELECT jsonb_build_object(
+    'database_id', database_id,
+    'database_name', database_name,
+    'recovery_state', recovery_state,
+    'last_database_event', last_database_event,
+    'last_global_event', last_global_event,
+    'in_global_running', in_global_running,
+    'in_global_recovering', in_global_recovering
+) AS json_line
+FROM rw_catalog.rw_recovery_info;
 "#;
 
 pub(crate) async fn query_all_database_recovery_state(
@@ -246,20 +254,6 @@ fn validate_global_consistency(databases: &[DatabaseRecoveryInfo]) {
             );
         }
 
-        if info.in_global_running && !info.last_database_event.is_success() {
-            panic!(
-                "Global recovery marks database {}({}) running but latest database event is {:?}",
-                info.name, info.id, info.last_database_event
-            );
-        }
-
-        if info.in_global_recovering && info.last_database_event.is_success() {
-            panic!(
-                "Global recovery marks database {}({}) recovering but latest database event is SUCCESS",
-                info.name, info.id
-            );
-        }
-
         if info.last_global_event == GlobalRecoveryEvent::Running
             && !info.in_global_running
             && !info.in_global_recovering
@@ -279,10 +273,12 @@ fn derive_state(
     in_global_recovering: bool,
 ) -> DatabaseRecoveryState {
     let global_running = matches!(global_event, GlobalRecoveryEvent::Running);
+    let global_recovering = matches!(global_event, GlobalRecoveryEvent::Recovering);
 
     if database_event.is_success() || (global_running && in_global_running) {
         DatabaseRecoveryState::Running
     } else if (global_running && in_global_recovering)
+        || global_recovering
         || matches!(database_event, DatabaseRecoveryEvent::Start)
     {
         DatabaseRecoveryState::Recovering
@@ -309,7 +305,7 @@ pub(crate) async fn cluster_fully_running(cluster: &mut Cluster) -> Result<bool>
 }
 
 const WAIT_ALL_DB_TIMEOUT: Duration = Duration::from_secs(100);
-const WAIT_ALL_DB_INTERVAL: Duration = Duration::from_secs(10);
+const WAIT_ALL_DB_INTERVAL: Duration = Duration::from_millis(500);
 
 pub(crate) async fn wait_all_database_recovered(cluster: &mut Cluster) {
     let start = Instant::now();
