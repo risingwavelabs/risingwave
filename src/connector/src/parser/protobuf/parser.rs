@@ -34,6 +34,7 @@ use crate::schema::{
 #[derive(Debug)]
 pub struct ProtobufAccessBuilder {
     decoder: ProtobufDecoder,
+    reader_descriptor: MessageDescriptor,
 
     // A HashSet containing protobuf message type full names (e.g. "google.protobuf.Any")
     // that should be mapped to JSONB type when storing in RisingWave
@@ -50,6 +51,7 @@ impl AccessBuilder for ProtobufAccessBuilder {
 
         Ok(AccessImpl::Protobuf(ProtobufAccess::new(
             message,
+            self.reader_descriptor.clone(),
             &self.messages_as_jsonb,
         )))
     }
@@ -59,12 +61,13 @@ impl ProtobufAccessBuilder {
     pub fn new(config: ProtobufParserConfig) -> ConnectorResult<Self> {
         let ProtobufParserConfig {
             decoder,
+            message_descriptor,
             messages_as_jsonb,
-            ..
         } = config;
 
         Ok(Self {
             decoder,
+            reader_descriptor: message_descriptor,
             messages_as_jsonb,
         })
     }
