@@ -33,6 +33,7 @@ type BufferedRows = u64;
 pub(crate) enum BackfillState {
     ConsumingUpstreamTableOrSource(ConsumedEpoch, ConsumedRows, BufferedRows),
     DoneConsumingUpstreamTableOrSource(ConsumedRows, BufferedRows),
+    /// The recreated snapshot-backfill actor has entered normal upstream consumption after merge.
     DoneConsumingLogStore,
 }
 
