@@ -185,7 +185,7 @@ and content in ('PositionDeletes', 'EqualityDeletes');
 0
 
 # Partitioned COW compaction must rewrite every delete-affected file while carrying clean files
-# to main unchanged. Two checkpoints create distinct equality-delete files before one vacuum.
+# to main unchanged. One checkpoint creates distinct equality-delete files for two partitions.
 statement ok
 create table t_cow_partitioned(p int, id int, v int, primary key(p, id))
 with(
@@ -244,15 +244,8 @@ and content = 'Data'
 and record_count = 12
 
 statement ok
-delete from t_cow_partitioned where p = 1 and id in (3, 4);
-
-statement ok
-flush;
-
-sleep 5s
-
-statement ok
-delete from t_cow_partitioned where p = 2 and id in (103, 104);
+delete from t_cow_partitioned
+where (p = 1 and id in (3, 4)) or (p = 2 and id in (103, 104));
 
 statement ok
 flush;

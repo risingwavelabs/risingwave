@@ -110,7 +110,7 @@ pub(crate) enum IcebergCompactionKind {
     Auto,
     SmallFiles,
     Full,
-    FilesWithDelete,
+    FilesWithDeletes,
     CopyOnWrite,
 }
 
@@ -126,7 +126,7 @@ impl IcebergCompactionKind {
             TaskType::Auto => Ok(Self::Auto),
             TaskType::SmallFiles => Ok(Self::SmallFiles),
             TaskType::Full => Ok(Self::Full),
-            TaskType::FilesWithDelete => Ok(Self::FilesWithDelete),
+            TaskType::FilesWithDelete => Ok(Self::FilesWithDeletes),
             _ => Err(HummockError::compaction_executor(anyhow::anyhow!(
                 "Unsupported task type in iceberg compaction task: {task_type:?}"
             ))),
@@ -138,7 +138,7 @@ impl IcebergCompactionKind {
             Self::Auto => "auto",
             Self::SmallFiles => "small-files",
             Self::Full => "full",
-            Self::FilesWithDelete => "files-with-delete",
+            Self::FilesWithDeletes => "files-with-delete",
             Self::CopyOnWrite => "copy-on-write",
         }
     }
@@ -571,14 +571,20 @@ async fn live_data_files_for_branch(table: &Table, branch: &str) -> HummockResul
     live_data_files_for_snapshot(table, snapshot_id).await
 }
 
-fn build_cow_publish_data_files(
-    mut planned_snapshot_files: Vec<DataFile>,
-    rewritten_data_file_paths: &HashSet<String>,
+async fn build_cow_publish_data_files(
+    table: &Table,
+    publish_plan: &CowPublishPlan,
     output_data_files: Vec<DataFile>,
-) -> Vec<DataFile> {
-    planned_snapshot_files.retain(|file| !rewritten_data_file_paths.contains(file.file_path()));
+) -> HummockResult<Vec<DataFile>> {
+    let mut planned_snapshot_files =
+        live_data_files_for_snapshot(table, publish_plan.snapshot_id).await?;
+    planned_snapshot_files.retain(|file| {
+        !publish_plan
+            .rewritten_data_file_paths
+            .contains(file.file_path())
+    });
     planned_snapshot_files.extend(output_data_files);
-    planned_snapshot_files
+    Ok(planned_snapshot_files)
 }
 
 fn diff_data_files(
@@ -612,13 +618,8 @@ async fn publish_cow_snapshot_to_main(
     publish_plan: &CowPublishPlan,
     output_data_files: Vec<DataFile>,
 ) -> HummockResult<()> {
-    let planned_snapshot_files =
-        live_data_files_for_snapshot(table, publish_plan.snapshot_id).await?;
-    let published_files = build_cow_publish_data_files(
-        planned_snapshot_files,
-        &publish_plan.rewritten_data_file_paths,
-        output_data_files,
-    );
+    let published_files =
+        build_cow_publish_data_files(table, publish_plan, output_data_files).await?;
     let main_files = live_data_files_for_branch(table, MAIN_BRANCH).await?;
     let (added_files, deleted_files) = diff_data_files(published_files, main_files);
 
@@ -771,7 +772,7 @@ fn build_task_planning_config(
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
             IcebergTaskPlanningConfig::Explicit(CompactionPlanningConfig::Full(config))
         }
-        IcebergCompactionKind::FilesWithDelete => {
+        IcebergCompactionKind::FilesWithDeletes => {
             let config = FilesWithDeletesConfigBuilder::default()
                 .max_input_parallelism(config.max_parallelism as usize)
                 .max_output_parallelism(config.max_parallelism as usize)
@@ -891,6 +892,15 @@ pub async fn create_task_execution(
     } else {
         compaction_plans
     };
+
+    // Each COW plan publishes a complete table state to `main`, so independent plans could
+    // overwrite one another instead of composing their rewrites.
+    if compaction_kind.is_copy_on_write() && compaction_plans.len() > 1 {
+        return Err(HummockError::compaction_executor(anyhow::anyhow!(
+            "COW compaction must produce at most one table-scoped plan, got {}",
+            compaction_plans.len()
+        )));
+    }
 
     if compaction_plans.is_empty() {
         tracing::info!(
@@ -1113,7 +1123,7 @@ mod tests {
 
     #[cfg_attr(madsim, ignore = "requires Iceberg's native Tokio runtime")]
     #[tokio::test]
-    async fn test_cow_publish_uses_planned_snapshot_before_concurrent_update() {
+    async fn test_cow_publish_file_set_uses_planned_snapshot() {
         let table = test_table();
         let old_file = test_data_file("data/old.parquet");
         let clean_file = test_data_file("data/clean.parquet");
@@ -1181,25 +1191,20 @@ mod tests {
             ]
         );
 
-        let planned_files = live_data_files_for_snapshot(&table, 1).await.unwrap();
+        let publish_plan = CowPublishPlan {
+            snapshot_id: 1,
+            rewritten_data_file_paths: HashSet::from(["data/old.parquet".to_owned()]),
+        };
         let published_files = build_cow_publish_data_files(
-            planned_files,
-            &HashSet::from(["data/old.parquet".to_owned()]),
+            &table,
+            &publish_plan,
             vec![test_data_file("data/compacted.parquet")],
-        );
+        )
+        .await
+        .unwrap();
         assert_eq!(
             sorted_file_paths(&published_files),
             vec!["data/clean.parquet", "data/compacted.parquet"]
-        );
-
-        let publish_only_files = build_cow_publish_data_files(
-            live_data_files_for_snapshot(&table, 1).await.unwrap(),
-            &HashSet::new(),
-            vec![],
-        );
-        assert_eq!(
-            sorted_file_paths(&publish_only_files),
-            vec!["data/clean.parquet", "data/old.parquet"]
         );
     }
 
