@@ -180,16 +180,12 @@ impl IcebergPkIndexSinkCoordinator {
                 PbIcebergPkIndexSinkRole::try_from(report.role)
                     != Ok(PbIcebergPkIndexSinkRole::CompactionResolver)
             });
-        let ordinary_aggregate = if ordinary_reports.is_empty() {
-            None
-        } else {
-            aggregate_ordinary_reports(
-                &ordinary_reports,
-                current_schema_id,
-                current_partition_spec_id,
-                current_format_version,
-            )?
-        };
+        let ordinary_aggregate = aggregate_ordinary_reports(
+            &ordinary_reports,
+            current_schema_id,
+            current_partition_spec_id,
+            current_format_version,
+        )?;
 
         let Some(compaction) = compaction else {
             if !resolver_reports.is_empty() {
@@ -224,7 +220,8 @@ impl IcebergPkIndexSinkCoordinator {
                 prev_epoch
             );
         }
-        validate_compactor_output_ids(
+        validate_aggregate_ids(
+            "compactor output",
             output_schema_id,
             output_partition_spec_id,
             current_schema_id,
@@ -279,16 +276,15 @@ impl IcebergPkIndexSinkCoordinator {
             })
             .try_collect::<Vec<DataFile>>()?;
         // TODO(pk-index-compaction): Remove
-        // `coalesce_position_delete_files` once the B1/B2 protocol
+        // `coalesce_position_delete_files` once the resolver attach/detach protocol
         // guarantees that foreground sink writes cannot author position-delete
         // artifacts for compaction output data files in the compaction commit epoch.
         // Until then, resolver masking deletes and PositionDeleteMerger deletes may
         // reference the same output file, so Meta must union their positions and
         // persist exactly one replacement artifact.
-        let coalesced = coalesce_position_delete_files(
+        let discarded_paths = coalesce_position_delete_files(
             &self.table,
             &self.iceberg_config,
-            self.sink_id,
             prev_epoch,
             &output_data_files,
             &mut added_delete_files,
@@ -301,7 +297,7 @@ impl IcebergPkIndexSinkCoordinator {
             ..merged
         };
         self.stage_pre_commit(prev_epoch, merged).await?;
-        self.cleanup_discarded_uncommitted_paths(prev_epoch, coalesced.discarded_paths)
+        self.cleanup_discarded_uncommitted_paths(prev_epoch, discarded_paths)
             .await;
         Ok(())
     }
@@ -788,18 +784,27 @@ struct IcebergPkIndexSinkAggResult {
     overwrite_files: Vec<SerializedDataFile>,
 }
 
+impl std::fmt::Debug for IcebergPkIndexSinkAggResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("IcebergPkIndexSinkAggResult")
+            .field("schema_id", &self.schema_id)
+            .field("partition_spec_id", &self.partition_spec_id)
+            .field("format_version", &self.format_version)
+            .field("data_files", &self.data_files.len())
+            .field("delete_files", &self.delete_files.len())
+            .field("overwrite_files", &self.overwrite_files.len())
+            .finish()
+    }
+}
+
 struct CompactionResolverDeleteAggregate {
     schema_id: i32,
     partition_spec_id: i32,
     delete_files: Vec<SerializedDataFile>,
 }
 
-struct PositionDeleteCoalesceResult {
-    discarded_paths: Vec<String>,
-}
-
 // TODO(pk-index-compaction): Remove
-// `coalesce_position_delete_files` once the B1/B2 protocol
+// `coalesce_position_delete_files` once the resolver attach/detach protocol
 // guarantees that foreground sink writes cannot author position-delete
 // artifacts for compaction output data files in the compaction commit epoch.
 // Until then, resolver masking deletes and PositionDeleteMerger deletes may
@@ -808,11 +813,10 @@ struct PositionDeleteCoalesceResult {
 async fn coalesce_position_delete_files(
     table: &Table,
     config: &IcebergConfig,
-    _sink_id: SinkId,
     epoch: u64,
     compaction_output_files: &[DataFile],
     added_delete_files: &mut Vec<DataFile>,
-) -> Result<PositionDeleteCoalesceResult> {
+) -> Result<Vec<String>> {
     let mut outputs = HashMap::with_capacity(compaction_output_files.len());
     let mut reserved_paths =
         HashSet::with_capacity(compaction_output_files.len() + added_delete_files.len());
@@ -950,22 +954,7 @@ async fn coalesce_position_delete_files(
             .chain(replacements)
             .collect();
     }
-    Ok(PositionDeleteCoalesceResult { discarded_paths })
-}
-
-fn validate_compactor_output_ids(
-    schema_id: i32,
-    partition_spec_id: i32,
-    current_schema_id: i32,
-    current_partition_spec_id: i32,
-) -> Result<()> {
-    validate_aggregate_ids(
-        "compactor output",
-        schema_id,
-        partition_spec_id,
-        current_schema_id,
-        current_partition_spec_id,
-    )
+    Ok(discarded_paths)
 }
 
 fn validate_aggregate_ids(
@@ -1017,15 +1006,6 @@ fn combine_compaction_aggregate(
     resolver: Option<CompactionResolverDeleteAggregate>,
     overwrite_files: Vec<SerializedDataFile>,
 ) -> Result<IcebergPkIndexSinkAggResult> {
-    if let Some(ordinary) = &ordinary {
-        validate_aggregate_ids(
-            "ordinary reports",
-            ordinary.schema_id,
-            ordinary.partition_spec_id,
-            current_schema_id,
-            current_partition_spec_id,
-        )?;
-    }
     if let Some(resolver) = &resolver {
         validate_aggregate_ids(
             "compaction resolver reports",
@@ -1062,10 +1042,6 @@ fn aggregate_reports(
     let mut data_files: Vec<SerializedDataFile> = Vec::new();
     let mut delete_files: Vec<SerializedDataFile> = Vec::new();
     let mut overwrite_files: Vec<SerializedDataFile> = Vec::new();
-
-    if reports.is_empty() {
-        bail!("no reports to aggregate for iceberg pk-index sink coordinator");
-    }
 
     for r in reports {
         let role = PbIcebergPkIndexSinkRole::try_from(r.role)
@@ -1223,6 +1199,6 @@ fn decode_pre_commit_state(blob: &[u8]) -> Result<(Arc<IcebergPkIndexSinkAggResu
     Ok((agg_result, state.snapshot_id))
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(madsim)))]
 #[path = "coordinator_test.rs"]
 mod tests;

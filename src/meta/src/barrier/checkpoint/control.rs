@@ -30,7 +30,7 @@ use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_meta_model::WorkerId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_pb::id::{FragmentId, PartialGraphId, SinkId};
+use risingwave_pb::id::{FragmentId, PartialGraphId};
 use risingwave_pb::stream_plan::DispatcherType as PbDispatcherType;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
@@ -38,7 +38,7 @@ use risingwave_pb::stream_service::streaming_control_stream_response::ResetParti
 use tracing::{debug, warn};
 
 use crate::barrier::cdc_progress::CdcProgress;
-use crate::barrier::checkpoint::compaction_resolver_job::CompactionResolveJobControl;
+use crate::barrier::checkpoint::compaction_resolver_job::CompactionResolveJobRegistry;
 use crate::barrier::checkpoint::independent_job::{
     BatchRefreshJobTriggerContext, IndependentCheckpointJobControl,
 };
@@ -762,7 +762,7 @@ pub(in crate::barrier) struct DatabaseCheckpointControl {
 
     pub(super) database_info: InflightDatabaseInfo,
     pub independent_checkpoint_job_controls: HashMap<JobId, IndependentCheckpointJobControl>,
-    pub(super) main_graph_compaction_resolve_jobs: HashMap<SinkId, CompactionResolveJobControl>,
+    pub(super) compaction_resolve_jobs: CompactionResolveJobRegistry,
 }
 
 impl DatabaseCheckpointControl {
@@ -777,7 +777,7 @@ impl DatabaseCheckpointControl {
             last_committed_barrier_time: None,
             database_info: InflightDatabaseInfo::empty(database_id, shared_actor_infos),
             independent_checkpoint_job_controls: Default::default(),
-            main_graph_compaction_resolve_jobs: Default::default(),
+            compaction_resolve_jobs: Default::default(),
         }
     }
 
@@ -798,7 +798,7 @@ impl DatabaseCheckpointControl {
             last_committed_barrier_time: None,
             database_info,
             independent_checkpoint_job_controls,
-            main_graph_compaction_resolve_jobs: Default::default(),
+            compaction_resolve_jobs: Default::default(),
         }
     }
 
@@ -817,13 +817,7 @@ impl DatabaseCheckpointControl {
                         })
                         .unwrap_or(true)
                 })
-            && self.main_graph_compaction_resolve_jobs.values().all(|job| {
-                job.fragment_infos()
-                    .map(|fragment_infos| {
-                        !InflightFragmentInfo::contains_worker(fragment_infos.values(), worker_id)
-                    })
-                    .unwrap_or(true)
-            })
+            && !self.compaction_resolve_jobs.contains_worker(worker_id)
     }
 
     /// Enqueue a barrier command
@@ -1071,11 +1065,9 @@ impl DatabaseCheckpointControl {
                 );
             },
         ) {
-            let compaction_metadata: Vec<_> = self
-                .main_graph_compaction_resolve_jobs
-                .values_mut()
-                .filter_map(|job| job.finish_b2(epoch, resps.values()))
-                .collect();
+            let compaction_metadata = self
+                .compaction_resolve_jobs
+                .complete_resolve(epoch, resps.values());
             self.handle_refresh_table_info(task, &resps);
             self.database_info.apply_collected_command(
                 &info.post_collect_command,
@@ -1155,15 +1147,7 @@ impl DatabaseCheckpointControl {
                             .with_guarded_label_values(&[&self.database_id.to_string()])
                     })
                     .set(Epoch(epoch.curr).as_unix_secs() as i64);
-                let mut finished_compaction_jobs = Vec::new();
-                for (sink_id, job) in &mut self.main_graph_compaction_resolve_jobs {
-                    if job.on_main_graph_committed(epoch.prev) {
-                        finished_compaction_jobs.push(*sink_id);
-                    }
-                }
-                for sink_id in finished_compaction_jobs {
-                    self.main_graph_compaction_resolve_jobs.remove(&sink_id);
-                }
+                self.compaction_resolve_jobs.ack_committed(epoch.prev);
             } else {
                 assert_eq!(command_prev_epoch, None);
             };
@@ -1253,8 +1237,8 @@ impl DatabaseCheckpointControl {
         {
             if let Some(sink_id) = streaming_job_ids.iter().find_map(|job_id| {
                 let sink_id = job_id.as_sink_id();
-                self.main_graph_compaction_resolve_jobs
-                    .contains_key(&sink_id)
+                self.compaction_resolve_jobs
+                    .contains_sink(sink_id)
                     .then_some(sink_id)
             }) {
                 warn!(%sink_id, "cannot drop sink while pk-index compaction resolver is active");
@@ -1353,36 +1337,19 @@ impl DatabaseCheckpointControl {
         span.record("epoch", barrier_info.curr_epoch());
 
         let epoch = barrier_info.epoch();
-        let is_compaction_resolve =
-            matches!(command, Some(Command::CreateCompactionResolveJob { .. }));
         let ApplyCommandInfo {
             jobs_to_wait,
             follow_up_barrier,
-        } = match if is_compaction_resolve {
-            self.apply_command_inner(
-                command,
-                None,
-                BarrierDomainContext::default(),
-                &mut notifier_start,
-                barrier_info,
-                partial_graph_manager,
-                hummock_version_stats,
-                worker_nodes,
-            )
-        } else {
-            self.apply_command(
-                command,
-                &mut notifier_start,
-                barrier_info,
-                partial_graph_manager,
-                hummock_version_stats,
-                worker_nodes,
-            )
-            .map(|jobs_to_wait| ApplyCommandInfo {
-                jobs_to_wait,
-                follow_up_barrier: None,
-            })
-        } {
+        } = match self.apply_command(
+            command,
+            None,
+            BarrierDomainContext::default(),
+            &mut notifier_start,
+            barrier_info,
+            partial_graph_manager,
+            hummock_version_stats,
+            worker_nodes,
+        ) {
             Ok(info) => {
                 assert!(notifier_start.is_none());
                 info
@@ -1399,10 +1366,10 @@ impl DatabaseCheckpointControl {
         // Record the in-flight barrier.
         self.enqueue_command(epoch, jobs_to_wait);
 
-        // Inject B2 before returning to the global barrier loop, so no scheduled or periodic
-        // barrier can be placed between the compaction B1 and B2. Barriers after B2 may proceed
-        // normally: the writer has already returned to `Normal`, and checkpoint completion keeps
-        // durability ordered.
+        // Inject the resolver detach checkpoint before returning to the global barrier loop, so no
+        // scheduled or periodic barrier can be placed between the attach and detach checkpoints.
+        // Later barriers may proceed normally: the writer has already returned to `Normal`, and
+        // checkpoint completion keeps durability ordered.
         if let Some(follow_up_barrier_info) = follow_up_barrier {
             let curr_epoch = self.state.in_flight_prev_epoch().next();
             let barrier_info = self.state.next_barrier_info(true, curr_epoch);
@@ -1410,7 +1377,7 @@ impl DatabaseCheckpointControl {
                 tracing::info!(
                     target: "rw_tracing",
                     epoch = barrier_info.curr_epoch(),
-                    "adjacent pk-index resolver barrier enqueued"
+                    "resolver detach checkpoint enqueued"
                 );
             });
             let epoch = barrier_info.epoch();
@@ -1418,7 +1385,7 @@ impl DatabaseCheckpointControl {
             let ApplyCommandInfo {
                 jobs_to_wait,
                 follow_up_barrier,
-            } = self.apply_command_inner(
+            } = self.apply_command(
                 None,
                 follow_up_barrier_info.mutation,
                 follow_up_barrier_info.domain_context,
@@ -1431,7 +1398,7 @@ impl DatabaseCheckpointControl {
             assert!(follow_up_notifiers.is_none());
             assert!(
                 follow_up_barrier.is_none(),
-                "internal B2 must not create another follow-up barrier"
+                "internal resolver detach checkpoint must not create another follow-up barrier"
             );
             self.enqueue_command(epoch, jobs_to_wait);
         }

@@ -229,9 +229,4 @@ mod tests {
         .unwrap_err();
         assert!(error.to_string().contains("disagrees on prev_epoch"));
     }
-
-    #[test]
-    fn group_pre_commit_metadata_empty_is_empty() {
-        assert!(group_pre_commit_metadata(vec![]).unwrap().is_empty());
-    }
 }

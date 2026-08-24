@@ -40,8 +40,7 @@ use tracing::warn;
 
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::checkpoint::compaction_resolver_job::{
-    CompactionResolveJobControl, OverwriteInput as ResolveOverwriteInput,
-    build_resolver_stream_node, output_file_paths, render_resolver_fragment,
+    CompactionResolveJob, build_resolver_stream_node, output_file_paths, render_resolver_fragment,
 };
 use crate::barrier::checkpoint::{
     BatchRefreshJobCheckpointControl, BatchRefreshLogicalFragments, CreatingStreamingJobControl,
@@ -65,6 +64,7 @@ use crate::controller::scale::{
     ComponentFragmentAligner, EnsembleActorTemplate, LoadedFragment, NoShuffleEnsemble,
     build_no_shuffle_fragment_graph_edges, find_no_shuffle_graphs,
 };
+use crate::manager::iceberg_pk_index_sink::CompactionOverwrite;
 use crate::model::{
     ActorId, ActorNewNoShuffle, FragmentDownstreamRelation, FragmentId, StreamActor, StreamContext,
     StreamJobActorsToCreate, StreamJobFragmentsToCreate,
@@ -437,29 +437,6 @@ impl DatabaseCheckpointControl {
     /// Returns the inflight actor infos that have included the newly added actors in the given command. The dropped actors
     /// will be removed from the state after the info get resolved.
     pub(super) fn apply_command(
-        &mut self,
-        command: Option<Command>,
-        notifier: &mut Option<NotifierStarter>,
-        barrier_info: BarrierInfo,
-        partial_graph_manager: &mut PartialGraphManager,
-        hummock_version_stats: &HummockVersionStats,
-        worker_nodes: &HashMap<WorkerId, WorkerNode>,
-    ) -> MetaResult<HashSet<JobId>> {
-        let info = self.apply_command_inner(
-            command,
-            None,
-            BarrierDomainContext::default(),
-            notifier,
-            barrier_info,
-            partial_graph_manager,
-            hummock_version_stats,
-            worker_nodes,
-        )?;
-        assert!(info.follow_up_barrier.is_none());
-        Ok(info.jobs_to_wait)
-    }
-
-    pub(super) fn apply_command_inner(
         &mut self,
         command: Option<Command>,
         injected_mutation: Option<Mutation>,
@@ -1540,14 +1517,10 @@ impl DatabaseCheckpointControl {
                 sink_id,
                 task_id,
                 writer_fragment_id,
-                pk_index_table_id: _,
                 overwrite,
                 completion,
             }) => {
-                if self
-                    .main_graph_compaction_resolve_jobs
-                    .contains_key(&sink_id)
-                {
+                if self.compaction_resolve_jobs.contains_sink(sink_id) {
                     tracing::warn!(
                         %sink_id,
                         %task_id,
@@ -1582,8 +1555,9 @@ impl DatabaseCheckpointControl {
                     let mutation = Some(render_result.attach_mutation.clone());
                     let actors_to_create = Some(render_result.actors_to_create.clone());
                     let output_result = overwrite.output_result;
-                    let overwrite_input = ResolveOverwriteInput {
+                    let overwrite = CompactionOverwrite {
                         sink_id,
+                        epoch: barrier_info.curr_epoch(),
                         schema_id: output_result.schema_id,
                         partition_spec_id: output_result.partition_spec_id,
                         output_files: output_result.data_files,
@@ -1616,15 +1590,18 @@ impl DatabaseCheckpointControl {
                             .extend(actor_ids.iter().copied());
                     }
                     let table_ids_to_commit = self.database_info.existing_table_ids().collect();
-                    let job = CompactionResolveJobControl::new(
+                    let job = CompactionResolveJob::new(
                         sink_id,
                         task_id,
                         completion,
-                        barrier_info.curr_epoch(),
-                        overwrite_input,
+                        overwrite,
                         render_result,
                     );
-                    self.main_graph_compaction_resolve_jobs.insert(sink_id, job);
+                    let success = self.compaction_resolve_jobs.insert(job);
+                    assert!(
+                        success,
+                        "duplicate compaction resolve job for sink_id={sink_id}"
+                    );
                     (
                         mutation,
                         table_ids_to_commit,
@@ -1918,16 +1895,8 @@ impl DatabaseCheckpointControl {
             }
         }
 
-        for resolve_job in self.main_graph_compaction_resolve_jobs.values() {
-            if let Some(resolver_node_actors) = resolve_job.node_actors() {
-                for (worker_id, actor_ids) in resolver_node_actors {
-                    node_actors
-                        .entry(*worker_id)
-                        .or_default()
-                        .extend(actor_ids.iter().copied());
-                }
-            }
-        }
+        self.compaction_resolve_jobs
+            .extend_node_actors(&mut node_actors);
 
         let database_notifier = if notify_database_graph {
             notifier.as_mut()

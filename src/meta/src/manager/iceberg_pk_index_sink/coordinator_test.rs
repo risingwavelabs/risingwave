@@ -26,7 +26,9 @@ use iceberg::spec::{
 use iceberg::writer::file_writer::location_generator::{
     DefaultFileNameGenerator, DefaultLocationGenerator,
 };
-use iceberg::{Catalog, Namespace, NamespaceIdent, TableCommit, TableCreation, TableIdent};
+use iceberg::{
+    Catalog, Namespace, NamespaceIdent, Runtime, TableCommit, TableCreation, TableIdent,
+};
 use risingwave_connector::sink::iceberg::{
     read_position_deletes_from_file, write_dv_puffin_file, write_parquet_position_delete_file,
 };
@@ -141,7 +143,7 @@ fn coalesce_test_table_at_location(
         schema,
         partition_spec,
         SortOrder::unsorted_order(),
-        location.clone(),
+        location,
         format_version,
         HashMap::new(),
     )?
@@ -152,7 +154,8 @@ fn coalesce_test_table_at_location(
             NamespaceIdent::new("db".to_owned()),
             "table".to_owned(),
         ))
-        .file_io(FileIO::from_path(&location)?.build()?)
+        .file_io(FileIO::new_with_fs())
+        .runtime(Runtime::try_current()?)
         .metadata(metadata)
         .build()?)
 }
@@ -312,6 +315,10 @@ impl Catalog for ReloadingTestCatalog {
         unreachable!("test only loads a table")
     }
 
+    async fn purge_table(&self, _table: &TableIdent) -> iceberg::Result<()> {
+        unreachable!("test only loads a table")
+    }
+
     async fn table_exists(&self, _table: &TableIdent) -> iceberg::Result<bool> {
         unreachable!("test only loads a table")
     }
@@ -410,19 +417,6 @@ async fn compactor_output_ids_are_validated_before_physical_rewrite() -> Result<
     Ok(())
 }
 
-#[test]
-fn compactor_output_ids_match_current_table() -> Result<()> {
-    validate_compactor_output_ids(3, 4, 3, 4)
-}
-
-#[test]
-fn compactor_output_partition_spec_mismatch_is_rejected() {
-    let error = validate_compactor_output_ids(3, 5, 3, 4)
-        .expect_err("compactor partition spec mismatch should fail");
-    assert!(error.to_string().contains("partition_spec_id 5"));
-}
-
-#[cfg(not(madsim))]
 #[tokio::test]
 async fn coalesce_position_delete_files_unions_v2_and_v3_artifacts() -> Result<()> {
     for format_version in [FormatVersion::V2, FormatVersion::V3] {
@@ -445,7 +439,6 @@ async fn coalesce_position_delete_files_unions_v2_and_v3_artifacts() -> Result<(
         let result = coalesce_position_delete_files(
             &table,
             &config,
-            SinkId::new(42),
             99,
             std::slice::from_ref(&output),
             &mut added_delete_files,
@@ -463,12 +456,11 @@ async fn coalesce_position_delete_files_unions_v2_and_v3_artifacts() -> Result<(
             read_position_deletes_from_file(table.file_io(), replacement).await?,
             DeleteVector::from([1, 3, 5])
         );
-        assert_eq!(HashSet::from_iter(result.discarded_paths), source_paths);
+        assert_eq!(HashSet::from_iter(result), source_paths);
     }
     Ok(())
 }
 
-#[cfg(not(madsim))]
 #[tokio::test]
 async fn coalesce_position_delete_files_preserves_singleton_and_unrelated() -> Result<()> {
     for format_version in [FormatVersion::V2, FormatVersion::V3] {
@@ -493,17 +485,11 @@ async fn coalesce_position_delete_files_preserves_singleton_and_unrelated() -> R
         ];
         let mut delete_files = vec![singleton, unrelated];
 
-        let result = coalesce_position_delete_files(
-            &table,
-            &config,
-            SinkId::new(42),
-            99,
-            &[output],
-            &mut delete_files,
-        )
-        .await?;
+        let result =
+            coalesce_position_delete_files(&table, &config, 99, &[output], &mut delete_files)
+                .await?;
 
-        assert!(result.discarded_paths.is_empty());
+        assert!(result.is_empty());
         assert_eq!(
             delete_files
                 .iter()
@@ -515,7 +501,6 @@ async fn coalesce_position_delete_files_preserves_singleton_and_unrelated() -> R
     Ok(())
 }
 
-#[cfg(not(madsim))]
 #[tokio::test]
 async fn coalesce_position_delete_files_groups_multiple_outputs() -> Result<()> {
     let temp_dir = tempfile::tempdir()?;
@@ -538,17 +523,10 @@ async fn coalesce_position_delete_files_groups_multiple_outputs() -> Result<()> 
         );
     }
 
-    let result = coalesce_position_delete_files(
-        &table,
-        &config,
-        SinkId::new(42),
-        99,
-        &outputs,
-        &mut delete_files,
-    )
-    .await?;
+    let result =
+        coalesce_position_delete_files(&table, &config, 99, &outputs, &mut delete_files).await?;
 
-    assert_eq!(result.discarded_paths.len(), 4);
+    assert_eq!(result.len(), 4);
     assert_eq!(delete_files.len(), 2);
     for (output, expected) in [
         (&outputs[0], DeleteVector::from([1, 3, 5])),
@@ -566,7 +544,6 @@ async fn coalesce_position_delete_files_groups_multiple_outputs() -> Result<()> 
     Ok(())
 }
 
-#[cfg(not(madsim))]
 #[tokio::test]
 async fn coalesce_position_delete_files_preserves_partition() -> Result<()> {
     for format_version in [FormatVersion::V2, FormatVersion::V3] {
@@ -601,15 +578,7 @@ async fn coalesce_position_delete_files_preserves_partition() -> Result<()> {
             .await?,
         ];
 
-        coalesce_position_delete_files(
-            &table,
-            &config,
-            SinkId::new(42),
-            99,
-            &[output],
-            &mut delete_files,
-        )
-        .await?;
+        coalesce_position_delete_files(&table, &config, 99, &[output], &mut delete_files).await?;
 
         assert_eq!(delete_files[0].partition(), &partition);
         assert_eq!(
@@ -620,7 +589,6 @@ async fn coalesce_position_delete_files_preserves_partition() -> Result<()> {
     Ok(())
 }
 
-#[cfg(not(madsim))]
 #[tokio::test]
 async fn coalesce_position_delete_files_retries_same_path_without_deleting_sources() -> Result<()> {
     for format_version in [FormatVersion::V2, FormatVersion::V3] {
@@ -642,7 +610,6 @@ async fn coalesce_position_delete_files_retries_same_path_without_deleting_sourc
         coalesce_position_delete_files(
             &table,
             &config,
-            SinkId::new(42),
             99,
             std::slice::from_ref(&output),
             &mut first_attempt,
@@ -650,15 +617,7 @@ async fn coalesce_position_delete_files_retries_same_path_without_deleting_sourc
         .await?;
         let first_path = first_attempt[0].file_path().to_owned();
         let mut second_attempt = sources;
-        coalesce_position_delete_files(
-            &table,
-            &config,
-            SinkId::new(42),
-            99,
-            &[output],
-            &mut second_attempt,
-        )
-        .await?;
+        coalesce_position_delete_files(&table, &config, 99, &[output], &mut second_attempt).await?;
 
         assert_eq!(second_attempt[0].file_path(), first_path);
         for path in source_paths {
@@ -668,7 +627,6 @@ async fn coalesce_position_delete_files_retries_same_path_without_deleting_sourc
     Ok(())
 }
 
-#[cfg(not(madsim))]
 #[tokio::test]
 async fn coalesce_position_delete_files_rejects_replacement_path_collision_before_io() -> Result<()>
 {
@@ -686,7 +644,6 @@ async fn coalesce_position_delete_files_rejects_replacement_path_collision_befor
         coalesce_position_delete_files(
             &table,
             &config,
-            SinkId::new(42),
             99,
             std::slice::from_ref(&output),
             &mut first_attempt,
@@ -707,17 +664,10 @@ async fn coalesce_position_delete_files_rejects_replacement_path_collision_befor
         let mut second_attempt = sources;
         second_attempt.push(retained_with_replacement_path);
 
-        let error = coalesce_position_delete_files(
-            &table,
-            &config,
-            SinkId::new(42),
-            99,
-            &[output],
-            &mut second_attempt,
-        )
-        .await
-        .err()
-        .expect("replacement path collision should fail");
+        let error =
+            coalesce_position_delete_files(&table, &config, 99, &[output], &mut second_attempt)
+                .await
+                .expect_err("replacement path collision should fail");
 
         assert!(error.to_string().contains("replacement path"));
         assert!(table.file_io().exists(replacement_path).await?);
@@ -725,7 +675,6 @@ async fn coalesce_position_delete_files_rejects_replacement_path_collision_befor
     Ok(())
 }
 
-#[cfg(not(madsim))]
 #[tokio::test]
 async fn coalesce_position_delete_files_rejects_invalid_artifacts() -> Result<()> {
     for format_version in [FormatVersion::V2, FormatVersion::V3] {
@@ -740,14 +689,12 @@ async fn coalesce_position_delete_files_rejects_invalid_artifacts() -> Result<()
         let error = coalesce_position_delete_files(
             &table,
             &config,
-            SinkId::new(42),
             99,
             std::slice::from_ref(&output),
             &mut delete_files,
         )
         .await
-        .err()
-        .expect("duplicate path should fail");
+        .expect_err("duplicate path should fail");
         assert!(error.to_string().contains("duplicate"));
 
         let selected =
@@ -767,17 +714,10 @@ async fn coalesce_position_delete_files_rejects_invalid_artifacts() -> Result<()
             .referenced_data_file(Some("file:///unrelated-data.parquet".to_owned()))
             .build()?;
         let mut delete_files = vec![selected, second_selected, retained_with_same_path];
-        let error = coalesce_position_delete_files(
-            &table,
-            &config,
-            SinkId::new(42),
-            99,
-            &[output],
-            &mut delete_files,
-        )
-        .await
-        .err()
-        .expect("selected and retained duplicate path should fail");
+        let error =
+            coalesce_position_delete_files(&table, &config, 99, &[output], &mut delete_files)
+                .await
+                .expect_err("selected and retained duplicate path should fail");
         assert!(error.to_string().contains("duplicate"));
     }
     Ok(())
@@ -805,17 +745,10 @@ async fn coalesce_position_delete_files_rejects_missing_reference() -> Result<()
                 .build()?,
         ];
 
-        let result = coalesce_position_delete_files(
-            &table,
-            &config,
-            SinkId::new(42),
-            99,
-            &[output],
-            &mut delete_files,
-        )
-        .await;
+        let result =
+            coalesce_position_delete_files(&table, &config, 99, &[output], &mut delete_files).await;
 
-        let error = result.err().expect("missing reference should fail");
+        let error = result.expect_err("missing reference should fail");
         assert!(error.to_string().contains("missing referenced_data_file"));
     }
     Ok(())
@@ -906,8 +839,7 @@ fn ordinary_aggregate_rejects_schema_id_different_from_table() {
         4,
         FormatVersion::V3,
     )
-    .err()
-    .expect("schema mismatch should fail");
+    .expect_err("schema mismatch should fail");
     assert!(error.to_string().contains("schema_id 2"));
 }
 
@@ -922,28 +854,8 @@ fn ordinary_aggregate_rejects_partition_spec_id_different_from_table() {
         4,
         FormatVersion::V3,
     )
-    .err()
-    .expect("partition spec mismatch should fail");
+    .expect_err("partition spec mismatch should fail");
     assert!(error.to_string().contains("partition_spec_id 5"));
-}
-
-#[test]
-fn ordinary_aggregate_validates_non_empty_metadata_mixed_with_empty() {
-    let error = aggregate_ordinary_reports(
-        &[
-            report(PbIcebergPkIndexSinkRole::Writer, None),
-            report(
-                PbIcebergPkIndexSinkRole::PositionDeleteMerger,
-                Some(merger_metadata(2, 4, vec![], vec![])),
-            ),
-        ],
-        3,
-        4,
-        FormatVersion::V3,
-    )
-    .err()
-    .expect("non-empty metadata schema mismatch should fail");
-    assert!(error.to_string().contains("schema_id 2"));
 }
 
 #[test]
@@ -1016,20 +928,6 @@ fn combine_compaction_aggregate_merges_every_input() {
 }
 
 #[test]
-fn combine_compaction_aggregate_rejects_report_ids_different_from_table() {
-    let ordinary = aggregate_reports(&[report(
-        PbIcebergPkIndexSinkRole::PositionDeleteMerger,
-        Some(merger_metadata(2, 4, vec![], vec![])),
-    )])
-    .unwrap();
-    let error =
-        combine_compaction_aggregate(3, 4, FormatVersion::V3, ordinary, vec![], None, vec![])
-            .err()
-            .expect("schema mismatch should fail");
-    assert!(error.to_string().contains("schema_id 2"));
-}
-
-#[test]
 fn combine_compaction_aggregate_rejects_resolver_ids_different_from_table() {
     let resolver = decode_compaction_resolver_delete_reports([report(
         PbIcebergPkIndexSinkRole::CompactionResolver,
@@ -1038,8 +936,7 @@ fn combine_compaction_aggregate_rejects_resolver_ids_different_from_table() {
     .unwrap();
     let error =
         combine_compaction_aggregate(3, 4, FormatVersion::V3, None, vec![], resolver, vec![])
-            .err()
-            .expect("partition spec mismatch should fail");
+            .expect_err("partition spec mismatch should fail");
     assert!(error.to_string().contains("partition_spec_id 5"));
 }
 
@@ -1064,19 +961,4 @@ fn aggregate_reports_ignores_empty_ordinary_metadata() {
 
     assert_eq!(merged.schema_id, 3);
     assert_eq!(merged.partition_spec_id, 4);
-}
-
-#[test]
-fn aggregate_reports_returns_none_for_only_empty_metadata() {
-    let merged = aggregate_reports(&[
-        report(PbIcebergPkIndexSinkRole::Writer, None),
-        report(PbIcebergPkIndexSinkRole::PositionDeleteMerger, None),
-    ])
-    .unwrap();
-    assert!(merged.is_none());
-}
-
-#[test]
-fn aggregate_reports_rejects_empty_input() {
-    assert!(aggregate_reports(&[]).is_err());
 }

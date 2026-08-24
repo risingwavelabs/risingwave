@@ -270,8 +270,6 @@ fn test_render_singleton_resolver_attaches_directly_to_all_writer_actors() {
     .unwrap();
 
     assert_eq!(render.fragment_infos.len(), 1);
-    assert!(render.state_table_ids.is_empty());
-    assert_eq!(render.resolver_actor_ids.len(), 1);
     let resolver_fragment = &render.fragment_infos[&resolver_fragment_id];
     assert_eq!(
         resolver_fragment.distribution_type,
@@ -279,7 +277,7 @@ fn test_render_singleton_resolver_attaches_directly_to_all_writer_actors() {
     );
     assert!(resolver_fragment.state_table_ids.is_empty());
 
-    let resolver_actor_id = render.resolver_actor_ids[0];
+    let resolver_actor_id = render.resolver_actor_id;
     assert!(
         render.actors_to_create[&WorkerId::new(2)].contains_key(&resolver_fragment_id),
         "resolver placement follows the smallest writer actor"
@@ -311,7 +309,7 @@ fn test_render_singleton_resolver_attaches_directly_to_all_writer_actors() {
     );
 
     let Mutation::Update(attach) = &render.attach_mutation else {
-        panic!("B1 must carry Update");
+        panic!("resolver attach checkpoint must carry Update");
     };
     assert!(attach.dropped_actors.is_empty());
     assert_eq!(attach.merge_update.len(), writer_fragment.actors.len());
@@ -323,7 +321,7 @@ fn test_render_singleton_resolver_attaches_directly_to_all_writer_actors() {
     }
 
     let Mutation::Update(detach) = &render.detach_mutation else {
-        panic!("B2 must carry Update");
+        panic!("resolver detach checkpoint must carry Update");
     };
     assert_eq!(detach.dropped_actors, vec![resolver_actor_id]);
     assert_eq!(detach.merge_update.len(), writer_fragment.actors.len());
@@ -358,7 +356,7 @@ fn test_render_hash_dispatcher_to_single_writer_without_persisted_bitmap() {
     )
     .unwrap();
 
-    let resolver_actor_id = render.resolver_actor_ids[0];
+    let resolver_actor_id = render.resolver_actor_id;
     let dispatcher = render
         .actors_to_create
         .values()
@@ -377,9 +375,10 @@ fn test_render_hash_dispatcher_to_single_writer_without_persisted_bitmap() {
     );
 }
 
-fn dummy_overwrite() -> OverwriteInput {
-    OverwriteInput {
+fn dummy_overwrite(epoch: u64) -> CompactionOverwrite {
+    CompactionOverwrite {
         sink_id: SinkId::new(7),
+        epoch,
         schema_id: 3,
         partition_spec_id: 4,
         output_files: vec![],
@@ -418,40 +417,22 @@ fn test_completion() -> Arc<CompactionResolveCompletion> {
 }
 
 #[test]
-fn test_new_job_is_resolving_with_adjacent_b2_epoch() {
-    let job = CompactionResolveJobControl::new(
+fn test_complete_resolve_transitions_to_pending_commit() {
+    let completion = test_completion();
+    let render = dummy_render();
+    let resolver_actor = render.resolver_actor_id;
+    let job = CompactionResolveJob::new(
         SinkId::new(7),
         IcebergCompactionTaskId::new(42),
-        test_completion(),
-        30,
-        dummy_overwrite(),
-        dummy_render(),
+        completion.clone(),
+        dummy_overwrite(60),
+        render,
     );
-    assert!(job.fragment_infos().is_some());
-    let Phase::Resolving { b2_prev_epoch, .. } = &job.phase else {
-        panic!("expected Resolving phase");
-    };
-    assert_eq!(*b2_prev_epoch, 30);
-    assert_eq!(job.task_id(), IcebergCompactionTaskId::new(42));
-}
-
-#[test]
-fn test_finish_b2_collects_main_response_and_takes_overwrite_once() {
-    let mut job = CompactionResolveJobControl::new(
-        SinkId::new(7),
-        IcebergCompactionTaskId::new(42),
-        test_completion(),
-        60,
-        dummy_overwrite(),
-        dummy_render(),
-    );
-    let resolver_actor = job.resolver_actor_ids()[0];
     assert!(
         job.node_actors()
-            .unwrap()
             .values()
             .any(|actor_ids| actor_ids.contains(&resolver_actor)),
-        "the terminal B2 collection set must still include the resolver"
+        "the resolver detach checkpoint collection set must still include the resolver"
     );
     let response = risingwave_pb::stream_service::BarrierCompleteResponse {
         epoch: 60,
@@ -465,30 +446,54 @@ fn test_finish_b2_collects_main_response_and_takes_overwrite_once() {
         ..Default::default()
     };
 
-    let overwrite = job.finish_b2(60, [&response].into_iter()).unwrap();
+    let (overwrite, pending_commit) = job.complete([&response].into_iter());
     assert_eq!(overwrite.prev_epoch, 60);
     assert_eq!(overwrite.compaction.as_ref().unwrap().schema_id, 3);
     assert_eq!(overwrite.compaction.as_ref().unwrap().partition_spec_id, 4);
     assert!(overwrite.reports.is_empty());
-    assert!(matches!(job.phase, Phase::Committing { b2_prev_epoch: 60 }));
-    assert!(job.finish_b2(60, [&response].into_iter()).is_none());
+    assert_eq!(Arc::strong_count(&completion), 2);
+    pending_commit.finish();
+    assert_eq!(Arc::strong_count(&completion), 1);
 }
 
 #[test]
-fn test_b2_commit_finishes_without_control_rpc() {
+fn test_registry_moves_job_to_pending_until_matching_commit_ack() {
     let completion = test_completion();
-    let mut job = CompactionResolveJobControl::new(
+    let render = dummy_render();
+    let resolver_actor = render.resolver_actor_id;
+    let job = CompactionResolveJob::new(
         SinkId::new(7),
         IcebergCompactionTaskId::new(42),
-        completion,
-        60,
-        dummy_overwrite(),
-        dummy_render(),
+        completion.clone(),
+        dummy_overwrite(60),
+        render,
     );
     let response = risingwave_pb::stream_service::BarrierCompleteResponse {
         epoch: 60,
+        iceberg_pk_index_sink_metadata: vec![PbIcebergPkIndexSinkMetadata {
+            reporter_actor_id: resolver_actor,
+            sink_id: SinkId::new(7),
+            prev_epoch: 60,
+            role: PbIcebergPkIndexSinkRole::CompactionResolver as i32,
+            metadata: None,
+        }],
         ..Default::default()
     };
-    assert!(job.finish_b2(60, [&response].into_iter()).is_some());
-    assert!(job.on_main_graph_committed(60));
+    let mut registry = CompactionResolveJobRegistry::default();
+
+    assert!(registry.insert(job));
+    assert!(registry.contains_sink(SinkId::new(7)));
+    assert_eq!(
+        registry.complete_resolve(60, [&response].into_iter()).len(),
+        1
+    );
+    assert!(registry.contains_sink(SinkId::new(7)));
+
+    registry.ack_committed(59);
+    assert!(registry.contains_sink(SinkId::new(7)));
+    assert_eq!(Arc::strong_count(&completion), 2);
+
+    registry.ack_committed(60);
+    assert!(!registry.contains_sink(SinkId::new(7)));
+    assert_eq!(Arc::strong_count(&completion), 1);
 }

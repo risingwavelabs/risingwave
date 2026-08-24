@@ -71,8 +71,8 @@ enum CompactionTrackState {
         gc_watermark_snapshot: Option<IcebergCommittedSnapshot>,
     },
     /// The compactor report was accepted and the transient resolver owns the
-    /// result. The task is not complete until B2 and the Iceberg overwrite are
-    /// durably committed.
+    /// result. The task is not complete until the resolver detach checkpoint and Iceberg
+    /// overwrite are durably committed.
     Resolving {
         task_id: IcebergCompactionTaskId,
         task_type: TaskType,
@@ -1372,9 +1372,7 @@ impl IcebergCompactionManager {
     ) -> MetaResult<()> {
         let catalog_controller = &self.metadata_manager.catalog_controller;
         let database_id = catalog_controller.get_object_database_id(sink_id).await?;
-        // The writer fragment (the one running the iceberg-pk-index writer node) owns the pk-index
-        // state table that the resolve job takes over during the pause window.
-        let (writer_fragment_id, pk_index_table_id) = catalog_controller
+        let writer_fragment_id = catalog_controller
             .get_iceberg_pk_index_writer_fragment(sink_id.as_job_id())
             .await?;
 
@@ -1402,7 +1400,6 @@ impl IcebergCompactionManager {
             sink_id,
             task_id,
             writer_fragment_id,
-            pk_index_table_id,
             overwrite: CompactionResolveOverwrite {
                 output_result,
                 input_file_paths,
@@ -1414,7 +1411,6 @@ impl IcebergCompactionManager {
             %sink_id,
             task_id = %task_id,
             %writer_fragment_id,
-            %pk_index_table_id,
             "enqueuing pk-index compaction resolve job"
         );
         let result = self

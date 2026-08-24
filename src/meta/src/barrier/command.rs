@@ -602,7 +602,7 @@ pub enum Command {
     },
 
     /// Attach a transient singleton resolver directly to the existing pk-index writers for one
-    /// adjacent B1/B2 main-graph barrier pair.
+    /// adjacent attach/detach checkpoint pair in the main graph.
     CreateCompactionResolveJob {
         database_id: DatabaseId,
         sink_id: SinkId,
@@ -610,12 +610,10 @@ pub enum Command {
         task_id: IcebergCompactionTaskId,
         /// The writer fragment whose dormant right Merge receives the resolver's hash edge.
         writer_fragment_id: FragmentId,
-        /// The writer's pk-index state table, used to validate the target job.
-        pk_index_table_id: TableId,
-        /// The compaction overwrite committed by the B2 checkpoint.
+        /// The compaction overwrite committed by the resolver detach checkpoint.
         overwrite: CompactionResolveOverwrite,
-        /// Resolves the scheduler track only after the resolver's B2 and
-        /// Iceberg overwrite are durable. Drop means retryable abandonment.
+        /// Resolves the scheduler track only after the resolver detach checkpoint and Iceberg
+        /// overwrite are durable. Drop means retryable abandonment.
         completion: Arc<CompactionResolveCompletion>,
     },
 }
@@ -734,11 +732,10 @@ impl std::fmt::Display for Command {
                 database_id,
                 sink_id,
                 task_id,
-                pk_index_table_id,
                 ..
             } => write!(
                 f,
-                "CreateCompactionResolveJob: sink={sink_id} task_id={task_id} table={pk_index_table_id} (database={database_id})"
+                "CreateCompactionResolveJob: sink={sink_id} task_id={task_id} (database={database_id})"
             ),
         }
     }

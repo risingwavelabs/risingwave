@@ -262,7 +262,7 @@ impl DatabaseStatusAction<'_, EnterReset> {
         match database_status {
             DatabaseCheckpointControlStatus::Running(database) => {
                 let mut resetting_partial_graphs = HashSet::new();
-                database.main_graph_compaction_resolve_jobs.clear();
+                database.compaction_resolve_jobs.clear();
                 let new_reset_partial_graphs: HashSet<_> = database
                     .independent_checkpoint_job_controls
                     .drain()

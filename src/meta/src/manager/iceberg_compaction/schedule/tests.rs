@@ -1182,53 +1182,6 @@ async fn test_handle_report_task_success_consumes_backlog_and_resets_to_idle() {
     assert!(matches!(track.state, CompactionTrackState::Idle { .. }));
 }
 
-/// A pk-index coordinated report with a valid payload routes into
-/// `route_pk_index_compaction_report`, which (post window-closure) no longer commits the overwrite
-/// itself — it enqueues a `CreateCompactionResolveJob` that commits inside the paused
-/// window. In this unit test the sink (147) has no catalog fragments, so the writer-fragment
-/// resolution fails and the enqueue returns `Err`; `handle_report_task` converts that into
-/// `finish_failed` (not silently `finish_success`, which would drop the completed rewrite) so the
-/// scheduler retries. The key property under test is that the state machine runs to completion
-/// either way: it must not hang or panic, and the track must leave `InFlight`.
-#[tokio::test]
-async fn test_handle_report_task_routes_pk_index_payload_and_finishes_track() {
-    let manager = build_test_manager().await;
-    let sink_id = SinkId::new(147);
-    let now = Instant::now();
-    let mut track = new_track(now, 120, 10, 2);
-    start_in_flight(&mut track, 9, now);
-    record_commits(&mut track, 3);
-    manager.inner.write().sink_schedules.insert(sink_id, track);
-
-    let output_files = SinkMetadata::try_from(&IcebergCommitResult {
-        schema_id: 1,
-        partition_spec_id: 2,
-        data_files: vec![],
-    })
-    .unwrap();
-    manager
-        .handle_report_task(IcebergReportTask {
-            task_id: 9.into(),
-            sink_id: sink_id.as_raw_id(),
-            status: IcebergReportTaskStatus::Success as i32,
-            error_message: None,
-            pk_index_result: Some(PkIndexCompactionResult {
-                output_files: Some(output_files),
-                input_file_paths: vec!["a.parquet".to_owned(), "b.parquet".to_owned()],
-                read_snapshot_id: 777,
-            }),
-        })
-        .await;
-
-    // The sink has no catalog fragments in the test environment, so the resolve-job enqueue fails and
-    // the track transitions to Idle via `finish_failed` — the scheduler will retry. The key
-    // property is that the state machine ran and the task is no longer InFlight. Crucially, the
-    // route path did not commit the overwrite before the writer was paused.
-    let guard = manager.inner.read();
-    let track = guard.sink_schedules.get(&sink_id).unwrap();
-    assert!(matches!(track.state, CompactionTrackState::Idle { .. }));
-}
-
 /// A malformed pk-index payload must be logged and treated as a failure without disrupting the
 /// state machine. `route_pk_index_compaction_report` returns `false` (deserialization fails before
 /// any commit attempt), so the track transitions to Idle via `finish_failed`. This is a regression

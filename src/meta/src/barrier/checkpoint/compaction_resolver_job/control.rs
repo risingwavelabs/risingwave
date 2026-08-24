@@ -15,121 +15,71 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use iceberg::spec::SerializedDataFile;
 use risingwave_pb::id::{ActorId, FragmentId, IcebergCompactionTaskId, SinkId};
 use risingwave_pb::stream_service::{BarrierCompleteResponse, PbIcebergPkIndexSinkRole};
-use tracing::info;
 
 use super::render::CompactionResolverRenderResult;
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::iceberg_compaction::CompactionResolveCompletion;
 use crate::manager::iceberg_pk_index_sink::{CompactionOverwrite, IcebergPkIndexPreCommitMetadata};
 
-#[derive(educe::Educe)]
-#[educe(Debug)]
-pub(crate) struct OverwriteInput {
-    pub sink_id: SinkId,
-    pub schema_id: i32,
-    pub partition_spec_id: i32,
-    #[educe(Debug(ignore))]
-    pub output_files: Vec<SerializedDataFile>,
-    pub input_file_paths: Vec<String>,
-    pub read_snapshot_id: i64,
-}
-
+/// A transient resolver attached to the database main graph until its detach checkpoint.
 #[derive(Debug)]
-enum Phase {
-    Resolving {
-        render_result: CompactionResolverRenderResult,
-        b2_prev_epoch: u64,
-        overwrite: OverwriteInput,
-    },
-    Committing {
-        b2_prev_epoch: u64,
-    },
-    Done,
-}
-
-/// Bookkeeping for the transient resolver that participates in the database main graph at B1/B2.
-#[derive(Debug)]
-pub(crate) struct CompactionResolveJobControl {
+pub(crate) struct CompactionResolveJob {
     sink_id: SinkId,
     task_id: IcebergCompactionTaskId,
     completion: Arc<CompactionResolveCompletion>,
-    phase: Phase,
+    render_result: CompactionResolverRenderResult,
+    overwrite: CompactionOverwrite,
 }
 
-impl CompactionResolveJobControl {
+impl CompactionResolveJob {
     pub(crate) fn new(
         sink_id: SinkId,
         task_id: IcebergCompactionTaskId,
         completion: Arc<CompactionResolveCompletion>,
-        b2_prev_epoch: u64,
-        overwrite: OverwriteInput,
+        overwrite: CompactionOverwrite,
         render_result: CompactionResolverRenderResult,
     ) -> Self {
-        assert!(render_result.state_table_ids.is_empty());
-        info!(%sink_id, %task_id, b2_prev_epoch, "created main-graph pk-index resolver job");
+        debug_assert_eq!(overwrite.sink_id, sink_id);
+        tracing::info!(%sink_id, %task_id, commit_epoch = overwrite.epoch, "created main-graph pk-index resolver job");
         Self {
             sink_id,
             task_id,
             completion,
-            phase: Phase::Resolving {
-                render_result,
-                b2_prev_epoch,
-                overwrite,
-            },
-        }
-    }
-
-    pub(crate) fn fragment_infos(&self) -> Option<&HashMap<FragmentId, InflightFragmentInfo>> {
-        match &self.phase {
-            Phase::Resolving { render_result, .. } => Some(&render_result.fragment_infos),
-            Phase::Committing { .. } | Phase::Done => None,
-        }
-    }
-
-    pub(crate) fn node_actors(
-        &self,
-    ) -> Option<&HashMap<risingwave_meta_model::WorkerId, HashSet<ActorId>>> {
-        match &self.phase {
-            Phase::Resolving { render_result, .. } => Some(&render_result.node_actors),
-            Phase::Committing { .. } | Phase::Done => None,
-        }
-    }
-
-    #[cfg(test)]
-    pub(crate) fn task_id(&self) -> IcebergCompactionTaskId {
-        self.task_id
-    }
-
-    #[cfg(test)]
-    pub(crate) fn resolver_actor_ids(&self) -> &[ActorId] {
-        match &self.phase {
-            Phase::Resolving { render_result, .. } => &render_result.resolver_actor_ids,
-            Phase::Committing { .. } | Phase::Done => &[],
-        }
-    }
-
-    /// Collect resolver reports from the main B2 responses and contribute the overwrite exactly once.
-    pub(crate) fn finish_b2<'a>(
-        &mut self,
-        epoch: u64,
-        responses: impl Iterator<Item = &'a BarrierCompleteResponse>,
-    ) -> Option<IcebergPkIndexPreCommitMetadata> {
-        let Phase::Resolving {
-            b2_prev_epoch,
             render_result,
-            ..
-        } = &self.phase
-        else {
-            return None;
-        };
-        if epoch != *b2_prev_epoch {
-            return None;
+            overwrite,
         }
-        let expected_actor_ids: HashSet<_> =
-            render_result.resolver_actor_ids.iter().copied().collect();
+    }
+
+    fn commit_epoch(&self) -> u64 {
+        self.overwrite.epoch
+    }
+
+    fn fragment_infos(&self) -> &HashMap<FragmentId, InflightFragmentInfo> {
+        &self.render_result.fragment_infos
+    }
+
+    fn node_actors(&self) -> &HashMap<risingwave_meta_model::WorkerId, HashSet<ActorId>> {
+        &self.render_result.node_actors
+    }
+
+    /// Complete resolver execution at the detach checkpoint and contribute the overwrite.
+    fn complete<'a>(
+        self,
+        responses: impl Iterator<Item = &'a BarrierCompleteResponse>,
+    ) -> (
+        IcebergPkIndexPreCommitMetadata,
+        PendingCompactionResolveCommit,
+    ) {
+        let Self {
+            sink_id,
+            task_id,
+            completion,
+            render_result,
+            overwrite,
+        } = self;
+        let commit_epoch = overwrite.epoch;
         for response in responses {
             for metadata in &response.iceberg_pk_index_sink_metadata {
                 if PbIcebergPkIndexSinkRole::try_from(metadata.role)
@@ -137,57 +87,113 @@ impl CompactionResolveJobControl {
                 {
                     continue;
                 }
-                assert_eq!(metadata.sink_id, self.sink_id);
-                assert_eq!(metadata.prev_epoch, epoch);
-                assert!(expected_actor_ids.contains(&metadata.reporter_actor_id));
+                assert_eq!(metadata.sink_id, sink_id);
+                assert_eq!(metadata.prev_epoch, commit_epoch);
+                assert_eq!(metadata.reporter_actor_id, render_result.resolver_actor_id);
             }
         }
 
-        let Phase::Resolving {
-            b2_prev_epoch,
-            overwrite,
-            ..
-        } = std::mem::replace(&mut self.phase, Phase::Done)
-        else {
-            unreachable!()
-        };
-        let OverwriteInput {
-            sink_id,
-            schema_id,
-            partition_spec_id,
-            output_files,
-            input_file_paths,
-            read_snapshot_id,
-        } = overwrite;
-        self.phase = Phase::Committing { b2_prev_epoch };
-        Some(IcebergPkIndexPreCommitMetadata {
-            sink_id,
-            prev_epoch: epoch,
-            reports: vec![],
-            compaction: Some(CompactionOverwrite {
+        (
+            overwrite.into(),
+            PendingCompactionResolveCommit {
                 sink_id,
-                epoch,
-                schema_id,
-                partition_spec_id,
-                output_files,
-                input_file_paths,
-                read_snapshot_id,
-            }),
+                task_id,
+                commit_epoch,
+                completion,
+            },
+        )
+    }
+}
+
+#[derive(Debug)]
+struct PendingCompactionResolveCommit {
+    sink_id: SinkId,
+    task_id: IcebergCompactionTaskId,
+    commit_epoch: u64,
+    completion: Arc<CompactionResolveCompletion>,
+}
+
+impl PendingCompactionResolveCommit {
+    fn finish(self) {
+        tracing::info!(sink_id = %self.sink_id, task_id = %self.task_id, "finish main-graph pk-index resolver job");
+        self.completion.finish(true);
+    }
+}
+
+/// Owns the resolver job across its transient actor and durable-commit lifetimes.
+#[derive(Debug, Default)]
+pub(crate) struct CompactionResolveJobRegistry {
+    resolving: HashMap<SinkId, CompactionResolveJob>,
+    pending_commits: HashMap<SinkId, PendingCompactionResolveCommit>,
+}
+
+impl CompactionResolveJobRegistry {
+    /// Insert a new resolver job, returning `false` if a job for the same sink already exists.
+    pub(crate) fn insert(&mut self, job: CompactionResolveJob) -> bool {
+        if self.contains_sink(job.sink_id) {
+            return false;
+        }
+        self.resolving.insert(job.sink_id, job);
+        true
+    }
+
+    pub(crate) fn contains_sink(&self, sink_id: SinkId) -> bool {
+        self.resolving.contains_key(&sink_id) || self.pending_commits.contains_key(&sink_id)
+    }
+
+    pub(crate) fn contains_worker(&self, worker_id: risingwave_meta_model::WorkerId) -> bool {
+        self.resolving.values().any(|job| {
+            InflightFragmentInfo::contains_worker(job.fragment_infos().values(), worker_id)
         })
     }
 
-    /// B2 commit/ack is the terminal event; no side-channel writer control is required.
-    pub(crate) fn on_main_graph_committed(&mut self, epoch: u64) -> bool {
-        let Phase::Committing { b2_prev_epoch } = self.phase else {
-            return false;
-        };
-        if epoch != b2_prev_epoch {
-            return false;
+    pub(crate) fn extend_node_actors(
+        &self,
+        node_actors: &mut HashMap<risingwave_meta_model::WorkerId, HashSet<ActorId>>,
+    ) {
+        for job in self.resolving.values() {
+            for (worker_id, actor_ids) in job.node_actors() {
+                node_actors
+                    .entry(*worker_id)
+                    .or_default()
+                    .extend(actor_ids.iter().copied());
+            }
         }
-        info!(sink_id = %self.sink_id, task_id = %self.task_id, "finish main-graph pk-index resolver job");
-        self.phase = Phase::Done;
-        self.completion.finish(true);
-        true
+    }
+
+    /// Complete resolving jobs for `commit_epoch` and move them to pending durable commits.
+    pub(crate) fn complete_resolve<'a>(
+        &mut self,
+        commit_epoch: u64,
+        responses: impl Iterator<Item = &'a BarrierCompleteResponse> + Clone,
+    ) -> Vec<IcebergPkIndexPreCommitMetadata> {
+        let Self {
+            resolving,
+            pending_commits,
+        } = self;
+        resolving
+            .extract_if(|_, job| job.commit_epoch() == commit_epoch)
+            .map(|(sink_id, job)| {
+                let (metadata, pending_commit) = job.complete(responses.clone());
+                let unique = pending_commits.insert(sink_id, pending_commit).is_none();
+                assert!(unique, "duplicate pending commit for sink_id={sink_id}");
+                metadata
+            })
+            .collect()
+    }
+
+    pub(crate) fn ack_committed(&mut self, commit_epoch: u64) {
+        for (_, pending_commit) in self
+            .pending_commits
+            .extract_if(|_, pending_commit| pending_commit.commit_epoch == commit_epoch)
+        {
+            pending_commit.finish();
+        }
+    }
+
+    pub(crate) fn clear(&mut self) {
+        self.resolving.clear();
+        self.pending_commits.clear();
     }
 }
 

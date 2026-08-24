@@ -16,7 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::Ordering;
 
 use iceberg::spec::SerializedDataFile;
-use risingwave_common::catalog::{FragmentTypeMask, TableId};
+use risingwave_common::catalog::FragmentTypeMask;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::{DispatcherType, WorkerId};
 use risingwave_pb::common::WorkerNode;
@@ -40,11 +40,10 @@ use crate::model::{DownstreamFragmentRelation, StreamActor, StreamJobActorsToCre
 pub(crate) struct CompactionResolverRenderResult {
     pub fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
     pub node_actors: HashMap<WorkerId, HashSet<ActorId>>,
-    pub state_table_ids: HashSet<TableId>,
     pub actors_to_create: StreamJobActorsToCreate,
     pub attach_mutation: Mutation,
     pub detach_mutation: Mutation,
-    pub resolver_actor_ids: Vec<ActorId>,
+    pub resolver_actor_id: ActorId,
 }
 
 pub(crate) struct CompactionResolverStreamNodes {
@@ -55,7 +54,6 @@ pub(crate) struct CompactionResolverStreamNodes {
 }
 
 /// Render one resolver actor on the worker hosting the smallest writer actor and wire its
-/// dispatcher
 /// dispatcher directly to every existing writer actor in the database main graph.
 pub(crate) fn render_resolver_fragment(
     writer_fragment: &InflightFragmentInfo,
@@ -173,11 +171,10 @@ pub(crate) fn render_resolver_fragment(
     Ok(CompactionResolverRenderResult {
         fragment_infos,
         node_actors,
-        state_table_ids: HashSet::new(),
         actors_to_create,
         attach_mutation,
         detach_mutation,
-        resolver_actor_ids: vec![resolver_actor_id],
+        resolver_actor_id,
     })
 }
 

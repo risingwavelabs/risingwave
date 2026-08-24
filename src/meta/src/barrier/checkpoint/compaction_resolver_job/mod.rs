@@ -18,5 +18,5 @@
 mod control;
 mod render;
 
-pub(crate) use control::{CompactionResolveJobControl, OverwriteInput};
+pub(crate) use control::{CompactionResolveJob, CompactionResolveJobRegistry};
 pub(crate) use render::{build_resolver_stream_node, output_file_paths, render_resolver_fragment};
