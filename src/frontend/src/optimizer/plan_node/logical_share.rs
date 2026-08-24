@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::hash::{Hash, Hasher};
-
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_common::bail_not_implemented;
 
@@ -49,7 +47,7 @@ use crate::utils::{ColIndexMapping, Condition};
 ///        |
 ///   LogicalSource
 /// ```
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct LogicalShare {
     pub base: PlanBase<Logical>,
     core: generic::Share<PlanRef>,
@@ -77,20 +75,6 @@ impl LogicalShare {
 
     pub(super) fn pretty_fields(base: impl GenericPlanRef, name: &str) -> XmlNode<'_> {
         childless_record(name, vec![("id", Pretty::debug(&base.id().0))])
-    }
-}
-
-impl PartialEq for LogicalShare {
-    fn eq(&self, other: &Self) -> bool {
-        self.share_id() == other.share_id()
-    }
-}
-
-impl Eq for LogicalShare {}
-
-impl Hash for LogicalShare {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.share_id().hash(state);
     }
 }
 

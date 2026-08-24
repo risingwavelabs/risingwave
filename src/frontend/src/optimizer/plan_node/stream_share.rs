@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::hash::{Hash, Hasher};
-
 use pretty_xmlish::XmlNode;
 use risingwave_pb::stream_plan::PbStreamNode;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
@@ -33,7 +31,7 @@ use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamShare` will be translated into an `ExchangeNode` based on its distribution finally.
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamShare {
     pub base: PlanBase<Stream>,
     core: generic::Share<PlanRef>,
@@ -59,20 +57,6 @@ impl StreamShare {
     pub fn new_from_input(input: PlanRef) -> Self {
         let ctx = input.ctx();
         Self::new(ctx.register_stream_share(input))
-    }
-}
-
-impl PartialEq for StreamShare {
-    fn eq(&self, other: &Self) -> bool {
-        self.share_id() == other.share_id()
-    }
-}
-
-impl Eq for StreamShare {}
-
-impl Hash for StreamShare {
-    fn hash<H: Hasher>(&self, state: &mut H) {
-        self.share_id().hash(state);
     }
 }
 
