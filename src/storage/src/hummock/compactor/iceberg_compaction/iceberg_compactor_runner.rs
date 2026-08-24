@@ -444,8 +444,9 @@ impl IcebergCompactionPlanRunner {
             let input_files = {
                 let mut input_files = vec![];
                 if let Some(snapshot) = committed_table.metadata().snapshot_for_ref(MAIN_BRANCH) {
-                    let manifest_list = snapshot
-                        .load_manifest_list(committed_table.file_io(), committed_table.metadata())
+                    let manifest_list = committed_table
+                        .object_cache()
+                        .get_manifest_list(snapshot, &committed_table.metadata_ref())
                         .await
                         .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
