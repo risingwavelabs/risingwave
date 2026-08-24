@@ -201,8 +201,12 @@ pub trait CatalogWriter: Send + Sync {
 
     async fn drop_sink(&self, sink_id: SinkId, cascade: bool) -> Result<()>;
 
-    async fn drop_subscription(&self, subscription_id: SubscriptionId, cascade: bool)
-    -> Result<()>;
+    async fn drop_subscription(
+        &self,
+        subscription_id: SubscriptionId,
+        cascade: bool,
+        if_exists: bool,
+    ) -> Result<()>;
 
     async fn drop_database(&self, database_id: DatabaseId) -> Result<()>;
 
@@ -634,10 +638,11 @@ impl CatalogWriter for CatalogWriterImpl {
         &self,
         subscription_id: SubscriptionId,
         cascade: bool,
+        if_exists: bool,
     ) -> Result<()> {
         let version = self
             .meta_client
-            .drop_subscription(subscription_id, cascade)
+            .drop_subscription(subscription_id, cascade, if_exists)
             .await?;
         self.wait_version(version).await
     }

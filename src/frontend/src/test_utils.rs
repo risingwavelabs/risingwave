@@ -586,6 +586,7 @@ impl CatalogWriter for MockCatalogWriter {
         &self,
         subscription_id: SubscriptionId,
         cascade: bool,
+        _if_exists: bool,
     ) -> Result<()> {
         if cascade {
             return Err(ErrorCode::NotSupported(

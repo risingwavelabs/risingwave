@@ -117,6 +117,14 @@ impl DropMode {
     }
 }
 
+fn ignore_missing_subscription<T>(result: MetaResult<T>, if_exists: bool) -> MetaResult<Option<T>> {
+    match result {
+        Ok(value) => Ok(Some(value)),
+        Err(err) if if_exists && err.is_catalog_id_not_found("subscription") => Ok(None),
+        Err(err) => Err(err),
+    }
+}
+
 #[derive(strum::AsRefStr)]
 pub enum StreamingJobId {
     MaterializedView(TableId),
@@ -189,7 +197,7 @@ pub enum DdlCommand {
     DropSecret(SecretId, DropMode),
     CommentOn(Comment),
     CreateSubscription(Subscription),
-    DropSubscription(SubscriptionId, DropMode),
+    DropSubscription(SubscriptionId, DropMode, bool),
     AlterSubscriptionRetention {
         subscription_id: SubscriptionId,
         retention_seconds: u64,
@@ -231,7 +239,7 @@ impl DdlCommand {
             DdlCommand::DropSecret(id, _) => Right(id.as_object_id()),
             DdlCommand::CommentOn(comment) => Right(comment.table_id.into()),
             DdlCommand::CreateSubscription(subscription) => Left(subscription.name.clone()),
-            DdlCommand::DropSubscription(id, _) => Right(id.as_object_id()),
+            DdlCommand::DropSubscription(id, _, _) => Right(id.as_object_id()),
             DdlCommand::AlterSubscriptionRetention {
                 subscription_id, ..
             } => Right(subscription_id.as_object_id()),
@@ -251,7 +259,7 @@ impl DdlCommand {
             | DdlCommand::DropStreamingJob { .. }
             | DdlCommand::DropConnection(_, _)
             | DdlCommand::DropSecret(_, _)
-            | DdlCommand::DropSubscription(_, _)
+            | DdlCommand::DropSubscription(_, _, _)
             | DdlCommand::AlterName(_, _)
             | DdlCommand::AlterObjectOwner(_, _)
             | DdlCommand::AlterSetSchema(_, _)
@@ -529,8 +537,9 @@ impl DdlController {
                 DdlCommand::CreateSubscription(subscription) => {
                     ctrl.create_subscription(subscription).await
                 }
-                DdlCommand::DropSubscription(subscription_id, drop_mode) => {
-                    ctrl.drop_subscription(subscription_id, drop_mode).await
+                DdlCommand::DropSubscription(subscription_id, drop_mode, if_exists) => {
+                    ctrl.drop_subscription(subscription_id, drop_mode, if_exists)
+                        .await
                 }
                 DdlCommand::AlterSubscriptionRetention {
                     subscription_id,
@@ -934,21 +943,40 @@ impl DdlController {
         &self,
         subscription_id: SubscriptionId,
         drop_mode: DropMode,
+        if_exists: bool,
     ) -> MetaResult<NotificationVersion> {
         tracing::debug!("preparing drop subscription");
         let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
-        let subscription = self
-            .metadata_manager
-            .catalog_controller
-            .get_subscription_by_id(subscription_id)
-            .await?;
+        let Some(subscription) = ignore_missing_subscription(
+            self.metadata_manager
+                .catalog_controller
+                .get_subscription_by_id(subscription_id)
+                .await,
+            if_exists,
+        )?
+        else {
+            return Ok(self
+                .metadata_manager
+                .catalog_controller
+                .notify_frontend_trivial()
+                .await);
+        };
         let table_id = subscription.dependent_table_id;
         let database_id = subscription.database_id;
-        let (_, version) = self
-            .metadata_manager
-            .catalog_controller
-            .drop_object(ObjectType::Subscription, subscription_id, drop_mode)
-            .await?;
+        let Some((_, version)) = ignore_missing_subscription(
+            self.metadata_manager
+                .catalog_controller
+                .drop_object(ObjectType::Subscription, subscription_id, drop_mode)
+                .await,
+            if_exists,
+        )?
+        else {
+            return Ok(self
+                .metadata_manager
+                .catalog_controller
+                .notify_frontend_trivial()
+                .await);
+        };
         self.stream_manager
             .drop_subscription(database_id, subscription_id, table_id)
             .await;
@@ -2592,6 +2620,30 @@ mod tests {
     use std::num::NonZeroUsize;
 
     use super::*;
+
+    #[test]
+    fn test_ignore_missing_subscription() {
+        let missing_subscription = MetaError::catalog_id_not_found("subscription", 1);
+        assert!(
+            ignore_missing_subscription::<()>(Err(missing_subscription), true)
+                .unwrap()
+                .is_none()
+        );
+
+        let missing_subscription = MetaError::catalog_id_not_found("subscription", 1);
+        assert!(
+            ignore_missing_subscription::<()>(Err(missing_subscription), false)
+                .unwrap_err()
+                .is_catalog_id_not_found("subscription")
+        );
+
+        let missing_table = MetaError::catalog_id_not_found("table", 1);
+        assert!(
+            ignore_missing_subscription::<()>(Err(missing_table), true)
+                .unwrap_err()
+                .is_catalog_id_not_found("table")
+        );
+    }
 
     #[test]
     fn test_validate_specified_parallelism_accepts_within_max() {

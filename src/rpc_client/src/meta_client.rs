@@ -959,10 +959,12 @@ impl MetaClient {
         &self,
         subscription_id: SubscriptionId,
         cascade: bool,
+        if_exists: bool,
     ) -> Result<WaitVersion> {
         let request = DropSubscriptionRequest {
             subscription_id,
             cascade,
+            if_exists,
         };
         let resp = self.inner.drop_subscription(request).await?;
         Ok(resp
