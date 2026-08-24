@@ -51,3 +51,5 @@
   formatted_sql: SELECT * FROM t MATCH_RECOGNIZE (PATTERN (a+? | b) DEFINE a AS a.x > 0, b AS b.x > 0)
 - input: select * from t match_recognize (pattern (a{2}?|b) define a as a.x > 0, b as b.x > 0)
   formatted_sql: SELECT * FROM t MATCH_RECOGNIZE (PATTERN (a{2}? | b) DEFINE a AS a.x > 0, b AS b.x > 0)
+- input: select * from t match_recognize (pattern ("PERMUTE") define "PERMUTE" as x > 0)
+  formatted_sql: SELECT * FROM t MATCH_RECOGNIZE (PATTERN ("PERMUTE") DEFINE "PERMUTE" AS x > 0)

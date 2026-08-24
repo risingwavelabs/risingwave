@@ -1776,10 +1776,12 @@ impl Parser<'_> {
     }
 
     /// Check if the expected match is the next token.
-    /// The equality check is case-insensitive.
+    /// The equality check is case-insensitive, and only an UNQUOTED word matches: a quoted word
+    /// is an identifier by definition, so it must never be taken as a contextual grammar word
+    /// (`PATTERN ("PERMUTE")` names a pattern variable, not the `PERMUTE(...)` form).
     pub fn parse_word(&mut self, expected: &str) -> bool {
         match self.peek_token().token {
-            Token::Word(w) if w.value.to_uppercase() == expected => {
+            Token::Word(w) if w.quote_style.is_none() && w.value.to_uppercase() == expected => {
                 self.next_token();
                 true
             }
