@@ -16,14 +16,15 @@ use core::mem;
 use core::time::Duration;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{Display, Formatter};
-use std::future::Future;
+use std::pin::Pin;
 use std::sync::Arc;
+use std::task::{Context, Poll};
 use std::time::Instant;
 
 use anyhow::anyhow;
 use bytes::Bytes;
-use futures::StreamExt;
-use futures::future::Either;
+use futures::stream::{self, BoxStream};
+use futures::{Stream, StreamExt};
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::StatementType;
@@ -52,7 +53,7 @@ use crate::monitor::{CursorMetrics, PeriodicCursorMetrics};
 use crate::optimizer::PlanRoot;
 use crate::optimizer::plan_node::{BatchFilter, BatchLogSeqScan, BatchSeqScan, generic};
 use crate::optimizer::property::{Order, RequiredDist};
-use crate::scheduler::{DistributedQueryStream, LocalQueryStream, ReadSnapshot, SchedulerError};
+use crate::scheduler::{DistributedQueryStream, LocalQueryStream, ReadSnapshot};
 use crate::utils::Condition;
 use crate::{OptimizerContext, OptimizerContextRef, PgResponseStream, TableCatalog};
 
@@ -67,12 +68,6 @@ pub struct FetchCursorCancelHandle {
     cancel_rx: ShutdownToken,
 }
 
-enum InterruptibleCursorResult<T> {
-    Completed(T),
-    TimedOut,
-    Cancelled,
-}
-
 impl FetchCursorCancelHandle {
     pub fn new() -> Self {
         let (cancel_tx, cancel_rx) = ShutdownToken::new();
@@ -85,52 +80,67 @@ impl FetchCursorCancelHandle {
     fn register(&self, session: &SessionImpl) {
         session.set_cancel_query_flag(self.cancel_tx.clone());
     }
-
-    async fn cancelled(&mut self) {
-        self.cancel_rx.cancelled().await;
-    }
 }
 
-async fn await_interruptible_cursor_operation<T>(
-    future: impl Future<Output = Result<T>>,
-    timeout_instant: Option<Instant>,
-    cancel_handle: &mut FetchCursorCancelHandle,
-) -> Result<InterruptibleCursorResult<T>> {
-    // Preserve the select's cancellation priority when both cancellation and timeout are already
-    // observable before the operation starts.
-    if cancel_handle.cancel_rx.is_cancelled() {
-        return Ok(InterruptibleCursorResult::Cancelled);
-    }
-    if let Some(timeout_instant) = timeout_instant {
-        let timeout_duration = timeout_instant.saturating_duration_since(Instant::now());
-        let timeout = if timeout_duration.is_zero() {
-            Either::Left(std::future::ready(()))
-        } else {
-            Either::Right(tokio::time::sleep(timeout_duration))
+/// A short-lived row stream for one subscription `FETCH` command.
+///
+/// Cancellation and timeout both end the stream, allowing the caller to return rows already
+/// accumulated by this `FETCH`.
+struct SubscriptionFetchStream<'a> {
+    inner: BoxStream<'a, Result<Row>>,
+}
+
+struct SubscriptionFetchStreamState<'a> {
+    cursor: &'a mut SubscriptionCursor,
+    handler_args: HandlerArgs,
+    formats: Vec<Format>,
+    deadline: Option<Instant>,
+    cancel_rx: ShutdownToken,
+    yielded_rows: usize,
+    finished: bool,
+}
+
+impl<'a> SubscriptionFetchStream<'a> {
+    fn new(
+        cursor: &'a mut SubscriptionCursor,
+        handler_args: HandlerArgs,
+        formats: &[Format],
+        deadline: Option<Instant>,
+        cancel_rx: ShutdownToken,
+    ) -> Self {
+        let state = SubscriptionFetchStreamState {
+            cursor,
+            handler_args,
+            formats: formats.to_vec(),
+            deadline,
+            cancel_rx,
+            yielded_rows: 0,
+            finished: false,
         };
-        tokio::pin!(timeout);
-        tokio::select! {
-            biased;
-            _ = cancel_handle.cancelled() => Ok(InterruptibleCursorResult::Cancelled),
-            _ = &mut timeout => Ok(InterruptibleCursorResult::TimedOut),
-            result = future => result.map(InterruptibleCursorResult::Completed),
-        }
-    } else {
-        tokio::select! {
-            biased;
-            _ = cancel_handle.cancelled() => Ok(InterruptibleCursorResult::Cancelled),
-            result = future => result.map(InterruptibleCursorResult::Completed),
-        }
+        let inner = stream::unfold(state, |mut state| async move {
+            if state.finished {
+                return None;
+            }
+            match state.next_item().await {
+                Ok(Some(row)) => Some((Ok(row), state)),
+                Ok(None) => None,
+                Err(error) => {
+                    state.finished = true;
+                    Some((Err(error), state))
+                }
+            }
+        })
+        .boxed();
+        Self { inner }
     }
 }
 
-/// Return a cancellation error if FETCH has no accumulated rows. Otherwise, allow the caller to
-/// finish with a partial result.
-fn check_fetch_cancellation(accumulated_rows: &[Row]) -> Result<()> {
-    if accumulated_rows.is_empty() {
-        return Err(SchedulerError::QueryCancelled("Cancelled by user".to_owned()).into());
+impl Stream for SubscriptionFetchStream<'_> {
+    type Item = Result<Row>;
+
+    fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
+        self.get_mut().inner.as_mut().poll_next(cx)
     }
-    Ok(())
 }
 
 impl CursorDataChunkStream {
@@ -684,7 +694,7 @@ impl SubscriptionCursor {
         timeout_seconds: Option<u64>,
         cancel_handle: &mut FetchCursorCancelHandle,
     ) -> Result<(Vec<Row>, Vec<PgFieldDescriptor>)> {
-        let timeout_instant = timeout_seconds.map(|s| Instant::now() + Duration::from_secs(s));
+        let deadline = timeout_seconds.map(|s| Instant::now() + Duration::from_secs(s));
         if Instant::now() > self.cursor_need_drop_time {
             return Err(ErrorCode::InternalError(
                 "The cursor has exceeded its maximum lifetime, please recreate it (close then declare cursor).".to_owned(),
@@ -694,7 +704,6 @@ impl SubscriptionCursor {
 
         let session = &handler_args.session;
         let mut ans = Vec::with_capacity(std::cmp::min(100, count) as usize);
-        let mut cur = 0;
         if let State::Fetch {
             from_snapshot,
             chunk_stream,
@@ -709,70 +718,21 @@ impl SubscriptionCursor {
         // Keep one cancellation identity for the entire FETCH, including nested queries and the
         // changelog notification wait.
         cancel_handle.register(session);
-        while cur < count {
-            let fetch_cursor_timer = Instant::now();
-            let row = await_interruptible_cursor_operation(
-                self.next_row(&handler_args, formats),
-                timeout_instant,
-                cancel_handle,
-            )
-            .await;
-            self.cursor_metrics
-                .subscription_cursor_fetch_duration
-                .with_label_values(&[&self.subscription.name])
-                .observe(fetch_cursor_timer.elapsed().as_millis() as _);
-            let row = match row? {
-                InterruptibleCursorResult::Completed(row) => row,
-                InterruptibleCursorResult::TimedOut => break,
-                InterruptibleCursorResult::Cancelled => {
-                    check_fetch_cancellation(&ans)?;
+        {
+            let mut fetch_stream = SubscriptionFetchStream::new(
+                self,
+                handler_args,
+                formats,
+                deadline,
+                cancel_handle.cancel_rx.clone(),
+            );
+            while ans.len() < count as usize {
+                let Some(row) = fetch_stream.next().await.transpose()? else {
                     break;
-                }
-            };
-            match row {
-                Some(row) => {
-                    cur += 1;
-                    ans.push(row);
-                }
-                None => {
-                    // Only an empty FETCH with a positive timeout waits for new changelog data.
-                    // Otherwise return the rows accumulated so far immediately.
-                    if cur > 0 || timeout_seconds == Some(0) {
-                        break;
-                    }
-                    let Some(timeout_instant) = timeout_instant else {
-                        break;
-                    };
-                    if let State::InitLogStoreQuery { seek_timestamp, .. } = &self.state {
-                        // This is the only point where subscription cursor fetch waits without an
-                        // inner query. The FETCH-level token also covers this wait and marks the
-                        // whole FETCH as cancelled, so we won't start another query after
-                        // cancellation.
-                        match await_interruptible_cursor_operation(
-                            session
-                                .env
-                                .hummock_snapshot_manager()
-                                .wait_table_change_log_notification(
-                                    self.dependent_table_id,
-                                    *seek_timestamp,
-                                ),
-                            Some(timeout_instant),
-                            cancel_handle,
-                        )
-                        .await?
-                        {
-                            InterruptibleCursorResult::Completed(()) => {}
-                            InterruptibleCursorResult::TimedOut => {
-                                tracing::debug!("Cursor wait next epoch timeout");
-                                break;
-                            }
-                            InterruptibleCursorResult::Cancelled => {
-                                return Err(check_fetch_cancellation(&ans).expect_err(
-                                    "notification wait requires an empty FETCH result",
-                                ));
-                            }
-                        }
-                    }
+                };
+                ans.push(row);
+                if deadline.is_some_and(|deadline| Instant::now() >= deadline) {
+                    break;
                 }
             }
         }
@@ -1132,6 +1092,101 @@ impl SubscriptionCursor {
     }
 }
 
+impl SubscriptionFetchStreamState<'_> {
+    async fn next_item(&mut self) -> Result<Option<Row>> {
+        enum FetchPoll<T> {
+            Ready(Result<T>),
+            TimedOut,
+            Cancelled,
+        }
+
+        loop {
+            let fetch_cursor_timer = Instant::now();
+            let poll = {
+                let cursor = &mut *self.cursor;
+                let handler_args = &self.handler_args;
+                let formats = &self.formats;
+                let cancel_rx = &mut self.cancel_rx;
+                if let Some(deadline) = self.deadline {
+                    let timeout =
+                        tokio::time::sleep(deadline.saturating_duration_since(Instant::now()));
+                    tokio::pin!(timeout);
+                    tokio::select! {
+                        biased;
+                        _ = cancel_rx.cancelled() => FetchPoll::Cancelled,
+                        row = cursor.next_row(handler_args, formats) => FetchPoll::Ready(row),
+                        _ = &mut timeout => FetchPoll::TimedOut,
+                    }
+                } else {
+                    tokio::select! {
+                        biased;
+                        _ = cancel_rx.cancelled() => FetchPoll::Cancelled,
+                        row = cursor.next_row(handler_args, formats) => FetchPoll::Ready(row),
+                    }
+                }
+            };
+            self.cursor
+                .cursor_metrics
+                .subscription_cursor_fetch_duration
+                .with_label_values(&[&self.cursor.subscription.name])
+                .observe(fetch_cursor_timer.elapsed().as_millis() as _);
+
+            let row = match poll {
+                FetchPoll::Cancelled | FetchPoll::TimedOut => return Ok(None),
+                FetchPoll::Ready(Err(_)) if self.cancel_rx.is_cancelled() => return Ok(None),
+                FetchPoll::Ready(result) => result?,
+            };
+            if let Some(row) = row {
+                self.yielded_rows += 1;
+                return Ok(Some(row));
+            }
+
+            // Once this FETCH has produced a row, reaching a phase or epoch boundary completes it.
+            // An empty FETCH waits for a future changelog epoch only when it has a deadline.
+            if self.yielded_rows > 0 {
+                return Ok(None);
+            }
+            let Some(deadline) = self.deadline else {
+                return Ok(None);
+            };
+            if Instant::now() >= deadline {
+                return Ok(None);
+            }
+            let State::InitLogStoreQuery { seek_timestamp, .. } = &self.cursor.state else {
+                // `next_row` can report a schema boundary while already holding the next query.
+                // Continue polling that query, subject to the same FETCH deadline.
+                continue;
+            };
+            let seek_timestamp = *seek_timestamp;
+            let wait = {
+                let cancel_rx = &mut self.cancel_rx;
+                let timeout =
+                    tokio::time::sleep(deadline.saturating_duration_since(Instant::now()));
+                tokio::pin!(timeout);
+                tokio::select! {
+                    biased;
+                    _ = cancel_rx.cancelled() => FetchPoll::Cancelled,
+                    result = self.handler_args.session.env.hummock_snapshot_manager()
+                        .wait_table_change_log_notification(
+                            self.cursor.dependent_table_id,
+                            seek_timestamp,
+                        ) => FetchPoll::Ready(result),
+                    _ = &mut timeout => FetchPoll::TimedOut,
+                }
+            };
+            match wait {
+                FetchPoll::Cancelled => return Ok(None),
+                FetchPoll::TimedOut => {
+                    tracing::debug!("Cursor wait next epoch timeout");
+                    return Ok(None);
+                }
+                FetchPoll::Ready(Err(_)) if self.cancel_rx.is_cancelled() => return Ok(None),
+                FetchPoll::Ready(result) => result?,
+            }
+        }
+    }
+}
+
 pub struct CursorManager {
     cursor_map: tokio::sync::Mutex<HashMap<String, Cursor>>,
     cursor_metrics: Arc<CursorMetrics>,
@@ -1331,74 +1386,9 @@ mod tests {
     use tokio::sync::oneshot;
 
     use super::*;
-    use crate::error::RwError;
     use crate::handler::query::handle_query;
 
-    #[tokio::test]
-    async fn test_interruptible_cursor_operation_completes() {
-        let mut cancel_handle = FetchCursorCancelHandle::new();
-
-        let result = await_interruptible_cursor_operation(
-            async { Ok::<_, RwError>(()) },
-            None,
-            &mut cancel_handle,
-        )
-        .await
-        .unwrap();
-
-        assert!(matches!(result, InterruptibleCursorResult::Completed(())));
-    }
-
-    #[tokio::test]
-    async fn test_interruptible_cursor_operation_times_out_pending_next_row() {
-        let mut cancel_handle = FetchCursorCancelHandle::new();
-
-        let result = await_interruptible_cursor_operation(
-            std::future::pending::<Result<()>>(),
-            Some(Instant::now() + Duration::from_millis(5)),
-            &mut cancel_handle,
-        )
-        .await
-        .unwrap();
-
-        assert!(matches!(result, InterruptibleCursorResult::TimedOut));
-    }
-
-    /// Verifies that cancellation wins when cancellation, timeout, and completion are all ready.
-    #[tokio::test]
-    async fn test_interruptible_cursor_operation_prefers_cancellation() {
-        let mut cancel_handle = FetchCursorCancelHandle::new();
-        assert!(cancel_handle.cancel_tx.cancel());
-
-        let result = await_interruptible_cursor_operation(
-            async { Ok::<_, RwError>(()) },
-            Some(Instant::now()),
-            &mut cancel_handle,
-        )
-        .await
-        .unwrap();
-
-        assert!(matches!(result, InterruptibleCursorResult::Cancelled));
-    }
-
-    /// Verifies that an elapsed FETCH deadline wins over an immediately-ready operation.
-    #[tokio::test]
-    async fn test_interruptible_cursor_operation_prefers_timeout() {
-        let mut cancel_handle = FetchCursorCancelHandle::new();
-
-        let result = await_interruptible_cursor_operation(
-            async { Ok::<_, RwError>(()) },
-            Some(Instant::now()),
-            &mut cancel_handle,
-        )
-        .await
-        .unwrap();
-
-        assert!(matches!(result, InterruptibleCursorResult::TimedOut));
-    }
-
-    /// Covers the `TimedOut => break` arm in `SubscriptionCursor::next` by keeping `next_row`
-    /// pending until the zero-duration FETCH timeout fires.
+    /// Keeps `next_row` pending until the zero-duration FETCH timeout ends the stream.
     #[tokio::test]
     async fn test_subscription_fetch_times_out_pending_next_row() {
         let session = Arc::new(SessionImpl::mock());
@@ -1442,9 +1432,10 @@ mod tests {
         assert!(rows.is_empty());
     }
 
-    /// Verifies that an elapsed timeout prevents FETCH from consuming an immediately-ready row.
+    /// Verifies that one immediately-ready row wins a timeout tie, after which the elapsed
+    /// deadline ends the stream.
     #[tokio::test]
-    async fn test_subscription_fetch_timeout_wins_over_ready_row() {
+    async fn test_subscription_fetch_ready_row_wins_timeout_tie() {
         let session = Arc::new(SessionImpl::mock());
         let sql: Arc<str> = "select 1".into();
         let statement = Parser::parse_exactly_one(&sql).unwrap();
@@ -1473,6 +1464,105 @@ mod tests {
 
         let (rows, _) = cursor
             .next(2, handler_args, &formats, Some(0), &mut cancel_handle)
+            .await
+            .unwrap();
+
+        assert_eq!(rows.len(), 1);
+    }
+
+    /// Verifies that a row buffered by an earlier FETCH remains immediately available when the
+    /// following FETCH uses a zero-duration timeout.
+    #[tokio::test]
+    async fn test_subscription_fetch_zero_timeout_returns_buffered_row() {
+        let session = Arc::new(SessionImpl::mock());
+        let sql: Arc<str> = "select 1".into();
+        let statement = Parser::parse_exactly_one(&sql).unwrap();
+        let handler_args = HandlerArgs::new(session, &statement, sql).unwrap();
+        let table_catalog = TableCatalog::default();
+        let mut cursor = SubscriptionCursor {
+            cursor_name: "cur".to_owned(),
+            subscription: Arc::new(SubscriptionCatalog::default()),
+            dependent_table_id: 0.into(),
+            cursor_need_drop_time: Instant::now() + Duration::from_secs(60),
+            state: State::Fetch {
+                from_snapshot: true,
+                rw_timestamp: 0,
+                chunk_stream: CursorDataChunkStream::PgResponse(PgResponseStream::from(vec![
+                    Row::new(vec![]),
+                    Row::new(vec![]),
+                ])),
+                remaining_rows: VecDeque::new(),
+                expected_timestamp: None,
+                init_query_timer: Instant::now(),
+            },
+            fields_manager: FieldsManager::new(&table_catalog),
+            cursor_metrics: Arc::new(CursorMetrics::for_test()),
+            last_fetch: Instant::now(),
+            seek_pk_row: None,
+        };
+        let formats = vec![];
+
+        let (rows, _) = cursor
+            .next(
+                1,
+                handler_args.clone(),
+                &formats,
+                None,
+                &mut FetchCursorCancelHandle::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert!(matches!(
+            &cursor.state,
+            State::Fetch { remaining_rows, .. } if remaining_rows.len() == 1
+        ));
+
+        let (rows, _) = cursor
+            .next(
+                1,
+                handler_args,
+                &formats,
+                Some(0),
+                &mut FetchCursorCancelHandle::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+    }
+
+    /// Verifies the polling priority `CancelRequest -> ready row -> timeout` and that cancellation
+    /// returns the rows accumulated so far, including an empty result.
+    #[tokio::test]
+    async fn test_subscription_fetch_cancellation_wins_ready_row_and_timeout() {
+        let session = Arc::new(SessionImpl::mock());
+        let sql: Arc<str> = "select 1".into();
+        let statement = Parser::parse_exactly_one(&sql).unwrap();
+        let handler_args = HandlerArgs::new(session, &statement, sql).unwrap();
+        let table_catalog = TableCatalog::default();
+        let mut cursor = SubscriptionCursor {
+            cursor_name: "cur".to_owned(),
+            subscription: Arc::new(SubscriptionCatalog::default()),
+            dependent_table_id: 0.into(),
+            cursor_need_drop_time: Instant::now() + Duration::from_secs(60),
+            state: State::Fetch {
+                from_snapshot: true,
+                rw_timestamp: 0,
+                chunk_stream: CursorDataChunkStream::PgResponse(PgResponseStream::from(vec![])),
+                remaining_rows: VecDeque::from([Row::new(vec![])]),
+                expected_timestamp: None,
+                init_query_timer: Instant::now(),
+            },
+            fields_manager: FieldsManager::new(&table_catalog),
+            cursor_metrics: Arc::new(CursorMetrics::for_test()),
+            last_fetch: Instant::now(),
+            seek_pk_row: None,
+        };
+        let mut cancel_handle = FetchCursorCancelHandle::new();
+        assert!(cancel_handle.cancel_tx.cancel());
+
+        let (rows, _) = cursor
+            .next(1, handler_args, &vec![], Some(0), &mut cancel_handle)
             .await
             .unwrap();
 
@@ -1513,7 +1603,7 @@ mod tests {
     /// wait (i.e., after `next_row` returns `None`, while waiting for the dependent table's next
     /// changelog epoch and receiving a cancellation request).
     #[tokio::test]
-    async fn test_subscription_fetch_cancellation_during_notification_wait_returns_error() {
+    async fn test_subscription_fetch_cancellation_during_notification_wait_returns_empty() {
         let session = Arc::new(SessionImpl::mock());
         let _txn_guard = session.txn_begin_implicit();
         let dependent_table_id: TableId = 42.into();
@@ -1580,11 +1670,11 @@ mod tests {
                 .is_some_and(|shutdown_tx| shutdown_tx.same_channel(&fetch_cancel_tx))
         );
 
-        let error = tokio::time::timeout(Duration::from_secs(1), fetch)
+        let (rows, _) = tokio::time::timeout(Duration::from_secs(1), fetch)
             .await
             .expect("cancelled FETCH should not hang")
-            .expect_err("cancelled FETCH without accumulated rows should return an error");
-        assert!(error.to_string().contains("Cancelled by user"));
+            .expect("cancelled FETCH should return its accumulated rows");
+        assert!(rows.is_empty());
     }
 
     #[tokio::test]
