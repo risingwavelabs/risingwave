@@ -415,7 +415,11 @@ impl DdlService for DdlServiceImpl {
         let drop_mode = DropMode::from_request_setting(request.cascade);
         let version = self
             .ddl_controller
-            .run_command(DdlCommand::DropSource(source_id, drop_mode))
+            .run_command(DdlCommand::DropSource(
+                source_id,
+                drop_mode,
+                request.if_exists,
+            ))
             .await?;
 
         Ok(Response::new(DropSourceResponse {
@@ -497,6 +501,7 @@ impl DdlService for DdlServiceImpl {
         let command = DdlCommand::DropStreamingJob {
             job_id: StreamingJobId::Sink(sink_id),
             drop_mode,
+            if_exists: request.if_exists,
         };
 
         let version = self.ddl_controller.run_command(command).await?;
@@ -598,6 +603,7 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::DropStreamingJob {
                 job_id: StreamingJobId::MaterializedView(table_id),
                 drop_mode,
+                if_exists: request.if_exists,
             })
             .await?;
 
@@ -657,6 +663,7 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::DropStreamingJob {
                 job_id: StreamingJobId::Index(index_id),
                 drop_mode,
+                if_exists: request.if_exists,
             })
             .await?;
 
@@ -750,6 +757,7 @@ impl DdlService for DdlServiceImpl {
             .run_command(DdlCommand::DropStreamingJob {
                 job_id: StreamingJobId::Table(source_id.map(|PbSourceId::Id(id)| id), table_id),
                 drop_mode,
+                if_exists: request.if_exists,
             })
             .await?;
 
@@ -1936,6 +1944,7 @@ impl DdlService for DdlServiceImpl {
                 .run_command(DdlCommand::DropStreamingJob {
                     job_id: StreamingJobId::Table(None, table_id),
                     drop_mode: DropMode::Cascade,
+                    if_exists: false,
                 })
                 .await
                 .inspect_err(|err| {
@@ -1985,6 +1994,7 @@ impl DdlService for DdlServiceImpl {
                 .run_command(DdlCommand::DropStreamingJob {
                     job_id: StreamingJobId::Table(None, table_id),
                     drop_mode: DropMode::Cascade,
+                    if_exists: false,
                 })
                 .await
                 .inspect_err(|err| {

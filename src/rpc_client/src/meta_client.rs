@@ -445,8 +445,13 @@ impl MetaClient {
         &self,
         table_id: TableId,
         cascade: bool,
+        if_exists: bool,
     ) -> Result<WaitVersion> {
-        let request = DropMaterializedViewRequest { table_id, cascade };
+        let request = DropMaterializedViewRequest {
+            table_id,
+            cascade,
+            if_exists,
+        };
 
         let resp = self.inner.drop_materialized_view(request).await?;
         Ok(resp
@@ -892,11 +897,13 @@ impl MetaClient {
         source_id: Option<SourceId>,
         table_id: TableId,
         cascade: bool,
+        if_exists: bool,
     ) -> Result<WaitVersion> {
         let request = DropTableRequest {
             source_id: source_id.map(risingwave_pb::ddl_service::drop_table_request::SourceId::Id),
             table_id,
             cascade,
+            if_exists,
         };
 
         let resp = self.inner.drop_table(request).await?;
@@ -931,8 +938,17 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn drop_source(&self, source_id: SourceId, cascade: bool) -> Result<WaitVersion> {
-        let request = DropSourceRequest { source_id, cascade };
+    pub async fn drop_source(
+        &self,
+        source_id: SourceId,
+        cascade: bool,
+        if_exists: bool,
+    ) -> Result<WaitVersion> {
+        let request = DropSourceRequest {
+            source_id,
+            cascade,
+            if_exists,
+        };
         let resp = self.inner.drop_source(request).await?;
         Ok(resp
             .version
@@ -947,8 +963,17 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn drop_sink(&self, sink_id: SinkId, cascade: bool) -> Result<WaitVersion> {
-        let request = DropSinkRequest { sink_id, cascade };
+    pub async fn drop_sink(
+        &self,
+        sink_id: SinkId,
+        cascade: bool,
+        if_exists: bool,
+    ) -> Result<WaitVersion> {
+        let request = DropSinkRequest {
+            sink_id,
+            cascade,
+            if_exists,
+        };
         let resp = self.inner.drop_sink(request).await?;
         Ok(resp
             .version
@@ -972,8 +997,17 @@ impl MetaClient {
             .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
-    pub async fn drop_index(&self, index_id: IndexId, cascade: bool) -> Result<WaitVersion> {
-        let request = DropIndexRequest { index_id, cascade };
+    pub async fn drop_index(
+        &self,
+        index_id: IndexId,
+        cascade: bool,
+        if_exists: bool,
+    ) -> Result<WaitVersion> {
+        let request = DropIndexRequest {
+            index_id,
+            cascade,
+            if_exists,
+        };
         let resp = self.inner.drop_index(request).await?;
         Ok(resp
             .version

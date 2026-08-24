@@ -117,10 +117,25 @@ impl DropMode {
     }
 }
 
-fn ignore_missing_subscription<T>(result: MetaResult<T>, if_exists: bool) -> MetaResult<Option<T>> {
+fn ignore_missing_object<T>(
+    result: MetaResult<T>,
+    if_exists: bool,
+    object_type: &'static str,
+    object_id: impl ToString,
+) -> MetaResult<Option<T>> {
+    let object_id = object_id.to_string();
     match result {
         Ok(value) => Ok(Some(value)),
-        Err(err) if if_exists && err.is_catalog_id_not_found("subscription") => Ok(None),
+        Err(err)
+            if if_exists
+                && matches!(
+                    err.inner(),
+                    MetaErrorInner::CatalogIdNotFound(found_type, found_id)
+                        if *found_type == object_type && found_id == &object_id
+                ) =>
+        {
+            Ok(None)
+        }
         Err(err) => Err(err),
     }
 }
@@ -164,7 +179,7 @@ pub enum DdlCommand {
     CreateSchema(Schema),
     DropSchema(SchemaId, DropMode),
     CreateNonSharedSource(Source, Option<TableId>),
-    DropSource(SourceId, DropMode),
+    DropSource(SourceId, DropMode, bool),
     ResetSource(SourceId),
     CreateFunction(Function),
     DropFunction(FunctionId, DropMode),
@@ -183,6 +198,7 @@ pub enum DdlCommand {
     DropStreamingJob {
         job_id: StreamingJobId,
         drop_mode: DropMode,
+        if_exists: bool,
     },
     AlterName(alter_name_request::Object, String),
     AlterSwapRename(alter_swap_rename_request::Object),
@@ -218,7 +234,7 @@ impl DdlCommand {
             DdlCommand::CreateSchema(schema) => Left(schema.name.clone()),
             DdlCommand::DropSchema(id, _) => Right(id.as_object_id()),
             DdlCommand::CreateNonSharedSource(source, _) => Left(source.name.clone()),
-            DdlCommand::DropSource(id, _) => Right(id.as_object_id()),
+            DdlCommand::DropSource(id, _, _) => Right(id.as_object_id()),
             DdlCommand::ResetSource(id) => Right(id.as_object_id()),
             DdlCommand::CreateFunction(function) => Left(function.name.clone()),
             DdlCommand::DropFunction(id, _) => Right(id.as_object_id()),
@@ -253,7 +269,7 @@ impl DdlCommand {
         match self {
             DdlCommand::DropDatabase(_)
             | DdlCommand::DropSchema(_, _)
-            | DdlCommand::DropSource(_, _)
+            | DdlCommand::DropSource(_, _, _)
             | DdlCommand::DropFunction(_, _)
             | DdlCommand::DropView(_, _)
             | DdlCommand::DropStreamingJob { .. }
@@ -469,8 +485,8 @@ impl DdlController {
                     ctrl.create_non_shared_source(source, iceberg_table_id)
                         .await
                 }
-                DdlCommand::DropSource(source_id, drop_mode) => {
-                    ctrl.drop_source(source_id, drop_mode).await
+                DdlCommand::DropSource(source_id, drop_mode, if_exists) => {
+                    ctrl.drop_source(source_id, drop_mode, if_exists).await
                 }
                 DdlCommand::ResetSource(source_id) => ctrl.reset_source(source_id).await,
                 DdlCommand::CreateFunction(function) => ctrl.create_function(function).await,
@@ -505,9 +521,11 @@ impl DdlController {
                     )
                     .await
                 }
-                DdlCommand::DropStreamingJob { job_id, drop_mode } => {
-                    ctrl.drop_streaming_job(job_id, drop_mode).await
-                }
+                DdlCommand::DropStreamingJob {
+                    job_id,
+                    drop_mode,
+                    if_exists,
+                } => ctrl.drop_streaming_job(job_id, drop_mode, if_exists).await,
                 DdlCommand::ReplaceStreamJob(ReplaceStreamJobInfo {
                     streaming_job,
                     fragment_graph,
@@ -720,9 +738,23 @@ impl DdlController {
         &self,
         source_id: SourceId,
         drop_mode: DropMode,
+        if_exists: bool,
     ) -> MetaResult<NotificationVersion> {
-        self.drop_object(ObjectType::Source, source_id, drop_mode)
-            .await
+        let Some(version) = ignore_missing_object(
+            self.drop_object(ObjectType::Source, source_id, drop_mode)
+                .await,
+            if_exists,
+            ObjectType::Source.as_str(),
+            source_id,
+        )?
+        else {
+            return Ok(self
+                .metadata_manager
+                .catalog_controller
+                .notify_frontend_trivial()
+                .await);
+        };
+        Ok(version)
     }
 
     async fn reset_source(&self, source_id: SourceId) -> MetaResult<NotificationVersion> {
@@ -947,12 +979,14 @@ impl DdlController {
     ) -> MetaResult<NotificationVersion> {
         tracing::debug!("preparing drop subscription");
         let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
-        let Some(subscription) = ignore_missing_subscription(
+        let Some(subscription) = ignore_missing_object(
             self.metadata_manager
                 .catalog_controller
                 .get_subscription_by_id(subscription_id)
                 .await,
             if_exists,
+            ObjectType::Subscription.as_str(),
+            subscription_id,
         )?
         else {
             return Ok(self
@@ -963,12 +997,14 @@ impl DdlController {
         };
         let table_id = subscription.dependent_table_id;
         let database_id = subscription.database_id;
-        let Some((_, version)) = ignore_missing_subscription(
+        let Some((_, version)) = ignore_missing_object(
             self.metadata_manager
                 .catalog_controller
                 .drop_object(ObjectType::Subscription, subscription_id, drop_mode)
                 .await,
             if_exists,
+            ObjectType::Subscription.as_str(),
+            subscription_id,
         )?
         else {
             return Ok(self
@@ -1900,6 +1936,7 @@ impl DdlController {
         &self,
         job_id: StreamingJobId,
         drop_mode: DropMode,
+        if_exists: bool,
     ) -> MetaResult<NotificationVersion> {
         let (object_id, object_type) = match job_id {
             StreamingJobId::MaterializedView(id) => (id.as_object_id(), ObjectType::Table),
@@ -1908,11 +1945,22 @@ impl DdlController {
             StreamingJobId::Index(idx) => (idx.as_object_id(), ObjectType::Index),
         };
 
-        let job_status = self
-            .metadata_manager
-            .catalog_controller
-            .get_streaming_job_status(job_id.id())
-            .await?;
+        let Some(job_status) = ignore_missing_object(
+            self.metadata_manager
+                .catalog_controller
+                .get_streaming_job_status(job_id.id())
+                .await,
+            if_exists,
+            "streaming job",
+            job_id.id(),
+        )?
+        else {
+            return Ok(self
+                .metadata_manager
+                .catalog_controller
+                .notify_frontend_trivial()
+                .await);
+        };
         let version = match job_status {
             JobStatus::Initial => {
                 let abort_result = self
@@ -1930,7 +1978,22 @@ impl DdlController {
                     .await?;
                 IGNORED_NOTIFICATION_VERSION
             }
-            JobStatus::Created => self.drop_object(object_type, object_id, drop_mode).await?,
+            JobStatus::Created => {
+                let Some(version) = ignore_missing_object(
+                    self.drop_object(object_type, object_id, drop_mode).await,
+                    if_exists,
+                    object_type.as_str(),
+                    object_id,
+                )?
+                else {
+                    return Ok(self
+                        .metadata_manager
+                        .catalog_controller
+                        .notify_frontend_trivial()
+                        .await);
+                };
+                version
+            }
         };
 
         Ok(version)
@@ -2622,26 +2685,33 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_ignore_missing_subscription() {
+    fn test_ignore_missing_object() {
         let missing_subscription = MetaError::catalog_id_not_found("subscription", 1);
         assert!(
-            ignore_missing_subscription::<()>(Err(missing_subscription), true)
+            ignore_missing_object::<()>(Err(missing_subscription), true, "subscription", 1)
                 .unwrap()
                 .is_none()
         );
 
         let missing_subscription = MetaError::catalog_id_not_found("subscription", 1);
         assert!(
-            ignore_missing_subscription::<()>(Err(missing_subscription), false)
+            ignore_missing_object::<()>(Err(missing_subscription), false, "subscription", 1)
                 .unwrap_err()
                 .is_catalog_id_not_found("subscription")
         );
 
         let missing_table = MetaError::catalog_id_not_found("table", 1);
         assert!(
-            ignore_missing_subscription::<()>(Err(missing_table), true)
+            ignore_missing_object::<()>(Err(missing_table), true, "subscription", 1)
                 .unwrap_err()
                 .is_catalog_id_not_found("table")
+        );
+
+        let other_subscription = MetaError::catalog_id_not_found("subscription", 2);
+        assert!(
+            ignore_missing_object::<()>(Err(other_subscription), true, "subscription", 1)
+                .unwrap_err()
+                .is_catalog_id_not_found("subscription")
         );
     }
 
