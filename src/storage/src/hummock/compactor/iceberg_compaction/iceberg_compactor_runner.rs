@@ -1111,6 +1111,7 @@ mod tests {
         paths
     }
 
+    #[cfg_attr(madsim, ignore = "requires Iceberg's native Tokio runtime")]
     #[tokio::test]
     async fn test_cow_publish_uses_planned_snapshot_before_concurrent_update() {
         let table = test_table();
