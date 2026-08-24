@@ -138,9 +138,7 @@ mod tests {
     use risingwave_common::array::{Op, StructValue};
     use risingwave_common::catalog::ColumnId;
     use risingwave_common::row::{OwnedRow, Row};
-    use risingwave_common::types::{
-        DataType, Date, Interval, Scalar, ScalarImpl, StructType, Time, Timestamp,
-    };
+    use risingwave_common::types::{DataType, Date, Interval, Scalar, ScalarImpl, Time, Timestamp};
     use serde_json::Value;
     use thiserror_ext::AsReport;
 
@@ -582,6 +580,7 @@ mod tests {
         use risingwave_pb::plan_common::AdditionalColumn;
 
         use super::*;
+        use crate::connector_common::postgres::postgres_point_type;
         use crate::source::SourceColumnType;
 
         // schema for temporal-type test
@@ -636,10 +635,7 @@ mod tests {
                 SourceColumnDesc::simple("o_uuid", DataType::Varchar, ColumnId::from(6)),
                 SourceColumnDesc {
                     name: "o_point".to_owned(),
-                    data_type: DataType::Struct(StructType::new(vec![
-                        ("x", DataType::Float64),
-                        ("y", DataType::Float64),
-                    ])),
+                    data_type: postgres_point_type(),
                     column_id: 7.into(),
                     column_type: SourceColumnType::Normal,
                     is_pk: false,
