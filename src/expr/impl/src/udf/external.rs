@@ -24,9 +24,9 @@ use futures_util::{StreamExt, TryStreamExt};
 use ginepro::{LoadBalancedChannel, ResolutionStrategy};
 use risingwave_common::array::arrow::arrow_schema_udf::{self, Fields};
 use risingwave_common::array::arrow::{UdfArrowConvert, UdfToArrow};
-use risingwave_common::util::addr::HostAddr;
 use thiserror_ext::AsReport;
 use tokio::runtime::Runtime;
+use tonic::transport::ClientTlsConfig;
 
 use super::*;
 
@@ -198,7 +198,7 @@ fn get_or_create_flight_client(link: &str) -> Result<Arc<Client>> {
 }
 
 /// Connect to a UDF service and return a tonic `Channel`.
-async fn connect_tonic(mut addr: &str) -> Result<tonic::transport::Channel> {
+async fn connect_tonic(addr: &str) -> Result<tonic::transport::Channel> {
     // Interval between two successive probes of the UDF DNS.
     const DNS_PROBE_INTERVAL_SECS: u64 = 5;
     // Timeout duration for performing an eager DNS resolution.
@@ -206,24 +206,46 @@ async fn connect_tonic(mut addr: &str) -> Result<tonic::transport::Channel> {
     const REQUEST_TIMEOUT_SECS: u64 = 5;
     const CONNECT_TIMEOUT_SECS: u64 = 5;
 
-    if let Some(s) = addr.strip_prefix("http://") {
-        addr = s;
-    }
-    if let Some(s) = addr.strip_prefix("https://") {
-        addr = s;
-    }
-    let host_addr = addr.parse::<HostAddr>()?;
-    let channel = LoadBalancedChannel::builder((host_addr.host.clone(), host_addr.port))
+    let (tls, host, port) = parse_udf_link(addr)?;
+    let mut builder = LoadBalancedChannel::builder((host.clone(), port))
         .dns_probe_interval(std::time::Duration::from_secs(DNS_PROBE_INTERVAL_SECS))
         .timeout(Duration::from_secs(REQUEST_TIMEOUT_SECS))
         .connect_timeout(Duration::from_secs(CONNECT_TIMEOUT_SECS))
         .resolution_strategy(ResolutionStrategy::Eager {
             timeout: tokio::time::Duration::from_secs(EAGER_DNS_RESOLVE_TIMEOUT_SECS),
-        })
+        });
+    if tls {
+        // ginepro sets the TLS domain name (SNI) to `host` rather than the resolved IPs.
+        builder = builder.with_tls(ClientTlsConfig::new().with_native_roots());
+    }
+    let channel = builder
         .channel()
         .await
-        .with_context(|| format!("failed to create LoadBalancedChannel, address: {host_addr}"))?;
+        .with_context(|| format!("failed to create LoadBalancedChannel, address: {host}:{port}"))?;
     Ok(channel.into())
+}
+
+/// Parse a UDF link into `(tls, host, port)`.
+///
+/// The link may be a plain `host:port`, or an `http://` / `https://` URL, where `https` enables
+/// TLS and an omitted port defaults to 80 / 443.
+fn parse_udf_link(link: &str) -> Result<(bool, String, u16)> {
+    let (tls, rest) = match link.split_once("://") {
+        Some((scheme, rest)) if scheme.eq_ignore_ascii_case("https") => (true, rest),
+        Some((scheme, rest)) if scheme.eq_ignore_ascii_case("http") => (false, rest),
+        Some((scheme, _)) => bail!("unsupported scheme in UDF link: {scheme}"),
+        None => (false, link),
+    };
+    let scheme = if tls { "https" } else { "http" };
+    let url = url::Url::parse(&format!("{scheme}://{rest}"))
+        .with_context(|| format!("failed to parse UDF link: {link}"))?;
+    let host = url
+        .host_str()
+        .with_context(|| format!("no host in UDF link: {link}"))?;
+    let port = url
+        .port_or_known_default()
+        .expect("http(s) scheme always has a default port");
+    Ok((tls, host.to_owned(), port))
 }
 
 impl ExternalFunction {
@@ -301,4 +323,41 @@ fn data_types_match(a: &arrow_schema_udf::Schema, b: &arrow_schema_udf::Schema) 
         .iter()
         .zip(b.fields())
         .all(|(a, b)| a.data_type().equals_datatype(b.data_type()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_udf_link;
+
+    #[test]
+    fn test_parse_udf_link() {
+        let parse = |link: &str| parse_udf_link(link).unwrap();
+        assert_eq!(parse("localhost:8815"), (false, "localhost".into(), 8815));
+        assert_eq!(parse("http://localhost"), (false, "localhost".into(), 80));
+        assert_eq!(
+            parse("http://localhost:80"),
+            (false, "localhost".into(), 80)
+        );
+        assert_eq!(
+            parse("http://localhost:8815"),
+            (false, "localhost".into(), 8815)
+        );
+        assert_eq!(
+            parse("https://example.com"),
+            (true, "example.com".into(), 443)
+        );
+        assert_eq!(
+            parse("https://example.com:443"),
+            (true, "example.com".into(), 443)
+        );
+        assert_eq!(
+            parse("https://example.com:8443"),
+            (true, "example.com".into(), 8443)
+        );
+        assert_eq!(parse("[::1]:8815"), (false, "[::1]".into(), 8815));
+
+        assert!(parse_udf_link("localhost:12345:12345").is_err());
+        assert!(parse_udf_link("localhost:65536").is_err());
+        assert!(parse_udf_link("").is_err());
+    }
 }
