@@ -254,6 +254,27 @@ pub const SINK_USER_FORCE_COMPACTION: &str = "force_compaction";
 /// barrier. Upstream changes under the same stream key may still be compacted earlier.
 pub const SINK_USER_PRESERVE_ROW_LEVEL_CHANGES: &str = "preserve_row_level_changes";
 
+/// Return whether the configured sink uses exactly-once commit state.
+///
+/// Connector dispatch is centralized here, while each [`Sink`] implementation owns the
+/// interpretation and default of its properties.
+pub fn sink_is_exactly_once(properties: &BTreeMap<String, String>) -> Result<bool> {
+    let sink_type = properties
+        .get(CONNECTOR_TYPE_KEY)
+        .ok_or_else(|| SinkError::Config(anyhow!("missing config: {}", CONNECTOR_TYPE_KEY)))?
+        .to_lowercase();
+
+    match_sink_name_str!(
+        sink_type.as_str(),
+        SinkType,
+        SinkType::is_exactly_once(properties),
+        |other| Err(SinkError::Config(anyhow!(
+            "unsupported sink connector {}",
+            other
+        )))
+    )
+}
+
 pub trait UnknownFields {
     /// Unrecognized fields in the `WITH` clause.
     fn unknown_fields(&self) -> HashMap<String, String>;
@@ -787,6 +808,11 @@ pub trait Sink: TryFrom<SinkParam, Error = SinkError> {
 
     type LogSinker: LogSinker;
 
+    /// Return whether this sink uses exactly-once commit state for the loaded properties.
+    fn is_exactly_once(_properties: &BTreeMap<String, String>) -> Result<bool> {
+        Ok(false)
+    }
+
     fn set_default_commit_checkpoint_interval(
         desc: &mut SinkDesc,
         user_specified: &SinkDecouple,
@@ -1315,5 +1341,41 @@ mod tests {
         ]))
         .unwrap_err();
         assert!(err.to_report_string().contains("missing field `topic`"));
+    }
+
+    #[test]
+    fn test_sink_exactly_once_policy() {
+        assert!(sink_is_exactly_once(&btreemap([(CONNECTOR_TYPE_KEY, ICEBERG_SINK)])).unwrap());
+        assert!(
+            !sink_is_exactly_once(&btreemap([
+                (CONNECTOR_TYPE_KEY, ICEBERG_SINK),
+                ("is_exactly_once", "false"),
+            ]))
+            .unwrap()
+        );
+
+        #[cfg(feature = "sink-deltalake")]
+        {
+            assert!(
+                !sink_is_exactly_once(&btreemap([(CONNECTOR_TYPE_KEY, DELTALAKE_SINK)])).unwrap()
+            );
+            assert!(
+                sink_is_exactly_once(&btreemap([
+                    (CONNECTOR_TYPE_KEY, DELTALAKE_SINK),
+                    ("is_exactly_once", "true"),
+                ]))
+                .unwrap()
+            );
+        }
+
+        #[cfg(feature = "sink-lancedb")]
+        assert!(sink_is_exactly_once(&btreemap([(CONNECTOR_TYPE_KEY, LANCEDB_SINK)])).unwrap());
+
+        let error = sink_is_exactly_once(&btreemap([
+            (CONNECTOR_TYPE_KEY, ICEBERG_SINK),
+            ("is_exactly_once", "invalid"),
+        ]))
+        .unwrap_err();
+        assert!(error.to_report_string().contains("is_exactly_once"));
     }
 }

@@ -24,6 +24,7 @@ use lance::dataset::CommitBuilder;
 use lance::dataset::fragment::FileFragment;
 use lance::dataset::transaction::{Operation, TransactionBuilder};
 use lance::dataset::write::WriteParams;
+use lance::io::ObjectStoreParams;
 use lance_table::format::Fragment;
 use lancedb::arrow::{
     SendableRecordBatchStream, SendableRecordBatchStreamExt, SimpleRecordBatchStream,
@@ -59,6 +60,7 @@ use crate::sink::{
 pub const LANCEDB_SINK: &str = "lancedb";
 
 const RW_EPOCH_TRANSACTION_PROPERTY: &str = "risingwave.epoch";
+const RW_SINK_ID_TRANSACTION_PROPERTY: &str = "risingwave.sink_id";
 const WRITE_CHANNEL_CAPACITY: usize = 16;
 
 // ---------------------------------------------------------------------------
@@ -170,6 +172,17 @@ impl Sink for LanceDbSink {
 
     const SINK_NAME: &'static str = LANCEDB_SINK;
 
+    fn is_exactly_once(properties: &BTreeMap<String, String>) -> Result<bool> {
+        let Some(value) = properties.get("is_exactly_once") else {
+            return Ok(true);
+        };
+        value.parse::<bool>().map_err(|_| {
+            SinkError::Config(anyhow!(
+                "invalid value for `is_exactly_once`: expected `true` or `false`, got `{value}`"
+            ))
+        })
+    }
+
     async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         let inner = LanceDbSinkWriter::new(self.config.clone(), self.param.schema()).await?;
 
@@ -244,7 +257,7 @@ impl Sink for LanceDbSink {
     ) -> Result<SinkCommitCoordinator> {
         let committer =
             LanceDbSinkCommitter::new(self.config.clone(), self.param.sink_id.to_string()).await?;
-        if self.config.is_exactly_once.unwrap_or(true) {
+        if Self::is_exactly_once(&self.param.properties)? {
             Ok(SinkCommitCoordinator::TwoPhase(Box::new(committer)))
         } else {
             Ok(SinkCommitCoordinator::SinglePhase(Box::new(committer)))
@@ -366,6 +379,13 @@ impl LanceDbSinkWriter {
             .lance_file_version()
             .context("failed to get LanceDB table storage version")
             .map_err(SinkError::LanceDb)?;
+        let store_params =
+            dataset_guard
+                .storage_options_accessor()
+                .map(|storage_options_accessor| ObjectStoreParams {
+                    storage_options_accessor: Some(storage_options_accessor),
+                    ..Default::default()
+                });
         drop(dataset_guard);
         let dataset_uri = config.common.dataset_uri(&table).await?;
 
@@ -375,6 +395,11 @@ impl LanceDbSinkWriter {
             arrow_schema: Arc::new(arrow_schema),
             dataset_uri,
             write_params: WriteParams {
+                // Reuse the opened dataset's storage options so fragment writes use the same
+                // credentials and object-store configuration as table access.
+                store_params,
+                // Lance otherwise chooses its latest stable format. Detached fragments must use
+                // the existing table's format so they remain compatible when committed later.
                 data_storage_version: Some(data_storage_version),
                 ..Default::default()
             },
@@ -469,7 +494,7 @@ impl SinkWriter for LanceDbSinkWriter {
             Ok(Ok(fragments)) => {
                 tracing::debug!(
                     fragment_count = fragments.len(),
-                    "Discarded uncommitted Lance fragments after sink writer abort"
+                    "Left uncommitted Lance fragments for table-level orphan cleanup after sink writer abort"
                 );
             }
             Ok(Err(error)) => {
@@ -536,27 +561,19 @@ impl LanceDbSinkCommitter {
         Ok(all_fragments)
     }
 
-    async fn is_epoch_committed(
-        &self,
-        dataset: &Dataset,
-        target_epoch: u64,
-    ) -> Result<bool> {
-        let latest_version = dataset.version().version;
+    async fn is_epoch_committed(&self, dataset: &Dataset, target_epoch: u64) -> Result<bool> {
+        let mut dataset = dataset.clone();
 
-        // Lance's transaction history API traverses versions the same way, from the latest
-        // version towards version 1:
-        // https://docs.rs/lance/6.0.0/lance/dataset/struct.Dataset.html#method.get_transactions
-        for version in (1..=latest_version).rev() {
-            let Some(transaction) = dataset
-                .read_transaction_by_version(version)
+        loop {
+            if let Some(transaction) = dataset
+                .read_transaction()
                 .await
                 .context("failed to read Lance transaction history")
                 .map_err(SinkError::LanceDb)?
-            else {
-                continue;
-            };
-
-            if let Some(properties) = transaction.transaction_properties
+                && let Some(properties) = transaction.transaction_properties
+                && properties
+                    .get(RW_SINK_ID_TRANSACTION_PROPERTY)
+                    .is_some_and(|sink_id| sink_id == &self.sink_id)
                 && let Some(committed_epoch) = properties.get(RW_EPOCH_TRANSACTION_PROPERTY)
             {
                 let committed_epoch = committed_epoch
@@ -565,9 +582,25 @@ impl LanceDbSinkCommitter {
                     .map_err(SinkError::LanceDb)?;
                 return Ok(committed_epoch >= target_epoch);
             }
-        }
 
-        Ok(false)
+            let version = dataset.version().version;
+            if version <= 1 {
+                return Ok(false);
+            }
+
+            dataset = match dataset.checkout_version(version - 1).await {
+                Ok(dataset) => dataset,
+                // Lance cleanup removes a contiguous prefix of old versions. Reaching a
+                // missing previous version therefore means that all retained history has
+                // already been inspected.
+                Err(lance::Error::DatasetNotFound { .. }) => return Ok(false),
+                Err(error) => {
+                    return Err(SinkError::LanceDb(
+                        anyhow!(error).context("failed to read Lance transaction history"),
+                    ));
+                }
+            };
+        }
     }
 
     async fn commit_fragments(
@@ -610,8 +643,7 @@ impl LanceDbSinkCommitter {
             .context("failed to get LanceDB table storage version")
             .map_err(SinkError::LanceDb)?;
 
-        if transaction_properties.is_some() && self.is_epoch_committed(&dataset, epoch).await?
-        {
+        if transaction_properties.is_some() && self.is_epoch_committed(&dataset, epoch).await? {
             tracing::info!(
                 "LanceDB epoch {epoch} has already been committed, skipping duplicate commit."
             );
@@ -732,7 +764,10 @@ impl TwoPhaseCommitCoordinator for LanceDbSinkCommitter {
     }
 
     async fn abort(&mut self, epoch: u64, _commit_metadata: Vec<u8>) {
-        tracing::debug!("Abort not implemented for LanceDB epoch {epoch}");
+        // Unreferenced files are reclaimed by Lance's old-version/orphan cleanup. This is
+        // intentionally not an eager delete: the commit may have succeeded even if its result
+        // was lost, and process crashes can bypass this callback entirely.
+        tracing::debug!("Left LanceDB epoch {epoch} for table-level orphan cleanup");
     }
 }
 
@@ -757,10 +792,16 @@ impl LanceDbPreCommitMetadata {
     }
 
     fn transaction_properties(&self) -> HashMap<String, String> {
-        HashMap::from([(
-            RW_EPOCH_TRANSACTION_PROPERTY.to_owned(),
-            self.epoch.to_string(),
-        )])
+        HashMap::from([
+            (
+                RW_SINK_ID_TRANSACTION_PROPERTY.to_owned(),
+                self.sink_id.clone(),
+            ),
+            (
+                RW_EPOCH_TRANSACTION_PROPERTY.to_owned(),
+                self.epoch.to_string(),
+            ),
+        ])
     }
 }
 
@@ -804,10 +845,13 @@ mod tests {
             arrow_schema::Field::new("id", arrow_schema::DataType::Int32, false),
             arrow_schema::Field::new("name", arrow_schema::DataType::Utf8, false),
         ]));
-        conn.create_table("test_table", arrow_array::RecordBatch::new_empty(arrow_schema.clone()))
-            .execute()
-            .await
-            .unwrap();
+        conn.create_table(
+            "test_table",
+            arrow_array::RecordBatch::new_empty(arrow_schema.clone()),
+        )
+        .execute()
+        .await
+        .unwrap();
 
         // 3. Create a LanceDB sink writer
         let properties: BTreeMap<String, String> = [
@@ -904,34 +948,43 @@ mod tests {
         assert_eq!(count, 3);
         let dataset_wrapper = table.dataset().unwrap();
         let dataset_guard = dataset_wrapper.get().await.unwrap();
-        assert!(committer.is_epoch_committed(&dataset_guard, 0).await.unwrap());
-        assert!(committer.is_epoch_committed(&dataset_guard, 1).await.unwrap());
-        assert!(!committer.is_epoch_committed(&dataset_guard, 2).await.unwrap());
-        drop(dataset_guard);
+        let transaction = dataset_guard.read_transaction().await.unwrap().unwrap();
+        let transaction_properties = transaction.transaction_properties.unwrap();
+        assert_eq!(
+            transaction_properties.get(RW_SINK_ID_TRANSACTION_PROPERTY),
+            Some(&"test-sink".to_owned())
+        );
+        assert!(
+            committer
+                .is_epoch_committed(&dataset_guard, 0)
+                .await
+                .unwrap()
+        );
+        assert!(
+            committer
+                .is_epoch_committed(&dataset_guard, 1)
+                .await
+                .unwrap()
+        );
+        assert!(
+            !committer
+                .is_epoch_committed(&dataset_guard, 2)
+                .await
+                .unwrap()
+        );
 
-        // 8. A replacement sink ID must still recognize the committed epoch.
-        let pre_commit_metadata =
-            LanceDbPreCommitMetadata::try_from_bytes(&commit_metadata).unwrap();
-        let replacement_commit_metadata = LanceDbPreCommitMetadata {
-            sink_id: "replacement-sink".to_owned(),
-            ..pre_commit_metadata
-        }
-        .try_into_bytes()
-        .unwrap();
-        let mut replacement_committer =
+        // 8. An independent sink must not use another sink's epoch marker.
+        let replacement_committer =
             LanceDbSinkCommitter::new(config.clone(), "replacement-sink".to_owned())
                 .await
                 .unwrap();
-        TwoPhaseCommitCoordinator::commit_data(
-            &mut replacement_committer,
-            1,
-            replacement_commit_metadata,
-        )
-        .await
-        .unwrap();
-        let table = conn.open_table("test_table").execute().await.unwrap();
-        let count = table.count_rows(None).await.unwrap();
-        assert_eq!(count, 3);
+        assert!(
+            !replacement_committer
+                .is_epoch_committed(&dataset_guard, 1)
+                .await
+                .unwrap()
+        );
+        drop(dataset_guard);
 
         // 9. Retrying the same committed epoch should be idempotent in two-phase mode.
         TwoPhaseCommitCoordinator::commit_data(&mut committer, 1, commit_metadata)
@@ -967,6 +1020,66 @@ mod tests {
         let table = conn.open_table("test_table").execute().await.unwrap();
         let count = table.count_rows(None).await.unwrap();
         assert_eq!(count, 4);
+    }
+
+    #[tokio::test]
+    async fn test_epoch_lookup_stops_at_pruned_history() {
+        let dir = tempfile::tempdir().unwrap();
+        let uri = dir.path().to_str().unwrap();
+        let arrow_schema = Arc::new(arrow_schema::Schema::new(vec![arrow_schema::Field::new(
+            "id",
+            arrow_schema::DataType::Int32,
+            false,
+        )]));
+        let batch = arrow_array::RecordBatch::try_new(
+            arrow_schema.clone(),
+            vec![Arc::new(arrow_array::Int32Array::from(vec![0i32]))],
+        )
+        .unwrap();
+
+        let conn = lancedb::connect(uri).execute().await.unwrap();
+        let table = conn
+            .create_table("test_table", batch.clone())
+            .execute()
+            .await
+            .unwrap();
+        table.add(batch).execute().await.unwrap();
+
+        let dataset_wrapper = table.dataset().unwrap();
+        let dataset_guard = dataset_wrapper.get().await.unwrap();
+        dataset_guard
+            .cleanup_old_versions(chrono::Duration::zero(), Some(true), Some(false))
+            .await
+            .unwrap();
+        drop(dataset_guard);
+        drop(table);
+        drop(conn);
+
+        // Reopen with a fresh session so a cached old manifest cannot hide the pruning boundary.
+        let conn = lancedb::connect(uri).execute().await.unwrap();
+        let table = conn.open_table("test_table").execute().await.unwrap();
+        let dataset_wrapper = table.dataset().unwrap();
+        let dataset_guard = dataset_wrapper.get().await.unwrap();
+        assert!(dataset_guard.checkout_version(1).await.is_err());
+
+        let properties: BTreeMap<String, String> = [
+            ("connector".to_owned(), "lancedb".to_owned()),
+            ("type".to_owned(), "append-only".to_owned()),
+            ("lancedb.uri".to_owned(), uri.to_owned()),
+            ("lancedb.table".to_owned(), "test_table".to_owned()),
+        ]
+        .into();
+        let config = LanceDbConfig::from_btreemap(properties).unwrap();
+        let committer = LanceDbSinkCommitter::new(config, "test-sink".to_owned())
+            .await
+            .unwrap();
+
+        assert!(
+            !committer
+                .is_epoch_committed(&dataset_guard, 1)
+                .await
+                .unwrap()
+        );
     }
 
     #[test]
