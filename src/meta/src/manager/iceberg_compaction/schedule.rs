@@ -164,6 +164,10 @@ impl CompactionTrack {
 
         let time_ready = now >= next_compaction_time;
         if self.round_max_file_sequence_number.is_some() {
+            // Starting a sequence-bounded round consumes the triggering backlog, so
+            // `pending_commit_count` tracks only commits after the fixed boundary. A
+            // successful non-drained task must remain schedulable without such commits,
+            // while a failed task must not let the commit threshold bypass its backoff.
             return time_ready;
         }
 
