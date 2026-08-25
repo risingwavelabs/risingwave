@@ -18,6 +18,8 @@ use std::time::Duration;
 use anyhow::Context;
 use reqwest::{Client, StatusCode, Url};
 use risingwave_common::bail;
+use tokio_retry::RetryIf;
+use tokio_retry::strategy::jitter;
 
 use super::PulsarSchemaInfo;
 use crate::Get;
@@ -34,6 +36,30 @@ const DEFAULT_MAX_DELAY_SEC: u64 = 3;
 const DEFAULT_BACKOFF_DURATION_MS: u64 = 100;
 const DEFAULT_BACKOFF_FACTOR: u64 = 2;
 const DEFAULT_RETRIES_MAX: usize = 3;
+
+#[derive(Debug)]
+enum PulsarSchemaRequestError {
+    Retryable(anyhow::Error),
+    Permanent(anyhow::Error),
+}
+
+impl PulsarSchemaRequestError {
+    fn is_retryable(&self) -> bool {
+        matches!(self, Self::Retryable(_))
+    }
+
+    fn as_inner(&self) -> &anyhow::Error {
+        match self {
+            Self::Retryable(error) | Self::Permanent(error) => error,
+        }
+    }
+
+    fn into_inner(self) -> anyhow::Error {
+        match self {
+            Self::Retryable(error) | Self::Permanent(error) => error,
+        }
+    }
+}
 
 #[derive(Clone)]
 pub struct PulsarSchemaClientConfig {
@@ -219,58 +245,76 @@ impl PulsarSchemaClient {
             .min(self.max_delay)
     }
 
+    async fn request_schema(
+        &self,
+        url: &Url,
+    ) -> Result<PulsarSchemaInfo, PulsarSchemaRequestError> {
+        let mut request = self.http_client.get(url.clone());
+        if let Some(token) = self.bearer_token.as_ref() {
+            request = request.bearer_auth(token);
+        }
+
+        let response = request.send().await.map_err(|error| {
+            PulsarSchemaRequestError::Retryable(
+                anyhow::Error::new(error)
+                    .context(format!("failed to fetch Pulsar schema from {url}")),
+            )
+        })?;
+        let retryable_status = response.status() == StatusCode::TOO_MANY_REQUESTS
+            || response.status().is_server_error();
+        let response = response.error_for_status().map_err(|error| {
+            let error = anyhow::Error::new(error)
+                .context(format!("Pulsar schema request failed for {url}"));
+            if retryable_status {
+                PulsarSchemaRequestError::Retryable(error)
+            } else {
+                PulsarSchemaRequestError::Permanent(error)
+            }
+        })?;
+        response.json().await.map_err(|error| {
+            PulsarSchemaRequestError::Retryable(
+                anyhow::Error::new(error)
+                    .context(format!("failed to parse Pulsar schema response from {url}")),
+            )
+        })
+    }
+
     pub async fn get_schema(
         &self,
         topic: &str,
         version: Option<i64>,
     ) -> ConnectorResult<PulsarSchemaInfo> {
         let url = self.build_schema_url(topic, version)?;
-        for retry in 0..=self.retries_max {
-            let mut request = self.http_client.get(url.clone());
-            if let Some(token) = self.bearer_token.as_ref() {
-                request = request.bearer_auth(token);
-            }
-
-            match request.send().await {
-                Ok(response)
-                    if retry < self.retries_max
-                        && (response.status() == StatusCode::TOO_MANY_REQUESTS
-                            || response.status().is_server_error()) =>
-                {
-                    tokio::time::sleep(self.retry_delay(retry)).await;
+        let retry_strategy = (0..self.retries_max)
+            .map(|retry| self.retry_delay(retry))
+            .map(jitter);
+        RetryIf::spawn(
+            retry_strategy,
+            || self.request_schema(&url),
+            |error: &PulsarSchemaRequestError| {
+                let retryable = error.is_retryable();
+                if retryable {
+                    tracing::debug!(error = %error.as_inner(), "retrying Pulsar schema request");
                 }
-                Ok(response) => {
-                    return Ok(response
-                        .error_for_status()
-                        .with_context(|| format!("Pulsar schema request failed for {url}"))?
-                        .json()
-                        .await
-                        .with_context(|| {
-                            format!("failed to parse Pulsar schema response from {url}")
-                        })?);
-                }
-                Err(error) if retry < self.retries_max => {
-                    tracing::debug!(
-                        retry,
-                        error = %error,
-                        "retrying Pulsar schema request"
-                    );
-                    tokio::time::sleep(self.retry_delay(retry)).await;
-                }
-                Err(error) => {
-                    return Err(error)
-                        .with_context(|| format!("failed to fetch Pulsar schema from {url}"))
-                        .map_err(Into::into);
-                }
-            }
-        }
-        unreachable!("Pulsar schema retry loop always returns on its final attempt")
+                retryable
+            },
+        )
+        .await
+        .map_err(|error| error.into_inner().into())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+    #[cfg(not(madsim))]
+    use std::io::{Read, Write};
+    #[cfg(not(madsim))]
+    use std::net::TcpListener;
+    #[cfg(not(madsim))]
+    use std::sync::mpsc;
+    #[cfg(not(madsim))]
+    use std::thread;
 
     use super::*;
 
@@ -332,5 +376,116 @@ mod tests {
         let debug = format!("{config:?}");
         assert!(!debug.contains("secret-token"));
         assert!(debug.contains("[REDACTED]"));
+    }
+
+    #[cfg(not(madsim))]
+    fn spawn_http_server(
+        responses: Vec<String>,
+    ) -> (String, mpsc::Receiver<String>, thread::JoinHandle<()>) {
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let addr = listener.local_addr().unwrap();
+        let (request_tx, request_rx) = mpsc::channel();
+        let handle = thread::spawn(move || {
+            for response in responses {
+                let (mut stream, _) = listener.accept().unwrap();
+                let mut request = Vec::new();
+                loop {
+                    let mut buffer = [0; 1024];
+                    let read = stream.read(&mut buffer).unwrap();
+                    assert_ne!(read, 0);
+                    request.extend_from_slice(&buffer[..read]);
+                    if request.windows(4).any(|window| window == b"\r\n\r\n") {
+                        break;
+                    }
+                }
+                request_tx
+                    .send(String::from_utf8(request).unwrap())
+                    .unwrap();
+                stream.write_all(response.as_bytes()).unwrap();
+            }
+        });
+        (format!("http://{addr}"), request_rx, handle)
+    }
+
+    #[cfg(not(madsim))]
+    fn ok_response(body: &str) -> String {
+        format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+            body.len()
+        )
+    }
+
+    #[cfg(not(madsim))]
+    #[tokio::test]
+    async fn admin_api_redirect_is_followed_automatically() {
+        let body = r#"{"version":1,"type":"AVRO","data":"{}"}"#;
+        let redirect_response = "HTTP/1.1 307 Temporary Redirect\r\nLocation: /schema\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_owned();
+        let (admin_url, requests, handle) =
+            spawn_http_server(vec![redirect_response, ok_response(body)]);
+        let client = PulsarSchemaClient::new(
+            PulsarSchemaClientConfig::from_options(
+                admin_url,
+                Some("test-token".to_owned()),
+                &BTreeMap::new(),
+            )
+            .unwrap(),
+        )
+        .unwrap();
+
+        let schema = client.get_schema("tenant/ns/events", None).await.unwrap();
+        assert_eq!(schema.version, 1);
+        requests.recv().unwrap();
+        let redirected_request = requests.recv().unwrap().to_ascii_lowercase();
+        assert!(redirected_request.starts_with("get /schema "));
+        assert!(redirected_request.contains("authorization: bearer test-token"));
+        handle.join().unwrap();
+    }
+
+    #[cfg(not(madsim))]
+    #[tokio::test]
+    async fn response_body_failure_is_retried() {
+        let body = r#"{"version":2,"type":"AVRO","data":"{}"}"#;
+        let truncated_response =
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 100\r\nConnection: close\r\n\r\n{".to_owned();
+        let (admin_url, requests, handle) =
+            spawn_http_server(vec![truncated_response, ok_response(body)]);
+        let options = BTreeMap::from([
+            (SCHEMA_REGISTRY_RETRIES_MAX_KEY.to_owned(), "1".to_owned()),
+            (
+                SCHEMA_REGISTRY_BACKOFF_DURATION_KEY.to_owned(),
+                "0".to_owned(),
+            ),
+        ]);
+        let client = PulsarSchemaClient::new(
+            PulsarSchemaClientConfig::from_options(admin_url, None, &options).unwrap(),
+        )
+        .unwrap();
+
+        let schema = client.get_schema("tenant/ns/events", None).await.unwrap();
+        assert_eq!(schema.version, 2);
+        requests.recv().unwrap();
+        requests.recv().unwrap();
+        assert!(requests.try_recv().is_err());
+        handle.join().unwrap();
+    }
+
+    #[cfg(not(madsim))]
+    #[tokio::test]
+    async fn client_error_is_not_retried() {
+        let not_found_response =
+            "HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_owned();
+        let (admin_url, requests, handle) = spawn_http_server(vec![not_found_response]);
+        let client = PulsarSchemaClient::new(
+            PulsarSchemaClientConfig::from_options(admin_url, None, &BTreeMap::new()).unwrap(),
+        )
+        .unwrap();
+
+        client
+            .get_schema("tenant/ns/events", None)
+            .await
+            .unwrap_err();
+        requests.recv().unwrap();
+        assert!(requests.try_recv().is_err());
+        handle.join().unwrap();
     }
 }

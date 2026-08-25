@@ -164,12 +164,6 @@ async fn bind_columns_from_source_for_non_cdc(
 
     let registry_type = SchemaRegistryType::from_options(&format_encode_options_to_consume)
         .map_err(|error| RwError::from(ProtocolError(error.to_string())))?;
-    if registry_type == SchemaRegistryType::Pulsar && schema_registry_conn_ref.is_some() {
-        return Err(RwError::from(ProtocolError(
-            "Pulsar Schema Registry does not support schema registry connection references"
-                .to_owned(),
-        )));
-    }
 
     let mut stream_source_info = StreamSourceInfo {
         format: format_to_prost(&format_encode.format) as i32,

@@ -195,6 +195,9 @@ pub fn validate_compatibility(
                 )));
             }
             if !options.connection_ref().is_empty() {
+                // TODO: Support Pulsar Schema Registry connection references once
+                // `schema_registry` connections support `schema.registry.type = 'pulsar'`
+                // and `schema.registry.auth.token`.
                 return Err(RwError::from(ProtocolError(
                     "Pulsar Schema Registry does not support schema registry connection references"
                         .to_owned(),
