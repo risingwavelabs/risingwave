@@ -35,7 +35,7 @@ message SubscribeIcebergCompactionEventRequest {
     uint64 task_id = 1;
     uint32 sink_id = 2;
     Status status = 3;
-    reserved 4, 5, 8;
+    reserved 4, 5;
     optional string error_message = 6;
 
     // Populated only for pk-index coordinated compaction tasks.
