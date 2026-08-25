@@ -22,7 +22,7 @@ use auto_enums::auto_enum;
 use risingwave_common::catalog::TableId;
 use risingwave_common::log::LogSuppressor;
 use risingwave_hummock_sdk::level::{Level, Levels};
-use risingwave_hummock_sdk::version::{HummockVersion, LocalHummockVersion};
+use risingwave_hummock_sdk::version::HummockVersion;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId, INVALID_VERSION_ID};
 use risingwave_rpc_client::HummockMetaClient;
 use thiserror_ext::AsReport;
@@ -83,12 +83,12 @@ impl Drop for PinnedVersionGuard {
 
 #[derive(Clone)]
 pub struct PinnedVersion {
-    version: Arc<LocalHummockVersion>,
+    version: Arc<HummockVersion>,
     guard: Arc<PinnedVersionGuard>,
 }
 
 impl Deref for PinnedVersion {
-    type Target = LocalHummockVersion;
+    type Target = HummockVersion;
 
     fn deref(&self) -> &Self::Target {
         &self.version
@@ -101,13 +101,12 @@ impl PinnedVersion {
         pinned_version_manager_tx: UnboundedSender<PinVersionAction>,
     ) -> Self {
         let version_id = version.id;
-        let local_version = LocalHummockVersion::from(version);
         PinnedVersion {
             guard: Arc::new(PinnedVersionGuard::new(
                 version_id,
                 pinned_version_manager_tx,
             )),
-            version: Arc::new(local_version),
+            version: Arc::new(version),
         }
     }
 
@@ -122,18 +121,18 @@ impl PinnedVersion {
             return None;
         }
         let version_id = version.id;
-        let local_version = LocalHummockVersion::from(version);
         Some(PinnedVersion {
             guard: Arc::new(PinnedVersionGuard::new(
                 version_id,
                 self.guard.pinned_version_manager_tx.clone(),
             )),
-            version: Arc::new(local_version),
+            version: Arc::new(version),
         })
     }
 
-    /// Create a new `PinnedVersion` with the given `LocalHummockVersion`. Referring to the usage in the `hummock_event_handler`.
-    pub fn new_with_local_version(&self, version: LocalHummockVersion) -> Option<Self> {
+    /// Create a new `PinnedVersion` with the given version. Referring to the usage in the
+    /// `hummock_event_handler`.
+    pub fn new_with_local_version(&self, version: HummockVersion) -> Option<Self> {
         assert!(
             version.id >= self.version.id,
             "pinning a older version {}. Current is {}",

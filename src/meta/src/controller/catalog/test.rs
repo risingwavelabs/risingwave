@@ -14,6 +14,7 @@
 
 #[cfg(test)]
 mod tests {
+    use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
     use risingwave_common::hash::VirtualNode;
     use risingwave_meta_model::FragmentId;
     use risingwave_meta_model::fragment::DistributionType;
@@ -22,12 +23,14 @@ mod tests {
     use risingwave_pb::catalog::{PbSinkType, StreamSourceInfo};
     use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType, worker_node};
     use risingwave_pb::meta::SubscribeType;
+    use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
     use risingwave_pb::stream_plan::PbStreamNode;
     use tokio::sync::{mpsc, oneshot};
 
+    use crate::barrier::Command;
     use crate::controller::catalog::*;
-    use crate::manager::{LocalNotification, WorkerKey};
-    use crate::model::FragmentDownstreamRelation;
+    use crate::manager::{LocalNotification, MetaOpts, WorkerKey};
+    use crate::model::{Fragment, FragmentDownstreamRelation};
     use crate::serving::ServingVnodeMapping;
 
     const TEST_DATABASE_ID: DatabaseId = DatabaseId::new(1);
@@ -121,8 +124,7 @@ mod tests {
             txn,
             object_type,
             TEST_OWNER_ID,
-            Some(TEST_DATABASE_ID),
-            Some(TEST_SCHEMA_ID),
+            Some(TEST_SCHEMA_ID.as_object_id()),
         )
         .await?
         .oid
@@ -136,8 +138,7 @@ mod tests {
             txn,
             ObjectType::Table,
             TEST_OWNER_ID,
-            Some(TEST_DATABASE_ID),
-            Some(TEST_SCHEMA_ID),
+            Some(job_id.as_object_id()),
         )
         .await?
         .oid
@@ -185,6 +186,142 @@ mod tests {
         }
         .insert(txn)
         .await?;
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_cancel_creating_job_includes_belonging_streaming_jobs() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let mut inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let table_job_id = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(TEST_SCHEMA_ID.as_object_id()),
+        )
+        .await?
+        .oid
+        .as_job_id();
+        insert_test_table(
+            &txn,
+            table_job_id.as_mv_table_id(),
+            "cancel_table",
+            TableType::Table,
+            None,
+            "",
+        )
+        .await?;
+        let sink_job_id = CatalogController::create_object(
+            &txn,
+            ObjectType::Sink,
+            TEST_OWNER_ID,
+            Some(table_job_id.as_object_id()),
+        )
+        .await?
+        .oid
+        .as_job_id();
+        Sink::insert(sink::ActiveModel::from(PbSink {
+            id: sink_job_id.as_sink_id(),
+            schema_id: TEST_SCHEMA_ID,
+            database_id: TEST_DATABASE_ID,
+            name: "cancel_sink".to_owned(),
+            owner: TEST_OWNER_ID as _,
+            sink_type: PbSinkType::AppendOnly as i32,
+            ..Default::default()
+        }))
+        .exec(&txn)
+        .await?;
+        for job_id in [table_job_id, sink_job_id] {
+            insert_test_streaming_job_model(&txn, job_id, None).await?;
+            StreamingJob::update(streaming_job::ActiveModel {
+                job_id: Set(job_id),
+                job_status: Set(JobStatus::Creating),
+                ..Default::default()
+            })
+            .exec(&txn)
+            .await?;
+        }
+
+        let table_state_id = TableId::new(1000);
+        let sink_state_id = TableId::new(1001);
+        insert_test_fragment(
+            &txn,
+            FragmentId::new(100),
+            table_job_id,
+            TableIdArray(vec![table_state_id]),
+        )
+        .await?;
+        insert_test_fragment(
+            &txn,
+            FragmentId::new(101),
+            sink_job_id,
+            TableIdArray(vec![sink_state_id]),
+        )
+        .await?;
+        let (table_finish_tx, table_finish_rx) = oneshot::channel();
+        inner.register_finish_notifier(TEST_DATABASE_ID, table_job_id, table_finish_tx);
+        let (sink_finish_tx, sink_finish_rx) = oneshot::channel();
+        inner.register_finish_notifier(TEST_DATABASE_ID, sink_job_id, sink_finish_tx);
+        txn.commit().await?;
+        drop(inner);
+
+        let abort_result = mgr
+            .try_abort_creating_streaming_job(table_job_id, true)
+            .await?;
+        assert!(abort_result.aborted);
+        assert_eq!(
+            abort_result.aborted_sink_ids,
+            vec![sink_job_id.as_sink_id()]
+        );
+        let cancel_info = abort_result
+            .cancel_info
+            .expect("cancelled table job should have cleanup information");
+        assert_eq!(
+            cancel_info
+                .streaming_job_ids
+                .iter()
+                .copied()
+                .collect::<HashSet<_>>(),
+            HashSet::from([table_job_id, sink_job_id])
+        );
+        assert_eq!(
+            cancel_info
+                .state_table_ids
+                .iter()
+                .copied()
+                .collect::<HashSet<_>>(),
+            HashSet::from([table_state_id, sink_state_id])
+        );
+        let Command::DropStreamingJobs {
+            streaming_job_ids,
+            unregistered_state_table_ids,
+            ..
+        } = cancel_info.command
+        else {
+            unreachable!()
+        };
+        assert_eq!(
+            streaming_job_ids,
+            HashSet::from([table_job_id, sink_job_id])
+        );
+        assert_eq!(
+            unregistered_state_table_ids,
+            HashSet::from([table_state_id, sink_state_id])
+        );
+
+        for finish_rx in [table_finish_rx, sink_finish_rx] {
+            let err = finish_rx
+                .await
+                .expect("aborted job should notify its finish waiter")
+                .expect_err("aborted job should not finish successfully");
+            assert!(err.contains("cancelled"));
+        }
+        let db = &mgr.inner.read().await.db;
+        assert!(Object::find_by_id(table_job_id).one(db).await?.is_none());
+        assert!(Object::find_by_id(sink_job_id).one(db).await?.is_none());
 
         Ok(())
     }
@@ -297,8 +434,7 @@ mod tests {
             &txn,
             ObjectType::Source,
             TEST_OWNER_ID,
-            Some(TEST_DATABASE_ID),
-            Some(TEST_SCHEMA_ID),
+            Some(TEST_SCHEMA_ID.as_object_id()),
         )
         .await?
         .oid
@@ -344,8 +480,7 @@ mod tests {
             &txn,
             ObjectType::Index,
             TEST_OWNER_ID,
-            Some(TEST_DATABASE_ID),
-            Some(TEST_SCHEMA_ID),
+            Some(TEST_SCHEMA_ID.as_object_id()),
         )
         .await?
         .oid
@@ -385,8 +520,7 @@ mod tests {
             &txn,
             ObjectType::Source,
             TEST_OWNER_ID,
-            Some(TEST_DATABASE_ID),
-            Some(TEST_SCHEMA_ID),
+            Some(TEST_SCHEMA_ID.as_object_id()),
         )
         .await?
         .oid
@@ -418,8 +552,7 @@ mod tests {
             &txn,
             ObjectType::Sink,
             TEST_OWNER_ID,
-            Some(TEST_DATABASE_ID),
-            Some(TEST_SCHEMA_ID),
+            Some(TEST_SCHEMA_ID.as_object_id()),
         )
         .await?
         .oid
@@ -583,6 +716,13 @@ mod tests {
         else {
             unreachable!()
         };
+        insert_test_fragment(
+            &txn,
+            FragmentId::new(200),
+            result_table_id.as_job_id(),
+            TableIdArray(vec![result_table_id, internal_table_id]),
+        )
+        .await?;
         txn.commit().await?;
         drop(inner);
 
@@ -636,10 +776,137 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn test_prepare_streaming_job_cache_refill_policy_notifies_hummock() -> MetaResult<()> {
+        let env = MetaSrvEnv::for_test().await;
+        let (tx, mut rx) = mpsc::unbounded_channel();
+        env.notification_manager().insert_sender(
+            SubscribeType::Hummock,
+            WorkerKey(HostAddress {
+                host: "localhost".to_owned(),
+                port: 1234,
+            }),
+            tx,
+        );
+        let (local_notification_tx, mut local_notification_rx) = mpsc::unbounded_channel();
+        env.notification_manager()
+            .insert_local_sender(local_notification_tx);
+        let mgr = CatalogController::new(env).await?;
+
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let (job_id, Some(result_table_id), internal_table_id) = insert_test_streaming_job(
+            &txn,
+            "mv_initial_cache_refill",
+            true,
+            Some(CacheRefillPolicy::Both),
+        )
+        .await?
+        else {
+            unreachable!()
+        };
+        let (unprepared_job_id, Some(unprepared_result_table_id), unprepared_internal_table_id) =
+            insert_test_streaming_job(
+                &txn,
+                "mv_unprepared_cache_refill",
+                true,
+                Some(CacheRefillPolicy::Serving),
+            )
+            .await?
+        else {
+            unreachable!()
+        };
+        for job_id in [job_id, unprepared_job_id] {
+            streaming_job::ActiveModel {
+                job_id: Set(job_id),
+                job_status: Set(JobStatus::Initial),
+                ..Default::default()
+            }
+            .update(&txn)
+            .await?;
+        }
+        txn.commit().await?;
+        drop(inner);
+
+        let fragments = [Fragment {
+            fragment_id: FragmentId::new(300),
+            fragment_type_mask: FragmentTypeMask::default(),
+            distribution_type: PbFragmentDistributionType::Hash,
+            state_table_ids: vec![],
+            maybe_vnode_count: Some(1),
+            nodes: PbStreamNode::default(),
+        }];
+        mgr.prepare_streaming_job(
+            job_id,
+            || fragments.iter(),
+            &FragmentDownstreamRelation::default(),
+            true,
+            None,
+            None,
+        )
+        .await?;
+
+        let local_notification = local_notification_rx
+            .try_recv()
+            .expect("should receive serving fragment mapping notification");
+        let LocalNotification::ServingFragmentMappingsUpsert(fragment_ids) = local_notification
+        else {
+            panic!(
+                "unexpected local notification before hummock notification: {:?}",
+                local_notification
+            );
+        };
+        assert_eq!(fragment_ids, vec![FragmentId::new(300).as_raw_id()]);
+
+        let response = rx
+            .recv()
+            .await
+            .expect("should receive hummock notification")
+            .expect("notification should be ok");
+        assert_eq!(response.operation(), NotificationOperation::Update);
+        let info = response.info;
+        let Some(NotificationInfo::TableRefillRuntimeConfig(config)) = info else {
+            panic!("unexpected notification: {:?}", info);
+        };
+        assert!(config.serving_table_vnode_mappings.is_none());
+        let policies = config
+            .table_cache_refill_policies
+            .expect("policy snapshot should be present");
+        let table_policies = policies
+            .table_policies
+            .into_iter()
+            .map(|policy| (policy.table_id, policy.policy))
+            .collect::<HashMap<_, _>>();
+        assert_eq!(
+            table_policies,
+            HashMap::from([(
+                result_table_id.as_raw_id(),
+                CacheRefillPolicy::Both.to_protobuf() as i32,
+            )])
+        );
+        assert!(!table_policies.contains_key(&unprepared_result_table_id.as_raw_id()));
+        let internal_table_policies = policies
+            .internal_table_policies
+            .into_iter()
+            .map(|policy| (policy.table_id, policy.policy))
+            .collect::<HashMap<_, _>>();
+        assert_eq!(
+            internal_table_policies,
+            HashMap::from([(
+                internal_table_id.as_raw_id(),
+                CacheRefillPolicy::Both.to_protobuf() as i32,
+            )])
+        );
+        assert!(!internal_table_policies.contains_key(&unprepared_internal_table_id.as_raw_id()));
+
+        Ok(())
+    }
+
     async fn insert_dirty_creating_job_with_fragment(
         mgr: &CatalogController,
         fragment_id: FragmentId,
         vnode_count: i32,
+        fragment_type_mask: FragmentTypeMask,
     ) -> MetaResult<(JobId, TableId)> {
         let inner = mgr.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -647,8 +914,7 @@ mod tests {
             &txn,
             ObjectType::Table,
             TEST_OWNER_ID,
-            Some(TEST_DATABASE_ID),
-            Some(TEST_SCHEMA_ID),
+            Some(TEST_SCHEMA_ID.as_object_id()),
         )
         .await?;
         let job_id = job_obj.oid.as_job_id();
@@ -661,6 +927,13 @@ mod tests {
             None,
             "CREATE MATERIALIZED VIEW mv_dirty_serving_mapping AS SELECT 1",
         )
+        .await?;
+        table::ActiveModel {
+            table_id: Set(table_id),
+            engine: Set(Some(table::Engine::Hummock)),
+            ..Default::default()
+        }
+        .update(&txn)
         .await?;
         streaming_job::ActiveModel {
             job_id: Set(job_id),
@@ -683,7 +956,7 @@ mod tests {
         fragment::ActiveModel {
             fragment_id: Set(fragment_id),
             job_id: Set(job_id),
-            fragment_type_mask: Set(0),
+            fragment_type_mask: Set(fragment_type_mask.into()),
             distribution_type: Set(DistributionType::Hash),
             stream_node: Set(StreamNode::default()),
             state_table_ids: Set(Vec::<TableId>::new().into()),
@@ -707,6 +980,7 @@ mod tests {
             &mgr,
             fragment_id,
             VirtualNode::COUNT_FOR_TEST as i32,
+            FragmentTypeMask::from(FragmentTypeFlag::Values as u32),
         )
         .await?;
 
@@ -742,6 +1016,63 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_clean_dirty_creating_jobs_keeps_job_without_values_fragment() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let fragment_id = FragmentId::new(43);
+        let (job_id, table_id) = insert_dirty_creating_job_with_fragment(
+            &mgr,
+            fragment_id,
+            1,
+            FragmentTypeMask::empty(),
+        )
+        .await?;
+
+        let cleaned = mgr
+            .clean_dirty_creating_jobs(Some(TEST_DATABASE_ID))
+            .await?;
+        assert!(cleaned.streaming_job_ids.is_empty());
+
+        let inner = mgr.inner.read().await;
+        assert!(Object::find_by_id(job_id).one(&inner.db).await?.is_some());
+        assert!(
+            StreamingJob::find_by_id(job_id)
+                .one(&inner.db)
+                .await?
+                .is_some()
+        );
+        assert!(Table::find_by_id(table_id).one(&inner.db).await?.is_some());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_clean_dirty_creating_jobs_cleans_foreground_job_in_legacy_mode() -> MetaResult<()>
+    {
+        let mut opts = MetaOpts::test(false);
+        opts.clean_all_foreground_jobs_on_recovery = true;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test_opts(opts, |_| ()).await).await?;
+        let (job_id, table_id) = insert_dirty_creating_job_with_fragment(
+            &mgr,
+            FragmentId::new(44),
+            1,
+            FragmentTypeMask::empty(),
+        )
+        .await?;
+
+        let cleaned = mgr
+            .clean_dirty_creating_jobs(Some(TEST_DATABASE_ID))
+            .await?;
+        assert_eq!(cleaned.streaming_job_ids, vec![job_id]);
+
+        let db = &mgr.inner.read().await.db;
+        assert!(Object::find_by_id(job_id).one(db).await?.is_none());
+        assert!(StreamingJob::find_by_id(job_id).one(db).await?.is_none());
+        assert!(Table::find_by_id(table_id).one(db).await?.is_none());
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_database_func() -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let pb_database = PbDatabase {
@@ -768,6 +1099,65 @@ mod tests {
             .unwrap();
         assert_eq!(database.name, "db2");
 
+        let schema_id: SchemaId = Schema::find()
+            .inner_join(Object)
+            .select_only()
+            .column(schema::Column::SchemaId)
+            .filter(object::Column::DatabaseId.eq(database_id))
+            .into_tuple()
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+        mgr.create_view(
+            PbView {
+                schema_id,
+                database_id,
+                name: "cross_db_upstream".to_owned(),
+                owner: TEST_OWNER_ID as _,
+                sql: "CREATE VIEW cross_db_upstream AS SELECT 1".to_owned(),
+                ..Default::default()
+            },
+            HashSet::new(),
+        )
+        .await?;
+        let upstream_id: ViewId = View::find()
+            .inner_join(Object)
+            .select_only()
+            .column(view::Column::ViewId)
+            .filter(
+                object::Column::DatabaseId
+                    .eq(database_id)
+                    .and(view::Column::Name.eq("cross_db_upstream")),
+            )
+            .into_tuple()
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let (dependent_job_id, Some(dependent_table_id), _) =
+            insert_test_streaming_job(&txn, "cross_db_dependent", true, None).await?
+        else {
+            unreachable!()
+        };
+        ObjectDependency::insert(object_dependency::ActiveModel {
+            oid: Set(upstream_id.as_object_id()),
+            used_by: Set(dependent_job_id.as_object_id()),
+            ..Default::default()
+        })
+        .exec(&txn)
+        .await?;
+        txn.commit().await?;
+        drop(inner);
+
+        assert!(
+            mgr.drop_object(ObjectType::Database, database_id, DropMode::Cascade)
+                .await
+                .is_err()
+        );
+        mgr.drop_object(ObjectType::Table, dependent_table_id, DropMode::Cascade)
+            .await?;
         mgr.drop_object(ObjectType::Database, database_id, DropMode::Cascade)
             .await?;
 
@@ -836,6 +1226,376 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_object_belong_to_cascade() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        mgr.create_schema(PbSchema {
+            database_id: TEST_DATABASE_ID,
+            name: "belong_to_target".to_owned(),
+            owner: TEST_OWNER_ID as _,
+            ..Default::default()
+        })
+        .await?;
+        let target_schema_id: SchemaId = Schema::find()
+            .select_only()
+            .column(schema::Column::SchemaId)
+            .filter(schema::Column::Name.eq("belong_to_target"))
+            .into_tuple()
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+        let txn = mgr.inner.read().await.db.begin().await?;
+
+        let mv_obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(TEST_SCHEMA_ID.as_object_id()),
+        )
+        .await?;
+        assert_eq!(mv_obj.belong_to_oid, Some(TEST_SCHEMA_ID.as_object_id()));
+        assert_eq!(mv_obj.database_id, Some(TEST_DATABASE_ID));
+        assert_eq!(mv_obj.schema_id, Some(TEST_SCHEMA_ID));
+        let job_id = mv_obj.oid.as_job_id();
+        let mv_table_id = job_id.as_mv_table_id();
+        insert_test_table(
+            &txn,
+            mv_table_id,
+            "mv_belong_to",
+            TableType::MaterializedView,
+            None,
+            "CREATE MATERIALIZED VIEW mv_belong_to AS SELECT 1",
+        )
+        .await?;
+
+        let internal_obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(job_id.as_object_id()),
+        )
+        .await?;
+        assert_eq!(internal_obj.belong_to_oid, Some(job_id.as_object_id()));
+        assert_eq!(internal_obj.database_id, Some(TEST_DATABASE_ID));
+        assert_eq!(internal_obj.schema_id, Some(TEST_SCHEMA_ID));
+        let internal_table_id = internal_obj.oid.as_table_id();
+        insert_test_table(
+            &txn,
+            internal_table_id,
+            "__internal_mv_belong_to",
+            TableType::Internal,
+            Some(job_id),
+            "",
+        )
+        .await?;
+        let nested_obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(internal_table_id.as_object_id()),
+        )
+        .await?;
+        txn.commit().await?;
+
+        assert!(
+            mgr.alter_schema(ObjectType::Sink, job_id.as_object_id(), target_schema_id,)
+                .await
+                .is_err()
+        );
+        mgr.alter_schema(ObjectType::Table, job_id.as_object_id(), target_schema_id)
+            .await?;
+
+        let db = &mgr.inner.read().await.db;
+        let belonging_object_ids = get_belong_objects(db, job_id.as_object_id())
+            .await?
+            .into_iter()
+            .map(|object| object.oid)
+            .collect::<HashSet<_>>();
+        assert_eq!(
+            belonging_object_ids,
+            HashSet::from([internal_table_id.as_object_id(), nested_obj.oid])
+        );
+        let moved_objects = Object::find()
+            .filter(object::Column::Oid.is_in([
+                job_id.as_object_id(),
+                internal_table_id.as_object_id(),
+                nested_obj.oid,
+            ]))
+            .all(db)
+            .await?;
+        assert!(
+            moved_objects
+                .iter()
+                .all(|object| object.schema_id == Some(target_schema_id))
+        );
+        assert_eq!(
+            Object::find_by_id(internal_table_id)
+                .one(db)
+                .await?
+                .unwrap()
+                .belong_to_oid,
+            Some(job_id.as_object_id())
+        );
+        assert_eq!(
+            Object::find_by_id(nested_obj.oid)
+                .one(db)
+                .await?
+                .unwrap()
+                .belong_to_oid,
+            Some(internal_table_id.as_object_id())
+        );
+
+        Object::delete_by_id(job_id).exec(db).await?;
+
+        assert!(Object::find_by_id(job_id).one(db).await?.is_none());
+        assert!(
+            Object::find_by_id(internal_table_id)
+                .one(db)
+                .await?
+                .is_none()
+        );
+        assert!(Table::find_by_id(mv_table_id).one(db).await?.is_none());
+        assert!(
+            Table::find_by_id(internal_table_id)
+                .one(db)
+                .await?
+                .is_none()
+        );
+        assert!(Object::find_by_id(nested_obj.oid).one(db).await?.is_none());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_alter_internal_table_schema_rejected() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        mgr.create_schema(PbSchema {
+            database_id: TEST_DATABASE_ID,
+            name: "internal_table_alter_target".to_owned(),
+            owner: TEST_OWNER_ID as _,
+            ..Default::default()
+        })
+        .await?;
+        let target_schema_id: SchemaId = Schema::find()
+            .select_only()
+            .column(schema::Column::SchemaId)
+            .filter(schema::Column::Name.eq("internal_table_alter_target"))
+            .into_tuple()
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+
+        let txn = mgr.inner.read().await.db.begin().await?;
+        let parent_obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(TEST_SCHEMA_ID.as_object_id()),
+        )
+        .await?;
+        let parent_job_id = parent_obj.oid.as_job_id();
+        insert_test_table(
+            &txn,
+            parent_job_id.as_mv_table_id(),
+            "internal_table_parent",
+            TableType::MaterializedView,
+            None,
+            "",
+        )
+        .await?;
+        let internal_obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(parent_job_id.as_object_id()),
+        )
+        .await?;
+        let internal_table_id = internal_obj.oid.as_table_id();
+        insert_test_table(
+            &txn,
+            internal_table_id,
+            "__internal_table_alter_target",
+            TableType::Internal,
+            Some(parent_job_id),
+            "",
+        )
+        .await?;
+        txn.commit().await?;
+
+        for new_schema in [TEST_SCHEMA_ID, target_schema_id] {
+            assert!(
+                mgr.alter_schema(
+                    ObjectType::Table,
+                    internal_table_id.as_object_id(),
+                    new_schema,
+                )
+                .await
+                .is_err()
+            );
+        }
+
+        let internal_obj = Object::find_by_id(internal_table_id)
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+        assert_eq!(internal_obj.schema_id, Some(TEST_SCHEMA_ID));
+        assert_eq!(
+            internal_obj.belong_to_oid,
+            Some(parent_job_id.as_object_id())
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_alter_table_schema_moves_indexes_but_not_subscriptions() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        mgr.create_schema(PbSchema {
+            database_id: TEST_DATABASE_ID,
+            name: "alter_table_target".to_owned(),
+            owner: TEST_OWNER_ID as _,
+            ..Default::default()
+        })
+        .await?;
+        let target_schema_id: SchemaId = Schema::find()
+            .select_only()
+            .column(schema::Column::SchemaId)
+            .filter(schema::Column::Name.eq("alter_table_target"))
+            .into_tuple()
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+
+        let txn = mgr.inner.read().await.db.begin().await?;
+        let table_obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(TEST_SCHEMA_ID.as_object_id()),
+        )
+        .await?;
+        let table_id = table_obj.oid.as_table_id();
+        insert_test_table(
+            &txn,
+            table_id,
+            "mv_with_index_and_subscription",
+            TableType::MaterializedView,
+            None,
+            "CREATE MATERIALIZED VIEW mv_with_index_and_subscription AS SELECT 1",
+        )
+        .await?;
+
+        let index_obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Index,
+            TEST_OWNER_ID,
+            Some(TEST_SCHEMA_ID.as_object_id()),
+        )
+        .await?;
+        let index_id = index_obj.oid.as_index_id();
+        let index_table_id = index_id.as_object_id().as_table_id();
+        insert_test_table(
+            &txn,
+            index_table_id,
+            "idx_mv_with_index_and_subscription_table",
+            TableType::Index,
+            None,
+            "",
+        )
+        .await?;
+        index::ActiveModel {
+            index_id: Set(index_id),
+            name: Set("idx_mv_with_index_and_subscription".to_owned()),
+            index_table_id: Set(index_table_id),
+            primary_table_id: Set(table_id),
+            index_items: Set(Vec::<risingwave_pb::expr::ExprNode>::new().into()),
+            index_column_properties: Set(None),
+            index_columns_len: Set(0),
+        }
+        .insert(&txn)
+        .await?;
+
+        let index_internal_obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(index_id.as_object_id()),
+        )
+        .await?;
+        let index_internal_table_id = index_internal_obj.oid.as_table_id();
+        insert_test_table(
+            &txn,
+            index_internal_table_id,
+            "__internal_idx_mv_with_index_and_subscription",
+            TableType::Internal,
+            Some(index_id.as_job_id()),
+            "",
+        )
+        .await?;
+        txn.commit().await?;
+
+        let mut subscription = PbSubscription {
+            name: "subscription_in_original_schema".to_owned(),
+            definition: "CREATE SUBSCRIPTION subscription_in_original_schema FROM mv_with_index_and_subscription".to_owned(),
+            retention_seconds: 86400,
+            database_id: TEST_DATABASE_ID,
+            schema_id: TEST_SCHEMA_ID,
+            dependent_table_id: table_id,
+            owner: TEST_OWNER_ID as _,
+            subscription_state: SubscriptionState::Created as _,
+            ..Default::default()
+        };
+        mgr.create_subscription_catalog(&mut subscription).await?;
+
+        {
+            let inner = mgr.inner.read().await;
+            assert_eq!(
+                Object::find_by_id(index_id)
+                    .one(&inner.db)
+                    .await?
+                    .unwrap()
+                    .belong_to_oid,
+                Some(TEST_SCHEMA_ID.as_object_id())
+            );
+            assert_eq!(
+                Object::find_by_id(subscription.id)
+                    .one(&inner.db)
+                    .await?
+                    .unwrap()
+                    .belong_to_oid,
+                Some(TEST_SCHEMA_ID.as_object_id())
+            );
+        }
+
+        mgr.alter_schema(ObjectType::Table, table_id.as_object_id(), target_schema_id)
+            .await?;
+
+        let db = &mgr.inner.read().await.db;
+        for object_id in [table_id.as_object_id(), index_id.as_object_id()] {
+            let object = Object::find_by_id(object_id).one(db).await?.unwrap();
+            assert_eq!(object.schema_id, Some(target_schema_id));
+            assert_eq!(object.belong_to_oid, Some(target_schema_id.as_object_id()));
+        }
+        let index_internal_object = Object::find_by_id(index_internal_table_id)
+            .one(db)
+            .await?
+            .unwrap();
+        assert_eq!(index_internal_object.schema_id, Some(target_schema_id));
+        assert_eq!(
+            index_internal_object.belong_to_oid,
+            Some(index_id.as_object_id())
+        );
+
+        let subscription_object = Object::find_by_id(subscription.id).one(db).await?.unwrap();
+        assert_eq!(subscription_object.schema_id, Some(TEST_SCHEMA_ID));
+        assert_eq!(
+            subscription_object.belong_to_oid,
+            Some(TEST_SCHEMA_ID.as_object_id())
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_create_function() -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let test_data_type = risingwave_pb::data::DataType {
@@ -874,6 +1634,36 @@ mod tests {
         assert_eq!(function.arg_types.to_protobuf().len(), 1);
         assert_eq!(function.language, "python");
 
+        mgr.create_schema(PbSchema {
+            database_id: TEST_DATABASE_ID,
+            name: "function_target".to_owned(),
+            owner: TEST_OWNER_ID as _,
+            ..Default::default()
+        })
+        .await?;
+        let target_schema_id: SchemaId = Schema::find()
+            .select_only()
+            .column(schema::Column::SchemaId)
+            .filter(schema::Column::Name.eq("function_target"))
+            .into_tuple()
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+        mgr.alter_schema(
+            ObjectType::Function,
+            function.function_id.as_object_id(),
+            target_schema_id,
+        )
+        .await?;
+        assert_eq!(
+            Object::find_by_id(function.function_id)
+                .one(&mgr.inner.read().await.db)
+                .await?
+                .unwrap()
+                .schema_id,
+            Some(target_schema_id)
+        );
+
         mgr.drop_object(
             ObjectType::Function,
             function.function_id,
@@ -910,7 +1700,7 @@ mod tests {
             }),
             ..Default::default()
         };
-        mgr.create_source(pb_source).await?;
+        mgr.create_source(pb_source, None).await?;
         let source_id: SourceId = Source::find()
             .select_only()
             .column(source::Column::SourceId)
@@ -992,12 +1782,19 @@ mod tests {
 
         let mut inner = mgr.inner.write().await;
         let txn = inner.db.begin().await?;
+        let obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(TEST_SCHEMA_ID.as_object_id()),
+        )
+        .await?;
+        let job_id = obj.oid.as_job_id();
         let source_obj = CatalogController::create_object(
             &txn,
             ObjectType::Source,
             TEST_OWNER_ID,
-            Some(TEST_DATABASE_ID),
-            Some(TEST_SCHEMA_ID),
+            Some(job_id.as_object_id()),
         )
         .await?;
         Source::insert(source::ActiveModel::from(PbSource {
@@ -1010,15 +1807,6 @@ mod tests {
         }))
         .exec(&txn)
         .await?;
-        let obj = CatalogController::create_object(
-            &txn,
-            ObjectType::Table,
-            TEST_OWNER_ID,
-            Some(TEST_DATABASE_ID),
-            Some(TEST_SCHEMA_ID),
-        )
-        .await?;
-        let job_id = obj.oid.as_job_id();
 
         table::ActiveModel {
             table_id: Set(obj.oid.as_table_id()),
@@ -1058,6 +1846,24 @@ mod tests {
             cdc_table_type: Set(None),
         }
         .insert(&txn)
+        .await?;
+
+        let internal_obj = CatalogController::create_object(
+            &txn,
+            ObjectType::Table,
+            TEST_OWNER_ID,
+            Some(job_id.as_object_id()),
+        )
+        .await?;
+        let internal_table_id = internal_obj.oid.as_table_id();
+        insert_test_table(
+            &txn,
+            internal_table_id,
+            "__internal_mv_abort_initial",
+            TableType::Internal,
+            Some(job_id),
+            "",
+        )
         .await?;
 
         streaming_job::ActiveModel {
@@ -1104,6 +1910,25 @@ mod tests {
                 .is_none()
         );
         assert!(
+            Object::find_by_id(internal_table_id)
+                .one(db)
+                .await?
+                .is_none()
+        );
+        assert!(
+            Table::find_by_id(internal_table_id)
+                .one(db)
+                .await?
+                .is_none()
+        );
+        assert!(
+            mgr.inner
+                .read()
+                .await
+                .dropped_tables
+                .contains_key(&internal_table_id)
+        );
+        assert!(
             Source::find_by_id(source_obj.oid.as_source_id())
                 .one(db)
                 .await?
@@ -1133,6 +1958,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_failed_foreground_creating_job_is_preserved() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let (job_id, table_id) = insert_dirty_creating_job_with_fragment(
+            &mgr,
+            FragmentId::new(45),
+            1,
+            FragmentTypeMask::empty(),
+        )
+        .await?;
+
+        let abort_result = mgr.try_abort_creating_streaming_job(job_id, false).await?;
+        assert!(!abort_result.aborted);
+        assert_eq!(abort_result.database_id, Some(TEST_DATABASE_ID));
+
+        let db = &mgr.inner.read().await.db;
+        assert!(Object::find_by_id(job_id).one(db).await?.is_some());
+        assert!(StreamingJob::find_by_id(job_id).one(db).await?.is_some());
+        assert!(Table::find_by_id(table_id).one(db).await?.is_some());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_failed_created_job_is_preserved() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let (job_id, table_id) = insert_dirty_creating_job_with_fragment(
+            &mgr,
+            FragmentId::new(46),
+            1,
+            FragmentTypeMask::empty(),
+        )
+        .await?;
+
+        {
+            let inner = mgr.inner.read().await;
+            streaming_job::ActiveModel {
+                job_id: Set(job_id),
+                job_status: Set(JobStatus::Created),
+                ..Default::default()
+            }
+            .update(&inner.db)
+            .await?;
+        }
+
+        let abort_result = mgr.try_abort_creating_streaming_job(job_id, false).await?;
+        assert!(!abort_result.aborted);
+        assert_eq!(abort_result.database_id, Some(TEST_DATABASE_ID));
+        let db = &mgr.inner.read().await.db;
+        assert!(Object::find_by_id(job_id).one(db).await?.is_some());
+        assert!(StreamingJob::find_by_id(job_id).one(db).await?.is_some());
+        assert!(Table::find_by_id(table_id).one(db).await?.is_some());
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_clean_dirty_creating_jobs_records_dropped_tables_for_per_db_recovery()
     -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
@@ -1143,8 +2024,7 @@ mod tests {
             &txn,
             ObjectType::Table,
             TEST_OWNER_ID,
-            Some(TEST_DATABASE_ID),
-            Some(TEST_SCHEMA_ID),
+            Some(TEST_SCHEMA_ID.as_object_id()),
         )
         .await?;
         let job_id = mv_obj.oid.as_job_id();
@@ -1163,8 +2043,7 @@ mod tests {
             &txn,
             ObjectType::Table,
             TEST_OWNER_ID,
-            Some(TEST_DATABASE_ID),
-            Some(TEST_SCHEMA_ID),
+            Some(job_id.as_object_id()),
         )
         .await?;
         let internal_table_id = internal_obj.oid.as_table_id();
@@ -1180,7 +2059,7 @@ mod tests {
 
         streaming_job::ActiveModel {
             job_id: Set(job_id),
-            job_status: Set(JobStatus::Creating),
+            job_status: Set(JobStatus::Initial),
             create_type: Set(CreateType::Foreground),
             timezone: Set(None),
             config_override: Set(None),
@@ -1213,6 +2092,12 @@ mod tests {
         assert!(inner.dropped_tables.contains_key(&internal_table_id));
         assert!(Object::find_by_id(job_id).one(&inner.db).await?.is_none());
         assert!(
+            Object::find_by_id(internal_table_id)
+                .one(&inner.db)
+                .await?
+                .is_none()
+        );
+        assert!(
             StreamingJob::find_by_id(job_id)
                 .one(&inner.db)
                 .await?
@@ -1243,8 +2128,13 @@ mod tests {
             .insert_local_sender(local_notification_tx);
         let mgr = CatalogController::new(env).await?;
         let fragment_id = FragmentId::new(3);
-        let (job_id, mv_table_id) =
-            insert_dirty_creating_job_with_fragment(&mgr, fragment_id, 1).await?;
+        let (job_id, mv_table_id) = insert_dirty_creating_job_with_fragment(
+            &mgr,
+            fragment_id,
+            1,
+            FragmentTypeMask::from(FragmentTypeFlag::Values as u32),
+        )
+        .await?;
 
         assert!(
             mgr.fragment_serving_infos()
@@ -1351,8 +2241,7 @@ mod tests {
             &txn,
             ObjectType::Table,
             TEST_OWNER_ID,
-            Some(TEST_DATABASE_ID),
-            Some(TEST_SCHEMA_ID),
+            Some(TEST_SCHEMA_ID.as_object_id()),
         )
         .await?;
         let table_id = table_obj.oid.as_table_id();

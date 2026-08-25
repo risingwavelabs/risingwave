@@ -762,6 +762,34 @@ pub mod tests {
     }
 
     #[test]
+    fn test_file_cache_separated_runtime_config_backward_compatibility() {
+        let config: RwConfig = toml::from_str(
+            r#"
+            [storage.data_file_cache.runtime_config.Separated.read_runtime_options]
+            worker_threads = 2
+            max_blocking_threads = 4
+
+            [storage.data_file_cache.runtime_config.Separated.write_runtime_options]
+            worker_threads = 6
+            max_blocking_threads = 8
+            "#,
+        )
+        .unwrap();
+
+        let storage::FileCacheRuntimeConfig::Separated {
+            read_runtime_options,
+            write_runtime_options,
+        } = config.storage.data_file_cache.runtime_config
+        else {
+            panic!("expected legacy separated file-cache runtime config");
+        };
+        assert_eq!(read_runtime_options.worker_threads, 2);
+        assert_eq!(read_runtime_options.max_blocking_threads, 4);
+        assert_eq!(write_runtime_options.worker_threads, 6);
+        assert_eq!(write_runtime_options.max_blocking_threads, 8);
+    }
+
+    #[test]
     fn test_meta_configs_backward_compatibility() {
         // Test periodic_space_reclaim_compaction_interval_sec
         {
