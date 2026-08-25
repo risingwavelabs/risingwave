@@ -45,7 +45,7 @@ use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
 
 use super::IcebergTaskMeta;
-use super::memory::{PlanMemoryEstimate, estimate_plan_memory};
+use super::memory::estimate_plan_memory;
 use crate::hummock::{HummockError, HummockResult};
 use crate::monitor::CompactorMetrics;
 
@@ -124,8 +124,6 @@ pub struct IcebergCompactionPlanRunner {
     branch: String,
     compaction_plan: CompactionPlan,
     pub memory_reservation_bytes: usize,
-    datafusion_memory_limit_bytes: usize,
-    memory_estimate: PlanMemoryEstimate,
 }
 
 impl IcebergCompactionPlanRunner {
@@ -175,17 +173,7 @@ impl IcebergCompactionPlanRunner {
             plan_index: self.plan_index,
             required_parallelism: self.required_parallelism(),
             memory_reservation_bytes: self.memory_reservation_bytes,
-            memory_estimate: Some(self.memory_estimate),
         }
-    }
-
-    pub(crate) fn grant_memory(
-        &mut self,
-        memory_reservation_bytes: usize,
-        datafusion_memory_limit_bytes: usize,
-    ) {
-        self.memory_reservation_bytes = memory_reservation_bytes;
-        self.datafusion_memory_limit_bytes = datafusion_memory_limit_bytes;
     }
 
     pub async fn compact(self, shutdown_rx: Receiver<()>) -> HummockResult<RewriteFilesStat> {
@@ -205,7 +193,6 @@ impl IcebergCompactionPlanRunner {
             self.branch,
             self.compaction_plan,
             self.memory_reservation_bytes,
-            self.datafusion_memory_limit_bytes,
         );
 
         tokio::select! {
@@ -254,7 +241,6 @@ impl IcebergCompactionPlanRunner {
         branch: String,
         compaction_plan: CompactionPlan,
         memory_reservation_bytes: usize,
-        datafusion_memory_limit_bytes: usize,
     ) -> HummockResult<RewriteFilesStat> {
         if !compaction_plan.has_files() {
             tracing::info!(
@@ -281,8 +267,9 @@ impl IcebergCompactionPlanRunner {
             .write_parquet_properties(write_parquet_properties)
             .target_file_size_bytes(iceberg_config.target_file_size_mb() * 1024 * 1024)
             .max_concurrent_closes(config.max_concurrent_closes)
+            // Keep DataFusion's default unbounded memory pool. Memory estimates are used only for
+            // scheduler admission; setting `max_memory_bytes` also enables disk spilling.
             .enable_prefetch(false)
-            .max_memory_bytes(Some(datafusion_memory_limit_bytes))
             .build()
             .map_err(|e| {
                 HummockError::compaction_executor(
@@ -299,7 +286,6 @@ impl IcebergCompactionPlanRunner {
             input_parallelism = compaction_plan.recommended_executor_parallelism(),
             output_parallelism = compaction_plan.recommended_output_parallelism(),
             memory_reservation_bytes,
-            datafusion_memory_limit_bytes,
             statistics = ?statistics,
             "Iceberg compaction plan started"
         );
@@ -615,30 +601,11 @@ pub async fn create_task_execution(
             requires_sort,
             compaction_plan.recommended_output_parallelism(),
         );
-        if memory_estimate.minimum_pool_bytes > memory_budget_bytes {
+        let memory_reservation_bytes = memory_estimate.estimated_heap_peak_bytes();
+        if memory_reservation_bytes > memory_budget_bytes {
             return Err(HummockError::compaction_executor(format!(
-                "Iceberg compaction plan {plan_index} for task {task_id} requires a minimum DataFusion pool of {} bytes, exceeding the worker budget of {memory_budget_bytes} bytes",
-                memory_estimate.minimum_pool_bytes,
+                "Iceberg compaction plan {plan_index} for task {task_id} has an estimated heap peak of {memory_reservation_bytes} bytes, exceeding the worker scheduling budget of {memory_budget_bytes} bytes",
             )));
-        }
-        let minimum_heap_bytes = memory_estimate.minimum_heap_bytes();
-        if minimum_heap_bytes > memory_budget_bytes {
-            return Err(HummockError::compaction_executor(format!(
-                "Iceberg compaction plan {plan_index} for task {task_id} requires a minimum heap reservation of {minimum_heap_bytes} bytes, exceeding the worker budget of {memory_budget_bytes} bytes",
-            )));
-        }
-        if memory_estimate.preferred_pool_bytes > memory_budget_bytes {
-            tracing::warn!(
-                task_id = %task_id,
-                sink_id,
-                plan_index,
-                preferred_pool_bytes = memory_estimate.preferred_pool_bytes,
-                minimum_pool_bytes = memory_estimate.minimum_pool_bytes,
-                non_spillable_memory_bytes = memory_estimate.non_spillable_bytes,
-                minimum_heap_bytes,
-                memory_budget_bytes,
-                "Iceberg compaction preferred DataFusion pool exceeds the worker budget; the scheduler will grant a smaller pool and spill"
-            );
         }
         runners.push(IcebergCompactionPlanRunner {
             task_id,
@@ -651,9 +618,7 @@ pub async fn create_task_execution(
             task_type: parsed_task_type,
             branch: branch.clone(),
             compaction_plan,
-            memory_reservation_bytes: minimum_heap_bytes,
-            datafusion_memory_limit_bytes: memory_estimate.minimum_pool_bytes,
-            memory_estimate,
+            memory_reservation_bytes,
         });
     }
 

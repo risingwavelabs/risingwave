@@ -29,7 +29,6 @@ use std::sync::Arc;
 
 use tokio::sync::Notify;
 
-use self::memory::PlanMemoryEstimate;
 use crate::monitor::CompactorMetrics;
 
 /// Unique key combining `(task_id, plan_index)` since one task can have multiple plans.
@@ -42,12 +41,9 @@ pub struct IcebergTaskMeta {
     pub plan_index: usize,
     /// Must be in range `1..=max_parallelism`
     pub required_parallelism: u32,
-    /// Minimum heap while waiting; replaced with the granted heap when the task is popped.
+    /// Estimated heap peak used for admission control.
     /// Must be in range `1..=total_memory_budget_bytes`.
     pub memory_reservation_bytes: usize,
-    /// Real plans use this to choose their pool from the memory available at pop time. Tests and
-    /// callers with a fixed reservation leave it unset.
-    pub(crate) memory_estimate: Option<PlanMemoryEstimate>,
 }
 
 #[derive(Debug)]
@@ -312,27 +308,11 @@ impl IcebergTaskQueue {
         if front.required_parallelism > self.available_parallelism() {
             return None;
         }
-        let available_memory_bytes = self.available_memory_reservation_bytes();
-        let (granted_memory_bytes, granted_pool_bytes) = match front.memory_estimate {
-            Some(estimate) => {
-                let pool_limit_bytes = estimate.pool_limit_for_heap_budget(
-                    available_memory_bytes,
-                    self.total_memory_budget_bytes,
-                )?;
-                (
-                    estimate.expected_heap_peak_bytes(pool_limit_bytes),
-                    Some(pool_limit_bytes),
-                )
-            }
-            None if front.memory_reservation_bytes <= available_memory_bytes => {
-                (front.memory_reservation_bytes, None)
-            }
-            None => return None,
-        };
+        if front.memory_reservation_bytes > self.available_memory_reservation_bytes() {
+            return None;
+        }
 
-        let mut meta = self.inner.deque.pop_front()?;
-        let waiting_memory_bytes = meta.memory_reservation_bytes;
-        meta.memory_reservation_bytes = granted_memory_bytes;
+        let meta = self.inner.deque.pop_front()?;
         self.inner.waiting_parallelism_sum = self
             .inner
             .waiting_parallelism_sum
@@ -344,7 +324,7 @@ impl IcebergTaskQueue {
         self.inner.waiting_memory_reservation_bytes = self
             .inner
             .waiting_memory_reservation_bytes
-            .checked_sub(waiting_memory_bytes)
+            .checked_sub(meta.memory_reservation_bytes)
             .expect("waiting memory reservation bookkeeping underflowed");
         self.inner.running_memory_reservation_bytes = self
             .inner
@@ -353,18 +333,8 @@ impl IcebergTaskQueue {
             .expect("running memory reservation sum overflowed");
 
         let key = meta.key();
-        let resources = self
-            .inner
-            .resource_map
-            .get_mut(&key)
-            .expect("popped task must have resource bookkeeping");
-        resources.memory_reservation_bytes = granted_memory_bytes;
-
         self.update_memory_metrics();
-        let mut runner = self.inner.runners.remove(&key);
-        if let (Some(runner), Some(pool_limit_bytes)) = (&mut runner, granted_pool_bytes) {
-            runner.grant_memory(granted_memory_bytes, pool_limit_bytes);
-        }
+        let runner = self.inner.runners.remove(&key);
         Some(PoppedIcebergTask { meta, runner })
     }
 
@@ -406,7 +376,6 @@ mod tests {
             plan_index,
             required_parallelism: p,
             memory_reservation_bytes: 1,
-            memory_estimate: None,
         }
     }
 
@@ -584,7 +553,6 @@ mod tests {
             plan_index: 0,
             required_parallelism: 1,
             memory_reservation_bytes,
-            memory_estimate: None,
         };
         assert_eq!(q.push(meta(1, 80), None), PushResult::Added);
         q.pop().unwrap();
@@ -604,7 +572,6 @@ mod tests {
             plan_index: 0,
             required_parallelism: 1,
             memory_reservation_bytes,
-            memory_estimate: None,
         };
         assert_eq!(q.push(meta(1, 60), None), PushResult::Added);
         q.pop().unwrap();
