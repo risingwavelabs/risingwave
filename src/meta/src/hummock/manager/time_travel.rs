@@ -46,7 +46,10 @@ use crate::hummock::error::{Error, Result};
 impl HummockManager {
     pub(crate) async fn init_time_travel_state(&self) -> Result<()> {
         let sql_store = self.env.meta_store_ref();
-        let mut guard = self.versioning.write().await;
+        let mut guard = self
+            .versioning
+            .write_with_process_name("init_time_travel_state")
+            .await;
         guard.mark_next_time_travel_version_snapshot();
 
         guard.last_time_travel_snapshot_sst_ids = HashSet::new();
@@ -73,7 +76,11 @@ impl HummockManager {
             .metrics
             .time_travel_vacuum_metadata_latency
             .start_timer();
-        let min_pinned_version_id = self.context_info.read().await.min_pinned_version_id();
+        let min_pinned_version_id = self
+            .context_info
+            .read_with_process_name("truncate_time_travel_metadata")
+            .await
+            .min_pinned_version_id();
         let sql_store = self.env.meta_store_ref();
         let txn = sql_store.conn.begin().await?;
 

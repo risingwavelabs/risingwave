@@ -12,15 +12,9 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Unit tests for the iceberg pk-index [`super::WriterExecutor`].
-//!
-//! The tests exercise the writer executor end-to-end with an in-memory state
-//! store and a mock iceberg data-file writer: inserts write data files and
-//! index rows, deletes emit (`file_path`, `position`) chunks, and updates
-//! rewrite the index entry and the underlying data file.
-
 use std::sync::{Arc, Mutex};
 
+use futures::FutureExt;
 use iceberg::writer::PositionDeleteInput;
 use risingwave_common::array::Op;
 use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
@@ -34,10 +28,23 @@ use risingwave_storage::memory::MemoryStateStore;
 use super::*;
 use crate::common::table::test_utils::gen_pbtable;
 use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
+use crate::executor::{IcebergPkIndexCompactionContext, Mutation, UpdateMutation};
 use crate::task::LocalBarrierManager;
 
 const CHUNK_SIZE: usize = 1024;
 const TEST_FILE_PATH: &str = "file1.parquet";
+
+fn compaction_context(
+    sink_id: SinkId,
+    task_id: IcebergCompactionTaskId,
+    phase: Phase,
+) -> IcebergPkIndexCompactionContext {
+    IcebergPkIndexCompactionContext {
+        sink_id,
+        task_id,
+        phase: phase as i32,
+    }
+}
 
 struct IcebergWriterMock {
     file_path: String,
@@ -95,7 +102,7 @@ async fn create_pk_index_state_table(
     let order_types = vec![OrderType::ascending()];
     let pk_indices = vec![0];
 
-    StateTable::from_table_catalog(
+    StateTable::from_table_catalog_inconsistent_op(
         &gen_pbtable(table_id, column_descs, order_types, pk_indices, 0),
         store,
         None,
@@ -127,7 +134,8 @@ fn test_file_position(position: i64) -> (String, i64) {
 }
 
 struct WriterTestHarness {
-    tx: MessageSender,
+    left_tx: MessageSender,
+    right_tx: MessageSender,
     executor: BoxedMessageStream,
     written_chunks: Arc<Mutex<Vec<StreamChunk>>>,
 }
@@ -145,36 +153,47 @@ impl WriterTestHarness {
         let writer = IcebergWriterMock::new(TEST_FILE_PATH);
         let written_chunks = writer.written_chunks();
 
-        let (tx, source) = MockSource::channel();
-        let source = source.into_executor(input_schema, vec![0]);
-        let lbm = LocalBarrierManager::for_test();
+        let (left_tx, left_source) = MockSource::channel();
+        let left_input = left_source.into_executor(input_schema, vec![0]);
+        let (right_tx, right_source) = MockSource::channel();
+        let right_input = right_source.into_executor(
+            Schema::new(vec![
+                Field::with_name(DataType::Int64, "pk"),
+                Field::with_name(DataType::Varchar, "file_path"),
+                Field::with_name(DataType::Int64, "position"),
+            ]),
+            vec![0],
+        );
         let executor = WriterExecutor::new(
             ActorContext::for_test(123),
-            source,
+            left_input,
+            right_input,
             vec![0],
             state_table,
             writer,
             CHUNK_SIZE,
             SinkId::new(0),
-            lbm,
+            LocalBarrierManager::for_test(),
         )
         .boxed()
         .execute();
 
         Self {
-            tx,
+            left_tx,
+            right_tx,
             executor,
             written_chunks,
         }
     }
 
     async fn init(&mut self) {
-        self.tx.push_barrier(test_epoch(1), false);
+        self.left_tx.push_barrier(test_epoch(1), false);
+        self.right_tx.push_barrier(test_epoch(1), false);
         self.executor.expect_barrier().await;
     }
 
     fn push_chunk(&mut self, chunk: StreamChunk) {
-        self.tx.push_chunk(chunk);
+        self.left_tx.push_chunk(chunk);
     }
 
     fn push_pretty_chunk(&mut self, pretty: &str) {
@@ -182,7 +201,38 @@ impl WriterTestHarness {
     }
 
     fn push_barrier(&mut self, epoch: u64) {
-        self.tx.push_barrier(test_epoch(epoch), false);
+        self.left_tx.push_barrier(test_epoch(epoch), false);
+        self.right_tx.push_barrier(test_epoch(epoch), false);
+    }
+
+    fn push_left_compaction_barrier(&mut self, epoch: u64, task_id: u64, phase: Phase) {
+        self.left_tx.send_barrier(
+            Barrier::new_test_barrier(test_epoch(epoch)).with_iceberg_pk_index_compaction(
+                compaction_context(SinkId::new(0), task_id.into(), phase),
+            ),
+        );
+    }
+
+    fn push_right_barrier(&mut self, epoch: u64, task_id: u64, phase: Phase) {
+        self.right_tx.send_barrier(
+            Barrier::new_test_barrier(test_epoch(epoch)).with_iceberg_pk_index_compaction(
+                compaction_context(SinkId::new(0), task_id.into(), phase),
+            ),
+        );
+    }
+
+    fn push_compaction_begin(&mut self, epoch: u64, task_id: u64) {
+        self.push_left_compaction_barrier(epoch, task_id, Phase::Begin);
+        self.push_right_barrier(epoch, task_id, Phase::Begin);
+    }
+
+    fn push_compaction_seal(&mut self, epoch: u64, task_id: u64) {
+        self.push_right_barrier(epoch, task_id, Phase::End);
+        self.push_left_compaction_barrier(epoch, task_id, Phase::End);
+    }
+
+    fn push_resolver_chunk(&mut self, pretty: &str) {
+        self.right_tx.push_chunk(StreamChunk::from_pretty(pretty));
     }
 
     async fn expect_barrier(&mut self) {
@@ -205,9 +255,9 @@ async fn test_writer_executor_insert_only() {
 
     harness.push_pretty_chunk(
         " I I
-        + 1 10
-        + 2 20
-        + 3 30",
+            + 1 10
+            + 2 20
+            + 3 30",
     );
     harness.push_barrier(2);
 
@@ -216,9 +266,9 @@ async fn test_writer_executor_insert_only() {
         harness.written_chunks(),
         vec![StreamChunk::from_pretty(
             " I I
-            + 1 10
-            + 2 20
-            + 3 30",
+                + 1 10
+                + 2 20
+                + 3 30",
         )]
     );
 }
@@ -230,16 +280,16 @@ async fn test_writer_executor_insert_then_delete() {
 
     harness.push_pretty_chunk(
         " I I
-        + 1 10
-        + 2 20
-        + 3 30",
+            + 1 10
+            + 2 20
+            + 3 30",
     );
     harness.push_barrier(2);
     harness.expect_barrier().await;
 
     harness.push_pretty_chunk(
         " I I
-        - 2 20",
+            - 2 20",
     );
     harness.push_barrier(3);
 
@@ -256,15 +306,15 @@ async fn test_writer_executor_update_rewrites_position() {
 
     harness.push_pretty_chunk(
         " I I
-        + 1 10",
+            + 1 10",
     );
     harness.push_barrier(2);
     harness.expect_barrier().await;
 
     harness.push_pretty_chunk(
         " I I
-        U- 1 10
-        U+ 1 99",
+            U- 1 10
+            U+ 1 99",
     );
     harness.push_barrier(3);
 
@@ -275,7 +325,7 @@ async fn test_writer_executor_update_rewrites_position() {
 
     harness.push_pretty_chunk(
         " I I
-        - 1 99",
+            - 1 99",
     );
     harness.push_barrier(4);
 
@@ -289,11 +339,11 @@ async fn test_writer_executor_update_rewrites_position() {
         vec![
             StreamChunk::from_pretty(
                 " I I
-                + 1 10",
+                    + 1 10",
             ),
             StreamChunk::from_pretty(
                 " I I
-                + 1 99",
+                    + 1 99",
             ),
         ]
     );
@@ -306,8 +356,8 @@ async fn test_writer_executor_delete_then_insert_without_existing_row_is_fresh_i
 
     harness.push_pretty_chunk(
         " I I
-        - 1 10
-        + 1 99",
+            - 1 10
+            + 1 99",
     );
     harness.push_barrier(2);
 
@@ -316,7 +366,7 @@ async fn test_writer_executor_delete_then_insert_without_existing_row_is_fresh_i
         harness.written_chunks(),
         vec![StreamChunk::from_pretty(
             " I I
-            + 1 99",
+                + 1 99",
         )]
     );
 }
@@ -328,15 +378,15 @@ async fn test_writer_executor_delete_then_insert_rewrites_existing_row() {
 
     harness.push_pretty_chunk(
         " I I
-        + 1 10",
+            + 1 10",
     );
     harness.push_barrier(2);
     harness.expect_barrier().await;
 
     harness.push_pretty_chunk(
         " I I
-        - 1 10
-        + 1 99",
+            - 1 10
+            + 1 99",
     );
     harness.push_barrier(3);
 
@@ -350,11 +400,11 @@ async fn test_writer_executor_delete_then_insert_rewrites_existing_row() {
         vec![
             StreamChunk::from_pretty(
                 " I I
-                + 1 10",
+                    + 1 10",
             ),
             StreamChunk::from_pretty(
                 " I I
-                + 1 99",
+                    + 1 99",
             ),
         ]
     );
@@ -371,15 +421,15 @@ async fn test_writer_executor_duplicate_delete_in_same_chunk_panics() {
 
     harness.push_pretty_chunk(
         " I I
-        + 1 10",
+            + 1 10",
     );
     harness.push_barrier(2);
     harness.expect_barrier().await;
 
     harness.push_pretty_chunk(
         " I I
-        - 1 10
-        - 1 10",
+            - 1 10
+            - 1 10",
     );
     harness.push_barrier(3);
 
@@ -394,11 +444,11 @@ async fn test_writer_executor_insert_then_delete_in_different_chunks_same_checkp
 
     harness.push_pretty_chunk(
         " I I
-        + 1 10",
+            + 1 10",
     );
     harness.push_pretty_chunk(
         " I I
-        - 1 10",
+            - 1 10",
     );
     harness.push_barrier(2);
 
@@ -410,7 +460,7 @@ async fn test_writer_executor_insert_then_delete_in_different_chunks_same_checkp
         harness.written_chunks(),
         vec![StreamChunk::from_pretty(
             " I I
-            + 1 10",
+                + 1 10",
         )]
     );
 }
@@ -425,8 +475,8 @@ async fn test_writer_executor_duplicate_insert_in_same_chunk_panics() {
 
     harness.push_pretty_chunk(
         " I I
-        + 1 10
-        + 1 99",
+            + 1 10
+            + 1 99",
     );
     harness.push_barrier(2);
 
@@ -441,11 +491,350 @@ async fn test_writer_executor_insert_then_delete_in_same_chunk_is_cancelled() {
 
     harness.push_pretty_chunk(
         " I I
-        + 1 10
-        - 1 10",
+            + 1 10
+            - 1 10",
     );
     harness.push_barrier(2);
 
     harness.expect_barrier().await;
     assert!(harness.written_chunks().is_empty());
+}
+
+#[tokio::test]
+async fn test_writer_executor_normal_watermark_does_not_poll_right_input() {
+    let mut harness = WriterTestHarness::new().await;
+    harness.init().await;
+
+    harness.left_tx.push_int64_watermark(0, 42);
+    assert!(matches!(
+        harness.executor.next().now_or_never(),
+        Some(Some(Ok(Message::Watermark(_))))
+    ));
+
+    harness.push_barrier(2);
+    harness.expect_barrier().await;
+}
+
+#[tokio::test]
+async fn test_writer_executor_rejects_mismatched_ordinary_update_mutation() {
+    let mut harness = WriterTestHarness::new().await;
+    harness.init().await;
+
+    let mut left_update = UpdateMutation::default();
+    left_update.dropped_actors.insert(ActorId::new(456));
+    let mut right_update = UpdateMutation::default();
+    right_update.dropped_actors.insert(ActorId::new(789));
+    let left =
+        Barrier::new_test_barrier(test_epoch(2)).with_mutation(Mutation::Update(left_update));
+    let right =
+        Barrier::new_test_barrier(test_epoch(2)).with_mutation(Mutation::Update(right_update));
+    harness.left_tx.send_barrier(left);
+    harness.right_tx.send_barrier(right);
+
+    let err = harness.executor.next().await.unwrap().unwrap_err();
+    assert!(
+        err.to_string().contains("mismatched left/right barriers"),
+        "unexpected error: {err}"
+    );
+}
+
+#[tokio::test]
+async fn test_writer_executor_accepts_equivalent_unordered_update_mutations() {
+    let mut harness = WriterTestHarness::new().await;
+    harness.init().await;
+
+    let mut left_update = UpdateMutation::default();
+    left_update
+        .dropped_actors
+        .extend([ActorId::new(456), ActorId::new(789), ActorId::new(1011)]);
+    let mut right_update = UpdateMutation::default();
+    right_update
+        .dropped_actors
+        .extend([ActorId::new(1011), ActorId::new(789), ActorId::new(456)]);
+    let left =
+        Barrier::new_test_barrier(test_epoch(2)).with_mutation(Mutation::Update(left_update));
+    let right =
+        Barrier::new_test_barrier(test_epoch(2)).with_mutation(Mutation::Update(right_update));
+    harness.left_tx.send_barrier(left);
+    harness.right_tx.send_barrier(right);
+    harness.expect_barrier().await;
+}
+
+#[tokio::test]
+async fn test_writer_executor_compaction_rejects_stray_seal_in_normal() {
+    let mut harness = WriterTestHarness::new().await;
+    harness.init().await;
+    harness.push_compaction_seal(2, 7);
+
+    let err = harness.executor.next().await.unwrap().unwrap_err();
+    assert!(
+        err.to_string().contains("unexpected End in Normal mode"),
+        "unexpected error: {err}"
+    );
+}
+
+#[tokio::test]
+async fn test_writer_executor_compaction_allows_other_sink_seal_in_normal() {
+    let mut harness = WriterTestHarness::new().await;
+    harness.init().await;
+
+    let barrier = Barrier::new_test_barrier(test_epoch(2)).with_iceberg_pk_index_compaction(
+        compaction_context(SinkId::new(99), 7.into(), Phase::End),
+    );
+    harness.left_tx.send_barrier(barrier.clone());
+    harness.right_tx.send_barrier(barrier);
+    harness.expect_barrier().await;
+}
+
+#[tokio::test]
+async fn test_writer_executor_compaction_rejects_left_watermark_before_b2() {
+    let mut harness = WriterTestHarness::new().await;
+    harness.init().await;
+    harness.push_compaction_begin(2, 7);
+    harness.expect_barrier().await;
+    harness.push_right_barrier(3, 7, Phase::End);
+    harness.left_tx.push_int64_watermark(0, 42);
+
+    let err = harness.executor.next().await.unwrap().unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("received watermark on left input while draining"),
+        "unexpected error: {err}"
+    );
+}
+
+#[tokio::test]
+async fn test_writer_executor_compaction_applies_right_survivors_before_left_e1_delete() {
+    let mut harness = WriterTestHarness::new().await;
+    harness.init().await;
+
+    harness.push_pretty_chunk(
+        " I I
+          + 1 10",
+    );
+    harness.push_barrier(2);
+    harness.expect_barrier().await;
+
+    harness.push_compaction_begin(3, 7);
+    harness.expect_barrier().await;
+    harness.push_pretty_chunk(
+        " I I
+          - 1 10",
+    );
+    harness.push_resolver_chunk(
+        " I T              I
+          + 1 output.parquet 100",
+    );
+    harness.push_compaction_seal(4, 7);
+
+    harness
+        .expect_position_chunk(vec![("output.parquet".to_owned(), 100)])
+        .await;
+    harness.expect_barrier().await;
+    assert_eq!(
+        harness.written_chunks(),
+        vec![StreamChunk::from_pretty(
+            " I I
+              + 1 10",
+        )]
+    );
+}
+
+#[tokio::test]
+async fn test_writer_executor_compaction_does_not_poll_left_before_right_b2() {
+    let mut harness = WriterTestHarness::new().await;
+    harness.init().await;
+    harness.push_compaction_begin(2, 7);
+    harness.expect_barrier().await;
+
+    harness.push_pretty_chunk(
+        " I I
+          + 1 10",
+    );
+    assert!(harness.executor.next().now_or_never().is_none());
+    assert!(harness.written_chunks().is_empty());
+
+    harness.push_right_barrier(3, 7, Phase::End);
+    assert!(harness.executor.next().now_or_never().is_none());
+    assert_eq!(
+        harness.written_chunks(),
+        vec![StreamChunk::from_pretty(
+            " I I
+              + 1 10",
+        )]
+    );
+    harness.push_left_compaction_barrier(3, 7, Phase::End);
+    harness.expect_barrier().await;
+}
+
+#[tokio::test]
+async fn test_writer_executor_compaction_forwards_b2_and_immediately_processes_e2() {
+    let mut harness = WriterTestHarness::new().await;
+    harness.init().await;
+    harness.push_compaction_begin(2, 7);
+    harness.expect_barrier().await;
+    harness.push_compaction_seal(3, 7);
+    harness.expect_barrier().await;
+
+    harness.push_pretty_chunk(
+        " I I
+          + 1 10",
+    );
+    harness.push_barrier(4);
+    harness.expect_barrier().await;
+    assert_eq!(
+        harness.written_chunks(),
+        vec![StreamChunk::from_pretty(
+            " I I
+              + 1 10",
+        )]
+    );
+}
+
+#[tokio::test]
+async fn test_writer_executor_compaction_rejects_mismatched_left_and_right_b2() {
+    let mut harness = WriterTestHarness::new().await;
+    harness.init().await;
+    harness.push_compaction_begin(2, 7);
+    harness.expect_barrier().await;
+    harness.push_right_barrier(3, 7, Phase::End);
+    harness.push_left_compaction_barrier(3, 8, Phase::End);
+
+    let err = harness.executor.next().await.unwrap().unwrap_err();
+    assert!(
+        err.to_string().contains("mismatched left/right barriers"),
+        "unexpected error: {err}"
+    );
+}
+
+#[tokio::test]
+async fn test_writer_executor_compaction_rejects_right_eof_before_b2() {
+    let store = MemoryStateStore::new();
+    let state_table = create_pk_index_state_table(store, TableId::new(1)).await;
+    let writer = IcebergWriterMock::new(TEST_FILE_PATH);
+    let (mut left_tx, left_source) = MockSource::channel();
+    let (mut right_tx, right_source) = MockSource::channel();
+    let left_input = left_source.into_executor(input_schema(), vec![0]);
+    let right_input = right_source
+        .stop_on_finish(false)
+        .into_executor(Schema::empty().clone(), vec![]);
+    let mut executor = WriterExecutor::new(
+        ActorContext::for_test(123),
+        left_input,
+        right_input,
+        vec![0],
+        state_table,
+        writer,
+        CHUNK_SIZE,
+        SinkId::new(0),
+        LocalBarrierManager::for_test(),
+    )
+    .boxed()
+    .execute();
+
+    left_tx.push_barrier(test_epoch(1), false);
+    right_tx.push_barrier(test_epoch(1), false);
+    executor.expect_barrier().await;
+    let begin = Barrier::new_test_barrier(test_epoch(2)).with_iceberg_pk_index_compaction(
+        compaction_context(SinkId::new(0), 7.into(), Phase::Begin),
+    );
+    left_tx.send_barrier(begin.clone());
+    right_tx.send_barrier(begin);
+    executor.expect_barrier().await;
+    drop(right_tx);
+
+    let err = executor.next().await.unwrap().unwrap_err();
+    assert!(
+        err.to_string().contains("right input closed before End"),
+        "unexpected error: {err}"
+    );
+}
+
+#[tokio::test]
+async fn test_writer_executor_compaction_rejects_left_eof_before_b2() {
+    let store = MemoryStateStore::new();
+    let state_table = create_pk_index_state_table(store, TableId::new(1)).await;
+    let writer = IcebergWriterMock::new(TEST_FILE_PATH);
+    let (mut left_tx, left_source) = MockSource::channel();
+    let (mut right_tx, right_source) = MockSource::channel();
+    let left_input = left_source
+        .stop_on_finish(false)
+        .into_executor(input_schema(), vec![0]);
+    let right_input = right_source.into_executor(Schema::empty().clone(), vec![]);
+    let mut executor = WriterExecutor::new(
+        ActorContext::for_test(123),
+        left_input,
+        right_input,
+        vec![0],
+        state_table,
+        writer,
+        CHUNK_SIZE,
+        SinkId::new(0),
+        LocalBarrierManager::for_test(),
+    )
+    .boxed()
+    .execute();
+
+    left_tx.push_barrier(test_epoch(1), false);
+    right_tx.push_barrier(test_epoch(1), false);
+    executor.expect_barrier().await;
+    let begin = Barrier::new_test_barrier(test_epoch(2)).with_iceberg_pk_index_compaction(
+        compaction_context(SinkId::new(0), 7.into(), Phase::Begin),
+    );
+    left_tx.send_barrier(begin.clone());
+    right_tx.send_barrier(begin);
+    executor.expect_barrier().await;
+
+    right_tx.send_barrier(
+        Barrier::new_test_barrier(test_epoch(3)).with_iceberg_pk_index_compaction(
+            compaction_context(SinkId::new(0), 7.into(), Phase::End),
+        ),
+    );
+    drop(left_tx);
+
+    let err = executor.next().await.unwrap().unwrap_err();
+    assert!(
+        err.to_string().contains("left input closed before End"),
+        "unexpected error: {err}"
+    );
+}
+
+#[tokio::test]
+async fn test_writer_executor_two_consecutive_compactions_reuse_same_state_table_handle() {
+    let mut harness = WriterTestHarness::new().await;
+    harness.init().await;
+    harness.push_pretty_chunk(
+        " I I
+          + 1 10",
+    );
+    harness.push_barrier(2);
+    harness.expect_barrier().await;
+
+    harness.push_compaction_begin(3, 7);
+    harness.expect_barrier().await;
+    harness.push_resolver_chunk(
+        " I T                I
+          + 1 output-1.parquet 100",
+    );
+    harness.push_compaction_seal(4, 7);
+    harness.expect_barrier().await;
+
+    harness.push_compaction_begin(5, 8);
+    harness.expect_barrier().await;
+    harness.push_resolver_chunk(
+        " I T                I
+          + 1 output-2.parquet 200",
+    );
+    harness.push_compaction_seal(6, 8);
+    harness.expect_barrier().await;
+
+    harness.push_pretty_chunk(
+        " I I
+          - 1 10",
+    );
+    harness.push_barrier(7);
+    harness
+        .expect_position_chunk(vec![("output-2.parquet".to_owned(), 200)])
+        .await;
+    harness.expect_barrier().await;
 }

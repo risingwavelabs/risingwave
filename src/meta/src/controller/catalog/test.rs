@@ -14,7 +14,7 @@
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::catalog::FragmentTypeMask;
+    use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
     use risingwave_common::hash::VirtualNode;
     use risingwave_meta_model::FragmentId;
     use risingwave_meta_model::fragment::DistributionType;
@@ -29,7 +29,7 @@ mod tests {
 
     use crate::barrier::Command;
     use crate::controller::catalog::*;
-    use crate::manager::{LocalNotification, WorkerKey};
+    use crate::manager::{LocalNotification, MetaOpts, WorkerKey};
     use crate::model::{Fragment, FragmentDownstreamRelation};
     use crate::serving::ServingVnodeMapping;
 
@@ -1226,6 +1226,7 @@ mod tests {
         mgr: &CatalogController,
         fragment_id: FragmentId,
         vnode_count: i32,
+        fragment_type_mask: FragmentTypeMask,
     ) -> MetaResult<(JobId, TableId)> {
         let inner = mgr.inner.write().await;
         let txn = inner.db.begin().await?;
@@ -1246,6 +1247,13 @@ mod tests {
             None,
             "CREATE MATERIALIZED VIEW mv_dirty_serving_mapping AS SELECT 1",
         )
+        .await?;
+        table::ActiveModel {
+            table_id: Set(table_id),
+            engine: Set(Some(table::Engine::Hummock)),
+            ..Default::default()
+        }
+        .update(&txn)
         .await?;
         streaming_job::ActiveModel {
             job_id: Set(job_id),
@@ -1268,7 +1276,7 @@ mod tests {
         fragment::ActiveModel {
             fragment_id: Set(fragment_id),
             job_id: Set(job_id),
-            fragment_type_mask: Set(0),
+            fragment_type_mask: Set(fragment_type_mask.into()),
             distribution_type: Set(DistributionType::Hash),
             stream_node: Set(StreamNode::default()),
             state_table_ids: Set(Vec::<TableId>::new().into()),
@@ -1292,6 +1300,7 @@ mod tests {
             &mgr,
             fragment_id,
             VirtualNode::COUNT_FOR_TEST as i32,
+            FragmentTypeMask::from(FragmentTypeFlag::Values as u32),
         )
         .await?;
 
@@ -1322,6 +1331,63 @@ mod tests {
 
         serving_vnode_mapping.reconcile(&current_snapshot, &[worker], None);
         assert!(!serving_vnode_mapping.all().contains_key(&fragment_id));
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_clean_dirty_creating_jobs_keeps_job_without_values_fragment() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let fragment_id = FragmentId::new(43);
+        let (job_id, table_id) = insert_dirty_creating_job_with_fragment(
+            &mgr,
+            fragment_id,
+            1,
+            FragmentTypeMask::empty(),
+        )
+        .await?;
+
+        let cleaned = mgr
+            .clean_dirty_creating_jobs(Some(TEST_DATABASE_ID))
+            .await?;
+        assert!(cleaned.streaming_job_ids.is_empty());
+
+        let inner = mgr.inner.read().await;
+        assert!(Object::find_by_id(job_id).one(&inner.db).await?.is_some());
+        assert!(
+            StreamingJob::find_by_id(job_id)
+                .one(&inner.db)
+                .await?
+                .is_some()
+        );
+        assert!(Table::find_by_id(table_id).one(&inner.db).await?.is_some());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_clean_dirty_creating_jobs_cleans_foreground_job_in_legacy_mode() -> MetaResult<()>
+    {
+        let mut opts = MetaOpts::test(false);
+        opts.clean_all_foreground_jobs_on_recovery = true;
+        let mgr = CatalogController::new(MetaSrvEnv::for_test_opts(opts, |_| ()).await).await?;
+        let (job_id, table_id) = insert_dirty_creating_job_with_fragment(
+            &mgr,
+            FragmentId::new(44),
+            1,
+            FragmentTypeMask::empty(),
+        )
+        .await?;
+
+        let cleaned = mgr
+            .clean_dirty_creating_jobs(Some(TEST_DATABASE_ID))
+            .await?;
+        assert_eq!(cleaned.streaming_job_ids, vec![job_id]);
+
+        let db = &mgr.inner.read().await.db;
+        assert!(Object::find_by_id(job_id).one(db).await?.is_none());
+        assert!(StreamingJob::find_by_id(job_id).one(db).await?.is_none());
+        assert!(Table::find_by_id(table_id).one(db).await?.is_none());
 
         Ok(())
     }
@@ -2212,6 +2278,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_failed_foreground_creating_job_is_preserved() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let (job_id, table_id) = insert_dirty_creating_job_with_fragment(
+            &mgr,
+            FragmentId::new(45),
+            1,
+            FragmentTypeMask::empty(),
+        )
+        .await?;
+
+        let abort_result = mgr.try_abort_creating_streaming_job(job_id, false).await?;
+        assert!(!abort_result.aborted);
+        assert_eq!(abort_result.database_id, Some(TEST_DATABASE_ID));
+
+        let db = &mgr.inner.read().await.db;
+        assert!(Object::find_by_id(job_id).one(db).await?.is_some());
+        assert!(StreamingJob::find_by_id(job_id).one(db).await?.is_some());
+        assert!(Table::find_by_id(table_id).one(db).await?.is_some());
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_failed_created_job_is_preserved() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let (job_id, table_id) = insert_dirty_creating_job_with_fragment(
+            &mgr,
+            FragmentId::new(46),
+            1,
+            FragmentTypeMask::empty(),
+        )
+        .await?;
+
+        {
+            let inner = mgr.inner.read().await;
+            streaming_job::ActiveModel {
+                job_id: Set(job_id),
+                job_status: Set(JobStatus::Created),
+                ..Default::default()
+            }
+            .update(&inner.db)
+            .await?;
+        }
+
+        let abort_result = mgr.try_abort_creating_streaming_job(job_id, false).await?;
+        assert!(!abort_result.aborted);
+        assert_eq!(abort_result.database_id, Some(TEST_DATABASE_ID));
+        let db = &mgr.inner.read().await.db;
+        assert!(Object::find_by_id(job_id).one(db).await?.is_some());
+        assert!(StreamingJob::find_by_id(job_id).one(db).await?.is_some());
+        assert!(Table::find_by_id(table_id).one(db).await?.is_some());
+
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_clean_dirty_creating_jobs_records_dropped_tables_for_per_db_recovery()
     -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
@@ -2257,7 +2379,7 @@ mod tests {
 
         streaming_job::ActiveModel {
             job_id: Set(job_id),
-            job_status: Set(JobStatus::Creating),
+            job_status: Set(JobStatus::Initial),
             create_type: Set(CreateType::Foreground),
             timezone: Set(None),
             config_override: Set(None),
@@ -2326,8 +2448,13 @@ mod tests {
             .insert_local_sender(local_notification_tx);
         let mgr = CatalogController::new(env).await?;
         let fragment_id = FragmentId::new(3);
-        let (job_id, mv_table_id) =
-            insert_dirty_creating_job_with_fragment(&mgr, fragment_id, 1).await?;
+        let (job_id, mv_table_id) = insert_dirty_creating_job_with_fragment(
+            &mgr,
+            fragment_id,
+            1,
+            FragmentTypeMask::from(FragmentTypeFlag::Values as u32),
+        )
+        .await?;
 
         assert!(
             mgr.fragment_serving_infos()

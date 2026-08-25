@@ -60,8 +60,8 @@ use risingwave_pb::user::{PbAction, PbGrantPrivilege, PbUserInfo};
 use risingwave_sqlparser::ast::Statement as SqlStatement;
 use risingwave_sqlparser::parser::Parser;
 use sea_orm::sea_query::{
-    Alias, CommonTableExpression, Expr, Query, QueryStatementBuilder, SelectStatement, UnionType,
-    WithClause,
+    Alias, CommonTableExpression, Expr, OnConflict, Query, QueryStatementBuilder, SelectStatement,
+    UnionType, WithClause,
 };
 use sea_orm::{
     ColumnTrait, ConnectionTrait, DatabaseTransaction, DerivePartialModel, EntityTrait,
@@ -1440,6 +1440,38 @@ where
         .collect())
 }
 
+/// Insert user privileges idempotently using the same key as `idx_user_privilege_item`.
+/// An existing privilege is preserved, except that its grant option is upgraded when requested.
+pub(crate) async fn upsert_user_privileges<C>(
+    db: &C,
+    privileges: impl IntoIterator<Item = user_privilege::ActiveModel>,
+) -> MetaResult<()>
+where
+    C: ConnectionTrait,
+{
+    for privilege in privileges {
+        let mut on_conflict = OnConflict::columns([
+            user_privilege::Column::UserId,
+            user_privilege::Column::Oid,
+            user_privilege::Column::Action,
+            user_privilege::Column::GrantedBy,
+        ]);
+        if *privilege.with_grant_option.as_ref() {
+            on_conflict.update_column(user_privilege::Column::WithGrantOption);
+        } else {
+            // Workaround to support MYSQL for `DO NOTHING`.
+            on_conflict.update_column(user_privilege::Column::UserId);
+        }
+
+        UserPrivilege::insert(privilege)
+            .on_conflict(on_conflict)
+            .do_nothing()
+            .exec(db)
+            .await?;
+    }
+    Ok(())
+}
+
 pub async fn get_table_columns(
     txn: &impl ConnectionTrait,
     id: TableId,
@@ -1517,54 +1549,46 @@ where
         .map(|(grantee, _, _, _)| *grantee)
         .collect::<HashSet<_>>();
 
+    let mut new_privileges = vec![];
     for (grantee, granted_by, action, with_grant_option) in default_privileges {
-        UserPrivilege::insert(user_privilege::ActiveModel {
+        new_privileges.push(user_privilege::ActiveModel {
             user_id: Set(grantee),
             oid: Set(object_id),
             granted_by: Set(granted_by),
             action: Set(action),
             with_grant_option: Set(with_grant_option),
             ..Default::default()
-        })
-        .exec(db)
-        .await?;
+        });
         if action == Action::Select {
             // Grant SELECT privilege for internal tables if the action is SELECT.
             let internal_table_ids = get_internal_tables_by_id(object_id.as_job_id(), db).await?;
-            if !internal_table_ids.is_empty() {
-                for internal_table_id in &internal_table_ids {
-                    UserPrivilege::insert(user_privilege::ActiveModel {
-                        user_id: Set(grantee),
-                        oid: Set(internal_table_id.as_object_id()),
-                        granted_by: Set(granted_by),
-                        action: Set(Action::Select),
-                        with_grant_option: Set(with_grant_option),
-                        ..Default::default()
-                    })
-                    .exec(db)
-                    .await?;
+            new_privileges.extend(internal_table_ids.into_iter().map(|internal_table_id| {
+                user_privilege::ActiveModel {
+                    user_id: Set(grantee),
+                    oid: Set(internal_table_id.as_object_id()),
+                    granted_by: Set(granted_by),
+                    action: Set(Action::Select),
+                    with_grant_option: Set(with_grant_option),
+                    ..Default::default()
                 }
-            }
+            }));
 
             // Additionally, grant SELECT privilege for iceberg related objects if the action is SELECT.
             let iceberg_privilege_object_ids =
                 get_iceberg_related_object_ids(object_id, db).await?;
-            if !iceberg_privilege_object_ids.is_empty() {
-                for iceberg_object_id in &iceberg_privilege_object_ids {
-                    UserPrivilege::insert(user_privilege::ActiveModel {
-                        user_id: Set(grantee),
-                        oid: Set(*iceberg_object_id),
-                        granted_by: Set(granted_by),
-                        action: Set(action),
-                        with_grant_option: Set(with_grant_option),
-                        ..Default::default()
-                    })
-                    .exec(db)
-                    .await?;
-                }
-            }
+            new_privileges.extend(iceberg_privilege_object_ids.into_iter().map(
+                |iceberg_object_id| user_privilege::ActiveModel {
+                    user_id: Set(grantee),
+                    oid: Set(iceberg_object_id),
+                    granted_by: Set(granted_by),
+                    action: Set(action),
+                    with_grant_option: Set(with_grant_option),
+                    ..Default::default()
+                },
+            ));
         }
     }
+    upsert_user_privileges(db, new_privileges).await?;
 
     let updated_user_infos = list_user_info_by_ids(updated_user_ids, db).await?;
     Ok(updated_user_infos)

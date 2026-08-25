@@ -149,7 +149,7 @@ async fn test_get_table_change_logs_with_inverted_epoch_range() {
     let table_id = TableId::new(1);
     hummock_manager
         .versioning
-        .write()
+        .write_with_process_name("test_get_table_change_logs_with_inverted_epoch_range")
         .await
         .table_change_log
         .insert(
@@ -3539,7 +3539,9 @@ async fn test_normalize_overlapping_compaction_groups_cancels_expired_compact_ta
     assert!(
         !hummock_manager
             .compaction
-            .read()
+            .read_with_process_name(
+                "test_normalize_overlapping_compaction_groups_cancels_expired_compact_tasks",
+            )
             .await
             .get_compact_task_assignments_by_group_id(cg_64)
             .is_empty()
@@ -3553,7 +3555,9 @@ async fn test_normalize_overlapping_compaction_groups_cancels_expired_compact_ta
     assert!(
         hummock_manager
             .compaction
-            .read()
+            .read_with_process_name(
+                "test_normalize_overlapping_compaction_groups_cancels_expired_compact_tasks",
+            )
             .await
             .get_compact_task_assignments_by_group_id(cg_64)
             .is_empty(),

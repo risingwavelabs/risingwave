@@ -13,6 +13,7 @@
 // limitations under the License.
 
 mod iceberg_query_storage_mode;
+mod locality_backfill_mode;
 mod non_zero64;
 mod opt;
 pub mod parallelism;
@@ -26,6 +27,7 @@ mod visibility_mode;
 use chrono_tz::Tz;
 pub use iceberg_query_storage_mode::IcebergQueryStorageMode;
 use itertools::Itertools;
+pub use locality_backfill_mode::LocalityBackfillMode;
 pub use opt::OptionConfig;
 pub use query_mode::QueryMode;
 use risingwave_common_proc_macro::{ConfigDoc, SessionConfig};
@@ -61,6 +63,16 @@ pub enum SessionConfigError {
 }
 
 type SessionConfigResult<T> = std::result::Result<T, SessionConfigError>;
+
+const AUTO_LOCALITY_BACKFILL_MIN_SIZE: u64 = 10 * 1024 * 1024 * 1024;
+
+fn default_auto_locality_backfill_min_size() -> u64 {
+    AUTO_LOCALITY_BACKFILL_MIN_SIZE
+}
+
+fn default_legacy_locality_backfill_mode() -> LocalityBackfillMode {
+    LocalityBackfillMode::Always
+}
 
 // NOTE(kwannoel): We declare it separately as a constant,
 // otherwise seems like it can't infer the type of -1 when written inline.
@@ -491,9 +503,23 @@ pub struct SessionConfig {
     #[parameter(default = false)]
     enable_mv_selection: bool,
 
-    /// Enable locality backfill for streaming queries. Defaults to false.
-    #[parameter(default = false)]
+    /// Whether to enable locality backfill. When enabled, `locality_backfill_mode` controls
+    /// whether it is selected automatically or always used.
+    #[parameter(default = true)]
     enable_locality_backfill: bool,
+
+    /// How to apply locality backfill when it is enabled. `auto` uses the estimated backfill size,
+    /// while `always` skips the size check. Missing values from older versions mean `always` to
+    /// preserve the previous boolean behavior.
+    #[serde(default = "default_legacy_locality_backfill_mode")]
+    #[parameter(default = LocalityBackfillMode::Auto)]
+    locality_backfill_mode: LocalityBackfillMode,
+
+    /// Auto-enable locality backfill when estimated scan backfill data reaches this size in bytes.
+    /// Defaults to 10 `GiB` (10737418240 bytes).
+    #[serde(default = "default_auto_locality_backfill_min_size")]
+    #[parameter(default = AUTO_LOCALITY_BACKFILL_MIN_SIZE)]
+    auto_locality_backfill_min_size: u64,
 
     /// Duration in seconds before notifying the user that a long-running DDL operation (e.g., DROP TABLE, CANCEL JOBS)
     /// is still running. Set to 0 to disable notifications. Defaults to 30 seconds.

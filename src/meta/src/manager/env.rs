@@ -96,6 +96,8 @@ pub struct MetaOpts {
     /// Whether to enable the recovery of the cluster. If disabled, the meta service will exit on
     /// abnormal cases.
     pub enable_recovery: bool,
+    /// Whether to clean up all foreground creating streaming jobs during recovery.
+    pub clean_all_foreground_jobs_on_recovery: bool,
     /// Whether to disable the auto-scaling feature.
     pub disable_automatic_parallelism_control: bool,
     /// The number of streaming jobs per scaling operation.
@@ -320,6 +322,7 @@ impl MetaOpts {
     pub fn test(enable_recovery: bool) -> Self {
         Self {
             enable_recovery,
+            clean_all_foreground_jobs_on_recovery: false,
             disable_automatic_parallelism_control: false,
             parallelism_control_batch_size: 1,
             parallelism_control_trigger_period_sec: 10,
