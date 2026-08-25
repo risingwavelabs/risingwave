@@ -60,12 +60,22 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         Long charMaxLength;
         String udtName;
         Integer atttypmod;
+        String arrayElementDataType;
+        String arrayElementUdtName;
 
-        ColumnInfo(String dataType, Long charMaxLength, String udtName, Integer atttypmod) {
+        ColumnInfo(
+                String dataType,
+                Long charMaxLength,
+                String udtName,
+                Integer atttypmod,
+                String arrayElementDataType,
+                String arrayElementUdtName) {
             this.dataType = dataType;
             this.charMaxLength = charMaxLength;
             this.udtName = udtName;
             this.atttypmod = atttypmod;
+            this.arrayElementDataType = arrayElementDataType;
+            this.arrayElementUdtName = arrayElementUdtName;
         }
     }
 
@@ -232,7 +242,17 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 var udtName = res.getString(4);
                 Integer atttypmod =
                         res.getObject(5) == null ? null : ((Number) res.getObject(5)).intValue();
-                schema.put(field, new ColumnInfo(dataType, charMaxLength, udtName, atttypmod));
+                var arrayElementDataType = res.getString(6);
+                var arrayElementUdtName = res.getString(7);
+                schema.put(
+                        field,
+                        new ColumnInfo(
+                                dataType,
+                                charMaxLength,
+                                udtName,
+                                atttypmod,
+                                arrayElementDataType,
+                                arrayElementUdtName));
             }
 
             for (var colDesc : tableSchema.getColumnDescs()) {
@@ -247,7 +267,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                             "Column '" + colName + "' not found in the upstream database");
                 }
                 var expectedType = colDesc.getDataType();
-                if (!isDataTypeCompatible(colInfo, expectedType.getTypeName())) {
+                if (!isDataTypeCompatible(colInfo, expectedType)) {
                     throw ValidatorUtils.invalidArgument(
                             "Incompatible data type of column " + colName);
                 }
@@ -731,7 +751,7 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         }
     }
 
-    private boolean isDataTypeCompatible(ColumnInfo colInfo, Data.DataType.TypeName typeName) {
+    private boolean isDataTypeCompatible(ColumnInfo colInfo, Data.DataType dataType) {
         LOG.info(
                 "Data type compatibility check: PostgreSQL type '{}', colInfo.udtName: {}",
                 colInfo.dataType,
@@ -739,9 +759,11 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
         return Binding.validateCdcSourceColumnType(
                 CDC_TABLE_TYPE,
                 colInfo.dataType,
-                typeName.getNumber(),
+                dataType.toByteArray(),
                 colInfo.charMaxLength == null ? -1 : colInfo.charMaxLength,
                 false,
-                colInfo.udtName);
+                colInfo.udtName,
+                colInfo.arrayElementDataType,
+                colInfo.arrayElementUdtName);
     }
 }
