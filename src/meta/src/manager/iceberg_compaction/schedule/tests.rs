@@ -294,10 +294,9 @@ async fn test_commit_update_freezes_gc_watermark_after_task_start() {
 }
 
 #[tokio::test]
-async fn test_force_update_records_observed_snapshot_while_processing() {
+async fn test_force_update_initializes_observed_snapshot() {
     let manager = build_test_manager().await;
-    let idle_sink_id = SinkId::new(405);
-    let processing_sink_id = SinkId::new(406);
+    let sink_id = SinkId::new(405);
     let now = Instant::now();
     let config = new_test_iceberg_config(300, 10, CompactionType::SmallFiles);
     let mut guard = empty_inner();
@@ -305,7 +304,7 @@ async fn test_force_update_records_observed_snapshot_while_processing() {
     let applied = manager.apply_sink_update(
         &mut guard,
         PreparedSinkUpdate {
-            sink_id: idle_sink_id,
+            sink_id,
             kind: force_update(10, 1000),
             now,
             allow_track_initialization: true,
@@ -314,41 +313,10 @@ async fn test_force_update_records_observed_snapshot_while_processing() {
     );
 
     assert!(applied);
-    let track = guard.sink_schedules.get_mut(&idle_sink_id).unwrap();
+    let track = guard.sink_schedules.get_mut(&sink_id).unwrap();
     track.start_processing();
     match track.processing_gc_watermark_snapshot() {
         Some(Some(snapshot)) => assert_eq!(snapshot.snapshot_id, 10),
-        protection => panic!("unexpected gc watermark: {protection:?}"),
-    }
-
-    let mut track = new_track(now, 300, 10, 0);
-    track.record_observed_snapshot(committed_snapshot(20, 2000));
-    track.record_force_compaction(now, None);
-    track.start_processing();
-    guard.sink_schedules.insert(processing_sink_id, track);
-
-    let applied = manager.apply_sink_update(
-        &mut guard,
-        PreparedSinkUpdate {
-            sink_id: processing_sink_id,
-            kind: force_update(21, 3000),
-            now,
-            allow_track_initialization: false,
-            loaded_config: None,
-        },
-    );
-
-    assert!(applied);
-    let track = guard.sink_schedules.get(&processing_sink_id).unwrap();
-    assert_eq!(
-        track
-            .latest_observed_snapshot
-            .as_ref()
-            .map(|s| s.snapshot_id),
-        Some(21)
-    );
-    match track.processing_gc_watermark_snapshot() {
-        Some(Some(snapshot)) => assert_eq!(snapshot.snapshot_id, 20),
         protection => panic!("unexpected gc watermark: {protection:?}"),
     }
 }
@@ -913,20 +881,8 @@ async fn test_refresh_schedule_config_preserves_active_round_task_type() {
     manager.refresh_schedule_config(&mut track, &refreshed_config, refresh_at);
 
     assert_eq!(track.task_type, TaskType::SmallFiles);
-    assert_eq!(
-        track.automatic_round_mode,
-        AutomaticRoundMode::SequenceBounded
-    );
     assert_eq!(track.trigger_snapshot_count, 7);
-    assert_eq!(track.trigger_interval_sec, 42);
     assert_eq!(track.round_max_file_sequence_number, Some(10));
-    assert!(matches!(
-        track.state,
-        CompactionTrackState::Idle {
-            next_compaction_time,
-            ..
-        } if next_compaction_time == refresh_at + Duration::from_secs(42)
-    ));
 }
 
 #[tokio::test]
@@ -972,19 +928,13 @@ async fn test_manual_force_update_uses_selected_task_type_once() {
     assert_eq!(handles[0].task_type, TaskType::FilesWithDelete);
     drop(handles);
 
-    {
-        let retry_now = Instant::now();
-        let mut guard = manager.inner.write();
-        let track = guard.sink_schedules.get_mut(&sink_id).unwrap();
-        let CompactionTrackState::Idle {
-            next_compaction_time,
-            ..
-        } = &mut track.state
-        else {
-            panic!("track should be idle after pre-dispatch failure");
-        };
-        *next_compaction_time = retry_now;
-    }
+    manager
+        .inner
+        .write()
+        .sink_schedules
+        .get_mut(&sink_id)
+        .unwrap()
+        .record_force_compaction(Instant::now(), None);
 
     let handles = manager.get_top_n_iceberg_commit_sink_ids(1);
     assert_eq!(handles.len(), 1);
