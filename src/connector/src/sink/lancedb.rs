@@ -41,6 +41,7 @@ use risingwave_pb::connector_service::sink_metadata::SerializedMetadata;
 use risingwave_pb::stream_plan::PbSinkSchemaChange;
 use serde::{Deserialize, Serialize};
 use serde_with::{DisplayFromStr, serde_as};
+use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{self, UnboundedSender};
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReceiverStream;
@@ -498,10 +499,16 @@ impl SinkWriter for LanceDbSinkWriter {
                 );
             }
             Ok(Err(error)) => {
-                tracing::warn!(%error, "Lance fragment write failed while aborting sink writer");
+                tracing::warn!(
+                    error = %error.as_report(),
+                    "Lance fragment write failed while aborting sink writer"
+                );
             }
             Err(error) => {
-                tracing::warn!(%error, "Lance fragment write task failed while aborting sink writer");
+                tracing::warn!(
+                    error = %error.as_report(),
+                    "Lance fragment write task failed while aborting sink writer"
+                );
             }
         }
         Ok(())

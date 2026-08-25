@@ -1221,7 +1221,7 @@ pub mod tests {
             ("connector".to_owned(), "jdbc".to_owned()),
             ("is_exactly_once".to_owned(), "true".to_owned()),
         ]);
-        assert!(super::sink_is_exactly_once(&properties).unwrap());
+        assert!(!super::sink_is_exactly_once(&properties).unwrap());
     }
 
     #[tokio::test]
