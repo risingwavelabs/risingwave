@@ -24,7 +24,7 @@ use risingwave_connector::connector_common::{
 use risingwave_connector::sink::SinkParam;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkId};
 use risingwave_connector::sink::iceberg::{
-    CompactionType, IcebergConfig, commit_branch, should_enable_iceberg_cow,
+    CompactionType, IcebergConfig, should_enable_iceberg_cow,
 };
 use risingwave_hummock_sdk::HummockContextId;
 use risingwave_pb::iceberg_compaction::IcebergCompactionTask;
@@ -68,6 +68,18 @@ enum CompactionTrackState {
     },
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum AutomaticRoundMode {
+    /// One successful task completes the automatic compaction cycle.
+    ///
+    /// COW publishes one complete table state and cannot be split by a file
+    /// sequence boundary with the current implementation.
+    SingleTask,
+    /// Keep scheduling tasks with one fixed file sequence boundary until the
+    /// compactor reports that the bounded scan is drained.
+    SequenceBounded,
+}
+
 #[derive(Debug, Clone, Copy)]
 struct ScheduledCompactionTask {
     task_id: IcebergCompactionTaskId,
@@ -83,6 +95,7 @@ enum CompactionTrackFinishAction {
 #[derive(Debug, Clone)]
 pub(super) struct CompactionTrack {
     task_type: TaskType,
+    automatic_round_mode: AutomaticRoundMode,
     trigger_interval_sec: u64,
     /// Minimum pending commit threshold to trigger compaction early.
     /// Compaction triggers when `pending_commit_count` >= this threshold, even before interval expires.
@@ -91,8 +104,8 @@ pub(super) struct CompactionTrack {
     last_config_refresh_at: Instant,
     pending_commit_count: usize,
     latest_observed_snapshot: Option<IcebergCommittedSnapshot>,
-    /// Frozen boundary for the current automatic compaction round.
-    active_round: Option<IcebergCommittedSnapshot>,
+    /// Inclusive file sequence number boundary for the current automatic compaction round.
+    round_max_file_sequence_number: Option<i64>,
     /// Track lifecycle policy after a selected task finishes. Manual compaction
     /// uses `RemoveTrack` only while automatic compaction is disabled; a later
     /// config refresh can turn the temporary track into a normal schedule track.
@@ -103,6 +116,7 @@ pub(super) struct CompactionTrack {
 impl CompactionTrack {
     fn new(
         task_type: TaskType,
+        automatic_round_mode: AutomaticRoundMode,
         trigger_interval_sec: u64,
         trigger_snapshot_count: usize,
         report_timeout: Duration,
@@ -110,13 +124,14 @@ impl CompactionTrack {
     ) -> Self {
         Self {
             task_type,
+            automatic_round_mode,
             trigger_interval_sec,
             trigger_snapshot_count,
             report_timeout,
             last_config_refresh_at: now,
             pending_commit_count: 0,
             latest_observed_snapshot: None,
-            active_round: None,
+            round_max_file_sequence_number: None,
             finish_action: CompactionTrackFinishAction::KeepTrack,
             state: CompactionTrackState::Idle {
                 next_compaction_time: now + Duration::from_secs(trigger_interval_sec),
@@ -148,7 +163,7 @@ impl CompactionTrack {
         };
 
         let time_ready = now >= next_compaction_time;
-        if self.active_round.is_some() {
+        if self.round_max_file_sequence_number.is_some() {
             return time_ready;
         }
 
@@ -177,7 +192,7 @@ impl CompactionTrack {
             *next_compaction_time = now;
             // An automatic round already has a fixed boundary. A force signal
             // during its idle gap only advances the next attempt.
-            if self.active_round.is_none() {
+            if self.round_max_file_sequence_number.is_none() {
                 self.pending_commit_count = self.pending_commit_count.max(1);
             }
         }
@@ -215,9 +230,15 @@ impl CompactionTrack {
             } => {
                 let manual_override = next_task_type_override.is_some();
                 let task_type = next_task_type_override.take().unwrap_or(self.task_type);
-                if !manual_override && self.active_round.is_none() {
-                    self.active_round = self.latest_observed_snapshot.clone();
-                    if self.active_round.is_some() {
+                if !manual_override
+                    && self.automatic_round_mode == AutomaticRoundMode::SequenceBounded
+                    && self.round_max_file_sequence_number.is_none()
+                {
+                    self.round_max_file_sequence_number = self
+                        .latest_observed_snapshot
+                        .as_ref()
+                        .map(|snapshot| snapshot.sequence_number);
+                    if self.round_max_file_sequence_number.is_some() {
                         self.pending_commit_count = 0;
                     }
                 }
@@ -332,10 +353,6 @@ impl CompactionTrack {
         )
     }
 
-    fn finish_success(&mut self, now: Instant) -> CompactionTrackFinishAction {
-        self.finish_success_with_planning_empty(now, false)
-    }
-
     fn finish_failed(&mut self, now: Instant) -> CompactionTrackFinishAction {
         match &self.state {
             CompactionTrackState::InFlight { .. } => {
@@ -400,36 +417,17 @@ impl CompactionTrack {
         }
     }
 
-    fn bounded_sequence_number(&self) -> Option<i64> {
-        self.active_round
-            .as_ref()
-            .map(|snapshot| snapshot.sequence_number)
-    }
-
-    fn finish_success_with_planning_empty(
-        &mut self,
-        now: Instant,
-        planning_empty: bool,
-    ) -> CompactionTrackFinishAction {
+    fn finish_success(&mut self, now: Instant) -> CompactionTrackFinishAction {
         match &self.state {
             CompactionTrackState::InFlight {
                 pending_commit_count_at_dispatch,
                 ..
             } => {
-                if self.active_round.is_some() {
-                    if planning_empty {
-                        self.active_round = None;
-                        self.state = CompactionTrackState::Idle {
-                            next_compaction_time: now
-                                + Duration::from_secs(self.trigger_interval_sec),
-                            next_task_type_override: None,
-                        };
-                    } else {
-                        self.state = CompactionTrackState::Idle {
-                            next_compaction_time: now,
-                            next_task_type_override: None,
-                        };
-                    }
+                if self.round_max_file_sequence_number.is_some() {
+                    self.state = CompactionTrackState::Idle {
+                        next_compaction_time: now,
+                        next_task_type_override: None,
+                    };
                 } else {
                     self.pending_commit_count = self
                         .pending_commit_count
@@ -444,6 +442,24 @@ impl CompactionTrack {
             CompactionTrackState::Idle { .. } => unreachable!("Cannot finish success when idle"),
             CompactionTrackState::PendingDispatch { .. } => {
                 unreachable!("Cannot finish success before task dispatch")
+            }
+        }
+    }
+
+    fn finish_drained(&mut self, now: Instant) -> CompactionTrackFinishAction {
+        debug_assert!(self.round_max_file_sequence_number.is_some());
+        match &self.state {
+            CompactionTrackState::InFlight { .. } => {
+                self.round_max_file_sequence_number = None;
+                self.state = CompactionTrackState::Idle {
+                    next_compaction_time: now + Duration::from_secs(self.trigger_interval_sec),
+                    next_task_type_override: None,
+                };
+                self.finish_action
+            }
+            CompactionTrackState::Idle { .. } => unreachable!("Cannot finish drained when idle"),
+            CompactionTrackState::PendingDispatch { .. } => {
+                unreachable!("Cannot finish drained before task dispatch")
             }
         }
     }
@@ -500,24 +516,6 @@ impl IcebergCompactionHandle {
         };
         let sink_catalog = SinkCatalog::from(prost_sink_catalog);
         let param = SinkParam::try_from_sink_catalog(sink_catalog)?;
-        let iceberg_config = IcebergConfig::from_btreemap(param.properties.clone())?;
-        let branch = commit_branch(iceberg_config.r#type.as_str(), iceberg_config.write_mode);
-
-        if self.max_file_sequence_number.is_some() {
-            let guard = self.inner.read();
-            if let Some(track) = guard.sink_schedules.get(&self.sink_id)
-                && track
-                    .active_round
-                    .as_ref()
-                    .is_some_and(|snapshot| snapshot.branch != branch)
-            {
-                return Err(anyhow!(
-                    "iceberg compaction round branch changed before dispatch for sink {}",
-                    self.sink_id
-                )
-                .into());
-            }
-        }
 
         let result =
             compactor.send_event(IcebergResponseEvent::CompactTask(IcebergCompactionTask {
@@ -696,10 +694,11 @@ impl IcebergCompactionManager {
         iceberg_config: &IcebergConfig,
         now: Instant,
     ) {
-        let (task_type, trigger_interval_sec, trigger_snapshot_count) =
+        let (task_type, automatic_round_mode, trigger_interval_sec, trigger_snapshot_count) =
             self.resolve_schedule_values(iceberg_config);
-        if track.active_round.is_none() {
+        if track.round_max_file_sequence_number.is_none() {
             track.task_type = task_type;
+            track.automatic_round_mode = automatic_round_mode;
         }
         track.trigger_snapshot_count = trigger_snapshot_count;
         track.update_interval(trigger_interval_sec, now);
@@ -802,7 +801,7 @@ impl IcebergCompactionManager {
                         if keep {
                             // The in-flight task may finish, but a disabled schedule must not
                             // retain an automatic round for a later retry.
-                            track.active_round = None;
+                            track.round_max_file_sequence_number = None;
                         }
                         keep
                     });
@@ -880,11 +879,12 @@ impl IcebergCompactionManager {
         iceberg_config: &IcebergConfig,
         now: Instant,
     ) -> CompactionTrack {
-        let (task_type, trigger_interval_sec, trigger_snapshot_count) =
+        let (task_type, automatic_round_mode, trigger_interval_sec, trigger_snapshot_count) =
             self.resolve_schedule_values(iceberg_config);
 
         CompactionTrack::new(
             task_type,
+            automatic_round_mode,
             trigger_interval_sec,
             trigger_snapshot_count,
             self.report_timeout(),
@@ -892,10 +892,14 @@ impl IcebergCompactionManager {
         )
     }
 
-    fn resolve_schedule_values(&self, iceberg_config: &IcebergConfig) -> (TaskType, u64, usize) {
+    fn resolve_schedule_values(
+        &self,
+        iceberg_config: &IcebergConfig,
+    ) -> (TaskType, AutomaticRoundMode, u64, usize) {
+        let cow_enabled =
+            should_enable_iceberg_cow(iceberg_config.r#type.as_str(), iceberg_config.write_mode);
         (
-            if should_enable_iceberg_cow(iceberg_config.r#type.as_str(), iceberg_config.write_mode)
-            {
+            if cow_enabled {
                 TaskType::Full
             } else {
                 match iceberg_config.compaction_type() {
@@ -904,6 +908,11 @@ impl IcebergCompactionManager {
                     CompactionType::SmallFiles => TaskType::SmallFiles,
                     CompactionType::FilesWithDelete => TaskType::FilesWithDelete,
                 }
+            },
+            if cow_enabled {
+                AutomaticRoundMode::SingleTask
+            } else {
+                AutomaticRoundMode::SequenceBounded
             },
             iceberg_config.compaction_interval_sec(),
             iceberg_config.trigger_snapshot_count(),
@@ -934,7 +943,7 @@ impl IcebergCompactionManager {
         }
 
         if let Some(track) = guard.sink_schedules.get(&sink_id) {
-            if track.active_round.is_some() {
+            if track.round_max_file_sequence_number.is_some() {
                 return Err(anyhow!(
                     "manual Full compaction is rejected while an automatic round is active for sink {}",
                     sink_id
@@ -1054,7 +1063,7 @@ impl IcebergCompactionManager {
                 .filter_map(|(sink_id, _)| {
                     let track = guard.sink_schedules.get_mut(&sink_id)?;
                     let task_type = track.start_processing();
-                    let max_file_sequence_number = track.bounded_sequence_number();
+                    let max_file_sequence_number = track.round_max_file_sequence_number;
 
                     Some(IcebergCompactionHandle::new(
                         sink_id,
@@ -1213,14 +1222,15 @@ impl IcebergCompactionManager {
             match guard.sink_schedules.get_mut(&sink_id) {
                 Some(track) if track.is_processing_task(task_id) => {
                     let finish_action = match status {
-                        IcebergReportTaskStatus::Success => {
-                            if report.planning_empty {
-                                track.finish_success_with_planning_empty(now, true)
-                            } else {
-                                track.finish_success(now)
-                            }
+                        IcebergReportTaskStatus::Success => track.finish_success(now),
+                        IcebergReportTaskStatus::Drained
+                            if track.round_max_file_sequence_number.is_some() =>
+                        {
+                            track.finish_drained(now)
                         }
-                        IcebergReportTaskStatus::Failed | IcebergReportTaskStatus::Unspecified => {
+                        IcebergReportTaskStatus::Drained
+                        | IcebergReportTaskStatus::Failed
+                        | IcebergReportTaskStatus::Unspecified => {
                             tracing::warn!(
                                 iceberg_component = "compaction_scheduler",
                                 iceberg_operation = "handle_report",

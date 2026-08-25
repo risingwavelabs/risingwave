@@ -63,7 +63,7 @@ pub use iceberg_compaction::set_simulated_pk_index_compaction_result;
 use iceberg_compaction::simulated_pk_index_compaction_result;
 use iceberg_compaction::{
     IcebergPlanCompletion, IcebergTaskQueue, IcebergTaskReport, IcebergTaskTracker, PushResult,
-    ReportSendResult, build_iceberg_task_report, build_iceberg_task_report_with_planning_empty,
+    ReportSendResult, build_drained_iceberg_task_report, build_iceberg_task_report,
     create_task_execution, flush_pending_iceberg_task_reports, send_or_buffer_iceberg_task_report,
 };
 pub use iterator::{ConcatSstableIterator, SstableStreamIterator};
@@ -616,6 +616,7 @@ pub fn start_iceberg_compactor(
                             risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event::CompactTask(iceberg_compaction_task) => {
                                 let task_id = iceberg_compaction_task.task_id;
                                 let sink_id = iceberg_compaction_task.sink_id;
+                                let is_bounded_round = iceberg_compaction_task.max_file_sequence_number.is_some();
                                 // iceberg-rust internally spawns on native Tokio, which is not
                                 // available inside a madsim node. Tests can replace only the
                                 // rewrite result while retaining the real compactor stream and
@@ -735,7 +736,6 @@ pub fn start_iceberg_compactor(
                                 };
 
                                 let sink_id = task_execution.sink_id;
-                                let planning_empty = task_execution.planning_empty;
                                 let plan_runners = task_execution.plan_runners;
 
                                 if plan_runners.is_empty() {
@@ -746,11 +746,11 @@ pub fn start_iceberg_compactor(
                                         sink_id = sink_id,
                                         "iceberg_compaction_task_skipped_no_plans",
                                     );
-                                    let report = build_iceberg_task_report_with_planning_empty(
-                                        task_id,
-                                        sink_id,
-                                        planning_empty,
-                                    );
+                                    let report = if is_bounded_round {
+                                        build_drained_iceberg_task_report(task_id, sink_id)
+                                    } else {
+                                        build_iceberg_task_report(task_id, sink_id, None)
+                                    };
                                     if matches!(
                                         send_or_buffer_iceberg_task_report(
                                             &request_sender,

@@ -294,17 +294,15 @@ pub(crate) fn build_iceberg_task_report(
         },
         error_message,
         pk_index_result: None,
-        planning_empty: false,
     }
 }
 
-pub(crate) fn build_iceberg_task_report_with_planning_empty(
+pub(crate) fn build_drained_iceberg_task_report(
     task_id: IcebergCompactionTaskId,
     sink_id: u32,
-    planning_empty: bool,
 ) -> IcebergTaskReport {
     let mut report = build_iceberg_task_report(task_id, sink_id, None);
-    report.planning_empty = planning_empty;
+    report.status = subscribe_iceberg_compaction_event_request::report_task::Status::Drained as i32;
     report
 }
 
@@ -391,18 +389,17 @@ mod tests {
             subscribe_iceberg_compaction_event_request::report_task::Status::Success as i32
         );
         assert!(report.error_message.is_none());
-        assert!(!report.planning_empty);
     }
 
     #[test]
-    fn test_bounded_empty_planning_is_reported_as_empty() {
-        let report = build_iceberg_task_report_with_planning_empty(7.into(), 9, true);
+    fn test_bounded_empty_planning_is_reported_as_drained() {
+        let report = build_drained_iceberg_task_report(7.into(), 9);
 
         assert_eq!(
             report.status,
-            subscribe_iceberg_compaction_event_request::report_task::Status::Success as i32
+            subscribe_iceberg_compaction_event_request::report_task::Status::Drained as i32
         );
-        assert!(report.planning_empty);
+        assert!(report.error_message.is_none());
     }
 
     #[test]

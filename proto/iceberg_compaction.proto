@@ -28,19 +28,18 @@ message SubscribeIcebergCompactionEventRequest {
       UNSPECIFIED = 0;
       SUCCESS = 1;
       FAILED = 2;
+      // A bounded scan completed successfully and produced no plans.
+      DRAINED = 3;
     }
 
     uint64 task_id = 1;
     uint32 sink_id = 2;
     Status status = 3;
-    reserved 4, 5;
+    reserved 4, 5, 8;
     optional string error_message = 6;
 
     // Populated only for pk-index coordinated compaction tasks.
     optional PkIndexCompactionResult pk_index_result = 7;
-
-    // True only when a bounded scan completed successfully and produced no plans.
-    bool planning_empty = 8;
   }
 
   oneof event {

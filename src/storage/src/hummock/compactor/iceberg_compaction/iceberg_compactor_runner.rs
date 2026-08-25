@@ -52,7 +52,6 @@ use crate::monitor::CompactorMetrics;
 pub struct IcebergTaskExecution {
     pub sink_id: u32,
     pub plan_runners: Vec<IcebergCompactionPlanRunner>,
-    pub planning_empty: bool,
 }
 
 static ICEBERG_COMPACTION_METRICS_REGISTRY: LazyLock<Box<PrometheusMetricsRegistry>> =
@@ -765,7 +764,6 @@ pub async fn create_task_execution(
             .map_err(|e| HummockError::compaction_executor(e.as_report()))?,
     };
 
-    let planning_empty = max_file_sequence_number.is_some() && compaction_plans.is_empty();
     if compaction_plans.is_empty() {
         tracing::info!(
             iceberg_component = "compaction_worker",
@@ -780,7 +778,6 @@ pub async fn create_task_execution(
         return Ok(IcebergTaskExecution {
             sink_id,
             plan_runners: vec![],
-            planning_empty,
         });
     }
 
@@ -818,7 +815,6 @@ pub async fn create_task_execution(
     Ok(IcebergTaskExecution {
         sink_id,
         plan_runners: runners,
-        planning_empty: false,
     })
 }
 

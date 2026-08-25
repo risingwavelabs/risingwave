@@ -19,7 +19,7 @@ pub use self::report::set_simulated_pk_index_compaction_result;
 pub(crate) use self::report::simulated_pk_index_compaction_result;
 pub(crate) use self::report::{
     IcebergPlanCompletion, IcebergTaskReport, IcebergTaskTracker, PkIndexCompactionResult,
-    ReportSendResult, build_iceberg_task_report, build_iceberg_task_report_with_planning_empty,
+    ReportSendResult, build_drained_iceberg_task_report, build_iceberg_task_report,
     build_pk_index_compaction_result, flush_pending_iceberg_task_reports,
     send_or_buffer_iceberg_task_report,
 };
