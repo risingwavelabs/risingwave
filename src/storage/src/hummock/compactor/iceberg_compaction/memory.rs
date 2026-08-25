@@ -785,7 +785,7 @@ mod tests {
             1,
         );
 
-        let mut file_group = baseline_plan.file_group.clone();
+        let mut file_group = baseline_plan.file_group;
         file_group.position_delete_files = vec![scan_task(
             schema.clone(),
             "position-delete.parquet",
