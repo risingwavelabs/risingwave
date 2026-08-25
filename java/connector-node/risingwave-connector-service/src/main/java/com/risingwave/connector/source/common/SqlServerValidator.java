@@ -224,19 +224,20 @@ public class SqlServerValidator extends DatabaseValidator implements AutoCloseab
                 }
             }
 
-            for (var e : tableSchema.getColumnTypes().entrySet()) {
+            for (var colDesc : tableSchema.getColumnDescs()) {
+                var colName = colDesc.getName();
                 // skip validate internal columns
-                if (e.getKey().startsWith(ValidatorUtils.INTERNAL_COLUMN_PREFIX)) {
+                if (colName.startsWith(ValidatorUtils.INTERNAL_COLUMN_PREFIX)) {
                     continue;
                 }
-                var dataType = schema.get(isCaseSensitive ? e.getKey() : e.getKey().toLowerCase());
+                var dataType = schema.get(isCaseSensitive ? colName : colName.toLowerCase());
                 if (dataType == null) {
                     throw ValidatorUtils.invalidArgument(
-                            "Column '" + e.getKey() + "' not found in the upstream database");
+                            "Column '" + colName + "' not found in the upstream database");
                 }
-                if (!isDataTypeCompatible(dataType, e.getValue())) {
+                if (!isDataTypeCompatible(dataType, colDesc.getDataType())) {
                     throw ValidatorUtils.invalidArgument(
-                            "Incompatible data type of column " + e.getKey());
+                            "Incompatible data type of column " + colName);
                 }
             }
         }
@@ -294,8 +295,8 @@ public class SqlServerValidator extends DatabaseValidator implements AutoCloseab
         }
     }
 
-    private boolean isDataTypeCompatible(String ssDataType, Data.DataType.TypeName typeName) {
+    private boolean isDataTypeCompatible(String ssDataType, Data.DataType dataType) {
         return Binding.validateCdcSourceColumnType(
-                CDC_TABLE_TYPE, ssDataType, typeName.getNumber(), -1, false, null);
+                CDC_TABLE_TYPE, ssDataType, dataType.toByteArray(), -1, false, null, null, null);
     }
 }
