@@ -1455,6 +1455,20 @@ PulsarProperties:
     field_type: bool
     required: false
     default: Default::default
+TcpKeepaliveConfig:
+  fields:
+  - name: tcp.keepalive.idle
+    field_type: u32
+    required: false
+    default: 10 * 60
+  - name: tcp.keepalive.interval
+    field_type: u32
+    required: false
+    default: '10'
+  - name: tcp.keepalive.count
+    field_type: u32
+    required: false
+    default: '3'
 TestSourceProperties:
   fields:
   - name: properties
