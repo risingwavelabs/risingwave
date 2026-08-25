@@ -227,25 +227,23 @@ async fn connect_tonic(addr: &str) -> Result<tonic::transport::Channel> {
 
 /// Parse a UDF link into `(tls, host, port)`.
 ///
-/// The link may be a plain `host:port`, or an `http://` / `https://` URL, where `https` enables
-/// TLS and an omitted port defaults to 80 / 443.
+/// The link is an `http://` / `https://` URL, with `http://` as the default scheme when omitted.
+/// `https` enables TLS; an omitted port defaults to 80 / 443.
 fn parse_udf_link(link: &str) -> Result<(bool, String, u16)> {
-    let (tls, rest) = match link.split_once("://") {
-        Some((scheme, rest)) if scheme.eq_ignore_ascii_case("https") => (true, rest),
-        Some((scheme, rest)) if scheme.eq_ignore_ascii_case("http") => (false, rest),
-        Some((scheme, _)) => bail!("unsupported scheme in UDF link: {scheme}"),
-        None => (false, link),
+    let url = match url::Url::parse(link) {
+        Ok(url) if matches!(url.scheme(), "http" | "https") => url,
+        Ok(url) if link.contains("://") => {
+            bail!("unsupported scheme in UDF link: {}", url.scheme())
+        }
+        // no scheme (a plain `host:port` parses as scheme `host`): default to `http://`
+        _ => url::Url::parse(&format!("http://{link}"))
+            .with_context(|| format!("failed to parse UDF link: {link}"))?,
     };
-    let scheme = if tls { "https" } else { "http" };
-    let url = url::Url::parse(&format!("{scheme}://{rest}"))
-        .with_context(|| format!("failed to parse UDF link: {link}"))?;
-    let host = url
-        .host_str()
-        .with_context(|| format!("no host in UDF link: {link}"))?;
+    let host = url.host_str().expect("http(s) URL always has a host");
     let port = url
         .port_or_known_default()
         .expect("http(s) scheme always has a default port");
-    Ok((tls, host.to_owned(), port))
+    Ok((url.scheme() == "https", host.to_owned(), port))
 }
 
 impl ExternalFunction {
@@ -355,7 +353,26 @@ mod tests {
             (true, "example.com".into(), 8443)
         );
         assert_eq!(parse("[::1]:8815"), (false, "[::1]".into(), 8815));
+        assert_eq!(parse("example.com:80"), (false, "example.com".into(), 80));
+        assert_eq!(parse("example.com:443"), (false, "example.com".into(), 443));
+        // WHATWG parsing tolerates missing slashes after `http(s):`
+        assert_eq!(
+            parse("http:/example.com"),
+            (false, "example.com".into(), 80)
+        );
+        assert_eq!(
+            parse("https:/example.com"),
+            (true, "example.com".into(), 443)
+        );
+        assert_eq!(parse("http:example.com"), (false, "example.com".into(), 80));
+        // a scheme-less link defaults to `http://`
+        assert_eq!(parse("localhost"), (false, "localhost".into(), 80));
+        assert_eq!(
+            parse("udf.example.com"),
+            (false, "udf.example.com".into(), 80)
+        );
 
+        assert!(parse_udf_link("ftp://localhost:8815").is_err());
         assert!(parse_udf_link("localhost:12345:12345").is_err());
         assert!(parse_udf_link("localhost:65536").is_err());
         assert!(parse_udf_link("").is_err());
