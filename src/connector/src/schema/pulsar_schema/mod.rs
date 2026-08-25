@@ -1,4 +1,4 @@
-// Copyright 2023 RisingWave Labs
+// Copyright 2026 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,12 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod confluent_resolver;
-mod glue_resolver;
-mod parser;
-mod pulsar_resolver;
+mod client;
+mod schema;
 
-pub use confluent_resolver::ConfluentSchemaCache;
-pub use glue_resolver::{GlueSchemaCache, GlueSchemaCacheImpl};
-pub use parser::{AvroAccessBuilder, AvroParserConfig};
-pub use pulsar_resolver::PulsarSchemaCache;
+pub use client::{PulsarSchemaClient, PulsarSchemaClientConfig};
+pub use schema::{PulsarSchemaInfo, PulsarSchemaVersion};
