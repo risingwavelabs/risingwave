@@ -20,7 +20,8 @@ use openssl::ssl::{SslConnector, SslMethod, SslVerifyMode};
 use postgres_openssl::MakeTlsConnector;
 use risingwave_common::bail;
 use risingwave_common::catalog::{ColumnDesc, ColumnId};
-use risingwave_common::types::{DataType, ScalarImpl, StructType};
+pub use risingwave_common::types::postgres_type::postgres_point_type;
+use risingwave_common::types::{DataType, ScalarImpl};
 use sea_schema::postgres::def::{ColumnType as SeaType, TableDef, TableInfo};
 use sea_schema::postgres::discovery::SchemaDiscovery;
 use sea_schema::sea_query::{Alias, IntoIden};
@@ -654,13 +655,6 @@ pub async fn create_pg_client(
     });
 
     Ok(client)
-}
-
-pub fn postgres_point_type() -> DataType {
-    DataType::Struct(StructType::new(vec![
-        ("x", DataType::Float64),
-        ("y", DataType::Float64),
-    ]))
 }
 
 // Used for both source and sink connector
