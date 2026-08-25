@@ -143,9 +143,8 @@ async fn bind_columns_from_source_for_non_cdc(
     fn get_sr_name_strategy_check(
         options: &mut BTreeMap<String, String>,
         use_sr: bool,
+        registry_type: SchemaRegistryType,
     ) -> Result<Option<i32>> {
-        let registry_type = SchemaRegistryType::from_options(options)
-            .map_err(|error| RwError::from(ProtocolError(error.to_string())))?;
         let name_strategy = get_name_strategy_or_default(try_consume_string_from_options(
             options,
             NAME_STRATEGY_KEY,
@@ -199,6 +198,7 @@ async fn bind_columns_from_source_for_non_cdc(
             let name_strategy = get_sr_name_strategy_check(
                 &mut format_encode_options_to_consume,
                 use_schema_registry,
+                registry_type,
             )?;
 
             stream_source_info.use_schema_registry = use_schema_registry;
@@ -247,6 +247,7 @@ async fn bind_columns_from_source_for_non_cdc(
                 let name_strategy = get_sr_name_strategy_check(
                     &mut format_encode_options_to_consume,
                     use_schema_registry,
+                    registry_type,
                 )?;
 
                 stream_source_info.use_schema_registry = use_schema_registry;
