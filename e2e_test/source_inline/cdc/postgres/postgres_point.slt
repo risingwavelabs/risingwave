@@ -69,16 +69,14 @@ create table test_point_invalid_scalar (
     location varchar
 ) from point_source table 'public.test_point';
 
-# Test: nested explicit-schema validation limitation
-# TODO: Enable this assertion when PostgreSQL CDC validates nested struct field types.
+# Test: reject incompatible nested struct field types
 # A point column should only accept struct<x double precision, y double precision>.
-#
-# statement error Incompatible data type of column location
-# create table test_point_invalid_coordinate_types (
-#     id int primary key,
-#     name varchar,
-#     location struct<x real, y real>
-# ) from point_source table 'public.test_point';
+statement error Incompatible data type of column location
+create table test_point_invalid_coordinate_types (
+    id int primary key,
+    name varchar,
+    location struct<x real, y real>
+) from point_source table 'public.test_point';
 
 # Test: incremental INSERT
 system ok
