@@ -490,7 +490,7 @@ fn test_report_timeout_is_based_on_processing_deadline() {
 }
 
 #[test]
-fn test_revert_pre_dispatch_failure_requeues_at_now_without_losing_backlog() {
+fn test_revert_pre_dispatch_failure_requeues_after_backoff_without_losing_backlog() {
     let now = Instant::now();
     for additional_commits in [0, 3] {
         let mut track = new_track(now, 120, 10, 5);
@@ -867,7 +867,7 @@ async fn test_start_manual_compaction_rejects_active_automatic_round() {
 }
 
 #[tokio::test]
-async fn test_refresh_schedule_config_preserves_active_round_task_type() {
+async fn test_refresh_schedule_config_preserves_active_round() {
     let manager = build_test_manager().await;
     let now = Instant::now();
     let mut track = new_track(now, 300, 3, 1);
@@ -881,8 +881,10 @@ async fn test_refresh_schedule_config_preserves_active_round_task_type() {
     manager.refresh_schedule_config(&mut track, &refreshed_config, refresh_at);
 
     assert_eq!(track.task_type, TaskType::SmallFiles);
+    assert_eq!(track.trigger_interval_sec, 42);
     assert_eq!(track.trigger_snapshot_count, 7);
     assert_eq!(track.round_max_file_sequence_number, Some(10));
+    assert!(track.should_trigger(refresh_at));
 }
 
 #[tokio::test]

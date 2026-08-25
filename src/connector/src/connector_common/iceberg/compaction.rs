@@ -19,6 +19,7 @@ pub struct IcebergCommittedSnapshot {
     pub branch: String,
     pub snapshot_id: i64,
     pub timestamp_ms: i64,
+    /// Snapshot sequence number, which upper-bounds file sequence numbers visible here.
     pub sequence_number: i64,
 }
 

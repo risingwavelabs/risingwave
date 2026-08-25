@@ -65,10 +65,9 @@ static ICEBERG_COMPACTION_METRICS_REGISTRY: LazyLock<Box<PrometheusMetricsRegist
 pub struct IcebergCompactorRunnerConfig {
     #[builder(default = "4")]
     pub max_parallelism: u32,
-    /// Optional planner input limit. When unset, use `max_parallelism` for
-    /// backwards-compatible standalone runner construction.
-    #[builder(default)]
-    pub max_input_parallelism: Option<u32>,
+    /// Planner-side input parallelism limit. Production aligns this with the
+    /// task queue capacity independently from output/execution parallelism.
+    pub max_input_parallelism: u32,
     #[builder(default = "1024 * 1024 * 1024")] // 1GB"
     pub min_size_per_partition: u64,
     #[builder(default = "32")]
@@ -538,9 +537,6 @@ fn build_task_planning_config(
     config: &IcebergCompactorRunnerConfig,
     max_file_sequence_number: Option<i64>,
 ) -> HummockResult<IcebergTaskPlanningConfig> {
-    let max_input_parallelism = config
-        .max_input_parallelism
-        .unwrap_or(config.max_parallelism);
     let grouping_strategy = match iceberg_config.write_mode {
         IcebergWriteMode::CopyOnWrite => iceberg_compaction_core::config::GroupingStrategy::Single,
         IcebergWriteMode::MergeOnRead => match config.target_binpack_group_size_mb {
@@ -569,7 +565,7 @@ fn build_task_planning_config(
         TaskType::Auto => {
             let mut builder = AutoCompactionConfigBuilder::default();
             builder
-                .max_input_parallelism(max_input_parallelism as usize)
+                .max_input_parallelism(config.max_input_parallelism as usize)
                 .max_output_parallelism(config.max_parallelism as usize)
                 .min_size_per_partition(config.min_size_per_partition)
                 .max_file_count_per_partition(config.max_file_count_per_partition as usize)
@@ -594,7 +590,7 @@ fn build_task_planning_config(
         TaskType::SmallFiles => {
             let mut builder = SmallFilesConfigBuilder::default();
             builder
-                .max_input_parallelism(max_input_parallelism as usize)
+                .max_input_parallelism(config.max_input_parallelism as usize)
                 .max_output_parallelism(config.max_parallelism as usize)
                 .min_size_per_partition(config.min_size_per_partition)
                 .max_file_count_per_partition(config.max_file_count_per_partition as usize)
@@ -626,7 +622,7 @@ fn build_task_planning_config(
             };
             let mut builder = FullCompactionConfigBuilder::default();
             builder
-                .max_input_parallelism(max_input_parallelism as usize)
+                .max_input_parallelism(config.max_input_parallelism as usize)
                 .max_output_parallelism(config.max_parallelism as usize)
                 .min_size_per_partition(config.min_size_per_partition)
                 .max_file_count_per_partition(config.max_file_count_per_partition as usize)
@@ -645,7 +641,7 @@ fn build_task_planning_config(
         TaskType::FilesWithDelete => {
             let mut builder = FilesWithDeletesConfigBuilder::default();
             builder
-                .max_input_parallelism(max_input_parallelism as usize)
+                .max_input_parallelism(config.max_input_parallelism as usize)
                 .max_output_parallelism(config.max_parallelism as usize)
                 .min_size_per_partition(config.min_size_per_partition)
                 .max_file_count_per_partition(config.max_file_count_per_partition as usize)
@@ -710,6 +706,8 @@ pub async fn create_task_execution(
         .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
     if let Some(boundary) = max_file_sequence_number {
+        // An empty bounded plan is reported as `Drained`, so fail closed unless
+        // the loaded branch can prove that this fixed boundary is meaningful.
         if table.metadata().format_version() < FormatVersion::V2 {
             return Err(HummockError::compaction_executor(anyhow::anyhow!(
                 "bounded compaction requires Iceberg format V2 or V3"
@@ -850,7 +848,7 @@ mod tests {
         .unwrap();
         let runner_config = IcebergCompactorRunnerConfig {
             max_parallelism: 8,
-            max_input_parallelism: Some(3),
+            max_input_parallelism: 3,
             min_size_per_partition: 512 * 1024 * 1024,
             max_file_count_per_partition: 16,
             enable_validate_compaction: false,

@@ -37,6 +37,8 @@ use tokio::sync::oneshot;
 
 use super::*;
 
+const COMPACTION_RETRY_BACKOFF: Duration = Duration::from_secs(1);
+
 /// Compaction track states using type-safe state machine pattern
 #[derive(Debug, Clone)]
 enum CompactionTrackState {
@@ -234,6 +236,8 @@ impl CompactionTrack {
             } => {
                 let manual_override = next_task_type_override.is_some();
                 let task_type = next_task_type_override.take().unwrap_or(self.task_type);
+                // Manual requests are one-shot tasks. Only an automatic sequence-bounded
+                // task may start a round and consume the commits covered by its boundary.
                 if !manual_override
                     && self.automatic_round_mode == AutomaticRoundMode::SequenceBounded
                     && self.round_max_file_sequence_number.is_none()
@@ -361,7 +365,7 @@ impl CompactionTrack {
         match &self.state {
             CompactionTrackState::InFlight { .. } => {
                 self.state = CompactionTrackState::Idle {
-                    next_compaction_time: now + Duration::from_secs(1),
+                    next_compaction_time: now + COMPACTION_RETRY_BACKOFF,
                     next_task_type_override: None,
                 };
                 self.finish_action
@@ -379,16 +383,15 @@ impl CompactionTrack {
     /// while the track is pending dispatch are not lost if task dispatch fails
     /// before the compactor accepts the task.
     ///
-    /// `next_compaction_time` is reset to `now` (like `finish_failed`) rather
-    /// than restored: candidates are dispatched in ascending order of this
-    /// field, so restoring a stale timestamp would let a repeatedly-failing
-    /// track sort ahead of every healthy sink and permanently monopolize
-    /// dispatch slots.
+    /// `next_compaction_time` starts a short retry backoff rather than restoring
+    /// its previous timestamp. Candidates are dispatched in ascending order of
+    /// this field, so restoring a stale timestamp would let a repeatedly-failing
+    /// track sort ahead of every healthy sink and monopolize dispatch slots.
     fn revert_pre_dispatch_failure(&mut self, now: Instant) -> CompactionTrackFinishAction {
         match &self.state {
             CompactionTrackState::PendingDispatch { .. } => {
                 self.state = CompactionTrackState::Idle {
-                    next_compaction_time: now + Duration::from_secs(1),
+                    next_compaction_time: now + COMPACTION_RETRY_BACKOFF,
                     next_task_type_override: None,
                 };
                 self.finish_action
@@ -408,6 +411,11 @@ impl CompactionTrack {
         }
 
         self.trigger_interval_sec = new_interval_sec;
+        if self.round_max_file_sequence_number.is_some() {
+            // The new interval applies after the round drains. The current deadline
+            // already represents either immediate continuation or retry backoff.
+            return;
+        }
 
         match &mut self.state {
             CompactionTrackState::Idle {
@@ -428,6 +436,8 @@ impl CompactionTrack {
                 ..
             } => {
                 if self.round_max_file_sequence_number.is_some() {
+                    // Success means this attempt made progress, but only `Drained`
+                    // proves that no work remains below the fixed boundary.
                     self.state = CompactionTrackState::Idle {
                         next_compaction_time: now,
                         next_task_type_override: None,
@@ -450,6 +460,8 @@ impl CompactionTrack {
         }
     }
 
+    /// Completes a sequence-bounded round while preserving commits that arrived
+    /// after its fixed boundary for the next round.
     fn finish_drained(&mut self, now: Instant) -> CompactionTrackFinishAction {
         debug_assert!(self.round_max_file_sequence_number.is_some());
         match &self.state {

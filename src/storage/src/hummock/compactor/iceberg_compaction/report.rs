@@ -127,8 +127,8 @@ pub(crate) enum ReportSendResult {
 
 pub(crate) struct IcebergTaskTracker {
     sink_id: u32,
-    total_plans: usize,
-    remaining_plans: usize,
+    admitted_plans: usize,
+    remaining_admitted_plans: usize,
     successful_plans: usize,
     failed_plans: usize,
     first_error: Option<String>,
@@ -138,11 +138,11 @@ pub(crate) struct IcebergTaskTracker {
 }
 
 impl IcebergTaskTracker {
-    pub(crate) fn new(sink_id: u32, remaining_plans: usize) -> Self {
+    pub(crate) fn new(sink_id: u32, admitted_plans: usize) -> Self {
         Self {
             sink_id,
-            total_plans: remaining_plans,
-            remaining_plans,
+            admitted_plans,
+            remaining_admitted_plans: admitted_plans,
             successful_plans: 0,
             failed_plans: 0,
             first_error: None,
@@ -155,8 +155,8 @@ impl IcebergTaskTracker {
         error_message: Option<String>,
         pk_index_result: Option<PkIndexCompactionResult>,
     ) {
-        debug_assert!(self.remaining_plans > 0);
-        self.remaining_plans -= 1;
+        debug_assert!(self.remaining_admitted_plans > 0);
+        self.remaining_admitted_plans -= 1;
         if let Some(error_message) = error_message {
             self.failed_plans += 1;
             if self.first_error.is_none() {
@@ -171,15 +171,17 @@ impl IcebergTaskTracker {
     }
 
     pub(crate) fn is_finished(&self) -> bool {
-        self.remaining_plans == 0
+        // This only proves that the admitted batch finished. A bounded round
+        // drains after the next planning attempt returns no plans.
+        self.remaining_admitted_plans == 0
     }
 
     pub(crate) fn sink_id(&self) -> u32 {
         self.sink_id
     }
 
-    pub(crate) fn total_plans(&self) -> usize {
-        self.total_plans
+    pub(crate) fn admitted_plans(&self) -> usize {
+        self.admitted_plans
     }
 
     pub(crate) fn successful_plans(&self) -> usize {

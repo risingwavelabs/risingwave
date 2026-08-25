@@ -535,7 +535,7 @@ pub fn start_iceberg_compactor(
 
                         let tracker = tracker_entry.remove();
                         let sink_id = tracker.sink_id();
-                        let total_plans = tracker.total_plans();
+                        let admitted_plans = tracker.admitted_plans();
                         let successful_plans = tracker.successful_plans();
                         let failed_plans = tracker.failed_plans();
                         let report = tracker.into_report(completed_task_id);
@@ -556,7 +556,7 @@ pub fn start_iceberg_compactor(
                                 iceberg_operation = "report_task",
                                 task_id = %completed_task_id,
                                 sink_id = sink_id,
-                                total_plans = total_plans,
+                                admitted_plans = admitted_plans,
                                 successful_plans = successful_plans,
                                 failed_plans = failed_plans,
                                 "iceberg_compaction_task_succeeded",
@@ -647,7 +647,7 @@ pub fn start_iceberg_compactor(
                                 // Note: write_parquet_properties is now built from sink config (IcebergConfig) in create_task_execution
                                 let compactor_runner_config = match IcebergCompactorRunnerConfigBuilder::default()
                                     .max_parallelism((worker_num as f32 * compactor_context.storage_opts.iceberg_compaction_task_parallelism_ratio) as u32)
-                                    .max_input_parallelism(Some(max_task_parallelism))
+                                    .max_input_parallelism(max_task_parallelism)
                                     .min_size_per_partition(compactor_context.storage_opts.iceberg_compaction_min_size_per_partition_mb as u64 * 1024 * 1024)
                                     .max_file_count_per_partition(compactor_context.storage_opts.iceberg_compaction_max_file_count_per_partition)
                                     .enable_validate_compaction(compactor_context.storage_opts.iceberg_compaction_enable_validate)
@@ -739,6 +739,9 @@ pub fn start_iceberg_compactor(
                                 let plan_runners = task_execution.plan_runners;
 
                                 if plan_runners.is_empty() {
+                                    // For a bounded round, an empty plan is the terminal proof.
+                                    // Completing the previous admitted batch proves only progress
+                                    // because planning and admission can limit each batch.
                                     tracing::info!(
                                         iceberg_component = "compaction_worker",
                                         iceberg_operation = "enqueue_plan",
@@ -765,8 +768,8 @@ pub fn start_iceberg_compactor(
                                 }
 
                                 // Enqueue each plan runner independently
-                                let total_plans = plan_runners.len();
-                                let mut enqueued_count = 0;
+                                let planned_count = plan_runners.len();
+                                let mut admitted_count = 0;
 
                                 for runner in plan_runners {
                                     let meta = runner.to_meta();
@@ -779,7 +782,7 @@ pub fn start_iceberg_compactor(
 
                                     match push_result {
                                         PushResult::Added => {
-                                            enqueued_count += 1;
+                                            admitted_count += 1;
                                             tracing::debug!(
                                                 iceberg_component = "compaction_worker",
                                                 iceberg_operation = "enqueue_plan",
@@ -803,8 +806,8 @@ pub fn start_iceberg_compactor(
                                                 table = %runner_table,
                                                 required_parallelism = required_parallelism,
                                                 pending_budget = pending_parallelism_budget,
-                                                enqueued_count = enqueued_count,
-                                                total_plans = total_plans,
+                                                admitted_count = admitted_count,
+                                                planned_count = planned_count,
                                                 "iceberg_compaction_plan_rejected_capacity",
                                             );
                                             // Stop enqueuing remaining plans
@@ -852,7 +855,7 @@ pub fn start_iceberg_compactor(
                                     }
                                 }
 
-                                if enqueued_count == 0 {
+                                if admitted_count == 0 {
                                     let report = build_iceberg_task_report(
                                         task_id,
                                         sink_id,
@@ -869,9 +872,11 @@ pub fn start_iceberg_compactor(
                                         continue 'start_stream;
                                     }
                                 } else {
+                                    // Track only admitted plans. Completing this batch reports
+                                    // progress; an immediate re-plan rediscovers any deferred work.
                                     task_trackers.insert(
                                         task_id,
-                                        IcebergTaskTracker::new(sink_id, enqueued_count),
+                                        IcebergTaskTracker::new(sink_id, admitted_count),
                                     );
                                 }
 
@@ -880,8 +885,8 @@ pub fn start_iceberg_compactor(
                                     iceberg_operation = "enqueue_plan",
                                     task_id = %task_id,
                                     sink_id = sink_id,
-                                    total_plans = total_plans,
-                                    enqueued_count = enqueued_count,
+                                    planned_count = planned_count,
+                                    admitted_count = admitted_count,
                                     "iceberg_compaction_task_enqueue_finished",
                                 );
                             },
