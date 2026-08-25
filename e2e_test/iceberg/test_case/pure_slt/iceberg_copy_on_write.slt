@@ -184,6 +184,88 @@ and content in ('PositionDeletes', 'EqualityDeletes');
 ----
 0
 
+# Create a newer data file and then delete from it. The older clean file still has a low sequence,
+# but only the newer file is delete-affected in this round.
+statement ok
+insert into t_cow_incremental values (1000, 1000);
+
+statement ok
+flush;
+
+sleep 5s
+
+statement ok
+update t_cow_incremental set v = 2000 where id = 1000;
+
+statement ok
+flush;
+
+sleep 5s
+
+# The latest ingestion snapshot contains the previous and current equality delete files.
+query T retry 10 backoff 1s
+select summary->>'total-delete-files' = '2' from rw_iceberg_snapshots
+where schema_name = 'public'
+and source_name = '__iceberg_source_t_cow_incremental'
+order by sequence_number desc
+limit 1;
+----
+t
+
+let pre_cleanup_seq
+select max(sequence_number) from rw_iceberg_snapshots
+where schema_name = 'public'
+and source_name = '__iceberg_source_t_cow_incremental'
+
+statement ok
+VACUUM FULL t_cow_incremental;
+
+query II retry 10 backoff 1s
+select id, v from t_cow_incremental where id in (3, 1000) order by id;
+----
+3 1003
+1000 2000
+
+# The first snapshot after the writer commits is the ingestion-branch compaction commit.
+let cleanup_snapshot_id
+select snapshot_id from rw_iceberg_snapshots
+where schema_name = 'public'
+and source_name = '__iceberg_source_t_cow_incremental'
+and sequence_number > ${pre_cleanup_seq}
+order by sequence_number
+limit 1
+
+# The compaction commit uses the minimum sequence among delete-affected data files, so the older
+# equality delete is retired even though the untouched clean file has a lower sequence. Inspect the
+# manifest directly because the snapshot summary does not account for sequence-filtered deletes.
+query TI
+select content, deleted_files_count
+from "t_cow_incremental\$manifests"
+for system_version as of ${cleanup_snapshot_id}
+where deleted_files_count > 0
+order by content;
+----
+data 1
+deletes 1
+
+# The newest equality delete follows the existing strict sequence rule and remains live on the
+# ingestion branch.
+query I
+select count(*)
+from "t_cow_incremental\$files"
+for system_version as of ${cleanup_snapshot_id}
+where content = 'EqualityDeletes';
+----
+1
+
+query I retry 10 backoff 1s
+select count(*) from rw_iceberg_files
+where schema_name = 'public'
+and source_name = '__iceberg_source_t_cow_incremental'
+and content in ('PositionDeletes', 'EqualityDeletes');
+----
+0
+
 # Partitioned COW compaction must rewrite every delete-affected file while carrying clean files
 # to main unchanged. One checkpoint creates distinct equality-delete files for two partitions.
 statement ok
