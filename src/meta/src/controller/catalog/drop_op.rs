@@ -51,7 +51,7 @@ impl CatalogController {
 
         let mut removed_objects = match drop_mode {
             DropMode::Cascade => {
-                get_referring_objects_cascade(object_id, Some(object_type), &txn).await?
+                get_referring_objects_cascade(object_id, object_type, &txn).await?
             }
             DropMode::Restrict => match object_type {
                 ObjectType::Database => unreachable!("database always be dropped in cascade mode"),
@@ -60,8 +60,12 @@ impl CatalogController {
                     Default::default()
                 }
                 ObjectType::Table => {
-                    let objects =
-                        check_no_non_owned_dependents(object_type, object_id, &txn).await?;
+                    let objects = validate_restrict_drop_and_collect_owned_objects(
+                        object_type,
+                        object_id,
+                        &txn,
+                    )
+                    .await?;
                     for obj in objects.iter().filter(|object| {
                         object.obj_type == ObjectType::Source || object.obj_type == ObjectType::Sink
                     }) {
@@ -73,12 +77,18 @@ impl CatalogController {
                         "only index and iceberg sink could be dropped in restrict mode"
                     );
                     for obj in &objects {
-                        check_no_non_owned_dependents(obj.obj_type, obj.oid, &txn).await?;
+                        validate_restrict_drop_and_collect_owned_objects(
+                            obj.obj_type,
+                            obj.oid,
+                            &txn,
+                        )
+                        .await?;
                     }
                     objects
                 }
                 object_type @ (ObjectType::Source | ObjectType::Sink) => {
-                    check_no_non_owned_dependents(object_type, object_id, &txn).await?;
+                    validate_restrict_drop_and_collect_owned_objects(object_type, object_id, &txn)
+                        .await?;
                     report_drop_object(object_type, object_id, &txn).await;
                     vec![]
                 }
@@ -89,7 +99,8 @@ impl CatalogController {
                 | ObjectType::Connection
                 | ObjectType::Subscription
                 | ObjectType::Secret => {
-                    check_no_non_owned_dependents(object_type, object_id, &txn).await?;
+                    validate_restrict_drop_and_collect_owned_objects(object_type, object_id, &txn)
+                        .await?;
                     vec![]
                 }
             },

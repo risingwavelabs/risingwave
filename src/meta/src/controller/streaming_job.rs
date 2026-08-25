@@ -1436,8 +1436,7 @@ impl CatalogController {
         streaming_job.verify_version_for_replace(&txn).await?;
         // 2. check concurrent replace.
         let referring_objects =
-            get_referring_objects(id.as_object_id(), Some(streaming_job.object_type()), &txn)
-                .await?;
+            get_referring_objects(id.as_object_id(), streaming_job.object_type(), &txn).await?;
         let referring_job_ids = referring_objects
             .iter()
             .map(|object| object.oid.as_job_id())

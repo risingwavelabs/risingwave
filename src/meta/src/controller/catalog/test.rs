@@ -402,8 +402,38 @@ mod tests {
             .expect("creating a second sink into the same table should not hang")?;
             sink_ids.push(job.id().as_object_id());
         }
+        let owned_sink_name = "owned_sink_without_iceberg_prefix";
+        let mut owned_sink = crate::manager::StreamingJob::Sink(
+            PbSink {
+                name: owned_sink_name.to_owned(),
+                database_id: TEST_DATABASE_ID,
+                schema_id: TEST_SCHEMA_ID,
+                owner: TEST_OWNER_ID as _,
+                target_table: Some(target_table_id),
+                sink_type: PbSinkType::AppendOnly as i32,
+                ..Default::default()
+            },
+            Some(target_table_id),
+        );
+        mgr.create_job_catalog(
+            &mut owned_sink,
+            &crate::model::StreamContext::default(),
+            &None,
+            1,
+            HashSet::from([mv1_id.as_object_id()]),
+            risingwave_pb::ddl_service::streaming_job_resource_type::ResourceType::Regular(true),
+            &None,
+            None,
+            None,
+            None,
+            None,
+        )
+        .await?;
+        let owned_sink_id = owned_sink.id().as_object_id();
+        sink_ids.push(owned_sink_id);
+
         // Ensure the test sinks were created
-        assert_eq!(sink_ids.len(), test_sink_tuples.len());
+        assert_eq!(sink_ids.len(), test_sink_tuples.len() + 1);
 
         let inner = mgr.inner.read().await;
         for sink_id in &sink_ids {
@@ -423,6 +453,14 @@ mod tests {
             .count(&inner.db)
             .await?;
         assert_eq!(object_dependency_count, 0);
+        assert_eq!(
+            Object::find_by_id(owned_sink_id)
+                .one(&inner.db)
+                .await?
+                .unwrap()
+                .belong_to_oid,
+            Some(target_table_id.as_object_id())
+        );
         drop(inner);
 
         let error = mgr
@@ -430,6 +468,10 @@ mod tests {
             .await
             .expect_err("RESTRICT drop should fail for a table with incoming sinks");
         assert_incoming_sink_drop_error(&error, &test_sink_tuples);
+        assert!(
+            !error.to_string().contains(owned_sink_name),
+            "an owned incoming sink should not prevent a RESTRICT drop"
+        );
         mgr.drop_object(ObjectType::Table, target_table_id, DropMode::Cascade)
             .await
             .expect("CASCADE drop should succeed");

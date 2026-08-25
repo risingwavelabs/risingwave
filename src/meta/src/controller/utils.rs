@@ -478,7 +478,7 @@ pub struct FragmentDesc {
 /// List all objects that are using the given one in a cascade way. It runs a recursive CTE to find all the dependencies.
 pub async fn get_referring_objects_cascade<C>(
     obj_id: ObjectId,
-    object_type: Option<ObjectType>,
+    object_type: ObjectType,
     db: &C,
 ) -> MetaResult<Vec<PartialObject>>
 where
@@ -495,11 +495,7 @@ where
     .await?;
 
     let target_objects = std::iter::once((obj_id, object_type))
-        .chain(
-            objects
-                .iter()
-                .map(|object| (object.oid, Some(object.obj_type))),
-        )
+        .chain(objects.iter().map(|object| (object.oid, object.obj_type)))
         .collect_vec();
     let mut existing_object_ids: HashSet<ObjectId> =
         objects.iter().map(|object| object.oid).collect();
@@ -830,12 +826,13 @@ where
     Ok(())
 }
 
-/// Returns the objects owned by the given object if it has no non-owned dependents.
+/// Validates a RESTRICT drop and returns referring objects that should be dropped together.
 ///
-/// A table owns its indexes and, for an Iceberg table, its internal Iceberg sink. These objects are
-/// dropped together with the table even in restrict mode. All other referring objects prevent the
+/// Objects related through `belong_to_oid` are catalog-owned by the target. Indexes are also
+/// logically owned by their primary table for dropping, although they remain schema-owned catalog
+/// objects. These objects are dropped together with the target; all other referrers prevent the
 /// drop.
-pub async fn check_no_non_owned_dependents<C>(
+pub async fn validate_restrict_drop_and_collect_owned_objects<C>(
     object_type: ObjectType,
     object_id: ObjectId,
     db: &C,
@@ -843,30 +840,16 @@ pub async fn check_no_non_owned_dependents<C>(
 where
     C: ConnectionTrait,
 {
-    let referring_objects = get_referring_objects(object_id, Some(object_type), db).await?;
+    let referring_objects = get_referring_objects(object_id, object_type, db).await?;
+    let owned_object_ids = get_belong_objects(db, object_id)
+        .await?
+        .into_iter()
+        .map(|object| object.oid)
+        .collect::<HashSet<_>>();
     let mut non_owned_objects = referring_objects.clone();
+    non_owned_objects.retain(|object| !owned_object_ids.contains(&object.oid));
     if object_type == ObjectType::Table {
         non_owned_objects.retain(|object| object.obj_type != ObjectType::Index);
-
-        let internal_iceberg_sink_ids: HashSet<ObjectId> = Sink::find()
-            .select_only()
-            .column(sink::Column::SinkId)
-            .filter(
-                sink::Column::SinkId.is_in(
-                    non_owned_objects
-                        .iter()
-                        .filter(|object| object.obj_type == ObjectType::Sink)
-                        .map(|object| object.oid.as_sink_id()),
-                ),
-            )
-            .filter(sink::Column::Name.starts_with(ICEBERG_SINK_PREFIX))
-            .into_tuple::<SinkId>()
-            .all(db)
-            .await?
-            .into_iter()
-            .map(|id| id.as_object_id())
-            .collect();
-        non_owned_objects.retain(|object| !internal_iceberg_sink_ids.contains(&object.oid));
     }
 
     if !non_owned_objects.is_empty() {
@@ -1007,22 +990,12 @@ where
 
 async fn get_incoming_sink_objects_for_target<C>(
     target_id: ObjectId,
-    target_type: Option<ObjectType>,
+    target_type: ObjectType,
     db: &C,
 ) -> MetaResult<Vec<PartialObject>>
 where
     C: ConnectionTrait,
 {
-    let target_type = match target_type {
-        Some(target_type) => target_type,
-        None => Object::find_by_id(target_id)
-            .select_only()
-            .column(object::Column::ObjType)
-            .into_tuple::<ObjectType>()
-            .one(db)
-            .await?
-            .ok_or_else(|| MetaError::catalog_id_not_found("object", target_id))?,
-    };
     match target_type {
         ObjectType::Table => {
             let incoming_sink_ids = Sink::find()
@@ -1046,7 +1019,7 @@ where
 /// List all objects that are using the given one.
 pub async fn get_referring_objects<C>(
     object_id: ObjectId,
-    object_type: Option<ObjectType>,
+    object_type: ObjectType,
     db: &C,
 ) -> MetaResult<Vec<PartialObject>>
 where
@@ -2266,7 +2239,7 @@ pub async fn rename_relation_refer(
             });
         }};
     }
-    let objs = get_referring_objects(object_id, Some(object_type), txn).await?;
+    let objs = get_referring_objects(object_id, object_type, txn).await?;
 
     for obj in objs {
         match obj.obj_type {
