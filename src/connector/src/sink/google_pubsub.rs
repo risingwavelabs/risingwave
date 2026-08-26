@@ -38,7 +38,7 @@ use super::writer::{
     AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt, FormattedSink,
 };
 use super::{Result, Sink, SinkError, SinkParam, SinkWriterParam};
-use crate::connector_common::DISABLE_DEFAULT_CREDENTIAL;
+use crate::connector_common::{DISABLE_DEFAULT_CREDENTIAL, resolve_pubsub_project_id};
 use crate::dispatch_sink_formatter_str_key_impl;
 use crate::enforce_secret::EnforceSecret;
 
@@ -76,9 +76,10 @@ use delivery_future::*;
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct GooglePubSubConfig {
-    /// The Google Pub/Sub Project ID
+    /// The Google Pub/Sub project ID. If omitted, the connector uses the project ID from
+    /// the credentials or Application Default Credentials.
     #[serde(rename = "pubsub.project_id")]
-    pub project_id: String,
+    pub project_id: Option<String>,
 
     /// Specifies the Pub/Sub topic to publish messages
     #[serde(rename = "pubsub.topic")]
@@ -220,7 +221,7 @@ impl GooglePubSubSinkWriter {
         db_name: String,
         sink_from_name: String,
     ) -> Result<Self> {
-        let environment = if let Some(ref cred) = config.credentials {
+        let (environment, detected_project_id) = if let Some(ref cred) = config.credentials {
             let mut auth_config = project::Config::default();
             auth_config = auth_config.with_audience(apiv1::conn_pool::AUDIENCE);
             auth_config = auth_config.with_scopes(&apiv1::conn_pool::SCOPES);
@@ -239,9 +240,10 @@ impl GooglePubSubSinkWriter {
                             ),
                         )
                     })?;
-            Environment::GoogleCloud(Box::new(provider))
+            let project_id = provider.project_id.clone();
+            (Environment::GoogleCloud(Box::new(provider)), project_id)
         } else if let Some(emu_host) = config.emulator_host {
-            Environment::Emulator(emu_host)
+            (Environment::Emulator(emu_host), None)
         } else {
             if env_var_is_true(DISABLE_DEFAULT_CREDENTIAL) {
                 return Err(SinkError::GooglePubSub(anyhow!(
@@ -259,12 +261,23 @@ impl GooglePubSubSinkWriter {
                         "failed to initialize Google Cloud Pub/Sub ADC; provide `pubsub.credentials`, configure ADC, or use `pubsub.emulator_host`",
                     ))
                 })?;
-            Environment::GoogleCloud(Box::new(provider))
+            let project_id = provider.project_id.clone();
+            (Environment::GoogleCloud(Box::new(provider)), project_id)
         };
 
+        let project_id = resolve_pubsub_project_id(
+            config.project_id.as_deref(),
+            detected_project_id.as_deref(),
+            matches!(&environment, Environment::Emulator(_)),
+        )
+        .ok_or_else(|| {
+            SinkError::Config(anyhow!(
+                "Google Cloud Pub/Sub project ID is unavailable; configure `pubsub.project_id` or provide credentials/ADC with a project ID"
+            ))
+        })?;
         let client_config = ClientConfig {
             endpoint: config.endpoint,
-            project_id: Some(config.project_id),
+            project_id: Some(project_id),
             environment,
             ..Default::default()
         };

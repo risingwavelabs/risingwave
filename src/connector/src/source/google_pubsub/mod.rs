@@ -37,7 +37,7 @@ pub use source::*;
 pub use split::*;
 use with_options::WithOptions;
 
-use crate::connector_common::DISABLE_DEFAULT_CREDENTIAL;
+use crate::connector_common::{DISABLE_DEFAULT_CREDENTIAL, resolve_pubsub_project_id};
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 use crate::source::SourceProperties;
@@ -51,6 +51,11 @@ pub const GOOGLE_PUBSUB_CONNECTOR: &str = "google_pubsub";
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct PubsubProperties {
+    /// The Google Pub/Sub project ID. If omitted, the connector uses the project ID from
+    /// the credentials or Application Default Credentials.
+    #[serde(rename = "pubsub.project_id")]
+    pub project_id: Option<String>,
+
     /// Pub/Sub subscription to consume messages from.
     ///
     /// Note that we rely on Pub/Sub to load-balance messages between all Readers pulling from
@@ -138,7 +143,7 @@ impl PubsubProperties {
         let auth_config = project::Config::default()
             .with_audience(apiv1::conn_pool::AUDIENCE)
             .with_scopes(&apiv1::conn_pool::SCOPES);
-        let (environment, project_id) = if let Some(credentials) = &self.credentials {
+        let (environment, detected_project_id) = if let Some(credentials) = &self.credentials {
             let credentials = CredentialsFile::new_from_str(credentials)
                 .await
                 .context("failed to parse Google Cloud Pub/Sub credentials")?;
@@ -151,10 +156,7 @@ impl PubsubProperties {
             let project_id = provider.project_id.clone();
             (Environment::GoogleCloud(Box::new(provider)), project_id)
         } else if let Some(emulator_host) = &self.emulator_host {
-            (
-                Environment::Emulator(emulator_host.clone()),
-                Some("local-project".to_owned()),
-            )
+            (Environment::Emulator(emulator_host.clone()), None)
         } else {
             if env_var_is_true(DISABLE_DEFAULT_CREDENTIAL) {
                 bail!(
@@ -171,9 +173,17 @@ impl PubsubProperties {
             (Environment::GoogleCloud(Box::new(provider)), project_id)
         };
 
+        let project_id = resolve_pubsub_project_id(
+            self.project_id.as_deref(),
+            detected_project_id.as_deref(),
+            matches!(&environment, Environment::Emulator(_)),
+        )
+        .context(
+            "Google Cloud Pub/Sub project ID is unavailable; configure `pubsub.project_id` or provide credentials/ADC with a project ID",
+        )?;
         let config = ClientConfig {
             environment,
-            project_id,
+            project_id: Some(project_id),
             ..Default::default()
         };
         let client = Client::new(config)
