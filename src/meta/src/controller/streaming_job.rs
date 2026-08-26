@@ -3789,6 +3789,10 @@ impl CatalogController {
                         rate_limit = node.rate_limit;
                         node_name = Some("SINK");
                     }
+                    PbNodeBody::Dml(node) => {
+                        rate_limit = node.rate_limit;
+                        node_name = Some("DML");
+                    }
                     _ => {}
                 }
 

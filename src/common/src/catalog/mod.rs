@@ -438,6 +438,7 @@ impl FragmentTypeFlag {
         Self::backfill_rate_limit_fragments()
             .chain(Self::source_rate_limit_fragments())
             .chain(Self::sink_rate_limit_fragments())
+            .chain(Self::dml_rate_limit_fragments())
     }
 
     pub fn dml_rate_limit_fragments() -> impl Iterator<Item = FragmentTypeFlag> {
