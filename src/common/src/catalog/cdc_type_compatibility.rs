@@ -70,12 +70,18 @@ pub fn cdc_auto_schema_change_existing_type_compatible(
         return true;
     }
 
-    if let (DataType::List(existing), DataType::List(mapped)) = (existing_type, mapped_type) {
-        return cdc_auto_schema_change_existing_type_compatible(
-            cdc_table_type,
-            existing.elem(),
-            mapped.elem(),
-        );
+    if matches!(
+        cdc_table_type,
+        PbCdcTableType::Postgres | PbCdcTableType::Citus
+    ) && matches!(
+        (existing_type, mapped_type),
+        (DataType::List(_), DataType::List(_))
+    ) {
+        // BACKWARD COMPATIBILITY:
+        // Previously, array element types were not validated at table creation,
+        // if we were to validate them now on auto-schema change, thew new schema cannot be updated,
+        // and will result in a schema mismatch
+        return true;
     }
 
     auto_schema_change_source_type_candidates(cdc_table_type, mapped_type)
@@ -434,6 +440,26 @@ mod tests {
             None,
             None,
             None,
+        ));
+        assert!(cdc_source_column_type_compatible(
+            PbCdcTableType::Postgres,
+            "array",
+            &DataType::Int32.list(),
+            None,
+            false,
+            Some("_int4"),
+            Some("integer"),
+            Some("int4"),
+        ));
+        assert!(!cdc_source_column_type_compatible(
+            PbCdcTableType::Postgres,
+            "array",
+            &DataType::Int64.list(),
+            None,
+            false,
+            Some("_int4"),
+            Some("integer"),
+            Some("int4"),
         ));
     }
 
