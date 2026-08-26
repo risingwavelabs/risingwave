@@ -308,13 +308,12 @@ impl CatalogController {
                     let scan_type = match StreamScanType::try_from(stream_scan.stream_scan_type) {
                         Ok(scan_type) => scan_type,
                         Err(err) => {
-                            collection_error = Some(anyhow!(
-                                "invalid persisted stream scan type {} in job {} fragment {}: {}",
+                            collection_error = Some(anyhow::Error::new(err).context(format!(
+                                "invalid persisted stream scan type {} in job {} fragment {}",
                                 stream_scan.stream_scan_type,
                                 fragment.job_id,
-                                fragment.fragment_id,
-                                err
-                            ));
+                                fragment.fragment_id
+                            )));
                             return;
                         }
                     };
