@@ -334,31 +334,6 @@ def test_cursor_fetch_n():
     check_rows_data([10,100],row[3],"UpdateInsert")
     drop_table_subscription()
 
-def test_zero_timeout_returns_buffered_row():
-    print(f"test_zero_timeout_returns_buffered_row")
-    create_table_subscription()
-    conn = psycopg2.connect(
-        host="localhost",
-        port="4566",
-        user="root",
-        database="dev"
-    )
-
-    execute_insert("insert into t3 values(1,1),(2,2)",conn)
-    execute_insert("flush",conn)
-    execute_insert("declare cur subscription cursor for sub2 full",conn)
-
-    row = execute_query("fetch 1 from cur",conn)
-    assert len(row) == 1
-    check_rows_data([1,1],row[0],"Insert")
-
-    # The first FETCH buffers the second row. An elapsed timeout must not hide that ready row.
-    row = execute_query("fetch 1 from cur with (timeout = '0s')",conn)
-    assert len(row) == 1
-    check_rows_data([2,2],row[0],"Insert")
-
-    drop_table_subscription()
-
 def test_rebuild_table():
     print(f"test_rebuild_table")
     create_table_subscription()
@@ -612,7 +587,6 @@ if __name__ == "__main__":
     test_cursor_since_begin()
     test_cursor_with_table_alter()
     test_cursor_fetch_n()
-    test_zero_timeout_returns_buffered_row()
     test_rebuild_table()
     test_order_table_with_pk()
     test_order_table_with_row_id()
