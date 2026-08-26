@@ -1002,8 +1002,8 @@ impl DatabaseCheckpointControl {
                         }
                     }
                     IndependentCheckpointJobControl::BatchRefresh(batch_refresh_job) => {
-                        if let Some((epoch, resps, info, tracking_job)) =
-                            batch_refresh_job.start_completing(partial_graph_manager)
+                        if let Some((epoch, resps, info, tracking_job)) = batch_refresh_job
+                            .start_completing(partial_graph_manager, committed_epoch)
                         {
                             let resps = resps.into_values().collect_vec();
                             if let Some(tracking_job) = tracking_job {
