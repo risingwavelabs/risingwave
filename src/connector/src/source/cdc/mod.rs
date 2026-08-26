@@ -159,12 +159,8 @@ pub fn table_schema_exclude_additional_columns(table_schema: &TableSchema) -> Ta
 impl<T: CdcSourceTypeTrait> TryFromBTreeMap for CdcProperties<T> {
     fn try_from_btreemap(
         properties: BTreeMap<String, String>,
-        deny_unknown_fields: bool,
+        _deny_unknown_fields: bool,
     ) -> ConnectorResult<Self> {
-        if deny_unknown_fields {
-            T::validate_properties(&properties)?;
-        }
-
         let is_share_source: bool = properties
             .get(CDC_SHARING_MODE_KEY)
             .is_some_and(|v| v == "true");
@@ -179,19 +175,35 @@ impl<T: CdcSourceTypeTrait> TryFromBTreeMap for CdcProperties<T> {
     }
 }
 
-fn validate_mongodb_debezium_filter_options(
+pub(crate) fn validate_mongodb_cdc_filter_options(
     properties: &BTreeMap<String, String>,
 ) -> ConnectorResult<()> {
-    for (debezium_option, risingwave_option) in [
-        ("debezium.database.include.list", "database.list"),
-        ("debezium.collection.include.list", "collection.name"),
+    for (alias, debezium_option) in [
+        ("database.list", "debezium.database.include.list"),
+        ("collection.name", "debezium.collection.include.list"),
+        ("collection.match.mode", "debezium.filters.match.mode"),
     ] {
-        if properties.contains_key(debezium_option) {
+        if properties.contains_key(alias) && properties.contains_key(debezium_option) {
             return Err(anyhow!(
-                "MongoDB CDC option '{debezium_option}' is not supported; use '{risingwave_option}' instead"
+                "MongoDB CDC options '{alias}' and '{debezium_option}' cannot be set together; use '{alias}'"
             )
             .into());
         }
+    }
+
+    let match_mode = properties
+        .get("collection.match.mode")
+        .or_else(|| properties.get("debezium.filters.match.mode"));
+    if let Some(match_mode) = match_mode
+        && !matches!(
+            match_mode.trim().to_ascii_lowercase().as_str(),
+            "regex" | "literal"
+        )
+    {
+        return Err(anyhow!(
+            "MongoDB CDC option 'collection.match.mode' must be 'regex' or 'literal', but got '{match_mode}'"
+        )
+        .into());
     }
 
     Ok(())
@@ -209,6 +221,10 @@ where
     type SplitReader = CdcSplitReader<T>;
 
     const SOURCE_NAME: &'static str = T::CDC_CONNECTOR_NAME;
+
+    fn validate_properties(properties: &BTreeMap<String, String>) -> ConnectorResult<()> {
+        T::validate_properties(properties)
+    }
 
     fn init_from_pb_source(&mut self, source: &PbSource) {
         let pk_indices = source
@@ -398,19 +414,25 @@ impl CdcScanOptions {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::source::ConnectorProperties;
 
     #[test]
-    fn reject_debezium_mongodb_filter_options_during_strict_extraction() {
-        for (debezium_option, risingwave_option) in [
-            ("debezium.database.include.list", "database.list"),
-            ("debezium.collection.include.list", "collection.name"),
+    fn mongodb_filter_aliases_cannot_be_duplicated() {
+        for (alias, debezium_option) in [
+            ("database.list", "debezium.database.include.list"),
+            ("collection.name", "debezium.collection.include.list"),
+            ("collection.match.mode", "debezium.filters.match.mode"),
         ] {
-            let properties = BTreeMap::from([(debezium_option.to_owned(), "ignored".to_owned())]);
-            let error = CdcProperties::<Mongodb>::try_from_btreemap(properties, true).unwrap_err();
+            let properties = BTreeMap::from([
+                ("connector".to_owned(), MONGODB_CDC_CONNECTOR.to_owned()),
+                (alias.to_owned(), "alias value".to_owned()),
+                (debezium_option.to_owned(), "debezium value".to_owned()),
+            ]);
 
+            let error = ConnectorProperties::validate(&properties).unwrap_err();
             assert!(
                 error.to_string().contains(&format!(
-                    "MongoDB CDC option '{debezium_option}' is not supported; use '{risingwave_option}' instead"
+                    "MongoDB CDC options '{alias}' and '{debezium_option}' cannot be set together"
                 )),
                 "unexpected error: {error}"
             );
@@ -418,61 +440,56 @@ mod tests {
     }
 
     #[test]
-    fn allow_debezium_mongodb_filter_options_during_permissive_extraction() {
-        let properties = BTreeMap::from([(
-            "debezium.database.include.list".to_owned(),
-            "legacy_db".to_owned(),
-        )]);
-
-        let properties = CdcProperties::<Mongodb>::try_from_btreemap(properties, false).unwrap();
-        assert_eq!(
-            properties
-                .properties
-                .get("debezium.database.include.list")
-                .map(String::as_str),
-            Some("legacy_db")
-        );
-    }
-
-    #[test]
-    fn allow_public_mongodb_filter_options_during_strict_extraction() {
-        let properties = BTreeMap::from([
-            ("database.list".to_owned(), "db1,db2".to_owned()),
-            ("collection.name".to_owned(), ".*[.]events".to_owned()),
-        ]);
-
-        CdcProperties::<Mongodb>::try_from_btreemap(properties, true).unwrap();
-    }
-
-    #[test]
-    fn allow_debezium_filter_options_for_other_cdc_connectors() {
-        let properties = BTreeMap::from([(
-            "debezium.database.include.list".to_owned(),
-            "db1".to_owned(),
-        )]);
-
-        CdcProperties::<Mysql>::try_from_btreemap(properties, true).unwrap();
-    }
-
-    #[test]
-    fn mongodb_alter_on_fly_rejects_debezium_filter_options() {
+    fn mongodb_filter_aliases_allow_raw_debezium_options() {
         for debezium_option in [
             "debezium.database.include.list",
             "debezium.collection.include.list",
+            "debezium.filters.match.mode",
         ] {
-            let error = crate::allow_alter_on_fly_fields::check_source_allow_alter_on_fly_fields(
-                Mongodb::CDC_CONNECTOR_NAME,
-                &[debezium_option.to_owned()],
-            )
-            .unwrap_err();
+            let properties = BTreeMap::from([
+                ("connector".to_owned(), MONGODB_CDC_CONNECTOR.to_owned()),
+                (debezium_option.to_owned(), "regex".to_owned()),
+            ]);
 
+            ConnectorProperties::validate(&properties).unwrap();
+        }
+    }
+
+    #[test]
+    fn mongodb_collection_match_mode_matches_debezium_semantics() {
+        for match_mode in ["regex", "literal", " REGEX ", "Literal"] {
+            let properties = BTreeMap::from([
+                ("connector".to_owned(), MONGODB_CDC_CONNECTOR.to_owned()),
+                ("collection.match.mode".to_owned(), match_mode.to_owned()),
+            ]);
+            ConnectorProperties::validate(&properties).unwrap();
+        }
+
+        for option in ["collection.match.mode", "debezium.filters.match.mode"] {
+            let properties = BTreeMap::from([
+                ("connector".to_owned(), MONGODB_CDC_CONNECTOR.to_owned()),
+                (option.to_owned(), "invalid".to_owned()),
+            ]);
+            let error = ConnectorProperties::validate(&properties).unwrap_err();
             assert!(
-                error
-                    .to_string()
-                    .contains(&format!("Field '{debezium_option}' is not allowed")),
+                error.to_string().contains("must be 'regex' or 'literal'"),
                 "unexpected error: {error}"
             );
         }
+    }
+
+    #[test]
+    fn mongodb_filter_validation_does_not_affect_other_connectors() {
+        let properties = BTreeMap::from([
+            ("connector".to_owned(), MYSQL_CDC_CONNECTOR.to_owned()),
+            ("collection.match.mode".to_owned(), "invalid".to_owned()),
+            (
+                "debezium.filters.match.mode".to_owned(),
+                "also invalid".to_owned(),
+            ),
+        ]);
+
+        ConnectorProperties::validate(&properties).unwrap();
     }
 
     #[test]

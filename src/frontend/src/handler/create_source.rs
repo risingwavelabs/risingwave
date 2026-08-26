@@ -743,6 +743,7 @@ pub fn bind_connector_props(
 ) -> Result<(WithOptions, SourceRefreshMode)> {
     let mut with_properties = handler_args.with_options.clone().into_connector_props();
     validate_compatibility(format_encode, &mut with_properties)?;
+    ConnectorProperties::validate(&with_properties)?;
     let refresh_mode = {
         let refresh_mode = resolve_source_refresh_mode_in_with_option(&mut with_properties)?;
         if is_create_source && refresh_mode.is_some() {

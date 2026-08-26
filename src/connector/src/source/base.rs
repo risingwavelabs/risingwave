@@ -118,6 +118,11 @@ pub trait SourceProperties:
     type SplitEnumerator: SplitEnumerator<Properties = Self, Split = Self::Split>;
     type SplitReader: SplitReader<Split = Self::Split, Properties = Self>;
 
+    /// Validate source properties when creating a catalog object.
+    fn validate_properties(_properties: &BTreeMap<String, String>) -> Result<()> {
+        Ok(())
+    }
+
     /// Load additional info from `PbSource`. Currently only used by CDC.
     fn init_from_pb_source(&mut self, _source: &PbSource) {}
 
@@ -654,6 +659,20 @@ impl Default for ConnectorProperties {
 }
 
 impl ConnectorProperties {
+    /// Validate raw source properties before creating a catalog object.
+    pub fn validate(properties: &BTreeMap<String, String>) -> Result<()> {
+        let connector = properties
+            .get(UPSTREAM_SOURCE_KEY)
+            .ok_or_else(|| anyhow!("Must specify 'connector' in WITH clause"))?
+            .to_lowercase();
+        match_source_name_str!(
+            connector.as_str(),
+            PropType,
+            PropType::validate_properties(properties),
+            |other| bail!("connector '{}' is not supported", other)
+        )
+    }
+
     /// Creates typed source properties from the raw `WITH` properties.
     ///
     /// It checks the `connector` field, and them dispatches to the corresponding type's `try_from_btreemap` method.

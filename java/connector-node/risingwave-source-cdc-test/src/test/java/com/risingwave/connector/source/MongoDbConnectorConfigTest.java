@@ -28,44 +28,38 @@ import org.junit.Test;
 public class MongoDbConnectorConfigTest {
 
     @Test
-    public void testExplicitDatabaseListPassesThrough() {
-        var properties = resolvedProperties(".*[.]events", Map.of("database.list", "db1,db2"));
+    public void testFilterAliasesPassThroughWithoutParsing() {
+        var properties =
+                resolvedProperties(
+                        "db[12][.]events_.*",
+                        Map.of(
+                                "database.list", "db1,db2.*",
+                                "collection.match.mode", "regex"));
 
         assertThat(properties)
-                .containsEntry("database.include.list", "db1,db2")
-                .containsEntry("collection.include.list", ".*[.]events");
+                .containsEntry("database.include.list", "db1,db2.*")
+                .containsEntry("collection.include.list", "db[12][.]events_.*")
+                .containsEntry("filters.match.mode", "regex");
     }
 
     @Test
-    public void testDatabaseListIsInferredFromCollectionNames() {
-        var properties = resolvedProperties("db1.events,db2.events_.*", Map.of());
+    public void testLiteralCollectionMatchModePassesThrough() {
+        var properties =
+                resolvedProperties("db1.events", Map.of("collection.match.mode", "literal"));
 
         assertThat(properties)
-                .containsEntry("database.include.list", "db1,db2")
-                .containsEntry("collection.include.list", "db1.events,db2.events_.*");
+                .containsEntry("collection.include.list", "db1.events")
+                .containsEntry("filters.match.mode", "literal");
     }
 
     @Test
-    public void testDatabaseListIsNotInferredFromUnqualifiedCollectionName() {
-        var properties = resolvedProperties("events", Map.of());
+    public void testDatabaseListIsNotInferredFromCollectionName() {
+        var properties = resolvedProperties("db1.events", Map.of());
 
         assertThat(properties)
                 .doesNotContainKey("database.include.list")
-                .containsEntry("collection.include.list", "events");
-    }
-
-    @Test
-    public void testDatabaseListIsNotPartiallyInferred() {
-        var properties = resolvedProperties("db1.events,.*[.]events", Map.of());
-
-        assertThat(properties).doesNotContainKey("database.include.list");
-    }
-
-    @Test
-    public void testDatabaseListIsNotInferredFromInvalidDatabaseName() {
-        var properties = resolvedProperties("invalid name.events", Map.of());
-
-        assertThat(properties).doesNotContainKey("database.include.list");
+                .doesNotContainKey("filters.match.mode")
+                .containsEntry("collection.include.list", "db1.events");
     }
 
     @Test
@@ -80,19 +74,25 @@ public class MongoDbConnectorConfigTest {
     }
 
     @Test
-    public void testLegacyDebeziumDatabaseListTakesPrecedenceOverDatabaseList() {
+    public void testAliasesTakePrecedenceOverLegacyDebeziumOptions() {
         var properties =
                 resolvedProperties(
                         "db1.events",
                         Map.of(
                                 "database.list", "db1",
-                                "debezium.database.include.list", "legacy_db"));
+                                "debezium.database.include.list", "legacy_db",
+                                "collection.match.mode", "literal",
+                                "debezium.collection.include.list", "db2.events",
+                                "debezium.filters.match.mode", "regex"));
 
-        assertThat(properties).containsEntry("database.include.list", "legacy_db");
+        assertThat(properties)
+                .containsEntry("database.include.list", "db1")
+                .containsEntry("collection.include.list", "db1.events")
+                .containsEntry("filters.match.mode", "literal");
     }
 
     @Test
-    public void testLegacyDebeziumDatabaseExcludeListPreventsInference() {
+    public void testLegacyDebeziumExcludeListPassesThrough() {
         var properties =
                 resolvedProperties(
                         "db1.events", Map.of("debezium.database.exclude.list", "legacy_db"));
@@ -100,15 +100,6 @@ public class MongoDbConnectorConfigTest {
         assertThat(properties)
                 .doesNotContainKey("database.include.list")
                 .containsEntry("database.exclude.list", "legacy_db");
-    }
-
-    @Test
-    public void testCollectionNameTakesPrecedenceOverDebeziumOption() {
-        var properties =
-                resolvedProperties(
-                        "db1.events", Map.of("debezium.collection.include.list", "db2.events"));
-
-        assertThat(properties).containsEntry("collection.include.list", "db1.events");
     }
 
     private static Map<String, String> resolvedProperties(

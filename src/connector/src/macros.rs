@@ -368,7 +368,7 @@ macro_rules! impl_cdc_source_type_validate_properties {
         fn validate_properties(
             properties: &std::collections::BTreeMap<std::string::String, std::string::String>,
         ) -> $crate::error::ConnectorResult<()> {
-            $crate::source::cdc::validate_mongodb_debezium_filter_options(properties)
+            $crate::source::cdc::validate_mongodb_cdc_filter_options(properties)
         }
     };
     ($cdc_source_type:ident) => {};
