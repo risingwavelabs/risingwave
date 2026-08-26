@@ -90,10 +90,12 @@ impl OpendalObjectStore {
 
         let http_client = Self::new_http_client(&config)?;
 
-        let op: Operator = Operator::new(builder)?
-            .layer(HttpClientLayer::new(http_client))
-            .layer(LoggingLayer::default())
-            .finish();
+        let op = new_operator(
+            &config,
+            Operator::new(builder)?
+                .layer(HttpClientLayer::new(http_client))
+                .layer(LoggingLayer::default()),
+        );
 
         Ok(Self {
             op,
