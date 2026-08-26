@@ -15,6 +15,11 @@
 use std::collections::HashMap;
 
 use anyhow::Context;
+use google_cloud_gax::conn::Environment;
+use google_cloud_pubsub::apiv1;
+use google_cloud_pubsub::client::google_cloud_auth::credentials::CredentialsFile;
+use google_cloud_pubsub::client::google_cloud_auth::project;
+use google_cloud_pubsub::client::google_cloud_auth::token::DefaultTokenSourceProvider;
 use google_cloud_pubsub::client::{Client, ClientConfig};
 use google_cloud_pubsub::subscription::Subscription;
 use risingwave_common::bail;
@@ -130,33 +135,47 @@ impl crate::source::UnknownFields for PubsubProperties {
 
 impl PubsubProperties {
     pub(crate) async fn subscription_client(&self) -> ConnectorResult<Subscription> {
-        if self.credentials.is_none()
-            && self.emulator_host.is_none()
-            && env_var_is_true(DISABLE_DEFAULT_CREDENTIAL)
-        {
-            bail!(
-                "Google Application Default Credentials are disabled; configure `pubsub.credentials` or `pubsub.emulator_host`"
-            );
-        }
+        let auth_config = project::Config::default()
+            .with_audience(apiv1::conn_pool::AUDIENCE)
+            .with_scopes(&apiv1::conn_pool::SCOPES);
+        let (environment, project_id) = if let Some(credentials) = &self.credentials {
+            let credentials = CredentialsFile::new_from_str(credentials)
+                .await
+                .context("failed to parse Google Cloud Pub/Sub credentials")?;
+            let provider = DefaultTokenSourceProvider::new_with_credentials(
+                auth_config,
+                Box::new(credentials),
+            )
+            .await
+            .context("failed to initialize Google Cloud Pub/Sub token source")?;
+            let project_id = provider.project_id.clone();
+            (Environment::GoogleCloud(Box::new(provider)), project_id)
+        } else if let Some(emulator_host) = &self.emulator_host {
+            (
+                Environment::Emulator(emulator_host.clone()),
+                Some("local-project".to_owned()),
+            )
+        } else {
+            if env_var_is_true(DISABLE_DEFAULT_CREDENTIAL) {
+                bail!(
+                    "Google Application Default Credentials are disabled; configure `pubsub.credentials` or `pubsub.emulator_host`"
+                );
+            }
 
-        // initialize env
-        {
-            tracing::debug!("setting pubsub environment variables");
-            if let Some(emulator_host) = &self.emulator_host {
-                // safety: only read in the same thread below in with_auth
-                unsafe { std::env::set_var("PUBSUB_EMULATOR_HOST", emulator_host) };
-            }
-            if let Some(credentials) = &self.credentials {
-                // safety: only read in the same thread below in with_auth
-                unsafe { std::env::set_var("GOOGLE_APPLICATION_CREDENTIALS_JSON", credentials) };
-            }
+            let provider = DefaultTokenSourceProvider::new(auth_config)
+                .await
+                .context(
+                    "failed to initialize Google Cloud Pub/Sub ADC; provide `pubsub.credentials`, configure ADC, or use `pubsub.emulator_host`",
+                )?;
+            let project_id = provider.project_id.clone();
+            (Environment::GoogleCloud(Box::new(provider)), project_id)
         };
 
-        // Validate config
-        let config = ClientConfig::default()
-            .with_auth()
-            .await
-            .context("failed to initialize Google Cloud Pub/Sub authentication")?;
+        let config = ClientConfig {
+            environment,
+            project_id,
+            ..Default::default()
+        };
         let client = Client::new(config)
             .await
             .context("error initializing pubsub client")?;
