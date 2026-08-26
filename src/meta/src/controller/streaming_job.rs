@@ -310,9 +310,7 @@ impl CatalogController {
                         Err(err) => {
                             collection_error = Some(anyhow::Error::new(err).context(format!(
                                 "invalid persisted stream scan type {} in job {} fragment {}",
-                                stream_scan.stream_scan_type,
-                                fragment.job_id,
-                                fragment.fragment_id
+                                stream_scan.stream_scan_type, fragment.job_id, fragment.fragment_id
                             )));
                             return;
                         }
