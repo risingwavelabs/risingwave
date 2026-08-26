@@ -316,6 +316,7 @@ impl RedShiftSinkWriter {
                     SinkError::Config(anyhow!("S3 configuration is required for S3 sink"))
                 })?,
                 schema,
+                writer_param.actor_id.as_raw_id(),
                 is_append_only,
                 config.table,
             )?;

@@ -597,6 +597,7 @@ impl SnowflakeSinkWriter {
                     ))
                 })?,
                 schema,
+                writer_param.actor_id.as_raw_id(),
                 is_append_only,
                 table_name,
             )?;
@@ -1153,6 +1154,20 @@ fn build_create_merge_into_task_sql(snowflake_task_context: &SnowflakeTaskContex
         .map(|name| format!(r#"source."{}""#, name))
         .collect::<Vec<String>>()
         .join(", ");
+    // Legacy row IDs did not contain the actor ID and can collide across writers. Match the
+    // complete row so that a late legacy row with the same ID is not deleted accidentally.
+    let consumed_row_eq_str = std::iter::once(__ROW_ID)
+        .chain(std::iter::once(__OP))
+        .chain(
+            all_column_names
+                .as_ref()
+                .unwrap()
+                .iter()
+                .map(String::as_str),
+        )
+        .map(|name| format!(r#"EQUAL_NULL({full_cdc_table_name}."{name}", consumed."{name}")"#))
+        .collect::<Vec<_>>()
+        .join(" AND ");
 
     let compute_clause = if *task_serverless {
         task_target_completion_interval
@@ -1168,18 +1183,24 @@ fn build_create_merge_into_task_sql(snowflake_task_context: &SnowflakeTaskContex
 SCHEDULE = '{writer_target_interval_seconds} SECONDS'
 AS
 BEGIN
-    LET max_row_id STRING;
+    LET cdc_batch_query_id STRING;
 
-    SELECT COALESCE(MAX("{snowflake_sink_row_id}"), '0') INTO :max_row_id
+    SELECT *
     FROM {cdc_table_name};
+    cdc_batch_query_id := SQLID;
 
     MERGE INTO {target_table_name} AS target
     USING (
         SELECT *
         FROM (
-            SELECT *, ROW_NUMBER() OVER (PARTITION BY {pk_names_str} ORDER BY "{snowflake_sink_row_id}" DESC) AS dedupe_id
-            FROM {cdc_table_name}
-            WHERE "{snowflake_sink_row_id}" <= :max_row_id
+            SELECT *, ROW_NUMBER() OVER (
+                PARTITION BY {pk_names_str}
+                ORDER BY
+                    TRY_TO_NUMBER(SPLIT_PART("{snowflake_sink_row_id}", '_', 1)) DESC,
+                    TRY_TO_NUMBER(SPLIT_PART("{snowflake_sink_row_id}", '_', 2)) DESC,
+                    COALESCE(TRY_TO_NUMBER(SPLIT_PART("{snowflake_sink_row_id}", '_', 3)), -1) DESC
+            ) AS dedupe_id
+            FROM TABLE(RESULT_SCAN(:cdc_batch_query_id))
         ) AS subquery
         WHERE dedupe_id = 1
     ) AS source
@@ -1189,7 +1210,8 @@ BEGIN
     WHEN NOT MATCHED AND source."{snowflake_sink_op}" IN (1, 3) THEN INSERT ({all_column_names_str}) VALUES ({all_column_names_insert_str});
 
     DELETE FROM {cdc_table_name}
-    WHERE "{snowflake_sink_row_id}" <= :max_row_id;
+    USING (SELECT * FROM TABLE(RESULT_SCAN(:cdc_batch_query_id))) AS consumed
+    WHERE {consumed_row_eq_str};
 END;"#,
         task_name = full_task_name,
         compute_clause = compute_clause
@@ -1203,6 +1225,7 @@ END;"#,
         all_column_names_set_str = all_column_names_set_str,
         all_column_names_str = all_column_names_str,
         all_column_names_insert_str = all_column_names_insert_str,
+        consumed_row_eq_str = consumed_row_eq_str,
         snowflake_sink_row_id = __ROW_ID,
         snowflake_sink_op = __OP,
     )
@@ -1369,18 +1392,24 @@ WAREHOUSE = test_warehouse
 SCHEDULE = '3600 SECONDS'
 AS
 BEGIN
-    LET max_row_id STRING;
+    LET cdc_batch_query_id STRING;
 
-    SELECT COALESCE(MAX("__row_id"), '0') INTO :max_row_id
+    SELECT *
     FROM "test_db"."test_schema"."test_cdc_table";
+    cdc_batch_query_id := SQLID;
 
     MERGE INTO "test_db"."test_schema"."test_target_table" AS target
     USING (
         SELECT *
         FROM (
-            SELECT *, ROW_NUMBER() OVER (PARTITION BY "v1" ORDER BY "__row_id" DESC) AS dedupe_id
-            FROM "test_db"."test_schema"."test_cdc_table"
-            WHERE "__row_id" <= :max_row_id
+            SELECT *, ROW_NUMBER() OVER (
+                PARTITION BY "v1"
+                ORDER BY
+                    TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 1)) DESC,
+                    TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 2)) DESC,
+                    COALESCE(TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 3)), -1) DESC
+            ) AS dedupe_id
+            FROM TABLE(RESULT_SCAN(:cdc_batch_query_id))
         ) AS subquery
         WHERE dedupe_id = 1
     ) AS source
@@ -1390,7 +1419,8 @@ BEGIN
     WHEN NOT MATCHED AND source."__op" IN (1, 3) THEN INSERT ("v1", "v2") VALUES (source."v1", source."v2");
 
     DELETE FROM "test_db"."test_schema"."test_cdc_table"
-    WHERE "__row_id" <= :max_row_id;
+    USING (SELECT * FROM TABLE(RESULT_SCAN(:cdc_batch_query_id))) AS consumed
+    WHERE EQUAL_NULL("test_db"."test_schema"."test_cdc_table"."__row_id", consumed."__row_id") AND EQUAL_NULL("test_db"."test_schema"."test_cdc_table"."__op", consumed."__op") AND EQUAL_NULL("test_db"."test_schema"."test_cdc_table"."v1", consumed."v1") AND EQUAL_NULL("test_db"."test_schema"."test_cdc_table"."v2", consumed."v2");
 END;"#;
         assert_eq!(normalize_sql(&task_sql), normalize_sql(expected));
     }
@@ -1419,18 +1449,24 @@ WAREHOUSE = multi_pk_warehouse
 SCHEDULE = '300 SECONDS'
 AS
 BEGIN
-    LET max_row_id STRING;
+    LET cdc_batch_query_id STRING;
 
-    SELECT COALESCE(MAX("__row_id"), '0') INTO :max_row_id
+    SELECT *
     FROM "test_db"."test_schema"."cdc_multi_pk";
+    cdc_batch_query_id := SQLID;
 
     MERGE INTO "test_db"."test_schema"."target_multi_pk" AS target
     USING (
         SELECT *
         FROM (
-            SELECT *, ROW_NUMBER() OVER (PARTITION BY "id1", "id2" ORDER BY "__row_id" DESC) AS dedupe_id
-            FROM "test_db"."test_schema"."cdc_multi_pk"
-            WHERE "__row_id" <= :max_row_id
+            SELECT *, ROW_NUMBER() OVER (
+                PARTITION BY "id1", "id2"
+                ORDER BY
+                    TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 1)) DESC,
+                    TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 2)) DESC,
+                    COALESCE(TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 3)), -1) DESC
+            ) AS dedupe_id
+            FROM TABLE(RESULT_SCAN(:cdc_batch_query_id))
         ) AS subquery
         WHERE dedupe_id = 1
     ) AS source
@@ -1440,7 +1476,8 @@ BEGIN
     WHEN NOT MATCHED AND source."__op" IN (1, 3) THEN INSERT ("id1", "id2", "val") VALUES (source."id1", source."id2", source."val");
 
     DELETE FROM "test_db"."test_schema"."cdc_multi_pk"
-    WHERE "__row_id" <= :max_row_id;
+    USING (SELECT * FROM TABLE(RESULT_SCAN(:cdc_batch_query_id))) AS consumed
+    WHERE EQUAL_NULL("test_db"."test_schema"."cdc_multi_pk"."__row_id", consumed."__row_id") AND EQUAL_NULL("test_db"."test_schema"."cdc_multi_pk"."__op", consumed."__op") AND EQUAL_NULL("test_db"."test_schema"."cdc_multi_pk"."id1", consumed."id1") AND EQUAL_NULL("test_db"."test_schema"."cdc_multi_pk"."id2", consumed."id2") AND EQUAL_NULL("test_db"."test_schema"."cdc_multi_pk"."val", consumed."val");
 END;"#;
         assert_eq!(normalize_sql(&task_sql), normalize_sql(expected));
     }
@@ -1469,18 +1506,24 @@ TARGET_COMPLETION_INTERVAL = '5 MINUTES'
 SCHEDULE = '120 SECONDS'
 AS
 BEGIN
-    LET max_row_id STRING;
+    LET cdc_batch_query_id STRING;
 
-    SELECT COALESCE(MAX("__row_id"), '0') INTO :max_row_id
+    SELECT *
     FROM "test_db"."test_schema"."serverless_cdc_table";
+    cdc_batch_query_id := SQLID;
 
     MERGE INTO "test_db"."test_schema"."serverless_target_table" AS target
     USING (
         SELECT *
         FROM (
-            SELECT *, ROW_NUMBER() OVER (PARTITION BY "id" ORDER BY "__row_id" DESC) AS dedupe_id
-            FROM "test_db"."test_schema"."serverless_cdc_table"
-            WHERE "__row_id" <= :max_row_id
+            SELECT *, ROW_NUMBER() OVER (
+                PARTITION BY "id"
+                ORDER BY
+                    TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 1)) DESC,
+                    TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 2)) DESC,
+                    COALESCE(TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 3)), -1) DESC
+            ) AS dedupe_id
+            FROM TABLE(RESULT_SCAN(:cdc_batch_query_id))
         ) AS subquery
         WHERE dedupe_id = 1
     ) AS source
@@ -1490,7 +1533,8 @@ BEGIN
     WHEN NOT MATCHED AND source."__op" IN (1, 3) THEN INSERT ("id", "val") VALUES (source."id", source."val");
 
     DELETE FROM "test_db"."test_schema"."serverless_cdc_table"
-    WHERE "__row_id" <= :max_row_id;
+    USING (SELECT * FROM TABLE(RESULT_SCAN(:cdc_batch_query_id))) AS consumed
+    WHERE EQUAL_NULL("test_db"."test_schema"."serverless_cdc_table"."__row_id", consumed."__row_id") AND EQUAL_NULL("test_db"."test_schema"."serverless_cdc_table"."__op", consumed."__op") AND EQUAL_NULL("test_db"."test_schema"."serverless_cdc_table"."id", consumed."id") AND EQUAL_NULL("test_db"."test_schema"."serverless_cdc_table"."val", consumed."val");
 END;"#;
         assert_eq!(normalize_sql(&task_sql), normalize_sql(expected));
     }
