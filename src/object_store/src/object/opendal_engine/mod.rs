@@ -14,7 +14,7 @@
 
 pub mod opendal_object_store;
 
-use opendal::layers::{ConcurrentLimitLayer, LoggingLayer};
+use opendal::layers::ConcurrentLimitLayer;
 use opendal::raw::Access;
 use opendal::{Operator, OperatorBuilder};
 pub use opendal_object_store::*;
@@ -54,6 +54,6 @@ fn new_operator(config: &ObjectStoreConfig, builder: OperatorBuilder<impl Access
         }
         builder.layer(concurrent_limit_layer).finish()
     } else {
-        builder.layer(LoggingLayer::default()).finish()
+        builder.finish()
     }
 }

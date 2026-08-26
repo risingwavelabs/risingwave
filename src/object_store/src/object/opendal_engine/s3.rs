@@ -87,9 +87,10 @@ impl OpendalObjectStore {
             .endpoint(&format!("{}{}", endpoint_prefix, address))
             .disable_config_load();
 
-        let op: Operator = Operator::new(builder)?
-            .layer(LoggingLayer::default())
-            .finish();
+        let op = new_operator(
+            &config,
+            Operator::new(builder)?.layer(LoggingLayer::default()),
+        );
         let http_client = Self::new_http_client(&config)?;
         op.update_http_client(|_| http_client);
 
