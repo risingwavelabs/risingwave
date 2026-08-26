@@ -50,6 +50,7 @@ use crate::sink::{
 
 pub const SNOWFLAKE_SINK_V2: &str = "snowflake_v2";
 
+const __BATCH_ID: &str = "__batch_id";
 const AUTH_METHOD_PASSWORD: &str = "password";
 const AUTH_METHOD_KEY_PAIR_FILE: &str = "key_pair_file";
 const AUTH_METHOD_KEY_PAIR_OBJECT: &str = "key_pair_object";
@@ -597,6 +598,7 @@ impl SnowflakeSinkWriter {
                     ))
                 })?,
                 schema,
+                writer_param.actor_id.as_raw_id(),
                 is_append_only,
                 table_name,
             )?;
@@ -861,10 +863,20 @@ impl SnowflakeJniClient {
 
     pub async fn execute_create_merge_into_task(&self) -> Result<()> {
         if self.snowflake_task_context.task_name.is_some() {
+            // Existing sinks recreate their task during recovery without running validation, so
+            // migrate the intermediate table before every task creation.
+            let add_batch_id_column_sql = build_add_batch_id_column_sql(
+                self.snowflake_task_context
+                    .cdc_table_name
+                    .as_ref()
+                    .expect("an upsert task must have an intermediate table"),
+                &self.snowflake_task_context.database,
+                &self.snowflake_task_context.schema_name,
+            );
             let create_task_sql = build_create_merge_into_task_sql(&self.snowflake_task_context);
             let start_task_sql = build_start_task_sql(&self.snowflake_task_context);
             self.jdbc_client
-                .execute_sql_sync(vec![create_task_sql])
+                .execute_sql_sync(vec![add_batch_id_column_sql, create_task_sql])
                 .await?;
             self.jdbc_client
                 .execute_sql_sync(vec![start_task_sql])
@@ -978,6 +990,7 @@ fn build_create_table_sql(
     if need_op_and_row_id {
         columns.push(format!(r#""{}" STRING"#, __ROW_ID));
         columns.push(format!(r#""{}" INT"#, __OP));
+        columns.push(format!(r#""{}" STRING"#, __BATCH_ID));
     }
     let columns_str = columns.join(", ");
     Ok(format!(
@@ -1052,6 +1065,11 @@ fn build_alter_add_column_sql(
 ) -> String {
     let full_table_name = build_full_table_name(database, schema, table_name);
     jdbc_jni_client::build_alter_add_column_sql(&full_table_name, columns, true)
+}
+
+fn build_add_batch_id_column_sql(table_name: &str, database: &str, schema: &str) -> String {
+    let columns = vec![(__BATCH_ID.to_owned(), "STRING".to_owned())];
+    build_alter_add_column_sql(table_name, database, schema, &columns)
 }
 
 fn build_start_task_sql(snowflake_task_context: &SnowflakeTaskContext) -> String {
@@ -1168,18 +1186,24 @@ fn build_create_merge_into_task_sql(snowflake_task_context: &SnowflakeTaskContex
 SCHEDULE = '{writer_target_interval_seconds} SECONDS'
 AS
 BEGIN
-    LET max_row_id STRING;
+    LET batch_id STRING := UUID_STRING();
 
-    SELECT COALESCE(MAX("{snowflake_sink_row_id}"), '0') INTO :max_row_id
-    FROM {cdc_table_name};
+    UPDATE {cdc_table_name}
+    SET "{snowflake_sink_batch_id}" = :batch_id;
 
     MERGE INTO {target_table_name} AS target
     USING (
         SELECT *
         FROM (
-            SELECT *, ROW_NUMBER() OVER (PARTITION BY {pk_names_str} ORDER BY "{snowflake_sink_row_id}" DESC) AS dedupe_id
+            SELECT *, ROW_NUMBER() OVER (
+                PARTITION BY {pk_names_str}
+                ORDER BY
+                    TRY_TO_NUMBER(SPLIT_PART("{snowflake_sink_row_id}", '_', 1)) DESC,
+                    TRY_TO_NUMBER(SPLIT_PART("{snowflake_sink_row_id}", '_', 2)) DESC,
+                    COALESCE(TRY_TO_NUMBER(SPLIT_PART("{snowflake_sink_row_id}", '_', 3)), -1) DESC
+            ) AS dedupe_id
             FROM {cdc_table_name}
-            WHERE "{snowflake_sink_row_id}" <= :max_row_id
+            WHERE "{snowflake_sink_batch_id}" = :batch_id
         ) AS subquery
         WHERE dedupe_id = 1
     ) AS source
@@ -1189,7 +1213,7 @@ BEGIN
     WHEN NOT MATCHED AND source."{snowflake_sink_op}" IN (1, 3) THEN INSERT ({all_column_names_str}) VALUES ({all_column_names_insert_str});
 
     DELETE FROM {cdc_table_name}
-    WHERE "{snowflake_sink_row_id}" <= :max_row_id;
+    WHERE "{snowflake_sink_batch_id}" = :batch_id;
 END;"#,
         task_name = full_task_name,
         compute_clause = compute_clause
@@ -1205,6 +1229,7 @@ END;"#,
         all_column_names_insert_str = all_column_names_insert_str,
         snowflake_sink_row_id = __ROW_ID,
         snowflake_sink_op = __OP,
+        snowflake_sink_batch_id = __BATCH_ID,
     )
 }
 
@@ -1369,18 +1394,24 @@ WAREHOUSE = test_warehouse
 SCHEDULE = '3600 SECONDS'
 AS
 BEGIN
-    LET max_row_id STRING;
+    LET batch_id STRING := UUID_STRING();
 
-    SELECT COALESCE(MAX("__row_id"), '0') INTO :max_row_id
-    FROM "test_db"."test_schema"."test_cdc_table";
+    UPDATE "test_db"."test_schema"."test_cdc_table"
+    SET "__batch_id" = :batch_id;
 
     MERGE INTO "test_db"."test_schema"."test_target_table" AS target
     USING (
         SELECT *
         FROM (
-            SELECT *, ROW_NUMBER() OVER (PARTITION BY "v1" ORDER BY "__row_id" DESC) AS dedupe_id
+            SELECT *, ROW_NUMBER() OVER (
+                PARTITION BY "v1"
+                ORDER BY
+                    TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 1)) DESC,
+                    TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 2)) DESC,
+                    COALESCE(TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 3)), -1) DESC
+            ) AS dedupe_id
             FROM "test_db"."test_schema"."test_cdc_table"
-            WHERE "__row_id" <= :max_row_id
+            WHERE "__batch_id" = :batch_id
         ) AS subquery
         WHERE dedupe_id = 1
     ) AS source
@@ -1390,9 +1421,10 @@ BEGIN
     WHEN NOT MATCHED AND source."__op" IN (1, 3) THEN INSERT ("v1", "v2") VALUES (source."v1", source."v2");
 
     DELETE FROM "test_db"."test_schema"."test_cdc_table"
-    WHERE "__row_id" <= :max_row_id;
+    WHERE "__batch_id" = :batch_id;
 END;"#;
         assert_eq!(normalize_sql(&task_sql), normalize_sql(expected));
+        assert!(!task_sql.contains("RESULT_SCAN"));
     }
 
     #[test]
@@ -1419,18 +1451,24 @@ WAREHOUSE = multi_pk_warehouse
 SCHEDULE = '300 SECONDS'
 AS
 BEGIN
-    LET max_row_id STRING;
+    LET batch_id STRING := UUID_STRING();
 
-    SELECT COALESCE(MAX("__row_id"), '0') INTO :max_row_id
-    FROM "test_db"."test_schema"."cdc_multi_pk";
+    UPDATE "test_db"."test_schema"."cdc_multi_pk"
+    SET "__batch_id" = :batch_id;
 
     MERGE INTO "test_db"."test_schema"."target_multi_pk" AS target
     USING (
         SELECT *
         FROM (
-            SELECT *, ROW_NUMBER() OVER (PARTITION BY "id1", "id2" ORDER BY "__row_id" DESC) AS dedupe_id
+            SELECT *, ROW_NUMBER() OVER (
+                PARTITION BY "id1", "id2"
+                ORDER BY
+                    TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 1)) DESC,
+                    TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 2)) DESC,
+                    COALESCE(TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 3)), -1) DESC
+            ) AS dedupe_id
             FROM "test_db"."test_schema"."cdc_multi_pk"
-            WHERE "__row_id" <= :max_row_id
+            WHERE "__batch_id" = :batch_id
         ) AS subquery
         WHERE dedupe_id = 1
     ) AS source
@@ -1440,7 +1478,7 @@ BEGIN
     WHEN NOT MATCHED AND source."__op" IN (1, 3) THEN INSERT ("id1", "id2", "val") VALUES (source."id1", source."id2", source."val");
 
     DELETE FROM "test_db"."test_schema"."cdc_multi_pk"
-    WHERE "__row_id" <= :max_row_id;
+    WHERE "__batch_id" = :batch_id;
 END;"#;
         assert_eq!(normalize_sql(&task_sql), normalize_sql(expected));
     }
@@ -1469,18 +1507,24 @@ TARGET_COMPLETION_INTERVAL = '5 MINUTES'
 SCHEDULE = '120 SECONDS'
 AS
 BEGIN
-    LET max_row_id STRING;
+    LET batch_id STRING := UUID_STRING();
 
-    SELECT COALESCE(MAX("__row_id"), '0') INTO :max_row_id
-    FROM "test_db"."test_schema"."serverless_cdc_table";
+    UPDATE "test_db"."test_schema"."serverless_cdc_table"
+    SET "__batch_id" = :batch_id;
 
     MERGE INTO "test_db"."test_schema"."serverless_target_table" AS target
     USING (
         SELECT *
         FROM (
-            SELECT *, ROW_NUMBER() OVER (PARTITION BY "id" ORDER BY "__row_id" DESC) AS dedupe_id
+            SELECT *, ROW_NUMBER() OVER (
+                PARTITION BY "id"
+                ORDER BY
+                    TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 1)) DESC,
+                    TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 2)) DESC,
+                    COALESCE(TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 3)), -1) DESC
+            ) AS dedupe_id
             FROM "test_db"."test_schema"."serverless_cdc_table"
-            WHERE "__row_id" <= :max_row_id
+            WHERE "__batch_id" = :batch_id
         ) AS subquery
         WHERE dedupe_id = 1
     ) AS source
@@ -1490,7 +1534,7 @@ BEGIN
     WHEN NOT MATCHED AND source."__op" IN (1, 3) THEN INSERT ("id", "val") VALUES (source."id", source."val");
 
     DELETE FROM "test_db"."test_schema"."serverless_cdc_table"
-    WHERE "__row_id" <= :max_row_id;
+    WHERE "__batch_id" = :batch_id;
 END;"#;
         assert_eq!(normalize_sql(&task_sql), normalize_sql(expected));
     }
@@ -1508,6 +1552,28 @@ END;"#;
         assert!(
             sql.contains(r#"FROM @"test_db"."test_schema"."RW_S3_STAGE"/reservations/ "#),
             "unexpected pipe sql: {sql}"
+        );
+    }
+
+    #[test]
+    fn test_build_cdc_table_sql_includes_batch_id() {
+        let sql = build_create_table_sql(
+            "test_cdc_table",
+            "test_db",
+            "test_schema",
+            &Schema { fields: vec![] },
+            true,
+        )
+        .unwrap();
+        let expected = r#"CREATE TABLE IF NOT EXISTS "test_db"."test_schema"."test_cdc_table" ("__row_id" STRING, "__op" INT, "__batch_id" STRING) ENABLE_SCHEMA_EVOLUTION = true"#;
+        assert_eq!(normalize_sql(&sql), normalize_sql(expected));
+
+        let migration_sql =
+            build_add_batch_id_column_sql("test_cdc_table", "test_db", "test_schema");
+        let expected_migration = r#"ALTER TABLE "test_db"."test_schema"."test_cdc_table" ADD COLUMN IF NOT EXISTS "__batch_id" STRING"#;
+        assert_eq!(
+            normalize_sql(&migration_sql),
+            normalize_sql(expected_migration)
         );
     }
 

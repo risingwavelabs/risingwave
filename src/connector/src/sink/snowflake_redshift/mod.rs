@@ -42,15 +42,21 @@ pub mod snowflake;
 pub const __ROW_ID: &str = "__row_id";
 pub const __OP: &str = "__op";
 
+fn build_row_id(epoch: u64, row_count: usize, actor_id: u32) -> String {
+    // Keep the ID deterministic across retries while making it unique across parallel writers.
+    format!("{epoch}_{row_count}_{actor_id}")
+}
+
 pub struct AugmentedRow {
     row_encoder: JsonEncoder,
     current_epoch: u64,
     current_row_count: usize,
+    actor_id: u32,
     is_append_only: bool,
 }
 
 impl AugmentedRow {
-    pub fn new(current_epoch: u64, is_append_only: bool, schema: Schema) -> Self {
+    pub fn new(current_epoch: u64, actor_id: u32, is_append_only: bool, schema: Schema) -> Self {
         let row_encoder = JsonEncoder::new(
             schema,
             None,
@@ -64,6 +70,7 @@ impl AugmentedRow {
             row_encoder,
             current_epoch,
             current_row_count: 0,
+            actor_id,
             is_append_only,
         }
     }
@@ -84,7 +91,11 @@ impl AugmentedRow {
         self.current_row_count += 1;
         row.insert(
             __ROW_ID.to_owned(),
-            Value::String(format!("{}_{}", self.current_epoch, self.current_row_count)),
+            Value::String(build_row_id(
+                self.current_epoch,
+                self.current_row_count,
+                self.actor_id,
+            )),
         );
         row.insert(
             __OP.to_owned(),
@@ -97,14 +108,16 @@ impl AugmentedRow {
 pub struct AugmentedChunk {
     current_epoch: u64,
     current_row_count: usize,
+    actor_id: u32,
     is_append_only: bool,
 }
 
 impl AugmentedChunk {
-    pub fn new(current_epoch: u64, is_append_only: bool) -> Self {
+    pub fn new(current_epoch: u64, actor_id: u32, is_append_only: bool) -> Self {
         Self {
             current_epoch,
             current_row_count: 0,
+            actor_id,
             is_append_only,
         }
     }
@@ -127,7 +140,13 @@ impl AugmentedChunk {
 
         let op_column = ops.iter().map(|op| op.to_i16() as i32).collect::<Vec<_>>();
         let row_column_strings: Vec<String> = (0..chunk_row_count)
-            .map(|i| format!("{}_{}", self.current_epoch, self.current_row_count + i))
+            .map(|i| {
+                build_row_id(
+                    self.current_epoch,
+                    self.current_row_count + i,
+                    self.actor_id,
+                )
+            })
             .collect();
 
         let row_column_refs: Vec<&str> = row_column_strings.iter().map(|s| s.as_str()).collect();
@@ -160,6 +179,7 @@ impl SnowflakeRedshiftSinkS3Writer {
     pub fn new(
         s3_config: S3Common,
         schema: Schema,
+        actor_id: u32,
         is_append_only: bool,
         target_table_name: String,
     ) -> Result<Self> {
@@ -168,7 +188,7 @@ impl SnowflakeRedshiftSinkS3Writer {
             s3_config,
             s3_operator,
             opendal_writer_path: None,
-            augmented_row: AugmentedRow::new(0, is_append_only, schema),
+            augmented_row: AugmentedRow::new(0, actor_id, is_append_only, schema),
             target_table_name,
         })
     }
@@ -261,6 +281,7 @@ impl SnowflakeRedshiftSinkJdbcWriter {
         full_table_name: String,
     ) -> Result<Self> {
         let metrics = SinkWriterMetrics::new(&writer_param);
+        let actor_id = writer_param.actor_id.as_raw_id();
         let column_descs = &mut param.columns;
 
         // Build full table name based on connector type
@@ -305,7 +326,7 @@ impl SnowflakeRedshiftSinkJdbcWriter {
             CoordinatedRemoteSinkWriter::new(param.clone(), metrics.clone()).await?;
 
         Ok(Self {
-            augmented_row: AugmentedChunk::new(0, is_append_only),
+            augmented_row: AugmentedChunk::new(0, actor_id, is_append_only),
             jdbc_sink_writer,
         })
     }
@@ -331,5 +352,16 @@ impl SnowflakeRedshiftSinkJdbcWriter {
         // TODO: abort should clean up all the data written in this epoch
         self.jdbc_sink_writer.abort().await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_row_id;
+
+    #[test]
+    fn test_build_row_id() {
+        assert_eq!(build_row_id(42, 10, 7), "42_10_7");
+        assert_ne!(build_row_id(42, 10, 7), build_row_id(42, 10, 8));
     }
 }
