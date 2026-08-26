@@ -255,18 +255,32 @@ impl Binder {
                         ScalarImpl::Float32(v) => Some(v.into_inner() > 0.0),
                         ScalarImpl::Float64(v) => Some(v.into_inner() > 0.0),
                         ScalarImpl::Decimal(d) => Some(*d > Decimal::from(0)),
-                        ScalarImpl::Interval(iv) => {
-                            Some(*iv > Interval::from_month_day_usec(0, 0, 0))
-                        }
+                        // Positive in total is not enough for an interval: `timestamp + interval`
+                        // adds months, days and microseconds as separate checked steps, so a
+                        // mixed-sign bound (`'1 month -29 days'`) can overflow on one component
+                        // while its true sum is representable — and the executor reads an
+                        // out-of-range deadline as a window that never closes, which would then
+                        // admit rows past the real deadline. Requiring every component to be
+                        // non-negative makes the deadline monotone in the bound, so "out of range"
+                        // means exactly "past every representable order key".
+                        ScalarImpl::Interval(iv) => Some(
+                            iv.months() >= 0
+                                && iv.days() >= 0
+                                && iv.usecs() >= 0
+                                && *iv != Interval::from_month_day_usec(0, 0, 0),
+                        ),
                         _ => None,
                     },
                 };
                 if is_positive == Some(false) {
                     return Err(crate::error::ErrorCode::NotSupported(
-                        "a MATCH_RECOGNIZE WITHIN bound that is NULL, zero or negative".to_owned(),
+                        "a MATCH_RECOGNIZE WITHIN bound that is NULL, zero or negative, or an \
+                         interval with a negative component"
+                            .to_owned(),
                         "the bound is the maximum span of a match; a non-positive bound can never \
                          hold a multi-row match (the view would stay empty) and a NULL bound \
-                         bounds nothing — use a positive constant interval"
+                         bounds nothing — use a positive constant interval whose months, days and \
+                         seconds are all non-negative"
                             .to_owned(),
                     )
                     .into());
@@ -1847,6 +1861,11 @@ impl ExprRewriter for SlotLoweringRewriter<'_, '_> {
 /// 30-day normalization, while `first + INTERVAL '1 month'` is calendar addition. For starts in
 /// short months the deadline would then close BEFORE the span window, prematurely finalizing and
 /// evicting live partials.
+///
+/// The sum can still leave the order key's range at runtime (a `smallint` key at `32766` with
+/// `WITHIN 2::smallint`). That is not a bind-time concern: every representable order key lies inside
+/// such a span, so the executor reads an out-of-range sum as a window that never closes
+/// (`Deadline::Never` in the stream crate) rather than as a NULL that the span check would reject.
 fn lower_within(ts_type: DataType, bound: ExprImpl) -> crate::error::Result<(ExprImpl, ExprImpl)> {
     let last = ExprImpl::from(InputRef::new(0, ts_type.clone()));
     let first = ExprImpl::from(InputRef::new(1, ts_type.clone()));

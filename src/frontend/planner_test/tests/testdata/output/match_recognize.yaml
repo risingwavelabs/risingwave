@@ -672,8 +672,8 @@
       define a as a.v > 0, b as b.v < 0
     );
   binder_error: |-
-    Not supported: a MATCH_RECOGNIZE WITHIN bound that is NULL, zero or negative
-    HINT: the bound is the maximum span of a match; a non-positive bound can never hold a multi-row match (the view would stay empty) and a NULL bound bounds nothing — use a positive constant interval
+    Not supported: a MATCH_RECOGNIZE WITHIN bound that is NULL, zero or negative, or an interval with a negative component
+    HINT: the bound is the maximum span of a match; a non-positive bound can never hold a multi-row match (the view would stay empty) and a NULL bound bounds nothing — use a positive constant interval whose months, days and seconds are all non-negative
 - name: MATCH_RECOGNIZE WITHIN rejects a zero bound
   sql: |
     create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
@@ -687,8 +687,8 @@
       define a as a.v > 0, b as b.v < 0
     );
   binder_error: |-
-    Not supported: a MATCH_RECOGNIZE WITHIN bound that is NULL, zero or negative
-    HINT: the bound is the maximum span of a match; a non-positive bound can never hold a multi-row match (the view would stay empty) and a NULL bound bounds nothing — use a positive constant interval
+    Not supported: a MATCH_RECOGNIZE WITHIN bound that is NULL, zero or negative, or an interval with a negative component
+    HINT: the bound is the maximum span of a match; a non-positive bound can never hold a multi-row match (the view would stay empty) and a NULL bound bounds nothing — use a positive constant interval whose months, days and seconds are all non-negative
 - name: MATCH_RECOGNIZE WITHIN rejects a NULL bound (the span predicate would silently never hold rows to a window)
   sql: |
     create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
@@ -702,8 +702,8 @@
       define a as a.v > 0, b as b.v < 0
     );
   binder_error: |-
-    Not supported: a MATCH_RECOGNIZE WITHIN bound that is NULL, zero or negative
-    HINT: the bound is the maximum span of a match; a non-positive bound can never hold a multi-row match (the view would stay empty) and a NULL bound bounds nothing — use a positive constant interval
+    Not supported: a MATCH_RECOGNIZE WITHIN bound that is NULL, zero or negative, or an interval with a negative component
+    HINT: the bound is the maximum span of a match; a non-positive bound can never hold a multi-row match (the view would stay empty) and a NULL bound bounds nothing — use a positive constant interval whose months, days and seconds are all non-negative
 - name: MATCH_RECOGNIZE MEASURES rejects physical PREV/NEXT (navigation over rows outside the match; not the misleading "function does not exist")
   sql: |
     create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;

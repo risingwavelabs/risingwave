@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_expr::expr::build_non_strict_from_prost;
 use risingwave_pb::stream_plan::{MatchRecognizeInputMode, MatchRecognizeNode};
@@ -22,7 +23,8 @@ use crate::common::table::state_table::StateTableBuilder;
 use crate::error::StreamResult;
 use crate::executor::Executor;
 use crate::executor::match_recognize::executor::{
-    CompiledDefine, CompiledMeasure, MatchRecognizeExecutor, MatchRecognizeExecutorArgs,
+    CompiledDefine, CompiledMeasure, DeadlineErrorReport, MatchRecognizeExecutor,
+    MatchRecognizeExecutorArgs,
 };
 use crate::executor::match_recognize::nfa::{Nfa, SkipMode};
 use crate::executor::match_recognize::proto::pattern_from_protobuf;
@@ -141,10 +143,18 @@ impl ExecutorBuilder for MatchRecognizeExecutorBuilder {
             .as_ref()
             .map(|e| build_non_strict_from_prost(e, params.eval_error_report.clone()))
             .transpose()?;
+        // Over `DeadlineErrorReport`, not the actor's report directly: `first + bound` leaving the
+        // order key's range is the window that never closes, not a compute error to count and log
+        // per row. See `eval_deadline` in the executor.
         let within_deadline = node
             .within_deadline
             .as_ref()
-            .map(|e| build_non_strict_from_prost(e, params.eval_error_report.clone()))
+            .map(|e| {
+                build_non_strict_from_prost(
+                    e,
+                    DeadlineErrorReport::new(params.eval_error_report.clone()),
+                )
+            })
             .transpose()?;
         // The two WITHIN expressions are a correctness-coupled pair, and the coupling tightened when
         // the executor's span check started reading the cached deadline instead of evaluating the
@@ -158,6 +168,42 @@ impl ExecutorBuilder for MatchRecognizeExecutorBuilder {
                  (predicate: {}, deadline: {}); the binder emits both or neither",
                 within.is_some(),
                 within_deadline.is_some(),
+            )
+            .into());
+        }
+        // The deadline is compared directly against the order key and the watermark
+        // (`ScalarRefImpl::default_cmp` panics across variants — an actor crash loop that recovery
+        // replays), and the span predicate is a boolean. The binder guarantees both
+        // (`lower_within`); re-state it here so a skewed or corrupt plan fails at build time.
+        let order_key_type = input
+            .schema()
+            .fields
+            .get(order_key_indices[0])
+            .map(|f| f.data_type())
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "MATCH_RECOGNIZE ORDER BY column {} is out of range for an input of {} columns",
+                    order_key_indices[0],
+                    input.schema().len()
+                )
+            })?;
+        if let Some(deadline) = &within_deadline
+            && deadline.return_type() != order_key_type
+        {
+            return Err(anyhow::anyhow!(
+                "MATCH_RECOGNIZE WITHIN deadline has type {} but the ORDER BY column has type {}; \
+                 the two are compared directly",
+                deadline.return_type(),
+                order_key_type,
+            )
+            .into());
+        }
+        if let Some(predicate) = &within
+            && predicate.return_type() != DataType::Boolean
+        {
+            return Err(anyhow::anyhow!(
+                "MATCH_RECOGNIZE WITHIN span predicate has type {}, expected boolean",
+                predicate.return_type(),
             )
             .into());
         }

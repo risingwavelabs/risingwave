@@ -537,12 +537,13 @@ impl CandidateMatcher for DefineMatcher<'_> {
         // operator: this runs once per predicate evaluation, up to the whole scan budget per visit,
         // and for a pattern variable with no `DEFINE` it was the entire cost of an evaluation.
         //
-        // A NULL deadline (an eval error at ingest) rejects, which is what the expression did with a
-        // NULL result. `order_key` is never NULL for a buffered row — those are dropped at ingest.
+        // A deadline past the order key type's range admits every row ([`Deadline::Never`]; see
+        // [`eval_deadline`]). `order_key` is never NULL for a buffered row — those are dropped at
+        // ingest.
         if self.within.is_some() {
-            let fits = match (&self.rows[pos].order_key, &self.rows[match_start].deadline) {
-                (Some(last), Some(deadline)) => last.default_cmp(deadline).is_le(),
-                _ => false,
+            let fits = match &self.rows[pos].order_key {
+                Some(last) => self.rows[match_start].deadline.admits(last),
+                None => false,
             };
             if !fits {
                 return Ok(false);
@@ -567,6 +568,10 @@ pub struct MatchRecognizeExecutorArgs<S: StateStore> {
     /// `WITHIN` deadline `first_order_key + interval` over a synthetic `[first_order_key]` row; the
     /// watermark at which a partial starting at that row expires. Used to wake idle partitions to
     /// evict timed-out partials. `None` when there is no `WITHIN`.
+    ///
+    /// Non-strict like every other expression here, but built over a [`DeadlineErrorReport`]: a sum
+    /// that leaves the order key's range is a meaningful outcome ([`Deadline::Never`]), not a
+    /// failure to report. See [`eval_deadline`].
     pub within_deadline: Option<NonStrictExpression>,
     pub nfa: Nfa,
     pub skip: SkipMode,
@@ -602,6 +607,120 @@ pub struct MatchRecognizeExecutor<S: StateStore> {
     state_table: StateTable<S>,
 }
 
+/// When a row's `WITHIN` window closes: the watermark at which a partial match starting at that row
+/// expires, and the latest order key a row may carry and still extend such a match.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Deadline {
+    /// `first + bound`, in the order key's type (`lower_within` guarantees that), so it compares
+    /// directly against order keys and watermarks.
+    At(ScalarImpl),
+    /// The window never closes. Without a `WITHIN` clause that is simply the semantics; with one,
+    /// it is what `first + bound` denotes when the sum lies past the order key type's range: every
+    /// representable order key is `<= first + bound`, so every candidate row is inside the span,
+    /// and no representable watermark can pass the deadline. Folding the overflow into NULL
+    /// instead — what non-strict evaluation did — rejected every such match (a `smallint` key at
+    /// `32766` with `WITHIN 2::smallint` could not match its own next row) while leaving the
+    /// partial unevictable.
+    ///
+    /// The reading rests on the addition being monotone in the bound, so that "out of range" can
+    /// only mean "past the maximum": the binder guarantees a positive bound with, for intervals,
+    /// no negative component (`timestamp + interval` adds months, days and microseconds as
+    /// separate checked steps, and a mixed-sign interval could overflow on one while its true sum
+    /// is representable).
+    Never,
+}
+
+// `BufferedRow` is the operator's whole retained state; the enum must not cost more than the
+// `Datum` it replaced (the `ScalarImpl` niche carries the second variant for free).
+const _: () = assert!(std::mem::size_of::<Deadline>() == std::mem::size_of::<Datum>());
+
+impl Deadline {
+    /// The finality test: the window has closed at watermark `w`. Strict, because a row with
+    /// `order_key == w` may still arrive and would still fall inside the inclusive span bound.
+    fn closed_at(&self, w: &ScalarImpl) -> bool {
+        match self {
+            Deadline::At(d) => d.default_cmp(w).is_lt(),
+            Deadline::Never => false,
+        }
+    }
+
+    /// The span test: a match starting at this row may extend to a row with order key `last`.
+    /// This is the lowered span predicate `last <= first + bound`, read off the cached deadline.
+    fn admits(&self, last: &ScalarImpl) -> bool {
+        match self {
+            Deadline::At(d) => last.default_cmp(d).is_le(),
+            Deadline::Never => true,
+        }
+    }
+}
+
+/// The error report the `WITHIN` deadline expression is built over: the sum leaving the order key
+/// type's range is not a failure but the window that never closes ([`Deadline::Never`]), so it is
+/// dropped here instead of being counted and logged as a compute error on every affected row. Every
+/// other error still reaches the actor's report.
+///
+/// The expression is `first + bound` with `bound` a positive constant of the order key's own type
+/// (`lower_within` enforces both), so out-of-range is the one error it can raise; anything else
+/// would mean the expression is no longer the one the binder emits, and deserves the report.
+#[derive(Clone)]
+pub struct DeadlineErrorReport<R> {
+    inner: R,
+}
+
+impl<R: EvalErrorReport> DeadlineErrorReport<R> {
+    pub fn new(inner: R) -> Self {
+        Self { inner }
+    }
+}
+
+impl<R: EvalErrorReport> EvalErrorReport for DeadlineErrorReport<R> {
+    fn report(&self, error: ExprError) {
+        if !is_out_of_range(&error) {
+            self.inner.report(error);
+        }
+    }
+}
+
+/// Whether `error` is, or wraps, an out-of-range arithmetic error. A generated function
+/// implementation does not return its function's error bare: it wraps it in
+/// [`ExprError::Function`] with the call rendered for display (`add('32766', '2')`), so the variant
+/// has to be found through that wrapper.
+fn is_out_of_range(error: &ExprError) -> bool {
+    match error {
+        // Not `NumericUnderflow`: the bound is positive at bind time, so the sum can only leave
+        // the range upwards. An underflow would mean the expression is not the one the binder
+        // emits, and must be reported rather than read as a window that never closes.
+        ExprError::NumericOutOfRange | ExprError::NumericOverflow => true,
+        ExprError::Function { source, .. } => source
+            .downcast_ref::<ExprError>()
+            .is_some_and(is_out_of_range),
+        _ => false,
+    }
+}
+
+/// Per-row WITHIN-deadline evaluation, run once when a row enters the buffer; every later
+/// consultation reads [`BufferedRow::deadline`].
+///
+/// A NULL result can only be an evaluation error padded to NULL: a NULL sum needs a NULL operand,
+/// and the order key is non-null for every buffered row (NULLs are dropped at ingest) while a NULL
+/// bound is rejected at bind time. And the one reachable error is the sum leaving the order key
+/// type's range (see [`DeadlineErrorReport`]) — the window that never closes. An unexpected error
+/// has already been reported by the wrapper and is read the same way, since the alternative —
+/// rejecting every match from that row — is the silent data loss this exists to prevent.
+async fn eval_deadline(
+    within_deadline: &Option<NonStrictExpression>,
+    order_key: &Datum,
+) -> Deadline {
+    let Some(expr) = within_deadline else {
+        return Deadline::Never;
+    };
+    let synthetic = OwnedRow::new(vec![order_key.clone()]);
+    match expr.eval_row_infallible(&synthetic).await {
+        Some(deadline) => Deadline::At(deadline),
+        None => Deadline::Never,
+    }
+}
+
 /// A buffered input row, materialized from the state table while processing one partition.
 struct BufferedRow {
     /// Per-actor monotonic id; the state-table key tiebreaker (keeps rows with equal ORDER BY keys
@@ -610,11 +729,10 @@ struct BufferedRow {
     /// Leading ORDER BY value (a copy of `row[time_col]`), compared against the watermark to find
     /// the safe prefix. The buffer arrives pre-sorted by the full ORDER BY key (state-table PK).
     order_key: Datum,
-    /// Precomputed `WITHIN` deadline (`order_key + bound`; `None` without a `WITHIN` clause or on
-    /// an eval error). A pure function of the row, consulted on every finality test and every
-    /// prune pass — evaluating the expression per consultation would put a boxed expression call
-    /// on each of those paths for what is one comparison.
-    deadline: Datum,
+    /// Precomputed `WITHIN` deadline (`order_key + bound`). A pure function of the row, consulted
+    /// on every finality test and every prune pass — evaluating the expression per consultation
+    /// would put a boxed expression call on each of those paths for what is one comparison.
+    deadline: Deadline,
     /// The raw input row, read by DEFINE and MEASURES navigation slots at match time.
     row: OwnedRow,
 }
@@ -642,21 +760,6 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             skip: args.skip,
             eval_error_report: args.eval_error_report,
             state_table: args.state_table,
-        }
-    }
-
-    /// Per-row WITHIN-deadline evaluation, run once when a row enters the buffer; every later
-    /// consultation reads [`BufferedRow::deadline`].
-    async fn eval_deadline(
-        within_deadline: &Option<NonStrictExpression>,
-        order_key: &Datum,
-    ) -> Datum {
-        match within_deadline {
-            Some(expr) => {
-                let synthetic = OwnedRow::new(vec![order_key.clone()]);
-                expr.eval_row_infallible(&synthetic).await
-            }
-            None => None,
         }
     }
 
@@ -723,7 +826,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             debug_assert!(end <= run.rows.len());
 
             let within_final = if let Some(w) = watermark {
-                matches!(&run.rows[start].deadline, Some(d) if d.default_cmp(w).is_lt())
+                run.rows[start].deadline.closed_at(w)
             } else {
                 false
             };
@@ -863,9 +966,9 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         let n = run.rows.len();
         let mut retain_from = n;
         for p in 0..n {
-            // Window closed (deadline < w): `p` is dead, skip it. A NULL deadline (no WITHIN, or
-            // eval-error) fails this test, so the position is conservatively retained.
-            if matches!(&run.rows[p].deadline, Some(d) if d.default_cmp(w).is_lt()) {
+            // Window closed (deadline < w): `p` is dead, skip it. A window that never closes (no
+            // WITHIN, or a deadline past the type's range) fails this test, so `p` is retained.
+            if run.rows[p].deadline.closed_at(w) {
                 continue;
             }
             let matcher = DefineMatcher {
@@ -1042,7 +1145,9 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                 );
                 let pk = (&input_row).project(partition_key_indices).into_owned_row();
                 let order_key = input_row.datum_at(time_col).to_owned_datum();
-                let deadline = Self::eval_deadline(within_deadline, &order_key).await;
+                // Not counted here: the ingest path counted this row once already, and a rebuild
+                // re-evaluates every retained row on each recovery.
+                let deadline = eval_deadline(within_deadline, &order_key).await;
                 let run = parts.entry(pk).or_insert_with(|| PartitionRun {
                     rows: Vec::new(),
                     matcher: IncrementalMatcher::new(nfa.clone(), skip.clone()),
@@ -1214,7 +1319,12 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         }
                         let seq = next_seq;
                         next_seq += 1;
-                        let deadline = Self::eval_deadline(&within_deadline, &order_key).await;
+                        let deadline = eval_deadline(&within_deadline, &order_key).await;
+                        // A `WITHIN` that silently stopped bounding this row's partial is worth
+                        // seeing: an integer order key near its type's maximum is a schema smell.
+                        if within_deadline.is_some() && deadline == Deadline::Never {
+                            metrics.match_recognize_within_deadline_overflow_count.inc();
+                        }
                         state_table.insert(once(Some(ScalarImpl::Int64(seq))).chain(row_ref));
                         let pk = row_ref.project(&partition_key_indices).into_owned_row();
                         let run = if parts.contains_key(&pk) {
@@ -1548,7 +1658,7 @@ mod tests {
             .map(|(i, v)| BufferedRow {
                 seq: i as i64,
                 order_key: Some(ScalarImpl::Int32(i as i32)),
-                deadline: None,
+                deadline: Deadline::Never,
                 row: OwnedRow::new(vec![Some(ScalarImpl::Int32(*v))]),
             })
             .collect()
@@ -1858,6 +1968,184 @@ mod tests {
 
     /// The emit-finality gate must agree with batch preference semantics, not with the positional
     /// "a later row exists" proxy. These pin the two supersession shapes that proxy gets wrong.
+    /// `WITHIN` deadline evaluation, and the two tests the executor reads off the cached value.
+    mod within_deadline {
+        use risingwave_common::types::DatumRef;
+        use risingwave_expr::expr::{LiteralExpression, build_from_pretty};
+
+        use super::*;
+
+        /// Records every error it is handed, so a test can see what a wrapper let through.
+        #[derive(Clone, Default)]
+        struct RecordingReport(Arc<Mutex<Vec<String>>>);
+
+        impl EvalErrorReport for RecordingReport {
+            fn report(&self, error: ExprError) {
+                self.0.lock().unwrap().push(error.to_string());
+            }
+        }
+
+        /// `first + 2::smallint` over an int2 order key — the deadline `lower_within` emits for
+        /// `ORDER BY <smallint> ... WITHIN 2::smallint` — built the way `from_proto` builds it.
+        fn int2_plus_two(report: RecordingReport) -> Option<NonStrictExpression> {
+            Some(NonStrictExpression::new_topmost(
+                build_from_pretty("(add:int2 $0:int2 2:int2)"),
+                DeadlineErrorReport::new(report),
+            ))
+        }
+
+        async fn deadline_of(order_key: i16) -> Deadline {
+            eval_deadline(
+                &int2_plus_two(RecordingReport::default()),
+                &Some(ScalarImpl::Int16(order_key)),
+            )
+            .await
+        }
+
+        #[tokio::test]
+        async fn representable_sum_is_the_deadline() {
+            assert_eq!(deadline_of(1).await, Deadline::At(ScalarImpl::Int16(3)));
+            // Landing exactly on the type's maximum is still representable.
+            assert_eq!(
+                deadline_of(32765).await,
+                Deadline::At(ScalarImpl::Int16(i16::MAX))
+            );
+        }
+
+        /// `32766 + 2` leaves int2. Non-strict evaluation folded that into NULL, which the span
+        /// check read as "outside the window": a valid zero-span match at the top of the key's
+        /// range was silently dropped. Past the type's range the window never closes.
+        #[tokio::test]
+        async fn overflowing_sum_never_closes() {
+            assert_eq!(deadline_of(32766).await, Deadline::Never);
+            assert_eq!(deadline_of(i16::MAX).await, Deadline::Never);
+        }
+
+        #[tokio::test]
+        async fn absent_within_never_closes() {
+            let d = eval_deadline(&None, &Some(ScalarImpl::Int16(0))).await;
+            assert_eq!(d, Deadline::Never);
+        }
+
+        /// The overflow is a legitimate outcome, not a compute error: it must not be counted and
+        /// logged against the actor for every row at the top of the key's range. Anything else
+        /// the expression raises still is — bare or inside the `Function` wrapper a generated
+        /// implementation puts around its function's error.
+        #[tokio::test]
+        async fn overflow_is_not_reported_but_other_errors_are() {
+            let report = RecordingReport::default();
+            let expr = int2_plus_two(report.clone());
+            assert_eq!(
+                eval_deadline(&expr, &Some(ScalarImpl::Int16(32766))).await,
+                Deadline::Never
+            );
+            assert!(
+                report.0.lock().unwrap().is_empty(),
+                "an out-of-range deadline must not reach the actor's error report"
+            );
+
+            let wrapper = DeadlineErrorReport::new(report.clone());
+            let no_args = || Vec::<DatumRef<'_>>::new();
+            wrapper.report(ExprError::NumericOutOfRange);
+            wrapper.report(ExprError::function(
+                "add",
+                no_args(),
+                ExprError::NumericOverflow,
+            ));
+            assert!(report.0.lock().unwrap().is_empty());
+
+            let wrapped = ExprError::function("divide", no_args(), ExprError::DivisionByZero);
+            let wrapped_text = wrapped.to_string();
+            wrapper.report(ExprError::DivisionByZero);
+            wrapper.report(wrapped);
+            assert_eq!(
+                *report.0.lock().unwrap(),
+                vec![ExprError::DivisionByZero.to_string(), wrapped_text],
+                "every other error is forwarded untouched"
+            );
+        }
+
+        /// Against a never-closing window the span test admits every order key and the finality
+        /// test never fires — so a match whose deadline overflowed is decided structurally,
+        /// exactly like a match without `WITHIN`. A representable deadline keeps the inclusive
+        /// span bound and the strict watermark boundary.
+        #[test]
+        fn never_admits_everything_and_never_closes() {
+            let never = Deadline::Never;
+            assert!(never.admits(&ScalarImpl::Int16(i16::MAX)));
+            assert!(!never.closed_at(&ScalarImpl::Int16(i16::MAX)));
+
+            let at = Deadline::At(ScalarImpl::Int16(10));
+            assert!(
+                at.admits(&ScalarImpl::Int16(10)),
+                "the span bound is inclusive"
+            );
+            assert!(!at.admits(&ScalarImpl::Int16(11)));
+            assert!(
+                !at.closed_at(&ScalarImpl::Int16(10)),
+                "the watermark boundary is strict"
+            );
+            assert!(at.closed_at(&ScalarImpl::Int16(11)));
+        }
+
+        /// Two rows with int2 order keys, each carrying the deadline `eval_deadline` computes for
+        /// it, no `DEFINE` (every row satisfies every variable), matched against `(a b)` with the
+        /// span check armed.
+        async fn ab_matches(order_keys: [i16; 2]) -> Vec<LabeledMatch> {
+            let mut rows = Vec::new();
+            let expr = int2_plus_two(RecordingReport::default());
+            for (i, k) in order_keys.into_iter().enumerate() {
+                let order_key = Some(ScalarImpl::Int16(k));
+                let deadline = eval_deadline(&expr, &order_key).await;
+                rows.push(BufferedRow {
+                    seq: i as i64,
+                    order_key,
+                    deadline,
+                    row: OwnedRow::new(vec![Some(ScalarImpl::Int32(0))]),
+                });
+            }
+            // Only `is_some()` is read on the hot path; the predicate itself is never evaluated.
+            let within = NonStrictExpression::for_test(LiteralExpression::new(
+                DataType::Boolean,
+                Some(ScalarImpl::Bool(true)),
+            ));
+            let defines = HashMap::new();
+            let matcher = DefineMatcher {
+                rows: &rows,
+                defines: &defines,
+                within: Some(&within),
+            };
+            let nfa = Nfa::compile(&Pattern::Concat(vec![
+                Pattern::Var("a".to_owned()),
+                Pattern::Var("b".to_owned()),
+            ]));
+            nfa.find_matches_dynamic(rows.len(), &matcher, &SkipMode::PastLastRow)
+                .await
+                .unwrap()
+        }
+
+        /// The reported case: `a`@32766, `b`@32766, `WITHIN 2::smallint`. The span is 0, and the
+        /// start row's deadline overflows. The match must be found.
+        #[tokio::test]
+        async fn overflowed_deadline_does_not_reject_a_match_inside_the_bound() {
+            assert_eq!(
+                ab_matches([32766, 32766]).await,
+                vec![LabeledMatch {
+                    start: 0,
+                    end: 2,
+                    labels: labels("ab"),
+                }]
+            );
+        }
+
+        /// Control: the span check still bites where the deadline IS representable. `a`@32763 has
+        /// deadline 32765, so `b`@32766 is outside the window; `b` cannot start `(a b)` alone.
+        #[tokio::test]
+        async fn representable_deadline_still_rejects_a_match_past_the_bound() {
+            assert!(ab_matches([32763, 32766]).await.is_empty());
+        }
+    }
+
     mod finality_gate {
         use std::collections::BTreeSet;
 

@@ -81,6 +81,21 @@ select * from src match_recognize (
   define a as a.v > 0, b as b.v < 0
 );
 
+# An interval bound that is positive in total but has a negative component is rejected too:
+# `timestamp + interval` adds months, days and microseconds as separate checked steps, so such a
+# bound can overflow on one component while its true sum is representable — and the executor reads
+# an out-of-range deadline as a window that never closes.
+statement error negative component
+create materialized view bad_within_mixed_sign as
+select * from src match_recognize (
+  partition by id
+  order by ts
+  measures a.v as m
+  one row per match
+  pattern (a b) within interval '1 month -29 days'
+  define a as a.v > 0, b as b.v < 0
+);
+
 # Physical PREV/NEXT in MEASURES reads rows outside the match; rejected by name rather than falling
 # through to a misleading "function prev does not exist".
 statement error in MATCH_RECOGNIZE MEASURES

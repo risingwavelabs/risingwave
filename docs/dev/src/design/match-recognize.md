@@ -330,6 +330,17 @@ with `order_key == w` may still arrive, and `WatermarkFilterExecutor` forwards i
 - dead-prefix pruning retains rows whose window is still open under the exact complement,
   `deadline >= w`.
 
+A deadline that overflows the order key's type — `first + bound` past the type's maximum — is a
+window that **never closes**: every representable order key lies inside the span, and no
+representable watermark can pass the deadline. The deadline expression is non-strict like every
+other streaming expression, so the overflow surfaces as NULL — and a NULL here can only be an
+evaluation error, since the order key is non-null for every buffered row and a NULL bound is
+rejected at bind time. The executor reads that NULL as the never-closing state (`Deadline::Never`),
+and the expression is built over an error report that drops the out-of-range error instead of
+counting it as a compute error on every affected row. Reading the NULL as an ordinary value instead
+made the span check treat it as "outside the window", which silently rejected valid matches at the
+top of the key's range while leaving their partials unevictable.
+
 The emit test and the prune test must stay in lockstep: if pruning were laxer than emission,
 eviction would delete the rows of a match the emit side is still holding, and the match would be
 lost with no trace.
