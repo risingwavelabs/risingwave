@@ -42,15 +42,14 @@ skipif madsim
 statement ok
 drop function rand_series(int);
 
-# Opting out of stored results requires network retries. The retry option is omitted here to
-# verify that its default value, false, is rejected.
+# External scalar UDFs require network retries when opting out of stored results. Validation runs
+# before RisingWave connects to the UDF server, so this test does not require a running server.
 skipif madsim
-statement error `always_retry_on_network_error` must be true when `skip_materializing_eval_result` is true
-create function rejected_without_retry(v int) returns int language javascript immutable as $$
-export function rejected_without_retry(v) {
-    return v;
-}
-$$ with (skip_materializing_eval_result = true);
+statement error `always_retry_on_network_error` must be true when `skip_materializing_eval_result` is true for an external scalar UDF
+create function rejected_external_without_retry(v int) returns int language java immutable
+as 'identity'
+using link 'http://localhost:8815'
+with (skip_materializing_eval_result = true);
 
 skipif madsim
 statement error `IMMUTABLE` must be specified when `skip_materializing_eval_result` is true
@@ -58,21 +57,16 @@ create function rejected_without_immutable(v int) returns int language javascrip
 export function rejected_without_immutable(v) {
     return v;
 }
-$$ with (
-    skip_materializing_eval_result = true,
-    always_retry_on_network_error = true
-);
+$$ with (skip_materializing_eval_result = true);
 
+# Embedded scalar UDFs execute locally and do not use the external network-retry loop.
 skipif madsim
 statement ok
 create function identity_without_stored_result(v int) returns int language javascript immutable as $$
 export function identity_without_stored_result(v) {
     return v;
 }
-$$ with (
-    skip_materializing_eval_result = true,
-    always_retry_on_network_error = true
-);
+$$ with (skip_materializing_eval_result = true);
 
 skipif madsim
 statement ok

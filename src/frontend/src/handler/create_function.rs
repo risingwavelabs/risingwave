@@ -39,6 +39,24 @@ pub(crate) fn reject_variant_in_udf_signature(
     Ok(())
 }
 
+fn validate_retry_for_skipped_materialization(
+    skip_materializing_eval_result: bool,
+    always_retry_on_network_error: bool,
+    supports_always_retry_on_network_error: bool,
+) -> Result<()> {
+    if skip_materializing_eval_result
+        && supports_always_retry_on_network_error
+        && !always_retry_on_network_error
+    {
+        return Err(ErrorCode::InvalidParameterValue(
+            "`always_retry_on_network_error` must be true when `skip_materializing_eval_result` is true for an external scalar UDF"
+                .to_owned(),
+        )
+        .into());
+    }
+    Ok(())
+}
+
 pub async fn handle_create_function(
     handler_args: HandlerArgs,
     or_replace: bool,
@@ -106,13 +124,6 @@ pub async fn handle_create_function(
     let skip_materializing_eval_result = with_options
         .skip_materializing_eval_result
         .unwrap_or_default();
-    if skip_materializing_eval_result && !always_retry_on_network_error {
-        return Err(ErrorCode::InvalidParameterValue(
-            "`always_retry_on_network_error` must be true when `skip_materializing_eval_result` is true"
-                .to_owned(),
-        )
-        .into());
-    }
     if skip_materializing_eval_result && !is_immutable {
         return Err(ErrorCode::InvalidParameterValue(
             "`IMMUTABLE` must be specified when `skip_materializing_eval_result` is true"
@@ -189,14 +200,21 @@ pub async fn handle_create_function(
         _ => None,
     };
 
-    let create_fn =
-        risingwave_expr::sig::find_udf_impl(&language, runtime.as_deref(), link)?.create_fn;
-    let output = create_fn(CreateOptions {
-        kind: match kind {
-            Kind::Scalar(_) => UdfKind::Scalar,
-            Kind::Table(_) => UdfKind::Table,
-            Kind::Aggregate(_) => unreachable!(),
-        },
+    let udf_kind = match kind {
+        Kind::Scalar(_) => UdfKind::Scalar,
+        Kind::Table(_) => UdfKind::Table,
+        // Aggregate UDFs are created through `CREATE AGGREGATE` and
+        // `handle_create_aggregate`, not this `CREATE FUNCTION` handler.
+        Kind::Aggregate(_) => unreachable!(),
+    };
+    let udf_impl = risingwave_expr::sig::find_udf_impl(&language, runtime.as_deref(), link)?;
+    validate_retry_for_skipped_materialization(
+        skip_materializing_eval_result,
+        always_retry_on_network_error,
+        (udf_impl.supports_always_retry_on_network_error)(udf_kind),
+    )?;
+    let output = (udf_impl.create_fn)(CreateOptions {
+        kind: udf_kind,
         name: &function_name,
         arg_names: &arg_names,
         arg_types: &arg_types,
@@ -242,6 +260,7 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_expr::sig::{CreateFunctionOutput, UDF_IMPLS, UdfImplDescriptor};
 
+    use super::validate_retry_for_skipped_materialization;
     use crate::catalog::root_catalog::SchemaPath;
     use crate::test_utils::LocalFrontend;
 
@@ -258,6 +277,7 @@ mod tests {
             })
         },
         build_fn: |_| unreachable!("the planner test does not execute the UDF"),
+        supports_always_retry_on_network_error: |_| false,
     };
 
     /// Verifies option dependencies, catalog propagation, recursive purity, and top-level
@@ -268,31 +288,23 @@ mod tests {
 
         frontend.run_sql("create table t(v int)").await.unwrap();
 
-        // Isolate the retry validation by providing IMMUTABLE.
-        let error = frontend
-            .run_sql(
-                r#"create function rejected_without_retry(v int)
-                   returns int immutable
-                   with (skip_materializing_eval_result = true)"#,
-            )
-            .await
-            .unwrap_err();
+        // Only execution paths that support infinite network retry require the option when result
+        // materialization is skipped. The UDF-enabled e2e test covers descriptor selection for an
+        // actual external scalar UDF.
+        let error = validate_retry_for_skipped_materialization(true, false, true).unwrap_err();
         assert!(
             error.to_string().contains(
-                "`always_retry_on_network_error` must be true when `skip_materializing_eval_result` is true"
+                "`always_retry_on_network_error` must be true when `skip_materializing_eval_result` is true for an external scalar UDF"
             ),
             "{error}"
         );
 
-        // Isolate the determinism validation by enabling retries.
+        // Embedded scalar UDFs do not use the external retry loop, but still require IMMUTABLE.
         let error = frontend
             .run_sql(
                 r#"create function rejected_without_immutable(v int)
                    returns int
-                   with (
-                       skip_materializing_eval_result = true,
-                       always_retry_on_network_error = true
-                   )"#,
+                   with (skip_materializing_eval_result = true)"#,
             )
             .await
             .unwrap_err();
@@ -307,10 +319,7 @@ mod tests {
             .run_sql(
                 r#"create function identity_without_stored_result(v int)
                    returns int immutable
-                   with (
-                       skip_materializing_eval_result = true,
-                       always_retry_on_network_error = true
-                   )"#,
+                   with (skip_materializing_eval_result = true)"#,
             )
             .await
             .unwrap();
@@ -385,18 +394,14 @@ mod tests {
             .run_sql(
                 r#"create function identity_without_stored_result(v int)
                    returns int immutable
-                   with (
-                       skip_materializing_eval_result = true,
-                       always_retry_on_network_error = true
-                   )"#,
+                   with (skip_materializing_eval_result = true)"#,
             )
             .await
             .unwrap();
         frontend
             .run_sql(
                 r#"create function identity_with_stored_result(v int)
-                   returns int immutable
-                   with (always_retry_on_network_error = true)"#,
+                   returns int immutable"#,
             )
             .await
             .unwrap();
