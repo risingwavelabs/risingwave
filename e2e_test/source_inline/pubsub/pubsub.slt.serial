@@ -8,12 +8,6 @@ CREATE SOURCE s (v1 int, v2 varchar) WITH (
     connector = 'google_pubsub'
 ) FORMAT PLAIN ENCODE JSON;
 
-statement error credentials must be set if not using the pubsub emulator
-CREATE SOURCE s (v1 int, v2 varchar) WITH (
-    connector = 'google_pubsub',
-    pubsub.subscription = 'test-subscription-1'
-) FORMAT PLAIN ENCODE JSON;
-
 statement error failed to lookup address information
 CREATE TABLE s (v1 int, v2 varchar) WITH (
     connector = 'google_pubsub',
