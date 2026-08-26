@@ -220,7 +220,13 @@ impl LocalityBackfillState {
 ///
 /// The executor implements a proper backfill process similar to arrangement backfill:
 /// 1. Backfill phase: Buffer incoming data and provide locality-ordered snapshot reads
-/// 2. Forward phase: Once backfill is complete, forward upstream messages directly
+/// 2. Completion transition: Drain buffered input and forward new input directly until the
+///    barrier that persists backfill completion
+/// 3. Forward phase: Optionally sort amplified epochs after that completion barrier
+///
+/// The sort buffer intentionally does not cover the completion transition. Input drained when the
+/// snapshot reaches EOF, or received while waiting for the completion barrier, is forwarded in
+/// arrival order. Only input after that barrier is eligible for sorting.
 ///
 /// Key improvements over the original implementation:
 /// - Removes arbitrary barrier buffer limit
@@ -941,7 +947,8 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
 
         tracing::debug!("Locality provider backfill finished, forwarding upstream directly");
 
-        // Wait for first barrier after backfill completion to mark progress as finished
+        // Wait for the first barrier after snapshot EOF to mark progress as finished. Chunks in
+        // this transition are forwarded directly; the sort buffer starts only after this barrier.
         if need_backfill && !backfill_state.is_completed() {
             while let Some(Ok(msg)) = upstream.next().await {
                 match msg {
@@ -1007,7 +1014,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
             }
         }
 
-        // After backfill completion, forward messages directly. When the sort buffer is enabled
+        // After the completion barrier, forward messages directly. When the sort buffer is enabled
         // and an epoch turns out to be amplified (row count exceeds the activation threshold),
         // switch to buffering the rest of the epoch into the sort buffer table and replay it in
         // locality order at the barrier, so that downstream operators process the amplified
@@ -1150,15 +1157,21 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use risingwave_common::array::StreamChunkTestExt;
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+    use risingwave_common::hash::VirtualNode;
     use risingwave_common::types::DataType;
     use risingwave_common::util::epoch::{EpochPair, test_epoch};
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
+    use tokio::time::timeout;
 
     use super::*;
     use crate::common::table::test_utils::gen_pbtable;
+    use crate::executor::test_utils::{MockSource, StreamExecutorTestExt};
+    use crate::task::LocalBarrierManager;
 
     fn row(values: impl IntoIterator<Item = i32>) -> OwnedRow {
         OwnedRow::new(
@@ -1324,6 +1337,153 @@ mod tests {
                 U- 2 1 20
                 U+ 2 1 21",
             )
+        );
+    }
+
+    #[tokio::test]
+    async fn test_sort_buffer_starts_after_backfill_completion_barrier() {
+        let store = MemoryStateStore::new();
+        let input_schema = Schema::new(vec![
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int32),
+        ]);
+        let input_columns = vec![
+            ColumnDesc::unnamed(ColumnId::new(0), DataType::Int32),
+            ColumnDesc::unnamed(ColumnId::new(1), DataType::Int32),
+            ColumnDesc::unnamed(ColumnId::new(2), DataType::Int32),
+        ];
+
+        // State table: input columns, pk = locality column + stream key.
+        let state_table = StateTable::from_table_catalog(
+            &gen_pbtable(
+                TableId::new(1),
+                input_columns.clone(),
+                vec![OrderType::ascending(); 2],
+                vec![0, 1],
+                0,
+            ),
+            store.clone(),
+            None,
+        )
+        .await;
+
+        // Progress table: vnode + state-table pk + completion flag + processed rows.
+        let progress_catalog = gen_pbtable(
+            TableId::new(2),
+            vec![
+                ColumnDesc::unnamed(ColumnId::new(0), VirtualNode::RW_TYPE),
+                ColumnDesc::unnamed(ColumnId::new(1), DataType::Int32),
+                ColumnDesc::unnamed(ColumnId::new(2), DataType::Int32),
+                ColumnDesc::unnamed(ColumnId::new(3), DataType::Boolean),
+                ColumnDesc::unnamed(ColumnId::new(4), DataType::Int64),
+            ],
+            vec![OrderType::ascending()],
+            vec![0],
+            1,
+        );
+        let progress_table =
+            StateTable::from_table_catalog(&progress_catalog, store.clone(), None).await;
+
+        // Sort buffer: input columns ++ [gen, op, seq],
+        // pk = gen + locality column + stream key + seq.
+        let mut sort_buffer_catalog = gen_pbtable(
+            TableId::new(3),
+            vec![
+                input_columns[0].clone(),
+                input_columns[1].clone(),
+                input_columns[2].clone(),
+                ColumnDesc::unnamed(ColumnId::new(3), DataType::Int64),
+                ColumnDesc::unnamed(ColumnId::new(4), DataType::Int16),
+                ColumnDesc::unnamed(ColumnId::new(5), DataType::Int64),
+            ],
+            vec![OrderType::ascending(); 4],
+            vec![3, 0, 1, 5],
+            0,
+        );
+        sort_buffer_catalog.clean_watermark_indices = vec![3];
+        let sort_buffer_table =
+            StateTable::from_table_catalog_inconsistent_op(&sort_buffer_catalog, store, None).await;
+
+        let fragment_id: FragmentId = 1.into();
+        let progress = CreateMviewProgressReporter::for_test(LocalBarrierManager::for_test());
+        let (mut tx, source) = MockSource::channel();
+        let upstream = source.into_executor(input_schema.clone(), vec![1]);
+        let mut executor = LocalityProviderExecutor::new(
+            upstream,
+            vec![0],
+            state_table,
+            progress_table,
+            Some(sort_buffer_table),
+            SortBufferSettings {
+                enabled: true,
+                activate_threshold: 0,
+            },
+            input_schema,
+            progress,
+            Arc::new(StreamingMetrics::unused()),
+            1024,
+            fragment_id,
+        )
+        .boxed()
+        .execute();
+
+        tx.push_barrier(test_epoch(1), false);
+        assert_eq!(
+            executor.expect_barrier().await.epoch,
+            EpochPair::new_test_epoch(test_epoch(1))
+        );
+
+        tx.send_barrier(Barrier::new_test_barrier(test_epoch(2)).with_mutation(
+            Mutation::StartFragmentBackfill {
+                fragment_ids: [fragment_id].into(),
+            },
+        ));
+        assert_eq!(
+            executor.expect_barrier().await.epoch,
+            EpochPair::new_test_epoch(test_epoch(2))
+        );
+
+        // Drive the empty snapshot to EOF. The executor is now waiting for the barrier that
+        // persists completion, and must still pass through chunks even though the threshold is 0.
+        assert!(
+            timeout(Duration::from_millis(200), executor.next())
+                .await
+                .is_err()
+        );
+        let transition_chunk = StreamChunk::from_pretty(
+            " i i i
+            + 2 1 20
+            + 1 1 10",
+        );
+        tx.push_chunk(transition_chunk.clone());
+        assert_eq!(executor.expect_chunk().await, transition_chunk);
+
+        tx.push_barrier(test_epoch(3), false);
+        assert_eq!(
+            executor.expect_barrier().await.epoch,
+            EpochPair::new_test_epoch(test_epoch(3))
+        );
+
+        // Starting with the next epoch, the same unsorted input is buffered and replayed in
+        // locality order at the barrier.
+        tx.push_chunk(StreamChunk::from_pretty(
+            " i i i
+            + 4 1 40
+            + 3 1 30",
+        ));
+        tx.push_barrier(test_epoch(4), false);
+        assert_eq!(
+            executor.expect_chunk().await,
+            StreamChunk::from_pretty(
+                " i i i
+                + 3 1 30
+                + 4 1 40",
+            )
+        );
+        assert_eq!(
+            executor.expect_barrier().await.epoch,
+            EpochPair::new_test_epoch(test_epoch(4))
         );
     }
 }
