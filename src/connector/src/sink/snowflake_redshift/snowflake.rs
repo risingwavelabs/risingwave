@@ -861,7 +861,7 @@ impl SnowflakeJniClient {
 
     pub async fn execute_create_merge_into_task(&self) -> Result<()> {
         if self.snowflake_task_context.task_name.is_some() {
-            let create_task_sql = build_create_merge_into_task_sql(&self.snowflake_task_context);
+            let create_task_sql = build_create_merge_into_task_sql(&self.snowflake_task_context)?;
             let start_task_sql = build_start_task_sql(&self.snowflake_task_context);
             self.jdbc_client
                 .execute_sql_sync(vec![create_task_sql])
@@ -1086,7 +1086,9 @@ fn build_drop_task_sql(snowflake_task_context: &SnowflakeTaskContext) -> String 
     format!("DROP TASK IF EXISTS {}", full_task_name)
 }
 
-fn build_create_merge_into_task_sql(snowflake_task_context: &SnowflakeTaskContext) -> String {
+fn build_create_merge_into_task_sql(
+    snowflake_task_context: &SnowflakeTaskContext,
+) -> Result<String> {
     let SnowflakeTaskContext {
         task_name,
         cdc_table_name,
@@ -1099,6 +1101,7 @@ fn build_create_merge_into_task_sql(snowflake_task_context: &SnowflakeTaskContex
         all_column_names,
         database,
         schema_name,
+        schema,
         ..
     } = snowflake_task_context;
     let full_task_name = format!(
@@ -1118,20 +1121,62 @@ fn build_create_merge_into_task_sql(snowflake_task_context: &SnowflakeTaskContex
         database, schema_name, target_table_name
     );
 
+    let pk_column_names = pk_column_names.as_ref().unwrap();
+    let pk_columns = pk_column_names
+        .iter()
+        .enumerate()
+        .map(|(index, name)| {
+            let field = schema
+                .fields
+                .iter()
+                .find(|field| field.name == *name)
+                .ok_or_else(|| {
+                    SinkError::Config(anyhow!(
+                        "Primary key column `{name}` not found in the Snowflake sink schema"
+                    ))
+                })?;
+            Ok((index, name, convert_snowflake_data_type(&field.data_type)?))
+        })
+        .collect::<Result<Vec<_>>>()?;
     let pk_names_str = pk_column_names
-        .as_ref()
-        .unwrap()
         .iter()
         .map(|name| format!(r#""{}""#, name))
         .collect::<Vec<String>>()
         .join(", ");
     let pk_names_eq_str = pk_column_names
-        .as_ref()
-        .unwrap()
         .iter()
         .map(|name| format!(r#"target."{}" = source."{}""#, name, name))
         .collect::<Vec<String>>()
         .join(" AND ");
+    let pk_bounds_declarations = pk_columns
+        .iter()
+        .flat_map(|(index, _, data_type)| {
+            [
+                format!("    LET min_pk_{index} {data_type};"),
+                format!("    LET max_pk_{index} {data_type};"),
+            ]
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+    // Collect the row cutoff and key bounds in one statement so they describe the same
+    // snapshot, even while new rows are being loaded into the intermediate table.
+    let pk_bounds_select_str = pk_columns
+        .iter()
+        .flat_map(|(_, name, _)| [format!(r#"MIN("{name}")"#), format!(r#"MAX("{name}")"#)])
+        .collect::<Vec<_>>()
+        .join(", ");
+    let pk_bounds_into_str = pk_columns
+        .iter()
+        .flat_map(|(index, _, _)| [format!(":min_pk_{index}"), format!(":max_pk_{index}")])
+        .collect::<Vec<_>>()
+        .join(", ");
+    let target_pruning_predicates = pk_columns
+        .iter()
+        .map(|(index, name, _)| {
+            format!(r#"target."{name}" BETWEEN :min_pk_{index} AND :max_pk_{index}"#)
+        })
+        .collect::<Vec<_>>()
+        .join("\n        AND ");
     let all_column_names_set_str = all_column_names
         .as_ref()
         .unwrap()
@@ -1162,15 +1207,17 @@ fn build_create_merge_into_task_sql(snowflake_task_context: &SnowflakeTaskContex
         Some(format!("WAREHOUSE = {}", warehouse.as_ref().unwrap()))
     };
 
-    format!(
+    Ok(format!(
         r#"CREATE OR REPLACE TASK {task_name}
 {compute_clause}
 SCHEDULE = '{writer_target_interval_seconds} SECONDS'
 AS
 BEGIN
     LET max_row_id STRING;
+{pk_bounds_declarations}
 
-    SELECT COALESCE(MAX("{snowflake_sink_row_id}"), '0') INTO :max_row_id
+    SELECT COALESCE(MAX("{snowflake_sink_row_id}"), '0'), {pk_bounds_select_str}
+    INTO :max_row_id, {pk_bounds_into_str}
     FROM {cdc_table_name};
 
     MERGE INTO {target_table_name} AS target
@@ -1184,6 +1231,7 @@ BEGIN
         WHERE dedupe_id = 1
     ) AS source
     ON {pk_names_eq_str}
+        AND {target_pruning_predicates}
     WHEN MATCHED AND source."{snowflake_sink_op}" IN (2, 4) THEN DELETE
     WHEN MATCHED AND source."{snowflake_sink_op}" IN (1, 3) THEN UPDATE SET {all_column_names_set_str}
     WHEN NOT MATCHED AND source."{snowflake_sink_op}" IN (1, 3) THEN INSERT ({all_column_names_str}) VALUES ({all_column_names_insert_str});
@@ -1200,17 +1248,23 @@ END;"#,
         target_table_name = full_target_table_name,
         pk_names_str = pk_names_str,
         pk_names_eq_str = pk_names_eq_str,
+        pk_bounds_declarations = pk_bounds_declarations,
+        pk_bounds_select_str = pk_bounds_select_str,
+        pk_bounds_into_str = pk_bounds_into_str,
+        target_pruning_predicates = target_pruning_predicates,
         all_column_names_set_str = all_column_names_set_str,
         all_column_names_str = all_column_names_str,
         all_column_names_insert_str = all_column_names_insert_str,
         snowflake_sink_row_id = __ROW_ID,
         snowflake_sink_op = __OP,
-    )
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use std::collections::BTreeMap;
+
+    use risingwave_common::catalog::Field;
 
     use super::*;
     use crate::sink::jdbc_jni_client::normalize_sql;
@@ -1359,19 +1413,25 @@ mod tests {
             all_column_names: Some(vec!["v1".to_owned(), "v2".to_owned()]),
             database: "test_db".to_owned(),
             schema_name: "test_schema".to_owned(),
-            schema: Schema { fields: vec![] },
+            schema: Schema::new(vec![
+                Field::with_name(DataType::Int32, "v1"),
+                Field::with_name(DataType::Varchar, "v2"),
+            ]),
             stage: None,
             pipe_name: None,
         };
-        let task_sql = build_create_merge_into_task_sql(&snowflake_task_context);
+        let task_sql = build_create_merge_into_task_sql(&snowflake_task_context).unwrap();
         let expected = r#"CREATE OR REPLACE TASK "test_db"."test_schema"."test_task"
 WAREHOUSE = test_warehouse
 SCHEDULE = '3600 SECONDS'
 AS
 BEGIN
     LET max_row_id STRING;
+    LET min_pk_0 INTEGER;
+    LET max_pk_0 INTEGER;
 
-    SELECT COALESCE(MAX("__row_id"), '0') INTO :max_row_id
+    SELECT COALESCE(MAX("__row_id"), '0'), MIN("v1"), MAX("v1")
+    INTO :max_row_id, :min_pk_0, :max_pk_0
     FROM "test_db"."test_schema"."test_cdc_table";
 
     MERGE INTO "test_db"."test_schema"."test_target_table" AS target
@@ -1385,6 +1445,7 @@ BEGIN
         WHERE dedupe_id = 1
     ) AS source
     ON target."v1" = source."v1"
+        AND target."v1" BETWEEN :min_pk_0 AND :max_pk_0
     WHEN MATCHED AND source."__op" IN (2, 4) THEN DELETE
     WHEN MATCHED AND source."__op" IN (1, 3) THEN UPDATE SET target."v1" = source."v1", target."v2" = source."v2"
     WHEN NOT MATCHED AND source."__op" IN (1, 3) THEN INSERT ("v1", "v2") VALUES (source."v1", source."v2");
@@ -1409,19 +1470,28 @@ END;"#;
             all_column_names: Some(vec!["id1".to_owned(), "id2".to_owned(), "val".to_owned()]),
             database: "test_db".to_owned(),
             schema_name: "test_schema".to_owned(),
-            schema: Schema { fields: vec![] },
+            schema: Schema::new(vec![
+                Field::with_name(DataType::Int64, "id1"),
+                Field::with_name(DataType::Timestamp, "id2"),
+                Field::with_name(DataType::Varchar, "val"),
+            ]),
             stage: None,
             pipe_name: None,
         };
-        let task_sql = build_create_merge_into_task_sql(&snowflake_task_context);
+        let task_sql = build_create_merge_into_task_sql(&snowflake_task_context).unwrap();
         let expected = r#"CREATE OR REPLACE TASK "test_db"."test_schema"."test_task_multi_pk"
 WAREHOUSE = multi_pk_warehouse
 SCHEDULE = '300 SECONDS'
 AS
 BEGIN
     LET max_row_id STRING;
+    LET min_pk_0 BIGINT;
+    LET max_pk_0 BIGINT;
+    LET min_pk_1 TIMESTAMP;
+    LET max_pk_1 TIMESTAMP;
 
-    SELECT COALESCE(MAX("__row_id"), '0') INTO :max_row_id
+    SELECT COALESCE(MAX("__row_id"), '0'), MIN("id1"), MAX("id1"), MIN("id2"), MAX("id2")
+    INTO :max_row_id, :min_pk_0, :max_pk_0, :min_pk_1, :max_pk_1
     FROM "test_db"."test_schema"."cdc_multi_pk";
 
     MERGE INTO "test_db"."test_schema"."target_multi_pk" AS target
@@ -1435,6 +1505,8 @@ BEGIN
         WHERE dedupe_id = 1
     ) AS source
     ON target."id1" = source."id1" AND target."id2" = source."id2"
+        AND target."id1" BETWEEN :min_pk_0 AND :max_pk_0
+        AND target."id2" BETWEEN :min_pk_1 AND :max_pk_1
     WHEN MATCHED AND source."__op" IN (2, 4) THEN DELETE
     WHEN MATCHED AND source."__op" IN (1, 3) THEN UPDATE SET target."id1" = source."id1", target."id2" = source."id2", target."val" = source."val"
     WHEN NOT MATCHED AND source."__op" IN (1, 3) THEN INSERT ("id1", "id2", "val") VALUES (source."id1", source."id2", source."val");
@@ -1459,19 +1531,25 @@ END;"#;
             all_column_names: Some(vec!["id".to_owned(), "val".to_owned()]),
             database: "test_db".to_owned(),
             schema_name: "test_schema".to_owned(),
-            schema: Schema { fields: vec![] },
+            schema: Schema::new(vec![
+                Field::with_name(DataType::Date, "id"),
+                Field::with_name(DataType::Varchar, "val"),
+            ]),
             stage: None,
             pipe_name: None,
         };
-        let task_sql = build_create_merge_into_task_sql(&snowflake_task_context);
+        let task_sql = build_create_merge_into_task_sql(&snowflake_task_context).unwrap();
         let expected = r#"CREATE OR REPLACE TASK "test_db"."test_schema"."test_serverless_task"
 TARGET_COMPLETION_INTERVAL = '5 MINUTES'
 SCHEDULE = '120 SECONDS'
 AS
 BEGIN
     LET max_row_id STRING;
+    LET min_pk_0 DATE;
+    LET max_pk_0 DATE;
 
-    SELECT COALESCE(MAX("__row_id"), '0') INTO :max_row_id
+    SELECT COALESCE(MAX("__row_id"), '0'), MIN("id"), MAX("id")
+    INTO :max_row_id, :min_pk_0, :max_pk_0
     FROM "test_db"."test_schema"."serverless_cdc_table";
 
     MERGE INTO "test_db"."test_schema"."serverless_target_table" AS target
@@ -1485,6 +1563,7 @@ BEGIN
         WHERE dedupe_id = 1
     ) AS source
     ON target."id" = source."id"
+        AND target."id" BETWEEN :min_pk_0 AND :max_pk_0
     WHEN MATCHED AND source."__op" IN (2, 4) THEN DELETE
     WHEN MATCHED AND source."__op" IN (1, 3) THEN UPDATE SET target."id" = source."id", target."val" = source."val"
     WHEN NOT MATCHED AND source."__op" IN (1, 3) THEN INSERT ("id", "val") VALUES (source."id", source."val");
