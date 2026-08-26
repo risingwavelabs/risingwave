@@ -26,6 +26,7 @@ use google_cloud_pubsub::client::{Client, ClientConfig};
 use google_cloud_pubsub::publisher::Publisher;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::Schema;
+use risingwave_common::util::env_var::env_var_is_true;
 use serde::Deserialize;
 use serde_with::serde_as;
 use with_options::WithOptions;
@@ -37,6 +38,7 @@ use super::writer::{
     AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriter, AsyncTruncateSinkWriterExt, FormattedSink,
 };
 use super::{Result, Sink, SinkError, SinkParam, SinkWriterParam};
+use crate::connector_common::DISABLE_DEFAULT_CREDENTIAL;
 use crate::dispatch_sink_formatter_str_key_impl;
 use crate::enforce_secret::EnforceSecret;
 
@@ -91,7 +93,9 @@ pub struct GooglePubSubConfig {
     #[serde(rename = "pubsub.emulator_host")]
     pub emulator_host: Option<String>,
 
-    /// A JSON string containing the service account credentials for authorization,
+    /// A JSON string containing the service account credentials for authorization. If omitted,
+    /// the connector uses Google Application Default Credentials (ADC) when allowed by the
+    /// deployment environment.
     /// see the [service-account](https://developers.google.com/workspace/guides/create-credentials#create_credentials_for_a_service_account) credentials guide.
     /// The provided account credential must have the
     /// `pubsub.publisher` [role](https://cloud.google.com/pubsub/docs/access-control#roles)
@@ -154,9 +158,11 @@ impl Sink for GooglePubSubSink {
         }
 
         let conf = &self.config;
-        if matches!((&conf.emulator_host, &conf.credentials), (None, None)) {
+        if matches!((&conf.emulator_host, &conf.credentials), (None, None))
+            && env_var_is_true(DISABLE_DEFAULT_CREDENTIAL)
+        {
             return Err(SinkError::GooglePubSub(anyhow!(
-                "Configure at least one of `pubsub.emulator_host` and `pubsub.credentials` in the Google Pub/Sub sink"
+                "Google Application Default Credentials are disabled; configure `pubsub.credentials` or `pubsub.emulator_host`"
             )));
         }
 
@@ -237,9 +243,23 @@ impl GooglePubSubSinkWriter {
         } else if let Some(emu_host) = config.emulator_host {
             Environment::Emulator(emu_host)
         } else {
-            return Err(SinkError::GooglePubSub(anyhow!(
-                "Missing emulator_host or credentials in Google Pub/Sub sink"
-            )));
+            if env_var_is_true(DISABLE_DEFAULT_CREDENTIAL) {
+                return Err(SinkError::GooglePubSub(anyhow!(
+                    "Google Application Default Credentials are disabled; configure `pubsub.credentials` or `pubsub.emulator_host`"
+                )));
+            }
+
+            let auth_config = project::Config::default()
+                .with_audience(apiv1::conn_pool::AUDIENCE)
+                .with_scopes(&apiv1::conn_pool::SCOPES);
+            let provider = DefaultTokenSourceProvider::new(auth_config)
+                .await
+                .map_err(|e| {
+                    SinkError::GooglePubSub(anyhow!(e).context(
+                        "failed to initialize Google Cloud Pub/Sub ADC; provide `pubsub.credentials`, configure ADC, or use `pubsub.emulator_host`",
+                    ))
+                })?;
+            Environment::GoogleCloud(Box::new(provider))
         };
 
         let client_config = ClientConfig {

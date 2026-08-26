@@ -446,7 +446,9 @@ GooglePubSubConfig:
   - name: pubsub.credentials
     field_type: String
     comments: |-
-      A JSON string containing the service account credentials for authorization,
+      A JSON string containing the service account credentials for authorization. If omitted,
+      the connector uses Google Application Default Credentials (ADC) when allowed by the
+      deployment environment.
       see the [service-account](https://developers.google.com/workspace/guides/create-credentials#create_credentials_for_a_service_account) credentials guide.
       The provided account credential must have the
       `pubsub.publisher` [role](https://cloud.google.com/pubsub/docs/access-control#roles)
