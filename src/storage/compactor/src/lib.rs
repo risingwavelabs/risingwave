@@ -22,6 +22,8 @@ use risingwave_common::config::{AsyncStackTraceOption, MetricLevel, OverrideConf
 use risingwave_common::util::meta_addr::MetaAddressStrategy;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_common::util::tokio_util::sync::CancellationToken;
+#[cfg(madsim)]
+pub use risingwave_storage::hummock::compactor::set_simulated_pk_index_compaction_result;
 
 use crate::server::{compactor_serve, shared_compactor_serve};
 

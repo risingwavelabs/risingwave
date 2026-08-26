@@ -55,6 +55,8 @@
 //! - `iceberg_v3_persist_pre_commit_fail`  (F5; via `fail::cfg`)
 //! - `iceberg_v3_commit_prune_fail`        (F12; via `fail::cfg`)
 //! - `iceberg_v3_recovery_fail`            (recovery panic; via `fail::cfg`)
+//! - `iceberg_pk_index_resolver_start_fail` (after B1, before resolver start)
+//! - `iceberg_pk_index_resolver_committed_notify_fail` (after B2, before writer notification)
 //! - `MockIcebergV3Catalog::set_err_rate_txn_commit` (F11; mock catalog state)
 //!
 //! ## Test cases
@@ -169,6 +171,18 @@
 //! - **Asserts:**
 //!   - a fresh commit lands after the second recovery attempt
 //!
+//! ### 11. `failpoint_limited_test_pk_index_compaction_abandons_before_resolve`
+//!
+//! Fail after the pause checkpoint B1 is durable but before the resolver graph
+//! starts. The failed task must not overwrite Iceberg. A later manual
+//! compaction and a subsequent sink commit must both succeed.
+//!
+//! ### 12. `failpoint_limited_test_pk_index_compaction_recovers_after_commit`
+//!
+//! Fail after the main checkpoint B2 and Iceberg overwrite are durable but
+//! before the writer receives `Committed`. Recovery must converge without a
+//! duplicate overwrite, and the sink must keep committing afterward.
+//!
 //! ## Known coverage gaps
 //!
 //! The current suite is strictly weaker than a "full 2PC fault matrix"
@@ -195,14 +209,80 @@ mod utils;
 // state: `fail::cfg` is process-wide and `MockCatalogGuard::register` panics
 // on double-register.
 mod failpoint_limited {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
     use anyhow::Result;
+    use risingwave_compactor::set_simulated_pk_index_compaction_result;
+    use risingwave_connector::sink::iceberg::IcebergCommitResult;
+    use risingwave_pb::connector_service::SinkMetadata;
+    use risingwave_pb::iceberg_compaction::PkIndexCompactionResult;
+    use risingwave_simulation::cluster::Session;
 
     use super::utils::{
         WorkloadConfig, assert_invariants, spawn_continuous_workload,
-        start_v3_test_cluster_with_sink,
+        start_v3_test_cluster_with_compaction, start_v3_test_cluster_with_sink,
     };
+
+    async fn wait_for_counter(counter: &AtomicUsize, target: usize) -> Result<()> {
+        loop {
+            if counter.load(Ordering::SeqCst) >= target {
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    async fn wait_for_compaction_idle(session: &mut Session) -> Result<()> {
+        loop {
+            let status = session
+                .run(
+                    "SELECT schedule_state, pending_snapshot_count \
+                     FROM rw_catalog.rw_iceberg_compaction_schedules",
+                )
+                .await?;
+            if status == "idle 0" {
+                return Ok(());
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+    }
+
+    async fn wait_for_sink_commits_quiescent(mock: &super::mock_catalog::MockIcebergV3Catalog) {
+        let mut last_count = mock.committed_snapshot_count();
+        let mut stable_rounds = 0;
+        while stable_rounds < 20 {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            let count = mock.committed_snapshot_count();
+            if count == last_count {
+                stable_rounds += 1;
+            } else {
+                last_count = count;
+                stable_rounds = 0;
+            }
+        }
+    }
+
+    async fn install_simulated_compaction_report(
+        mock: &super::mock_catalog::MockIcebergV3Catalog,
+    ) -> Result<()> {
+        let (output_files, input_file_paths, schema_id, partition_spec_id, read_snapshot_id) =
+            mock.current_data_files().await?;
+        anyhow::ensure!(!output_files.is_empty(), "mock table has no data files");
+        let output_files = SinkMetadata::try_from(&IcebergCommitResult {
+            schema_id,
+            partition_spec_id,
+            data_files: output_files,
+        })?;
+        set_simulated_pk_index_compaction_result(Some(PkIndexCompactionResult {
+            output_files: Some(output_files),
+            input_file_paths,
+            read_snapshot_id,
+        }));
+        fail::cfg("iceberg_pk_index_simulated_compaction_report", "return").unwrap();
+        Ok(())
+    }
 
     /// No-fault sanity: continuous workload (mixed insert/upsert/delete)
     /// streams into the TABLE, V3 sink must commit at least one snapshot
@@ -776,6 +856,190 @@ mod failpoint_limited {
         })??;
 
         workload.shutdown().await;
+        assert_invariants(&mut handle).await?;
+        Ok(())
+    }
+
+    /// Failure after B1 is durable but before the resolver graph starts must
+    /// abandon that resolve, preserve the compaction backlog, and retry after
+    /// recovery. No Iceberg overwrite may be committed during the fault window.
+    #[tokio::test]
+    async fn failpoint_limited_test_pk_index_compaction_abandons_before_resolve() -> Result<()> {
+        let mut handle = start_v3_test_cluster_with_compaction(4).await?;
+        let resolver_failures = Arc::new(AtomicUsize::new(0));
+        fail::cfg_callback("iceberg_pk_index_resolver_start_fail", {
+            let resolver_failures = resolver_failures.clone();
+            move || {
+                resolver_failures.fetch_add(1, Ordering::SeqCst);
+            }
+        })
+        .unwrap();
+        let workload = spawn_continuous_workload(
+            &mut handle.cluster,
+            WorkloadConfig {
+                seed: 10,
+                ..WorkloadConfig::default()
+            },
+        );
+
+        tokio::time::timeout(
+            Duration::from_secs(45),
+            handle.mock.wait_for_event_count('I', 3),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("fewer than three sink commits before resolver retry"))??;
+        workload.shutdown().await;
+        wait_for_sink_commits_quiescent(&handle.mock).await;
+
+        install_simulated_compaction_report(&handle.mock).await?;
+        let overwritten_before_fault = handle.mock.total_data_files_overwritten();
+
+        // Use the same deterministic manual-compaction entry point as the
+        // Iceberg PK-index SLTs. The automatic threshold is deliberately high
+        // so no unrelated in-flight compaction can affect this fault window.
+        let mut session = handle.cluster.start_session();
+        let mut vacuum_session = handle.cluster.start_session();
+        let vacuum_task =
+            tokio::spawn(async move { vacuum_session.run("VACUUM FULL test_v3_sink").await });
+        tokio::time::timeout(
+            Duration::from_secs(30),
+            wait_for_counter(&resolver_failures, 1),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("resolver-start failpoint was not reached"))??;
+        anyhow::ensure!(
+            handle.mock.total_data_files_overwritten() == overwritten_before_fault,
+            "resolver start failure committed an overwrite; trace = {}",
+            handle.mock.get_event_trace()
+        );
+
+        let _first_vacuum_result = tokio::time::timeout(Duration::from_secs(60), vacuum_task)
+            .await
+            .map_err(|_| anyhow::anyhow!("VACUUM did not return after resolver-start failure"))??;
+
+        fail::remove("iceberg_pk_index_resolver_start_fail");
+        session.run("VACUUM FULL test_v3_sink").await?;
+        tokio::time::timeout(
+            Duration::from_secs(60),
+            wait_for_compaction_idle(&mut session),
+        )
+        .await
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "compaction did not retry to completion after resolver-start failure; trace = {}",
+                handle.mock.get_event_trace()
+            )
+        })??;
+        anyhow::ensure!(
+            handle.mock.total_data_files_overwritten() > overwritten_before_fault,
+            "fresh compaction after resolver abandon did not commit an Iceberg overwrite"
+        );
+
+        let committed = handle.mock.count_events('I');
+        session
+            .run("INSERT INTO test_v3_table VALUES (10001, 'after-resolve-retry')")
+            .await?;
+        tokio::time::timeout(
+            Duration::from_secs(45),
+            handle.mock.wait_for_event_count('I', committed + 1),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("sink did not commit after compaction retry"))??;
+        fail::remove("iceberg_pk_index_simulated_compaction_report");
+        set_simulated_pk_index_compaction_result(None);
+        assert_invariants(&mut handle).await?;
+        Ok(())
+    }
+
+    /// Failure after the main B2 and Iceberg overwrite are durable but before
+    /// the writer receives `Committed` must recover from the new committed
+    /// state. Retrying must not duplicate the overwrite, and later sink commits
+    /// must continue normally.
+    #[tokio::test]
+    async fn failpoint_limited_test_pk_index_compaction_recovers_after_commit() -> Result<()> {
+        let mut handle = start_v3_test_cluster_with_compaction(4).await?;
+        let committed_notify_failures = Arc::new(AtomicUsize::new(0));
+        fail::cfg_callback("iceberg_pk_index_resolver_committed_notify_fail", {
+            let committed_notify_failures = committed_notify_failures.clone();
+            move || {
+                committed_notify_failures.fetch_add(1, Ordering::SeqCst);
+            }
+        })
+        .unwrap();
+        let workload = spawn_continuous_workload(
+            &mut handle.cluster,
+            WorkloadConfig {
+                seed: 11,
+                ..WorkloadConfig::default()
+            },
+        );
+
+        tokio::time::timeout(
+            Duration::from_secs(45),
+            handle.mock.wait_for_event_count('I', 3),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("fewer than three sink commits before compaction"))??;
+        workload.shutdown().await;
+        wait_for_sink_commits_quiescent(&handle.mock).await;
+        install_simulated_compaction_report(&handle.mock).await?;
+        let overwritten_before_compaction = handle.mock.total_data_files_overwritten();
+        let mut session = handle.cluster.start_session();
+        let mut vacuum_session = handle.cluster.start_session();
+        let vacuum_task =
+            tokio::spawn(async move { vacuum_session.run("VACUUM FULL test_v3_sink").await });
+        let post_b2_reached = tokio::time::timeout(
+            Duration::from_secs(30),
+            wait_for_counter(&committed_notify_failures, 1),
+        )
+        .await;
+        if post_b2_reached.is_err() {
+            let schedule = session
+                .run(
+                    "SELECT schedule_state, pending_snapshot_count \
+                     FROM rw_catalog.rw_iceberg_compaction_schedules",
+                )
+                .await?;
+            anyhow::bail!(
+                "resolver did not reach the post-B2 failpoint; schedule = {}; trace = {}",
+                schedule,
+                handle.mock.get_event_trace()
+            );
+        }
+        post_b2_reached.unwrap()?;
+        anyhow::ensure!(
+            handle.mock.total_data_files_overwritten() > overwritten_before_compaction,
+            "post-B2 failpoint fired before the Iceberg overwrite became durable"
+        );
+        let _first_vacuum_result = tokio::time::timeout(Duration::from_secs(60), vacuum_task)
+            .await
+            .map_err(|_| anyhow::anyhow!("VACUUM did not return after post-B2 failure"))??;
+        fail::remove("iceberg_pk_index_resolver_committed_notify_fail");
+
+        tokio::time::timeout(
+            Duration::from_secs(60),
+            wait_for_compaction_idle(&mut session),
+        )
+        .await
+        .map_err(|_| anyhow::anyhow!("resolver did not converge after post-B2 recovery"))??;
+
+        let committed = handle.mock.count_events('I');
+        session
+            .run("INSERT INTO test_v3_table VALUES (10002, 'after-post-b2-recovery')")
+            .await?;
+        tokio::time::timeout(
+            Duration::from_secs(45),
+            handle.mock.wait_for_event_count('I', committed + 1),
+        )
+        .await
+        .map_err(|_| {
+            anyhow::anyhow!(
+                "sink did not resume after post-B2 resolver recovery; trace = {}",
+                handle.mock.get_event_trace()
+            )
+        })??;
+        fail::remove("iceberg_pk_index_simulated_compaction_report");
+        set_simulated_pk_index_compaction_result(None);
         assert_invariants(&mut handle).await?;
         Ok(())
     }
