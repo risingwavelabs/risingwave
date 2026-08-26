@@ -812,6 +812,9 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             // but not-yet-emitted matches, whose starts sit before the resume position (it points
             // past the LAST frozen match).
             let resume_pos = run.matcher.resume_pos().min(run.rows.len());
+            // The gap check below walks `[resume_pos, start)`; positions the freeze already proved
+            // dead (`dead_prefix_end`, monotone under appends) need no walk, so start it past them.
+            let gap_from = resume_pos.max(run.matcher.dead_prefix_end());
             let Some(start) = run.rows.iter().position(|r| Seq(r.seq) == start_seq) else {
                 // A provisional match referencing an unfed seq is a matcher-invariant violation.
                 // Fail loud: breaking here instead would re-hit the same match on every visit —
@@ -860,7 +863,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                 match_is_final(
                     nfa,
                     &matcher,
-                    resume_pos,
+                    gap_from,
                     start,
                     run.rows.len(),
                     within_final,
@@ -964,11 +967,18 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             return Ok(());
         }
         let n = run.rows.len();
+        // Positions the matcher's freeze walks already proved dead at the boundary (monotone under
+        // appends; see `IncrementalMatcher::dead_prefix_end`) need no walk here. Buffer positions
+        // and fed positions coincide (`consume_prefix` keeps them aligned).
+        let proven_dead = run.matcher.dead_prefix_end().min(n);
         let mut retain_from = n;
         for p in 0..n {
             // Window closed (deadline < w): `p` is dead, skip it. A window that never closes (no
             // WITHIN, or a deadline past the type's range) fails this test, so `p` is retained.
             if run.rows[p].deadline.closed_at(w) {
+                continue;
+            }
+            if p < proven_dead {
                 continue;
             }
             let matcher = DefineMatcher {
@@ -1438,7 +1448,9 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         // provisional tail an under-approximation. Re-derive with this visit's
                         // fresh budget BEFORE deciding anything: the deadline prune below treats
                         // missing matches as decided, which is only sound over a complete tail.
-                        if run.matcher.is_incomplete() {
+                        // A budget-truncated FREEZE asks for the same: it left proven-dead
+                        // progress to resume from, and an idle partition gets no arrival to do it.
+                        if run.matcher.needs_refresh() {
                             let matcher = DefineMatcher {
                                 rows: &run.rows,
                                 defines: &defines,

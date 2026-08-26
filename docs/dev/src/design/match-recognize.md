@@ -216,14 +216,16 @@ or version-skewed plan fails with an error instead of allocating).
 Backtracking over predicates is worst-case exponential, so every walk — the match finder itself,
 liveness checks, extension probes — runs under two defenses:
 
-- a **scan budget** — a per-visit cap on walk *steps*: predicate evaluations plus every recursion
-  descent, ε-transitions included. Metering only predicate evaluations, as it originally did, left
+- a **scan budget** — a per-visit cap on walk *steps*: predicate evaluations plus every edge
+  taken, ε-transitions included. Metering only predicate evaluations, as it originally did, left
   ε-traversal free, so a large compiled NFA could spend arbitrary CPU per metered evaluation and
-  the budget was not actually a CPU bound. The same descent accounting carries a hard recursion
-  depth cap (`MAX_WALK_DEPTH`): the walkers recurse per consumed row, so without it a long enough
-  single match was a stack overflow rather than a catchable error. A depth overrun is folded into
-  ordinary exhaustion. Exhaustion is never converted into a
-  *structural* verdict: the walk stops, the caller treats the position as undecided, nothing is
+  the budget was not actually a CPU bound. The walkers are iterative — one depth-first search over
+  an explicit heap stack (`Nfa::walk`) serves the finder, the liveness check and the extension
+  probe — so a walk's depth is bounded by memory, not by the thread stack, and the budget is the
+  only bound on it. (An earlier recursive implementation needed a hard depth cap to avoid
+  overflowing the stack, and the cap made any match spanning more than a couple of hundred rows
+  permanently undecidable: unlike the budget, it did not reset between visits, so every refresh
+  died at the same depth.) Exhaustion is never converted into a *structural* verdict: the walk stops, the caller treats the position as undecided, nothing is
   frozen, the condition is counted in a metric and reported once per pass, and the next visit retries
   with a fresh budget. The budget is scoped per row on the data path and per partition visit on the
   watermark path, so one pathological partition cannot starve the others.
@@ -287,20 +289,54 @@ The gate (`match_is_final`) therefore asks exactly what batch equivalence requir
 On a spent scan budget the two *structural* conditions answer "hold". The `WITHIN`-finality
 condition still answers "emit", because a closed window is a fact the watermark supplies: no future
 row can satisfy the span bound for this start, so no amount of predicate evaluation could refine it.
-That is what lets a starved partition make any progress at all.
+That is what lets a starved partition shed a match at all — provided the scan found one to shed.
 
 ### Degradation under a spent budget
 
 Worth stating plainly, because the two cases differ and only one of them recovers.
 
-**With `WITHIN`.** A starved partition still makes progress, but only through window closure. Each
-watermark visit re-derives the tail (spending the whole budget), then emits the head if its window
-has closed. Emitting a provisional match rebuilds the matcher under that same spent budget, which
-empties the tail and ends the drain — so the practical rate is about **one match per watermark
-visit**, and the deadline prune contributes nothing while the matcher is incomplete. Emission latency
-degrades from decidability to window closure, and the retained set shrinks only at that rate: if
-arrivals per watermark interval exceed it, the partition still grows. This is an improvement on
-shedding nothing; it is not convergence.
+**With `WITHIN`.** A starved partition still sheds matches, but only through window closure, and
+only matches the truncated scan reached. Each watermark visit re-derives the tail (spending the
+whole budget), then emits the head if its window has closed. Emitting a provisional match rebuilds
+the matcher under that same spent budget, which empties the tail and ends the drain — so the
+practical rate is about **one match per watermark visit**, and the deadline prune contributes
+nothing while the matcher is incomplete. Emission latency degrades from decidability to window
+closure, and the retained set shrinks only at that rate: if arrivals per watermark interval exceed
+it, the partition still grows. This is an improvement on shedding nothing; it is not convergence.
+When the starvation is in the rescan itself — a long pending run over which no match has completed,
+so the tail is empty — window closure has nothing to drain and this path sheds nothing either.
+
+**Long matches.** Exhaustion is not only a backtracking phenomenon: a *linear* chain pattern
+(`a{600}`) reaches it through sheer length. Walking every pending start to the boundary costs Θ(k²)
+per rescan, and freezing a match of `L` rows — one liveness walk per position of its region, each
+walking up to `L` rows — costs Θ(L²), past the 2^20 budget from `L ≈ 600`. Four things keep such
+patterns decidable within the binder's repetition limit of 1000, each a verdict derived or
+remembered instead of re-walked:
+
+- the finder skips a start with fewer rows to the boundary than the shortest match the pattern
+  admits (`Nfa::min_match_rows`, a compile-time 0-1 BFS) — the verdict a walk would reach by
+  consuming its way there, taken without the walk;
+- for an acyclic pattern, a position with more rows to the boundary than the automaton can
+  consume (`Nfa::max_match_rows`) is dead without a walk — which makes freezing a chain match
+  free: every position of its region has the rest of the match, and more, ahead of it;
+- the finder remembers **matchless** starts: a start whose walk found no accept and never reached
+  the boundary died entirely on rows below it, which are immutable, so it can never match at any
+  later boundary. The matcher keeps the contiguous prefix of such starts
+  (`IncrementalMatcher::matchless_upto`) and the next rescan begins past it: a run of `r` rows
+  broken by one non-matching row costs its Θ(r²) once, amortised across visits, instead of on
+  every rescan forever;
+- the freeze is **resumable**: deadness at the boundary is monotone under appends (a walk reads
+  only rows at or before its position; there is no forward navigation), so the matcher keeps the
+  prefix of positions its freeze walks have proven dead (`IncrementalMatcher::dead_prefix_end`)
+  and the next rescan continues from there — and a freeze cut short by the budget asks for a
+  refresh on the next watermark visit, so an idle partition resumes it too. The executor's own
+  liveness walks (the dead-prefix prune, the emission gate's gap check) skip that prefix as well.
+
+Both memories are forgotten wherever the rows a verdict was computed over can change: truncation,
+and the eviction rebase. What remains inherently per-visit is a run that stays *alive* — `a{600} b`
+over an unbroken run of `a` rows keeps every start alive until a `b` arrives or its `WITHIN` window
+closes — where each rescan re-walks the live starts and the budget throttles the partition as
+described above; `WITHIN` is what bounds that.
 
 **Without `WITHIN`.** There is no deadline, so `WITHIN`-finality is unreachable and nothing above
 applies: the partition emits nothing and evicts nothing, and because per-visit cost grows with the

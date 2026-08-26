@@ -30,8 +30,6 @@
 use std::collections::BTreeSet;
 use std::collections::HashSet;
 
-use async_recursion::async_recursion;
-
 use crate::executor::error::StreamExecutorResult;
 
 /// Cursor for [`Nfa::next_match`]: the next start position the scan will try. A fresh scan starts
@@ -41,11 +39,29 @@ use crate::executor::error::StreamExecutorResult;
 #[derive(Debug, Default)]
 pub struct MatchScan {
     next_start: usize,
+    /// End of the contiguous run of starts, from where this scan began, proven MATCHLESS FOREVER:
+    /// their walks found no accept and never reached the boundary, so every path from them died
+    /// on a row below it — and those rows are immutable, so no arrival can revive them. The
+    /// incremental matcher reads this back and begins its next rescan past them.
+    matchless_upto: usize,
 }
 
 impl MatchScan {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    /// A scan beginning at `start`, with nothing proven yet.
+    pub fn starting_at(start: usize) -> Self {
+        Self {
+            next_start: start,
+            matchless_upto: start,
+        }
+    }
+
+    /// See the `matchless_upto` field.
+    pub fn matchless_upto(&self) -> usize {
+        self.matchless_upto
     }
 
     /// The next start the pull loop would explore.
@@ -63,11 +79,11 @@ impl MatchScan {
     }
 }
 
-/// Per-visit budget on NFA walk steps — predicate evaluations AND recursion descents (row
-/// consumptions and ε-transitions) — shared by every walk of one partition visit (matching,
-/// eviction liveness, extension probing). ε-descents are charged deliberately: metering only
-/// predicate evaluations left ε-traversal free, so a large NFA could spend arbitrary CPU per
-/// metered evaluation and the budget was not actually a CPU bound.
+/// Per-visit budget on NFA walk steps — predicate evaluations AND edges taken (row consumptions
+/// and ε-transitions) — shared by every walk of one partition visit (matching, eviction liveness,
+/// extension probing). ε-edges are charged deliberately: metering only predicate evaluations left
+/// ε-traversal free, so a large NFA could spend arbitrary CPU per metered evaluation and the budget
+/// was not actually a CPU bound.
 ///
 /// The matcher is a backtracking DFS whose worst case is exponential in the pattern for
 /// pathological shapes (`(a? a? … a? b)` over a run of `a`-rows — the classic catastrophic
@@ -84,58 +100,21 @@ pub struct ScanBudget {
     remaining: usize,
     /// Set once the budget runs out; sticky for the rest of the visit.
     pub hit: bool,
-    /// Current recursion depth of the walk in flight; see [`MAX_WALK_DEPTH`].
-    depth: u32,
 }
-
-/// Hard cap on a single walk's recursion depth.
-///
-/// The walkers recurse per consumed row and per ε-transition (`#[async_recursion]` boxes each
-/// frame, but *polling* the chain still recurses the real stack), so without a cap a long enough
-/// match is a stack overflow — SIGSEGV, not a catchable error — and the budget alone does not
-/// prevent it: 2^20 charges permit a 2^20-deep path. Overrunning the cap is folded into the
-/// existing exhaustion semantics (undecided, held, reported, retried), so it adds no new degraded
-/// mode.
-///
-/// Sized empirically, and conservatively: a poll chain of these futures costs on the order of
-/// half a kilobyte per level in a debug build (a 4096 cap still overflowed a 2 MB test-thread
-/// stack), so 512 keeps the walk comfortably inside the smallest stack it runs on. The honest
-/// trade: one match spanning more rows than this cannot be decided and degrades to the budget
-/// path — but before the cap existed the same match was a segfault, so nothing that worked is
-/// lost. Raising the ceiling means rewriting the walkers iteratively (explicit stack), which is
-/// the real fix and its own change.
-const MAX_WALK_DEPTH: u32 = 512;
 
 impl ScanBudget {
     pub fn new(evaluations: usize) -> Self {
         Self {
             remaining: evaluations,
             hit: false,
-            depth: 0,
         }
     }
 
-    /// Account one recursion descent (an ε-transition or a row consumption). Returns `false` — and
-    /// latches `hit` — when the budget is spent or the walk is deeper than [`MAX_WALK_DEPTH`].
-    /// ε-transitions were previously free, which made the budget a bound on predicate evaluations
-    /// rather than on the walk: a large NFA could spend arbitrary CPU on ε-traversal per metered
-    /// evaluation. Every descent must be paired with [`ScanBudget::ascend`].
+    /// Account one edge taken by a walk (an ε-transition or a row consumption). Returns `false` —
+    /// and latches `hit` — once the budget is spent.
     #[must_use]
-    pub fn descend(&mut self) -> bool {
-        if self.depth >= MAX_WALK_DEPTH {
-            self.remaining = 0;
-            self.hit = true;
-            return false;
-        }
-        if !self.charge() {
-            return false;
-        }
-        self.depth += 1;
-        true
-    }
-
-    pub fn ascend(&mut self) {
-        self.depth = self.depth.saturating_sub(1);
+    pub fn step(&mut self) -> bool {
+        self.charge()
     }
 
     /// No practical limit — for callers (tests, the collect wrapper) that need the historical
@@ -279,6 +258,17 @@ pub struct Nfa {
     /// whose target cannot reach `accept` can never contribute a longer match, no matter what rows
     /// arrive. Computed once at compile with one reverse BFS.
     reach_accept: Vec<bool>,
+    /// Fewest rows any accepting path consumes, with every predicate assumed satisfiable — the
+    /// shortest match the pattern admits (`0` when it accepts the empty match). A start with fewer
+    /// rows than this before the boundary cannot complete, so the finder skips it without a walk
+    /// (see [`Nfa::next_match`]). Computed once at compile with one 0-1 BFS.
+    min_match_rows: usize,
+    /// Most rows any path from `start` consumes, when the automaton is acyclic (no `*`, `+` or
+    /// unbounded range) — `None` when it has a cycle and a path can consume without bound. From a
+    /// position with MORE rows than this before the boundary, no path can reach the boundary while
+    /// still inside the automaton: the position is dead without a walk (see
+    /// [`Nfa::reaches_boundary_alive`]). Computed once at compile with one DFS.
+    max_match_rows: Option<usize>,
 }
 
 impl Nfa {
@@ -287,12 +277,109 @@ impl Nfa {
         let mut builder = NfaBuilder { states: Vec::new() };
         let frag = builder.build(pattern);
         let reach_accept = Self::compute_reach_accept(&builder.states, frag.accept);
+        let max_match_rows = Self::compute_max_match_rows(&builder.states, frag.start);
+        let min_match_rows = Self::compute_min_match_rows(&builder.states, frag.start, frag.accept);
         Nfa {
             states: builder.states,
             start: frag.start,
             accept: frag.accept,
             reach_accept,
+            min_match_rows,
+            max_match_rows,
         }
+    }
+
+    /// See the `max_match_rows` field.
+    pub fn max_match_rows(&self) -> Option<usize> {
+        self.max_match_rows
+    }
+
+    /// See the `max_match_rows` field: the longest path from `start` counting consuming edges,
+    /// over ANY path (not only accepting ones — a path that dies still consumed its rows), or
+    /// `None` if a cycle is reachable. One iterative DFS with a tri-state mark, so a 100k-state
+    /// automaton does not recurse.
+    fn compute_max_match_rows(states: &[Vec<Transition>], start: StateId) -> Option<usize> {
+        #[derive(Clone, Copy, PartialEq, Eq)]
+        enum Mark {
+            New,
+            Active,
+            Done,
+        }
+        let mut mark = vec![Mark::New; states.len()];
+        // Longest consumption from each finished state.
+        let mut longest = vec![0usize; states.len()];
+        let mut stack: Vec<(StateId, usize)> = vec![(start, 0)];
+        mark[start] = Mark::Active;
+        while let Some(&(s, edge)) = stack.last() {
+            if let Some(t) = states[s].get(edge) {
+                stack.last_mut().expect("just peeked").1 += 1;
+                let next = match t {
+                    Transition::Epsilon(next) => *next,
+                    Transition::OnVar { target, .. } => *target,
+                };
+                match mark[next] {
+                    // A state still on the DFS path is reachable from itself: a cycle.
+                    Mark::Active => return None,
+                    Mark::New => {
+                        mark[next] = Mark::Active;
+                        stack.push((next, 0));
+                    }
+                    Mark::Done => {}
+                }
+            } else {
+                stack.pop();
+                mark[s] = Mark::Done;
+                longest[s] = states[s]
+                    .iter()
+                    .map(|t| match t {
+                        Transition::Epsilon(next) => longest[*next],
+                        Transition::OnVar { target, .. } => longest[*target] + 1,
+                    })
+                    .max()
+                    .unwrap_or(0);
+            }
+        }
+        Some(longest[start])
+    }
+
+    /// See the `min_match_rows` field.
+    pub fn min_match_rows(&self) -> usize {
+        self.min_match_rows
+    }
+
+    /// See the `min_match_rows` field: shortest path from `start` to `accept` where ε-edges cost
+    /// nothing and consuming edges cost one row (0-1 BFS, linear in states + transitions).
+    fn compute_min_match_rows(
+        states: &[Vec<Transition>],
+        start: StateId,
+        accept: StateId,
+    ) -> usize {
+        let mut dist = vec![usize::MAX; states.len()];
+        let mut queue = std::collections::VecDeque::from([start]);
+        dist[start] = 0;
+        while let Some(s) = queue.pop_front() {
+            let d = dist[s];
+            for t in &states[s] {
+                let (next, cost) = match t {
+                    Transition::Epsilon(next) => (*next, 0),
+                    Transition::OnVar { target, .. } => (*target, 1),
+                };
+                if d + cost < dist[next] {
+                    dist[next] = d + cost;
+                    if cost == 0 {
+                        queue.push_front(next);
+                    } else {
+                        queue.push_back(next);
+                    }
+                }
+            }
+        }
+        debug_assert_ne!(
+            dist[accept],
+            usize::MAX,
+            "accept must be reachable by construction"
+        );
+        dist[accept]
     }
 
     /// See the `reach_accept` field. Linear in states + transitions (one reverse BFS).
@@ -559,8 +646,8 @@ pub struct LabeledMatch {
 }
 
 /// Visited-state guard for one traversal position of the dynamic matcher. ε-transitions keep the
-/// position, so each consumed row starts a fresh set (see `preferred_from_dynamic`); these sets are
-/// created O(rows × branches) times per partition visit, so their allocation cost matters. The
+/// position, so each consumed row starts a fresh set (see [`Nfa::walk`]); these sets are opened
+/// O(rows × branches) times per partition visit, so their allocation cost matters. The
 /// common case — an automaton with at most 64 states — is a single `u64` bitmask (no allocation,
 /// membership is a bit test); larger automata (deep `PERMUTE` expansions) fall back to a `HashSet`.
 enum Visited {
@@ -603,6 +690,14 @@ impl Visited {
         match self {
             Visited::Small(bits) => *bits & (1u64 << s) != 0,
             Visited::Large(set) => set.contains(&s),
+        }
+    }
+
+    /// Empties the set for reuse as a fresh scope (keeps the `HashSet` fallback's allocation).
+    fn clear(&mut self) {
+        match self {
+            Visited::Small(bits) => *bits = 0,
+            Visited::Large(set) => set.clear(),
         }
     }
 }
@@ -734,40 +829,51 @@ impl Nfa {
     ) -> StreamExecutorResult<Option<LabeledMatch>> {
         while scan.next_start < n_rows && !budget.hit {
             let i = scan.next_start;
-            let mut path: Vec<String> = Vec::new();
-            let mut visited = Visited::new(self.states.len());
+            // Fewer rows than the shortest match before the boundary: no accepting path exists
+            // from `i` within `n_rows`, which is exactly the verdict a walk would reach after
+            // consuming its way to the boundary — so skip the walk and take the verdict. This is
+            // what keeps a rescan over a long pending run of a chain pattern (`a{600}`) from
+            // walking every start to the boundary, Θ(k²) per rescan. (Not a matchless start: the
+            // walk it stands in for is blocked at the boundary, and more rows may complete it.)
+            if n_rows - i < self.min_match_rows() {
+                scan.next_start += 1;
+                continue;
+            }
             // The memo is per START: within one start a verdict depends only on `(var, pos)`
             // (given path-independence), so it must not leak across starts, where `labels.len()`
             // differs for the same position.
             let mut memo = memoize.then(|| Memo::new(i, n_rows, self.states.len()));
+            let mut reached_boundary = false;
             let found = self
-                .preferred_from_dynamic(
-                    n_rows,
-                    self.start,
+                .walk(
+                    Goal::Accept {
+                        n_rows,
+                        reached_boundary: &mut reached_boundary,
+                    },
                     i,
-                    &mut path,
                     matcher,
-                    &mut visited,
                     budget,
                     memo.as_mut(),
                 )
                 .await?;
-            if let Some((end, labels)) = found
-                && end > i
-            {
-                // The diagnostic is dropped here on purpose: the executor recomputes the resume
-                // position for the matches it actually *emits* and reports from there, so a match
-                // that this scan finds but the emit path holds back or skips is not reported twice
-                // (nor reported at all until it is emitted).
-                (scan.next_start, _) = skip.next_pos(i, end, &labels);
-                return Ok(Some(LabeledMatch {
-                    start: i,
-                    end,
-                    labels,
-                }));
-            }
-            // Only advance past a start with a real verdict. `preferred_from_dynamic` returns `None`
-            // for two different reasons — "no match from here" and "the budget died mid-walk, no
+            let found_empty = match found {
+                Some((end, labels)) if end > i => {
+                    // The diagnostic is dropped here on purpose: the executor recomputes the
+                    // resume position for the matches it actually *emits* and reports from there,
+                    // so a match that this scan finds but the emit path holds back or skips is not
+                    // reported twice (nor reported at all until it is emitted).
+                    (scan.next_start, _) = skip.next_pos(i, end, &labels);
+                    return Ok(Some(LabeledMatch {
+                        start: i,
+                        end,
+                        labels,
+                    }));
+                }
+                Some(_) => true,
+                None => false,
+            };
+            // Only advance past a start with a real verdict. The walk returns `None` for two
+            // different reasons — "no match from here" and "the budget died mid-walk, no
             // verdict" — and advancing on the second leaves the cursor claiming a verdict the walk
             // never reached: `(a b) | a` over two `a` rows with a budget of 1 dies inside start 0
             // before ever trying the second alternative, which matches there.
@@ -776,6 +882,17 @@ impl Nfa {
             // here reads the cursor afterwards); it matters to a caller that resumes a pull.
             if budget.hit {
                 break;
+            }
+            // A start whose walk found no accept and never reached the boundary is matchless
+            // FOREVER: every path from it died on a row below the boundary, and those rows are
+            // immutable, so no arrival can revive it. Record the contiguous run of such starts (see
+            // `MatchScan::matchless_upto`) — the finder's cross-visit memory, the counterpart of
+            // the freeze's proven-dead prefix: a broken run of `r` rows costs its Θ(r²) once,
+            // amortised across visits, instead of on every rescan forever. An empty match proves
+            // nothing about the other paths (the walk stopped at its first verdict), so it does
+            // not count.
+            if !found_empty && !reached_boundary && scan.matchless_upto == i {
+                scan.matchless_upto = i + 1;
             }
             scan.next_start += 1;
         }
@@ -799,20 +916,27 @@ impl Nfa {
         budget: &mut ScanBudget,
         memoize: bool,
     ) -> StreamExecutorResult<bool> {
-        let mut path: Vec<String> = Vec::new();
-        let mut visited = Visited::new(self.states.len());
+        // Acyclic automaton: no path consumes more than `max_match_rows` rows, so with more rows
+        // than that before the boundary no path can reach it — dead, without a walk. This is what
+        // makes freezing a long chain match (`a{600}`) cheap: every position of its region has the
+        // rest of the match, and more, ahead of it. (With EXACTLY that many rows the walk runs: a
+        // match ending on the boundary keeps its start alive.)
+        if let Some(max) = self.max_match_rows
+            && n_rows - pos > max
+        {
+            return Ok(false);
+        }
         let mut memo = memoize.then(|| Memo::new(pos, n_rows, self.states.len()));
-        self.live_to_boundary(
-            n_rows,
-            self.start,
-            pos,
-            &mut path,
-            matcher,
-            &mut visited,
-            budget,
-            memo.as_mut(),
-        )
-        .await
+        Ok(self
+            .walk(
+                Goal::Boundary { n_rows },
+                pos,
+                matcher,
+                budget,
+                memo.as_mut(),
+            )
+            .await?
+            .is_some())
     }
 
     /// Whether the automaton is a fixed-length linear chain: every state has at most one
@@ -827,7 +951,7 @@ impl Nfa {
     /// Whether the finder's *preferred* result for the match starting at `start` could change if
     /// more rows arrived past the boundary `end`.
     ///
-    /// The finder ([`Nfa::preferred_from_dynamic`]) returns the first accepting path in transition
+    /// The finder ([`Nfa::next_match`]) returns the first accepting path in transition
     /// order: greedy quantifiers try their consume edge before their exit edge, reluctant ones the
     /// reverse, and ordered alternation tries branches as listed. A lower-priority path can
     /// therefore NEVER override an accepting higher-priority one, no matter what rows arrive — for
@@ -854,23 +978,21 @@ impl Nfa {
         budget: &mut ScanBudget,
         memoize: bool,
     ) -> StreamExecutorResult<bool> {
-        let mut path: Vec<String> = Vec::new();
-        let mut visited = Visited::new(self.states.len());
         let mut blocked = false;
         let mut memo = memoize.then(|| Memo::new(start, end, self.states.len()));
         let accepted = self
-            .preferred_blocked_before_accept(
-                end,
-                self.start,
+            .walk(
+                Goal::AcceptOrBlocked {
+                    end,
+                    blocked: &mut blocked,
+                },
                 start,
-                &mut path,
                 matcher,
-                &mut visited,
-                &mut blocked,
                 budget,
                 memo.as_mut(),
             )
-            .await?;
+            .await?
+            .is_some();
         // A spent budget means the walk may have stopped before the preferred accept: `blocked`
         // then under-approximates, and the only safe answer is "may extend" (hold — never emit on
         // partial information).
@@ -885,350 +1007,285 @@ impl Nfa {
         Ok(blocked)
     }
 
-    /// Path-carrying DFS backing [`Nfa::may_extend`]. Mirrors [`Nfa::preferred_from_dynamic`]'s
-    /// traversal (same transition order, same visited discipline, predicates over the real rows),
-    /// bounded by `end`: a consuming transition at `pos == end` cannot be evaluated, and if its
-    /// target can still reach `accept` it is recorded in `blocked` — a hypothetical future row
-    /// could fire it and produce a more-preferred result. Returns on the first accept, leaving
-    /// `blocked` reflecting only what was explored before it.
-    #[async_recursion]
-    #[allow(clippy::too_many_arguments)]
-    async fn preferred_blocked_before_accept(
+    /// The one traversal behind the finder, the liveness check and the extension probe: a
+    /// depth-first search from `self.start` at row `start_pos`, in transition order, with `DEFINE`
+    /// predicates evaluated over the running match (`path`, the labels bound so far, is threaded to
+    /// the matcher). Returns the row position at which `goal` was met together with the labels of
+    /// the path that met it; `None` is "no such path" — or, with `budget.hit` latched, "undecided".
+    ///
+    /// Iterative, over an explicit heap stack. The recursive walkers this replaced — boxed
+    /// `async_recursion` frames, polled through the real thread stack once per consumed row and
+    /// once per ε-edge — needed a hard depth cap to avoid overflowing it, and the cap made any
+    /// match spanning more than a couple of hundred rows permanently undecidable: unlike the
+    /// budget it did not reset between visits, so every refresh died at the same depth. Every push
+    /// is charged to the budget, so the stack holds at most `budget` frames — at the executor's
+    /// 2^20 steps, about 32 megabytes of 32-byte frames in the worst case — and the budget is the
+    /// only bound on a walk.
+    ///
+    /// The discipline, identical for all three goals:
+    /// - transitions are tried in the order the builder emitted them, and the FIRST verdict wins —
+    ///   greedy quantifiers list their consume edge before their exit edge, reluctant ones the
+    ///   reverse, alternation as written;
+    /// - a [`Visited`] scope per row position cuts ε-cycles: ε-edges keep the position and the
+    ///   scope, a consumed row opens a fresh one, so distinct label assignments may reach the same
+    ///   state at the next row;
+    /// - the budget is charged once per predicate evaluation and once per edge taken, and a spent
+    ///   budget ends the walk without a verdict and without recording anything;
+    /// - failures are memoized only at consumption boundaries — a consumed frame starts with a fresh
+    ///   scope, so its outcome is context-free — and never for a budget-aborted walk, which would
+    ///   turn a transient abort into a permanent wrong verdict (see [`Memo`]).
+    async fn walk(
         &self,
-        end: usize,
-        state: StateId,
-        pos: usize,
-        path: &mut Vec<String>,
+        mut goal: Goal<'_>,
+        start_pos: usize,
         matcher: &(impl CandidateMatcher + Sync),
-        visited: &mut Visited,
-        blocked: &mut bool,
-        budget: &mut ScanBudget,
-        mut memo: Option<&mut Memo>,
-    ) -> StreamExecutorResult<bool> {
-        if state == self.accept {
-            return Ok(true);
-        }
-        if budget.hit {
-            return Ok(false);
-        }
-        if !visited.insert(state) {
-            return Ok(false);
-        }
-        for t in &self.states[state] {
-            let accepted = match t {
-                Transition::Epsilon(next) => {
-                    if !budget.descend() {
-                        false
-                    } else {
-                        let r = self
-                            .preferred_blocked_before_accept(
-                                end,
-                                *next,
-                                pos,
-                                path,
-                                matcher,
-                                visited,
-                                blocked,
-                                budget,
-                                memo.as_deref_mut(),
-                            )
-                            .await;
-                        budget.ascend();
-                        r?
-                    }
-                }
-                Transition::OnVar { var, target } => {
-                    if pos == end {
-                        // Boundary: the row this edge would consume does not exist yet. If the
-                        // target can still reach `accept`, a future row could fire this edge —
-                        // and everything explored so far (including this edge) is preferred over
-                        // any accept found later in the walk.
-                        if self.reach_accept[*target] {
-                            *blocked = true;
-                        }
-                        false
-                    } else if budget.charge() && matcher.matches(var, pos, path).await? {
-                        // Consumption boundary — memo as in `preferred_from_dynamic`. `blocked`
-                        // is monotone (set-only), so skipping a memoized-failed subtree cannot
-                        // lose it: the first, full exploration of that subtree already set it.
-                        if memo
-                            .as_deref_mut()
-                            .is_some_and(|m| m.is_failed(*target, pos + 1))
-                        {
-                            false
-                        } else {
-                            path.push(var.clone());
-                            let mut next_visited = Visited::new(self.states.len());
-                            let r = if !budget.descend() {
-                                false
-                            } else {
-                                let r = self
-                                    .preferred_blocked_before_accept(
-                                        end,
-                                        *target,
-                                        pos + 1,
-                                        path,
-                                        matcher,
-                                        &mut next_visited,
-                                        blocked,
-                                        budget,
-                                        memo.as_deref_mut(),
-                                    )
-                                    .await;
-                                budget.ascend();
-                                r?
-                            };
-                            path.pop();
-                            if !r
-                                && !budget.hit
-                                && let Some(m) = memo.as_deref_mut()
-                            {
-                                m.record_failure(*target, pos + 1);
-                            }
-                            r
-                        }
-                    } else {
-                        false
-                    }
-                }
-            };
-            if accepted {
-                visited.remove(state);
-                return Ok(true);
-            }
-            if budget.hit {
-                break;
-            }
-        }
-        visited.remove(state);
-        Ok(false)
-    }
-
-    /// Path-carrying DFS backing [`Nfa::reaches_boundary_alive`]. Mirrors the traversal of
-    /// [`Nfa::preferred_from_dynamic`] (so `DEFINE` predicates see the running match), but instead of
-    /// looking for an accepting path it asks whether the safe suffix `pos..n_rows` can be consumed
-    /// without dying. Reaching `pos == n_rows` inside the automaton is "alive"; reaching `accept`
-    /// before the boundary is a complete (already-finalized) match, not a live partial one, so it
-    /// does not by itself keep the start alive.
-    #[async_recursion]
-    #[allow(clippy::too_many_arguments)]
-    async fn live_to_boundary(
-        &self,
-        n_rows: usize,
-        state: StateId,
-        pos: usize,
-        path: &mut Vec<String>,
-        matcher: &(impl CandidateMatcher + Sync),
-        visited: &mut Visited,
-        budget: &mut ScanBudget,
-        mut memo: Option<&mut Memo>,
-    ) -> StreamExecutorResult<bool> {
-        if pos == n_rows {
-            return Ok(true);
-        }
-        if state == self.accept {
-            return Ok(false);
-        }
-        if budget.hit {
-            return Ok(false);
-        }
-        if !visited.insert(state) {
-            return Ok(false);
-        }
-        for t in &self.states[state] {
-            let alive = match t {
-                Transition::Epsilon(next) => {
-                    if !budget.descend() {
-                        false
-                    } else {
-                        let r = self
-                            .live_to_boundary(
-                                n_rows,
-                                *next,
-                                pos,
-                                path,
-                                matcher,
-                                visited,
-                                budget,
-                                memo.as_deref_mut(),
-                            )
-                            .await;
-                        budget.ascend();
-                        r?
-                    }
-                }
-                Transition::OnVar { var, target } => {
-                    if pos < n_rows && budget.charge() && matcher.matches(var, pos, path).await? {
-                        // Consumption boundary — see `preferred_from_dynamic` for why the memo is
-                        // checked and recorded exactly here. The memoized outcome is "not alive".
-                        if memo
-                            .as_deref_mut()
-                            .is_some_and(|m| m.is_failed(*target, pos + 1))
-                        {
-                            false
-                        } else {
-                            path.push(var.clone());
-                            let mut next_visited = Visited::new(self.states.len());
-                            let r = if !budget.descend() {
-                                false
-                            } else {
-                                let r = self
-                                    .live_to_boundary(
-                                        n_rows,
-                                        *target,
-                                        pos + 1,
-                                        path,
-                                        matcher,
-                                        &mut next_visited,
-                                        budget,
-                                        memo.as_deref_mut(),
-                                    )
-                                    .await;
-                                budget.ascend();
-                                r?
-                            };
-                            path.pop();
-                            if !r
-                                && !budget.hit
-                                && let Some(m) = memo.as_deref_mut()
-                            {
-                                m.record_failure(*target, pos + 1);
-                            }
-                            r
-                        }
-                    } else {
-                        false
-                    }
-                }
-            };
-            if alive {
-                visited.remove(state);
-                return Ok(true);
-            }
-            if budget.hit {
-                break;
-            }
-        }
-        visited.remove(state);
-        Ok(false)
-    }
-
-    /// Async, path-carrying counterpart of `longest_from`. `path` is the variables bound to
-    /// the match's rows so far (threaded *down* so the matcher can see the running match); the
-    /// returned `labels` is the full assignment of the chosen accepting path. `visited` guards
-    /// against ε-cycles *at the current position* — ε-transitions keep `pos`/`path`, so a fresh set
-    /// is used once a row is consumed (which lets distinct variable assignments reach the same state
-    /// at the next position).
-    /// Returns the *first* accepting path in transition order, not the longest. Transitions are
-    /// emitted by the builder in preference order — for a greedy quantifier the consume/loop edge
-    /// precedes the exit edge (so the first accepting path is the longest match), and for a reluctant
-    /// quantifier the exit edge precedes it (so the first accepting path is the shortest). This also
-    /// gives alternation its standard ordered semantics (the first listed alternative that matches).
-    #[async_recursion]
-    #[allow(clippy::too_many_arguments)]
-    async fn preferred_from_dynamic(
-        &self,
-        n_rows: usize,
-        state: StateId,
-        pos: usize,
-        path: &mut Vec<String>,
-        matcher: &(impl CandidateMatcher + Sync),
-        visited: &mut Visited,
         budget: &mut ScanBudget,
         mut memo: Option<&mut Memo>,
     ) -> StreamExecutorResult<Option<(usize, Vec<String>)>> {
-        // The single accept state is terminal: reaching it completes the match here.
-        if state == self.accept {
-            return Ok(Some((pos, path.clone())));
-        }
-        // A spent budget aborts the walk without a verdict; the caller must treat everything
-        // undecided conservatively (see `ScanBudget`).
-        if budget.hit {
-            return Ok(None);
-        }
-        if !visited.insert(state) {
-            return Ok(None);
-        }
-        for t in &self.states[state] {
-            let candidate = match t {
-                Transition::Epsilon(next) => {
-                    if !budget.descend() {
-                        None
-                    } else {
-                        let r = self
-                            .preferred_from_dynamic(
-                                n_rows,
-                                *next,
-                                pos,
-                                path,
-                                matcher,
-                                visited,
-                                budget,
-                                memo.as_deref_mut(),
-                            )
-                            .await;
-                        budget.ascend();
-                        r?
+        let n_states = self.states.len();
+        let mut path: Vec<String> = Vec::new();
+        // One visited scope per consumption level; `scopes[depth]` is the live one. A walk opens a
+        // scope per consumed row, so they are cleared and reused rather than reallocated.
+        let mut scopes: Vec<Visited> = vec![Visited::new(n_states)];
+        let mut depth = 0usize;
+        let mut stack = vec![Frame::new(self.start, start_pos, false)];
+
+        loop {
+            let Some(top) = stack.last_mut() else {
+                return Ok(None);
+            };
+            if !top.entered {
+                top.entered = true;
+                // A walk entered with an already-spent budget aborts without deciding anything
+                // (the caller must treat everything undecided conservatively; see `ScanBudget`).
+                // Exhaustion MID-walk never reaches this point: every `step`/`charge` that
+                // latches `hit` returns from `walk` directly below — which is what lets
+                // `pop_failed` record a failure unconditionally.
+                if budget.hit {
+                    return Ok(None);
+                }
+                let (state, pos) = (top.state, top.pos);
+                match goal.enter(self, state, pos) {
+                    Enter::Verdict => return Ok(Some((pos, path))),
+                    Enter::Dead => {
+                        Self::pop_failed(
+                            &mut stack,
+                            &mut scopes,
+                            &mut depth,
+                            &mut path,
+                            memo.as_deref_mut(),
+                            budget,
+                        );
+                        continue;
                     }
+                    Enter::Explore => {}
+                }
+                if scopes[depth].insert(state) {
+                    top.inserted = true;
+                } else {
+                    Self::pop_failed(
+                        &mut stack,
+                        &mut scopes,
+                        &mut depth,
+                        &mut path,
+                        memo.as_deref_mut(),
+                        budget,
+                    );
+                    continue;
+                }
+            }
+            let (state, pos) = (top.state, top.pos);
+            let Some(t) = self.states[state].get(top.next_edge) else {
+                // Every transition tried and none met the goal: this frame fails.
+                Self::pop_failed(
+                    &mut stack,
+                    &mut scopes,
+                    &mut depth,
+                    &mut path,
+                    memo.as_deref_mut(),
+                    budget,
+                );
+                continue;
+            };
+            top.next_edge += 1;
+            match t {
+                Transition::Epsilon(next) => {
+                    if !budget.step() {
+                        return Ok(None);
+                    }
+                    stack.push(Frame::new(*next, pos, false));
                 }
                 Transition::OnVar { var, target } => {
-                    if pos < n_rows && budget.charge() && matcher.matches(var, pos, path).await? {
-                        // Consumption boundary: the recursion below starts with a fresh
-                        // visited-set, so its outcome is context-free — check and record the
-                        // failure memo exactly here (never at ε-level, where a failure can be a
-                        // cycle-cut artifact).
-                        if memo
-                            .as_deref_mut()
-                            .is_some_and(|m| m.is_failed(*target, pos + 1))
-                        {
-                            None
-                        } else {
-                            path.push(var.clone());
-                            let mut next_visited = Visited::new(self.states.len());
-                            let r = if !budget.descend() {
-                                None
-                            } else {
-                                let r = self
-                                    .preferred_from_dynamic(
-                                        n_rows,
-                                        *target,
-                                        pos + 1,
-                                        path,
-                                        matcher,
-                                        &mut next_visited,
-                                        budget,
-                                        memo.as_deref_mut(),
-                                    )
-                                    .await;
-                                budget.ascend();
-                                r?
-                            };
-                            path.pop();
-                            // A budget-aborted None is NOT a proven failure; memoizing it would
-                            // turn a transient abort into a permanent wrong verdict.
-                            if r.is_none()
-                                && !budget.hit
-                                && let Some(m) = memo.as_deref_mut()
-                            {
-                                m.record_failure(*target, pos + 1);
-                            }
-                            r
-                        }
-                    } else {
-                        None
+                    if !goal.may_consume(self, *target, pos) {
+                        continue;
                     }
+                    if !budget.charge() {
+                        return Ok(None);
+                    }
+                    if !matcher.matches(var, pos, &path).await? {
+                        continue;
+                    }
+                    // Consumption boundary: the frame pushed below starts with a fresh visited
+                    // scope, so its outcome is context-free — the failure memo is checked here and
+                    // recorded on its exit, never at ε-level, where a failure can be a cycle-cut
+                    // artifact.
+                    if memo
+                        .as_deref_mut()
+                        .is_some_and(|m| m.is_failed(*target, pos + 1))
+                    {
+                        continue;
+                    }
+                    if !budget.step() {
+                        return Ok(None);
+                    }
+                    path.push(var.clone());
+                    depth += 1;
+                    if depth == scopes.len() {
+                        scopes.push(Visited::new(n_states));
+                    } else {
+                        scopes[depth].clear();
+                    }
+                    stack.push(Frame::new(*target, pos + 1, true));
                 }
-            };
-            if candidate.is_some() {
-                visited.remove(state);
-                return Ok(candidate);
-            }
-            if budget.hit {
-                break;
             }
         }
-        visited.remove(state);
-        Ok(None)
+    }
+
+    /// Pop the top frame as a failure: unmark its state in its scope, and if it was entered by
+    /// consuming a row, close that scope, drop its label, and memoize the failure.
+    ///
+    /// A budget-aborted walk never gets here — every latch site returns from `walk` directly — so
+    /// the failure being recorded is always a proven one, by construction rather than by a guard.
+    fn pop_failed(
+        stack: &mut Vec<Frame>,
+        scopes: &mut [Visited],
+        depth: &mut usize,
+        path: &mut Vec<String>,
+        memo: Option<&mut Memo>,
+        budget: &ScanBudget,
+    ) {
+        debug_assert!(
+            !budget.hit,
+            "a spent budget returns from `walk`; it never pops a frame"
+        );
+        // Callers hold the top frame, so the stack is non-empty; an empty stack here would be a
+        // walk-invariant violation, and letting the loop end on it (no verdict) beats panicking an
+        // actor over it.
+        let Some(frame) = stack.pop() else {
+            return;
+        };
+        if frame.inserted {
+            scopes[*depth].remove(frame.state);
+        }
+        if frame.consumed {
+            debug_assert!(*depth > 0, "a consumed frame always opened a scope");
+            *depth = depth.saturating_sub(1);
+            path.pop();
+            if let Some(m) = memo {
+                m.record_failure(frame.state, frame.pos);
+            }
+        }
+    }
+}
+
+/// What a [`Nfa::walk`] is looking for. The three questions the executor asks of the automaton share
+/// one traversal and differ only in when a frame is a verdict and in what a consuming edge may do at
+/// the row boundary.
+enum Goal<'a> {
+    /// The first accepting path in preference order — the match finder ([`Nfa::next_match`]).
+    /// Consuming edges stop at `n_rows`. `reached_boundary` records whether any frame was entered
+    /// AT `n_rows`: a walk that finds no accept and never got there died entirely on rows below
+    /// the boundary, which no arrival can change — the start is matchless forever.
+    Accept {
+        n_rows: usize,
+        reached_boundary: &'a mut bool,
+    },
+    /// Whether some path consumes the safe suffix up to `n_rows` while still inside the automaton
+    /// ([`Nfa::reaches_boundary_alive`]). Reaching `n_rows` is the verdict; reaching `accept` before
+    /// it is a complete (already-finalized) match, not a live partial one, and fails that path.
+    Boundary { n_rows: usize },
+    /// The first accept, bounded by `end` ([`Nfa::may_extend`]). A consuming edge at `end` cannot
+    /// be evaluated — the row does not exist yet; if its target can still reach `accept`
+    /// ([`Nfa::reach_accept`]) it is recorded in `blocked`, since a future row could fire it and
+    /// produce a more-preferred result than any accept found later in the walk.
+    AcceptOrBlocked { end: usize, blocked: &'a mut bool },
+}
+
+/// A frame's verdict on entry.
+enum Enter {
+    /// The goal is met at this frame.
+    Verdict,
+    /// This path can no longer meet the goal.
+    Dead,
+    /// Keep walking.
+    Explore,
+}
+
+impl Goal<'_> {
+    fn enter(&mut self, nfa: &Nfa, state: StateId, pos: usize) -> Enter {
+        if let Goal::Accept {
+            n_rows,
+            reached_boundary,
+        } = self
+            && pos == *n_rows
+        {
+            **reached_boundary = true;
+        }
+        match self {
+            // The single accept state is terminal: reaching it completes the match here.
+            Goal::Accept { .. } | Goal::AcceptOrBlocked { .. } if state == nfa.accept => {
+                Enter::Verdict
+            }
+            Goal::Boundary { n_rows } if pos == *n_rows => Enter::Verdict,
+            Goal::Boundary { .. } if state == nfa.accept => Enter::Dead,
+            _ => Enter::Explore,
+        }
+    }
+
+    /// Whether a consuming edge into `target` may be evaluated at `pos`.
+    fn may_consume(&mut self, nfa: &Nfa, target: StateId, pos: usize) -> bool {
+        match self {
+            Goal::Accept { n_rows, .. } | Goal::Boundary { n_rows } => pos < *n_rows,
+            Goal::AcceptOrBlocked { end, blocked } => {
+                if pos == *end {
+                    if nfa.reach_accept[target] {
+                        **blocked = true;
+                    }
+                    false
+                } else {
+                    true
+                }
+            }
+        }
+    }
+}
+
+/// One frame of the explicit walk stack: the state under exploration at row `pos`, and how far
+/// through its transitions the walk has got.
+struct Frame {
+    state: StateId,
+    pos: usize,
+    /// Index of the next transition of `state` to try.
+    next_edge: usize,
+    /// Entered through a consuming transition: it opened a [`Visited`] scope and pushed a label,
+    /// both undone on exit, and its failure is memoizable.
+    consumed: bool,
+    /// The entry checks have run (goal verdict, budget, visited).
+    entered: bool,
+    /// The frame marked `state` in its scope, and must unmark it on exit.
+    inserted: bool,
+}
+
+impl Frame {
+    fn new(state: StateId, pos: usize, consumed: bool) -> Self {
+        Self {
+            state,
+            pos,
+            next_edge: 0,
+            consumed,
+            entered: false,
+            inserted: false,
+        }
     }
 }
 
@@ -2431,21 +2488,188 @@ mod tests {
         );
     }
 
-    /// A walk deeper than `MAX_WALK_DEPTH` must fold into budget exhaustion, not overflow the
-    /// stack. The walkers recurse per consumed row, so before the guard a single greedy `a+` match
-    /// spanning enough rows was a SIGSEGV — not a catchable panic — and the per-visit budget did
-    /// not prevent it (2^20 charges permit a 2^20-deep path). With the guard the walk aborts as
-    /// ordinary exhaustion: undecided, `hit` latched, retried by the caller like any other
-    /// truncation.
+    #[test]
+    fn max_match_rows_is_the_longest_path_or_none_for_a_cycle() {
+        let var = |s: &str| Pattern::Var(s.to_owned());
+        let concat = |s: &str| Pattern::Concat(s.split(' ').map(var).collect());
+        let q = |p: Pattern, q: Quantifier| Pattern::Quantified(Box::new(p), q, false);
+        let range = |min, max| Quantifier::Range { min, max };
+        assert_eq!(Nfa::compile(&concat("a b c")).max_match_rows(), Some(3));
+        assert_eq!(
+            Nfa::compile(&Pattern::Alt(vec![concat("a b"), var("c")])).max_match_rows(),
+            Some(2)
+        );
+        assert_eq!(
+            Nfa::compile(&Pattern::Concat(vec![
+                q(var("a"), Quantifier::Question),
+                var("b")
+            ]))
+            .max_match_rows(),
+            Some(2)
+        );
+        assert_eq!(
+            Nfa::compile(&q(var("a"), range(2, Some(5)))).max_match_rows(),
+            Some(5)
+        );
+        assert_eq!(
+            Nfa::compile(&q(var("a"), range(600, Some(600)))).max_match_rows(),
+            Some(600)
+        );
+        assert_eq!(
+            Nfa::compile(&q(var("a"), Quantifier::Plus)).max_match_rows(),
+            None
+        );
+        assert_eq!(
+            Nfa::compile(&q(var("a"), Quantifier::Star)).max_match_rows(),
+            None
+        );
+        assert_eq!(
+            Nfa::compile(&q(var("a"), range(2, None))).max_match_rows(),
+            None
+        );
+    }
+
+    /// With more rows to the boundary than an acyclic automaton can consume, a position is dead
+    /// without a walk — a budget of 1 survives untouched. With exactly as many, the walk runs, and
+    /// a match that ends on the boundary keeps its start alive.
     #[tokio::test]
-    async fn a_walk_past_the_depth_cap_degrades_instead_of_overflowing_the_stack() {
-        let pat = Pattern::Quantified(Box::new(Pattern::Var("a".into())), Quantifier::Plus, false);
+    async fn far_from_the_boundary_an_acyclic_pattern_is_dead_without_a_walk() {
+        let pat = Pattern::Quantified(
+            Box::new(Pattern::Var("a".into())),
+            Quantifier::Range {
+                min: 600,
+                max: Some(600),
+            },
+            false,
+        );
         let nfa = Nfa::compile(&pat);
-        let n_rows = 2000; // comfortably past MAX_WALK_DEPTH
-        let rows = vec![BTreeSet::from(["a".to_owned()]); n_rows];
-        let matcher = SetMatcher::new(rows);
-        let mut scan = MatchScan::new();
+        let n_rows = 1300;
+        let matcher = SetMatcher::new(vec![BTreeSet::from(["a".to_owned()]); n_rows]);
+        let mut budget = ScanBudget::new(1);
+        assert!(
+            !nfa.reaches_boundary_alive(0, n_rows, &matcher, &mut budget, true)
+                .await
+                .unwrap()
+        );
+        assert!(!budget.hit, "the verdict must not have cost a walk");
         let mut budget = ScanBudget::unlimited();
+        assert!(
+            nfa.reaches_boundary_alive(700, n_rows, &matcher, &mut budget, true)
+                .await
+                .unwrap(),
+            "a{{600}} from 700 accepts exactly on the boundary, which is alive"
+        );
+    }
+
+    /// A start whose walk finds no accept and never reaches the boundary died on rows that will
+    /// never change: the scan proves it matchless forever. The proof runs contiguously from where
+    /// the scan began, stops at a start that reached the boundary, and is not extended by a start
+    /// the finder skipped as too short (that one is blocked at the boundary, not dead).
+    #[tokio::test]
+    async fn starts_that_die_below_the_boundary_are_proven_matchless() {
+        let nfa = Nfa::compile(&Pattern::Concat(vec![
+            Pattern::Var("a".into()),
+            Pattern::Var("b".into()),
+        ]));
+        let scan_all = |seq: &str| {
+            let nfa = &nfa;
+            let matcher = SetMatcher::new(rows(seq));
+            let n = seq.len();
+            async move {
+                let mut scan = MatchScan::new();
+                let mut budget = ScanBudget::unlimited();
+                let found = nfa
+                    .next_match(
+                        &mut scan,
+                        n,
+                        &matcher,
+                        &SkipMode::PastLastRow,
+                        &mut budget,
+                        false,
+                    )
+                    .await
+                    .unwrap();
+                (found.map(|m| (m.start, m.end)), scan)
+            }
+        };
+        // Starts 0, 1 and 2 all die below the boundary; start 3 is skipped as too short.
+        let (found, scan) = scan_all("axaa").await;
+        assert_eq!(found, None);
+        assert_eq!(scan.matchless_upto(), 3);
+        assert_eq!(scan.next_start(), 4);
+        // Start 2 consumes `a` and stands at the boundary waiting for `b`: not matchless.
+        let (found, scan) = scan_all("axa").await;
+        assert_eq!(found, None);
+        assert_eq!(scan.matchless_upto(), 2);
+        // A match ends the contiguous run.
+        let (found, scan) = scan_all("xab").await;
+        assert_eq!(found, Some((1, 3)));
+        assert_eq!(scan.matchless_upto(), 1);
+    }
+
+    #[test]
+    fn min_match_rows_is_the_shortest_accepting_path() {
+        let var = |s: &str| Pattern::Var(s.to_owned());
+        let concat = |s: &str| Pattern::Concat(s.split(' ').map(var).collect());
+        let q = |p: Pattern, q: Quantifier| Pattern::Quantified(Box::new(p), q, false);
+        assert_eq!(Nfa::compile(&concat("a b c")).min_match_rows(), 3);
+        assert_eq!(
+            Nfa::compile(&q(var("a"), Quantifier::Plus)).min_match_rows(),
+            1
+        );
+        assert_eq!(
+            Nfa::compile(&q(var("a"), Quantifier::Star)).min_match_rows(),
+            0
+        );
+        assert_eq!(
+            Nfa::compile(&Pattern::Concat(vec![
+                q(var("a"), Quantifier::Question),
+                var("b")
+            ]))
+            .min_match_rows(),
+            1
+        );
+        assert_eq!(
+            Nfa::compile(&Pattern::Alt(vec![concat("a b"), var("c")])).min_match_rows(),
+            1
+        );
+        assert_eq!(
+            Nfa::compile(&Pattern::Permute(vec!["a".into(), "b".into(), "c".into()]))
+                .min_match_rows(),
+            3
+        );
+        assert_eq!(
+            Nfa::compile(&q(
+                var("a"),
+                Quantifier::Range {
+                    min: 600,
+                    max: Some(600),
+                }
+            ))
+            .min_match_rows(),
+            600
+        );
+    }
+
+    /// A start with fewer rows before the boundary than the shortest possible match is skipped
+    /// without a walk — and the skip IS a verdict ("no match from here within these rows"), so the
+    /// cursor advances past it exactly as it would after a failed walk. Here the whole buffer is
+    /// shorter than `a{600}`: nothing is walked, and a budget of 1 survives untouched.
+    #[tokio::test]
+    async fn starts_too_close_to_the_boundary_are_skipped_without_a_walk() {
+        let pat = Pattern::Quantified(
+            Box::new(Pattern::Var("a".into())),
+            Quantifier::Range {
+                min: 600,
+                max: Some(600),
+            },
+            false,
+        );
+        let nfa = Nfa::compile(&pat);
+        let n_rows = 10;
+        let matcher = SetMatcher::new(vec![BTreeSet::from(["a".to_owned()]); n_rows]);
+        let mut scan = MatchScan::new();
+        let mut budget = ScanBudget::new(1);
         let found = nfa
             .next_match(
                 &mut scan,
@@ -2457,21 +2681,26 @@ mod tests {
             )
             .await
             .unwrap();
-        assert!(budget.hit, "a depth overrun must latch the exhaustion flag");
-        assert!(
-            found.is_none(),
-            "an aborted walk must stay undecided rather than fabricate a partial match"
-        );
+        assert!(found.is_none());
+        assert!(!budget.hit, "no start was walked, so nothing was charged");
         assert_eq!(
             scan.next_start(),
-            0,
-            "the aborted start must not be advanced past"
+            n_rows,
+            "every start was skipped with a verdict, so the cursor passed them all"
         );
+    }
 
-        // A match well under the cap is untouched.
-        let n_rows = 100;
-        let rows = vec![BTreeSet::from(["a".to_owned()]); n_rows];
-        let matcher = SetMatcher::new(rows);
+    /// The walkers used to recurse once per consumed row and once per ε-edge under a hard cap of
+    /// 512 frames, so any match spanning more than a couple of hundred rows was permanently
+    /// undecidable: the cap did not reset with the budget, and every visit died at the same depth.
+    /// The walk is iterative now and only the budget bounds it. All three walkers reach this depth.
+    #[tokio::test]
+    async fn a_match_spanning_thousands_of_rows_is_decided() {
+        let pat = Pattern::Quantified(Box::new(Pattern::Var("a".into())), Quantifier::Plus, false);
+        let nfa = Nfa::compile(&pat);
+        let n_rows = 2000;
+        let matcher = SetMatcher::new(vec![BTreeSet::from(["a".to_owned()]); n_rows]);
+
         let mut scan = MatchScan::new();
         let mut budget = ScanBudget::unlimited();
         let found = nfa
@@ -2485,8 +2714,65 @@ mod tests {
             )
             .await
             .unwrap()
-            .expect("a 100-row greedy match is far below the cap");
-        assert_eq!((found.start, found.end), (0, 100));
+            .expect("a 2000-row greedy match must be found");
+        assert_eq!((found.start, found.end), (0, n_rows));
+        assert_eq!(found.labels.len(), n_rows);
         assert!(!budget.hit);
+
+        // The greedy `a+` is blocked at the boundary, so the match may still extend...
+        let mut budget = ScanBudget::unlimited();
+        assert!(
+            nfa.may_extend(0, n_rows, &matcher, &mut budget, true)
+                .await
+                .unwrap()
+        );
+        assert!(!budget.hit);
+        // ...and its start is alive there.
+        let mut budget = ScanBudget::unlimited();
+        assert!(
+            nfa.reaches_boundary_alive(0, n_rows, &matcher, &mut budget, true)
+                .await
+                .unwrap()
+        );
+        assert!(!budget.hit);
+    }
+
+    /// The reported case: the binder accepts repetition counts up to 1000, and `a{600}` compiles to
+    /// a 600-copy chain the old depth cap could never walk to its accept. It must match exactly 600
+    /// rows — no fewer, and not greedily more.
+    #[tokio::test]
+    async fn a_bounded_repetition_beyond_the_old_depth_cap_matches_exactly() {
+        let pat = Pattern::Quantified(
+            Box::new(Pattern::Var("a".into())),
+            Quantifier::Range {
+                min: 600,
+                max: Some(600),
+            },
+            false,
+        );
+        let nfa = Nfa::compile(&pat);
+        let spans = |n_rows: usize| {
+            let nfa = &nfa;
+            async move {
+                let matcher = SetMatcher::new(vec![BTreeSet::from(["a".to_owned()]); n_rows]);
+                nfa.find_matches_dynamic(n_rows, &matcher, &SkipMode::PastLastRow)
+                    .await
+                    .unwrap()
+                    .into_iter()
+                    .map(|m| (m.start, m.end))
+                    .collect::<Vec<_>>()
+            }
+        };
+        assert_eq!(
+            spans(599).await,
+            vec![],
+            "599 rows cannot complete a{{600}}"
+        );
+        assert_eq!(spans(600).await, vec![(0, 600)]);
+        assert_eq!(
+            spans(1300).await,
+            vec![(0, 600), (600, 1200)],
+            "two exact matches; the 100-row tail cannot complete a third"
+        );
     }
 }

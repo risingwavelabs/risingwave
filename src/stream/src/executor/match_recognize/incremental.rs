@@ -240,6 +240,30 @@ pub struct IncrementalMatcher {
     /// WITHIN-deadline prune in particular would otherwise delete rows carrying a match the
     /// truncated scan never reached.
     incomplete: bool,
+    /// Positions `[next_pos, dead_upto)` proven dead at the boundary by the freeze walks of this
+    /// and earlier visits (`next_pos <= matchless_upto <= dead_upto` always). Deadness is monotone
+    /// under appends — a walk reads only rows at or before its position (there is no forward
+    /// navigation: `NEXT` inside `DEFINE` is rejected at bind and decode time), so a position no
+    /// path can carry to the boundary stays that way as rows arrive — which lets a freeze that ran
+    /// out of budget resume where it stopped instead of restarting at `next_pos`. Without this,
+    /// freezing a match of `L` rows costs Θ(L²) steps in ONE visit (each of its `L` positions
+    /// walks up to `L` rows), and once that exceeds the per-visit budget the region never freezes:
+    /// the permanent, non-self-healing shape a long chain pattern (`a{600}`) otherwise degrades
+    /// into. Reset to `next_pos` whenever the rows a verdict was computed over can change
+    /// (truncation, eviction rebase).
+    dead_upto: usize,
+    /// Starts `[next_pos, matchless_upto)` proven MATCHLESS FOREVER by the finder: their walks found
+    /// no accept and never reached the boundary, so they died entirely on immutable rows (see
+    /// [`MatchScan::matchless_upto`]). The next rescan begins past them. This is the finder's
+    /// counterpart of `dead_upto` — and feeds it, since such a start is dead too: without it, a
+    /// long run broken by one non-matching row costs Θ(r²) on EVERY rescan (each start walks to
+    /// the break and dies), past the budget from `r ≈ 840`, and a partition in that state never
+    /// completes a rescan again. Same resets as `dead_upto`.
+    matchless_upto: usize,
+    /// Whether the last freeze loop stopped on a spent budget with its region unfinished. The
+    /// executor refreshes on this like on `incomplete`, so a truncated freeze resumes on the next
+    /// watermark visit rather than only on the next arrival.
+    freeze_truncated: bool,
 }
 
 /// Adapts a [`CandidateMatcher`] so that a scan over the suffix `[offset, ..)` sees suffix-relative
@@ -272,6 +296,9 @@ impl IncrementalMatcher {
             next_pos: 0,
             seq_index: Vec::new(),
             incomplete: false,
+            dead_upto: 0,
+            matchless_upto: 0,
+            freeze_truncated: false,
         }
     }
 
@@ -285,12 +312,22 @@ impl IncrementalMatcher {
         self.next_pos = 0;
         self.seq_index.clear();
         self.incomplete = false;
+        self.dead_upto = 0;
+        self.matchless_upto = 0;
+        self.freeze_truncated = false;
     }
 
     /// Whether the last rescan was truncated by a spent budget — see the field doc. While true,
     /// `provisional()` is a leftmost-prefix under-approximation.
     pub fn is_incomplete(&self) -> bool {
         self.incomplete
+    }
+
+    /// Whether a visit's rescan should be re-run with a fresh budget before deciding anything:
+    /// the provisional tail is incomplete ([`IncrementalMatcher::is_incomplete`]), or the freeze
+    /// stopped on a spent budget and has proven-dead progress to resume from.
+    pub fn needs_refresh(&self) -> bool {
+        self.incomplete || self.freeze_truncated
     }
 
     /// Re-derive the provisional tail with a fresh budget, without feeding rows: the executor's
@@ -312,6 +349,14 @@ impl IncrementalMatcher {
     /// emission.
     pub fn resume_pos(&self) -> usize {
         self.next_pos
+    }
+
+    /// End of the prefix of fed positions proven dead at the boundary — every position below it
+    /// can never again start a match (see the `dead_upto` field). The executor's own liveness
+    /// walks (the dead-prefix prune, the emission gate's gap check) skip these positions instead
+    /// of re-deriving a verdict the freeze already paid for.
+    pub fn dead_prefix_end(&self) -> usize {
+        self.dead_upto
     }
 
     /// Feed rows appended in `ORDER BY` order. `new_row_seqs` are the seqs of the newly appended rows;
@@ -380,9 +425,18 @@ impl IncrementalMatcher {
         // loop stops early and the tail is INCOMPLETE: the freeze loop below holds (it treats
         // `budget.hit` as "alive"), the executor's emission gate holds, and the next visit
         // rescans with a fresh budget — degraded latency, never a wrong or lost match.
+        debug_assert!(
+            self.next_pos <= self.matchless_upto && self.matchless_upto <= self.dead_upto,
+            "next_pos {} <= matchless_upto {} <= dead_upto {}",
+            self.next_pos,
+            self.matchless_upto,
+            self.dead_upto
+        );
         let mut tail: Vec<LabeledMatch> = Vec::new();
         {
-            let mut scan = MatchScan::new();
+            // Begin past the starts earlier rescans proved matchless forever (suffix-relative, like
+            // everything the finder sees).
+            let mut scan = MatchScan::starting_at(self.matchless_upto - offset);
             while let Some(m) = self
                 .nfa
                 .next_match(
@@ -397,6 +451,10 @@ impl IncrementalMatcher {
             {
                 tail.push(m);
             }
+            // Remember what this scan proved, even when the budget cut it short: that is what
+            // makes the next rescan cheaper than this one. A matchless start is dead as well.
+            self.matchless_upto = offset + scan.matchless_upto();
+            self.dead_upto = self.dead_upto.max(self.matchless_upto);
         }
         // Whether the pull loop stopped because the budget died (including a budget already spent
         // on entry) rather than because the scan genuinely finished. Captured BEFORE the freeze
@@ -424,31 +482,51 @@ impl IncrementalMatcher {
         // boundary, so its start is alive and the region check fails.
         let mut newly_frozen = 0usize;
         let mut cursor = self.next_pos;
+        let mut freeze_truncated = false;
+        debug_assert!(
+            self.dead_upto >= cursor,
+            "dead_upto {} < next_pos {cursor}",
+            self.dead_upto
+        );
         'freeze: for m in &tail_abs {
             // The skip-degradation diagnostic is dropped here for the same reason
             // `Nfa::find_matches_dynamic` drops it: this is freeze-cursor bookkeeping, not an
             // emission site — the executor recomputes the resume position for the matches it
             // actually emits and reports from there.
             let (resume, _) = self.skip.next_pos(m.start, m.end, &m.labels);
-            for p in cursor..resume {
+            // `dead_upto >= cursor` throughout: it starts at or past `next_pos`, and a region only
+            // freezes once every position in it is proven dead, so `cursor = resume` keeps it. An
+            // EMPTY range here is the resumed freeze paying off — the whole region was proven dead
+            // by earlier visits, and the match freezes without a walk.
+            for p in self.dead_upto..resume {
                 let alive = self
                     .nfa
                     .reaches_boundary_alive(p, n_rows, matcher, budget, memoize)
                     .await?;
-                // A spent budget is NOT a deadness verdict: `live_to_boundary` returns `false`
+                // A spent budget is NOT a deadness verdict: the liveness walk returns `false`
                 // when it stops early, and freezing on that fabricated answer advances the cursor
                 // past positions that are genuinely alive — their matches are then lost forever
                 // (the cursor never rewinds) while the prune pass, which guards correctly,
-                // retains their rows forever. Exhaustion holds the freeze; the next visit retries
-                // with a fresh budget.
-                if budget.hit || alive {
+                // retains their rows forever. Exhaustion holds the freeze; the next rescan resumes
+                // it from `dead_upto` with a fresh budget, so each one makes progress.
+                if budget.hit {
+                    freeze_truncated = true;
                     break 'freeze;
                 }
+                if alive {
+                    break 'freeze;
+                }
+                // Proven dead, and deadness is monotone under appends: never walk `p` again.
+                self.dead_upto = p + 1;
             }
             cursor = resume;
             newly_frozen += 1;
         }
         self.next_pos = cursor;
+        // Freezing moves the resume point past matches, including past starts the finder never
+        // proved anything about; the matchless prefix begins at the resume point by definition.
+        self.matchless_upto = self.matchless_upto.max(cursor);
+        self.freeze_truncated = freeze_truncated;
 
         // Drop the previous provisional tail and reattach the freshly scanned suffix, moving each
         // match's labels (this runs per arriving row — a clone here would copy every provisional
@@ -542,6 +620,12 @@ impl IncrementalMatcher {
         }
 
         self.next_pos = cursor;
+        // The re-fed rows may differ, and a dead or matchless verdict for any position could have
+        // been decided by a path that died on one of them; forget every verdict beyond the kept
+        // frozen prefix.
+        self.dead_upto = cursor;
+        self.matchless_upto = cursor;
+        self.freeze_truncated = false;
         self.frozen_count = kept;
         self.matched.truncate(kept);
         self.seq_index.truncate(trunc_pos);
@@ -639,6 +723,13 @@ impl IncrementalMatcher {
         self.matched.drain(..finalized);
         self.frozen_count -= finalized;
         self.next_pos -= final_pos;
+        // Through the executor `final_pos == next_pos`, so this is `0`: every frozen match was
+        // emitted and the surviving suffix is re-derived from scratch. Verdicts beyond the frozen
+        // prefix are forgotten rather than shifted: a `PREV` slot at the new buffer start reads
+        // past it where it read an evicted row before, so a verdict computed over the old buffer
+        // need not hold — conservative, and resumable.
+        self.dead_upto = self.next_pos;
+        self.matchless_upto = self.next_pos;
         self.seq_index.drain(..final_pos);
         Finalized::Rebased
     }
@@ -2383,6 +2474,159 @@ mod tests {
             "every starved op still matched the batch answer exactly — truncation never actually \
              withheld a match, so the prefix property was asserted vacuously"
         );
+    }
+
+    /// A chain pattern with a cycle behind it (`a{600} b*`), so the acyclic shortcut does not
+    /// apply and freezing a match of `L` rows really runs one liveness walk per position of its
+    /// region, each walking up to `L` rows — Θ(L²) steps, which exceeds one visit's budget
+    /// (600 × ~1800 > 2^20). The freeze must carry its proven-dead prefix across visits so a
+    /// bounded number of refreshes converges; restarting it at `next_pos` every visit never would
+    /// (the budget died at the same position each time, and the region never froze — the
+    /// permanent, non-self-healing degradation the depth cap used to cause by other means).
+    #[tokio::test]
+    async fn freeze_resumes_across_budget_exhausted_visits() {
+        const N: usize = 600;
+        const ROWS: usize = 1300;
+        const BUDGET: usize = 1 << 20;
+        let a_n = Pattern::Quantified(
+            Box::new(Pattern::Var("a".into())),
+            Quantifier::Range {
+                min: N as u32,
+                max: Some(N as u32),
+            },
+            false,
+        );
+        let b_star =
+            Pattern::Quantified(Box::new(Pattern::Var("b".into())), Quantifier::Star, false);
+        let nfa = Nfa::compile(&Pattern::Concat(vec![a_n, b_star]));
+        assert_eq!(
+            nfa.max_match_rows(),
+            None,
+            "the test needs a cyclic automaton"
+        );
+        let matcher = SetMatcher::new(vec![BTreeSet::from(["a".to_owned()]); ROWS]);
+        let mut inc = IncrementalMatcher::new(std::sync::Arc::new(nfa), SkipMode::PastLastRow);
+
+        let seqs: Vec<Seq> = (0..ROWS as i64).map(Seq).collect();
+        let mut budget = ScanBudget::new(BUDGET);
+        inc.advance(&seqs, &matcher, &mut budget, true)
+            .await
+            .unwrap();
+        assert!(
+            budget.hit,
+            "the test needs a freeze that outruns one visit's budget"
+        );
+        assert_eq!(inc.frozen(), 0, "the first region did not finish freezing");
+        assert!(
+            !inc.is_incomplete(),
+            "the tail scan itself completed; only the freeze was cut short"
+        );
+        assert!(inc.needs_refresh(), "a truncated freeze asks for a refresh");
+        let proven_after_first_visit = inc.dead_prefix_end();
+        assert!(
+            proven_after_first_visit > 0,
+            "the first visit proved nothing dead"
+        );
+
+        let mut visits = 1;
+        while inc.needs_refresh() {
+            assert!(visits < 5, "the freeze did not converge in {visits} visits");
+            budget = ScanBudget::new(BUDGET);
+            inc.refresh(&matcher, &mut budget, true).await.unwrap();
+            visits += 1;
+        }
+        assert!(visits >= 2, "convergence must have needed the resume");
+        assert!(inc.dead_prefix_end() > proven_after_first_visit);
+
+        // (0,600) froze: every position of its region is dead. (600,1200) is provisional and
+        // stays so while every row is an `a`: from 700 on, `a{600}` reaches the boundary before
+        // it can accept — alive, not frozen — so the proven-dead prefix ends exactly there.
+        assert_eq!(inc.frozen(), 1);
+        assert_eq!(inc.resume_pos(), N);
+        assert_eq!(inc.dead_prefix_end(), 700);
+        let spans: Vec<(i64, i64)> = inc
+            .provisional()
+            .iter()
+            .map(|m| (m.start_seq.0, m.end_seq.0))
+            .collect();
+        assert_eq!(spans, vec![(0, 600), (600, 1200)]);
+    }
+
+    /// A run one row short of a match, then a non-matching row: under `a{1000}` (the binder's
+    /// limit) every start in the run walks to the break and dies, Θ(r²) per rescan — for r = 999
+    /// that is ~1.5M steps, more than one visit's budget. The finder must remember the starts it
+    /// proved matchless so the next rescan begins past them; without that memory every visit
+    /// re-walks the same dead starts, exhausts at the same place, and the partition never
+    /// completes a rescan again.
+    #[tokio::test]
+    async fn finder_resumes_past_starts_proven_matchless() {
+        const N: usize = 1000;
+        const RUN: usize = N - 1;
+        const BUDGET: usize = 1 << 20;
+        let nfa = Nfa::compile(&Pattern::Quantified(
+            Box::new(Pattern::Var("a".into())),
+            Quantifier::Range {
+                min: N as u32,
+                max: Some(N as u32),
+            },
+            false,
+        ));
+        let a = BTreeSet::from(["a".to_owned()]);
+        let x = BTreeSet::from(["x".to_owned()]);
+        let rows: Vec<BTreeSet<String>> = std::iter::repeat_n(a.clone(), RUN)
+            .chain(std::iter::once(x))
+            .chain(std::iter::repeat_n(a, N))
+            .collect();
+        let n_rows = rows.len();
+        let matcher = SetMatcher::new(rows);
+        let mut inc = IncrementalMatcher::new(std::sync::Arc::new(nfa), SkipMode::PastLastRow);
+
+        let seqs: Vec<Seq> = (0..n_rows as i64).map(Seq).collect();
+        let mut budget = ScanBudget::new(BUDGET);
+        inc.advance(&seqs, &matcher, &mut budget, true)
+            .await
+            .unwrap();
+        assert!(
+            budget.hit,
+            "the test needs a rescan that outruns one visit's budget"
+        );
+        assert!(inc.is_incomplete());
+        assert!(
+            inc.provisional().is_empty(),
+            "the finder never got past the break"
+        );
+        let proven_after_first_visit = inc.dead_prefix_end();
+        assert!(
+            proven_after_first_visit > 0,
+            "the truncated rescan must still have proved a prefix of starts matchless"
+        );
+
+        let mut visits = 1;
+        while inc.needs_refresh() {
+            assert!(visits < 4, "the rescan did not converge in {visits} visits");
+            budget = ScanBudget::new(BUDGET);
+            inc.refresh(&matcher, &mut budget, true).await.unwrap();
+            visits += 1;
+        }
+        assert_eq!(visits, 2, "one resume should finish the run");
+
+        // The match after the break is found; everything before it is proven dead (the run and
+        // the break row are matchless), and the acyclic shortcut proves the match's own region
+        // dead up to the first position that can still reach the boundary.
+        let spans: Vec<(i64, i64)> = inc
+            .provisional()
+            .iter()
+            .map(|m| (m.start_seq.0, m.end_seq.0))
+            .collect();
+        assert_eq!(spans, vec![((RUN + 1) as i64, (RUN + 1 + N) as i64)]);
+        assert_eq!(inc.dead_prefix_end(), n_rows - N);
+        assert_eq!(
+            inc.frozen(),
+            0,
+            "positions from {} on are alive",
+            n_rows - N
+        );
+        assert!(!inc.needs_refresh());
     }
 
     #[tokio::test]
