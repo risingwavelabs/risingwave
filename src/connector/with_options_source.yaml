@@ -1266,6 +1266,12 @@ PosixFsProperties:
     default: Default::default
 PubsubProperties:
   fields:
+  - name: pubsub.project_id
+    field_type: String
+    comments: |-
+      The Google Pub/Sub project ID. If omitted, the connector uses the project ID from
+      the credentials or Application Default Credentials.
+    required: false
   - name: pubsub.subscription
     field_type: String
     comments: |-
@@ -1286,7 +1292,9 @@ PubsubProperties:
   - name: pubsub.credentials
     field_type: String
     comments: |-
-      `credentials` is a JSON string containing the service account credentials.
+      `credentials` is a JSON string containing the service account credentials. If omitted,
+      the connector uses Google Application Default Credentials (ADC) when allowed by the
+      deployment environment.
       See the [service-account credentials guide](https://developers.google.com/workspace/guides/create-credentials#create_credentials_for_a_service_account).
       The service account must have the `pubsub.subscriber` [role](https://cloud.google.com/pubsub/docs/access-control#roles).
     required: false
