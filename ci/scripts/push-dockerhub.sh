@@ -3,9 +3,9 @@
 # Exits as soon as any line fails.
 set -euo pipefail
 
-: "${SOURCE_IMAGE_TAG:?Set SOURCE_IMAGE_TAG to the tag to copy from GHCR}"
+: "${IMAGE_TAG:?Set IMAGE_TAG to the tag to copy from GHCR}"
 
-TARGET_IMAGE_TAG="${TARGET_IMAGE_TAG:-${SOURCE_IMAGE_TAG}}"
+TARGET_IMAGE_TAG="${TARGET_IMAGE_TAG:-${IMAGE_TAG}}"
 ghcraddr="ghcr.io/risingwavelabs/risingwave"
 dockerhubaddr="docker.io/risingwavelabs/risingwave"
 
@@ -19,10 +19,10 @@ function validateImageTag() {
   fi
 }
 
-validateImageTag "${SOURCE_IMAGE_TAG}" "SOURCE_IMAGE_TAG"
+validateImageTag "${IMAGE_TAG}" "IMAGE_TAG"
 validateImageTag "${TARGET_IMAGE_TAG}" "TARGET_IMAGE_TAG"
 
-source_image="${ghcraddr}:${SOURCE_IMAGE_TAG}"
+source_image="${ghcraddr}:${IMAGE_TAG}"
 target_image="${dockerhubaddr}:${TARGET_IMAGE_TAG}"
 
 echo "--- ghcr login"
