@@ -134,7 +134,9 @@ public class DbzConnectorConfig {
             boolean snapshotDone,
             boolean isCdcSourceJob) {
 
-        StringSubstitutor substitutor = new StringSubstitutor(userProps);
+        var substitutionProps = new HashMap<>(userProps);
+        substitutionProps.put("source.id", Long.toString(sourceId));
+        StringSubstitutor substitutor = new StringSubstitutor(substitutionProps);
         var dbzProps = initiateDbConfig(DBZ_CONFIG_FILE, substitutor);
         var isCdcBackfill =
                 null != userProps.get(SNAPSHOT_MODE_KEY)
