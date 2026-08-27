@@ -22,10 +22,22 @@ WITH (
   collection.name = 'random_data.*'
 );
 
-# collection.name is only a Debezium collection filter. Without database.list, Debezium
-# still discovers every database, even when collection.name starts with an exact database.
+# A regular-expression collection filter does not trigger database inference, so Debezium
+# still discovers every database and the limited user cannot list collections in config.
 statement error Failed to discover MongoDB collections with the configured user:.*not authorized on config to execute command.*listCollections
 CREATE TABLE users_insufficient_discovery_privilege (
+  _id JSONB PRIMARY KEY,
+  payload JSONB
+) WITH (
+  connector = 'mongodb-cdc',
+  mongodb.url = 'mongodb://rw_limited:risingwave@mongodb-auth:27017/?replicaSet=rs-auth&authSource=admin',
+  collection.name = 'rw_allowed[.]events'
+);
+
+# An unambiguous literal collection list infers Debezium's database include list and literal
+# match mode at runtime, avoiding discovery of databases that the limited user cannot access.
+statement ok
+CREATE TABLE users_inferred_database_list (
   _id JSONB PRIMARY KEY,
   payload JSONB
 ) WITH (
@@ -34,76 +46,34 @@ CREATE TABLE users_insufficient_discovery_privilege (
   collection.name = 'rw_allowed.events'
 );
 
-# The RisingWave options pass through unchanged to Debezium's database and collection filters.
-# Literal mode makes both filters exact names instead of regular expressions.
-statement ok
-CREATE TABLE users_explicit_database_list (
-  _id JSONB PRIMARY KEY,
-  payload JSONB
-) WITH (
-  connector = 'mongodb-cdc',
-  mongodb.url = 'mongodb://rw_limited:risingwave@mongodb-auth:27017/?replicaSet=rs-auth&authSource=admin',
-  database.list = 'rw_allowed',
-  collection.name = 'rw_allowed.events',
-  collection.match.mode = 'literal'
-);
-
 query I retry 20 backoff 1s
-SELECT count(*) FROM users_explicit_database_list;
+SELECT count(*) FROM users_inferred_database_list;
 ----
 1
 
 statement ok
-DROP TABLE users_explicit_database_list;
+DROP TABLE users_inferred_database_list;
 
-# RisingWave mirrors Debezium's match-mode validation during DDL binding.
-statement error .*collection.match.mode.*must be 'regex' or 'literal'.*
-CREATE TABLE users_invalid_collection_match_mode (
+# Restricting Debezium's database discovery to the authorized database avoids touching
+# config and allows both validation and ingestion to proceed.
+statement ok
+CREATE TABLE users_restricted_database_discovery (
   _id JSONB PRIMARY KEY,
   payload JSONB
 ) WITH (
   connector = 'mongodb-cdc',
   mongodb.url = 'mongodb://rw_limited:risingwave@mongodb-auth:27017/?replicaSet=rs-auth&authSource=admin',
-  database.list = 'rw_allowed',
-  collection.name = 'rw_allowed.events',
-  collection.match.mode = 'invalid'
-);
-
-# New objects cannot specify both a RisingWave alias and its raw Debezium option.
-statement error MongoDB CDC options 'database.list' and 'debezium.database.include.list' cannot be set together
-CREATE TABLE users_duplicate_database_list (
-  _id JSONB PRIMARY KEY,
-  payload JSONB
-) WITH (
-  connector = 'mongodb-cdc',
-  mongodb.url = 'mongodb://mongodb:27017/?replicaSet=rs0',
-  database.list = 'rw_allowed',
   collection.name = 'rw_allowed.events',
   debezium.database.include.list = 'rw_allowed'
 );
 
-statement error MongoDB CDC options 'collection.name' and 'debezium.collection.include.list' cannot be set together
-CREATE TABLE users_duplicate_collection_list (
-  _id JSONB PRIMARY KEY,
-  payload JSONB
-) WITH (
-  connector = 'mongodb-cdc',
-  mongodb.url = 'mongodb://mongodb:27017/?replicaSet=rs0',
-  collection.name = 'rw_allowed.events',
-  debezium.collection.include.list = 'rw_allowed.events'
-);
+query I retry 20 backoff 1s
+SELECT count(*) FROM users_restricted_database_discovery;
+----
+1
 
-statement error MongoDB CDC options 'collection.match.mode' and 'debezium.filters.match.mode' cannot be set together
-CREATE TABLE users_duplicate_collection_match_mode (
-  _id JSONB PRIMARY KEY,
-  payload JSONB
-) WITH (
-  connector = 'mongodb-cdc',
-  mongodb.url = 'mongodb://mongodb:27017/?replicaSet=rs0',
-  collection.name = 'rw_allowed.events',
-  collection.match.mode = 'literal',
-  debezium.filters.match.mode = 'regex'
-);
+statement ok
+DROP TABLE users_restricted_database_discovery;
 
 system ok
 mongosh 'mongodb://mongodb:27017' <<EOF

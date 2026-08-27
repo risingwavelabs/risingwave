@@ -28,78 +28,100 @@ import org.junit.Test;
 public class MongoDbConnectorConfigTest {
 
     @Test
-    public void testFilterAliasesPassThroughWithoutParsing() {
+    public void testLiteralCollectionListInfersDatabaseListAndMatchMode() {
         var properties =
                 resolvedProperties(
-                        "db[12][.]events_.*",
-                        Map.of(
-                                "database.list", "db1,db2.*",
-                                "collection.match.mode", "regex"));
+                        "Sales_db.Orders-2026, archive-db.events_2, Sales_db.Other", Map.of());
 
         assertThat(properties)
-                .containsEntry("database.include.list", "db1,db2.*")
-                .containsEntry("collection.include.list", "db[12][.]events_.*")
-                .containsEntry("filters.match.mode", "regex");
-    }
-
-    @Test
-    public void testLiteralCollectionMatchModePassesThrough() {
-        var properties =
-                resolvedProperties("db1.events", Map.of("collection.match.mode", "literal"));
-
-        assertThat(properties)
-                .containsEntry("collection.include.list", "db1.events")
+                .containsEntry("database.include.list", "Sales_db,archive-db")
+                .containsEntry(
+                        "collection.include.list",
+                        "Sales_db.Orders-2026, archive-db.events_2, Sales_db.Other")
                 .containsEntry("filters.match.mode", "literal");
     }
 
     @Test
-    public void testDatabaseListIsNotInferredFromCollectionName() {
-        var properties = resolvedProperties("db1.events", Map.of());
+    public void testLiteralCollectionListSupportsLeadingUnderscores() {
+        var properties = resolvedProperties("_internal._events", Map.of());
+
+        assertThat(properties)
+                .containsEntry("database.include.list", "_internal")
+                .containsEntry("collection.include.list", "_internal._events")
+                .containsEntry("filters.match.mode", "literal");
+    }
+
+    @Test
+    public void testNonLiteralCollectionListsAreNotInferred() {
+        for (var collectionList :
+                new String[] {
+                    "db[12][.]events_.*",
+                    "db.collection.more",
+                    "db.collection,",
+                    "db.collection,,other.events",
+                    " db.collection",
+                    "db.collection ",
+                    "db.collection\t,other.events",
+                    "1db.collection",
+                    "db.$collection"
+                }) {
+            var properties = resolvedProperties(collectionList, Map.of());
+
+            assertThat(properties)
+                    .describedAs("resolved properties for collection list %s", collectionList)
+                    .doesNotContainKey("database.include.list")
+                    .doesNotContainKey("filters.match.mode")
+                    .containsEntry("collection.include.list", collectionList);
+        }
+    }
+
+    @Test
+    public void testDebeziumDatabaseIncludeListDisablesInference() {
+        var properties =
+                resolvedProperties(
+                        "db1.events", Map.of("debezium.database.include.list", "explicit_db"));
+
+        assertThat(properties)
+                .containsEntry("database.include.list", "explicit_db")
+                .doesNotContainKey("filters.match.mode");
+    }
+
+    @Test
+    public void testDebeziumDatabaseExcludeListDisablesInference() {
+        var properties =
+                resolvedProperties(
+                        "db1.events", Map.of("debezium.database.exclude.list", "legacy_.*"));
 
         assertThat(properties)
                 .doesNotContainKey("database.include.list")
-                .doesNotContainKey("filters.match.mode")
-                .containsEntry("collection.include.list", "db1.events");
+                .containsEntry("database.exclude.list", "legacy_.*")
+                .doesNotContainKey("filters.match.mode");
     }
 
     @Test
-    public void testLegacyDebeziumDatabaseListPassesThrough() {
-        var properties =
-                resolvedProperties(
-                        "db1.events", Map.of("debezium.database.include.list", "legacy_db"));
+    public void testDebeziumMatchModeDisablesInference() {
+        for (var matchMode : new String[] {"regex", "literal", "invalid"}) {
+            var properties =
+                    resolvedProperties(
+                            "db1.events", Map.of("debezium.filters.match.mode", matchMode));
 
-        assertThat(properties)
-                .containsEntry("database.include.list", "legacy_db")
-                .containsEntry("collection.include.list", "db1.events");
+            assertThat(properties)
+                    .doesNotContainKey("database.include.list")
+                    .containsEntry("filters.match.mode", matchMode);
+        }
     }
 
     @Test
-    public void testAliasesTakePrecedenceOverLegacyDebeziumOptions() {
+    public void testCollectionNameKeepsPrecedenceForHistoricalProperties() {
         var properties =
                 resolvedProperties(
                         "db1.events",
-                        Map.of(
-                                "database.list", "db1",
-                                "debezium.database.include.list", "legacy_db",
-                                "collection.match.mode", "literal",
-                                "debezium.collection.include.list", "db2.events",
-                                "debezium.filters.match.mode", "regex"));
+                        Map.of("debezium.collection.include.list", "legacy_db.events"));
 
         assertThat(properties)
                 .containsEntry("database.include.list", "db1")
                 .containsEntry("collection.include.list", "db1.events")
                 .containsEntry("filters.match.mode", "literal");
-    }
-
-    @Test
-    public void testLegacyDebeziumExcludeListPassesThrough() {
-        var properties =
-                resolvedProperties(
-                        "db1.events", Map.of("debezium.database.exclude.list", "legacy_db"));
-
-        assertThat(properties)
-                .doesNotContainKey("database.include.list")
-                .containsEntry("database.exclude.list", "legacy_db");
     }
 
     private static Map<String, String> resolvedProperties(
