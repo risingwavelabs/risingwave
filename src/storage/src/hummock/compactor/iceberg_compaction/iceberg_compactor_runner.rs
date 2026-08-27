@@ -20,13 +20,13 @@ use derive_builder::Builder;
 use iceberg::spec::MAIN_BRANCH;
 use iceberg::{Catalog, TableIdent};
 use iceberg_compaction_core::compaction::{
-    AutoCompactionPlanner, CommitConsistencyParams, CommitManagerRetryConfig, CompactionBuilder,
-    CompactionPlan, CompactionPlanner, CompactionResult, RewriteResult,
+    CommitConsistencyParams, CommitManagerRetryConfig, CompactionBuilder, CompactionPlan,
+    CompactionPlanner, CompactionResult, RewriteResult,
 };
 use iceberg_compaction_core::config::{
-    AutoCompactionConfig, AutoCompactionConfigBuilder, CompactionExecutionConfigBuilder,
-    CompactionPlanningConfig, FileGroupScope, FilesWithDeletesConfigBuilder,
-    FullCompactionConfigBuilder, GroupFilters, SmallFilesConfigBuilder,
+    AutoCompactionConfigBuilder, CompactionExecutionConfigBuilder, CompactionPlanningConfig,
+    FileGroupScope, FilesWithDeletesConfigBuilder, FullCompactionConfigBuilder, GroupFilters,
+    SmallFilesConfigBuilder,
 };
 use iceberg_compaction_core::executor::RewriteFilesStat;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
@@ -96,11 +96,6 @@ pub struct IcebergCompactionTaskStatistics {
     pub total_pos_del_file_count: u32,
     pub total_eq_del_file_size: u64,
     pub total_eq_del_file_count: u32,
-}
-
-enum IcebergTaskPlanningConfig {
-    Auto(AutoCompactionConfig),
-    Explicit(CompactionPlanningConfig),
 }
 
 impl Debug for IcebergCompactionTaskStatistics {
@@ -532,7 +527,7 @@ fn build_task_planning_config(
     task_type: TaskType,
     iceberg_config: &IcebergConfig,
     config: &IcebergCompactorRunnerConfig,
-) -> HummockResult<IcebergTaskPlanningConfig> {
+) -> HummockResult<CompactionPlanningConfig> {
     let grouping_strategy = match iceberg_config.write_mode {
         IcebergWriteMode::CopyOnWrite => iceberg_compaction_core::config::GroupingStrategy::Single,
         IcebergWriteMode::MergeOnRead => match config.target_binpack_group_size_mb {
@@ -578,7 +573,7 @@ fn build_task_planning_config(
             let config = builder
                 .build()
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-            IcebergTaskPlanningConfig::Auto(config)
+            CompactionPlanningConfig::Auto(config)
         }
         TaskType::SmallFiles => {
             let mut builder = SmallFilesConfigBuilder::default();
@@ -599,7 +594,7 @@ fn build_task_planning_config(
             let config = builder
                 .build()
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-            IcebergTaskPlanningConfig::Explicit(CompactionPlanningConfig::SmallFiles(config))
+            CompactionPlanningConfig::SmallFiles(config)
         }
         TaskType::Full => {
             let file_group_scope = if should_enable_iceberg_cow(
@@ -621,7 +616,7 @@ fn build_task_planning_config(
                 .file_group_scope(file_group_scope)
                 .build()
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-            IcebergTaskPlanningConfig::Explicit(CompactionPlanningConfig::Full(config))
+            CompactionPlanningConfig::Full(config)
         }
         TaskType::FilesWithDelete => {
             let config = FilesWithDeletesConfigBuilder::default()
@@ -635,7 +630,7 @@ fn build_task_planning_config(
                 .min_delete_file_count_threshold(iceberg_config.delete_files_count_threshold())
                 .build()
                 .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-            IcebergTaskPlanningConfig::Explicit(CompactionPlanningConfig::FilesWithDeletes(config))
+            CompactionPlanningConfig::FilesWithDeletes(config)
         }
         _ => unreachable!("Unsupported task type in iceberg compaction task: {task_type:?}"),
     };
@@ -680,33 +675,10 @@ pub async fn create_task_execution(
         .await
         .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
-    let compaction_plans = match planning_config {
-        IcebergTaskPlanningConfig::Auto(config) => {
-            let report = AutoCompactionPlanner::new(config)
-                .plan_compaction_report_with_branch(&table, &branch)
-                .await
-                .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
-            tracing::info!(
-                iceberg_component = "compaction_worker",
-                iceberg_operation = "plan_auto_task",
-                task_id = %task_id,
-                sink_id,
-                table = %table_ident,
-                branch = %branch,
-                selected_strategy = ?report.selected_strategy,
-                reason = ?report.reason,
-                planned_input_bytes = report.planned_input_bytes,
-                planned_input_files = report.planned_input_files,
-                rewrite_ratio = report.rewrite_ratio,
-                "iceberg_auto_compaction_strategy_selected",
-            );
-            report.plans
-        }
-        IcebergTaskPlanningConfig::Explicit(config) => CompactionPlanner::new(config)
-            .plan_compaction_with_branch(&table, &branch)
-            .await
-            .map_err(|e| HummockError::compaction_executor(e.as_report()))?,
-    };
+    let compaction_plans = CompactionPlanner::new(planning_config)
+        .plan_compaction_with_branch(&table, &branch)
+        .await
+        .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
 
     if compaction_plans.is_empty() {
         tracing::info!(
@@ -806,7 +778,7 @@ mod tests {
             min_group_file_count: Some(3),
         };
 
-        let IcebergTaskPlanningConfig::Auto(config) =
+        let CompactionPlanningConfig::Auto(config) =
             build_task_planning_config(TaskType::Auto, &iceberg_config, &runner_config).unwrap()
         else {
             panic!("expected auto planning config");
@@ -819,9 +791,6 @@ mod tests {
         assert_eq!(config.target_file_size_bytes, 256 * 1024 * 1024);
         assert_eq!(config.small_file_threshold_bytes, 96 * 1024 * 1024);
         assert_eq!(config.min_delete_file_count_threshold, 7);
-        assert_eq!(config.thresholds.min_small_files_count, 5);
-        assert_eq!(config.thresholds.min_delete_heavy_files_count, 1);
-
         let iceberg_compaction_core::config::GroupingStrategy::BinPack(bin_pack) =
             config.grouping_strategy
         else {
