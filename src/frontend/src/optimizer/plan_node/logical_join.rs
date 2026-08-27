@@ -605,7 +605,7 @@ impl PlanTreeNodeBinary<Logical> for LogicalJoin {
         right: PlanRef,
         right_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
-        let (new_on, new_output_indices) = {
+        let (new_on, new_output_indices, temporal_event_time_as_of) = {
             let (mut map, _) = left_col_change.clone().into_parts();
             let (mut right_map, _) = right_col_change.clone().into_parts();
             for i in right_map.iter_mut().flatten() {
@@ -620,16 +620,21 @@ impl PlanTreeNodeBinary<Logical> for LogicalJoin {
                 .map(|&i| mapping.map(i))
                 .collect::<Vec<_>>();
             let new_on = self.on().clone().rewrite_expr(&mut mapping);
-            (new_on, new_output_indices)
+            let temporal_event_time_as_of = self
+                .temporal_event_time_as_of()
+                .cloned()
+                .map(|as_of| mapping.rewrite_expr(as_of));
+            (new_on, new_output_indices, temporal_event_time_as_of)
         };
 
-        let join = Self::with_output_indices(
+        let mut join = Self::with_output_indices(
             left,
             right,
             self.join_type(),
             new_on,
             new_output_indices.clone(),
         );
+        join.set_temporal_event_time_as_of(temporal_event_time_as_of);
 
         let new_i2o = ColIndexMapping::with_remaining_columns(
             &new_output_indices,

@@ -353,6 +353,48 @@
         │ └─StreamTableScan { table: orders, columns: [orders.order_id, orders.currency, orders.amount, orders.order_time], stream_scan_type: SnapshotBackfill, stream_key: [orders.order_id, orders.order_time], pk: [order_id], dist: UpstreamHashShard(orders.order_id) }
         └─StreamExchange { dist: HashShard(exchange_rates.currency) }
           └─StreamTableScan { table: exchange_rates, columns: [exchange_rates.currency, exchange_rates.cents_per_unit, exchange_rates.rate_time], stream_scan_type: SnapshotBackfill, stream_key: [exchange_rates.currency, exchange_rates.rate_time], pk: [currency, rate_time], dist: UpstreamHashShard(exchange_rates.currency, exchange_rates.rate_time) }
+- name: event-time temporal join with qualified AS OF among duplicate column names
+  sql: |
+    create table orders (
+      order_id int primary key,
+      order_time timestamp,
+      watermark for order_time as order_time - interval '1' second with ttl
+    );
+    create table shipments (
+      order_id int primary key,
+      order_time timestamp,
+      watermark for order_time as order_time - interval '1' second with ttl
+    );
+    create table exchange_rates (
+      order_id int,
+      rate_time timestamp,
+      cents_per_unit int,
+      watermark for rate_time as rate_time - interval '1' second with ttl,
+      primary key (order_id, rate_time)
+    );
+    select
+      orders.order_id,
+      orders.order_time as order_time,
+      shipments.order_time as shipment_time,
+      cents_per_unit
+    from orders
+    join shipments
+      on orders.order_id = shipments.order_id
+      and orders.order_time = shipments.order_time
+    join exchange_rates FOR SYSTEM_TIME AS OF orders.order_time
+      on orders.order_id = exchange_rates.order_id;
+  stream_plan: |-
+    StreamMaterialize { columns: [order_id, order_time, shipment_time, cents_per_unit, exchange_rates.order_id(hidden), exchange_rates.rate_time(hidden)], stream_key: [order_id, order_time, exchange_rates.rate_time], pk_columns: [order_id, order_time, exchange_rates.rate_time], pk_conflict: NoCheck, watermark_columns: [order_time] }
+    └─StreamExchange { dist: HashShard(orders.order_id, orders.order_time, exchange_rates.rate_time) }
+      └─StreamTemporalJoin { type: Inner, append_only: true, predicate: orders.order_id = exchange_rates.order_id, nested_loop: false, output_watermarks: [[orders.order_time]], output: [orders.order_id, orders.order_time, shipments.order_time, exchange_rates.cents_per_unit, exchange_rates.order_id, exchange_rates.rate_time] }
+        ├─StreamExchange { dist: HashShard(orders.order_id) }
+        │ └─StreamHashJoin [window] { type: Inner, predicate: orders.order_time = shipments.order_time AND orders.order_id = shipments.order_id, conditions_to_clean_state_in_join_key: [(orders.order_time = shipments.order_time)], output_watermarks: [[orders.order_time], [shipments.order_time]], output: [orders.order_id, orders.order_time, shipments.order_time, shipments.order_id] }
+        │   ├─StreamExchange { dist: HashShard(orders.order_id, orders.order_time) }
+        │   │ └─StreamTableScan { table: orders, columns: [orders.order_id, orders.order_time], stream_scan_type: SnapshotBackfill, stream_key: [orders.order_id, orders.order_time], pk: [order_id], dist: UpstreamHashShard(orders.order_id) }
+        │   └─StreamExchange { dist: HashShard(shipments.order_id, shipments.order_time) }
+        │     └─StreamTableScan { table: shipments, columns: [shipments.order_id, shipments.order_time], stream_scan_type: SnapshotBackfill, stream_key: [shipments.order_id, shipments.order_time], pk: [order_id], dist: UpstreamHashShard(shipments.order_id) }
+        └─StreamExchange { dist: HashShard(exchange_rates.order_id) }
+          └─StreamTableScan { table: exchange_rates, columns: [exchange_rates.order_id, exchange_rates.cents_per_unit, exchange_rates.rate_time], stream_scan_type: SnapshotBackfill, stream_key: [exchange_rates.order_id, exchange_rates.rate_time], pk: [order_id, rate_time], dist: UpstreamHashShard(exchange_rates.order_id, exchange_rates.rate_time) }
 - name: event-time temporal join requires unique right version per join key and time
   sql: |
     create table orders (

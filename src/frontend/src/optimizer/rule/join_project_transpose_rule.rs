@@ -55,6 +55,12 @@ impl Rule<Logical> for JoinProjectTransposeRule {
             && left_input_index_on_condition
                 .iter()
                 .all(|index| project.exprs()[*index].as_input_ref().is_some())
+            && join.temporal_event_time_as_of().is_none_or(|as_of| {
+                as_of
+                    .as_input_ref()
+                    .and_then(|input_ref| project.exprs().get(input_ref.index()))
+                    .is_some_and(|expr| expr.as_input_ref().is_some())
+            })
             && join_type != JoinType::RightAnti
             && join_type != JoinType::RightSemi
             && join_type != JoinType::RightOuter
@@ -146,8 +152,13 @@ impl Rule<Logical> for JoinProjectTransposeRule {
             return None;
         }
 
+        let temporal_event_time_as_of = join
+            .temporal_event_time_as_of()
+            .cloned()
+            .map(|as_of| IndexRewriter::new(old_i2new_i.clone()).rewrite_expr(as_of));
         let new_cond = on.rewrite_expr(&mut IndexRewriter::new(old_i2new_i));
-        let new_join = LogicalJoin::new(new_left, new_right, join_type, new_cond);
+        let mut new_join = LogicalJoin::new(new_left, new_right, join_type, new_cond);
+        new_join.set_temporal_event_time_as_of(temporal_event_time_as_of);
 
         // remain only the columns that are output in the original join
         let new_proj_exprs = join
