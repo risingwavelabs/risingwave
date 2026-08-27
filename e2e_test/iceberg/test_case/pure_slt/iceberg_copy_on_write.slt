@@ -235,28 +235,21 @@ and sequence_number > ${pre_cleanup_seq}
 order by sequence_number
 limit 1
 
-# The compaction commit uses the minimum sequence among delete-affected data files, so the older
-# equality delete is retired even though the untouched clean file has a lower sequence. Inspect the
-# manifest directly because the snapshot summary does not account for sequence-filtered deletes.
-query TI
-select content, deleted_files_count
-from "t_cow_incremental\$manifests"
-for system_version as of ${cleanup_snapshot_id}
-where deleted_files_count > 0
-order by content;
+# The compaction commit rewrites only the delete-affected data file. Verify the partial-overwrite
+# summary here because release-3.0 does not expose per-table $manifests or $files relations. Delete
+# file totals do not account for sequence-filtered manifest entries, so their final cleanup is
+# checked against rw_iceberg_files after the ingestion snapshot is published to main.
+query TTT
+select
+    summary->>'deleted-data-files' = '1',
+    summary->>'deleted-records' = '1',
+    summary->>'total-data-files' = '4'
+from rw_iceberg_snapshots
+where schema_name = 'public'
+and source_name = '__iceberg_source_t_cow_incremental'
+and snapshot_id = ${cleanup_snapshot_id};
 ----
-data 1
-deletes 1
-
-# The newest equality delete follows the existing strict sequence rule and remains live on the
-# ingestion branch.
-query I
-select count(*)
-from "t_cow_incremental\$files"
-for system_version as of ${cleanup_snapshot_id}
-where content = 'EqualityDeletes';
-----
-1
+t t t
 
 query I retry 10 backoff 1s
 select count(*) from rw_iceberg_files
