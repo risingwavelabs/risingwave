@@ -193,7 +193,8 @@ impl WaitCheckpointTask {
                         return;
                     };
 
-                    let Some(ack_tx) = PULSAR_ACK_CHANNEL.get(ack_channel_id).await else {
+                    let Some(ack_tx) = PULSAR_ACK_CHANNEL.lock().get(ack_channel_id).cloned()
+                    else {
                         GLOBAL_SOURCE_METRICS.inc_connector_ack_failure_count(
                             source_name,
                             "pulsar",
