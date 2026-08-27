@@ -72,8 +72,9 @@ pub struct QueryExecution {
     shutdown_tx: Sender<QueryMessage>,
     /// Identified by `process_id`, `secret_key`. Query in the same session should have same key.
     pub session_id: SessionId,
+    /// Whether a PostgreSQL `CancelRequest` for the session should cancel this query.
+    can_session_cancel: bool,
     /// Permit to execute the query. Once query finishes execution, this is dropped.
-    #[expect(dead_code)]
     pub permit: Option<tokio::sync::OwnedSemaphorePermit>,
 }
 
@@ -100,6 +101,7 @@ impl QueryExecution {
         query: Query,
         session_id: SessionId,
         permit: Option<tokio::sync::OwnedSemaphorePermit>,
+        can_session_cancel: bool,
     ) -> Self {
         let query = Arc::new(query);
         let (sender, receiver) = channel(100);
@@ -112,8 +114,14 @@ impl QueryExecution {
             state: RwLock::new(state),
             shutdown_tx: sender,
             session_id,
+            can_session_cancel,
             permit,
         }
+    }
+
+    /// Returns whether PostgreSQL session cancellation should abort this query.
+    pub fn can_session_cancel(&self) -> bool {
+        self.can_session_cancel
     }
 
     /// Start execution of this query.
@@ -505,7 +513,7 @@ pub(crate) mod tests {
             CatalogReader::new(Arc::new(parking_lot::RwLock::new(Catalog::default())));
         let query = create_query().await;
         let query_id = query.query_id().clone();
-        let query_execution = Arc::new(QueryExecution::new(query, (0, 0), None));
+        let query_execution = Arc::new(QueryExecution::new(query, (0, 0), None, true));
         let query_execution_info = Arc::new(RwLock::new(QueryExecutionInfo::new_from_map(
             HashMap::from([(query_id, query_execution.clone())]),
         )));

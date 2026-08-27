@@ -34,7 +34,7 @@ use super::QueryExecution;
 use super::stats::DistributedQueryMetrics;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::scheduler::plan_fragmenter::{Query, QueryId};
-use crate::scheduler::{ExecutionContextRef, SchedulerResult};
+use crate::scheduler::{ExecutionContextRef, ReadSnapshot, SchedulerResult};
 
 pub struct DistributedQueryStream {
     chunk_rx: tokio::sync::mpsc::Receiver<SchedulerResult<DataChunk>>,
@@ -106,6 +106,53 @@ impl QueryExecutionInfo {
 
 pub type QueryExecutionInfoRef = Arc<RwLock<QueryExecutionInfo>>;
 
+/// Cancels a distributed query if scheduling is dropped before stream ownership is transferred.
+struct PendingQueryRegistration {
+    query_id: QueryId,
+    query_execution: Arc<QueryExecution>,
+    query_execution_info: QueryExecutionInfoRef,
+    armed: bool,
+}
+
+impl PendingQueryRegistration {
+    /// Arms cleanup for a query that has been inserted into the execution map.
+    fn new(
+        query_id: QueryId,
+        query_execution: Arc<QueryExecution>,
+        query_execution_info: QueryExecutionInfoRef,
+    ) -> Self {
+        Self {
+            query_id,
+            query_execution,
+            query_execution_info,
+            armed: true,
+        }
+    }
+
+    /// Transfers cleanup responsibility to the returned [`DistributedQueryStream`].
+    fn disarm(&mut self) {
+        self.armed = false;
+    }
+}
+
+impl Drop for PendingQueryRegistration {
+    fn drop(&mut self) {
+        if !self.armed {
+            return;
+        }
+        self.query_execution_info
+            .write()
+            .unwrap()
+            .delete_query(&self.query_id);
+        let query_execution = self.query_execution.clone();
+        tokio::spawn(async move {
+            query_execution
+                .abort("query scheduling was cancelled".to_owned())
+                .await;
+        });
+    }
+}
+
 impl QueryExecutionInfo {
     pub fn add_query(&mut self, query_id: QueryId, query_execution: Arc<QueryExecution>) {
         self.query_execution_map.insert(query_id, query_execution);
@@ -118,7 +165,7 @@ impl QueryExecutionInfo {
     pub fn abort_queries(&self, session_id: SessionId) {
         for query in self.query_execution_map.values() {
             // `QueryExecutionInfo` might have queries from different sessions.
-            if query.session_id == session_id {
+            if query.session_id == session_id && query.can_session_cancel() {
                 let query = query.clone();
                 // Spawn a task to abort. Avoid await point in this function.
                 tokio::spawn(async move { query.abort("cancelled by user".to_owned()).await });
@@ -144,6 +191,7 @@ pub struct QueryManager {
 }
 
 impl QueryManager {
+    /// Creates a distributed query manager with optional per-session and global limits.
     pub fn new(
         worker_node_manager: WorkerNodeManagerRef,
         compute_client_pool: ComputeClientPoolRef,
@@ -186,13 +234,19 @@ impl QueryManager {
         }
     }
 
+    /// Schedules a distributed query and transfers cleanup ownership to its returned stream.
+    ///
+    /// `snapshot` supplies a caller-owned storage view. When it is `None`, the query uses the
+    /// snapshot pinned by the current session transaction.
     pub async fn schedule(
         &self,
         context: ExecutionContextRef,
         mut query: Query,
+        can_session_cancel: bool,
+        snapshot: Option<ReadSnapshot>,
     ) -> SchedulerResult<DistributedQueryStream> {
         // TODO: if there's no table scan, we don't need to acquire snapshot.
-        let pinned_snapshot = context.session().pinned_snapshot();
+        let pinned_snapshot = snapshot.unwrap_or_else(|| context.session().pinned_snapshot());
         pinned_snapshot.fill_batch_query_epoch(&mut query)?;
 
         if let Some(query_limit) = self.distributed_query_limit
@@ -206,7 +260,12 @@ impl QueryManager {
         }
         let query_id = query.query_id.clone();
         let permit = self.get_permit().await?;
-        let query_execution = Arc::new(QueryExecution::new(query, context.session().id(), permit));
+        let query_execution = Arc::new(QueryExecution::new(
+            query,
+            context.session().id(),
+            permit,
+            can_session_cancel,
+        ));
 
         // Add queries status when begin.
         context
@@ -214,6 +273,11 @@ impl QueryManager {
             .env()
             .query_manager()
             .add_query(query_id.clone(), query_execution.clone());
+        let mut registration = PendingQueryRegistration::new(
+            query_id.clone(),
+            query_execution.clone(),
+            self.query_execution_info.clone(),
+        );
 
         let worker_node_manager_reader = WorkerNodeSelector::new(
             self.worker_node_manager.clone(),
@@ -230,21 +294,31 @@ impl QueryManager {
                 self.query_execution_info.clone(),
                 self.query_metrics.clone(),
             )
-            .await
-            .inspect_err(|_| {
-                // Clean up query execution on error.
-                context
-                    .session()
-                    .env()
-                    .query_manager()
-                    .delete_query(&query_id);
-            })?;
-        Ok(query_result_fetcher.stream_from_channel())
+            .await?;
+        let stream = query_result_fetcher.stream_from_channel();
+        registration.disarm();
+        Ok(stream)
     }
 
+    /// Cancels queries that opted into PostgreSQL session cancellation.
     pub fn cancel_queries_in_session(&self, session_id: SessionId) {
         let query_execution_info = self.query_execution_info.read().unwrap();
         query_execution_info.abort_queries(session_id);
+    }
+
+    /// Cancels one distributed query without blocking its caller on teardown.
+    pub fn cancel_query(&self, query_id: &QueryId, reason: impl Into<String>) {
+        let query_execution = self
+            .query_execution_info
+            .read()
+            .unwrap()
+            .query_execution_map
+            .get(query_id)
+            .cloned();
+        if let Some(query_execution) = query_execution {
+            let reason = reason.into();
+            tokio::spawn(async move { query_execution.abort(reason).await });
+        }
     }
 
     pub fn add_query(&self, query_id: QueryId, query_execution: Arc<QueryExecution>) {

@@ -579,6 +579,38 @@ pub mod tests {
         assert!(err.to_string().contains("unknown field `not_a_real_param`"));
     }
 
+    #[test]
+    fn test_cursor_data_chunk_channel_capacity_is_configurable_and_nonzero() {
+        assert_eq!(
+            RwConfig::default()
+                .frontend
+                .cursor_data_chunk_channel_capacity,
+            10
+        );
+
+        let config: RwConfig = toml::from_str(
+            r#"
+            [frontend]
+            cursor_data_chunk_channel_capacity = 3
+            "#,
+        )
+        .unwrap();
+        assert_eq!(config.frontend.cursor_data_chunk_channel_capacity, 3);
+
+        let error = toml::from_str::<RwConfig>(
+            r#"
+            [frontend]
+            cursor_data_chunk_channel_capacity = 0
+            "#,
+        )
+        .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("frontend.cursor_data_chunk_channel_capacity must be greater than 0")
+        );
+    }
+
     #[derive(Debug)]
     struct ConfigItemDoc {
         desc: String,

@@ -1599,10 +1599,21 @@ impl SessionManager for SessionManagerImpl {
     }
 
     fn end_session(&self, session: &Self::Session) {
+        session.get_cursor_manager().shutdown();
         self.delete_session(&session.session_id());
     }
 
     async fn shutdown(&self) {
+        let sessions = self
+            .env
+            .sessions_map()
+            .read()
+            .values()
+            .cloned()
+            .collect_vec();
+        for session in sessions {
+            session.get_cursor_manager().shutdown();
+        }
         // Clean up the session map.
         self.env.sessions_map().write().clear();
         // Unregister from the meta service.
