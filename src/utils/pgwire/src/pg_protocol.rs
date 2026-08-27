@@ -580,8 +580,8 @@ where
     async fn do_process_inner(&mut self, msg: FeMessage) -> PsqlResult<()> {
         if self.state == PgProtocolState::Authentication && !matches!(&msg, FeMessage::Password(_))
         {
-            return Err(PsqlError::ProtocolError(
-                "expected PasswordMessage during authentication".to_owned(),
+            return Err(PsqlError::protocol_error(
+                "expected PasswordMessage during authentication",
             ));
         }
 
