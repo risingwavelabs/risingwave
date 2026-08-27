@@ -88,10 +88,9 @@ use crate::controller::utils::{
     PartialObject, build_object_group_for_delete, check_if_belongs_to_iceberg_table,
     check_relation_name_duplicate, check_sink_into_table_cycle, ensure_job_not_canceled,
     ensure_object_id, ensure_user_id, fetch_target_fragments, format_with_option_secret_resolved,
-    get_belong_objects, get_belong_objects_by_ids, get_internal_tables_by_id,
-    get_referring_objects, get_table_columns, grant_default_privileges_automatically,
-    insert_fragment_relations, list_object_dependencies_by_object_id, list_user_info_by_ids,
-    try_get_iceberg_table_by_downstream_sink, upsert_user_privileges,
+    get_belong_objects, get_belong_objects_by_ids, get_referring_objects, get_table_columns,
+    grant_default_privileges_automatically, insert_fragment_relations,
+    list_object_dependencies_by_object_id, list_user_info_by_ids, upsert_user_privileges,
 };
 use crate::error::MetaErrorInner;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};

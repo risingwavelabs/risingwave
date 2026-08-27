@@ -35,7 +35,6 @@ use super::TcpKeepaliveConfig;
 #[cfg(not(madsim))]
 use super::maybe_tls_connector::MaybeMakeTlsConnector;
 use crate::error::ConnectorResult;
-use crate::with_options::WithOptions;
 
 /// SQL query to discover primary key columns directly from PostgreSQL system tables.
 /// This bypasses querying `information_schema.table_constraints` to avoid permission issues.
@@ -213,12 +212,6 @@ pub enum SslMode {
     /// matches the name stored in the server certificate.
     #[serde(alias = "verify-full")]
     VerifyFull,
-}
-
-// Implement it for `SslMode` so structs containing this enum can be parsed
-// from `WITH (...)` options without requiring additional conversion wrappers.
-impl WithOptions for SslMode {
-    fn assert_receiver_is_with_options(&self) {}
 }
 
 pub struct PostgresExternalTable {
