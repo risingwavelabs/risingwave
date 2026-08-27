@@ -13,9 +13,9 @@
 // limitations under the License.
 
 use std::collections::{HashMap, VecDeque};
+use std::ops::RangeBounds;
 
 use risingwave_common::catalog::TableId;
-use risingwave_pb::hummock::hummock_version_delta::PbChangeLogDelta;
 use risingwave_pb::hummock::{PbEpochNewChangeLog, PbSstableInfo, PbTableChangeLog};
 use tracing::warn;
 
@@ -44,6 +44,25 @@ impl<T> TableChangeLogCommon<T> {
         self.0.iter_mut()
     }
 
+    pub fn first(&self) -> Option<&EpochNewChangeLogCommon<T>> {
+        self.0.front()
+    }
+
+    pub fn last(&self) -> Option<&EpochNewChangeLogCommon<T>> {
+        self.0.back()
+    }
+
+    pub fn get(&self, index: usize) -> Option<&EpochNewChangeLogCommon<T>> {
+        self.0.get(index)
+    }
+
+    pub fn range(
+        &self,
+        range: impl RangeBounds<usize>,
+    ) -> impl Iterator<Item = &EpochNewChangeLogCommon<T>> + '_ {
+        self.0.range(range)
+    }
+
     pub fn add_change_log(&mut self, new_change_log: EpochNewChangeLogCommon<T>) {
         if let Some(prev_log) = self.0.back() {
             assert!(prev_log.checkpoint_epoch < new_change_log.first_epoch());
@@ -61,7 +80,7 @@ impl<T> TableChangeLogCommon<T> {
         self.0.is_empty()
     }
 
-    pub fn binary_search_by_epoch(&self, epoch: u64) -> Result<usize, usize> {
+    pub fn binary_search_by_checkpoint_epoch(&self, epoch: u64) -> Result<usize, usize> {
         self.0
             .binary_search_by_key(&epoch, |log| log.checkpoint_epoch)
     }
@@ -192,6 +211,10 @@ impl<T> TableChangeLogCommon<T> {
         &self,
         (min_epoch, max_epoch): (u64, u64),
     ) -> impl Iterator<Item = &EpochNewChangeLogCommon<T>> + '_ {
+        assert!(
+            min_epoch <= max_epoch,
+            "invalid epoch range: {min_epoch}..={max_epoch}"
+        );
         let start = self
             .0
             .partition_point(|epoch_change_log| epoch_change_log.checkpoint_epoch < min_epoch);
@@ -345,54 +368,6 @@ pub struct ChangeLogDeltaCommon<T> {
 }
 
 pub type ChangeLogDelta = ChangeLogDeltaCommon<SstableInfo>;
-
-impl<T> From<&ChangeLogDeltaCommon<T>> for PbChangeLogDelta
-where
-    PbSstableInfo: for<'a> From<&'a T>,
-{
-    fn from(val: &ChangeLogDeltaCommon<T>) -> Self {
-        Self {
-            truncate_epoch: val.truncate_epoch,
-            new_log: Some((&val.new_log).into()),
-        }
-    }
-}
-
-impl<T> From<&PbChangeLogDelta> for ChangeLogDeltaCommon<T>
-where
-    T: for<'a> From<&'a PbSstableInfo>,
-{
-    fn from(val: &PbChangeLogDelta) -> Self {
-        Self {
-            truncate_epoch: val.truncate_epoch,
-            new_log: val.new_log.as_ref().unwrap().into(),
-        }
-    }
-}
-
-impl<T> From<ChangeLogDeltaCommon<T>> for PbChangeLogDelta
-where
-    PbSstableInfo: From<T>,
-{
-    fn from(val: ChangeLogDeltaCommon<T>) -> Self {
-        Self {
-            truncate_epoch: val.truncate_epoch,
-            new_log: Some(val.new_log.into()),
-        }
-    }
-}
-
-impl<T> From<PbChangeLogDelta> for ChangeLogDeltaCommon<T>
-where
-    T: From<PbSstableInfo>,
-{
-    fn from(val: PbChangeLogDelta) -> Self {
-        Self {
-            truncate_epoch: val.truncate_epoch,
-            new_log: val.new_log.unwrap().into(),
-        }
-    }
-}
 
 #[cfg(test)]
 mod tests {

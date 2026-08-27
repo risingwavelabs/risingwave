@@ -166,14 +166,8 @@ impl RecentVersions {
                 } else {
                     self.recent_versions.get(index - 1).cloned()
                 };
-                version.and_then(|version| {
-                    if version.state_table_info.info().contains_key(&table_id) {
-                        Some(version)
-                    } else {
-                        // if the table does not exist in the version, return `None` to try get a time travel version
-                        None
-                    }
-                })
+                // if the table does not exist in the version, return `None` to try get a time travel version
+                version.filter(|version| version.state_table_info.info().contains_key(&table_id))
             }
         }
     }

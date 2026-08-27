@@ -55,7 +55,7 @@ impl<R: Rng> SqlGenerator<'_, R> {
 /// Gen utils
 impl<R: Rng> SqlGenerator<'_, R> {
     pub(crate) fn gen_table_name_with_prefix(&mut self, prefix: &str) -> String {
-        format!("{}_{}", prefix, &self.gen_relation_id())
+        format!("{}_{}", prefix, self.gen_relation_id())
     }
 
     fn gen_relation_id(&mut self) -> u32 {

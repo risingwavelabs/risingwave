@@ -402,8 +402,7 @@ impl HummockMetaClient for MockHummockMetaClient {
         exclude_empty: bool,
         limit: Option<u32>,
     ) -> Result<TableChangeLogs> {
-        Ok(self
-            .hummock_manager
+        self.hummock_manager
             .get_table_change_logs(
                 epoch_only,
                 start_epoch_inclusive,
@@ -412,7 +411,8 @@ impl HummockMetaClient for MockHummockMetaClient {
                 exclude_empty,
                 limit,
             )
-            .await)
+            .await
+            .map_err(mock_err)
     }
 }
 

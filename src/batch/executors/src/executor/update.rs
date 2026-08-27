@@ -311,9 +311,9 @@ mod tests {
         ));
 
         // Update expressions, will swap two columns.
-        let exprs = vec![
-            Box::new(InputRefExpression::new(DataType::Int32, 1)) as BoxedExpression,
-            Box::new(InputRefExpression::new(DataType::Int32, 0)),
+        let exprs: Vec<BoxedExpression> = vec![
+            InputRefExpression::new(DataType::Int32, 1).into(),
+            InputRefExpression::new(DataType::Int32, 0).into(),
         ];
 
         // Create the table.

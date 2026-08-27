@@ -505,6 +505,7 @@ impl fmt::Display for CreateSink {
 // });
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct CreateSinkStatement {
+    pub or_replace: bool,
     pub if_not_exists: bool,
     pub sink_name: ObjectName,
     pub with_properties: WithProperties,
@@ -520,6 +521,12 @@ pub struct CreateSinkStatement {
 
 impl ParseTo for CreateSinkStatement {
     fn parse_to(p: &mut Parser<'_>) -> ModalResult<Self> {
+        Self::parse_to_with_or_replace(p, false)
+    }
+}
+
+impl CreateSinkStatement {
+    pub fn parse_to_with_or_replace(p: &mut Parser<'_>, or_replace: bool) -> ModalResult<Self> {
         impl_parse_to!(if_not_exists => [Keyword::IF, Keyword::NOT, Keyword::EXISTS], p);
         impl_parse_to!(sink_name: ObjectName, p);
 
@@ -541,7 +548,11 @@ impl ParseTo for CreateSinkStatement {
             let query = Box::new(p.parse_query()?);
             CreateSink::AsQuery(query)
         } else {
-            p.expected("FROM or AS after CREATE SINK sink_name")?
+            p.expected(if or_replace {
+                "FROM or AS after REPLACE SINK sink_name"
+            } else {
+                "FROM or AS after CREATE SINK sink_name"
+            })?
         };
 
         let emit_mode: Option<EmitMode> = p.parse_emit_mode()?;
@@ -560,6 +571,7 @@ impl ParseTo for CreateSinkStatement {
         let sink_schema = p.parse_schema()?;
 
         Ok(Self {
+            or_replace,
             if_not_exists,
             sink_name,
             with_properties,

@@ -28,7 +28,7 @@ use itertools::Itertools;
 use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::{
     PbCdcSourceOffsetUpdated, PbCdcTableBackfillProgress, PbCreateMviewProgress,
-    PbListFinishedSource, PbLoadFinishedSource, PbLocalSstableInfo,
+    PbIcebergPkIndexSinkMetadata, PbListFinishedSource, PbLoadFinishedSource, PbLocalSstableInfo,
 };
 use risingwave_rpc_client::error::{ToTonicStatus, TonicStatusWrapper};
 use risingwave_storage::store_impl::AsHummock;
@@ -53,6 +53,7 @@ pub mod managed_state;
 #[cfg(test)]
 mod tests;
 
+use risingwave_common::metrics::LabelGuardedHistogram;
 use risingwave_hummock_sdk::table_stats::to_prost_table_stats_map;
 use risingwave_hummock_sdk::{LocalSstableInfo, SyncResult};
 use risingwave_pb::stream_service::streaming_control_stream_request::{
@@ -97,6 +98,9 @@ pub struct BarrierCompleteResult {
 
     /// CDC sources that have updated their offset at least once.
     pub cdc_source_offset_updated: Vec<PbCdcSourceOffsetUpdated>,
+
+    /// Iceberg pk-index sink metadata reports collected during this barrier.
+    pub iceberg_pk_index_sink_metadata: Vec<PbIcebergPkIndexSinkMetadata>,
 
     /// The table IDs that should be truncated.
     pub truncate_tables: Vec<TableId>,
@@ -198,7 +202,7 @@ impl ControlStreamHandle {
                 .is_err()
             {
                 self.pair = None;
-                warn!("fail to send response. control stream reset");
+                warn!("failed to send the response; the control stream was reset");
             }
         } else {
             debug!(?response, "control stream has been reset. ignore response");
@@ -479,7 +483,8 @@ impl LocalBarrierWorker {
             Request::InjectBarrier(req) => {
                 let partial_graph_id = req.partial_graph_id;
                 let result: StreamResult<()> = try {
-                    let barrier = Barrier::from_protobuf(req.get_barrier().unwrap())?;
+                    let barrier = Barrier::from_protobuf(req.get_barrier().unwrap())
+                        .map_err(StreamError::from)?;
                     self.send_barrier(&barrier, req)?;
                 };
                 result.map_err(|e| (partial_graph_id, e))?;
@@ -636,7 +641,7 @@ mod await_epoch_completed_future {
     use risingwave_hummock_sdk::SyncResult;
     use risingwave_pb::stream_service::barrier_complete_response::{
         PbCdcSourceOffsetUpdated, PbCdcTableBackfillProgress, PbCreateMviewProgress,
-        PbListFinishedSource, PbLoadFinishedSource,
+        PbIcebergPkIndexSinkMetadata, PbListFinishedSource, PbLoadFinishedSource,
     };
 
     use crate::error::StreamResult;
@@ -657,6 +662,7 @@ mod await_epoch_completed_future {
         load_finished_source_ids: Vec<PbLoadFinishedSource>,
         cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
         cdc_source_offset_updated: Vec<PbCdcSourceOffsetUpdated>,
+        iceberg_pk_index_sink_metadata: Vec<PbIcebergPkIndexSinkMetadata>,
         truncate_tables: Vec<TableId>,
         refresh_finished_tables: Vec<TableId>,
     ) -> AwaitEpochCompletedFuture {
@@ -679,6 +685,7 @@ mod await_epoch_completed_future {
                     load_finished_source_ids,
                     cdc_table_backfill_progress,
                     cdc_source_offset_updated,
+                    iceberg_pk_index_sink_metadata,
                     truncate_tables,
                     refresh_finished_tables,
                 }),
@@ -706,11 +713,11 @@ use crate::executor::exchange::permit;
 
 fn sync_epoch(
     state_store: &StateStoreImpl,
-    streaming_metrics: &StreamingMetrics,
+    barrier_sync_latency: LabelGuardedHistogram,
     prev_epoch: u64,
     table_ids: HashSet<TableId>,
 ) -> BoxFuture<'static, StreamResult<SyncResult>> {
-    let timer = streaming_metrics.barrier_sync_latency.start_timer();
+    let timer = barrier_sync_latency.start_timer();
 
     let state_store = state_store.clone();
     let future = async move {
@@ -722,6 +729,7 @@ fn sync_epoch(
     future
         .instrument_await(await_tree::span!("sync_epoch (epoch {})", prev_epoch))
         .inspect_ok(move |_| {
+            let _guard = &barrier_sync_latency;
             timer.observe_duration();
         })
         .map_err(move |e| {
@@ -755,6 +763,7 @@ impl LocalBarrierWorker {
                 load_finished_source_ids,
                 cdc_table_backfill_progress,
                 cdc_source_offset_updated,
+                iceberg_pk_index_sink_metadata,
                 truncate_tables,
                 refresh_finished_tables,
             } = graph_state.pop_barrier_to_complete(prev_epoch);
@@ -772,7 +781,7 @@ impl LocalBarrierWorker {
                 BarrierKind::Barrier => None,
                 BarrierKind::Checkpoint => Some(sync_epoch(
                     &self.actor_manager.env.state_store(),
-                    &self.actor_manager.streaming_metrics,
+                    graph_state.graph_state.barrier_sync_latency(),
                     prev_epoch,
                     table_ids.expect("should be Some on BarrierKind::Checkpoint"),
                 )),
@@ -791,6 +800,7 @@ impl LocalBarrierWorker {
                         load_finished_source_ids,
                         cdc_table_backfill_progress,
                         cdc_source_offset_updated,
+                        iceberg_pk_index_sink_metadata,
                         truncate_tables,
                         refresh_finished_tables,
                     )
@@ -811,6 +821,7 @@ impl LocalBarrierWorker {
             load_finished_source_ids,
             cdc_table_backfill_progress,
             cdc_source_offset_updated,
+            iceberg_pk_index_sink_metadata,
             truncate_tables,
             refresh_finished_tables,
         } = result;
@@ -875,6 +886,7 @@ impl LocalBarrierWorker {
                         cdc_table_backfill_progress,
                         truncate_tables,
                         refresh_finished_tables,
+                        iceberg_pk_index_sink_metadata,
                     },
                 )
             }

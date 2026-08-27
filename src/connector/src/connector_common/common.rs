@@ -136,16 +136,18 @@ impl AwsAuthProps {
                 .build()
                 .region()
                 .await
-                .context("region should be provided")?)
+                .context("region must be provided")?)
         }
     }
 
     async fn build_credential_provider(&self) -> ConnectorResult<SharedCredentialsProvider> {
-        if self.access_key.is_some() && self.secret_key.is_some() {
+        if let (Some(access_key), Some(secret_key)) =
+            (self.access_key.as_ref(), self.secret_key.as_ref())
+        {
             Ok(SharedCredentialsProvider::new(
                 aws_credential_types::Credentials::from_keys(
-                    self.access_key.as_ref().unwrap(),
-                    self.secret_key.as_ref().unwrap(),
+                    access_key,
+                    secret_key,
                     self.session_token.clone(),
                 ),
             ))
@@ -154,7 +156,7 @@ impl AwsAuthProps {
                 aws_config::default_provider::credentials::default_provider().await,
             ))
         } else {
-            bail!("Both \"access_key\" and \"secret_key\" are required.")
+            bail!("Both `access_key` and `secret_key` must be provided")
         }
     }
 
@@ -364,12 +366,45 @@ pub struct RdKafkaPropertiesCommon {
     #[with_option(allow_alter_on_fly)]
     pub enable_ssl_certificate_verification: Option<bool>,
 
+    /// Initial backoff time in milliseconds before reconnecting to a broker after a connection
+    /// closes.
+    #[serde(rename = "properties.reconnect.backoff.ms")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
+    pub reconnect_backoff_ms: Option<usize>,
+
+    /// Maximum backoff time in milliseconds before reconnecting to a broker after a connection
+    /// closes.
+    #[serde(rename = "properties.reconnect.backoff.max.ms")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
+    pub reconnect_backoff_max_ms: Option<usize>,
+
+    /// Maximum time in milliseconds allowed for broker connection setup, including TCP setup and
+    /// SSL/SASL handshakes.
+    #[serde(rename = "properties.socket.connection.setup.timeout.ms")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
+    pub socket_connection_setup_timeout_ms: Option<usize>,
+
     #[serde(
         rename = "properties.socket.keepalive.enable",
         default = "default_socket_keepalive_enable"
     )]
     #[serde_as(as = "DisplayFromStr")]
     pub socket_keepalive_enable: bool,
+
+    /// Initial backoff time in milliseconds before retrying a failed protocol request.
+    #[serde(rename = "properties.retry.backoff.ms")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
+    pub retry_backoff_ms: Option<usize>,
+
+    /// Maximum backoff time in milliseconds before retrying a failed protocol request.
+    #[serde(rename = "properties.retry.backoff.max.ms")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
+    pub retry_backoff_max_ms: Option<usize>,
 }
 
 impl RdKafkaPropertiesCommon {
@@ -389,10 +424,25 @@ impl RdKafkaPropertiesCommon {
         if let Some(v) = self.enable_ssl_certificate_verification {
             c.set("enable.ssl.certificate.verification", v.to_string());
         }
+        if let Some(v) = self.reconnect_backoff_ms {
+            c.set("reconnect.backoff.ms", v.to_string());
+        }
+        if let Some(v) = self.reconnect_backoff_max_ms {
+            c.set("reconnect.backoff.max.ms", v.to_string());
+        }
+        if let Some(v) = self.socket_connection_setup_timeout_ms {
+            c.set("socket.connection.setup.timeout.ms", v.to_string());
+        }
         c.set(
             "socket.keepalive.enable",
             self.socket_keepalive_enable.to_string(),
         );
+        if let Some(v) = self.retry_backoff_ms {
+            c.set("retry.backoff.ms", v.to_string());
+        }
+        if let Some(v) = self.retry_backoff_max_ms {
+            c.set("retry.backoff.max.ms", v.to_string());
+        }
     }
 }
 
@@ -925,7 +975,9 @@ impl NatsCommon {
                     connect_options =
                         connect_options.user_and_password(v_user.into(), v_password.into())
                 } else {
-                    bail!("nats connect mode is user_and_password, but user or password is empty");
+                    bail!(
+                        "NATS connect mode `user_and_password` requires both `user` and `password`"
+                    );
                 }
             }
 
@@ -935,12 +987,14 @@ impl NatsCommon {
                         .credentials(&self.create_credential(v_nkey, v_jwt)?)
                         .expect("failed to parse static creds")
                 } else {
-                    bail!("nats connect mode is credential, but nkey or jwt is empty");
+                    bail!("NATS connect mode `credential` requires both `nkey` and `jwt`");
                 }
             }
             "plain" => {}
             _ => {
-                bail!("nats connect mode only accepts user_and_password/credential/plain");
+                bail!(
+                    "NATS connect mode must be one of `user_and_password`, `credential`, or `plain`"
+                );
             }
         };
 
@@ -953,7 +1007,7 @@ impl NatsCommon {
                     .collect::<Result<Vec<async_nats::ServerAddr>, _>>()?,
             )
             .await
-            .context("build nats client error")
+            .context("failed to build the NATS client")
             .map_err(SinkError::Nats)?;
         Ok(client)
     }
@@ -973,21 +1027,21 @@ impl NatsCommon {
                 {
                     match existing_client.connection_state() {
                         async_nats::connection::State::Connected => {
-                            tracing::info!("reuse existing nats client for {}", self.server_url);
+                            tracing::info!("reusing existing NATS client for {}", self.server_url);
                             client = Some(existing_client);
                             return Ok(Op::Nop);
                         }
                         _ => {
                             tracing::warn!(
                                 server_url = self.server_url,
-                                "existing nats client is not connected",
+                                "existing NATS client is not connected",
                             );
                         }
                     }
                 }
                 tracing::info!(
                     server_url = self.server_url,
-                    "no cached client, or client disconnected, building new nats client"
+                    "no cached NATS client was found, or the cached client disconnected; building a new client"
                 );
                 let new_client = Arc::new(self.build_client_inner().await?);
                 client = Some(new_client.clone());
@@ -1156,7 +1210,7 @@ pub(crate) fn load_certs(
 
     CertificateDer::pem_slice_iter(&cert_bytes)
         .collect::<Result<Vec<_>, _>>()
-        .context("Failed to parse certificates")
+        .context("failed to parse certificates")
         .map_err(Into::into)
 }
 
@@ -1172,7 +1226,7 @@ pub(crate) fn load_private_key(
     let cert = PrivatePkcs8KeyDer::pem_slice_iter(&cert_bytes)
         .next()
         .ok_or_else(|| anyhow!("No private key found"))?
-        .context("Failed to parse private key")?;
+        .context("failed to parse the private key")?;
     Ok(cert.into())
 }
 
@@ -1201,4 +1255,37 @@ impl MongodbCommon {
 
         Ok(client)
     }
+}
+
+/// TCP keepalive knobs for long-lived Postgres clients, see `create_pg_client`.
+#[serde_as]
+#[derive(Debug, Clone, Deserialize, WithOptions)]
+pub struct TcpKeepaliveConfig {
+    #[serde(rename = "tcp.keepalive.idle", default = "default_tcp_keepalive_idle")]
+    #[serde_as(as = "DisplayFromStr")]
+    pub tcp_keepalive_idle: u32,
+    #[serde(
+        rename = "tcp.keepalive.interval",
+        default = "default_tcp_keepalive_interval"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    pub tcp_keepalive_interval: u32,
+    #[serde(
+        rename = "tcp.keepalive.count",
+        default = "default_tcp_keepalive_count"
+    )]
+    #[serde_as(as = "DisplayFromStr")]
+    pub tcp_keepalive_count: u32,
+}
+
+const fn default_tcp_keepalive_idle() -> u32 {
+    10 * 60
+}
+
+const fn default_tcp_keepalive_interval() -> u32 {
+    10
+}
+
+const fn default_tcp_keepalive_count() -> u32 {
+    3
 }

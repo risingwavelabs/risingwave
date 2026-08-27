@@ -62,13 +62,7 @@ impl Binder {
             let right = self.bind_table_with_joins(t)?;
             self.pop_and_merge_lateral_context()?;
 
-            let is_lateral = match &right {
-                Relation::Subquery(subquery) if subquery.lateral => true,
-                Relation::TableFunction { .. } => true,
-                _ => false,
-            };
-
-            root = if is_lateral {
+            root = if Self::requires_apply(&right) {
                 Relation::Apply(Box::new(BoundJoin {
                     join_type: JoinType::Inner,
                     left: root,
@@ -89,6 +83,12 @@ impl Binder {
         Ok(Some(root))
     }
 
+    fn requires_apply(relation: &Relation) -> bool {
+        matches!(relation, Relation::Subquery(subquery) if subquery.lateral)
+            || matches!(relation, Relation::TableFunction { .. })
+            || relation.is_correlated_by_depth(0)
+    }
+
     pub(crate) fn bind_table_with_joins(&mut self, table: &TableWithJoins) -> Result<Relation> {
         let mut root = self.bind_table_factor(&table.relation)?;
         for join in &table.joins {
@@ -104,6 +104,7 @@ impl Binder {
             };
             let right: Relation;
             let cond: ExprImpl;
+            let temporal_event_time_as_of: Option<ExprImpl>;
             if matches!(
                 constraint.clone(),
                 JoinConstraint::Using(_) | JoinConstraint::Natural
@@ -125,8 +126,9 @@ impl Binder {
                     )
                     .into());
                 }
+                temporal_event_time_as_of = None;
             } else {
-                let temporal_event_time_as_of = if let TableFactor::Table {
+                temporal_event_time_as_of = if let TableFactor::Table {
                     as_of: Some(AsOf::EventTime(expr)),
                     ..
                 } = &join.relation
@@ -148,47 +150,9 @@ impl Binder {
                 };
                 right = self.bind_table_factor(&join.relation)?;
                 (cond, _) = self.bind_join_constraint(constraint, None, join_type)?;
-                let is_lateral = match &right {
-                    Relation::Subquery(subquery) if subquery.lateral => true,
-                    Relation::TableFunction { .. } => true,
-                    _ => false,
-                };
-
-                root = if is_lateral {
-                    match join_type {
-                        JoinType::Inner | JoinType::LeftOuter => {}
-                        _ => {
-                            return Err(ErrorCode::InvalidInputSyntax("The combining JOIN type must be INNER or LEFT for a LATERAL reference.".to_owned())
-                                .into());
-                        }
-                    }
-
-                    Relation::Apply(Box::new(BoundJoin {
-                        join_type,
-                        left: root,
-                        right,
-                        cond,
-                        temporal_event_time_as_of,
-                    }))
-                } else {
-                    Relation::Join(Box::new(BoundJoin {
-                        join_type,
-                        left: root,
-                        right,
-                        cond,
-                        temporal_event_time_as_of,
-                    }))
-                };
-                continue;
             }
 
-            let is_lateral = match &right {
-                Relation::Subquery(subquery) if subquery.lateral => true,
-                Relation::TableFunction { .. } => true,
-                _ => false,
-            };
-
-            root = if is_lateral {
+            root = if Self::requires_apply(&right) {
                 match join_type {
                     JoinType::Inner | JoinType::LeftOuter => {}
                     _ => {
@@ -202,7 +166,7 @@ impl Binder {
                     left: root,
                     right,
                     cond,
-                    temporal_event_time_as_of: None,
+                    temporal_event_time_as_of,
                 }))
             } else {
                 Relation::Join(Box::new(BoundJoin {
@@ -210,7 +174,7 @@ impl Binder {
                     left: root,
                     right,
                     cond,
-                    temporal_event_time_as_of: None,
+                    temporal_event_time_as_of,
                 }))
             };
         }
@@ -259,7 +223,7 @@ impl Binder {
                     .filter(|(_, idxs)| idxs.iter().all(|i| !self.context.columns[*i].is_hidden))
                     .map(|(s, idxes)| (Ident::from_real_value(s), idxes))
                     .collect::<Vec<_>>();
-                columns.sort_by(|a, b| a.0.real_value().cmp(&b.0.real_value()));
+                columns.sort_by_key(|a| a.0.real_value());
 
                 let mut col_indices = Vec::new();
                 let mut binary_expr = Expr::Value(Value::Boolean(true));

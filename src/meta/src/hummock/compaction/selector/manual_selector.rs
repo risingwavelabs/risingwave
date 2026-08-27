@@ -100,6 +100,7 @@ impl CompactionSelector for ManualCompactionSelector {
             levels,
             level_handlers,
             developer_config,
+            in_progress_compactions,
             ..
         } = context;
         self.blocked_by_pending = false;
@@ -187,6 +188,11 @@ impl CompactionSelector for ManualCompactionSelector {
         }
 
         let compaction_input = compaction_input?;
+        if !compaction_input.skip_target_range_conflict_check
+            && in_progress_compactions.has_conflict_with_input(&compaction_input)
+        {
+            return None;
+        }
         compaction_input.add_pending_task(task_id, level_handlers);
 
         Some(create_compaction_task(

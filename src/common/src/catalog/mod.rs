@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod cdc_type_compatibility;
 mod column;
 mod external_table;
 mod internal_table;
@@ -437,6 +438,7 @@ impl FragmentTypeFlag {
         Self::backfill_rate_limit_fragments()
             .chain(Self::source_rate_limit_fragments())
             .chain(Self::sink_rate_limit_fragments())
+            .chain(Self::dml_rate_limit_fragments())
     }
 
     pub fn dml_rate_limit_fragments() -> impl Iterator<Item = FragmentTypeFlag> {

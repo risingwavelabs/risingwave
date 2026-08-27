@@ -14,32 +14,33 @@
 
 use anyhow::Context;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::Field;
+use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
-use risingwave_pb::stream_plan::IcebergWithPkIndexWriterNode;
-use risingwave_pb::stream_plan::stream_node::NodeBody;
+use risingwave_pb::stream_plan::stream_node::{NodeBody, PbStreamKind};
+use risingwave_pb::stream_plan::{
+    DispatcherType, IcebergWithPkIndexWriterNode, MergeNode, PbStreamNode,
+};
 
 use super::stream::prelude::*;
 use crate::TableCatalog;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
-use crate::optimizer::plan_node::utils::{
-    Distill, IndicesDisplay, TableCatalogBuilder, childless_record,
-};
+use crate::optimizer::plan_node::utils::{Distill, TableCatalogBuilder, childless_record};
 use crate::optimizer::plan_node::{
     ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamNode, StreamPlanRef as PlanRef,
 };
 use crate::optimizer::property::{
     Distribution, FunctionalDependencySet, MonotonicityMap, WatermarkColumns,
 };
+use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 
 /// `StreamIcebergWithPkIndexWriter` is the stateful writer executor for the Iceberg
 /// with pk index sink. It maintains a PK index and writes data files to Iceberg.
 ///
 /// Output schema: `[file_path: Varchar, position: Int64]` — delete-position info for
-/// the downstream `DvMerger`.
+/// the downstream `PositionDeleteMerger`.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct StreamIcebergWithPkIndexWriter {
     pub base: PlanBase<Stream>,
@@ -77,11 +78,26 @@ impl StreamIcebergWithPkIndexWriter {
     }
 }
 
-fn output_schema() -> risingwave_common::catalog::Schema {
-    risingwave_common::catalog::Schema::new(vec![
+fn output_schema() -> Schema {
+    Schema::new(vec![
         Field::with_name(DataType::Varchar, "file_path"),
         Field::with_name(DataType::Int64, "position"),
     ])
+}
+
+/// Schema of the transient compaction resolver output consumed by the writer's right input.
+fn resolver_output_schema(sink_desc: &SinkDesc) -> Result<Schema> {
+    let downstream_pk = sink_desc
+        .downstream_pk
+        .as_deref()
+        .context("Missing downstream PK in Iceberg sink desc")?;
+    let mut fields: Vec<Field> = downstream_pk
+        .iter()
+        .map(|&idx| Field::from(&sink_desc.columns[idx].column_desc))
+        .collect();
+    fields.push(Field::with_name(DataType::Varchar, "file_path"));
+    fields.push(Field::with_name(DataType::Int64, "position"));
+    Ok(Schema::new(fields))
 }
 
 fn build_iceberg_pk_state_table(sink_desc: &SinkDesc) -> Result<TableCatalog> {
@@ -89,7 +105,7 @@ fn build_iceberg_pk_state_table(sink_desc: &SinkDesc) -> Result<TableCatalog> {
 
     let downstream_pk = sink_desc
         .downstream_pk
-        .as_ref()
+        .as_deref()
         .context("Missing downstream PK in Iceberg sink desc")?;
     for &idx in downstream_pk {
         builder.add_column(&Field::from(&sink_desc.columns[idx].column_desc));
@@ -118,11 +134,13 @@ impl Distill for StreamIcebergWithPkIndexWriter {
         let mut vec = Vec::with_capacity(2);
         vec.push(("columns", column_names));
         if let Some(pk) = &self.sink_desc.downstream_pk {
-            let sink_pk = IndicesDisplay {
-                indices: pk,
-                schema: self.input.schema(),
-            };
-            vec.push(("downstream_pk", sink_pk.distill()));
+            let column_names = pk
+                .iter()
+                .map(|&idx| self.sink_desc.columns[idx].name_with_hidden().to_string())
+                .map(Pretty::from)
+                .collect();
+            let column_names = Pretty::Array(column_names);
+            vec.push(("downstream_pk", column_names));
         }
 
         childless_record("StreamIcebergWithPkIndexWriter", vec)
@@ -147,16 +165,66 @@ impl PlanTreeNodeUnary<Stream> for StreamIcebergWithPkIndexWriter {
 impl_plan_tree_node_for_unary! { Stream, StreamIcebergWithPkIndexWriter }
 
 impl StreamNode for StreamIcebergWithPkIndexWriter {
-    fn to_stream_prost_body(&self, state: &mut BuildFragmentGraphState) -> NodeBody {
+    fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> NodeBody {
+        unreachable!(
+            "iceberg pk-index writer cannot be converted into a prost body -- call \
+             `adhoc_to_stream_prost` instead, since it declares a dormant second input."
+        )
+    }
+}
+
+impl StreamIcebergWithPkIndexWriter {
+    /// Serializes the writer with its normal upstream and a dormant compaction-resolver edge.
+    /// The resolver is dynamically attached to the second input by a later task.
+    pub fn adhoc_to_stream_prost(
+        &self,
+        state: &mut BuildFragmentGraphState,
+    ) -> SchedulerResult<PbStreamNode> {
         let pk_index_table = self
             .pk_index_table
             .clone()
             .with_id(state.gen_table_id_wrapped());
+        let resolver_fields = resolver_output_schema(&self.sink_desc)
+            .context("build compaction resolver output schema")?
+            .to_prost();
 
-        NodeBody::IcebergWithPkIndexWriter(Box::new(IcebergWithPkIndexWriterNode {
-            sink_desc: Some(self.sink_desc.to_proto()),
-            pk_index_table: Some(pk_index_table.to_internal_table_prost()),
-        }))
+        let left_input = self.input.to_stream_prost(state)?;
+        let right_dispatcher = match self.distribution() {
+            Distribution::Single => DispatcherType::Simple,
+            _ => DispatcherType::Hash,
+        };
+        let right_input = PbStreamNode {
+            node_body: Some(NodeBody::Merge(Box::new(MergeNode {
+                upstream_fragment_id: 0.into(),
+                upstream_dispatcher_type: right_dispatcher.into(),
+                allow_no_initial_upstream: true,
+                ..Default::default()
+            }))),
+            identity: "IcebergCompactionResolverEdge".into(),
+            fields: resolver_fields,
+            stream_kind: PbStreamKind::AppendOnly as i32,
+            ..Default::default()
+        };
+
+        Ok(PbStreamNode {
+            node_body: Some(NodeBody::IcebergWithPkIndexWriter(Box::new(
+                IcebergWithPkIndexWriterNode {
+                    sink_desc: Some(self.sink_desc.to_proto()),
+                    pk_index_table: Some(pk_index_table.to_internal_table_prost()),
+                },
+            ))),
+            input: vec![left_input, right_input],
+            identity: self.distill_to_string(),
+            operator_id: self.id().to_stream_node_operator_id(),
+            stream_key: self
+                .stream_key()
+                .unwrap_or_default()
+                .iter()
+                .map(|x| *x as u32)
+                .collect(),
+            fields: self.schema().to_prost(),
+            stream_kind: self.stream_kind().to_protobuf() as i32,
+        })
     }
 }
 
@@ -221,5 +289,62 @@ mod tests {
         assert_eq!(table.read_prefix_len_hint, 1);
         assert_eq!(table.owner, DEFAULT_SUPER_USER_ID);
         assert_eq!(table.stream_job_status, StreamJobStatus::Creating);
+    }
+
+    #[test]
+    fn test_build_iceberg_pk_state_table_with_multi_column_pk() {
+        // Simulate planner output where the derived pk spans several stream-key columns, e.g. a
+        // hidden upstream column (`order_id`) promoted to visible and carried in verbatim.
+        let mut desc = test_sink_desc();
+        desc.columns.push(ColumnCatalog::visible(ColumnDesc::named(
+            "order_id",
+            ColumnId::new(3),
+            DataType::Int64,
+        )));
+        desc.columns.push(ColumnCatalog::visible(ColumnDesc::named(
+            "shard_id",
+            ColumnId::new(4),
+            DataType::Int64,
+        )));
+        desc.downstream_pk = Some(vec![1, 3, 4]); // v1, order_id, shard_id
+
+        let table = build_iceberg_pk_state_table(&desc).unwrap();
+
+        let names: Vec<_> = table
+            .columns()
+            .iter()
+            .map(|c| c.name().to_owned())
+            .collect();
+        assert_eq!(
+            names,
+            vec!["v1", "order_id", "shard_id", "file_path", "position"]
+        );
+        assert_eq!(table.pk().len(), 3);
+        assert_eq!(table.distribution_key(), &[0, 1, 2]);
+        assert_eq!(table.read_prefix_len_hint, 3);
+    }
+
+    #[test]
+    fn test_build_iceberg_pk_state_table_with_visible_extra_only() {
+        // Simulate planner output: downstream_pk = [user_pk, visible_extra].
+        let mut desc = test_sink_desc();
+        desc.columns.push(ColumnCatalog::visible(ColumnDesc::named(
+            "order_id",
+            ColumnId::new(3),
+            DataType::Int64,
+        )));
+        desc.downstream_pk = Some(vec![1, 3]); // v1, order_id
+
+        let table = build_iceberg_pk_state_table(&desc).unwrap();
+
+        let names: Vec<_> = table
+            .columns()
+            .iter()
+            .map(|c| c.name().to_owned())
+            .collect();
+        assert_eq!(names, vec!["v1", "order_id", "file_path", "position"]);
+        assert_eq!(table.pk().len(), 2);
+        assert_eq!(table.distribution_key(), &[0, 1]);
+        assert_eq!(table.read_prefix_len_hint, 2);
     }
 }

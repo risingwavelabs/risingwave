@@ -18,6 +18,8 @@ use std::collections::{HashMap, HashSet};
 use std::sync::atomic::AtomicU32;
 
 use anyhow::{Context, anyhow};
+use futures::StreamExt;
+use futures::stream::FuturesUnordered;
 use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, TableId};
@@ -38,7 +40,8 @@ use crate::barrier::DatabaseRuntimeInfoSnapshot;
 use crate::barrier::checkpoint::{
     BatchRefreshJobCheckpointControl, BatchRefreshLogicalFragments, BatchRefreshRenderResult,
 };
-use crate::barrier::context::GlobalBarrierWorkerContextImpl;
+use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
+use crate::barrier::progress::TrackingJob;
 use crate::barrier::rpc::to_partial_graph_id;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::scale::{
@@ -310,6 +313,95 @@ fn build_stream_actors(
 }
 
 impl GlobalBarrierWorkerContextImpl {
+    fn resolve_job_committed_epoch(
+        job_id: JobId,
+        fragments: &HashMap<FragmentId, LoadedFragment>,
+        state_table_committed_epochs: &HashMap<TableId, u64>,
+    ) -> MetaResult<u64> {
+        let mut table_id_iter = fragments
+            .values()
+            .flat_map(|fragment| fragment.state_table_ids.iter().copied());
+        let Some(first_table_id) = table_id_iter.next() else {
+            bail!("job {} has no state table", job_id);
+        };
+        let committed_epoch = *state_table_committed_epochs
+            .get(&first_table_id)
+            .ok_or_else(|| anyhow!("cannot get committed epoch on table {}.", first_table_id))?;
+        for table_id in table_id_iter {
+            let table_committed_epoch = *state_table_committed_epochs
+                .get(&table_id)
+                .ok_or_else(|| anyhow!("cannot get committed epoch on table {}.", table_id))?;
+            if committed_epoch != table_committed_epoch {
+                bail!(
+                    "table {} has committed epoch {} different to other table {} with committed epoch {} in job {}",
+                    first_table_id,
+                    committed_epoch,
+                    table_id,
+                    table_committed_epoch,
+                    job_id
+                );
+            }
+        }
+
+        Ok(committed_epoch)
+    }
+
+    async fn finish_completed_batch_refresh_background_jobs(
+        &self,
+        recovery_context: &LoadedRecoveryContext,
+        state_table_committed_epochs: &HashMap<TableId, u64>,
+        creating_jobs: &mut HashSet<JobId>,
+    ) -> MetaResult<()> {
+        let creating_job_ids = creating_jobs.iter().copied().collect_vec();
+        for job_id in creating_job_ids {
+            let Some(job) = recovery_context.fragment_context.job_map.get(&job_id) else {
+                continue;
+            };
+            if job.refresh_interval_sec.is_none() {
+                continue;
+            }
+            let Some(fragments) = recovery_context.fragment_context.job_fragments.get(&job_id)
+            else {
+                continue;
+            };
+
+            let committed_epoch =
+                Self::resolve_job_committed_epoch(job_id, fragments, state_table_committed_epochs)?;
+            let snapshot_backfill_info = StreamFragmentGraph::collect_snapshot_backfill_info_impl(
+                fragments
+                    .values()
+                    .map(|fragment| (&fragment.nodes, fragment.fragment_type_mask)),
+            )?
+            .0
+            .ok_or_else(|| anyhow!("batch refresh job {} has no snapshot backfill info", job_id))?;
+            let snapshot_epoch = snapshot_backfill_info
+                .upstream_mv_table_id_to_backfill_epoch
+                .values()
+                .find_map(|e| *e)
+                .unwrap_or(committed_epoch);
+            if committed_epoch < snapshot_epoch {
+                continue;
+            }
+
+            info!(
+                %job_id,
+                committed_epoch,
+                snapshot_epoch,
+                "finish completed batch refresh background job during recovery"
+            );
+            self.finish_creating_job(TrackingJob::recovered_from_fragment_nodes(
+                job_id,
+                fragments
+                    .iter()
+                    .map(|(fragment_id, fragment)| (*fragment_id, &fragment.nodes)),
+            ))
+            .await?;
+            creating_jobs.remove(&job_id);
+        }
+
+        Ok(())
+    }
+
     async fn apply_pre_applied_drop_cancel(
         &self,
         database_id: Option<DatabaseId>,
@@ -328,7 +420,8 @@ impl GlobalBarrierWorkerContextImpl {
         Ok(has_drop_streaming_jobs)
     }
 
-    /// Clean catalogs for creating streaming jobs that are in foreground mode or table fragments not persisted.
+    /// Clean catalogs for jobs in the initial state and creating jobs whose progress cannot be
+    /// recovered.
     async fn clean_dirty_streaming_jobs(&self, database_id: Option<DatabaseId>) -> MetaResult<()> {
         self.metadata_manager
             .catalog_controller
@@ -340,6 +433,10 @@ impl GlobalBarrierWorkerContextImpl {
             .catalog_controller
             .clean_dirty_creating_jobs(database_id)
             .await?;
+        for sink_id in &cleaned_dirty_jobs.sink_ids {
+            self.iceberg_compaction_manager
+                .clear_iceberg_maintenance_by_sink_id(*sink_id);
+        }
         if database_id.is_some() {
             // Per-database recovery does not run the global Hummock purge below. Unregister the
             // dirty jobs cleaned in this database through the normal dropped-table cleanup path.
@@ -374,9 +471,86 @@ impl GlobalBarrierWorkerContextImpl {
                 .catalog_controller
                 .list_sink_ids(Some(database_id))
                 .await?;
-            self.sink_manager.stop_sink_coordinator(sink_ids).await;
+            self.sink_manager
+                .stop_sink_coordinator(sink_ids.clone())
+                .await;
+            self.iceberg_pk_index_sink_manager
+                .unregister_sinks(sink_ids);
         } else {
             self.sink_manager.reset().await;
+            self.iceberg_pk_index_sink_manager.reset();
+        }
+        Ok(())
+    }
+
+    /// Re-register iceberg pk-index sink commit coordinators after recovery wipes them.
+    async fn reregister_iceberg_pk_index_sinks(
+        &self,
+        database_id: Option<DatabaseId>,
+    ) -> MetaResult<()> {
+        let pb_sinks = self
+            .metadata_manager
+            .catalog_controller
+            .list_sinks()
+            .await?;
+        let mut futs = FuturesUnordered::new();
+        for pb_sink in pb_sinks {
+            if database_id.is_some_and(|db_id| pb_sink.database_id != db_id)
+                || !crate::manager::iceberg_pk_index_sink::is_iceberg_pk_index_sink(
+                    &pb_sink.properties,
+                )
+            {
+                continue;
+            }
+            let config = crate::manager::iceberg_pk_index_sink::build_iceberg_config(&pb_sink)
+                .with_context(|| {
+                    format!(
+                        "build iceberg config while re-registering v3 sink {}",
+                        pb_sink.id
+                    )
+                })?;
+            let state_table_id = self
+                .metadata_manager
+                .catalog_controller
+                .get_sink_state_table_ids(pb_sink.id)
+                .await?
+                .into_iter()
+                .next()
+                .ok_or_else(|| {
+                    anyhow!(
+                        "no state table found while re-registering iceberg v3 sink {}",
+                        pb_sink.id
+                    )
+                })?;
+            let recovered_epoch = self
+                .hummock_manager
+                .on_current_version(|version| version.table_committed_epoch(state_table_id))
+                .await
+                .ok_or_else(|| {
+                    anyhow!(
+                        "cannot get committed epoch for iceberg v3 sink {} state table {}",
+                        pb_sink.id,
+                        state_table_id
+                    )
+                })?;
+            let manager = &self.iceberg_pk_index_sink_manager;
+            futs.push(async move {
+                let partial_graph_id = to_partial_graph_id(pb_sink.database_id, None);
+                let result = manager
+                    .register_sink(pb_sink.id, partial_graph_id, config)
+                    .await;
+                if result.is_ok() {
+                    manager.advance_committed_epochs([(partial_graph_id, recovered_epoch)]);
+                }
+                (pb_sink.id, result)
+            });
+        }
+
+        while let Some((id, res)) = futs.next().await {
+            if let Err(e) = res {
+                let msg = format!("register iceberg v3 sink {} during recovery", id);
+                return Err(e.context(msg).into());
+            }
         }
         Ok(())
     }
@@ -440,14 +614,18 @@ impl GlobalBarrierWorkerContextImpl {
         Ok(())
     }
 
-    async fn list_background_job_progress(
+    async fn list_creating_jobs(
         &self,
         database_id: Option<DatabaseId>,
     ) -> MetaResult<HashSet<JobId>> {
         let mgr = &self.metadata_manager;
-        mgr.catalog_controller
-            .list_background_creating_jobs(false, database_id)
-            .await
+        Ok(mgr
+            .catalog_controller
+            .list_creating_jobs(false, database_id)
+            .await?
+            .into_iter()
+            .map(|(job_id, _, _, _, _)| job_id)
+            .collect())
     }
 
     async fn load_recovery_context(
@@ -568,7 +746,7 @@ impl GlobalBarrierWorkerContextImpl {
 
     #[expect(clippy::type_complexity)]
     fn resolve_hummock_version_epochs(
-        background_jobs: impl Iterator<Item = (JobId, &HashMap<FragmentId, LoadedFragment>)>,
+        creating_jobs: impl Iterator<Item = (JobId, &HashMap<FragmentId, LoadedFragment>)>,
         version: &HummockVersion,
         table_change_log: &TableChangeLogs,
     ) -> MetaResult<(
@@ -587,31 +765,9 @@ impl GlobalBarrierWorkerContextImpl {
                 .ok_or_else(|| anyhow!("cannot get committed epoch on table {}.", table_id))?)
         };
         let mut min_downstream_committed_epochs = HashMap::new();
-        for (job_id, fragments) in background_jobs {
-            let job_committed_epoch = {
-                let mut table_id_iter = fragments
-                    .values()
-                    .flat_map(|fragment| fragment.state_table_ids.iter().copied());
-                let Some(first_table_id) = table_id_iter.next() else {
-                    bail!("job {} has no state table", job_id);
-                };
-                let job_committed_epoch = get_table_committed_epoch(first_table_id)?;
-                for table_id in table_id_iter {
-                    let table_committed_epoch = get_table_committed_epoch(table_id)?;
-                    if job_committed_epoch != table_committed_epoch {
-                        bail!(
-                            "table {} has committed epoch {} different to other table {} with committed epoch {} in job {}",
-                            first_table_id,
-                            job_committed_epoch,
-                            table_id,
-                            table_committed_epoch,
-                            job_id
-                        );
-                    }
-                }
-
-                job_committed_epoch
-            };
+        for (job_id, fragments) in creating_jobs {
+            let job_committed_epoch =
+                Self::resolve_job_committed_epoch(job_id, fragments, &table_committed_epoch)?;
             if let (Some(snapshot_backfill_info), _) =
                 StreamFragmentGraph::collect_snapshot_backfill_info_impl(
                     fragments
@@ -713,14 +869,21 @@ impl GlobalBarrierWorkerContextImpl {
                         .await
                         .context("abort dirty pending sink state")?;
 
-                    // Background job progress needs to be recovered.
-                    tracing::info!("recovering background job progress");
-                    let initial_background_jobs = self
-                        .list_background_job_progress(None)
+                    // We must abort dirty pending sink state before registering iceberg pk-index sinks,
+                    // otherwise recover_pending will take speculative (epoch > committed epoch) pending sink state
+                    // as valid and cause duplicated iceberg commit.
+                    self.reregister_iceberg_pk_index_sinks(None)
                         .await
-                        .context("recover background job progress should not fail")?;
+                        .context("re-register iceberg v3 sinks after recovery")?;
 
-                    tracing::info!("recovered background job progress");
+                    // Creating job progress needs to be recovered.
+                    tracing::info!("recovering creating job progress");
+                    let mut initial_creating_jobs = self
+                        .list_creating_jobs(None)
+                        .await
+                        .context("recover creating job progress should not fail")?;
+
+                    tracing::info!("recovered creating job progress");
 
                     // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
                     let _ = self.apply_pre_applied_drop_cancel(None).await?;
@@ -733,19 +896,19 @@ impl GlobalBarrierWorkerContextImpl {
                         ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone())
                             .await?;
 
-                    let background_streaming_jobs =
-                        initial_background_jobs.iter().cloned().collect_vec();
+                    let creating_streaming_jobs =
+                        initial_creating_jobs.iter().cloned().collect_vec();
 
                     tracing::info!(
-                        "background streaming jobs: {:?} total {}",
-                        background_streaming_jobs,
-                        background_streaming_jobs.len()
+                        "creating streaming jobs: {:?} total {}",
+                        creating_streaming_jobs,
+                        creating_streaming_jobs.len()
                     );
 
                     let unreschedulable_jobs = {
                         let mut unreschedulable_jobs = HashSet::new();
 
-                        for job_id in background_streaming_jobs {
+                        for job_id in creating_streaming_jobs {
                             let scan_types = self
                                 .metadata_manager
                                 .get_job_backfill_scan_types(job_id)
@@ -763,10 +926,7 @@ impl GlobalBarrierWorkerContextImpl {
                     };
 
                     if !unreschedulable_jobs.is_empty() {
-                        info!(
-                            "unreschedulable background jobs: {:?}",
-                            unreschedulable_jobs
-                        );
+                        info!("unreschedulable creating jobs: {:?}", unreschedulable_jobs);
                     }
 
                     // Resolve actor info for recovery. If there's no actor to recover, most of the
@@ -774,7 +934,7 @@ impl GlobalBarrierWorkerContextImpl {
                     // TODO(error-handling): attach context to the errors and log them together, instead of inspecting everywhere.
                     if !unreschedulable_jobs.is_empty() {
                         bail!(
-                            "Recovery for unreschedulable background jobs is not yet implemented. \
+                            "Recovery for unreschedulable creating jobs is not yet implemented. \
                              This path is triggered when the following jobs have at least one scan type that is not reschedulable: {:?}.",
                             unreschedulable_jobs
                         );
@@ -806,7 +966,7 @@ impl GlobalBarrierWorkerContextImpl {
                                     .job_fragments
                                     .iter()
                                     .filter_map(|(job_id, job)| {
-                                        initial_background_jobs
+                                        initial_creating_jobs
                                             .contains(job_id)
                                             .then_some((*job_id, job))
                                     }),
@@ -816,23 +976,30 @@ impl GlobalBarrierWorkerContextImpl {
                         })
                         .await?;
 
+                    self.finish_completed_batch_refresh_background_jobs(
+                        &recovery_context,
+                        &state_table_committed_epochs,
+                        &mut initial_creating_jobs,
+                    )
+                    .await?;
+
                     let mv_depended_subscriptions = self
                         .metadata_manager
                         .get_mv_depended_subscriptions(None)
                         .await?;
 
-                    // Refresh background job progress for the final snapshot to reflect any catalog changes.
-                    let background_jobs = {
-                        let mut refreshed_background_jobs = self
-                            .list_background_job_progress(None)
+                    // Refresh creating job progress for the final snapshot to reflect any catalog changes.
+                    let creating_jobs = {
+                        let mut refreshed_creating_jobs = self
+                            .list_creating_jobs(None)
                             .await
-                            .context("recover background job progress should not fail")?;
+                            .context("recover creating job progress should not fail")?;
                         recovery_context
                             .fragment_context
                             .job_map
                             .keys()
                             .filter_map(|job_id| {
-                                refreshed_background_jobs.remove(job_id).then_some(*job_id)
+                                refreshed_creating_jobs.remove(job_id).then_some(*job_id)
                             })
                             .collect()
                     };
@@ -853,7 +1020,7 @@ impl GlobalBarrierWorkerContextImpl {
                         state_table_committed_epochs,
                         state_table_log_epochs,
                         mv_depended_subscriptions,
-                        background_jobs,
+                        creating_jobs,
                         hummock_version_stats: self.hummock_manager.get_version_stats().await,
                         database_infos,
                         cdc_table_snapshot_splits,
@@ -877,18 +1044,18 @@ impl GlobalBarrierWorkerContextImpl {
         self.abort_dirty_pending_sink_state(Some(database_id))
             .await
             .context("abort dirty pending sink state")?;
-
-        // Background job progress needs to be recovered.
-        tracing::info!(
-            ?database_id,
-            "recovering background job progress of database"
-        );
-
-        let background_jobs = self
-            .list_background_job_progress(Some(database_id))
+        self.reregister_iceberg_pk_index_sinks(Some(database_id))
             .await
-            .context("recover background job progress of database should not fail")?;
-        tracing::info!(?database_id, "recovered background job progress");
+            .context("re-register iceberg v3 sinks after recovery")?;
+
+        // Creating job progress needs to be recovered.
+        tracing::info!(?database_id, "recovering creating job progress of database");
+
+        let mut creating_jobs = self
+            .list_creating_jobs(Some(database_id))
+            .await
+            .context("recover creating job progress of database should not fail")?;
+        tracing::info!(?database_id, "recovered creating job progress");
 
         // This is a quick path to accelerate the process of dropping and canceling streaming jobs.
         let _ = self
@@ -897,7 +1064,7 @@ impl GlobalBarrierWorkerContextImpl {
 
         let recovery_context = self.load_recovery_context(Some(database_id)).await?;
 
-        let missing_background_jobs = background_jobs
+        let missing_creating_jobs = creating_jobs
             .iter()
             .filter(|job_id| {
                 !recovery_context
@@ -907,11 +1074,11 @@ impl GlobalBarrierWorkerContextImpl {
             })
             .copied()
             .collect_vec();
-        if !missing_background_jobs.is_empty() {
+        if !missing_creating_jobs.is_empty() {
             warn!(
                 database_id = %database_id,
-                missing_job_ids = ?missing_background_jobs,
-                "background jobs missing in rendered info"
+                missing_job_ids = ?missing_creating_jobs,
+                "creating jobs missing in rendered info"
             );
         }
 
@@ -919,7 +1086,7 @@ impl GlobalBarrierWorkerContextImpl {
             .hummock_manager
             .on_current_version_and_table_change_log(|version, table_change_log| {
                 Self::resolve_hummock_version_epochs(
-                    background_jobs.iter().filter_map(|job_id| {
+                    creating_jobs.iter().filter_map(|job_id| {
                         recovery_context
                             .fragment_context
                             .job_fragments
@@ -931,6 +1098,13 @@ impl GlobalBarrierWorkerContextImpl {
                 )
             })
             .await?;
+
+        self.finish_completed_batch_refresh_background_jobs(
+            &recovery_context,
+            &state_table_committed_epochs,
+            &mut creating_jobs,
+        )
+        .await?;
 
         let mv_depended_subscriptions = self
             .metadata_manager
@@ -949,7 +1123,7 @@ impl GlobalBarrierWorkerContextImpl {
             state_table_committed_epochs,
             state_table_log_epochs,
             mv_depended_subscriptions,
-            background_jobs,
+            creating_jobs,
             cdc_table_snapshot_splits,
         })
     }

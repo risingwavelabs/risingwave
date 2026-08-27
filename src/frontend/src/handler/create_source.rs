@@ -98,9 +98,10 @@ use crate::handler::create_table::{
 };
 use crate::handler::util::{
     SourceSchemaCompatExt, check_connector_match_connection_type, ensure_connection_type_allowed,
+    ensure_local_fs_connector_allowed,
 };
 use crate::optimizer::plan_node::generic::SourceNodeKind;
-use crate::optimizer::plan_node::{LogicalSource, ToStream, ToStreamContext};
+use crate::optimizer::plan_node::{BackfillType, LogicalSource, ToStream, ToStreamContext};
 use crate::session::SessionImpl;
 use crate::session::current::notice_to_user;
 use crate::utils::{
@@ -244,7 +245,6 @@ pub(crate) fn bind_all_columns(
             .cloned()
             .collect_vec();
 
-        #[expect(clippy::collapsible_else_if)]
         match sql_column_strategy {
             // Ignore `cols_from_source`, follow `cols_from_sql` without checking.
             SqlColumnStrategy::FollowUnchecked => {
@@ -833,6 +833,39 @@ pub enum SqlColumnStrategy {
     Ignore,
 }
 
+/// Reject user-declared `VARIANT` columns (including nested) on binding paths whose ingest
+/// pipeline cannot produce variant values. `context` names the path in the error message.
+pub(crate) fn reject_variant_columns(columns: &[ColumnCatalog], context: &str) -> Result<()> {
+    if let Some(col) = columns.iter().find(|c| c.data_type().contains_variant()) {
+        return Err(RwError::from(NotSupported(
+            format!(
+                "VARIANT column \"{}\" is not supported {context} yet",
+                col.name()
+            ),
+            format!("VARIANT columns are not supported {context} yet"),
+        )));
+    }
+    Ok(())
+}
+
+/// Reject user-declared `VARIANT` columns when the `FORMAT ... ENCODE ...` is handled by a
+/// row-encode parser or native generator, none of which can produce variant values.
+///
+/// Not gated: connector-native schemas (`ENCODE NONE`, e.g. iceberg) infer their own schema, and
+/// `ENCODE PARQUET` reads variant columns via the Parquet Variant extension type.
+fn reject_variant_columns_for_unsupported_encoding(
+    format_encode: &FormatEncodeOptions,
+    columns_from_sql: &[ColumnCatalog],
+) -> Result<()> {
+    if matches!(
+        (&format_encode.format, &format_encode.row_encode),
+        (Format::None, Encode::None) | (_, Encode::Parquet)
+    ) {
+        return Ok(());
+    }
+    reject_variant_columns(columns_from_sql, "for this source encoding")
+}
+
 /// Entrypoint for binding source connector.
 /// Common logic shared by `CREATE SOURCE` and `CREATE TABLE`.
 #[expect(clippy::too_many_arguments)]
@@ -932,6 +965,8 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
         )));
     }
     let columns_from_sql = bind_sql_columns(sql_columns_defs, false)?;
+
+    reject_variant_columns_for_unsupported_encoding(&format_encode, &columns_from_sql)?;
 
     let mut columns = bind_all_columns(
         &format_encode,
@@ -1150,6 +1185,9 @@ pub async fn handle_create_source(
     let format_encode = stmt.format_encode.into_v2_with_warning();
     let (with_properties, refresh_mode) =
         bind_connector_props(&handler_args, &format_encode, true)?;
+    if let Some(connector) = with_properties.get_connector() {
+        ensure_local_fs_connector_allowed(&session, &connector)?;
+    }
 
     let create_source_type = CreateSourceType::for_newly_created(&session, &*with_properties);
     let (columns_from_resolve_source, source_info) = bind_columns_from_source(
@@ -1231,7 +1269,12 @@ pub(super) fn generate_stream_graph_for_source(
         None,
     )?;
 
-    let stream_plan = source_node.to_stream(&mut ToStreamContext::new(false))?;
+    let stream_plan = source_node.to_stream(&mut ToStreamContext::new_with_backfill_type(
+        false,
+        // Shared source planning does not create stream table scans, so this required context
+        // value is only a placeholder and is not used for backfill selection.
+        BackfillType::ArrangementBackfill,
+    ))?;
     let graph = build_graph(stream_plan, Some(GraphJobType::Source))?;
     Ok(graph)
 }
@@ -1244,6 +1287,7 @@ pub mod tests {
     use risingwave_common::catalog::{
         DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME, ROW_ID_COLUMN_NAME,
     };
+    use risingwave_common::config::FrontendConfig;
     use risingwave_common::types::{DataType, StructType};
     use risingwave_pb::plan_common::EncodeType;
 
@@ -1333,6 +1377,37 @@ pub mod tests {
 
         assert_eq!(source.name, "t_mqtt");
         assert_eq!(source.info.row_encode, EncodeType::Protobuf as i32);
+    }
+
+    #[tokio::test]
+    async fn test_create_posix_fs_source_requires_frontend_config() {
+        let frontend = LocalFrontend::with_frontend_config(
+            Default::default(),
+            FrontendConfig {
+                unsafe_enable_local_fs_connector: false,
+                ..Default::default()
+            },
+        )
+        .await;
+        let err = frontend
+            .run_sql(
+                r#"CREATE SOURCE local_files (
+                    line VARCHAR
+                ) WITH (
+                    connector = 'posix_fs',
+                    posix_fs.root = '/tmp',
+                    match_pattern = '*.csv'
+                ) FORMAT PLAIN ENCODE CSV (without_header = 'true')"#
+                    .to_owned(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("frontend.unsafe_enable_local_fs_connector = true"),
+            "{err:?}"
+        );
     }
 
     #[tokio::test]
@@ -1508,6 +1583,45 @@ pub mod tests {
             ]
         "#]]
         .assert_debug_eq(&columns);
+        drop(catalog_reader);
+
+        let sql =
+            "CREATE SOURCE s_pulsar (v1 int) include header 'tenant' as pulsar_header with (connector = 'pulsar') format plain encode json".to_owned();
+        frontend.run_sql(sql).await.unwrap();
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let (source, _) = catalog_reader
+            .get_source_by_name(
+                DEFAULT_DATABASE_NAME,
+                SchemaPath::Name(DEFAULT_SCHEMA_NAME),
+                "s_pulsar",
+            )
+            .unwrap();
+        assert_eq!(source.name, "s_pulsar");
+
+        let columns = source
+            .columns
+            .iter()
+            .map(|col| (col.name(), col.data_type().clone()))
+            .collect::<Vec<(&str, DataType)>>();
+
+        expect_test::expect![[r#"
+            [
+                (
+                    "v1",
+                    Int32,
+                ),
+                (
+                    "pulsar_header",
+                    Bytea,
+                ),
+                (
+                    "_row_id",
+                    Serial,
+                ),
+            ]
+        "#]]
+        .assert_debug_eq(&columns);
+        drop(catalog_reader);
 
         let sql =
             "CREATE SOURCE s3 (v1 int) include timestamp 'header1' as header_col with (connector = 'kafka') format plain encode json".to_owned();

@@ -45,11 +45,7 @@ pub struct SetStmts {
 impl SetStmts {
     fn push(&mut self, sql: &str) {
         let ast = Parser::parse_sql(sql).expect("a set statement should be parsed successfully");
-        match ast
-            .into_iter()
-            .exactly_one()
-            .expect("should contain only one statement")
-        {
+        match Itertools::exactly_one(ast.into_iter()).expect("should contain only one statement") {
             // record `local` for variable and `SetTransaction` if supported in the future.
             Statement::SetVariable {
                 local: _,

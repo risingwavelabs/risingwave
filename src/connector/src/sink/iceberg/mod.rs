@@ -16,8 +16,14 @@
 mod test;
 
 mod commit;
+pub mod commit_retry;
 mod config;
 mod create_table;
+mod engine_options;
+mod metadata;
+#[cfg(any(test, madsim))]
+pub mod mock_v3_catalog_registry;
+mod position_delete;
 mod prometheus;
 mod writer;
 
@@ -29,7 +35,10 @@ use anyhow::{Context, anyhow};
 pub use commit::*;
 pub use config::*;
 pub use create_table::*;
+pub use engine_options::*;
 use iceberg::table::Table;
+pub use metadata::*;
+pub use position_delete::*;
 use risingwave_common::bail;
 use tokio::sync::mpsc::UnboundedSender;
 pub use writer::*;
@@ -38,7 +47,7 @@ use super::{
     GLOBAL_SINK_METRICS, SINK_TYPE_APPEND_ONLY, SINK_TYPE_OPTION, SINK_TYPE_UPSERT, Sink,
     SinkError, SinkWriterParam,
 };
-use crate::connector_common::IcebergSinkCompactionUpdate;
+use crate::connector_common::{IcebergCatalogKind, IcebergSinkCompactionUpdate};
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::coordinate::CoordinatedLogSinker;
 use crate::sink::{Result, SinkCommitCoordinator, SinkParam};
@@ -85,7 +94,8 @@ impl IcebergSink {
         create_and_validate_table_impl(&self.config, &self.param).await
     }
 
-    pub async fn create_table_if_not_exists(&self) -> Result<()> {
+    /// Returns `true` if this call created the table, `false` if it already existed.
+    pub async fn create_table_if_not_exists(&self) -> Result<bool> {
         create_table_if_not_exists_impl(&self.config, &self.param).await
     }
 
@@ -143,12 +153,15 @@ impl Sink for IcebergSink {
 
     const SINK_NAME: &'static str = ICEBERG_SINK;
 
+    crate::impl_validate_sink_unknown_fields!();
+
     async fn validate(&self) -> Result<()> {
-        if "snowflake".eq_ignore_ascii_case(self.config.catalog_type()) {
+        let catalog_kind = self.config.catalog_kind()?;
+        if matches!(catalog_kind, IcebergCatalogKind::Snowflake) {
             bail!("Snowflake catalog only supports iceberg sources");
         }
 
-        if "glue".eq_ignore_ascii_case(self.config.catalog_type()) {
+        if matches!(catalog_kind, IcebergCatalogKind::Glue(_)) {
             risingwave_common::license::Feature::IcebergSinkWithGlue
                 .check_available()
                 .map_err(|e| anyhow::anyhow!(e))?;
@@ -175,6 +188,18 @@ impl Sink for IcebergSink {
         }
 
         match compaction_type {
+            CompactionType::Auto => {
+                risingwave_common::license::Feature::IcebergCompaction
+                    .check_available()
+                    .map_err(|e| anyhow::anyhow!(e))?;
+
+                if self.config.write_mode != IcebergWriteMode::MergeOnRead {
+                    bail!(
+                        "'auto' compaction type only supports 'merge-on-read' write mode, got: '{}'",
+                        self.config.write_mode
+                    );
+                }
+            }
             CompactionType::SmallFiles => {
                 // 1. check license
                 risingwave_common::license::Feature::IcebergCompaction
@@ -222,7 +247,9 @@ impl Sink for IcebergSink {
             }
         }
 
-        let _ = self.create_and_validate_table().await?;
+        let table = self.create_and_validate_table().await?;
+        self.config
+            .validate_manifest_rewrite_format(table.metadata().format_version())?;
         Ok(())
     }
 
@@ -252,7 +279,7 @@ impl Sink for IcebergSink {
             && max_snapshots < 1
         {
             bail!(
-                "`compaction.max-snapshots-num` must be greater than 0, got: {}",
+                "`compaction.max_snapshots_num` must be greater than 0, got: {}",
                 max_snapshots
             );
         }

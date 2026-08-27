@@ -19,13 +19,14 @@ use async_trait::async_trait;
 use risingwave_common::config::{MAX_CONNECTION_WINDOW_SIZE, RpcClientConfig};
 use risingwave_common::monitor::{EndpointExt, TcpConfig};
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common::util::retry::exponential_backoff;
 use risingwave_pb::frontend_service::frontend_service_client::FrontendServiceClient;
 use risingwave_pb::frontend_service::{
     CancelRunningSqlRequest, CancelRunningSqlResponse, GetAllCursorsRequest, GetAllCursorsResponse,
     GetAllSubCursorsRequest, GetAllSubCursorsResponse, GetRunningSqlsRequest,
     GetRunningSqlsResponse, GetTableReplacePlanRequest, GetTableReplacePlanResponse,
 };
-use tokio_retry::strategy::{ExponentialBackoff, jitter};
+use tokio_retry::strategy::jitter;
 use tonic::Response;
 use tonic::transport::Endpoint;
 
@@ -42,7 +43,7 @@ struct FrontendClient(FrontendServiceClient<Channel>);
 
 impl FrontendClient {
     async fn new(host_addr: HostAddr, opts: &RpcClientConfig) -> Result<Self> {
-        let channel = Endpoint::from_shared(format!("http://{}", &host_addr))?
+        let channel = Endpoint::from_shared(format!("http://{}", host_addr))?
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .connect_timeout(Duration::from_secs(opts.connect_timeout_secs))
             .monitored_connect(
@@ -85,10 +86,13 @@ impl FrontendRetryClient {
 
     #[inline(always)]
     fn get_retry_strategy() -> impl Iterator<Item = Duration> {
-        ExponentialBackoff::from_millis(DEFAULT_RETRY_INTERVAL)
-            .max_delay(DEFAULT_RETRY_MAX_DELAY)
-            .take(DEFAULT_RETRY_MAX_ATTEMPTS)
-            .map(jitter)
+        exponential_backoff(
+            Duration::from_millis(DEFAULT_RETRY_INTERVAL),
+            DEFAULT_RETRY_INTERVAL,
+            DEFAULT_RETRY_MAX_DELAY,
+        )
+        .take(DEFAULT_RETRY_MAX_ATTEMPTS)
+        .map(jitter)
     }
 
     fn should_retry(status: &tonic::Status) -> bool {

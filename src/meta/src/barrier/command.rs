@@ -20,7 +20,7 @@ use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::hash::{ActorMapping, VnodeCountCompat};
-use risingwave_common::id::{JobId, SourceId};
+use risingwave_common::id::{JobId, SinkId, SourceId};
 use risingwave_common::must_match;
 use risingwave_common::types::Timestamptz;
 use risingwave_common::util::epoch::Epoch;
@@ -31,7 +31,7 @@ use risingwave_meta_model::{DispatcherType, WorkerId, fragment_relation, streami
 use risingwave_pb::catalog::CreateType;
 use risingwave_pb::common::PbActorInfo;
 use risingwave_pb::hummock::vector_index_delta::PbVectorIndexInit;
-use risingwave_pb::plan_common::PbField;
+use risingwave_pb::plan_common::{ColumnCatalog as PbColumnCatalog, PbField};
 use risingwave_pb::source::{
     ConnectorSplit, ConnectorSplits, PbCdcTableSnapshotSplits,
     PbCdcTableSnapshotSplitsWithGeneration,
@@ -46,15 +46,16 @@ use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate}
 use risingwave_pb::stream_plan::{
     AddMutation, ConnectorPropsChangeMutation, Dispatcher, Dispatchers, DropSubscriptionsMutation,
     ListFinishMutation, LoadFinishMutation, PauseMutation, PbSinkAddColumnsOp, PbSinkDropColumnsOp,
-    PbSinkSchemaChange, PbUpstreamSinkInfo, ResumeMutation, SourceChangeSplitMutation,
-    StartFragmentBackfillMutation, StopMutation, SubscriptionUpstreamInfo, ThrottleMutation,
-    UpdateMutation,
+    PbSinkSchemaChange, PbStreamNode, PbUpstreamSinkInfo, ResumeMutation,
+    SourceChangeSplitMutation, StartFragmentBackfillMutation, StopMutation,
+    SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
 };
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::warn;
 
 use super::info::InflightDatabaseInfo;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
+use crate::barrier::complete_task::CompleteBarrierTask;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::BarrierInfo;
 use crate::barrier::partial_graph::PartialGraphBarrierInfo;
@@ -63,7 +64,7 @@ use crate::barrier::utils::{collect_new_vector_index_info, collect_resp_info};
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::scale::LoadedFragmentContext;
 use crate::controller::utils::StreamingJobExtraInfo;
-use crate::hummock::{CommitEpochInfo, NewTableFragmentInfo};
+use crate::hummock::NewTableFragmentInfo;
 use crate::manager::{StreamingJob, StreamingJobType};
 use crate::model::{
     ActorId, ActorUpstreams, DispatcherId, FragmentActorDispatchers, FragmentDownstreamRelation,
@@ -76,6 +77,20 @@ use crate::stream::{
     build_actor_connector_splits,
 };
 use crate::{MetaError, MetaResult};
+
+pub(crate) type ThrottleConfigMap = HashMap<FragmentId, (ThrottleConfig, PbStreamNode)>;
+
+pub(crate) fn extract_throttle_config(
+    config: &mut ThrottleConfigMap,
+    mut apply: impl FnMut(FragmentId, &PbStreamNode) -> bool,
+) -> Option<Mutation> {
+    let fragment_throttle = config
+        .extract_if(|fragment_id, (_, stream_node)| apply(*fragment_id, stream_node))
+        .map(|(fragment_id, (throttle_config, _))| (fragment_id, throttle_config))
+        .collect::<HashMap<_, _>>();
+    (!fragment_throttle.is_empty())
+        .then_some(Mutation::Throttle(ThrottleMutation { fragment_throttle }))
+}
 
 /// [`Reschedule`] describes per-fragment changes in a resolved reschedule plan,
 /// used for actor scaling or migration.
@@ -359,6 +374,8 @@ pub struct CreateStreamingJobCommandInfo {
     pub is_serverless: bool,
     /// The `streaming_job::Model` for this job, loaded from meta store.
     pub streaming_job_model: streaming_job::Model,
+    /// If set, this create command replaces an existing sink while creating the new sink job.
+    pub replace_sink: Option<SinkId>,
     /// Batch refresh interval in seconds. If set, the MV uses batch refresh semantics.
     pub refresh_interval_sec: Option<u64>,
 }
@@ -407,12 +424,22 @@ impl StreamJobFragments {
     }
 }
 
+pub type TableLogEpochs = Vec<(Vec<u64>, u64)>;
+pub type UpstreamTableLogEpochs = HashMap<TableId, TableLogEpochs>;
+pub type SinceTimestampResolvedEpoch = (u64, TableLogEpochs);
+
 #[derive(Debug, Clone)]
 pub struct SnapshotBackfillInfo {
     /// `table_id` -> `Some(snapshot_backfill_epoch)`
     /// The `snapshot_backfill_epoch` should be None at the beginning, and be filled
     /// by global barrier worker when handling the command.
     pub upstream_mv_table_id_to_backfill_epoch: HashMap<TableId, Option<u64>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct SinceEpochInfo {
+    pub provided_since_epoch: u64,
+    pub resolved: Option<SinceTimestampResolvedEpoch>,
 }
 
 #[derive(Debug, Clone)]
@@ -425,7 +452,10 @@ pub struct BatchRefreshInfo {
 pub enum CreateStreamingJobType {
     Normal,
     SinkIntoTable(UpstreamSinkInfo),
-    SnapshotBackfill(SnapshotBackfillInfo),
+    SnapshotBackfill {
+        snapshot_backfill_info: SnapshotBackfillInfo,
+        since_epoch: Option<SinceEpochInfo>,
+    },
     BatchRefresh(BatchRefreshInfo),
 }
 
@@ -503,8 +533,7 @@ pub enum Command {
     /// `Throttle` command generates a `Throttle` barrier with the given throttle config to change
     /// the `rate_limit` of executors. `throttle_type` specifies which executor kinds should apply it.
     Throttle {
-        jobs: HashSet<JobId>,
-        config: HashMap<FragmentId, ThrottleConfig>,
+        config: ThrottleConfigMap,
     },
 
     /// `CreateSubscription` command generates a `CreateSubscriptionMutation` to notify
@@ -787,6 +816,29 @@ impl BarrierKind {
     }
 }
 
+fn sink_original_schema_fields(columns: &[PbColumnCatalog]) -> Vec<PbField> {
+    columns
+        .iter()
+        .filter(|col| !col.is_hidden)
+        .map(|col| {
+            let column_desc = col
+                .column_desc
+                .as_ref()
+                .expect("sink column catalog should have a column descriptor");
+            PbField {
+                data_type: Some(
+                    column_desc
+                        .column_type
+                        .as_ref()
+                        .expect("sink column descriptor should have a column type")
+                        .clone(),
+                ),
+                name: column_desc.name.clone(),
+            }
+        })
+        .collect()
+}
+
 impl BarrierInfo {
     fn get_truncate_epoch(&self, retention_second: u64) -> Epoch {
         let Some(truncate_timestamptz) = Timestamptz::from_secs(
@@ -803,7 +855,7 @@ impl Command {
     pub(super) fn collect_commit_epoch_info(
         database_info: &InflightDatabaseInfo,
         barrier_info: &PartialGraphBarrierInfo,
-        info: &mut CommitEpochInfo,
+        task: &mut CompleteBarrierTask,
         resps: Vec<BarrierCompleteResponse>,
         backfill_pinned_log_epoch: HashMap<JobId, (u64, HashSet<TableId>)>,
     ) {
@@ -814,15 +866,14 @@ impl Command {
             old_value_ssts,
             vector_index_adds,
             truncate_tables,
+            iceberg_pk_index_sink_metadata,
         ) = collect_resp_info(resps);
 
-        let new_table_fragment_infos =
-            if let PostCollectCommand::CreateStreamingJob { info, job_type, .. } =
-                &barrier_info.post_collect_command
-            {
+        let new_table_fragment_infos = match &barrier_info.post_collect_command {
+            PostCollectCommand::CreateStreamingJob { info, job_type, .. } => {
                 assert!(!matches!(
                     job_type,
-                    CreateStreamingJobType::SnapshotBackfill(_)
+                    CreateStreamingJobType::SnapshotBackfill { .. }
                         | CreateStreamingJobType::BatchRefresh(_)
                 ));
                 let table_fragments = &info.stream_job_fragments;
@@ -833,9 +884,9 @@ impl Command {
                 }
 
                 vec![NewTableFragmentInfo { table_ids }]
-            } else {
-                vec![]
-            };
+            }
+            _ => vec![],
+        };
 
         let mut mv_log_store_truncate_epoch = HashMap::new();
         // TODO: may collect cross db snapshot backfill
@@ -872,6 +923,7 @@ impl Command {
         );
 
         let epoch = barrier_info.barrier_info.prev_epoch();
+        let info = &mut task.commit_info;
         for table_id in &barrier_info.table_ids_to_commit {
             info.tables_to_commit
                 .try_insert(*table_id, epoch)
@@ -903,6 +955,8 @@ impl Command {
                 .expect("non-duplicate");
         }
         info.truncate_tables.extend(truncate_tables);
+        task.iceberg_pk_index_sink_metadata
+            .extend(iceberg_pk_index_sink_metadata);
     }
 }
 
@@ -953,18 +1007,6 @@ impl Command {
         }
     }
 
-    /// Build the `Throttle` mutation.
-    pub(super) fn throttle_to_mutation(config: &HashMap<FragmentId, ThrottleConfig>) -> Mutation {
-        {
-            {
-                let config = config.clone();
-                Mutation::Throttle(ThrottleMutation {
-                    fragment_throttle: config,
-                })
-            }
-        }
-    }
-
     /// Build the `Stop` mutation for `DropStreamingJobs`.
     pub(super) fn drop_streaming_jobs_to_mutation(
         actors: &Vec<ActorId>,
@@ -986,6 +1028,7 @@ impl Command {
     pub(super) fn create_streaming_job_to_mutation(
         info: &CreateStreamingJobCommandInfo,
         job_type: &CreateStreamingJobType,
+        dropped_actors: impl IntoIterator<Item = ActorId>,
         is_currently_paused: bool,
         edges: &mut FragmentEdgeBuildResult,
         control_stream_manager: &ControlStreamManager,
@@ -1009,12 +1052,16 @@ impl Command {
                     .flatten()
                     .map(|actor| actor.actor_id)
                     .collect();
+                let dropped_actors = dropped_actors.into_iter().collect();
                 let actor_splits = split_assignment
                     .values()
                     .flat_map(build_actor_connector_splits)
                     .collect();
-                let subscriptions_to_add =
-                    if let CreateStreamingJobType::SnapshotBackfill(snapshot_backfill_info)
+                let subscriptions_to_add = {
+                    if let CreateStreamingJobType::SnapshotBackfill {
+                        snapshot_backfill_info,
+                        ..
+                    }
                     | CreateStreamingJobType::BatchRefresh(BatchRefreshInfo {
                         snapshot_backfill_info,
                         ..
@@ -1032,7 +1079,8 @@ impl Command {
                             .collect()
                     } else {
                         Default::default()
-                    };
+                    }
+                };
                 let backfill_nodes_to_pause: Vec<_> =
                     get_nodes_with_backfill_dependencies(fragment_backfill_ordering)
                         .into_iter()
@@ -1050,7 +1098,7 @@ impl Command {
                         let new_sink_actors = stream_actors
                             .get(sink_fragment_id)
                             .unwrap_or_else(|| {
-                                panic!("upstream sink fragment {sink_fragment_id} not exist")
+                                panic!("upstream sink fragment {sink_fragment_id} does not exist")
                             })
                             .iter()
                             .map(|actor| {
@@ -1097,6 +1145,11 @@ impl Command {
                     backfill_nodes_to_pause,
                     actor_cdc_table_snapshot_splits,
                     new_upstream_sinks,
+                    dropped_actors,
+                    sink_log_store_flush: info
+                        .replace_sink
+                        .map(|old_sink_id| vec![old_sink_id])
+                        .unwrap_or_default(),
                 };
 
                 Ok(Mutation::Add(add_mutation))
@@ -1354,6 +1407,8 @@ impl Command {
                 backfill_nodes_to_pause: vec![],
                 actor_cdc_table_snapshot_splits: None,
                 new_upstream_sinks: Default::default(),
+                dropped_actors: Default::default(),
+                sink_log_store_flush: Default::default(),
             })
         }
     }
@@ -1654,23 +1709,9 @@ impl Command {
                         (
                             sink.original_sink.id.as_raw_id(),
                             PbSinkSchemaChange {
-                                original_schema: sink
-                                    .original_sink
-                                    .columns
-                                    .iter()
-                                    .map(|col| PbField {
-                                        data_type: Some(
-                                            col.column_desc
-                                                .as_ref()
-                                                .unwrap()
-                                                .column_type
-                                                .as_ref()
-                                                .unwrap()
-                                                .clone(),
-                                        ),
-                                        name: col.column_desc.as_ref().unwrap().name.clone(),
-                                    })
-                                    .collect(),
+                                original_schema: sink_original_schema_fields(
+                                    &sink.original_sink.columns,
+                                ),
                                 op: Some(op),
                             },
                         )
@@ -1775,5 +1816,45 @@ impl Command {
             }
         }
         actor_upstreams
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_pb::data::PbDataType;
+    use risingwave_pb::data::data_type::PbTypeName;
+    use risingwave_pb::plan_common::{ColumnCatalog as PbColumnCatalog, ColumnDesc};
+
+    use super::sink_original_schema_fields;
+
+    fn column(name: &str, type_name: PbTypeName, is_hidden: bool) -> PbColumnCatalog {
+        PbColumnCatalog {
+            column_desc: Some(ColumnDesc {
+                column_type: Some(PbDataType {
+                    type_name: type_name as i32,
+                    ..Default::default()
+                }),
+                name: name.to_owned(),
+                ..Default::default()
+            }),
+            is_hidden,
+        }
+    }
+
+    #[test]
+    fn test_sink_original_schema_fields_skips_hidden_columns() {
+        let columns = vec![
+            column("k", PbTypeName::Int32, false),
+            column("v", PbTypeName::Varchar, false),
+            column("_row_id", PbTypeName::Serial, true),
+        ];
+
+        let fields = sink_original_schema_fields(&columns);
+        let field_names = fields
+            .iter()
+            .map(|field| field.name.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(field_names, ["k", "v"]);
     }
 }

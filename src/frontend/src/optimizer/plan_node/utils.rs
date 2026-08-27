@@ -38,6 +38,7 @@ use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::iceberg::IcebergTimeTravelInfo;
 use risingwave_expr::aggregate::PbAggKind;
 use risingwave_expr::bail;
+use risingwave_pb::stream_plan::StreamScanType;
 use risingwave_sqlparser::ast::AsOf;
 
 use super::generic::{self, GenericPlanRef, PhysicalPlanRef};
@@ -46,7 +47,6 @@ use crate::catalog::table_catalog::TableType;
 use crate::catalog::{ColumnId, FragmentId, TableCatalog, TableId};
 use crate::error::{ErrorCode, Result};
 use crate::expr::InputRef;
-use crate::optimizer::StreamScanType;
 use crate::optimizer::plan_node::generic::Agg;
 use crate::optimizer::plan_node::{BatchSimpleAgg, PlanAggCall};
 use crate::optimizer::property::{Cardinality, Order, RequiredDist, WatermarkColumns};
@@ -468,10 +468,7 @@ pub fn infer_synced_kv_log_store_table_catalog_inner(
     table_catalog_builder.build(dist_key, read_prefix_len_hint)
 }
 
-/// Check that all leaf nodes must be stream table scan,
-/// since that plan node maps to `backfill` executor, which supports recovery.
-/// Some other leaf nodes like `StreamValues` do not support recovery, and they
-/// cannot use background ddl.
+/// Check that all leaf nodes support recoverable background DDL.
 pub(crate) fn plan_can_use_background_ddl(plan: &StreamPlanRef) -> bool {
     if plan.inputs().is_empty() {
         if plan.as_stream_source_scan().is_some()
@@ -480,11 +477,19 @@ pub(crate) fn plan_can_use_background_ddl(plan: &StreamPlanRef) -> bool {
         {
             true
         } else if let Some(scan) = plan.as_stream_table_scan() {
-            scan.stream_scan_type() == StreamScanType::Backfill
-                || scan.stream_scan_type() == StreamScanType::ArrangementBackfill
-                || scan.stream_scan_type() == StreamScanType::CrossDbSnapshotBackfill
-                || scan.stream_scan_type() == StreamScanType::SnapshotBackfill
+            #[expect(deprecated)]
+            match scan.stream_scan_type() {
+                StreamScanType::Backfill
+                | StreamScanType::ArrangementBackfill
+                | StreamScanType::CrossDbSnapshotBackfill
+                | StreamScanType::SnapshotBackfill
+                | StreamScanType::UpstreamOnly => true,
+                StreamScanType::Unspecified => unreachable!(),
+                // These legacy scan types do not persist snapshot progress.
+                StreamScanType::Chain | StreamScanType::Rearrange => false,
+            }
         } else {
+            // Other leaf nodes, such as `StreamValues`, do not support recovery.
             false
         }
     } else {
@@ -508,8 +513,8 @@ pub fn to_batch_query_epoch(a: &Option<AsOf>) -> Result<Option<PbBatchQueryEpoch
     let timestamp = match a {
         AsOf::ProcessTime => {
             return Err(ErrorCode::NotSupported(
-                "do not support AS OF PROCTIME in batch query".to_owned(),
-                "please use as of timestamp".to_owned(),
+                "AS OF PROCTIME is not supported".to_owned(),
+                "please use AS OF TIMESTAMP".to_owned(),
             )
             .into());
         }
@@ -523,7 +528,7 @@ pub fn to_batch_query_epoch(a: &Option<AsOf>) -> Result<Option<PbBatchQueryEpoch
         AsOf::TimestampNum(ts) => *ts,
         AsOf::TimestampString(ts) => {
             let date_time = speedate::DateTime::parse_str_rfc3339(ts)
-                .map_err(|_e| anyhow!("fail to parse timestamp"))?;
+                .map_err(|_e| anyhow!("failed to parse the timestamp"))?;
             if date_time.time.tz_offset.is_none() {
                 // If the input does not specify a time zone, use the time zone set by the "SET TIME ZONE" command.
                 risingwave_expr::expr_context::TIME_ZONE::try_with(|set_time_zone| {
@@ -551,8 +556,8 @@ pub fn to_batch_query_epoch(a: &Option<AsOf>) -> Result<Option<PbBatchQueryEpoch
         }
         AsOf::VersionNum(_) | AsOf::VersionString(_) => {
             return Err(ErrorCode::NotSupported(
-                "do not support as of version".to_owned(),
-                "please use as of timestamp".to_owned(),
+                "AS OF VERSION is not supported".to_owned(),
+                "please use AS OF TIMESTAMP".to_owned(),
             )
             .into());
         }
@@ -561,7 +566,7 @@ pub fn to_batch_query_epoch(a: &Option<AsOf>) -> Result<Option<PbBatchQueryEpoch
                 value,
                 Some(crate::Binder::bind_date_time_field(*leading_field)),
             )
-            .map_err(|_| anyhow!("fail to parse interval"))?;
+            .map_err(|_| anyhow!("failed to parse the interval"))?;
             let interval_sec = (interval.epoch_in_micros() / 1_000_000) as i64;
             chrono::Utc::now()
                 .timestamp()
@@ -588,7 +593,7 @@ pub fn to_iceberg_time_travel_as_of(
         }
         Some(AsOf::TimestampString(ts)) => {
             let date_time = speedate::DateTime::parse_str_rfc3339(ts)
-                .map_err(|_e| anyhow!("fail to parse timestamp"))?;
+                .map_err(|_e| anyhow!("failed to parse the timestamp"))?;
             let timestamp = if date_time.time.tz_offset.is_none() {
                 // If the input does not specify a time zone, use the time zone set by the "SET TIME ZONE" command.
                 let tz = Timestamptz::lookup_time_zone(timezone).map_err(|e| anyhow!(e))?;

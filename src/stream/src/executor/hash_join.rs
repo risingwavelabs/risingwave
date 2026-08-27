@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::assert_matches::assert_matches;
+use std::assert_matches;
 use std::collections::{BTreeMap, HashSet};
 use std::marker::PhantomData;
 use std::time::Duration;
@@ -23,6 +23,7 @@ use itertools::Itertools;
 use multimap::MultiMap;
 use risingwave_common::array::Op;
 use risingwave_common::hash::{HashKey, NullBitmap};
+use risingwave_common::metrics::LabelGuardedHistogram;
 use risingwave_common::row::RowExt;
 use risingwave_common::types::{DefaultOrd, ToOwnedDatum};
 use risingwave_common::util::epoch::EpochPair;
@@ -246,6 +247,7 @@ struct EqJoinArgs<'a, K: HashKey, S: StateStore, E: JoinEncoding> {
     high_join_amplification_threshold: usize,
     entry_state_max_rows: usize,
     join_cache_evict_interval_rows: u32,
+    join_matched_join_keys: &'a LabelGuardedHistogram,
 }
 
 impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
@@ -637,6 +639,26 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
             .join_cached_entry_count
             .with_guarded_label_values(&[actor_id_str.as_str(), fragment_id_str.as_str(), "right"]);
 
+        // Bind at executor scope: a per-chunk guard would be dropped between chunks and reset the series.
+        let left_table_id_str = self.side_l.ht.table_id().to_string();
+        let right_table_id_str = self.side_r.ht.table_id().to_string();
+        let left_join_matched_join_keys = self
+            .metrics
+            .join_matched_join_keys
+            .with_guarded_label_values(&[
+                actor_id_str.as_str(),
+                fragment_id_str.as_str(),
+                left_table_id_str.as_str(),
+            ]);
+        let right_join_matched_join_keys = self
+            .metrics
+            .join_matched_join_keys
+            .with_guarded_label_values(&[
+                actor_id_str.as_str(),
+                fragment_id_str.as_str(),
+                right_table_id_str.as_str(),
+            ]);
+
         let mut start_time = Instant::now();
 
         while let Some(msg) = aligned_stream
@@ -674,6 +696,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                         high_join_amplification_threshold: self.high_join_amplification_threshold,
                         entry_state_max_rows: self.entry_state_max_rows,
                         join_cache_evict_interval_rows: self.join_cache_evict_interval_rows,
+                        join_matched_join_keys: &left_join_matched_join_keys,
                     }) {
                         left_time += left_start_time.elapsed();
                         yield Message::Chunk(chunk?);
@@ -701,6 +724,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                         high_join_amplification_threshold: self.high_join_amplification_threshold,
                         entry_state_max_rows: self.entry_state_max_rows,
                         join_cache_evict_interval_rows: self.join_cache_evict_interval_rows,
+                        join_matched_join_keys: &right_join_matched_join_keys,
                     }) {
                         right_time += right_start_time.elapsed();
                         yield Message::Chunk(chunk?);
@@ -937,6 +961,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
             high_join_amplification_threshold,
             entry_state_max_rows,
             join_cache_evict_interval_rows,
+            join_matched_join_keys,
             ..
         } = args;
 
@@ -963,15 +988,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                 side_update.i2o_mapping.clone(),
                 side_match.i2o_mapping.clone(),
             ));
-
-        let join_matched_join_keys = ctx
-            .streaming_metrics
-            .join_matched_join_keys
-            .with_guarded_label_values(&[
-                &ctx.id.to_string(),
-                &ctx.fragment_id.to_string(),
-                &side_update.ht.table_id().to_string(),
-            ]);
 
         let keys = K::build_many(&side_update.join_key_indices, chunk.data_chunk());
         for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.iter()) {
@@ -1011,6 +1027,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                         side_update,
                         &useful_state_clean_columns,
                         cond,
+                        &mut total_matches,
                         append_only_optimize,
                         entry_state_max_rows,
                     )
@@ -1023,7 +1040,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                     #[for_await]
                     for chunk in match_rows!(Insert) {
                         let chunk = chunk?;
-                        total_matches += chunk.cardinality();
                         yield chunk;
                     }
                 }
@@ -1032,7 +1048,6 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                     #[for_await]
                     for chunk in match_rows!(Delete) {
                         let chunk = chunk?;
-                        total_matches += chunk.cardinality();
                         yield chunk;
                     }
                 }
@@ -1082,6 +1097,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         side_update: &'a mut JoinSide<K, S, E>,
         useful_state_clean_columns: &'a [(usize, &'a Watermark)],
         cond: &'a mut Option<NonStrictExpression>,
+        total_matches: &'a mut usize,
         append_only_optimize: bool,
         entry_state_max_rows: usize,
     ) {
@@ -1114,6 +1130,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
                     cond,
                     &mut degree,
                     useful_state_clean_columns,
+                    total_matches,
                     append_only_optimize,
                     &mut append_only_matched_row,
                     &mut matched_rows_to_clean,
@@ -1263,6 +1280,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         cond: &Option<NonStrictExpression>,
         update_row_degree: &mut u64,
         useful_state_clean_columns: &[(usize, &'a Watermark)],
+        total_matches: &mut usize,
         append_only_optimize: bool,
         append_only_matched_row: &mut Option<JoinRow<RO>>,
         matched_rows_to_clean: &mut Vec<JoinRow<RO>>,
@@ -1283,6 +1301,7 @@ impl<K: HashKey, S: StateStore, const T: JoinTypePrimitive, E: JoinEncoding>
         .await;
 
         if join_condition_satisfied {
+            *total_matches += 1;
             // update degree
             *update_row_degree += 1;
             // send matched row downstream

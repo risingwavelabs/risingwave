@@ -62,7 +62,7 @@ log/
 dhat-heap.json
 
 # RisingWave Local Runtime
-.risingwave/
+.risingwave
 .bin/
 
 # Generated Configuration Files
@@ -99,3 +99,4 @@ book/
 
 # Code agent temporary files
 docs/superpowers
+.context/

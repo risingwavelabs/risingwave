@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::assert_matches::assert_matches;
+use std::assert_matches;
 
 use pretty_xmlish::{Pretty, XmlNode};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
@@ -45,7 +45,7 @@ impl StreamExchange {
         assert_matches!(
             dist,
             Distribution::HashShard(_) | Distribution::Single | Distribution::Broadcast,
-            "exchange can not be used to enforce such distribution"
+            "exchange cannot be used to enforce this distribution"
         );
 
         // For non-append-only distributed stream, check that distribution key is a subset of stream key

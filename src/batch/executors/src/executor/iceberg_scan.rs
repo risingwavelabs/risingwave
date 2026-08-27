@@ -22,7 +22,7 @@ use risingwave_common::catalog::{
 use risingwave_common::types::DataType;
 use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::source::iceberg::{
-    IcebergFileScanTask, IcebergProperties, IcebergScanOpts, IcebergSplit,
+    IcebergFileScanMetrics, IcebergFileScanTask, IcebergProperties, IcebergScanOpts, IcebergSplit,
     scan_task_to_chunk_with_deletes,
 };
 use risingwave_connector::source::{ConnectorProperties, SplitImpl, SplitMetaData};
@@ -39,9 +39,10 @@ pub struct IcebergScanExecutor {
     chunk_size: usize,
     schema: Schema,
     identity: String,
-    metrics: Option<BatchMetrics>,
+    file_scan_metrics: Option<IcebergFileScanMetrics>,
     need_seq_num: bool,
     need_file_path_and_pos: bool,
+    limit: Option<u64>,
 }
 
 impl Executor for IcebergScanExecutor {
@@ -68,16 +69,24 @@ impl IcebergScanExecutor {
         metrics: Option<BatchMetrics>,
         need_seq_num: bool,
         need_file_path_and_pos: bool,
+        limit: Option<u64>,
     ) -> Self {
+        let file_scan_metrics = metrics.as_ref().map(|metrics| {
+            IcebergFileScanMetrics::new(
+                &metrics.iceberg_scan_metrics(),
+                iceberg_config.table.table_name(),
+            )
+        });
         Self {
             iceberg_config,
             chunk_size,
             schema,
             file_scan_tasks: Some(file_scan_tasks),
             identity,
-            metrics,
+            file_scan_metrics,
             need_seq_num,
             need_file_path_and_pos,
+            limit,
         }
     }
 
@@ -87,19 +96,20 @@ impl IcebergScanExecutor {
         let data_types = self.schema.data_types();
 
         let data_file_scan_tasks = match Option::take(&mut self.file_scan_tasks) {
-            Some(IcebergFileScanTask::Data(data_file_scan_tasks)) => data_file_scan_tasks,
-            Some(IcebergFileScanTask::EqualityDelete(equality_delete_file_scan_tasks)) => {
-                equality_delete_file_scan_tasks
-            }
-            Some(IcebergFileScanTask::PositionDelete(position_delete_file_scan_tasks)) => {
-                position_delete_file_scan_tasks
-            }
+            Some(file_scan_tasks) => file_scan_tasks.into_tasks(),
             None => {
                 bail!("file_scan_tasks must be Some")
             }
         };
+        let mut remaining_limit = self
+            .limit
+            .map(|limit| usize::try_from(limit).unwrap_or(usize::MAX));
 
         for data_file_scan_task in data_file_scan_tasks {
+            if matches!(remaining_limit, Some(0)) {
+                return Ok(());
+            }
+
             #[for_await]
             for chunk in scan_task_to_chunk_with_deletes(
                 table.clone(),
@@ -108,14 +118,31 @@ impl IcebergScanExecutor {
                     chunk_size: self.chunk_size,
                     need_seq_num: self.need_seq_num,
                     need_file_path_and_pos: self.need_file_path_and_pos,
+                    // Iceberg V2 scans expose delete files separately for delete-file scan nodes.
+                    // From V3 onward, deletion vectors are attached to data-file tasks and must be
+                    // applied by iceberg-rs during the data scan.
                     handle_delete_files: table.metadata().format_version()
                         >= iceberg::spec::FormatVersion::V3,
                 },
-                self.metrics.as_ref().map(|m| m.iceberg_scan_metrics()),
+                self.file_scan_metrics.clone(),
             ) {
                 let chunk = chunk?;
                 assert_eq!(chunk.data_types(), data_types);
-                yield chunk;
+                if let Some(remaining) = &mut remaining_limit {
+                    if chunk.cardinality() > *remaining {
+                        yield take_first_visible_rows(chunk, *remaining);
+                        return Ok(());
+                    }
+
+                    *remaining -= chunk.cardinality();
+                    yield chunk;
+
+                    if *remaining == 0 {
+                        return Ok(());
+                    }
+                } else {
+                    yield chunk;
+                }
             }
         }
     }
@@ -188,9 +215,19 @@ impl BoxedExecutorBuilder for IcebergScanExecutorBuilder {
                 metrics,
                 need_seq_num,
                 need_file_path_and_pos,
+                split.limit,
             )))
         } else {
             unreachable!()
         }
     }
+}
+
+fn take_first_visible_rows(chunk: DataChunk, limit: usize) -> DataChunk {
+    if limit >= chunk.cardinality() {
+        return chunk;
+    }
+
+    let indexes = chunk.visibility().iter_ones().take(limit).collect_vec();
+    chunk.reorder_rows(&indexes)
 }

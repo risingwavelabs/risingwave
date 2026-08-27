@@ -1,4 +1,4 @@
 query I
-select (select count(*) from no_shuffle_backfill) = (select count(*) from t);
+select (select count(*) from arrangement_backfill_fallback) = (select count(*) from t);
 ----
 t

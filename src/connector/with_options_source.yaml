@@ -215,6 +215,9 @@ IcebergProperties:
   - name: glue.region
     field_type: String
     required: false
+  - name: glue.endpoint
+    field_type: String
+    required: false
   - name: glue.id
     field_type: String
     comments: |-
@@ -240,6 +243,18 @@ IcebergProperties:
     field_type: String
     required: false
   - name: adlsgen2.endpoint
+    field_type: String
+    required: false
+  - name: adlsgen2.tenant_id
+    field_type: String
+    required: false
+  - name: adlsgen2.client_id
+    field_type: String
+    required: false
+  - name: adlsgen2.client_secret
+    field_type: String
+    required: false
+  - name: adlsgen2.authority_host
     field_type: String
     required: false
   - name: warehouse.path
@@ -555,10 +570,41 @@ KafkaProperties:
     field_type: bool
     required: false
     allow_alter_on_fly: true
+  - name: properties.reconnect.backoff.ms
+    field_type: usize
+    comments: |-
+      Initial backoff time in milliseconds before reconnecting to a broker after a connection
+      closes.
+    required: false
+    allow_alter_on_fly: true
+  - name: properties.reconnect.backoff.max.ms
+    field_type: usize
+    comments: |-
+      Maximum backoff time in milliseconds before reconnecting to a broker after a connection
+      closes.
+    required: false
+    allow_alter_on_fly: true
+  - name: properties.socket.connection.setup.timeout.ms
+    field_type: usize
+    comments: |-
+      Maximum time in milliseconds allowed for broker connection setup, including TCP setup and
+      SSL/SASL handshakes.
+    required: false
+    allow_alter_on_fly: true
   - name: properties.socket.keepalive.enable
     field_type: bool
     required: false
     default: 'true'
+  - name: properties.retry.backoff.ms
+    field_type: usize
+    comments: Initial backoff time in milliseconds before retrying a failed protocol request.
+    required: false
+    allow_alter_on_fly: true
+  - name: properties.retry.backoff.max.ms
+    field_type: usize
+    comments: Maximum backoff time in milliseconds before retrying a failed protocol request.
+    required: false
+    allow_alter_on_fly: true
   - name: properties.queued.min.messages
     field_type: usize
     comments: |-
@@ -616,6 +662,11 @@ KafkaProperties:
       progress for monitoring. Setting this to false can avoid creating consumer groups.
 
       default: true
+    required: false
+    allow_alter_on_fly: true
+  - name: properties.auto.commit.interval.ms
+    field_type: usize
+    comments: The frequency in milliseconds that the consumer offsets are committed.
     required: false
     allow_alter_on_fly: true
   - name: broker.rewrite.endpoints
@@ -1276,6 +1327,22 @@ PubsubProperties:
       Must be between 10 and 600 seconds. Defaults to 60.
     required: false
     allow_alter_on_fly: true
+  - name: pubsub.max_outstanding_messages
+    field_type: i64
+    comments: |-
+      The maximum number of unacknowledged messages delivered to each streaming pull reader.
+      Pub/Sub pauses delivery to a reader when this limit is reached. Must be greater than 0.
+      Defaults to 1024.
+    required: false
+    allow_alter_on_fly: true
+  - name: pubsub.max_outstanding_bytes
+    field_type: i64
+    comments: |-
+      The maximum total size of unacknowledged messages delivered to each streaming pull reader.
+      Pub/Sub pauses delivery to a reader when this limit is reached. Must be greater than 0.
+      Defaults to 1 GB.
+    required: false
+    allow_alter_on_fly: true
 PulsarProperties:
   fields:
   - name: scan.startup.mode
@@ -1404,6 +1471,20 @@ PulsarProperties:
     field_type: bool
     required: false
     default: Default::default
+TcpKeepaliveConfig:
+  fields:
+  - name: tcp.keepalive.idle
+    field_type: u32
+    required: false
+    default: 10 * 60
+  - name: tcp.keepalive.interval
+    field_type: u32
+    required: false
+    default: '10'
+  - name: tcp.keepalive.count
+    field_type: u32
+    required: false
+    default: '3'
 TestSourceProperties:
   fields:
   - name: properties

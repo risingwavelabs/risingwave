@@ -96,6 +96,8 @@ pub struct MetaOpts {
     /// Whether to enable the recovery of the cluster. If disabled, the meta service will exit on
     /// abnormal cases.
     pub enable_recovery: bool,
+    /// Whether to clean up all foreground creating streaming jobs during recovery.
+    pub clean_all_foreground_jobs_on_recovery: bool,
     /// Whether to disable the auto-scaling feature.
     pub disable_automatic_parallelism_control: bool,
     /// The number of streaming jobs per scaling operation.
@@ -104,8 +106,12 @@ pub struct MetaOpts {
     pub parallelism_control_trigger_period_sec: u64,
     /// The first delay of parallelism control.
     pub parallelism_control_trigger_first_delay_sec: u64,
-    /// The maximum number of barriers in-flight in the compute nodes.
+    /// The maximum number of pending barriers in each partial graph.
     pub in_flight_barrier_nums: usize,
+    /// The maximum number of lagged barriers when finishing snapshot backfill.
+    pub snapshot_backfill_finish_max_lagged_barriers: usize,
+    /// The multiplier applied to the pending-barrier limit for snapshot backfill partial graphs.
+    pub snapshot_backfill_barrier_amplification_factor: usize,
     /// After specified seconds of idle (no mview or flush), the process will be exited.
     /// 0 for infinite, process will never be exited due to long idle time.
     pub max_idle_ms: u64,
@@ -310,6 +316,7 @@ pub struct MetaOpts {
 
     pub enable_legacy_table_migration: bool,
     pub pause_on_next_bootstrap_offline: bool,
+    pub serverless_backfill_controller_addr: String,
 }
 
 impl MetaOpts {
@@ -317,11 +324,14 @@ impl MetaOpts {
     pub fn test(enable_recovery: bool) -> Self {
         Self {
             enable_recovery,
+            clean_all_foreground_jobs_on_recovery: false,
             disable_automatic_parallelism_control: false,
             parallelism_control_batch_size: 1,
             parallelism_control_trigger_period_sec: 10,
             parallelism_control_trigger_first_delay_sec: 30,
             in_flight_barrier_nums: 40,
+            snapshot_backfill_finish_max_lagged_barriers: 100,
+            snapshot_backfill_barrier_amplification_factor: 1,
             max_idle_ms: 0,
             compaction_deterministic_test: false,
             default_parallelism: DefaultParallelism::Full,
@@ -416,6 +426,7 @@ impl MetaOpts {
             enable_legacy_table_migration: true,
             refresh_scheduler_interval_sec: 60,
             pause_on_next_bootstrap_offline: false,
+            serverless_backfill_controller_addr: String::new(),
             table_change_log_insert_batch_size: 1000,
             table_change_log_delete_batch_size: 1000,
         }

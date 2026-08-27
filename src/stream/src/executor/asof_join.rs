@@ -27,6 +27,7 @@ use either::Either;
 use itertools::Itertools;
 use multimap::MultiMap;
 use risingwave_common::array::Op;
+use risingwave_common::metrics::LabelGuardedHistogram;
 use risingwave_common::row::RowExt;
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::sort_util::cmp_rows_ascending;
@@ -162,6 +163,8 @@ struct EqJoinArgs<'a, S: StateStore, E: AsOfRowEncoding> {
     cnt_rows_received: &'a mut u32,
     join_cache_evict_interval_rows: u32,
     high_join_amplification_threshold: usize,
+    /// Bound at executor scope so the guard isn't dropped between chunks (which resets the series).
+    join_matched_join_keys: &'a LabelGuardedHistogram,
 }
 
 impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoinExecutor<S, T, E> {
@@ -372,6 +375,26 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
             .join_cached_entry_count
             .with_guarded_label_values(&[actor_id_str.as_str(), fragment_id_str.as_str(), "right"]);
 
+        // Bind at executor scope: a per-chunk guard would be dropped between chunks and reset the series.
+        let left_table_id_str = self.side_l.ht.table_id().to_string();
+        let right_table_id_str = self.side_r.ht.table_id().to_string();
+        let left_join_matched_join_keys = self
+            .metrics
+            .join_matched_join_keys
+            .with_guarded_label_values(&[
+                actor_id_str.as_str(),
+                fragment_id_str.as_str(),
+                left_table_id_str.as_str(),
+            ]);
+        let right_join_matched_join_keys = self
+            .metrics
+            .join_matched_join_keys
+            .with_guarded_label_values(&[
+                actor_id_str.as_str(),
+                fragment_id_str.as_str(),
+                right_table_id_str.as_str(),
+            ]);
+
         let mut start_time = Instant::now();
 
         while let Some(msg) = aligned_stream
@@ -407,6 +430,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
                         cnt_rows_received: &mut self.cnt_rows_received,
                         join_cache_evict_interval_rows: self.join_cache_evict_interval_rows,
                         high_join_amplification_threshold: self.high_join_amplification_threshold,
+                        join_matched_join_keys: &left_join_matched_join_keys,
                     }) {
                         left_time += left_start_time.elapsed();
                         yield Message::Chunk(chunk?);
@@ -432,6 +456,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
                         cnt_rows_received: &mut self.cnt_rows_received,
                         join_cache_evict_interval_rows: self.join_cache_evict_interval_rows,
                         high_join_amplification_threshold: self.high_join_amplification_threshold,
+                        join_matched_join_keys: &right_join_matched_join_keys,
                     }) {
                         right_time += right_start_time.elapsed();
                         yield Message::Chunk(chunk?);
@@ -548,7 +573,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
     #[try_stream(ok = StreamChunk, error = StreamExecutorError)]
     async fn eq_join_left(args: EqJoinArgs<'_, S, E>) {
         let EqJoinArgs {
-            ctx: _,
+            ctx,
             side_l,
             side_r,
             null_safe,
@@ -558,7 +583,8 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
             chunk_size,
             cnt_rows_received,
             join_cache_evict_interval_rows,
-            high_join_amplification_threshold: _,
+            high_join_amplification_threshold,
+            join_matched_join_keys,
         } = args;
 
         let (side_update, side_match) = (side_l, side_r);
@@ -609,6 +635,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
                         }
                     }
                 }
+                join_matched_join_keys.observe(0.0);
                 continue;
             }
 
@@ -616,6 +643,8 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
 
             let inequal_key_is_null = side_update.ht.check_inequal_key_null(&row);
             let inequal_key = row.project(&inequal_key_idx_update);
+
+            let mut join_matched_rows_cnt = 0;
 
             if !inequal_key_is_null {
                 let matched_row_by_inequality = match asof_desc.inequality_type {
@@ -660,6 +689,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
                 match op {
                     Op::Insert | Op::UpdateInsert => {
                         if let Some(matched_row) = matched_row_by_inequality {
+                            join_matched_rows_cnt += 1;
                             if let Some(chunk) =
                                 join_chunk_builder.with_match_on_insert(&row, &matched_row)
                             {
@@ -674,6 +704,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
                     }
                     Op::Delete | Op::UpdateDelete => {
                         if let Some(matched_row) = matched_row_by_inequality {
+                            join_matched_rows_cnt += 1;
                             if let Some(chunk) =
                                 join_chunk_builder.with_match_on_delete(&row, &matched_row)
                             {
@@ -707,6 +738,18 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
                     }
                 }
             }
+            join_matched_join_keys.observe(join_matched_rows_cnt as _);
+            if join_matched_rows_cnt > high_join_amplification_threshold {
+                tracing::warn!(target: "high_join_amplification",
+                    matched_rows_len = join_matched_rows_cnt,
+                    update_table_id = %side_update.ht.table_id(),
+                    match_table_id = %side_match.ht.table_id(),
+                    join_key = ?join_key,
+                    actor_id = %ctx.id,
+                    fragment_id = %ctx.fragment_id,
+                    "large rows matched for join key when AsOf join updating left side",
+                );
+            }
         }
         if let Some(chunk) = join_chunk_builder.take() {
             yield chunk;
@@ -731,6 +774,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
             cnt_rows_received,
             join_cache_evict_interval_rows,
             high_join_amplification_threshold,
+            join_matched_join_keys,
         } = args;
 
         let (side_update, side_match) = (side_r, side_l);
@@ -741,15 +785,6 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
             side_update.i2o_mapping.clone(),
             side_match.i2o_mapping.clone(),
         );
-
-        let join_matched_join_keys = ctx
-            .streaming_metrics
-            .join_matched_join_keys
-            .with_guarded_label_values(&[
-                &ctx.id.to_string(),
-                &ctx.fragment_id.to_string(),
-                &side_update.ht.table_id().to_string(),
-            ]);
 
         // The inequality key is always a single column; wrap in an array for `project()`.
         let inequal_key_idx_update = [side_update.inequal_key_idx];
@@ -773,6 +808,7 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
                 .zip_eq(null_safe.iter())
                 .any(|(idx, ns)| !ns && row.datum_at(*idx).is_none());
             if join_key_null_not_safe {
+                join_matched_join_keys.observe(0.0);
                 continue;
             }
 
@@ -972,8 +1008,11 @@ impl<S: StateStore, const T: AsOfJoinTypePrimitive, E: AsOfRowEncoding> AsOfJoin
 mod tests {
     use std::sync::atomic::AtomicU64;
 
+    use prometheus::Registry;
     use risingwave_common::array::*;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, TableId};
+    use risingwave_common::config::MetricLevel;
+    use risingwave_common::metrics::get_label;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_storage::memory::MemoryStateStore;
@@ -1011,6 +1050,19 @@ mod tests {
     async fn create_executor<const T: AsOfJoinTypePrimitive>(
         asof_desc: AsOfDesc,
         use_cache: bool,
+    ) -> (MessageSender, MessageSender, BoxedMessageStream) {
+        create_executor_with_metrics::<T>(
+            asof_desc,
+            use_cache,
+            Arc::new(StreamingMetrics::unused()),
+        )
+        .await
+    }
+
+    async fn create_executor_with_metrics<const T: AsOfJoinTypePrimitive>(
+        asof_desc: AsOfDesc,
+        use_cache: bool,
+        metrics: Arc<StreamingMetrics>,
     ) -> (MessageSender, MessageSender, BoxedMessageStream) {
         let schema = Schema {
             fields: vec![
@@ -1073,13 +1125,62 @@ mod tests {
             state_l,
             state_r,
             Arc::new(AtomicU64::new(0)),
-            Arc::new(StreamingMetrics::unused()),
+            metrics,
             1024,
             asof_desc,
             use_cache,
             2048, // high_join_amplification_threshold
         );
         (tx_l, tx_r, executor.boxed().execute())
+    }
+
+    fn join_matched_sample_count(registry: &Registry, table_id: &str) -> u64 {
+        registry
+            .gather()
+            .iter()
+            .find(|metric_family| metric_family.name() == "stream_join_matched_join_keys")
+            .and_then(|metric_family| {
+                metric_family.get_metric().iter().find(|metric| {
+                    get_label::<String>(metric, "table_id").as_deref() == Some(table_id)
+                })
+            })
+            .map(|metric| metric.get_histogram().get_sample_count())
+            .unwrap_or(0)
+    }
+
+    #[tokio::test]
+    async fn test_asof_join_records_null_equi_key_probe_metrics() -> StreamExecutorResult<()> {
+        let asof_desc = AsOfDesc {
+            left_idx: 1,
+            right_idx: 1,
+            inequality_type: AsOfInequalityType::Lt,
+        };
+        let registry = Registry::new();
+        let metrics = Arc::new(StreamingMetrics::new(&registry, MetricLevel::Debug));
+        let (mut tx_l, mut tx_r, mut hash_join) =
+            create_executor_with_metrics::<{ AsOfJoinType::Inner }>(asof_desc, false, metrics)
+                .await;
+
+        tx_l.push_barrier(test_epoch(1), false);
+        tx_r.push_barrier(test_epoch(1), false);
+        hash_join.next_unwrap_ready_barrier()?;
+
+        tx_l.push_chunk(StreamChunk::from_pretty(
+            "  I I I
+             + . 10 1",
+        ));
+        hash_join.next_unwrap_pending();
+
+        tx_r.push_chunk(StreamChunk::from_pretty(
+            "  I I I
+             + . 20 2",
+        ));
+        hash_join.next_unwrap_pending();
+
+        assert_eq!(join_matched_sample_count(&registry, "0"), 1);
+        assert_eq!(join_matched_sample_count(&registry, "1"), 1);
+
+        Ok(())
     }
 
     #[tokio::test]

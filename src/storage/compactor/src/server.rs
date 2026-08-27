@@ -80,6 +80,7 @@ pub async fn prepare_start_parameters(
     let compactor_metrics = Arc::new(GLOBAL_COMPACTOR_METRICS.clone());
 
     let state_store_url = system_params_reader.state_store();
+    let state_store_url = state_store_url.expose();
 
     let storage_memory_config = extract_storage_memory_config(&config);
     let storage_opts: Arc<StorageOpts> = Arc::new(StorageOpts::from((

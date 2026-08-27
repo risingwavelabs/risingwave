@@ -436,7 +436,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                 .collect();
             if !incomplete_vnodes.is_empty() {
                 // Resume from merge stage since some VNodes were left incomplete
-                inner_state = Box::new(MaterializeStreamState::<_>::MergingData);
+                *inner_state = MaterializeStreamState::<_>::MergingData;
                 tracing::info!(
                     incomplete_vnodes = incomplete_vnodes.len(),
                     "Recovery: Resuming refresh from merge stage due to incomplete VNodes"
@@ -845,8 +845,7 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                         %load_finish_source_id,
                                         "LoadFinish received, starting data replacement"
                                     );
-                                    expect_next_state =
-                                        Box::new(MaterializeStreamState::<_>::MergingData);
+                                    *expect_next_state = MaterializeStreamState::<_>::MergingData;
                                 }
                             }
                             _ => {}

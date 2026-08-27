@@ -17,6 +17,7 @@ itertools = { workspace = true }
 paste = "1"
 risingwave_expr_impl = { workspace = true }
 risingwave_frontend = { workspace = true }
+risingwave_license = { workspace = true }
 risingwave_sqlparser = { workspace = true }
 serde = { workspace = true }
 serde_with = "3"

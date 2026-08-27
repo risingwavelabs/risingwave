@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::ops::DerefMut;
 use std::sync::{Arc, LazyLock};
 use std::time::Instant;
 
@@ -29,7 +30,7 @@ use rand::seq::SliceRandom;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::meta::default::compaction_config;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_hummock_sdk::compact_task::{CompactTask, ReportTask};
+use risingwave_hummock_sdk::compact_task::{CompactTask, CompactTaskAssignment, ReportTask};
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::safe_epoch_table_watermarks_impl;
 use risingwave_hummock_sdk::level::Levels;
@@ -47,17 +48,17 @@ use risingwave_meta_model::hummock_sequence::COMPACTION_TASK_ID;
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
-    CompactTaskAssignment, CompactionConfig, PbCompactStatus, PbCompactTaskAssignment,
+    CompactTaskAssignment as PbCompactTaskAssignment, CompactionConfig, PbCompactStatus,
     SubscribeCompactionEventRequest, TableOption, compact_task,
 };
 use thiserror_ext::AsReport;
-use tokio::sync::RwLockWriteGuard;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio::sync::oneshot::{Receiver, Sender};
 use tokio::task::JoinHandle;
 use tonic::Streaming;
 use tracing::warn;
 
+use crate::hummock::compaction::in_progress_compaction::InProgressCompactionView;
 use crate::hummock::compaction::selector::level_selector::PickerInfo;
 use crate::hummock::compaction::selector::{
     DynamicLevelSelector, DynamicLevelSelectorCore, LocalSelectorStatistic, ManualCompactionOption,
@@ -82,7 +83,7 @@ use crate::hummock::metrics_utils::{
     trigger_local_table_stat,
 };
 use crate::hummock::model::CompactionGroup;
-use crate::hummock::{HummockManager, commit_multi_var, start_measure_real_process_timer};
+use crate::hummock::{HummockManager, commit_multi_var};
 use crate::manager::META_NODE_ID;
 use crate::model::BTreeMapTransaction;
 
@@ -196,7 +197,7 @@ impl HummockVersionTransaction<'_> {
 #[derive(Default)]
 pub struct Compaction {
     /// Compaction task that is already assigned to a compactor
-    pub compact_task_assignment: BTreeMap<HummockCompactionTaskId, PbCompactTaskAssignment>,
+    pub compact_task_assignment: BTreeMap<HummockCompactionTaskId, CompactTaskAssignment>,
     /// `CompactStatus` of each compaction group
     pub compaction_statuses: BTreeMap<CompactionGroupId, CompactStatus>,
 
@@ -205,19 +206,40 @@ pub struct Compaction {
 
 impl HummockManager {
     pub async fn get_assigned_compact_task_num(&self) -> u64 {
-        self.compaction.read().await.compact_task_assignment.len() as u64
+        self.compaction
+            .read_with_process_name("get_assigned_compact_task_num")
+            .await
+            .compact_task_assignment
+            .len() as u64
     }
 
     pub async fn list_compaction_status(
         &self,
-    ) -> (Vec<PbCompactStatus>, Vec<CompactTaskAssignment>) {
-        let compaction = self.compaction.read().await;
+    ) -> (Vec<PbCompactStatus>, Vec<PbCompactTaskAssignment>) {
+        let (compaction_statuses, compact_task_assignments) = {
+            let compaction = self
+                .compaction
+                .read_with_process_name("list_compaction_status")
+                .await;
+            (
+                compaction
+                    .compaction_statuses
+                    .values()
+                    .map_into()
+                    .collect_vec(),
+                compaction
+                    .compact_task_assignment
+                    .values()
+                    .cloned()
+                    .collect_vec(),
+            )
+        };
+
         (
-            compaction.compaction_statuses.values().map_into().collect(),
-            compaction
-                .compact_task_assignment
-                .values()
-                .cloned()
+            compaction_statuses,
+            compact_task_assignments
+                .into_iter()
+                .map(PbCompactTaskAssignment::from)
                 .collect(),
         )
     }
@@ -227,9 +249,18 @@ impl HummockManager {
         compaction_group_id: CompactionGroupId,
     ) -> Vec<PickerInfo> {
         let (status, levels, group) = {
-            let compaction = self.compaction.read().await;
-            let versioning = self.versioning.read().await;
-            let config_manager = self.compaction_group_manager.read().await;
+            let compaction = self
+                .compaction
+                .read_with_process_name("get_compaction_scores")
+                .await;
+            let versioning = self
+                .versioning
+                .read_with_process_name("get_compaction_scores")
+                .await;
+            let config_manager = self
+                .compaction_group_manager
+                .read_with_process_name("get_compaction_scores")
+                .await;
             match (
                 compaction.compaction_statuses.get(&compaction_group_id),
                 versioning.current_version.levels.get(&compaction_group_id),
@@ -322,12 +353,16 @@ impl HummockManager {
     ) -> Result<(Vec<CompactTask>, Vec<CompactionGroupId>)> {
         let deterministic_mode = self.env.opts.compaction_deterministic_test;
 
-        let mut compaction_guard = self.compaction.write().await;
+        let mut compaction_guard = self
+            .compaction
+            .write_with_process_name("get_compact_tasks_impl")
+            .await;
+        let mut versioning_guard = self
+            .versioning
+            .write_with_process_name("get_compact_tasks_impl")
+            .await;
         let compaction: &mut Compaction = &mut compaction_guard;
-        let mut versioning_guard = self.versioning.write().await;
         let versioning: &mut Versioning = &mut versioning_guard;
-
-        let _timer = start_measure_real_process_timer!(self, "get_compact_tasks_impl");
 
         let start_time = Instant::now();
         let mut compaction_statuses = BTreeMapTransaction::new(&mut compaction.compaction_statuses);
@@ -343,6 +378,7 @@ impl HummockManager {
             None,
             &self.metrics,
             &self.env.opts,
+            &self.version_stat_tx,
         );
         // Apply stats changes.
         let mut version_stats = HummockVersionStatsTransaction::new(
@@ -389,7 +425,10 @@ impl HummockManager {
             // config) is destroyed as well. Then a compaction task for this group may come later and
             // cannot find its config.
             let group_config = {
-                let config_manager = self.compaction_group_manager.read().await;
+                let config_manager = self
+                    .compaction_group_manager
+                    .read_with_process_name("get_compact_tasks_impl")
+                    .await;
 
                 match config_manager.try_get_compaction_group_config(compaction_group_id) {
                     Some(config) => config,
@@ -436,6 +475,11 @@ impl HummockManager {
                 }
             }
 
+            let in_progress_compactions = InProgressCompactionView::for_group(
+                compact_task_assignment.tree_ref().values(),
+                compaction_group_id,
+            );
+
             while let Some(picked_task) = compact_status.get_compact_task(
                 version
                     .latest_version()
@@ -452,6 +496,7 @@ impl HummockManager {
                 developer_config.clone(),
                 &version.latest_version().table_watermarks,
                 &version.latest_version().state_table_info,
+                &in_progress_compactions,
             ) {
                 let compaction_group_levels = version
                     .latest_version()
@@ -515,7 +560,7 @@ impl HummockManager {
                         compact_task_assignment.insert(
                             compact_task.task_id,
                             CompactTaskAssignment {
-                                compact_task: Some(compact_task.clone().into()),
+                                compact_task: compact_task.clone(),
                                 context_id: META_NODE_ID, // deprecated
                             },
                         );
@@ -774,8 +819,14 @@ impl HummockManager {
     }
 
     pub async fn report_compact_tasks(&self, report_tasks: Vec<ReportTask>) -> Result<Vec<bool>> {
-        let compaction_guard = self.compaction.write().await;
-        let versioning_guard = self.versioning.write().await;
+        let compaction_guard = self
+            .compaction
+            .write_with_process_name("report_compact_tasks")
+            .await;
+        let versioning_guard = self
+            .versioning
+            .write_with_process_name("report_compact_tasks")
+            .await;
 
         self.report_compact_tasks_impl(report_tasks, compaction_guard, versioning_guard)
             .await
@@ -791,8 +842,8 @@ impl HummockManager {
     pub async fn report_compact_tasks_impl(
         &self,
         report_tasks: Vec<ReportTask>,
-        mut compaction_guard: RwLockWriteGuard<'_, Compaction>,
-        mut versioning_guard: RwLockWriteGuard<'_, Versioning>,
+        mut compaction_guard: impl DerefMut<Target = Compaction>,
+        mut versioning_guard: impl DerefMut<Target = Versioning>,
     ) -> Result<Vec<bool>> {
         let deterministic_mode = self.env.opts.compaction_deterministic_test;
         let compaction: &mut Compaction = &mut compaction_guard;
@@ -804,7 +855,6 @@ impl HummockManager {
             BTreeMapTransaction::new(&mut compaction.compact_task_assignment);
         // The compaction task is finished.
         let versioning: &mut Versioning = &mut versioning_guard;
-        let _timer = start_measure_real_process_timer!(self, "report_compact_tasks");
 
         // purge stale compact_status
         for group_id in original_keys {
@@ -822,6 +872,7 @@ impl HummockManager {
             None,
             &self.metrics,
             &self.env.opts,
+            &self.version_stat_tx,
         );
 
         if deterministic_mode {
@@ -839,7 +890,7 @@ impl HummockManager {
             let task_id = task.task_id;
             let mut task_status = task.task_status;
             let mut compact_task = match compact_task_assignment.remove(task.task_id) {
-                Some(compact_task) => CompactTask::from(compact_task.compact_task.unwrap()),
+                Some(compact_task_assignment) => compact_task_assignment.compact_task,
                 None => {
                     tracing::warn!("{}", format!("compact task {} not found", task.task_id));
                     rets[idx] = false;
@@ -1332,7 +1383,10 @@ impl HummockManager {
         &self,
         task_id: u64,
     ) -> Option<CompactTaskAssignment> {
-        let compaction_guard = self.compaction.read().await;
+        let compaction_guard = self
+            .compaction
+            .read_with_process_name("compaction_task_from_assignment_for_test")
+            .await;
         let assignment_ref = &compaction_guard.compact_task_assignment;
         assignment_ref.get(&task_id).cloned()
     }
@@ -1346,11 +1400,14 @@ impl HummockManager {
         table_stats_change: Option<PbTableStatsMap>,
     ) -> Result<()> {
         if let Some(task) = compact_task {
-            let mut guard = self.compaction.write().await;
+            let mut guard = self
+                .compaction
+                .write_with_process_name("report_compact_task_for_test")
+                .await;
             guard.compact_task_assignment.insert(
                 task_id,
                 CompactTaskAssignment {
-                    compact_task: Some(task.into()),
+                    compact_task: task,
                     context_id: 0.into(),
                 },
             );
@@ -1541,17 +1598,10 @@ impl Compaction {
         compaction_group_id: CompactionGroupId,
     ) -> Vec<CompactTaskAssignment> {
         self.compact_task_assignment
-            .iter()
-            .filter_map(|(_, assignment)| {
-                if assignment
-                    .compact_task
-                    .as_ref()
-                    .is_some_and(|task| task.compaction_group_id == compaction_group_id)
-                {
-                    Some(CompactTaskAssignment {
-                        compact_task: assignment.compact_task.clone(),
-                        context_id: assignment.context_id,
-                    })
+            .values()
+            .filter_map(|assignment| {
+                if assignment.compact_task.compaction_group_id == compaction_group_id {
+                    Some(assignment.clone())
                 } else {
                     None
                 }
@@ -1788,16 +1838,6 @@ impl GroupStateValidator {
         }
 
         Self::check_single_group_emergency(levels, compaction_config)
-    }
-}
-
-#[cfg(test)]
-mod prefetched_task_id_tests {
-    use crate::manager::MetaOpts;
-
-    #[test]
-    fn test_compaction_task_id_refill_capacity_default() {
-        assert_eq!(MetaOpts::test(false).compaction_task_id_refill_capacity, 64);
     }
 }
 

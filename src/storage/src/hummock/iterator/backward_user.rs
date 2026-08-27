@@ -307,7 +307,7 @@ impl<I: HummockIterator<Direction = Backward>> BackwardUserIterator<I> {
 mod tests {
     use std::cmp::Reverse;
     use std::collections::BTreeMap;
-    use std::ops::Bound::{self, *};
+    use std::ops::Bound;
 
     use rand::distr::Alphanumeric;
     use rand::{Rng, rng as thread_rng};

@@ -61,7 +61,7 @@ pub struct ComputeClient {
 
 impl ComputeClient {
     pub async fn new(addr: HostAddr, opts: &RpcClientConfig) -> Result<Self> {
-        let channel = Endpoint::from_shared(format!("http://{}", &addr))?
+        let channel = Endpoint::from_shared(format!("http://{}", addr))?
             .initial_connection_window_size(MAX_CONNECTION_WINDOW_SIZE)
             .initial_stream_window_size(STREAM_WINDOW_SIZE)
             .connect_timeout(Duration::from_secs(opts.connect_timeout_secs))

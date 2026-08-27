@@ -72,7 +72,7 @@ impl SinkWriterCoordinationHandle {
                     },
                 )),
             }))
-            .map_err(|_| anyhow!("fail to send start response"))
+            .map_err(|_| anyhow!("failed to send the start response"))
     }
 
     pub(super) fn ack_aligned_initial_epoch(
@@ -85,7 +85,7 @@ impl SinkWriterCoordinationHandle {
                     aligned_initial_epoch,
                 )),
             }))
-            .map_err(|_| anyhow!("fail to send start response"))
+            .map_err(|_| anyhow!("failed to send the start response"))
     }
 
     pub(super) fn abort(self, status: Status) {
@@ -99,7 +99,7 @@ impl SinkWriterCoordinationHandle {
                     epoch,
                 })),
             }))
-            .map_err(|_| anyhow!("fail to send commit response of epoch {}", epoch))
+            .map_err(|_| anyhow!("failed to send the commit response for epoch {}", epoch))
     }
 
     pub(super) fn stop(&mut self) -> anyhow::Result<()> {
@@ -107,7 +107,7 @@ impl SinkWriterCoordinationHandle {
             .send(Ok(CoordinateResponse {
                 msg: Some(coordinate_response::Msg::Stopped(true)),
             }))
-            .map_err(|_| anyhow!("fail to send stopped response"))
+            .map_err(|_| anyhow!("failed to send the stopped response"))
     }
 
     pub(super) fn poll_next_request(
@@ -116,7 +116,8 @@ impl SinkWriterCoordinationHandle {
     ) -> Poll<anyhow::Result<coordinate_request::Msg>> {
         let result = try {
             let request = ready!(self.request_stream.try_poll_next_unpin(cx))
-                .ok_or_else(|| anyhow!("end of request stream"))??;
+                .ok_or_else(|| anyhow!("end of request stream"))?
+                .map_err(anyhow::Error::from)?;
             let request = request.msg.ok_or_else(|| anyhow!("None msg in request"))?;
             match &request {
                 coordinate_request::Msg::StartRequest(_)

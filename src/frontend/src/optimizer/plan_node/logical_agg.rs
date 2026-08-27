@@ -672,7 +672,7 @@ impl LogicalAggBuilder {
                 | PbAggKind::VarPop
                 | PbAggKind::VarSamp),
             ) => {
-                let arg = agg_call.args().iter().exactly_one().unwrap();
+                let arg = Itertools::exactly_one(agg_call.args().iter()).unwrap();
                 let squared_arg = ExprImpl::from(FunctionCall::new(
                     ExprType::Multiply,
                     vec![arg.clone(), arg.clone()],
@@ -1554,7 +1554,11 @@ impl ToStream for LogicalAgg {
         let logical_input = if self.group_key().is_empty() {
             self.input()
         } else {
-            try_enforce_locality_requirement(self.input(), &self.group_key().to_vec())
+            try_enforce_locality_requirement(
+                self.input(),
+                &self.group_key().to_vec(),
+                ctx.locality_backfill_enabled(),
+            )
         };
         let (input, input_col_change) = logical_input.logical_rewrite_for_stream(ctx)?;
         let (agg, out_col_change) = self.rewrite_with_input(input, input_col_change);

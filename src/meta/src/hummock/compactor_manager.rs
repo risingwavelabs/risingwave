@@ -23,15 +23,17 @@ use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::{HummockCompactionTaskId, HummockContextId};
 use risingwave_pb::hummock::subscribe_compaction_event_response::Event as ResponseEvent;
 use risingwave_pb::hummock::{
-    CancelCompactTask, CompactTaskAssignment, CompactTaskProgress, SubscribeCompactionEventResponse,
+    CancelCompactTask, CompactTaskProgress, SubscribeCompactionEventResponse,
 };
 use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_response::Event as IcebergResponseEvent;
 use risingwave_pb::iceberg_compaction::{
     CancelCompactTask as IcebergCancelCompactTask, SubscribeIcebergCompactionEventResponse,
 };
+use risingwave_pb::id::IcebergCompactionTaskId;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 
 use crate::MetaResult;
+use crate::hummock::model::ext::compaction_task_model_to_assignment;
 use crate::manager::MetaSrvEnv;
 use crate::model::MetadataModelError;
 
@@ -156,12 +158,12 @@ impl CompactorManagerInner {
         use risingwave_meta_model::compaction_task;
         use sea_orm::EntityTrait;
         // Retrieve the existing task assignments from metastore.
-        let task_assignment: Vec<CompactTaskAssignment> = compaction_task::Entity::find()
+        let task_assignment: Vec<_> = compaction_task::Entity::find()
             .all(&env.meta_store_ref().conn)
             .await
             .map_err(MetadataModelError::from)?
             .into_iter()
-            .map(Into::into)
+            .map(compaction_task_model_to_assignment)
             .collect();
         let mut manager = Self {
             task_expired_seconds: env.opts.compaction_task_max_progress_interval_secs,
@@ -171,7 +173,7 @@ impl CompactorManagerInner {
         };
         // Initialize heartbeat for existing tasks.
         task_assignment.into_iter().for_each(|assignment| {
-            manager.initiate_task_heartbeat(CompactTask::from(assignment.compact_task.unwrap()));
+            manager.initiate_task_heartbeat(assignment.compact_task);
         });
         Ok(manager)
     }
@@ -515,7 +517,7 @@ impl IcebergCompactor {
         Ok(())
     }
 
-    pub fn cancel_task(&self, task_id: u64) -> MetaResult<()> {
+    pub fn cancel_task(&self, task_id: IcebergCompactionTaskId) -> MetaResult<()> {
         self.send_event(IcebergResponseEvent::CancelCompactTask(
             IcebergCancelCompactTask { task_id },
         ))
@@ -700,7 +702,7 @@ mod tests {
             .unwrap();
         assert_eq!(compactor.context_id(), iceberg_context_id);
 
-        compactor.cancel_task(42).unwrap();
+        compactor.cancel_task(42.into()).unwrap();
         let event = receiver.try_recv().unwrap().unwrap().event.unwrap();
         match event {
             IcebergResponseEvent::CancelCompactTask(cancel_task) => {

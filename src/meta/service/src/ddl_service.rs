@@ -21,6 +21,7 @@ use futures::future::select;
 use rand::rng as thread_rng;
 use rand::seq::IndexedRandom;
 use replace_job_plan::{ReplaceSource, ReplaceTable};
+use risingwave_common::catalog::cdc_type_compatibility::cdc_auto_schema_change_existing_type_compatible;
 use risingwave_common::catalog::{AlterDatabaseParam, ColumnCatalog};
 use risingwave_common::id::{ObjectId, TableId};
 use risingwave_common::system_param::adaptive_parallelism_strategy::parse_strategy;
@@ -36,7 +37,7 @@ use risingwave_meta::stream::{ParallelismPolicy, ReschedulePolicy, ResourceGroup
 use risingwave_meta::{MetaResult, bail_invalid_parameter, bail_unavailable};
 use risingwave_meta_model::StreamingParallelism;
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
-use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
+use risingwave_pb::catalog::table::{CdcTableType as PbCdcTableType, OptionalAssociatedSourceId};
 use risingwave_pb::catalog::{Comment, Connection, PbCreateType, Secret, Table};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::State;
@@ -57,6 +58,7 @@ use tonic::{Request, Response, Status};
 
 use crate::MetaError;
 use crate::barrier::BarrierManagerRef;
+use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, StreamingJob};
 use crate::rpc::ddl_controller::{
@@ -74,6 +76,7 @@ pub struct DdlServiceImpl {
     meta_metrics: Arc<MetaMetrics>,
     iceberg_compaction_manager: iceberg_compaction::IcebergCompactionManagerRef,
     barrier_scheduler: BarrierScheduler,
+    iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
 }
 
 impl DdlServiceImpl {
@@ -87,6 +90,7 @@ impl DdlServiceImpl {
         meta_metrics: Arc<MetaMetrics>,
         iceberg_compaction_manager: iceberg_compaction::IcebergCompactionManagerRef,
         barrier_scheduler: BarrierScheduler,
+        iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
     ) -> Self {
         let ddl_controller = DdlController::new(
             env.clone(),
@@ -96,6 +100,7 @@ impl DdlServiceImpl {
             barrier_manager,
             sink_manager.clone(),
             iceberg_compaction_manager.clone(),
+            iceberg_pk_index_sink_manager.clone(),
         )
         .await;
         Self {
@@ -106,6 +111,7 @@ impl DdlServiceImpl {
             meta_metrics,
             iceberg_compaction_manager,
             barrier_scheduler,
+            iceberg_pk_index_sink_manager,
         }
     }
 
@@ -131,6 +137,7 @@ impl DdlServiceImpl {
             replace_job_plan::ReplaceJob::ReplaceMaterializedView(ReplaceMaterializedView {
                 table,
             }) => StreamingJob::MaterializedView(table.unwrap()),
+            replace_job_plan::ReplaceJob::ReplaceSink(_) => unreachable!("use replace sink path"),
         };
 
         ReplaceStreamJobInfo {
@@ -368,7 +375,7 @@ impl DdlService for DdlServiceImpl {
             None => {
                 let version = self
                     .ddl_controller
-                    .run_command(DdlCommand::CreateNonSharedSource(source))
+                    .run_command(DdlCommand::CreateNonSharedSource(source, None))
                     .await?;
                 Ok(Response::new(CreateSourceResponse {
                     status: None,
@@ -387,6 +394,8 @@ impl DdlService for DdlServiceImpl {
                         resource_type: Self::default_streaming_job_resource_type(),
                         if_not_exists: req.if_not_exists,
                         refresh_interval_sec: None,
+                        replace_sink: None,
+                        since_timestamp_epoch: None,
                     })
                     .await?;
                 Ok(Response::new(CreateSourceResponse {
@@ -450,16 +459,23 @@ impl DdlService for DdlServiceImpl {
         let sink = req.get_sink()?.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
         let dependencies = req.get_dependencies().iter().copied().collect();
+        let resource_type = req
+            .resource_type
+            .and_then(|resource_type| resource_type.resource_type)
+            .unwrap_or_else(Self::default_streaming_job_resource_type);
+        let since_timestamp_epoch = req.since_timestamp_epoch;
 
-        let stream_job = StreamingJob::Sink(sink);
+        let stream_job = StreamingJob::Sink(sink, None);
 
         let command = DdlCommand::CreateStreamingJob {
             stream_job,
             fragment_graph,
             dependencies,
-            resource_type: Self::default_streaming_job_resource_type(),
+            resource_type,
             if_not_exists: req.if_not_exists,
             refresh_interval_sec: None,
+            replace_sink: None,
+            since_timestamp_epoch,
         };
 
         let version = self.ddl_controller.run_command(command).await?;
@@ -556,6 +572,8 @@ impl DdlService for DdlServiceImpl {
                 resource_type,
                 if_not_exists: req.if_not_exists,
                 refresh_interval_sec: req.refresh_interval_sec,
+                replace_sink: None,
+                since_timestamp_epoch: None,
             })
             .await?;
 
@@ -599,6 +617,10 @@ impl DdlService for DdlServiceImpl {
         let index = req.get_index()?.clone();
         let index_table = req.get_index_table()?.clone();
         let fragment_graph = req.get_fragment_graph()?.clone();
+        let resource_type = req
+            .resource_type
+            .and_then(|resource_type| resource_type.resource_type)
+            .unwrap_or_else(Self::default_streaming_job_resource_type);
 
         let stream_job = StreamingJob::Index(index, index_table);
         let version = self
@@ -607,9 +629,11 @@ impl DdlService for DdlServiceImpl {
                 stream_job,
                 fragment_graph,
                 dependencies: HashSet::new(),
-                resource_type: Self::default_streaming_job_resource_type(),
+                resource_type,
                 if_not_exists: req.if_not_exists,
+                replace_sink: None,
                 refresh_interval_sec: None,
+                since_timestamp_epoch: None,
             })
             .await?;
 
@@ -701,6 +725,8 @@ impl DdlService for DdlServiceImpl {
                 resource_type: Self::default_streaming_job_resource_type(),
                 if_not_exists: request.if_not_exists,
                 refresh_interval_sec: None,
+                replace_sink: None,
+                since_timestamp_epoch: None,
             })
             .await?;
 
@@ -842,14 +868,41 @@ impl DdlService for DdlServiceImpl {
         &self,
         request: Request<ReplaceJobPlanRequest>,
     ) -> Result<Response<ReplaceJobPlanResponse>, Status> {
-        let req = request.into_inner().get_plan().cloned()?;
+        let ReplaceJobPlan {
+            fragment_graph,
+            replace_job,
+        } = request.into_inner().get_plan().cloned()?;
 
-        let version = self
-            .ddl_controller
-            .run_command(DdlCommand::ReplaceStreamJob(
-                Self::extract_replace_table_info(req),
-            ))
-            .await?;
+        let command = match replace_job {
+            Some(replace_job_plan::ReplaceJob::ReplaceSink(replace_sink)) => {
+                let replace_job_plan::ReplaceSink {
+                    sink,
+                    old_sink_id,
+                    dependencies,
+                    resource_type,
+                } = replace_sink;
+                DdlCommand::CreateStreamingJob {
+                    stream_job: StreamingJob::Sink(sink.unwrap(), None),
+                    fragment_graph: fragment_graph.unwrap(),
+                    dependencies: dependencies.into_iter().collect::<HashSet<_>>(),
+                    resource_type: resource_type
+                        .and_then(|resource_type| resource_type.resource_type)
+                        .unwrap_or(streaming_job_resource_type::ResourceType::Regular(true)),
+                    if_not_exists: false,
+                    refresh_interval_sec: None,
+                    replace_sink: Some(old_sink_id),
+                    since_timestamp_epoch: None,
+                }
+            }
+            replace_job => {
+                DdlCommand::ReplaceStreamJob(Self::extract_replace_table_info(ReplaceJobPlan {
+                    fragment_graph,
+                    replace_job,
+                }))
+            }
+        };
+
+        let version = self.ddl_controller.run_command(command).await?;
 
         Ok(Response::new(ReplaceJobPlanResponse {
             status: None,
@@ -1347,37 +1400,78 @@ impl DdlService for DdlServiceImpl {
             for table in tables {
                 // Since we only support `ADD` and `DROP` column, we check whether the new columns and the original columns
                 // is a subset of the other.
-                let original_columns: HashSet<(String, DataType)> =
-                    HashSet::from_iter(table.columns.iter().filter_map(|col| {
+                let original_columns_by_name: HashMap<String, ColumnCatalog> = table
+                    .columns
+                    .iter()
+                    .filter_map(|col| {
                         let col = ColumnCatalog::from(col.clone());
-                        if col.is_generated() || col.is_hidden() {
-                            None
-                        } else {
-                            Some((col.column_desc.name.clone(), col.data_type().clone()))
-                        }
-                    }));
+                        cdc_auto_schema_change_comparable_column(&col).map(|(name, _)| (name, col))
+                    })
+                    .collect();
 
-                let mut new_columns: HashSet<(String, DataType)> =
-                    HashSet::from_iter(table_change.columns.iter().filter_map(|col| {
+                let original_column_types: HashMap<String, DataType> = original_columns_by_name
+                    .iter()
+                    .map(|(name, col)| (name.clone(), col.data_type().clone()))
+                    .collect();
+
+                let original_column_names: HashSet<String> =
+                    HashSet::from_iter(original_column_types.keys().cloned());
+
+                let collect_new_columns = |table_change: &TableSchemaChange| {
+                    let mut new_columns: HashSet<(String, DataType)> =
+                        HashSet::from_iter(table_change.columns.iter().filter_map(|col| {
+                            let col = ColumnCatalog::from(col.clone());
+                            cdc_auto_schema_change_comparable_column(&col)
+                        }));
+
+                    // For subset/superset check, we need to add visible connector additional columns defined by INCLUDE in the original table to new_columns.
+                    // This includes both _rw columns and user-defined INCLUDE columns (e.g., INCLUDE TIMESTAMP AS xxx).
+                    for col in &table.columns {
                         let col = ColumnCatalog::from(col.clone());
-                        if col.is_generated() || col.is_hidden() {
-                            None
-                        } else {
-                            Some((col.column_desc.name.clone(), col.data_type().clone()))
+                        if col.is_connector_additional_column()
+                            && !col.is_hidden()
+                            && !col.is_generated()
+                        {
+                            new_columns
+                                .insert((col.column_desc.name.clone(), col.data_type().clone()));
                         }
-                    }));
-
-                // For subset/superset check, we need to add visible connector additional columns defined by INCLUDE in the original table to new_columns
-                // This includes both _rw columns and user-defined INCLUDE columns (e.g., INCLUDE TIMESTAMP AS xxx)
-                for col in &table.columns {
-                    let col = ColumnCatalog::from(col.clone());
-                    if col.is_connector_additional_column()
-                        && !col.is_hidden()
-                        && !col.is_generated()
-                    {
-                        new_columns.insert((col.column_desc.name.clone(), col.data_type().clone()));
                     }
-                }
+
+                    new_columns
+                };
+
+                let new_columns = collect_new_columns(&table_change);
+
+                let new_column_names: HashSet<String> =
+                    HashSet::from_iter(new_columns.iter().map(|(name, _)| name.clone()));
+                let is_add_or_drop_by_name = original_column_names.is_subset(&new_column_names)
+                    || original_column_names.is_superset(&new_column_names);
+
+                // Debezium schema change events carry the full table schema. Preserve existing
+                // validator-compatible RW types before both validation and replacement planning.
+                let table_change =
+                    if original_column_names != new_column_names && is_add_or_drop_by_name {
+                        normalize_cdc_auto_schema_change_existing_column_types(
+                            table_change.clone(),
+                            PbCdcTableType::try_from(table.cdc_table_type.unwrap_or_default())
+                                .unwrap_or(PbCdcTableType::Unspecified),
+                            &original_columns_by_name,
+                        )
+                    } else {
+                        // Keep the raw schema change for non-add/drop-only cases, such as a
+                        // mixed add-and-drop change. Existing validation below should see the
+                        // original change and reject unsupported schema changes without masking
+                        // them through type normalization.
+                        table_change.clone()
+                    };
+
+                let original_columns: HashSet<(String, DataType)> = HashSet::from_iter(
+                    original_column_types
+                        .iter()
+                        .map(|(name, data_type)| (name.clone(), data_type.clone())),
+                );
+
+                let new_columns = collect_new_columns(&table_change);
 
                 if !(original_columns.is_subset(&new_columns)
                     || original_columns.is_superset(&new_columns))
@@ -1519,6 +1613,26 @@ impl DdlService for DdlServiceImpl {
         Ok(Response::new(AutoSchemaChangeResponse {}))
     }
 
+    async fn wait_iceberg_pk_index_sink_epoch(
+        &self,
+        request: Request<WaitIcebergPkIndexSinkEpochRequest>,
+    ) -> Result<Response<WaitIcebergPkIndexSinkEpochResponse>, Status> {
+        let req = request.into_inner();
+        let snapshot_id = self
+            .iceberg_pk_index_sink_manager
+            .wait_epoch(req.sink_id, req.epoch)
+            .await
+            .map_err(|e| {
+                Status::internal(format!(
+                    "Failed to wait for pk-index sink epoch: {}",
+                    e.as_report()
+                ))
+            })?;
+        Ok(Response::new(WaitIcebergPkIndexSinkEpochResponse {
+            snapshot_id,
+        }))
+    }
+
     async fn alter_swap_rename(
         &self,
         request: Request<AlterSwapRenameRequest>,
@@ -1542,19 +1656,40 @@ impl DdlService for DdlServiceImpl {
     ) -> Result<Response<AlterResourceGroupResponse>, Status> {
         let req = request.into_inner();
 
-        let table_id = req.get_table_id();
+        let job_id = req.get_job_id();
         let deferred = req.get_deferred();
         let resource_group = req.resource_group;
 
         self.ddl_controller
             .reschedule_streaming_job(
-                table_id.as_job_id(),
+                job_id,
                 ReschedulePolicy::ResourceGroup(ResourceGroupPolicy { resource_group }),
                 deferred,
             )
             .await?;
 
         Ok(Response::new(AlterResourceGroupResponse {}))
+    }
+
+    async fn alter_database_resource_group(
+        &self,
+        request: Request<AlterDatabaseResourceGroupRequest>,
+    ) -> Result<Response<AlterDatabaseResourceGroupResponse>, Status> {
+        let req = request.into_inner();
+
+        let version = self
+            .ddl_controller
+            .run_command(DdlCommand::AlterDatabaseResourceGroup(
+                req.database_id,
+                req.resource_group,
+                req.deferred,
+            ))
+            .await?;
+
+        Ok(Response::new(AlterDatabaseResourceGroupResponse {
+            status: None,
+            version,
+        }))
     }
 
     async fn alter_database_param(
@@ -1625,6 +1760,29 @@ impl DdlService for DdlServiceImpl {
         }))
     }
 
+    async fn rewrite_iceberg_table_manifests(
+        &self,
+        request: Request<RewriteIcebergTableManifestsRequest>,
+    ) -> Result<Response<RewriteIcebergTableManifestsResponse>, Status> {
+        let req = request.into_inner();
+        let sink_id = req.sink_id;
+
+        self.iceberg_compaction_manager
+            .check_and_rewrite_manifests(sink_id)
+            .await
+            .map_err(|e| {
+                Status::internal(format!(
+                    "Failed to rewrite manifests for sink {}: {}",
+                    sink_id,
+                    e.as_report()
+                ))
+            })?;
+
+        Ok(Response::new(RewriteIcebergTableManifestsResponse {
+            status: None,
+        }))
+    }
+
     async fn create_iceberg_table(
         &self,
         request: Request<CreateIcebergTableRequest>,
@@ -1680,6 +1838,8 @@ impl DdlService for DdlServiceImpl {
                 resource_type: Self::default_streaming_job_resource_type(),
                 if_not_exists,
                 refresh_interval_sec: None,
+                replace_sink: None,
+                since_timestamp_epoch: None,
             })
             .await?;
 
@@ -1755,7 +1915,7 @@ impl DdlService for DdlServiceImpl {
 
         let table_id = table_catalog.id;
         let dependencies = HashSet::from_iter([table_id.into(), schema_id.into()]);
-        let stream_job = StreamingJob::Sink(sink);
+        let stream_job = StreamingJob::Sink(sink, Some(table_id));
         let res = self
             .ddl_controller
             .run_command(DdlCommand::CreateStreamingJob {
@@ -1765,6 +1925,8 @@ impl DdlService for DdlServiceImpl {
                 resource_type: Self::default_streaming_job_resource_type(),
                 if_not_exists,
                 refresh_interval_sec: None,
+                replace_sink: None,
+                since_timestamp_epoch: None,
             })
             .await;
 
@@ -1790,7 +1952,7 @@ impl DdlService for DdlServiceImpl {
         {
             let OptionalAssociatedSourceId::AssociatedSourceId(source_id) =
                 table_catalog.optional_associated_source_id.unwrap();
-            let (jobs, fragments) = self
+            let fragment_nodes = self
                 .metadata_manager
                 .update_source_rate_limit_by_source_id(source_id, source_rate_limit)
                 .await?;
@@ -1798,18 +1960,13 @@ impl DdlService for DdlServiceImpl {
                 throttle_type: risingwave_pb::common::ThrottleType::Source.into(),
                 rate_limit: source_rate_limit,
             };
+            let config = fragment_nodes
+                .into_iter()
+                .map(|(fragment_id, stream_node)| (fragment_id, (throttle_config, stream_node)))
+                .collect();
             let _ = self
                 .barrier_scheduler
-                .run_command(
-                    database_id,
-                    Command::Throttle {
-                        jobs,
-                        config: fragments
-                            .into_iter()
-                            .map(|fragment_id| (fragment_id, throttle_config))
-                            .collect(),
-                    },
-                )
+                .run_command(database_id, Command::Throttle { config })
                 .await?;
         }
 
@@ -1817,7 +1974,10 @@ impl DdlService for DdlServiceImpl {
         let iceberg_source = iceberg_source.unwrap();
         let res = self
             .ddl_controller
-            .run_command(DdlCommand::CreateNonSharedSource(iceberg_source))
+            .run_command(DdlCommand::CreateNonSharedSource(
+                iceberg_source,
+                Some(table_id),
+            ))
             .await;
         if res.is_err() {
             let _ = self
@@ -1863,4 +2023,159 @@ fn add_auto_schema_change_fail_event_log(
         fail_info,
     };
     event_log_manager.add_event_logs(vec![event_log::Event::AutoSchemaChangeFail(event)]);
+}
+
+fn cdc_auto_schema_change_comparable_column(column: &ColumnCatalog) -> Option<(String, DataType)> {
+    if column.is_generated() || column.is_hidden() {
+        None
+    } else {
+        Some((column.column_desc.name.clone(), column.data_type().clone()))
+    }
+}
+
+fn normalize_cdc_auto_schema_change_existing_column_types(
+    mut table_change: TableSchemaChange,
+    cdc_table_type: PbCdcTableType,
+    original_columns_by_name: &HashMap<String, ColumnCatalog>,
+) -> TableSchemaChange {
+    for column in &mut table_change.columns {
+        let mut column_catalog = ColumnCatalog::from(column.clone());
+        if column_catalog.is_generated() || column_catalog.is_hidden() {
+            continue;
+        }
+
+        if let Some(original_column) =
+            original_columns_by_name.get(&column_catalog.column_desc.name)
+            && cdc_auto_schema_change_existing_type_compatible(
+                cdc_table_type,
+                original_column.data_type(),
+                column_catalog.data_type(),
+            )
+        {
+            column_catalog.column_desc.data_type = original_column.data_type().clone();
+            column_catalog.column_desc.generated_or_default_column = original_column
+                .column_desc
+                .generated_or_default_column
+                .clone();
+            *column = column_catalog.to_protobuf();
+        }
+    }
+
+    table_change
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::{ColumnDesc, ColumnId};
+    use risingwave_common::types::ScalarImpl;
+    use risingwave_pb::ddl_service::table_schema_change::TableChangeType;
+    use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
+
+    use super::*;
+
+    fn pb_column(name: &str, data_type: DataType) -> risingwave_pb::plan_common::ColumnCatalog {
+        ColumnCatalog::visible(ColumnDesc::named(name, ColumnId::placeholder(), data_type))
+            .to_protobuf()
+    }
+
+    fn pb_column_with_default_value(
+        name: &str,
+        data_type: DataType,
+        snapshot_value: ScalarImpl,
+    ) -> risingwave_pb::plan_common::ColumnCatalog {
+        ColumnCatalog::visible(ColumnDesc::named_with_default_value(
+            name,
+            ColumnId::placeholder(),
+            data_type,
+            Some(snapshot_value),
+        ))
+        .to_protobuf()
+    }
+
+    fn pb_table_change(
+        columns: Vec<risingwave_pb::plan_common::ColumnCatalog>,
+    ) -> TableSchemaChange {
+        TableSchemaChange {
+            change_type: TableChangeType::Alter as _,
+            cdc_table_id: "1.db.t".to_owned(),
+            columns,
+            upstream_ddl: "ALTER TABLE t ADD COLUMN note VARCHAR(255)".to_owned(),
+        }
+    }
+
+    #[test]
+    fn test_cdc_auto_schema_change_normalizes_compatible_existing_column_types() {
+        let original_columns_by_name = HashMap::from([
+            (
+                "id".to_owned(),
+                ColumnCatalog::visible(ColumnDesc::named(
+                    "id",
+                    ColumnId::placeholder(),
+                    DataType::Int64,
+                )),
+            ),
+            (
+                "v".to_owned(),
+                ColumnCatalog::visible(ColumnDesc::named(
+                    "v",
+                    ColumnId::placeholder(),
+                    DataType::Varchar,
+                )),
+            ),
+        ]);
+        let table_change = pb_table_change(vec![
+            pb_column("id", DataType::Int32),
+            pb_column("v", DataType::Varchar),
+            pb_column("note", DataType::Varchar),
+        ]);
+
+        let normalized = normalize_cdc_auto_schema_change_existing_column_types(
+            table_change,
+            PbCdcTableType::Mysql,
+            &original_columns_by_name,
+        );
+        let columns = normalized
+            .columns
+            .into_iter()
+            .map(ColumnCatalog::from)
+            .map(|column| (column.column_desc.name, column.column_desc.data_type))
+            .collect::<HashMap<_, _>>();
+
+        assert_eq!(columns["id"], DataType::Int64);
+        assert_eq!(columns["v"], DataType::Varchar);
+        assert_eq!(columns["note"], DataType::Varchar);
+    }
+
+    #[test]
+    fn test_cdc_auto_schema_change_preserves_default_when_normalizing_type() {
+        let original = ColumnCatalog::visible(ColumnDesc::named_with_default_value(
+            "v",
+            ColumnId::placeholder(),
+            DataType::Int64,
+            Some(ScalarImpl::Int64(1)),
+        ));
+        let original_columns_by_name = HashMap::from([("v".to_owned(), original.clone())]);
+        let table_change = pb_table_change(vec![pb_column_with_default_value(
+            "v",
+            DataType::Int32,
+            ScalarImpl::Int32(1),
+        )]);
+
+        let normalized = normalize_cdc_auto_schema_change_existing_column_types(
+            table_change,
+            PbCdcTableType::Mysql,
+            &original_columns_by_name,
+        );
+        let column = ColumnCatalog::from(normalized.columns.into_iter().next().unwrap());
+
+        assert_eq!(column.column_desc.data_type, DataType::Int64);
+        assert_eq!(
+            column.column_desc.generated_or_default_column,
+            original.column_desc.generated_or_default_column
+        );
+        assert!(matches!(
+            column.column_desc.generated_or_default_column,
+            Some(GeneratedOrDefaultColumn::DefaultColumn(_))
+        ));
+    }
 }

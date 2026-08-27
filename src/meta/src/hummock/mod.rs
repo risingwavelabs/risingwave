@@ -26,24 +26,42 @@ mod metrics_utils;
 pub mod mock_hummock_meta_client;
 pub mod model;
 pub mod test_utils;
+use std::collections::{HashMap, HashSet};
+use std::sync::LazyLock;
 use std::time::Duration;
 
 pub use compactor_manager::*;
 use futures::future::BoxFuture;
 #[cfg(any(test, feature = "test"))]
 pub use mock_hummock_meta_client::MockHummockMetaClient;
+use risingwave_common::catalog::TableId;
+use tokio::runtime::Runtime;
 use tokio::sync::oneshot::Sender;
 use tokio::task::JoinHandle;
 
 use crate::MetaOpts;
 use crate::backup_restore::BackupManagerRef;
 
+type PinnedSnapshotEpochsFetcher =
+    Box<dyn Fn() -> BoxFuture<'static, Option<HashMap<TableId, HashSet<u64>>>> + Send>;
+
+// Building and compressing a large checkpoint can spend a long time without yielding. Keep that
+// work off the main meta runtime so it cannot monopolize one of its worker threads.
+static VERSION_CHECKPOINT_RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
+    tokio::runtime::Builder::new_multi_thread()
+        .worker_threads(1)
+        .thread_name("rw-version-checkpoint")
+        .enable_all()
+        .build()
+        .expect("failed to build hummock version checkpoint runtime")
+});
+
 /// Start hummock's asynchronous tasks.
 pub fn start_hummock_workers(
     hummock_manager: HummockManagerRef,
     backup_manager: BackupManagerRef,
     meta_opts: &MetaOpts,
-    should_pause_vacuum_time_travel: Box<dyn Fn() -> BoxFuture<'static, bool> + Send>,
+    get_pinned_snapshot_epochs: PinnedSnapshotEpochsFetcher,
 ) -> Vec<(JoinHandle<()>, Sender<()>)> {
     // These critical tasks are put in their own timer loop deliberately, to avoid long-running ones
     // from blocking others.
@@ -61,7 +79,7 @@ pub fn start_hummock_workers(
         start_vacuum_time_travel_metadata_loop(
             hummock_manager,
             Duration::from_secs(meta_opts.time_travel_vacuum_interval_sec),
-            should_pause_vacuum_time_travel,
+            get_pinned_snapshot_epochs,
         ),
     ];
     workers
@@ -97,7 +115,7 @@ pub fn start_vacuum_metadata_loop(
 pub fn start_vacuum_time_travel_metadata_loop(
     hummock_manager: HummockManagerRef,
     interval: Duration,
-    should_pause_vacuum_time_travel: Box<dyn Fn() -> BoxFuture<'static, bool> + Send>,
+    get_pinned_snapshot_epochs: PinnedSnapshotEpochsFetcher,
 ) -> (JoinHandle<()>, Sender<()>) {
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
     let join_handle = tokio::spawn(async move {
@@ -113,11 +131,16 @@ pub fn start_vacuum_time_travel_metadata_loop(
                     return;
                 }
             }
-            if should_pause_vacuum_time_travel().await {
-                tracing::warn!("time travel vacuum paused");
+            let Some(pinned_snapshot_epochs) = get_pinned_snapshot_epochs().await else {
+                tracing::warn!(
+                    "time travel vacuum paused because pinned snapshots are unavailable"
+                );
                 continue;
-            }
-            if let Err(err) = hummock_manager.delete_time_travel_metadata().await {
+            };
+            if let Err(err) = hummock_manager
+                .delete_time_travel_metadata(pinned_snapshot_epochs)
+                .await
+            {
                 tracing::warn!(error = %err.as_report(), "Vacuum time travel metadata error");
             }
         }
@@ -150,14 +173,22 @@ pub fn start_checkpoint_loop(
             {
                 continue;
             }
-            match hummock_manager
-                .create_version_checkpoint(min_delta_log_num)
+            let checkpoint_manager = hummock_manager.clone();
+            match VERSION_CHECKPOINT_RUNTIME
+                .spawn(async move {
+                    checkpoint_manager
+                        .create_version_checkpoint(min_delta_log_num)
+                        .await
+                })
                 .await
             {
-                Err(err) => {
+                Ok(Err(err)) => {
                     tracing::warn!(error = %err.as_report(), "Hummock version checkpoint error.");
                 }
-                _ => {
+                Err(err) => {
+                    tracing::warn!(error = %err.as_report(), "Hummock version checkpoint task failed.");
+                }
+                Ok(Ok(_)) => {
                     let backup_manager_2 = backup_manager.clone();
                     let hummock_manager_2 = hummock_manager.clone();
                     tokio::task::spawn(async move {

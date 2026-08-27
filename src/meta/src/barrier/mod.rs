@@ -54,10 +54,12 @@ use risingwave_pb::ddl_service::PbBackfillType;
 
 pub use self::command::{
     BarrierKind, BatchRefreshInfo, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
-    ReplaceStreamJobPlan, Reschedule, ReschedulePlan, ResumeBackfillTarget, SnapshotBackfillInfo,
+    ReplaceStreamJobPlan, Reschedule, ReschedulePlan, ResumeBackfillTarget, SinceEpochInfo,
+    SnapshotBackfillInfo,
 };
 pub(crate) use self::info::{SharedActorInfos, SharedFragmentInfo};
 pub use self::manager::{BarrierManagerRef, GlobalBarrierManager};
+pub(crate) use self::rpc::to_partial_graph_id;
 pub use self::schedule::BarrierScheduler;
 pub use self::trace::TracedEpoch;
 use crate::barrier::cdc_progress::CdcProgress;
@@ -85,11 +87,11 @@ enum BarrierManagerStatus {
     Running,
 }
 
-/// Scheduled command with its notifiers.
+/// Scheduled command with its notifier.
 struct Scheduled {
     database_id: DatabaseId,
     command: Command,
-    notifiers: Vec<Notifier>,
+    notifier: Notifier,
     span: tracing::Span,
 }
 
@@ -133,7 +135,6 @@ pub(crate) enum BarrierManagerRequest {
     GetCdcProgress(Sender<MetaResult<HashMap<JobId, CdcProgress>>>),
     AdhocRecovery(Sender<()>),
     UpdateDatabaseBarrier(UpdateDatabaseBarrierRequest),
-    MayHaveSnapshotBackfillingJob(Sender<bool>),
 }
 
 #[derive(Debug)]
@@ -144,7 +145,7 @@ struct BarrierWorkerRuntimeInfoSnapshot {
     /// `table_id` -> (`Vec<non-checkpoint epoch>`, checkpoint epoch)
     state_table_log_epochs: HashMap<TableId, Vec<(Vec<u64>, u64)>>,
     mv_depended_subscriptions: HashMap<TableId, HashMap<SubscriptionId, u64>>,
-    background_jobs: HashSet<JobId>,
+    creating_jobs: HashSet<JobId>,
     hummock_version_stats: HummockVersionStats,
     database_infos: Vec<Database>,
     cdc_table_snapshot_splits: HashMap<JobId, CdcTableSnapshotSplits>,
@@ -166,7 +167,7 @@ impl BarrierWorkerRuntimeInfoSnapshot {
                         .contains_key(&actor.worker_id)
                     {
                         return Err(anyhow!(
-                            "worker_id {} of actor {} do not exist",
+                            "worker_id {} for actor {} does not exist",
                             actor.worker_id,
                             actor_id
                         )
@@ -230,6 +231,6 @@ struct DatabaseRuntimeInfoSnapshot {
     /// `table_id` -> (`Vec<non-checkpoint epoch>`, checkpoint epoch)
     state_table_log_epochs: HashMap<TableId, Vec<(Vec<u64>, u64)>>,
     mv_depended_subscriptions: HashMap<TableId, HashMap<SubscriptionId, u64>>,
-    background_jobs: HashSet<JobId>,
+    creating_jobs: HashSet<JobId>,
     cdc_table_snapshot_splits: HashMap<JobId, CdcTableSnapshotSplits>,
 }

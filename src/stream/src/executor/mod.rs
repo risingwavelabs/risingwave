@@ -40,8 +40,9 @@ use risingwave_common::types::{DataType, Datum, DefaultOrd, ScalarImpl};
 use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_common::util::value_encoding::{DatumFromProtoExt, DatumToProtoExt};
+use risingwave_common_estimate_size::EstimateSize;
 use risingwave_connector::source::SplitImpl;
-use risingwave_expr::expr::{Expression, NonStrictExpression};
+use risingwave_expr::expr::NonStrictExpression;
 use risingwave_pb::data::PbEpoch;
 use risingwave_pb::expr::PbInputRef;
 use risingwave_pb::stream_plan::add_mutation::PbNewUpstreamSink;
@@ -51,8 +52,8 @@ use risingwave_pb::stream_plan::stream_node::PbStreamKind;
 use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    PbBarrier, PbBarrierMutation, PbDispatcher, PbSinkSchemaChange, PbStreamMessageBatch,
-    PbWatermark, SubscriptionUpstreamInfo,
+    IcebergPkIndexCompactionContext, PbBarrier, PbBarrierMutation, PbDispatcher,
+    PbSinkSchemaChange, PbStreamMessageBatch, PbWatermark, SubscriptionUpstreamInfo,
 };
 use smallvec::SmallVec;
 use tokio::sync::mpsc;
@@ -91,7 +92,7 @@ mod filter;
 mod gap_fill;
 pub mod hash_join;
 mod hop_window;
-mod iceberg_with_pk_index;
+pub(crate) mod iceberg_with_pk_index;
 mod join;
 pub mod locality_provider;
 mod lookup;
@@ -103,7 +104,6 @@ mod no_op;
 mod now;
 mod over_window;
 pub mod project;
-mod rearranged_chain;
 mod receiver;
 pub mod row_id_gen;
 mod sink;
@@ -157,7 +157,8 @@ pub use gap_fill::{GapFillExecutor, GapFillExecutorArgs};
 pub use hash_join::*;
 pub use hop_window::HopWindowExecutor;
 pub use iceberg_with_pk_index::{
-    DvHandlerImpl, DvMergerExecutor, IcebergWriterImpl, WriterExecutor,
+    CompactionResolverExecutor, IcebergWriterImpl, PositionDeleteHandlerImpl,
+    PositionDeleteMergerExecutor, WriterExecutor,
 };
 pub use join::asof_join::{AsOfCpuEncoding, AsOfMemoryEncoding};
 pub use join::row::{CachedJoinRow, CpuEncoding, JoinEncoding, MemoryEncoding};
@@ -171,7 +172,6 @@ pub use nested_loop_temporal_join::NestedLoopTemporalJoinExecutor;
 pub use no_op::NoOpExecutor;
 pub use now::*;
 pub use over_window::*;
-pub use rearranged_chain::RearrangedChainExecutor;
 pub use receiver::ReceiverExecutor;
 use risingwave_common::id::SourceId;
 pub use row_merge::RowMergeExecutor;
@@ -246,10 +246,6 @@ impl ExecutorInfo {
 pub trait Execute: Send + 'static {
     fn execute(self: Box<Self>) -> BoxedMessageStream;
 
-    fn execute_with_epoch(self: Box<Self>, _epoch: u64) -> BoxedMessageStream {
-        self.execute()
-    }
-
     fn boxed(self) -> Box<dyn Execute>
     where
         Self: Sized + Send + 'static,
@@ -293,10 +289,6 @@ impl Executor {
     pub fn execute(self) -> BoxedMessageStream {
         self.execute.execute()
     }
-
-    pub fn execute_with_epoch(self, epoch: u64) -> BoxedMessageStream {
-        self.execute.execute_with_epoch(epoch)
-    }
 }
 
 impl std::fmt::Debug for Executor {
@@ -325,8 +317,8 @@ pub const INVALID_EPOCH: u64 = 0;
 type UpstreamFragmentId = FragmentId;
 type SplitAssignments = HashMap<ActorId, Vec<SplitImpl>>;
 
-#[derive(Debug, Clone)]
-#[cfg_attr(any(test, feature = "test"), derive(Default, PartialEq))]
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(any(test, feature = "test"), derive(Default))]
 pub struct UpdateMutation {
     pub dispatchers: HashMap<ActorId, Vec<DispatcherUpdate>>,
     pub merges: HashMap<(ActorId, UpstreamFragmentId), MergeUpdate>,
@@ -339,11 +331,12 @@ pub struct UpdateMutation {
     pub subscriptions_to_drop: Vec<SubscriptionUpstreamInfo>,
 }
 
-#[derive(Debug, Clone)]
-#[cfg_attr(any(test, feature = "test"), derive(Default, PartialEq))]
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(any(test, feature = "test"), derive(Default))]
 pub struct AddMutation {
     pub adds: HashMap<ActorId, Vec<PbDispatcher>>,
     pub added_actors: HashSet<ActorId>,
+    pub dropped_actors: HashSet<ActorId>,
     // TODO: remove this and use `SourceChangesSplit` after we support multiple mutations.
     pub splits: SplitAssignments,
     pub pause: bool,
@@ -353,18 +346,18 @@ pub struct AddMutation {
     pub backfill_nodes_to_pause: HashSet<FragmentId>,
     pub actor_cdc_table_snapshot_splits: CdcTableSnapshotSplitAssignmentWithGeneration,
     pub new_upstream_sinks: HashMap<FragmentId, PbNewUpstreamSink>,
+    pub sink_log_store_flush: HashSet<SinkId>,
 }
 
-#[derive(Debug, Clone)]
-#[cfg_attr(any(test, feature = "test"), derive(Default, PartialEq))]
+#[derive(Debug, Clone, PartialEq)]
+#[cfg_attr(any(test, feature = "test"), derive(Default))]
 pub struct StopMutation {
     pub dropped_actors: HashSet<ActorId>,
     pub dropped_sink_fragments: HashSet<FragmentId>,
 }
 
 /// See [`PbMutation`] for the semantics of each mutation.
-#[cfg_attr(any(test, feature = "test"), derive(PartialEq))]
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Mutation {
     Stop(StopMutation),
     Update(UpdateMutation),
@@ -413,6 +406,7 @@ pub struct BarrierInner<M> {
 
     /// Tracing context for the **current** epoch of this barrier.
     pub tracing_context: TracingContext,
+    pub iceberg_pk_index_compaction: Option<IcebergPkIndexCompactionContext>,
 }
 
 pub type BarrierMutationType = Option<Arc<Mutation>>;
@@ -427,6 +421,7 @@ impl<M: Default> BarrierInner<M> {
             kind: BarrierKind::Checkpoint,
             tracing_context: TracingContext::none(),
             mutation: Default::default(),
+            iceberg_pk_index_compaction: None,
         }
     }
 
@@ -436,6 +431,7 @@ impl<M: Default> BarrierInner<M> {
             kind: BarrierKind::Checkpoint,
             tracing_context: TracingContext::none(),
             mutation: Default::default(),
+            iceberg_pk_index_compaction: None,
         }
     }
 }
@@ -447,6 +443,7 @@ impl Barrier {
             mutation: (),
             kind: self.kind,
             tracing_context: self.tracing_context,
+            iceberg_pk_index_compaction: self.iceberg_pk_index_compaction,
         }
     }
 
@@ -464,6 +461,16 @@ impl Barrier {
             dropped_actors: Default::default(),
             dropped_sink_fragments: Default::default(),
         }))
+    }
+
+    pub fn with_iceberg_pk_index_compaction(
+        self,
+        context: IcebergPkIndexCompactionContext,
+    ) -> Self {
+        Self {
+            iceberg_pk_index_compaction: Some(context),
+            ..self
+        }
     }
 
     /// Whether this barrier carries stop mutation.
@@ -513,11 +520,7 @@ impl Barrier {
 
     /// Get all actors that to be stopped (dropped) by this barrier.
     pub fn all_stop_actors(&self) -> Option<&HashSet<ActorId>> {
-        match self.mutation.as_deref() {
-            Some(Mutation::Stop(StopMutation { dropped_actors, .. })) => Some(dropped_actors),
-            Some(Mutation::Update(UpdateMutation { dropped_actors, .. })) => Some(dropped_actors),
-            _ => None,
-        }
+        self.mutation.as_deref()?.all_stop_actors()
     }
 
     /// Whether this barrier is to newly add the actor with `actor_id`. This is used for `Chain` and
@@ -690,6 +693,18 @@ impl Barrier {
             })
     }
 
+    pub fn should_flush_sink_log_store(&self, sink_id: SinkId) -> bool {
+        self.mutation
+            .as_deref()
+            .is_some_and(|mutation| match mutation {
+                Mutation::Add(AddMutation {
+                    sink_log_store_flush,
+                    ..
+                }) => sink_log_store_flush.contains(&sink_id),
+                _ => false,
+            })
+    }
+
     pub fn as_subscriptions_to_drop(&self) -> Option<&[SubscriptionUpstreamInfo]> {
         match self.mutation.as_deref() {
             Some(Mutation::DropSubscriptions {
@@ -743,11 +758,27 @@ impl<M: PartialEq> PartialEq for BarrierInner<M> {
 }
 
 impl Mutation {
+    /// Get all actors to be stopped (dropped) by this mutation.
+    pub fn all_stop_actors(&self) -> Option<&HashSet<ActorId>> {
+        match self {
+            Mutation::Stop(StopMutation { dropped_actors, .. })
+            | Mutation::Update(UpdateMutation { dropped_actors, .. })
+            | Mutation::Add(AddMutation { dropped_actors, .. }) => Some(dropped_actors),
+            _ => None,
+        }
+    }
+
+    /// Return true if the mutation stops the given actor.
+    pub fn is_stop(&self, actor_id: ActorId) -> bool {
+        self.all_stop_actors()
+            .is_some_and(|actors| actors.contains(&actor_id))
+    }
+
     /// Return true if the mutation is stop.
     ///
     /// Note that this does not mean we will stop the current actor.
     #[cfg(test)]
-    pub fn is_stop(&self) -> bool {
+    pub fn is_stop_mutation(&self) -> bool {
         matches!(self, Mutation::Stop(_))
     }
 
@@ -832,12 +863,14 @@ impl Mutation {
             Mutation::Add(AddMutation {
                 adds,
                 added_actors,
+                dropped_actors,
                 splits,
                 pause,
                 subscriptions_to_add,
                 backfill_nodes_to_pause,
                 actor_cdc_table_snapshot_splits,
                 new_upstream_sinks,
+                sink_log_store_flush,
             }) => PbMutation::Add(PbAddMutation {
                 actor_dispatchers: adds
                     .iter()
@@ -874,6 +907,8 @@ impl Mutation {
                     .iter()
                     .map(|(k, v)| (*k, v.clone()))
                     .collect(),
+                dropped_actors: dropped_actors.iter().copied().collect(),
+                sink_log_store_flush: sink_log_store_flush.iter().copied().collect(),
             }),
             Mutation::SourceChangeSplit(changes) => {
                 PbMutation::Splits(PbSourceChangeSplitMutation {
@@ -1026,6 +1061,7 @@ impl Mutation {
                     .map(|(&actor_id, dispatchers)| (actor_id, dispatchers.dispatchers.clone()))
                     .collect(),
                 added_actors: add.added_actors.iter().copied().collect(),
+                dropped_actors: add.dropped_actors.iter().copied().collect(),
                 // TODO: remove this and use `SourceChangesSplit` after we support multiple
                 // mutations.
                 splits: add
@@ -1065,6 +1101,7 @@ impl Mutation {
                     .iter()
                     .map(|(k, v)| (*k, v.clone()))
                     .collect(),
+                sink_log_store_flush: add.sink_log_store_flush.iter().copied().collect(),
             }),
 
             PbMutation::Splits(s) => {
@@ -1146,7 +1183,7 @@ impl<M> BarrierInner<M> {
             mutation,
             kind,
             tracing_context,
-            ..
+            iceberg_pk_index_compaction,
         } = self;
 
         PbBarrier {
@@ -1159,6 +1196,7 @@ impl<M> BarrierInner<M> {
             }),
             tracing_context: tracing_context.to_protobuf(),
             kind: *kind as _,
+            iceberg_pk_index_compaction: *iceberg_pk_index_compaction,
         }
     }
 
@@ -1175,6 +1213,7 @@ impl<M> BarrierInner<M> {
                 (prost.mutation.as_ref()).and_then(|mutation| mutation.mutation.as_ref()),
             )?,
             tracing_context: TracingContext::from_protobuf(&prost.tracing_context),
+            iceberg_pk_index_compaction: prost.iceberg_pk_index_compaction,
         })
     }
 
@@ -1184,7 +1223,12 @@ impl<M> BarrierInner<M> {
             mutation: f(self.mutation),
             kind: self.kind,
             tracing_context: self.tracing_context,
+            iceberg_pk_index_compaction: self.iceberg_pk_index_compaction,
         }
+    }
+
+    pub fn iceberg_pk_index_compaction(&self) -> Option<&IcebergPkIndexCompactionContext> {
+        self.iceberg_pk_index_compaction.as_ref()
     }
 }
 
@@ -1209,9 +1253,10 @@ impl Barrier {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, PartialEq, Eq, Clone, EstimateSize)]
 pub struct Watermark {
     pub col_idx: usize,
+    #[estimate_size(ignore)]
     pub data_type: DataType,
     pub val: ScalarImpl,
 }
@@ -1239,7 +1284,7 @@ impl Watermark {
 
     pub async fn transform_with_expr(
         self,
-        expr: &NonStrictExpression<impl Expression>,
+        expr: &NonStrictExpression,
         new_col_idx: usize,
     ) -> Option<Self> {
         let Self { col_idx, val, .. } = self;
@@ -1357,7 +1402,7 @@ impl Message {
             Message::Barrier(Barrier {
                 mutation,
                 ..
-            }) if mutation.as_ref().unwrap().is_stop()
+            }) if mutation.as_ref().unwrap().is_stop_mutation()
         )
     }
 }
@@ -1767,7 +1812,18 @@ impl DispatchBarrierBuffer {
         &mut self,
         stream: &mut (impl Stream<Item = StreamExecutorResult<DispatcherMessage>> + Unpin),
         metrics: &ActorInputMetrics,
+        upstream_is_empty: bool,
     ) -> StreamExecutorResult<DispatcherMessage> {
+        if upstream_is_empty {
+            while self.buffer.is_empty() {
+                self.try_fetch_barrier_rx(false).await?;
+            }
+            let (barrier, _) = self.buffer.front().unwrap();
+            return Ok(DispatcherMessage::Barrier(
+                barrier.clone().into_dispatcher(),
+            ));
+        }
+
         let mut start_time = Instant::now();
         let interval_duration = Duration::from_secs(15);
         let mut interval =
@@ -1847,17 +1903,16 @@ impl DispatchBarrierBuffer {
     }
 
     fn pre_apply_barrier(&mut self, barrier: &Barrier) -> Option<BoxedNewInputsFuture> {
-        if let Some(update) = barrier.as_update_merge(self.actor_id, self.curr_upstream_fragment_id)
-            && !update.added_upstream_actors.is_empty()
-        {
-            // When update upstream fragment, added_actors will not be empty.
-            let upstream_fragment_id =
-                if let Some(new_upstream_fragment_id) = update.new_upstream_fragment_id {
-                    self.curr_upstream_fragment_id = new_upstream_fragment_id;
-                    new_upstream_fragment_id
-                } else {
-                    self.curr_upstream_fragment_id
-                };
+        let update = barrier.as_update_merge(self.actor_id, self.curr_upstream_fragment_id)?;
+        let upstream_fragment_id = update
+            .new_upstream_fragment_id
+            .unwrap_or(self.curr_upstream_fragment_id);
+        // Keep the fragment id in sync even when switching to an empty upstream. Otherwise a
+        // subsequent reattach cannot be recognized as a merge update and its new input may not
+        // receive the matching first barrier before the barrier is forwarded.
+        self.curr_upstream_fragment_id = upstream_fragment_id;
+
+        if !update.added_upstream_actors.is_empty() {
             let ctx = self.build_input_ctx.clone();
             let added_upstream_actors = update.added_upstream_actors.clone();
             let barrier = barrier.clone();

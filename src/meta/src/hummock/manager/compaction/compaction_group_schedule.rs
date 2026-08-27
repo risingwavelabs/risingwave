@@ -193,8 +193,14 @@ impl HummockManager {
         group_2: CompactionGroupId,
         created_tables: Option<HashSet<TableId>>,
     ) -> Result<()> {
-        let compaction_guard = self.compaction.write().await;
-        let mut versioning_guard = self.versioning.write().await;
+        let compaction_guard = self
+            .compaction
+            .write_with_process_name("merge_compaction_group_impl")
+            .await;
+        let mut versioning_guard = self
+            .versioning
+            .write_with_process_name("merge_compaction_group_impl")
+            .await;
         let versioning = versioning_guard.deref_mut();
         // Validate parameters.
         if !versioning.current_version.levels.contains_key(&group_1) {
@@ -372,6 +378,7 @@ impl HummockManager {
             None,
             &self.metrics,
             &self.env.opts,
+            &self.version_stat_tx,
         );
         let mut new_version_delta = version.new_delta();
 
@@ -414,7 +421,10 @@ impl HummockManager {
         });
 
         {
-            let mut compaction_group_manager = self.compaction_group_manager.write().await;
+            let mut compaction_group_manager = self
+                .compaction_group_manager
+                .write_with_process_name("merge_compaction_group_impl")
+                .await;
             let mut compaction_groups_txn = compaction_group_manager.start_compaction_groups_txn();
 
             // for metrics reclaim
@@ -469,22 +479,27 @@ impl HummockManager {
         compact_task_assignments
             .into_iter()
             .for_each(|task_assignment| {
-                if let Some(task) = task_assignment.compact_task.as_ref() {
-                    assert_eq!(task.compaction_group_id, right_group_id);
-                    canceled_tasks.push(ReportTask {
-                        task_id: task.task_id,
-                        task_status: TaskStatus::ManualCanceled,
-                        table_stats_change: HashMap::default(),
-                        sorted_output_ssts: vec![],
-                        object_timestamps: HashMap::default(),
-                    });
-                }
+                let task = &task_assignment.compact_task;
+                assert_eq!(task.compaction_group_id, right_group_id);
+                canceled_tasks.push(ReportTask {
+                    task_id: task.task_id,
+                    task_status: TaskStatus::ManualCanceled,
+                    table_stats_change: HashMap::default(),
+                    sorted_output_ssts: vec![],
+                    object_timestamps: HashMap::default(),
+                });
             });
 
         if !canceled_tasks.is_empty() {
             self.report_compact_tasks_impl(canceled_tasks, compaction_guard, versioning_guard)
                 .await?;
+        } else {
+            drop(versioning_guard);
+            drop(compaction_guard);
         }
+
+        self.try_update_write_limits(&[left_group_id, right_group_id])
+            .await;
 
         self.metrics
             .merge_compaction_group_count
@@ -609,8 +624,14 @@ impl HummockManager {
         partition_vnode_count: Option<u32>,
     ) -> Result<Vec<(CompactionGroupId, Vec<StateTableId>)>> {
         let mut result = vec![];
-        let compaction_guard = self.compaction.write().await;
-        let mut versioning_guard = self.versioning.write().await;
+        let compaction_guard = self
+            .compaction
+            .write_with_process_name("split_compaction_group_impl")
+            .await;
+        let mut versioning_guard = self
+            .versioning
+            .write_with_process_name("split_compaction_group_impl")
+            .await;
         let versioning = versioning_guard.deref_mut();
         // Validate parameters.
         if !versioning
@@ -680,6 +701,7 @@ impl HummockManager {
             None,
             &self.metrics,
             &self.env.opts,
+            &self.version_stat_tx,
         );
         let mut new_version_delta = version.new_delta();
 
@@ -694,7 +716,7 @@ impl HummockManager {
             // Inherit config from parent group
             let config = self
                 .compaction_group_manager
-                .read()
+                .read_with_process_name("split_compaction_group_impl")
                 .await
                 .try_get_compaction_group_config(parent_group_id)
                 .ok_or_else(|| {
@@ -751,7 +773,10 @@ impl HummockManager {
         result.push((new_compaction_group_id, table_ids_right));
 
         {
-            let mut compaction_group_manager = self.compaction_group_manager.write().await;
+            let mut compaction_group_manager = self
+                .compaction_group_manager
+                .write_with_process_name("split_compaction_group_impl")
+                .await;
             let mut compaction_groups_txn = compaction_group_manager.start_compaction_groups_txn();
             compaction_groups_txn
                 .create_compaction_groups(new_compaction_group_id, Arc::new(config));
@@ -794,27 +819,32 @@ impl HummockManager {
         compact_task_assignments
             .into_iter()
             .for_each(|task_assignment| {
-                if let Some(task) = task_assignment.compact_task.as_ref() {
-                    let is_expired = is_compaction_task_expired(
-                        task.compaction_group_version_id,
-                        levels.compaction_group_version_id,
-                    );
-                    if is_expired {
-                        canceled_tasks.push(ReportTask {
-                            task_id: task.task_id,
-                            task_status: TaskStatus::ManualCanceled,
-                            table_stats_change: HashMap::default(),
-                            sorted_output_ssts: vec![],
-                            object_timestamps: HashMap::default(),
-                        });
-                    }
+                let task = &task_assignment.compact_task;
+                let is_expired = is_compaction_task_expired(
+                    task.compaction_group_version_id,
+                    levels.compaction_group_version_id,
+                );
+                if is_expired {
+                    canceled_tasks.push(ReportTask {
+                        task_id: task.task_id,
+                        task_status: TaskStatus::ManualCanceled,
+                        table_stats_change: HashMap::default(),
+                        sorted_output_ssts: vec![],
+                        object_timestamps: HashMap::default(),
+                    });
                 }
             });
 
         if !canceled_tasks.is_empty() {
             self.report_compact_tasks_impl(canceled_tasks, compaction_guard, versioning_guard)
                 .await?;
+        } else {
+            drop(versioning_guard);
+            drop(compaction_guard);
         }
+
+        let affected_group_ids = result.iter().map(|(cg_id, _)| *cg_id).collect_vec();
+        self.try_update_write_limits(&affected_group_ids).await;
 
         self.metrics
             .split_compaction_group_count
@@ -848,7 +878,10 @@ impl HummockManager {
         }
 
         let parent_table_ids = {
-            let versioning_guard = self.versioning.read().await;
+            let versioning_guard = self
+                .versioning
+                .read_with_process_name("move_state_tables_to_dedicated_compaction_group")
+                .await;
             versioning_guard
                 .current_version
                 .state_table_info
@@ -965,9 +998,15 @@ impl HummockManager {
 
     async fn apply_normalize_plan(&self, plan: &NormalizePlan) -> Result<bool> {
         let (table_ids_right, boundary_table_id, new_compaction_group_id) = {
-            let mut versioning_guard = self.versioning.write().await;
+            let mut versioning_guard = self
+                .versioning
+                .write_with_process_name("apply_normalize_plan")
+                .await;
             let versioning = versioning_guard.deref_mut();
-            let mut compaction_group_manager = self.compaction_group_manager.write().await;
+            let mut compaction_group_manager = self
+                .compaction_group_manager
+                .write_with_process_name("apply_normalize_plan")
+                .await;
 
             let groups = collect_normalize_group_statistics(
                 &versioning.current_version,
@@ -1004,6 +1043,7 @@ impl HummockManager {
                 None,
                 &self.metrics,
                 &self.env.opts,
+                &self.version_stat_tx,
             );
             let mut new_version_delta = version.new_delta();
             let split_key = plan.split_key();
@@ -1066,6 +1106,8 @@ impl HummockManager {
 
         self.cancel_expired_normalize_split_tasks(plan.parent_group_id)
             .await?;
+        self.try_update_write_limits(&[plan.parent_group_id, new_compaction_group_id])
+            .await;
         self.metrics
             .split_compaction_group_count
             .with_label_values(&[&plan.parent_group_id.to_string()])
@@ -1086,8 +1128,14 @@ impl HummockManager {
         parent_group_id: CompactionGroupId,
     ) -> Result<()> {
         let mut canceled_tasks = vec![];
-        let compaction_guard = self.compaction.write().await;
-        let mut versioning_guard = self.versioning.write().await;
+        let compaction_guard = self
+            .compaction
+            .write_with_process_name("cancel_expired_normalize_split_tasks")
+            .await;
+        let mut versioning_guard = self
+            .versioning
+            .write_with_process_name("cancel_expired_normalize_split_tasks")
+            .await;
         let versioning = versioning_guard.deref_mut();
         let compact_task_assignments =
             compaction_guard.get_compact_task_assignments_by_group_id(parent_group_id);
@@ -1097,12 +1145,11 @@ impl HummockManager {
         compact_task_assignments
             .into_iter()
             .for_each(|task_assignment| {
-                if let Some(task) = task_assignment.compact_task.as_ref()
-                    && is_compaction_task_expired(
-                        task.compaction_group_version_id,
-                        levels.compaction_group_version_id,
-                    )
-                {
+                let task = &task_assignment.compact_task;
+                if is_compaction_task_expired(
+                    task.compaction_group_version_id,
+                    levels.compaction_group_version_id,
+                ) {
                     canceled_tasks.push(ReportTask {
                         task_id: task.task_id,
                         task_status: TaskStatus::ManualCanceled,
@@ -1598,18 +1645,20 @@ impl GroupMergeValidator {
 
         {
             // Avoid merge when the group is in emergency state
-            let versioning_guard = versioning.read().await;
+            let versioning_guard = versioning
+                .read_with_process_name("validate_group_merge")
+                .await;
             let levels = &versioning_guard.current_version.levels;
             if !levels.contains_key(&group.group_id) {
                 return Err(Error::CompactionGroup(format!(
-                    "Cannot merge group {} not exist",
+                    "cannot merge compaction group {} because it does not exist",
                     group.group_id
                 )));
             }
 
             if !levels.contains_key(&next_group.group_id) {
                 return Err(Error::CompactionGroup(format!(
-                    "Cannot merge next group {} not exist",
+                    "cannot merge next compaction group {} because it does not exist",
                     next_group.group_id
                 )));
             }
@@ -1652,7 +1701,7 @@ impl GroupMergeValidator {
             // check whether the group is in the write stop state after merge
             let l0_sub_level_count_after_merge =
                 group_levels.l0.sub_levels.len() + next_group_levels.l0.sub_levels.len();
-            if GroupStateValidator::write_stop_l0_file_count(
+            if GroupStateValidator::write_stop_sub_level_count(
                 (l0_sub_level_count_after_merge as f64
                     * opts.compaction_group_merge_dimension_threshold) as usize,
                 group.compaction_group_config.compaction_config().deref(),
@@ -1663,8 +1712,13 @@ impl GroupMergeValidator {
                 )));
             }
 
-            let l0_file_count_after_merge =
-                group_levels.l0.sub_levels.len() + next_group_levels.l0.sub_levels.len();
+            let l0_file_count_after_merge = group_levels
+                .l0
+                .sub_levels
+                .iter()
+                .chain(next_group_levels.l0.sub_levels.iter())
+                .map(|level| level.table_infos.len())
+                .sum::<usize>();
             if GroupStateValidator::write_stop_l0_file_count(
                 (l0_file_count_after_merge as f64 * opts.compaction_group_merge_dimension_threshold)
                     as usize,
@@ -1692,8 +1746,8 @@ impl GroupMergeValidator {
 
             // check whether the group is in the emergency state after merge
             if GroupStateValidator::emergency_l0_file_count(
-                (l0_sub_level_count_after_merge as f64
-                    * opts.compaction_group_merge_dimension_threshold) as usize,
+                (l0_file_count_after_merge as f64 * opts.compaction_group_merge_dimension_threshold)
+                    as usize,
                 group.compaction_group_config.compaction_config().deref(),
             ) {
                 return Err(Error::CompactionGroup(format!(

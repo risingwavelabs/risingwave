@@ -38,6 +38,16 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.timeseries_ops(
+                    "Kafka Consumer Group Delete Failures",
+                    "Rate of Kafka consumer group delete failures observed by source enumerator cleanup.",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('source_kafka_consumer_group_delete_failure_count')}[$__rate_interval])) by (source_id, consumer_group)",
+                            "source={{source_id}} group={{consumer_group}}",
+                        ),
+                    ],
+                ),
                 panels.subheader("Producer Queue"),
                 panels.timeseries_count(
                     "Message Count in Producer Queue",

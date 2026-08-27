@@ -17,8 +17,8 @@
 //! See [this post](https://matklad.github.io/2021/02/27/delete-cargo-integration-tests.html)
 //! for the rationale behind this approach.
 
-#![feature(stmt_expr_attributes)]
-#![feature(impl_trait_in_assoc_type)]
+#![cfg_attr(madsim, feature(stmt_expr_attributes))]
+#![cfg_attr(madsim, feature(impl_trait_in_assoc_type))]
 
 mod backfill_tests;
 mod batch;
@@ -30,5 +30,6 @@ mod recovery;
 mod scale;
 mod sink;
 mod storage;
+mod table_cache_refill;
 mod throttle;
 mod utils;

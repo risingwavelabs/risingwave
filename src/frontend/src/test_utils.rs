@@ -30,6 +30,7 @@ use risingwave_common::catalog::{
     FunctionId, IndexId, NON_RESERVED_USER_ID, ObjectId, PG_CATALOG_SCHEMA_NAME,
     RW_CATALOG_SCHEMA_NAME, TableId,
 };
+use risingwave_common::config::FrontendConfig;
 use risingwave_common::hash::{VirtualNode, VnodeCount, VnodeCountCompat};
 use risingwave_common::id::{ConnectionId, JobId, SourceId, SubscriptionId, ViewId, WorkerId};
 use risingwave_common::session_config::SessionConfig;
@@ -57,7 +58,7 @@ use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
 };
-use risingwave_pb::id::ActorId;
+use risingwave_pb::id::{ActorId, IcebergCompactionTaskId};
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
@@ -137,6 +138,13 @@ impl LocalFrontend {
     #[expect(clippy::unused_async)]
     pub async fn new(opts: FrontendOpts) -> Self {
         let env = FrontendEnv::mock();
+        Self { opts, env }
+    }
+
+    #[expect(clippy::unused_async)]
+    pub async fn with_frontend_config(opts: FrontendOpts, frontend_config: FrontendConfig) -> Self {
+        let mut env = FrontendEnv::mock();
+        env.set_frontend_config_for_test(frontend_config);
         Self { opts, env }
     }
 
@@ -396,10 +404,28 @@ impl CatalogWriter for MockCatalogWriter {
         sink: PbSink,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
+        _resource_type: streaming_job_resource_type::ResourceType,
         _if_not_exists: bool,
+        _since_timestamp_epoch: Option<u64>,
     ) -> Result<()> {
         let sink_id = self.create_sink_inner(sink, graph)?;
         self.insert_object_dependencies(sink_id.as_object_id(), dependencies);
+        Ok(())
+    }
+
+    async fn replace_sink(
+        &self,
+        old_sink_id: SinkId,
+        sink: PbSink,
+        graph: StreamFragmentGraph,
+        _dependencies: HashSet<ObjectId>,
+        _resource_type: streaming_job_resource_type::ResourceType,
+    ) -> Result<()> {
+        let (database_id, schema_id) = self.drop_table_or_sink_id(old_sink_id.as_raw_id());
+        self.catalog
+            .write()
+            .drop_sink(database_id, schema_id, old_sink_id);
+        self.create_sink_inner(sink, graph)?;
         Ok(())
     }
 
@@ -412,6 +438,7 @@ impl CatalogWriter for MockCatalogWriter {
         mut index: PbIndex,
         mut index_table: PbTable,
         _graph: StreamFragmentGraph,
+        _resource_type: streaming_job_resource_type::ResourceType,
         _if_not_exists: bool,
     ) -> Result<()> {
         index_table.id = self.gen_id();
@@ -638,6 +665,16 @@ impl CatalogWriter for MockCatalogWriter {
         object_name: &str,
     ) -> Result<()> {
         match object_id {
+            alter_name_request::Object::DatabaseId(database_id) => {
+                let mut database = self
+                    .catalog
+                    .read()
+                    .get_database_by_id(database_id)?
+                    .to_prost();
+                database.name = object_name.to_owned();
+                self.catalog.write().update_database(&database);
+                Ok(())
+            }
             alter_name_request::Object::TableId(table_id) => {
                 self.catalog
                     .write()
@@ -770,11 +807,28 @@ impl CatalogWriter for MockCatalogWriter {
 
     async fn alter_resource_group(
         &self,
-        _table_id: TableId,
+        _job_id: JobId,
         _resource_group: Option<String>,
         _deferred: bool,
     ) -> Result<()> {
         todo!()
+    }
+
+    async fn alter_database_resource_group(
+        &self,
+        database_id: DatabaseId,
+        resource_group: Option<String>,
+        _deferred: bool,
+    ) -> Result<()> {
+        let mut pb_database = {
+            let reader = self.catalog.read();
+            let database = reader.get_database_by_id(database_id)?.to_owned();
+            database.to_prost()
+        };
+        pb_database.resource_group =
+            resource_group.unwrap_or_else(|| DEFAULT_RESOURCE_GROUP.to_owned());
+        self.catalog.write().update_database(&pb_database);
+        Ok(())
     }
 
     async fn alter_database_param(
@@ -1419,8 +1473,12 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(())
     }
 
-    async fn compact_iceberg_table(&self, _sink_id: SinkId) -> RpcResult<u64> {
-        Ok(1)
+    async fn compact_iceberg_table(&self, _sink_id: SinkId) -> RpcResult<IcebergCompactionTaskId> {
+        Ok(1.into())
+    }
+
+    async fn rewrite_iceberg_table_manifests(&self, _sink_id: SinkId) -> RpcResult<()> {
+        Ok(())
     }
 
     async fn expire_iceberg_table_snapshots(&self, _sink_id: SinkId) -> RpcResult<()> {

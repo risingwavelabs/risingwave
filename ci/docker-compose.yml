@@ -37,6 +37,16 @@ services:
       timeout: 5s
       retries: 5
 
+  moto:
+    image: motoserver/moto:5.0.3
+    ports:
+      - 5000
+    healthcheck:
+      test: ["CMD-SHELL", "python - <<'PY'\nimport urllib.request\nurllib.request.urlopen('http://127.0.0.1:5000/moto-api/', timeout=2)\nPY"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
   # TODO: reuse the same mysql instance for connector test and meta store
   #       after https://github.com/risingwavelabs/risingwave/issues/19783 addressed
   mysql-meta:
@@ -358,6 +368,14 @@ services:
       - ..:/risingwave
     stop_grace_period: 30s
 
+  sink-opensearch-test-env:
+    image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
+    depends_on:
+      - opensearch
+    volumes:
+      - ..:/risingwave
+    stop_grace_period: 30s
+
   sink-pulsar-test-env:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     depends_on:
@@ -439,6 +457,7 @@ services:
       - db
       - message_queue
       - schemaregistry
+      - moto
     volumes:
       - ..:/risingwave
     stop_grace_period: 30s
@@ -525,6 +544,21 @@ services:
       - ELASTIC_PASSWORD=risingwave
     ports:
       - 9200:9200
+    healthcheck:
+      test: ["CMD-SHELL", "curl --fail -sS -u elastic:$${ELASTIC_PASSWORD} http://localhost:9200 >/dev/null"]
+      interval: 1s
+      timeout: 5s
+      retries: 60
+
+  opensearch:
+    image: opensearchproject/opensearch:2.19.1
+    environment:
+      - discovery.type=single-node
+      - DISABLE_SECURITY_PLUGIN=true
+      - OPENSEARCH_INITIAL_ADMIN_PASSWORD=Risingwave123!
+      - OPENSEARCH_JAVA_OPTS=-Xms512m -Xmx512m
+    ports:
+      - 9201:9200
 
   clickhouse-server:
     image: clickhouse/clickhouse-server:25.5
