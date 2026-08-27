@@ -37,12 +37,16 @@ use risingwave_common::session_config::sink_decouple::SinkDecouple;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::{bail, bail_not_implemented};
+use risingwave_connector::connector_common::PostgresExternalTable;
 use risingwave_connector::source::cdc::external::{
     DATABASE_NAME_KEY, ExternalCdcTableType, ExternalTableConfig, ExternalTableImpl,
     SCHEMA_NAME_KEY, SchemaTableName, TABLE_NAME_KEY,
 };
 use risingwave_connector::source::cdc::{
-    build_cdc_table_id, normalize_simple_postgres_quoted_table_name,
+    CDC_BACKFILL_AS_EVEN_SPLITS, CDC_BACKFILL_ENABLE_KEY, CDC_BACKFILL_NUM_ROWS_PER_SPLIT,
+    CDC_BACKFILL_PARALLELISM, CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY,
+    CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY, CDC_BACKFILL_SPLIT_PK_COLUMN_INDEX, build_cdc_table_id,
+    normalize_simple_postgres_quoted_table_name,
 };
 use risingwave_connector::{
     AUTO_SCHEMA_CHANGE_KEY, WithOptionsSecResolved, WithPropertiesExt, source,
@@ -59,10 +63,11 @@ use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::secret::secret_ref::PbRefAsType;
 use risingwave_pb::stream_plan::StreamFragmentGraph;
 use risingwave_sqlparser::ast::{
-    CdcTableInfo, ColumnDef, ColumnOption, CompatibleFormatEncode, ConnectionRefValue, CreateSink,
-    CreateSinkStatement, CreateSourceStatement, DataType as AstDataType, ExplainOptions, Format,
-    FormatEncodeOptions, Ident, ObjectName, OnConflict, SecretRefAsType, SourceWatermark,
-    Statement, TableConstraint, WebhookSourceInfo, WithProperties,
+    BackfillOrderStrategy, CdcTableInfo, ColumnDef, ColumnOption, CompatibleFormatEncode,
+    ConnectionRefValue, CreateSink, CreateSinkStatement, CreateSourceStatement,
+    DataType as AstDataType, ExplainOptions, Format, FormatEncodeOptions, Ident, ObjectName,
+    OnConflict, SecretRefAsType, SourceWatermark, Statement, TableConstraint, WebhookSourceInfo,
+    WithProperties,
 };
 use risingwave_sqlparser::parser::IncludeOption;
 use thiserror_ext::AsReport;
@@ -980,6 +985,99 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     ))
 }
 
+/// Generate the append-only raw event plan for a table based on a shared PostgreSQL CDC source.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn gen_create_table_plan_for_raw_cdc_table(
+    context: OptimizerContextRef,
+    source: Arc<SourceCatalog>,
+    external_table_name: String,
+    cdc_with_options: WithOptionsSecResolved,
+    mut col_id_gen: ColumnIdGenerator,
+    resolved_table_name: String,
+    database_id: DatabaseId,
+    schema_id: SchemaId,
+    table_id: TableId,
+    engine: Engine,
+) -> Result<(PlanRef, TableCatalog)> {
+    let session = context.session_ctx().clone();
+    let mut columns = ColumnCatalog::debezium_cdc_event_table_cols().to_vec();
+    for column in &mut columns {
+        col_id_gen.generate(column)?;
+    }
+
+    let (columns, pk_column_ids, row_id_index) =
+        bind_pk_and_row_id_on_relation(columns, vec![], true)?;
+    let row_id_index = row_id_index.expect("raw CDC event tables always have a row ID");
+    let table_pk = vec![ColumnOrder::new(row_id_index, OrderType::ascending())];
+
+    let (options, secret_refs) = cdc_with_options.into_parts();
+    let cdc_table_type = ExternalCdcTableType::from_properties(&options);
+    debug_assert_eq!(cdc_table_type, ExternalCdcTableType::Postgres);
+    let cdc_table_desc = CdcTableDesc {
+        table_id,
+        source_id: source.id,
+        external_table_name: external_table_name.clone(),
+        pk: table_pk,
+        columns: columns
+            .iter()
+            .map(|column| column.column_desc.clone())
+            .collect(),
+        stream_key: vec![row_id_index],
+        connect_properties: options,
+        secret_refs,
+    };
+
+    let logical_scan = LogicalCdcScan::create_raw_append_only(
+        external_table_name.clone(),
+        Rc::new(cdc_table_desc),
+        context.clone(),
+    );
+    let required_cols = FixedBitSet::with_capacity(columns.len());
+    let plan_root = PlanRoot::new_with_logical_plan(
+        logical_scan.into(),
+        RequiredDist::Any,
+        Order::any(),
+        required_cols,
+        vec![],
+    );
+
+    let cdc_table_id_external_table_name =
+        normalize_simple_postgres_quoted_table_name(&external_table_name)
+            .unwrap_or(external_table_name);
+    let cdc_table_id = build_cdc_table_id(source.id, &cdc_table_id_external_table_name);
+    let materialize = plan_root.gen_table_plan(
+        context.clone(),
+        resolved_table_name,
+        database_id,
+        schema_id,
+        CreateTableInfo {
+            columns,
+            pk_column_ids,
+            row_id_index: Some(row_id_index),
+            watermark_descs: vec![],
+            source_catalog: Some((*source).clone()),
+            version: col_id_gen.into_version(),
+        },
+        CreateTableProps {
+            definition: context.normalized_sql().to_owned(),
+            append_only: true,
+            on_conflict: ConflictBehavior::NoCheck.into(),
+            with_version_columns: vec![],
+            webhook_info: None,
+            engine,
+        },
+    )?;
+
+    let mut table = materialize.table().clone();
+    table.owner = session.user_id();
+    table.cdc_table_id = Some(cdc_table_id);
+    table.cdc_table_type = Some(cdc_table_type);
+    Ok((
+        ensure_sync_log_store_fragment_root(materialize.into()),
+        table,
+    ))
+}
+
 /// Derive connector properties and normalize `external_table_name` for CDC tables.
 ///
 /// Returns (`connector_properties`, `normalized_external_table_name`) where:
@@ -1177,6 +1275,14 @@ fn parse_postgres_cdc_external_table_name(external_table_name: &str) -> Result<(
     parts.push(current);
 
     if let [schema_name, table_name] = parts.as_slice() {
+        if external_table_name.contains('"')
+            && normalize_simple_postgres_quoted_table_name(external_table_name).is_none()
+        {
+            return Err(anyhow!(
+                "Postgres CDC supports quoted table names only in the form schema.\"table\" without embedded dots, quotes, or backslashes"
+            )
+            .into());
+        }
         Ok((schema_name.clone(), table_name.clone()))
     } else {
         Err(
@@ -1325,6 +1431,14 @@ pub(super) async fn handle_create_table_plan(
     TableJobType,
     Option<SourceId>,
 )> {
+    if append_only && cdc_table_info.is_none() && handler_args.with_options.is_cdc_connector() {
+        return Err(ErrorCode::NotSupported(
+            "a direct CDC connector on an append-only table".to_owned(),
+            "Create a shared `postgres-cdc` source and reference it with FROM ... TABLE".to_owned(),
+        )
+        .into());
+    }
+
     let col_id_gen = ColumnIdGenerator::new_initial();
     let format_encode = check_create_table_with_source(
         &handler_args.with_options,
@@ -1391,6 +1505,11 @@ pub(super) async fn handle_create_table_plan(
                 &wildcard_idx,
                 &constraints,
                 &source_watermarks,
+                on_conflict.is_some(),
+                !with_version_columns.is_empty(),
+                !include_column_options.is_empty(),
+                engine,
+                &handler_args.with_options,
             )?;
 
             generated_columns_check_for_cdc_table(&column_defs)?;
@@ -1405,7 +1524,6 @@ pub(super) async fn handle_create_table_plan(
             let (database_id, schema_id) =
                 session.get_database_and_schema_id_for_create(schema_name.clone())?;
 
-            // cdc table cannot be append-only
             let (source_schema, source_name) =
                 Binder::resolve_schema_qualified_name(db_name, &cdc_table.source_name)?;
 
@@ -1427,63 +1545,86 @@ pub(super) async fn handle_create_table_plan(
                     cdc_table.external_table_name.clone(),
                 )?;
 
-            let (columns, pk_names) = match wildcard_idx {
-                Some(_) => bind_cdc_table_schema_externally(cdc_with_options.clone()).await?,
-                None => {
-                    for column_def in &column_defs {
-                        for option_def in &column_def.options {
-                            if let ColumnOption::DefaultValue(_)
-                            | ColumnOption::DefaultValueInternal { .. } = option_def.option
-                            {
-                                return Err(ErrorCode::NotSupported(
-                                            "Default value for columns defined on the table created from a CDC source".into(),
-                                            "Remove the default value expression in the column definitions".into(),
-                                        )
-                                            .into());
+            let shared_source_id = source.id;
+            let (plan, table) = if append_only {
+                if !source.with_properties.is_shareable_cdc_connector() {
+                    return Err(ErrorCode::NotSupported(
+                        "append-only CDC event tables require a shared CDC source".to_owned(),
+                        "Create and reference a shared `postgres-cdc` source".to_owned(),
+                    )
+                    .into());
+                }
+                validate_raw_postgres_cdc_table(session, cdc_with_options.clone()).await?;
+                let context: OptimizerContextRef =
+                    OptimizerContext::new(handler_args, explain_options).into();
+                gen_create_table_plan_for_raw_cdc_table(
+                    context,
+                    source,
+                    normalized_external_table_name,
+                    cdc_with_options,
+                    col_id_gen,
+                    resolved_table_name,
+                    database_id,
+                    schema_id,
+                    TableId::placeholder(),
+                    engine,
+                )?
+            } else {
+                let (columns, pk_names) = match wildcard_idx {
+                    Some(_) => bind_cdc_table_schema_externally(cdc_with_options.clone()).await?,
+                    None => {
+                        for column_def in &column_defs {
+                            for option_def in &column_def.options {
+                                if let ColumnOption::DefaultValue(_)
+                                | ColumnOption::DefaultValueInternal { .. } = option_def.option
+                                {
+                                    return Err(ErrorCode::NotSupported(
+                                                "Default value for columns defined on the table created from a CDC source".into(),
+                                                "Remove the default value expression in the column definitions".into(),
+                                            )
+                                                .into());
+                                }
                             }
                         }
+
+                        let (columns, pk_names) =
+                            bind_cdc_table_schema(&column_defs, &constraints, false)?;
+                        // Read default value definitions from the external database.
+                        let (options, secret_refs) = cdc_with_options.clone().into_parts();
+                        let _config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
+                            .context("failed to extract external table config")?;
+
+                        (columns, pk_names)
                     }
+                };
 
-                    let (columns, pk_names) =
-                        bind_cdc_table_schema(&column_defs, &constraints, false)?;
-                    // read default value definition from external db
-                    let (options, secret_refs) = cdc_with_options.clone().into_parts();
-                    let _config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
-                        .context("failed to extract external table config")?;
+                // If Debezium column filters remove a PK column from the change-event value,
+                // RisingWave reads NULL for that PK and silently corrupts current-state updates.
+                reject_pk_filtered_by_debezium_column_filter(&pk_names, &cdc_with_options)?;
 
-                    (columns, pk_names)
-                }
+                let context: OptimizerContextRef =
+                    OptimizerContext::new(handler_args, explain_options).into();
+                gen_create_table_plan_for_cdc_table(
+                    context,
+                    source,
+                    normalized_external_table_name,
+                    column_defs,
+                    source_watermarks,
+                    columns,
+                    pk_names,
+                    cdc_with_options,
+                    col_id_gen,
+                    on_conflict,
+                    with_version_columns,
+                    include_column_options,
+                    table_name.clone(),
+                    resolved_table_name,
+                    database_id,
+                    schema_id,
+                    TableId::placeholder(),
+                    engine,
+                )?
             };
-
-            // CDC-table branch only: if Debezium column filters remove a PK column from the
-            // change-event value, RisingWave reads NULL for that PK from the payload and silently
-            // corrupts downstream (UPDATE turns into a fresh INSERT, DELETE no-ops). Plain
-            // (non-CDC) tables don't hit this check.
-            reject_pk_filtered_by_debezium_column_filter(&pk_names, &cdc_with_options)?;
-
-            let context: OptimizerContextRef =
-                OptimizerContext::new(handler_args, explain_options).into();
-            let shared_source_id = source.id;
-            let (plan, table) = gen_create_table_plan_for_cdc_table(
-                context,
-                source,
-                normalized_external_table_name,
-                column_defs,
-                source_watermarks,
-                columns,
-                pk_names,
-                cdc_with_options,
-                col_id_gen,
-                on_conflict,
-                with_version_columns,
-                include_column_options,
-                table_name.clone(),
-                resolved_table_name,
-                database_id,
-                schema_id,
-                TableId::placeholder(),
-                engine,
-            )?;
 
             (
                 (plan, None, table),
@@ -1552,12 +1693,18 @@ fn not_null_check_for_cdc_table(
 }
 
 // Only for table from cdc source
+#[allow(clippy::too_many_arguments)]
 fn sanity_check_for_table_on_cdc_source(
     append_only: bool,
     column_defs: &Vec<ColumnDef>,
     wildcard_idx: &Option<usize>,
     constraints: &Vec<TableConstraint>,
     source_watermarks: &Vec<SourceWatermark>,
+    has_on_conflict: bool,
+    has_version_columns: bool,
+    has_include_columns: bool,
+    engine: Engine,
+    with_options: &WithOptions,
 ) -> Result<()> {
     // wildcard cannot be used with column definitions
     if wildcard_idx.is_some() && !column_defs.is_empty() {
@@ -1566,6 +1713,120 @@ fn sanity_check_for_table_on_cdc_source(
             "Remove the wildcard or column definitions".to_owned(),
         )
         .into());
+    }
+
+    if append_only {
+        if !column_defs.is_empty() {
+            return Err(ErrorCode::NotSupported(
+                "explicit columns on an append-only CDC event table".to_owned(),
+                "Remove the column definitions; the event schema is inferred automatically"
+                    .to_owned(),
+            )
+            .into());
+        }
+        if wildcard_idx.is_some() {
+            return Err(ErrorCode::NotSupported(
+                "wildcard schema inference on an append-only CDC event table".to_owned(),
+                "Remove the wildcard".to_owned(),
+            )
+            .into());
+        }
+        if !constraints.is_empty() {
+            return Err(ErrorCode::NotSupported(
+                "constraints on an append-only CDC event table".to_owned(),
+                "Remove the constraints".to_owned(),
+            )
+            .into());
+        }
+        if !source_watermarks.is_empty() {
+            return Err(ErrorCode::NotSupported(
+                "watermarks on an append-only CDC event table".to_owned(),
+                "Remove the watermark definitions".to_owned(),
+            )
+            .into());
+        }
+        if has_on_conflict {
+            return Err(ErrorCode::NotSupported(
+                "ON CONFLICT on an append-only CDC event table".to_owned(),
+                "Remove the ON CONFLICT clause".to_owned(),
+            )
+            .into());
+        }
+        if has_version_columns {
+            return Err(ErrorCode::NotSupported(
+                "version columns on an append-only CDC event table".to_owned(),
+                "Remove the WITH VERSION COLUMN clause".to_owned(),
+            )
+            .into());
+        }
+        if has_include_columns {
+            return Err(ErrorCode::NotSupported(
+                "INCLUDE columns on an append-only CDC event table".to_owned(),
+                "Remove the INCLUDE clause".to_owned(),
+            )
+            .into());
+        }
+        if engine != Engine::Hummock {
+            return Err(ErrorCode::NotSupported(
+                "Iceberg engine for an append-only CDC event table".to_owned(),
+                "Use the default Hummock engine".to_owned(),
+            )
+            .into());
+        }
+        if with_options.contains_key(UPSTREAM_SOURCE_KEY) {
+            return Err(ErrorCode::NotSupported(
+                "a direct connector on an append-only CDC event table".to_owned(),
+                "Reference a shared PostgreSQL CDC source with FROM ... TABLE instead".to_owned(),
+            )
+            .into());
+        }
+
+        match with_options.get(CDC_BACKFILL_ENABLE_KEY) {
+            Some(value) if value.parse::<bool>() == Ok(false) => {}
+            Some(_) => {
+                return Err(ErrorCode::InvalidParameterValue(
+                    "append-only CDC event tables require `snapshot = 'false'`".to_owned(),
+                )
+                .into());
+            }
+            None => {
+                return Err(ErrorCode::InvalidParameterValue(
+                    "append-only CDC event tables require an explicit `snapshot = 'false'`"
+                        .to_owned(),
+                )
+                .into());
+            }
+        }
+
+        for key in [
+            CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY,
+            CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY,
+            CDC_BACKFILL_PARALLELISM,
+            CDC_BACKFILL_NUM_ROWS_PER_SPLIT,
+            CDC_BACKFILL_AS_EVEN_SPLITS,
+            CDC_BACKFILL_SPLIT_PK_COLUMN_INDEX,
+            OverwriteOptions::BACKFILL_RATE_LIMIT_KEY,
+        ] {
+            if with_options.contains_key(key) {
+                return Err(ErrorCode::NotSupported(
+                    format!("backfill option `{key}` on an append-only CDC event table"),
+                    "Remove the backfill option".to_owned(),
+                )
+                .into());
+            }
+        }
+        if !matches!(
+            with_options.backfill_order_strategy(),
+            BackfillOrderStrategy::Default
+        ) {
+            return Err(ErrorCode::NotSupported(
+                "backfill order on an append-only CDC event table".to_owned(),
+                "Remove the `backfill_order` option".to_owned(),
+            )
+            .into());
+        }
+
+        return Ok(());
     }
 
     // cdc table must have primary key constraint or primary key column
@@ -1588,14 +1849,6 @@ fn sanity_check_for_table_on_cdc_source(
         return Err(ErrorCode::NotSupported(
             "CDC table without primary key constraint is not supported".to_owned(),
             "Please define a primary key".to_owned(),
-        )
-        .into());
-    }
-
-    if append_only {
-        return Err(ErrorCode::NotSupported(
-            "append only modifier on the table created from a CDC source".into(),
-            "Remove the APPEND ONLY clause".into(),
         )
         .into());
     }
@@ -1640,6 +1893,40 @@ async fn bind_cdc_table_schema_externally(
             .collect(),
         table.pk_names().clone(),
     ))
+}
+
+async fn validate_raw_postgres_cdc_table(
+    session: &SessionImpl,
+    cdc_with_options: WithOptionsSecResolved,
+) -> Result<()> {
+    let (options, secret_refs) = cdc_with_options.into_parts();
+    if ExternalCdcTableType::from_properties(&options) != ExternalCdcTableType::Postgres {
+        return Err(ErrorCode::NotSupported(
+            "append-only CDC event tables are only supported for PostgreSQL and AlloyDB sources"
+                .to_owned(),
+            "Use a shared `postgres-cdc` source".to_owned(),
+        )
+        .into());
+    }
+
+    let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
+        .context("failed to extract PostgreSQL CDC table config")?;
+    let metadata = PostgresExternalTable::inspect_cdc_table(
+        &config.pg_connection_config()?,
+        &config.schema,
+        &config.table,
+    )
+    .await
+    .context("failed to validate PostgreSQL CDC event table")?;
+
+    if !metadata.has_full_replica_identity() {
+        session.notice_to_user(format!(
+            "Upstream table {}.{} does not use REPLICA IDENTITY FULL. CDC event rows will still be recorded, but UPDATE and DELETE envelopes may contain only key or partial before-images.",
+            config.schema, config.table
+        ));
+    }
+
+    Ok(())
 }
 
 /// Derive schema for cdc table when create a new Table or alter an existing Table
@@ -1696,7 +1983,7 @@ pub async fn handle_create_table(
     }
 
     let (graph, source, hummock_table, job_type, shared_source_id) = {
-        let (plan, source, table, job_type, shared_source_id) = handle_create_table_plan(
+        let (plan, source, table, job_type, shared_source_id) = Box::pin(handle_create_table_plan(
             handler_args.clone(),
             ExplainOptions::default(),
             format_encode,
@@ -1712,7 +1999,7 @@ pub async fn handle_create_table(
             include_column_options,
             webhook_info,
             engine,
-        )
+        ))
         .await?;
         tracing::trace!("table_plan: {:?}", plan.explain_to_string());
 
@@ -1736,7 +2023,9 @@ pub async fn handle_create_table(
         Engine::Hummock => {
             let catalog_writer = session.catalog_writer()?;
             let action = match job_type {
-                TableJobType::SharedCdcSource => LongRunningNotificationAction::MonitorBackfillJob,
+                TableJobType::SharedCdcSource if !hummock_table.append_only => {
+                    LongRunningNotificationAction::MonitorBackfillJob
+                }
                 _ => LongRunningNotificationAction::DiagnoseBarrierLatency,
             };
             execute_with_long_running_notification(
@@ -2297,6 +2586,14 @@ pub async fn generate_stream_graph_for_replace_table(
         panic!("unexpected statement type: {:?}", statement);
     };
 
+    if append_only && cdc_table_info.is_none() && handler_args.with_options.is_cdc_connector() {
+        return Err(ErrorCode::NotSupported(
+            "a direct CDC connector on an append-only table".to_owned(),
+            "Create a shared `postgres-cdc` source and reference it with FROM ... TABLE".to_owned(),
+        )
+        .into());
+    }
+
     let format_encode = format_encode
         .clone()
         .map(|format_encode| format_encode.into_v2_with_warning());
@@ -2370,6 +2667,11 @@ pub async fn generate_stream_graph_for_replace_table(
                 &wildcard_idx,
                 &constraints,
                 &source_watermarks,
+                on_conflict.is_some(),
+                !with_version_columns.is_empty(),
+                !include_column_options.is_empty(),
+                engine,
+                &handler_args.with_options,
             )?;
 
             let session = &handler_args.session;
@@ -2382,37 +2684,62 @@ pub async fn generate_stream_graph_for_replace_table(
                     cdc_table.external_table_name.clone(),
                 )?;
 
-            let (column_catalogs, pk_names) = bind_cdc_table_schema(&columns, &constraints, true)?;
+            let (plan, table) = if append_only {
+                if !source.with_properties.is_shareable_cdc_connector() {
+                    return Err(ErrorCode::NotSupported(
+                        "append-only CDC event tables require a shared CDC source".to_owned(),
+                        "Create and reference a shared `postgres-cdc` source".to_owned(),
+                    )
+                    .into());
+                }
+                validate_raw_postgres_cdc_table(session, cdc_with_options.clone()).await?;
+                let context: OptimizerContextRef =
+                    OptimizerContext::new(handler_args, ExplainOptions::default()).into();
+                gen_create_table_plan_for_raw_cdc_table(
+                    context,
+                    source,
+                    normalized_external_table_name,
+                    cdc_with_options,
+                    col_id_gen,
+                    resolved_table_name,
+                    original_catalog.database_id,
+                    original_catalog.schema_id,
+                    original_catalog.id(),
+                    engine,
+                )?
+            } else {
+                let (column_catalogs, pk_names) =
+                    bind_cdc_table_schema(&columns, &constraints, true)?;
 
-            // CDC-table branch only: see the comment at the symmetric call site in
-            // `handle_create_table_plan`. Plain (non-CDC) tables don't hit this check.
-            reject_pk_filtered_by_debezium_column_filter(&pk_names, &cdc_with_options)?;
+                // See the comment at the symmetric call site in `handle_create_table_plan`.
+                reject_pk_filtered_by_debezium_column_filter(&pk_names, &cdc_with_options)?;
 
-            let context: OptimizerContextRef =
-                OptimizerContext::new(handler_args, ExplainOptions::default()).into();
-            let (plan, table) = gen_create_table_plan_for_cdc_table(
-                context,
-                source,
-                normalized_external_table_name,
-                columns,
-                source_watermarks,
-                column_catalogs,
-                pk_names,
-                cdc_with_options,
-                col_id_gen,
-                on_conflict,
-                with_version_columns
-                    .iter()
-                    .map(|col| col.real_value())
-                    .collect(),
-                include_column_options,
-                table_name,
-                resolved_table_name,
-                original_catalog.database_id,
-                original_catalog.schema_id,
-                original_catalog.id(),
-                engine,
-            )?;
+                let context: OptimizerContextRef =
+                    OptimizerContext::new(handler_args, ExplainOptions::default()).into();
+                gen_create_table_plan_for_cdc_table(
+                    context,
+                    source,
+                    normalized_external_table_name,
+                    columns,
+                    source_watermarks,
+                    column_catalogs,
+                    pk_names,
+                    cdc_with_options,
+                    col_id_gen,
+                    on_conflict,
+                    with_version_columns
+                        .iter()
+                        .map(|col| col.real_value())
+                        .collect(),
+                    include_column_options,
+                    table_name,
+                    resolved_table_name,
+                    original_catalog.database_id,
+                    original_catalog.schema_id,
+                    original_catalog.id(),
+                    engine,
+                )?
+            };
 
             ((plan, None, table), TableJobType::SharedCdcSource)
         }
@@ -2583,9 +2910,12 @@ fn bind_webhook_info(
 #[cfg(test)]
 mod tests {
     use risingwave_common::catalog::{
+        CDC_EVENT_SOURCE_OFFSET_COLUMN_NAME, CDC_EVENT_SOURCE_TABLE_NAME_COLUMN_NAME,
         DEFAULT_DATABASE_NAME, ROW_ID_COLUMN_NAME, RW_TIMESTAMP_COLUMN_NAME,
     };
     use risingwave_common::types::{DataType, StructType};
+    use risingwave_pb::catalog::StreamSourceInfo;
+    use risingwave_pb::stream_plan::stream_node::{NodeBody, StreamKind as PbStreamKind};
 
     use super::*;
     use crate::test_utils::{LocalFrontend, PROTO_FILE_DATA, create_proto_file};
@@ -2870,11 +3200,6 @@ mod tests {
         for (input, expected) in [
             ("public.Note", ("public", "Note")),
             ("public.\"Note\"", ("public", "Note")),
-            (
-                "\"Mixed.Schema\".\"Note.Table\"",
-                ("Mixed.Schema", "Note.Table"),
-            ),
-            ("public.\"Note\"\"Archive\"", ("public", "Note\"Archive")),
         ] {
             assert_eq!(
                 parse_postgres_cdc_external_table_name(input).unwrap(),
@@ -2889,6 +3214,9 @@ mod tests {
             ".Note",
             "public.\"Note",
             "public.\"Note\"Archive",
+            "\"MixedSchema\".\"Note\"",
+            "\"Mixed.Schema\".\"Note.Table\"",
+            "public.\"Note\"\"Archive\"",
             "public.Note.Archive",
         ] {
             assert!(
@@ -2896,6 +3224,294 @@ mod tests {
                 "input should be rejected: {input}"
             );
         }
+    }
+
+    fn check_raw_cdc_table_syntax(sql: &str) -> Result<CdcTableInfo> {
+        let statement = risingwave_sqlparser::parser::Parser::parse_exactly_one(sql)?;
+        let with_options = WithOptions::try_from(&statement)?;
+        let Statement::CreateTable {
+            columns,
+            wildcard_idx,
+            constraints,
+            source_watermarks,
+            append_only,
+            on_conflict,
+            with_version_columns,
+            cdc_table_info,
+            include_column_options,
+            engine,
+            ..
+        } = statement
+        else {
+            unreachable!()
+        };
+        let engine = match engine {
+            risingwave_sqlparser::ast::Engine::Hummock => Engine::Hummock,
+            risingwave_sqlparser::ast::Engine::Iceberg => Engine::Iceberg,
+        };
+
+        sanity_check_for_table_on_cdc_source(
+            append_only,
+            &columns,
+            &wildcard_idx,
+            &constraints,
+            &source_watermarks,
+            on_conflict.is_some(),
+            !with_version_columns.is_empty(),
+            !include_column_options.is_empty(),
+            engine,
+            &with_options,
+        )?;
+        cdc_table_info.ok_or_else(|| anyhow!("test statement must use FROM ... TABLE").into())
+    }
+
+    #[test]
+    fn test_raw_cdc_table_syntax_contract() {
+        let cdc_table = check_raw_cdc_table_syntax(
+            r#"CREATE TABLE fuelaudit_events
+               APPEND ONLY
+               WITH (snapshot = 'false')
+               FROM alloydb_source TABLE 'public."FuelAudit"'"#,
+        )
+        .unwrap();
+        assert_eq!(cdc_table.source_name.real_value(), "alloydb_source");
+        assert_eq!(cdc_table.external_table_name, r#"public."FuelAudit""#);
+
+        for (sql, expected_error) in [
+            (
+                "CREATE TABLE e APPEND ONLY FROM s TABLE 'public.t'",
+                "explicit `snapshot = 'false'`",
+            ),
+            (
+                "CREATE TABLE e APPEND ONLY WITH (snapshot = 'true') FROM s TABLE 'public.t'",
+                "require `snapshot = 'false'`",
+            ),
+            (
+                "CREATE TABLE e (id int) APPEND ONLY WITH (snapshot = 'false') FROM s TABLE 'public.t'",
+                "explicit columns",
+            ),
+            (
+                "CREATE TABLE e (*) APPEND ONLY WITH (snapshot = 'false') FROM s TABLE 'public.t'",
+                "wildcard schema inference",
+            ),
+            (
+                "CREATE TABLE e (PRIMARY KEY (id)) APPEND ONLY WITH (snapshot = 'false') FROM s TABLE 'public.t'",
+                "constraints",
+            ),
+            (
+                "CREATE TABLE e (WATERMARK FOR payload AS payload) APPEND ONLY WITH (snapshot = 'false') FROM s TABLE 'public.t'",
+                "watermarks",
+            ),
+            (
+                "CREATE TABLE e APPEND ONLY ON CONFLICT DO NOTHING WITH (snapshot = 'false') FROM s TABLE 'public.t'",
+                "ON CONFLICT",
+            ),
+            (
+                "CREATE TABLE e APPEND ONLY WITH VERSION COLUMN(payload) WITH (snapshot = 'false') FROM s TABLE 'public.t'",
+                "version columns",
+            ),
+            (
+                "CREATE TABLE e APPEND ONLY INCLUDE KEY WITH (snapshot = 'false') FROM s TABLE 'public.t'",
+                "INCLUDE columns",
+            ),
+            (
+                "CREATE TABLE e APPEND ONLY WITH (snapshot = 'false', backfill_order = NONE) FROM s TABLE 'public.t'",
+                "backfill order",
+            ),
+            (
+                "CREATE TABLE e APPEND ONLY WITH (snapshot = 'false') FROM s TABLE 'public.t' ENGINE = ICEBERG",
+                "Iceberg engine",
+            ),
+            (
+                "CREATE TABLE e APPEND ONLY WITH (connector = 'postgres-cdc', snapshot = 'false') FORMAT DEBEZIUM ENCODE JSON FROM s TABLE 'public.t'",
+                "direct connector",
+            ),
+        ] {
+            let err = check_raw_cdc_table_syntax(sql).unwrap_err();
+            assert!(
+                err.to_report_string().contains(expected_error),
+                "unexpected error for `{sql}`: {}",
+                err.to_report_string()
+            );
+        }
+
+        for option in [
+            "snapshot.interval",
+            "snapshot.batch_size",
+            "backfill.parallelism",
+            "backfill.num_rows_per_split",
+            "backfill.as_even_splits",
+            "backfill.split_pk_column_index",
+            "backfill_rate_limit",
+        ] {
+            let sql = format!(
+                "CREATE TABLE e APPEND ONLY WITH \
+                 (snapshot = 'false', {option} = '1') FROM s TABLE 'public.t'"
+            );
+            let err = check_raw_cdc_table_syntax(&sql).unwrap_err();
+            assert!(
+                err.to_report_string()
+                    .contains(&format!("backfill option `{option}`")),
+                "unexpected error for `{sql}`: {}",
+                err.to_report_string()
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_raw_cdc_table_rejects_direct_connector() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        let err = frontend
+            .run_sql(
+                "CREATE TABLE direct_cdc_events APPEND ONLY \
+                 WITH (connector = 'postgres-cdc') FORMAT DEBEZIUM ENCODE JSON",
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_report_string()
+                .contains("direct CDC connector on an append-only table")
+        );
+    }
+
+    #[tokio::test]
+    async fn test_raw_cdc_table_rejects_non_postgres_source() {
+        let options = WithOptionsSecResolved::new(
+            BTreeMap::from([("connector".to_owned(), "mysql-cdc".to_owned())]),
+            BTreeMap::new(),
+        );
+        let err = validate_raw_postgres_cdc_table(&SessionImpl::mock(), options)
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_report_string()
+                .contains("only supported for PostgreSQL and AlloyDB")
+        );
+    }
+
+    fn raw_cdc_graph_contains(
+        graph: &StreamFragmentGraph,
+        predicate: fn(&NodeBody) -> bool,
+    ) -> bool {
+        fn node_contains(
+            node: &risingwave_pb::stream_plan::StreamNode,
+            predicate: fn(&NodeBody) -> bool,
+        ) -> bool {
+            node.node_body.as_ref().is_some_and(predicate)
+                || node
+                    .input
+                    .iter()
+                    .any(|input| node_contains(input, predicate))
+        }
+
+        graph.fragments.values().any(|fragment| {
+            fragment
+                .node
+                .as_ref()
+                .is_some_and(|node| node_contains(node, predicate))
+        })
+    }
+
+    #[test]
+    fn test_raw_cdc_table_catalog_and_graph() {
+        let context = OptimizerContext::mock();
+        let source = Arc::new(SourceCatalog {
+            id: SourceId::new(42),
+            name: "postgres_source".to_owned(),
+            schema_id: SchemaId::new(1),
+            database_id: DatabaseId::new(1),
+            columns: ColumnCatalog::debezium_cdc_source_cols().to_vec(),
+            pk_col_ids: vec![],
+            append_only: true,
+            owner: context.session_ctx().user_id(),
+            info: StreamSourceInfo {
+                cdc_source_job: true,
+                ..Default::default()
+            },
+            row_id_index: None,
+            with_properties: WithOptionsSecResolved::new(
+                BTreeMap::from([("connector".to_owned(), "postgres-cdc".to_owned())]),
+                BTreeMap::new(),
+            ),
+            watermark_descs: vec![],
+            associated_table_id: None,
+            definition: String::new(),
+            connection_id: None,
+            created_at_epoch: None,
+            initialized_at_epoch: None,
+            version: 0,
+            created_at_cluster_version: None,
+            initialized_at_cluster_version: None,
+            rate_limit: None,
+            refresh_mode: None,
+        });
+        let cdc_options = source.with_properties.clone();
+
+        let (plan, table) = gen_create_table_plan_for_raw_cdc_table(
+            context,
+            source,
+            "public.fuelaudit".to_owned(),
+            cdc_options,
+            ColumnIdGenerator::new_initial(),
+            "fuelaudit_events".to_owned(),
+            DatabaseId::new(1),
+            SchemaId::new(1),
+            TableId::placeholder(),
+            Engine::Hummock,
+        )
+        .unwrap();
+
+        assert!(table.append_only);
+        assert_eq!(table.conflict_behavior(), ConflictBehavior::NoCheck);
+        assert_eq!(table.row_id_index, Some(3));
+        assert_eq!(table.stream_key(), &[3]);
+        assert_eq!(
+            table
+                .columns
+                .iter()
+                .filter(|column| !column.is_hidden)
+                .map(ColumnCatalog::name)
+                .collect_vec(),
+            [
+                "payload",
+                CDC_EVENT_SOURCE_OFFSET_COLUMN_NAME,
+                CDC_EVENT_SOURCE_TABLE_NAME_COLUMN_NAME,
+            ]
+        );
+        assert_eq!(table.columns[3].name(), ROW_ID_COLUMN_NAME);
+        assert!(table.columns[3].is_hidden);
+
+        let graph = build_graph(plan, Some(GraphJobType::Table)).unwrap();
+        assert!(raw_cdc_graph_contains(&graph, |body| matches!(
+            body,
+            NodeBody::CdcFilter(_)
+        )));
+        assert!(raw_cdc_graph_contains(&graph, |body| matches!(
+            body,
+            NodeBody::RowIdGen(_)
+        )));
+        assert!(!raw_cdc_graph_contains(&graph, |body| matches!(
+            body,
+            NodeBody::StreamCdcScan(_)
+        )));
+        assert!(
+            graph.fragments.values().any(|fragment| {
+                fragment.node.as_ref().is_some_and(|node| {
+                    node.identity == "RawCdcEventProject"
+                        && node.stream_kind == PbStreamKind::AppendOnly as i32
+                })
+            }) || graph.fragments.values().any(|fragment| {
+                fragment.node.as_ref().is_some_and(|node| {
+                    fn find_raw_project(node: &risingwave_pb::stream_plan::StreamNode) -> bool {
+                        (node.identity == "RawCdcEventProject"
+                            && node.stream_kind == PbStreamKind::AppendOnly as i32)
+                            || node.input.iter().any(find_raw_project)
+                    }
+                    find_raw_project(node)
+                })
+            })
+        );
+        assert!(graph.backfill_parallelism.is_none());
     }
 
     #[test]

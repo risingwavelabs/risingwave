@@ -69,6 +69,23 @@ impl LogicalCdcScan {
             cdc_table_desc,
             ctx,
             options,
+            generic::CdcScanMode::CurrentState,
+        )
+        .into()
+    }
+
+    pub fn create_raw_append_only(
+        table_name: String,
+        cdc_table_desc: Rc<CdcTableDesc>,
+        ctx: OptimizerContextRef,
+    ) -> Self {
+        generic::CdcScan::new(
+            table_name,
+            (0..cdc_table_desc.columns.len()).collect(),
+            cdc_table_desc,
+            ctx,
+            CdcScanOptions::default(),
+            generic::CdcScanMode::RawAppendOnly,
         )
         .into()
     }
@@ -98,6 +115,7 @@ impl LogicalCdcScan {
             self.core.cdc_table_desc.clone(),
             self.base.ctx(),
             self.core.options.clone(),
+            self.core.mode,
         )
         .into()
     }

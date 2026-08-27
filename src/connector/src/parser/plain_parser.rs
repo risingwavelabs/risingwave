@@ -265,7 +265,10 @@ mod tests {
     use futures::{StreamExt, TryStreamExt};
     use futures_async_stream::try_stream;
     use itertools::Itertools;
+    use risingwave_common::array::Op;
     use risingwave_common::catalog::ColumnCatalog;
+    use risingwave_common::row::Row;
+    use risingwave_common::types::ScalarRefImpl;
     use risingwave_pb::connector_service::{SourceType, cdc_message};
 
     use super::*;
@@ -322,8 +325,8 @@ mod tests {
                     assert_eq!(4, c.cardinality());
                 }
                 if i == 1 {
-                    // 2 data messages + 1 end
-                    assert_eq!(3, c.cardinality());
+                    // 3 data messages + 1 end
+                    assert_eq!(4, c.cardinality());
                 }
                 c
             })
@@ -358,13 +361,55 @@ mod tests {
                 SourceReaderEvent::DataChunk(_) | SourceReaderEvent::SplitProgress(_) => None,
             })
             .inspect(|c| {
-                // 5 data messages in a single chunk
-                assert_eq!(5, c.cardinality());
+                // 6 data messages in a single chunk
+                assert_eq!(6, c.cardinality());
             })
             .collect_vec();
 
         // a single transactional chunk
         assert_eq!(1, output.len());
+        let rows = output[0].rows().collect_vec();
+        assert!(rows.iter().all(|(op, _)| *op == Op::Insert));
+
+        let payloads = rows
+            .iter()
+            .map(|(_, row)| {
+                let Some(ScalarRefImpl::Jsonb(payload)) = row.datum_at(0) else {
+                    panic!("expected JSONB payload")
+                };
+                let payload: serde_json::Value =
+                    serde_json::from_str(&payload.to_string()).unwrap();
+                assert!(payload.get("source").is_some());
+                assert!(payload.get("transaction").is_some());
+
+                let Some(ScalarRefImpl::Utf8(offset)) = row.datum_at(1) else {
+                    panic!("expected source offset")
+                };
+                assert_eq!(offset, "0");
+                let Some(ScalarRefImpl::Utf8(table_name)) = row.datum_at(2) else {
+                    panic!("expected source table name")
+                };
+                assert_eq!(table_name, "orders");
+
+                payload
+            })
+            .collect_vec();
+        assert_eq!(
+            payloads
+                .iter()
+                .map(|payload| payload["op"].as_str().unwrap())
+                .collect_vec(),
+            ["c", "c", "c", "c", "c", "t"]
+        );
+        let customer_names = payloads
+            .iter()
+            .filter_map(|payload| {
+                payload["after"]["customer_name"]
+                    .as_str()
+                    .map(str::to_owned)
+            })
+            .collect_vec();
+        assert_eq!(customer_names, ["a1", "a2", "a3", "a4", "a5"]);
     }
 
     #[try_stream(ok = Vec<SourceMessage>, error = crate::error::ConnectorError)]
@@ -380,11 +425,25 @@ mod tests {
             vec![
                 r#"{ "schema": null, "payload": {"after": {"customer_name": "a4", "order_date": "2020-04-30", "order_id": 10024, "order_status": false, "price": "50.50", "product_id": 102}, "before": null, "op": "c", "source": {"connector": "postgresql", "db": "mydb", "lsn": 3963199336, "name": "RW_CDC_1001", "schema": "public", "sequence": "[\"3963198512\",\"3963199336\"]", "snapshot": "false", "table": "orders_tx", "ts_ms": 1704355505506, "txId": 35352, "version": "2.4.2.Final", "xmin": null}, "transaction": {"data_collection_order": 1, "id": "35392:3963199336", "total_order": 1}, "ts_ms": 1704355839905} }"#,
                 r#"{ "schema": null, "payload": {"after": {"customer_name": "a5", "order_date": "2020-05-30", "order_id": 10025, "order_status": false, "price": "50.50", "product_id": 102}, "before": null, "op": "c", "source": {"connector": "postgresql", "db": "mydb", "lsn": 3963199336, "name": "RW_CDC_1001", "schema": "public", "sequence": "[\"3963198512\",\"3963199336\"]", "snapshot": "false", "table": "orders_tx", "ts_ms": 1704355505506, "txId": 35352, "version": "2.4.2.Final", "xmin": null}, "transaction": {"data_collection_order": 1, "id": "35392:3963199336", "total_order": 1}, "ts_ms": 1704355839905} }"#,
+                r#"{ "schema": null, "payload": {"after": null, "before": null, "op": "t", "source": {"connector": "postgresql", "db": "mydb", "lsn": 3963199336, "name": "RW_CDC_1001", "schema": "public", "sequence": "[\"3963198512\",\"3963199336\"]", "snapshot": "false", "table": "orders_tx", "ts_ms": 1704355505506, "txId": 35352, "version": "2.4.2.Final", "xmin": null}, "transaction": {"data_collection_order": 6, "id": "35392:3963199336", "total_order": 6}, "ts_ms": 1704355839905} }"#,
             ],
         ];
         for (i, batch) in data_batches.iter().enumerate() {
             let mut source_msg_batch = vec![];
             if i == 0 {
+                // A heartbeat updates the source offset but must not become an event row.
+                source_msg_batch.push(SourceMessage {
+                    meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(
+                        "orders".to_owned(),
+                        0,
+                        cdc_message::CdcMessageType::Heartbeat,
+                        SourceType::Unspecified,
+                    )),
+                    split_id: SplitId::from("1001"),
+                    offset: "0".into(),
+                    key: None,
+                    payload: None,
+                });
                 // put begin message at first
                 source_msg_batch.push(SourceMessage {
                     meta: SourceMeta::DebeziumCdc(DebeziumCdcMeta::new(

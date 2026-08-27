@@ -981,13 +981,21 @@ impl DdlController {
         Ok(version)
     }
 
-    /// Validates the connect properties in the `cdc_table_desc` stored in the `StreamCdcScan` node
+    /// Validates the connect properties in the `cdc_table_desc` stored in a current-state
+    /// `StreamCdcScan` node. Raw append-only CDC event tables are validated in the frontend and do
+    /// not contain this node.
     #[await_tree::instrument]
     pub(crate) async fn validate_cdc_table(
         &self,
         table: &Table,
         table_fragments: &StreamJobFragments,
     ) -> MetaResult<()> {
+        // Append-only CDC event tables consume the already validated raw shared-source stream.
+        // They intentionally contain a CdcFilter but no StreamCdcScan or backfill executor.
+        if table.append_only {
+            return Ok(());
+        }
+
         let stream_scan_fragment =
             Itertools::exactly_one(table_fragments.fragments.values().filter(|f| {
                 f.fragment_type_mask.contains(FragmentTypeFlag::StreamScan)

@@ -353,6 +353,21 @@ SELECT c_boolean, c_bit, c_tinyint, c_smallint, c_mediumint, c_integer, c_bigint
 t t -128 -32767 -8388608 -2147483647 -9223372036854775807 -10 -10000 -10000 a b 1001-01-01 00:00:00 1998-01-01 00:00:00 1970-01-01 00:00:01+00:00
 f f NULL NULL -8388608 -2147483647 9223372036854775806 -10 -10000 -10000 c d 1001-01-01 NULL 2000-01-01 00:00:00 NULL
 
+# Prepare a row before the shared source and event table are activated. The raw
+# event table must not backfill it.
+system ok
+psql -v ON_ERROR_STOP=1 -c "
+DROP TABLE IF EXISTS public.rw_cdc_event_history_fixture;
+DROP TABLE IF EXISTS public.rw_cdc_event_history_flush;
+CREATE TABLE public.rw_cdc_event_history_fixture (
+    id INT PRIMARY KEY,
+    value INT NOT NULL
+);
+CREATE TABLE public.rw_cdc_event_history_flush (id INT PRIMARY KEY);
+ALTER TABLE public.rw_cdc_event_history_fixture REPLICA IDENTITY FULL;
+INSERT INTO public.rw_cdc_event_history_fixture VALUES (1, 0);
+"
+
 statement ok
 create secret pg_pwd with (
   backend = 'meta'
@@ -376,6 +391,119 @@ create source pg_source with (
 
 statement ok
 show create source pg_source;
+
+# A raw CDC event table starts at its activation barrier and preserves each
+# routed data envelope without typed parsing or same-key compaction.
+statement ok
+CREATE TABLE pg_cdc_event_history
+APPEND ONLY
+WITH (snapshot = 'false')
+FROM pg_source TABLE 'public.rw_cdc_event_history_fixture';
+
+# The seed row predates activation and snapshot/backfill is disabled.
+sleep 2s
+
+query I
+SELECT count(*) FROM pg_cdc_event_history;
+----
+0
+
+# This succeeds only when the source relation is planned as append-only.
+statement ok
+CREATE SINK pg_cdc_event_history_sink
+FROM pg_cdc_event_history
+WITH (
+    connector = 'blackhole',
+    type = 'append-only',
+    snapshot = 'false'
+);
+
+statement ok
+CREATE MATERIALIZED VIEW pg_cdc_update_history AS
+SELECT
+    (payload->'before'->>'value')::INT AS before_value,
+    (payload->'after'->>'value')::INT AS after_value,
+    source_offset
+FROM pg_cdc_event_history
+WHERE payload->>'op' = 'u';
+
+# Ten updates to the same key are deliberately committed together. The insert
+# and delete additionally verify both envelope shapes and control-record filtering.
+system ok
+psql -v ON_ERROR_STOP=1 -c "
+BEGIN;
+UPDATE public.rw_cdc_event_history_fixture SET value = 1 WHERE id = 1;
+UPDATE public.rw_cdc_event_history_fixture SET value = 2 WHERE id = 1;
+UPDATE public.rw_cdc_event_history_fixture SET value = 3 WHERE id = 1;
+UPDATE public.rw_cdc_event_history_fixture SET value = 4 WHERE id = 1;
+UPDATE public.rw_cdc_event_history_fixture SET value = 5 WHERE id = 1;
+UPDATE public.rw_cdc_event_history_fixture SET value = 6 WHERE id = 1;
+UPDATE public.rw_cdc_event_history_fixture SET value = 7 WHERE id = 1;
+UPDATE public.rw_cdc_event_history_fixture SET value = 8 WHERE id = 1;
+UPDATE public.rw_cdc_event_history_fixture SET value = 9 WHERE id = 1;
+UPDATE public.rw_cdc_event_history_fixture SET value = 10 WHERE id = 1;
+INSERT INTO public.rw_cdc_event_history_fixture VALUES (2, 20);
+DELETE FROM public.rw_cdc_event_history_fixture WHERE id = 2;
+COMMIT;
+"
+
+# PostgreSQL transaction metadata can be delivered when the following
+# transaction starts. This event is routed to another upstream table.
+system ok
+psql -v ON_ERROR_STOP=1 -c "INSERT INTO public.rw_cdc_event_history_flush VALUES (1);"
+
+# BEGIN/END transaction records are not rows, and the pre-activation seed is absent.
+query I retry 15 backoff 1s
+SELECT count(*) FROM pg_cdc_event_history;
+----
+12
+
+query II retry 15 backoff 1s
+SELECT
+    (payload->'before'->>'value')::INT,
+    (payload->'after'->>'value')::INT
+FROM pg_cdc_event_history
+WHERE payload->>'op' = 'u'
+ORDER BY (payload->'transaction'->>'total_order')::BIGINT;
+----
+0 1
+1 2
+2 3
+3 4
+4 5
+5 6
+6 7
+7 8
+8 9
+9 10
+
+query TTT retry 15 backoff 1s
+SELECT
+    payload->>'op',
+    payload->'before'->>'id',
+    payload->'after'->>'id'
+FROM pg_cdc_event_history
+WHERE coalesce(payload->'before'->>'id', payload->'after'->>'id') = '2'
+ORDER BY (payload->'transaction'->>'total_order')::BIGINT;
+----
+c NULL 2
+d 2 NULL
+
+query I retry 15 backoff 1s
+SELECT count(*)
+FROM pg_cdc_event_history
+WHERE source_table_name = 'public.rw_cdc_event_history_fixture'
+  AND source_offset IS NOT NULL
+  AND length(source_offset) > 0
+  AND payload->'source' IS NOT NULL
+  AND payload->'transaction' IS NOT NULL;
+----
+12
+
+query I retry 15 backoff 1s
+SELECT count(*) FROM pg_cdc_update_history;
+----
+10
 
 # postgres streaming test
 system ok
@@ -984,3 +1112,24 @@ onlyif can-use-recover
 statement ok
 recover;
 ### END
+
+# The same assertion also runs after recovery in recovery-enabled profiles.
+query I
+SELECT count(*) FROM pg_cdc_event_history;
+----
+12
+
+statement ok
+DROP SINK pg_cdc_event_history_sink;
+
+statement ok
+DROP MATERIALIZED VIEW pg_cdc_update_history;
+
+statement ok
+DROP TABLE pg_cdc_event_history;
+
+system ok
+psql -c "
+DROP TABLE IF EXISTS public.rw_cdc_event_history_fixture;
+DROP TABLE IF EXISTS public.rw_cdc_event_history_flush;
+"

@@ -242,10 +242,12 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
             .map(|col| col.column_desc.as_ref().unwrap().into())
             .collect();
 
-        // Extract TOAST-able column indices from table columns.
-        // Only for PostgreSQL CDC tables.
-        let toastable_column_indices = if table_catalog.cdc_table_type()
-            == risingwave_pb::catalog::table::CdcTableType::Postgres
+        // Extract TOAST-able column indices from typed PostgreSQL CDC tables. Append-only CDC
+        // event tables carry opaque envelopes and must not interpret or replace values inside
+        // them; keeping this `None` also selects the cache-free `NoCheck` materialize path.
+        let toastable_column_indices = if !table_catalog.append_only
+            && table_catalog.cdc_table_type()
+                == risingwave_pb::catalog::table::CdcTableType::Postgres
         {
             let toastable_indices: Vec<usize> = table_columns
                 .iter()
@@ -1257,21 +1259,238 @@ impl<S: StateStore, SD: ValueRowSerde> std::fmt::Debug for MaterializeExecutor<S
 #[cfg(test)]
 mod tests {
 
+    use std::collections::HashSet;
     use std::iter;
     use std::sync::atomic::AtomicU64;
 
+    use futures::TryStreamExt;
     use rand::rngs::SmallRng;
     use rand::{Rng, RngCore, SeedableRng};
+    use risingwave_common::array::Array;
     use risingwave_common::array::stream_chunk::{StreamChunkMut, StreamChunkTestExt};
     use risingwave_common::catalog::Field;
+    use risingwave_common::types::JsonbVal;
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_hummock_sdk::HummockReadEpoch;
+    use risingwave_pb::catalog::table::CdcTableType as PbCdcTableType;
+    use risingwave_pb::stream_plan::stream_node::StreamKind as PbStreamKind;
     use risingwave_storage::memory::MemoryStateStore;
     use risingwave_storage::table::batch_table::BatchTable;
 
     use super::*;
+    use crate::executor::row_id_gen::RowIdGenExecutor;
     use crate::executor::test_utils::*;
+
+    #[tokio::test]
+    async fn test_append_only_cdc_events_preserve_same_key_rows_across_recovery() {
+        const EVENT_COUNT: usize = 3_000;
+
+        let memory_state_store = MemoryStateStore::new();
+        let table_id = TableId::new(1);
+        let schema = Schema::new(vec![
+            Field::unnamed(DataType::Jsonb),
+            Field::unnamed(DataType::Varchar),
+            Field::unnamed(DataType::Varchar),
+            Field::unnamed(DataType::Serial),
+        ]);
+        let column_ids = vec![1.into(), 2.into(), 3.into(), 0.into()];
+        let data_types = schema.data_types();
+        let rows = (0..EVENT_COUNT)
+            .map(|transition| {
+                (
+                    Op::Insert,
+                    OwnedRow::new(vec![
+                        Some(
+                            JsonbVal::from(serde_json::json!({
+                                "before": { "id": 42, "value": transition },
+                                "after": { "id": 42, "value": transition + 1 },
+                                "op": "u",
+                                "source": { "lsn": 100 },
+                                "transaction": { "total_order": transition + 1 },
+                            }))
+                            .into(),
+                        ),
+                        Some("same-native-offset".into()),
+                        Some("public.same_key_updates".into()),
+                        None,
+                    ]),
+                )
+            })
+            .collect_vec();
+        let event_chunk = StreamChunk::from_rows(&rows, &data_types);
+
+        let column_descs = vec![
+            ColumnDesc::unnamed(column_ids[0], DataType::Jsonb),
+            ColumnDesc::unnamed(column_ids[1], DataType::Varchar),
+            ColumnDesc::unnamed(column_ids[2], DataType::Varchar),
+            ColumnDesc::unnamed(column_ids[3], DataType::Serial),
+        ];
+        let mut materialize_table = crate::common::table::test_utils::gen_pbtable(
+            table_id,
+            column_descs.clone(),
+            vec![OrderType::ascending()],
+            vec![3],
+            0,
+        );
+        materialize_table.stream_key = vec![3];
+        materialize_table.append_only = true;
+        materialize_table.cdc_table_type = Some(PbCdcTableType::Postgres as i32);
+        let table = BatchTable::for_test(
+            memory_state_store.clone(),
+            table_id,
+            column_descs,
+            vec![OrderType::ascending()],
+            vec![3],
+            vec![0, 1, 2, 3],
+        );
+
+        let source = MockSource::with_messages(vec![
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
+            Message::Chunk(event_chunk),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
+        ])
+        .into_executor(schema.clone(), StreamKey::new());
+        let row_id_gen = (
+            ExecutorInfo {
+                schema: schema.clone(),
+                stream_key: vec![3],
+                stream_kind: PbStreamKind::AppendOnly,
+                identity: "RawCdcEventRowIdGen".to_owned(),
+                ..Default::default()
+            },
+            RowIdGenExecutor::new(
+                ActorContext::for_test(1),
+                source,
+                3,
+                Bitmap::ones(VirtualNode::COUNT_FOR_TEST),
+            ),
+        )
+            .into();
+        let mut materialize = MaterializeExecutor::<_, BasicSerde>::new(
+            row_id_gen,
+            schema.clone(),
+            memory_state_store.clone(),
+            vec![ColumnOrder::new(3, OrderType::ascending())],
+            ActorContext::for_test(1),
+            None,
+            &materialize_table,
+            Arc::new(AtomicU64::new(0)),
+            ConflictBehavior::NoCheck,
+            vec![],
+            StreamingMetrics::unused().into(),
+            None,
+            false,
+            LocalBarrierManager::for_test(),
+        )
+        .await
+        .boxed()
+        .execute();
+
+        assert!(matches!(
+            materialize.next().await.transpose().unwrap(),
+            Some(Message::Barrier(_))
+        ));
+        let output = materialize
+            .next()
+            .await
+            .transpose()
+            .unwrap()
+            .unwrap()
+            .into_chunk()
+            .unwrap();
+        assert_eq!(output.cardinality(), EVENT_COUNT);
+        let row_ids = output
+            .column_at(3)
+            .as_serial()
+            .iter()
+            .map(|value| value.unwrap())
+            .collect::<HashSet<_>>();
+        assert_eq!(row_ids.len(), EVENT_COUNT);
+        assert!(matches!(
+            materialize.next().await.transpose().unwrap(),
+            Some(Message::Barrier(_))
+        ));
+        drop(materialize);
+
+        let stored_rows = table
+            .batch_iter(
+                HummockReadEpoch::NoWait(u64::MAX),
+                false,
+                Default::default(),
+            )
+            .await
+            .unwrap()
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap();
+        assert_eq!(stored_rows.len(), EVENT_COUNT);
+
+        // Recover the row-id and materialize executors after the committed barrier. Replaying no
+        // source data must neither duplicate nor lose any event row already in storage.
+        let recovered_source = MockSource::with_messages(vec![
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
+        ])
+        .into_executor(schema.clone(), StreamKey::new());
+        let recovered_row_id_gen = (
+            ExecutorInfo {
+                schema: schema.clone(),
+                stream_key: vec![3],
+                stream_kind: PbStreamKind::AppendOnly,
+                identity: "RecoveredRawCdcEventRowIdGen".to_owned(),
+                ..Default::default()
+            },
+            RowIdGenExecutor::new(
+                ActorContext::for_test(1),
+                recovered_source,
+                3,
+                Bitmap::ones(VirtualNode::COUNT_FOR_TEST),
+            ),
+        )
+            .into();
+        let mut recovered_materialize = MaterializeExecutor::<_, BasicSerde>::new(
+            recovered_row_id_gen,
+            schema.clone(),
+            memory_state_store,
+            vec![ColumnOrder::new(3, OrderType::ascending())],
+            ActorContext::for_test(1),
+            None,
+            &materialize_table,
+            Arc::new(AtomicU64::new(0)),
+            ConflictBehavior::NoCheck,
+            vec![],
+            StreamingMetrics::unused().into(),
+            None,
+            false,
+            LocalBarrierManager::for_test(),
+        )
+        .await
+        .boxed()
+        .execute();
+        assert!(matches!(
+            recovered_materialize.next().await.transpose().unwrap(),
+            Some(Message::Barrier(_))
+        ));
+        assert!(matches!(
+            recovered_materialize.next().await.transpose().unwrap(),
+            Some(Message::Barrier(_))
+        ));
+        drop(recovered_materialize);
+
+        let stored_rows_after_recovery = table
+            .batch_iter(
+                HummockReadEpoch::NoWait(u64::MAX),
+                false,
+                Default::default(),
+            )
+            .await
+            .unwrap()
+            .try_collect::<Vec<_>>()
+            .await
+            .unwrap();
+        assert_eq!(stored_rows_after_recovery.len(), EVENT_COUNT);
+    }
 
     #[tokio::test]
     async fn test_materialize_executor() {

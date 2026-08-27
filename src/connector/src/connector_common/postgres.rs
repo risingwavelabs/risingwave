@@ -89,6 +89,18 @@ const CHECK_TABLE_PRIVILEGE_QUERY: &str = r#"
     LIMIT 1
 "#;
 
+const INSPECT_CDC_TABLE_QUERY: &str = r#"
+    SELECT
+      n.oid IS NOT NULL AS schema_exists,
+      c.relreplident::text AS replica_identity
+    FROM (SELECT 1) AS one
+    LEFT JOIN pg_namespace n ON n.nspname = $1
+    LEFT JOIN pg_class c ON c.relnamespace = n.oid
+      AND c.relname = $2
+      AND c.relkind IN ('r', 'p')
+    LIMIT 1
+"#;
+
 /// Canonical Postgres connection parameters shared across sink, source CDC, batch
 /// executor, and frontend `postgres_query` table function. Each caller constructs
 /// this from its own user-facing config struct before invoking the shared helpers
@@ -219,6 +231,17 @@ pub struct PostgresExternalTable {
     pk_names: Vec<String>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PostgresCdcTableMetadata {
+    pub replica_identity: String,
+}
+
+impl PostgresCdcTableMetadata {
+    pub fn has_full_replica_identity(&self) -> bool {
+        self.replica_identity == "f"
+    }
+}
+
 struct PostgresTablePrivilege {
     user_name: String,
     schema_exists: bool,
@@ -229,6 +252,31 @@ struct PostgresTablePrivilege {
 }
 
 impl PostgresExternalTable {
+    /// Validate that a CDC target exists without discovering or binding its column types.
+    pub async fn inspect_cdc_table(
+        config: &PgConnectionConfig,
+        schema: &str,
+        table: &str,
+    ) -> ConnectorResult<PostgresCdcTableMetadata> {
+        let connection = PgPool::connect_with(config.to_sqlx_connect_options()).await?;
+        let row = sqlx::query(INSPECT_CDC_TABLE_QUERY)
+            .bind(schema)
+            .bind(table)
+            .fetch_one(&connection)
+            .await
+            .context("Failed to inspect PostgreSQL CDC table")?;
+
+        if !row.get::<bool, _>("schema_exists") {
+            return Err(anyhow!("PostgreSQL schema `{schema}` does not exist").into());
+        }
+
+        let replica_identity = row
+            .try_get::<Option<String>, _>("replica_identity")?
+            .ok_or_else(|| anyhow!("PostgreSQL table `{schema}`.`{table}` does not exist"))?;
+
+        Ok(PostgresCdcTableMetadata { replica_identity })
+    }
+
     /// Discover primary key columns directly from PostgreSQL system tables.
     /// This bypasses querying `information_schema.table_constraints` to avoid requiring table owner permissions.
     async fn discover_primary_key(

@@ -14,7 +14,7 @@
 
 use itertools::Itertools;
 use pretty_xmlish::{Pretty, XmlNode};
-use risingwave_common::catalog::{ColumnCatalog, Field};
+use risingwave_common::catalog::{ColumnCatalog, Field, ROW_ID_COLUMN_ID};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::source::cdc::normalize_simple_postgres_quoted_table_name;
@@ -25,7 +25,9 @@ use super::stream::prelude::*;
 use super::utils::{Distill, childless_record};
 use super::{ExprRewritable, PlanBase, StreamNode, StreamPlanRef as PlanRef, generic};
 use crate::catalog::ColumnId;
-use crate::expr::{Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef};
+use crate::expr::{
+    Expr, ExprImpl, ExprRewriter, ExprType, ExprVisitor, FunctionCall, InputRef, Literal,
+};
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::optimizer::property::{Distribution, DistributionDisplay};
@@ -44,10 +46,14 @@ pub struct StreamCdcTableScan {
 impl StreamCdcTableScan {
     pub fn new(core: generic::CdcScan) -> Self {
         let distribution = Distribution::SomeShard;
+        let stream_kind = match core.mode {
+            generic::CdcScanMode::CurrentState => StreamKind::Retract,
+            generic::CdcScanMode::RawAppendOnly => StreamKind::AppendOnly,
+        };
         let base = PlanBase::new_stream_with_core(
             &core,
             distribution,
-            StreamKind::Retract,
+            stream_kind,
             false,
             core.watermark_columns(),
             core.columns_monotonicity(),
@@ -180,32 +186,25 @@ impl StreamCdcTableScan {
             .map(|c| Field::from(c.column_desc).to_prost())
             .collect_vec();
 
-        let catalog = self
-            .build_backfill_state_catalog(state, self.core.options.is_parallelized_backfill())
-            .to_internal_table_prost();
-
-        // We need to pass the id of upstream source job here
+        // We need to pass the id of upstream source job here.
         let upstream_source_id = self.core.cdc_table_desc.source_id;
 
-        // filter upstream source chunk by the value of `_rw_table_name` column
+        // Filter upstream source chunks by the value of `_rw_table_name`.
         let filter_expr =
             Self::build_cdc_filter_expr(self.core.cdc_table_desc.external_table_name.as_str());
 
         let filter_operator_id = self.core.ctx.next_plan_node_id();
-        // The filter node receive chunks in `(payload, _rw_offset, _rw_table_name)` schema
+        // The merge node body will be filled by the actor builder on the meta service.
         let filter_stream_node = StreamNode {
             operator_id: filter_operator_id.to_stream_node_operator_id(),
-            input: vec![
-                // The merge node body will be filled by the `ActorBuilder` on the meta service.
-                PbStreamNode {
-                    node_body: Some(PbNodeBody::Merge(Default::default())),
-                    identity: "Upstream".into(),
-                    fields: cdc_source_schema.clone(),
-                    stream_key: vec![], // not used
-                    ..Default::default()
-                },
-            ],
-            stream_key: vec![], // not used
+            input: vec![PbStreamNode {
+                node_body: Some(PbNodeBody::Merge(Default::default())),
+                identity: "Upstream".into(),
+                fields: cdc_source_schema.clone(),
+                stream_key: vec![],
+                ..Default::default()
+            }],
+            stream_key: vec![],
             stream_kind: PbStreamKind::AppendOnly as _,
             identity: "StreamCdcFilter".to_owned(),
             fields: cdc_source_schema.clone(),
@@ -214,6 +213,40 @@ impl StreamCdcTableScan {
                 upstream_source_id,
             }))),
         };
+
+        if self.core.mode == generic::CdcScanMode::RawAppendOnly {
+            let select_list = self
+                .core
+                .output_col_idx
+                .iter()
+                .map(|&index| match index {
+                    0 => ExprImpl::from(InputRef::new(0, DataType::Jsonb)),
+                    1 | 2 => ExprImpl::from(InputRef::new(index, DataType::Varchar)),
+                    _ if self.core.get_table_columns()[index].column_id == ROW_ID_COLUMN_ID => {
+                        ExprImpl::from(Literal::new(None, DataType::Serial))
+                    }
+                    _ => unreachable!("unexpected raw CDC event table column index: {index}"),
+                })
+                .map(|expr| expr.to_expr_proto())
+                .collect();
+
+            return Ok(PbStreamNode {
+                fields: self.schema().to_prost(),
+                input: vec![filter_stream_node],
+                node_body: Some(PbNodeBody::Project(Box::new(ProjectNode {
+                    select_list,
+                    ..Default::default()
+                }))),
+                stream_key,
+                operator_id: self.base.id().to_stream_node_operator_id(),
+                identity: "RawCdcEventProject".to_owned(),
+                stream_kind: PbStreamKind::AppendOnly as _,
+            });
+        }
+
+        let catalog = self
+            .build_backfill_state_catalog(state, self.core.options.is_parallelized_backfill())
+            .to_internal_table_prost();
 
         let exchange_operator_id = self.core.ctx.next_plan_node_id();
         let strategy = if self.core.options.is_parallelized_backfill() {

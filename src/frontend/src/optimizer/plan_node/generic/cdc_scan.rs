@@ -37,6 +37,12 @@ use crate::expr::{ExprRewriter, ExprVisitor};
 use crate::optimizer::optimizer_context::OptimizerContextRef;
 use crate::optimizer::property::{FunctionalDependencySet, MonotonicityMap, WatermarkColumns};
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum CdcScanMode {
+    CurrentState,
+    RawAppendOnly,
+}
+
 /// [`CdcScan`] reads rows of a table from an external upstream database
 #[derive(Debug, Clone, Educe)]
 #[educe(PartialEq, Eq, Hash)]
@@ -51,6 +57,8 @@ pub struct CdcScan {
     pub ctx: OptimizerContextRef,
 
     pub options: CdcScanOptions,
+
+    pub mode: CdcScanMode,
 }
 
 pub fn build_cdc_scan_options_with_options(
@@ -188,6 +196,7 @@ impl CdcScan {
         cdc_table_desc: Rc<CdcTableDesc>,
         ctx: OptimizerContextRef,
         options: CdcScanOptions,
+        mode: CdcScanMode,
     ) -> Self {
         Self {
             table_name,
@@ -195,6 +204,7 @@ impl CdcScan {
             cdc_table_desc,
             ctx,
             options,
+            mode,
         }
     }
 

@@ -27,6 +27,7 @@ use risingwave_pb::plan_common::{
 
 use super::schema::FieldLike;
 use super::{
+    CDC_EVENT_SOURCE_OFFSET_COLUMN_NAME, CDC_EVENT_SOURCE_TABLE_NAME_COLUMN_NAME,
     CDC_OFFSET_COLUMN_NAME, CDC_TABLE_NAME_COLUMN_NAME, ICEBERG_FILE_PATH_COLUMN_NAME,
     ICEBERG_FILE_POS_COLUMN_NAME, ICEBERG_SEQUENCE_NUM_COLUMN_NAME, ROW_ID_COLUMN_NAME,
     RW_TIMESTAMP_COLUMN_ID, RW_TIMESTAMP_COLUMN_NAME, USER_COLUMN_ID_OFFSET,
@@ -457,6 +458,27 @@ impl ColumnCatalog {
             // upstream table name of the cdc table
             Self::hidden(ColumnDesc::named(
                 CDC_TABLE_NAME_COLUMN_NAME,
+                ColumnId::placeholder(),
+                DataType::Varchar,
+            )),
+        ]
+    }
+
+    /// Visible columns exposed by an append-only CDC event table.
+    pub fn debezium_cdc_event_table_cols() -> [Self; 3] {
+        [
+            Self::visible(ColumnDesc::named(
+                "payload",
+                ColumnId::placeholder(),
+                DataType::Jsonb,
+            )),
+            Self::visible(ColumnDesc::named(
+                CDC_EVENT_SOURCE_OFFSET_COLUMN_NAME,
+                ColumnId::placeholder(),
+                DataType::Varchar,
+            )),
+            Self::visible(ColumnDesc::named(
+                CDC_EVENT_SOURCE_TABLE_NAME_COLUMN_NAME,
                 ColumnId::placeholder(),
                 DataType::Varchar,
             )),

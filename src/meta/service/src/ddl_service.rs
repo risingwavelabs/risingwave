@@ -1398,6 +1398,19 @@ impl DdlService for DdlServiceImpl {
                 .await?;
 
             for table in tables {
+                // Raw append-only CDC event tables have a fixed envelope schema. Upstream schema
+                // changes remain visible inside future JSON payloads and must not replace the
+                // RisingWave table definition.
+                if table.append_only {
+                    tracing::debug!(
+                        target: "auto_schema_change",
+                        table_id = %table.id,
+                        cdc_table_id = table.cdc_table_id,
+                        "Skipping auto schema change for append-only CDC event table"
+                    );
+                    continue;
+                }
+
                 // Since we only support `ADD` and `DROP` column, we check whether the new columns and the original columns
                 // is a subset of the other.
                 let original_columns_by_name: HashMap<String, ColumnCatalog> = table

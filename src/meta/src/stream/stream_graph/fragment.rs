@@ -1783,7 +1783,7 @@ impl CompleteStreamFragmentGraph {
                                     downstream_fragment_id: id,
                                 },
                                 // We always use `NoShuffle` for the exchange between the upstream
-                                // `Source` and the downstream `StreamScan` of the new cdc table.
+                                // `Source` and the downstream `CdcFilter` of the new CDC table.
                                 dispatch_strategy: DispatchStrategy {
                                     r#type: DispatcherType::NoShuffle as _,
                                     dist_key_indices: vec![], // not used for `NoShuffle`

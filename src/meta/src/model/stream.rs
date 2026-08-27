@@ -491,8 +491,9 @@ impl StreamJobFragments {
         let mut actor_ids = vec![];
         for (fragment_type_mask, actors) in fragments {
             if fragment_type_mask.contains(FragmentTypeFlag::CdcFilter) {
-                // Note: CDC table job contains a StreamScan fragment (StreamCdcScan node) and a CdcFilter fragment.
-                // We don't track any fragments' progress.
+                // Current-state CDC tables also contain a StreamCdcScan backfill fragment, while
+                // raw append-only CDC event tables do not. Creation progress for either kind is
+                // driven by the CDC job lifecycle rather than generic actor progress tracking.
                 return vec![];
             }
             if fragment_type_mask.contains_any([
