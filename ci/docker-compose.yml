@@ -176,22 +176,43 @@ services:
   source-test-env:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     depends_on:
-      - mysql
-      - mysql-meta
-      - sqlserver-server
-      - db
-      - message_queue
-      - schemaregistry
-      - pulsar-server
-      - mongodb
-      - mongodb-setup
-      - nats-server
-      - vault-server
-      - message_queue_sasl_1
-      - message_queue_sasl_2
-      - rabbitmq-server
+      mysql:
+        condition: service_started
+      mysql-meta:
+        condition: service_started
+      sqlserver-server:
+        condition: service_started
+      db:
+        condition: service_started
+      message_queue:
+        condition: service_started
+      schemaregistry:
+        condition: service_started
+      pulsar-server:
+        condition: service_started
+      mongodb:
+        condition: service_started
+      mongodb-setup:
+        condition: service_started
+      mongodb-auth-setup:
+        condition: service_completed_successfully
+      mongodb-tls-setup:
+        condition: service_completed_successfully
+      mongodb-mtls-setup:
+        condition: service_completed_successfully
+      nats-server:
+        condition: service_started
+      vault-server:
+        condition: service_started
+      message_queue_sasl_1:
+        condition: service_started
+      message_queue_sasl_2:
+        condition: service_started
+      rabbitmq-server:
+        condition: service_started
     volumes:
       - ..:/risingwave
+      - mongodb-tls-certs:/mongodb-tls:ro
     stop_grace_period: 30s
 
   # Minimal environment for cron_only source tests (only Kafka alter tests)
