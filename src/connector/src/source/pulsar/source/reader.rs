@@ -313,7 +313,11 @@ impl PulsarBrokerReader {
 
     async fn into_stream(self) -> PulsarConsumeStream {
         let (ack_tx, ack_rx) = tokio::sync::mpsc::unbounded_channel();
-        let channel_entry = build_pulsar_ack_channel_id(self.source_ctx.source_id, &self.split_id);
+        let channel_entry = build_pulsar_ack_channel_id(
+            self.source_ctx.source_id,
+            &self.split_id,
+            self.source_ctx.actor_id,
+        );
         PULSAR_ACK_CHANNEL
             .entry(channel_entry)
             .and_upsert_with(|_| std::future::ready(ack_tx))
@@ -396,7 +400,11 @@ impl PulsarConsumeStream {
         tracing::debug!(
             "ack message id: {:?} from channel {}",
             message_id,
-            build_pulsar_ack_channel_id(self.source_ctx.source_id, &self.split_id)
+            build_pulsar_ack_channel_id(
+                self.source_ctx.source_id,
+                &self.split_id,
+                self.source_ctx.actor_id,
+            )
         );
         #[cfg(not(madsim))]
         {
