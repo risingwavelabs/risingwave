@@ -169,7 +169,7 @@ fn postgres_source_column_type_compatible(
             rw_type == PbTypeName::Time
         }
         "interval" => rw_type == PbTypeName::Interval,
-        "bytea" | "geometry" => rw_type == PbTypeName::Bytea,
+        "bytea" | "geometry" | "geography" => rw_type == PbTypeName::Bytea,
         "json" | "jsonb" => rw_type == PbTypeName::Jsonb,
         "date" => rw_type == PbTypeName::Date,
         "numeric" => matches!(
@@ -181,7 +181,7 @@ fn postgres_source_column_type_compatible(
         "array" => rw_type == PbTypeName::List,
         "user-defined" => match udt_name.map(str::to_ascii_lowercase).as_deref() {
             Some("citext") => rw_type == PbTypeName::Varchar,
-            Some("geometry") => rw_type == PbTypeName::Bytea,
+            Some("geometry" | "geography") => rw_type == PbTypeName::Bytea,
             Some("vector") => rw_type == PbTypeName::Vector,
             Some("ltree" | "hstore") | None => false,
             Some(_) => rw_type == PbTypeName::Varchar,
