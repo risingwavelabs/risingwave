@@ -134,8 +134,12 @@ select id from mysql_query('mysql_cdc_source_ns', 'select id from test;');
 ----
 1
 
+control substitution off
+
 statement ok
 set search_path to "$user", public;
+
+control substitution on
 
 statement error source not found: mysql_cdc_source_ns
 select id from mysql_query('mysql_cdc_source_ns', 'select id from test;');
