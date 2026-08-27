@@ -478,6 +478,7 @@ pub struct FragmentDesc {
 /// List all objects that are using the given one in a cascade way. It runs a recursive CTE to find all the dependencies.
 pub async fn get_referring_objects_cascade<C>(
     obj_id: ObjectId,
+    object_type: ObjectType,
     db: &C,
 ) -> MetaResult<Vec<PartialObject>>
 where
@@ -485,13 +486,28 @@ where
 {
     let query = construct_obj_dependency_query(obj_id);
     let (sql, values) = query.build_any(&*db.get_database_backend().get_query_builder());
-    let objects = PartialObject::find_by_statement(Statement::from_sql_and_values(
+    let mut objects = PartialObject::find_by_statement(Statement::from_sql_and_values(
         db.get_database_backend(),
         sql,
         values,
     ))
     .all(db)
     .await?;
+
+    let target_objects = std::iter::once((obj_id, object_type))
+        .chain(objects.iter().map(|object| (object.oid, object.obj_type)))
+        .collect_vec();
+    let mut existing_object_ids: HashSet<ObjectId> =
+        objects.iter().map(|object| object.oid).collect();
+    for (target_id, target_type) in target_objects {
+        let incoming_sink_objects =
+            get_incoming_sink_objects_for_target(target_id, target_type, db).await?;
+        for incoming_sink_object in incoming_sink_objects {
+            if existing_object_ids.insert(incoming_sink_object.oid) {
+                objects.push(incoming_sink_object);
+            }
+        }
+    }
     Ok(objects)
 }
 
@@ -810,42 +826,35 @@ where
     Ok(())
 }
 
-/// `check_object_refer_for_drop` checks whether the object is used by other objects except indexes.
-/// It returns an error that contains the details of the referring objects if it is used by others.
-pub async fn check_object_refer_for_drop<C>(
+/// Validates a RESTRICT drop and returns referring objects that should be dropped together.
+///
+/// Objects related through `belong_to_oid` are catalog-owned by the target. Indexes are also
+/// logically owned by their primary table for dropping, although they remain schema-owned catalog
+/// objects. These objects are dropped together with the target; all other referrers prevent the
+/// drop.
+pub async fn validate_restrict_drop_and_collect_owned_objects<C>(
     object_type: ObjectType,
     object_id: ObjectId,
     db: &C,
-) -> MetaResult<()>
+) -> MetaResult<Vec<PartialObject>>
 where
     C: ConnectionTrait,
 {
-    // Ignore indexes.
-    let count = if object_type == ObjectType::Table {
-        ObjectDependency::find()
-            .join(
-                JoinType::InnerJoin,
-                object_dependency::Relation::Object1.def(),
-            )
-            .filter(
-                object_dependency::Column::Oid
-                    .eq(object_id)
-                    .and(object::Column::ObjType.ne(ObjectType::Index)),
-            )
-            .count(db)
-            .await?
-    } else {
-        ObjectDependency::find()
-            .filter(object_dependency::Column::Oid.eq(object_id))
-            .count(db)
-            .await?
-    };
-    if count != 0 {
-        // find the name of all objects that are using the given one.
-        let referring_objects = get_referring_objects(object_id, db).await?;
-        let referring_objs_map = referring_objects
+    let referring_objects = get_referring_objects(object_id, object_type, db).await?;
+    let owned_object_ids = get_belong_objects(db, object_id)
+        .await?
+        .into_iter()
+        .map(|object| object.oid)
+        .collect::<HashSet<_>>();
+    let mut non_owned_objects = referring_objects.clone();
+    non_owned_objects.retain(|object| !owned_object_ids.contains(&object.oid));
+    if object_type == ObjectType::Table {
+        non_owned_objects.retain(|object| object.obj_type != ObjectType::Index);
+    }
+
+    if !non_owned_objects.is_empty() {
+        let referring_objs_map = non_owned_objects
             .into_iter()
-            .filter(|o| o.obj_type != ObjectType::Index)
             .into_group_map_by(|o| o.obj_type);
         let mut details = vec![];
         for (obj_type, objs) in referring_objs_map {
@@ -881,17 +890,6 @@ where
                         .into_tuple()
                         .all(db)
                         .await?;
-                    if object_type == ObjectType::Table {
-                        let engine = Table::find_by_id(object_id.as_table_id())
-                            .select_only()
-                            .column(table::Column::Engine)
-                            .into_tuple::<table::Engine>()
-                            .one(db)
-                            .await?;
-                        if engine == Some(table::Engine::Iceberg) && sinks.len() == 1 {
-                            continue;
-                        }
-                    }
                     details.extend(sinks.into_iter().map(|(schema_name, sink_name)| {
                         format!("sink {}.{} depends on it", schema_name, sink_name)
                     }));
@@ -970,7 +968,7 @@ where
             }
         }
         if details.is_empty() {
-            return Ok(());
+            return Ok(referring_objects);
         }
 
         return Err(MetaError::permission_denied(format!(
@@ -987,15 +985,47 @@ where
             }
         )));
     }
-    Ok(())
+    Ok(referring_objects)
 }
 
-/// List all objects that are using the given one.
-pub async fn get_referring_objects<C>(object_id: ObjectId, db: &C) -> MetaResult<Vec<PartialObject>>
+async fn get_incoming_sink_objects_for_target<C>(
+    target_id: ObjectId,
+    target_type: ObjectType,
+    db: &C,
+) -> MetaResult<Vec<PartialObject>>
 where
     C: ConnectionTrait,
 {
-    let objs = ObjectDependency::find()
+    match target_type {
+        ObjectType::Table => {
+            let incoming_sink_ids = Sink::find()
+                .select_only()
+                .column(sink::Column::SinkId)
+                .filter(sink::Column::TargetTable.eq(target_id.as_table_id()))
+                .into_tuple::<SinkId>()
+                .all(db)
+                .await?;
+            Object::find()
+                .filter(object::Column::Oid.is_in(incoming_sink_ids))
+                .into_partial_model()
+                .all(db)
+                .await
+                .map_err(Into::into)
+        }
+        _ => Ok(vec![]),
+    }
+}
+
+/// List all objects that are using the given one.
+pub async fn get_referring_objects<C>(
+    object_id: ObjectId,
+    object_type: ObjectType,
+    db: &C,
+) -> MetaResult<Vec<PartialObject>>
+where
+    C: ConnectionTrait,
+{
+    let mut objects: Vec<PartialObject> = ObjectDependency::find()
         .filter(object_dependency::Column::Oid.eq(object_id))
         .join(
             JoinType::InnerJoin,
@@ -1005,7 +1035,17 @@ where
         .all(db)
         .await?;
 
-    Ok(objs)
+    let incoming_sink_objects =
+        get_incoming_sink_objects_for_target(object_id, object_type, db).await?;
+    let mut existing_object_ids: HashSet<ObjectId> =
+        objects.iter().map(|object| object.oid).collect();
+    objects.extend(
+        incoming_sink_objects
+            .into_iter()
+            .filter(|object| existing_object_ids.insert(object.oid)),
+    );
+
+    Ok(objects)
 }
 
 /// `ensure_schema_empty` ensures that the schema is empty, used by `DROP SCHEMA`.
@@ -2199,23 +2239,7 @@ pub async fn rename_relation_refer(
             });
         }};
     }
-    let mut objs = get_referring_objects(object_id, txn).await?;
-    if object_type == ObjectType::Table {
-        let incoming_sinks: Vec<SinkId> = Sink::find()
-            .select_only()
-            .column(sink::Column::SinkId)
-            .filter(sink::Column::TargetTable.eq(object_id))
-            .into_tuple()
-            .all(txn)
-            .await?;
-
-        objs.extend(incoming_sinks.into_iter().map(|id| PartialObject {
-            oid: id.as_object_id(),
-            obj_type: ObjectType::Sink,
-            schema_id: None,
-            database_id: None,
-        }));
-    }
+    let objs = get_referring_objects(object_id, object_type, txn).await?;
 
     for obj in objs {
         match obj.obj_type {
