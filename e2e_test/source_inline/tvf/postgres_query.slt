@@ -107,8 +107,12 @@ select id from postgres_query('postgres_cdc_source_ns', 'select id from test whe
 ----
 1
 
+control substitution off
+
 statement ok
 set search_path to "$user", public;
+
+control substitution on
 
 statement error source not found: postgres_cdc_source_ns
 select id from postgres_query('postgres_cdc_source_ns', 'select id from test where id = 1;');
