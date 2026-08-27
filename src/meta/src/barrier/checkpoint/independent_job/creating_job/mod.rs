@@ -45,9 +45,7 @@ use crate::barrier::command::{
     PostCollectCommand, TableLogEpochs, ThrottleConfigMap, UpstreamTableLogEpochs,
 };
 use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
-use crate::barrier::edge_builder::{
-    EdgeBuilderFragmentInfo, FragmentEdgeBuildResult, FragmentEdgeBuilder,
-};
+use crate::barrier::edge_builder::{FragmentEdgeBuildResult, FragmentEdgeBuilder};
 use crate::barrier::info::BarrierInfo;
 use crate::barrier::notifier::NotifierStarter;
 use crate::barrier::partial_graph::{
@@ -629,25 +627,12 @@ impl CreatingStreamingJobControl {
             InflightFragmentInfo::existing_table_ids(fragment_infos.values()).collect();
 
         let partial_graph_id = to_partial_graph_id(database_id, Some(job_id));
-        let mut builder = FragmentEdgeBuilder::new(fragment_infos.values().map(|fragment| {
-            (
-                fragment.fragment_id,
-                EdgeBuilderFragmentInfo::from_inflight(
-                    fragment,
-                    partial_graph_id,
-                    partial_graph_recoverer.control_stream_manager(),
-                ),
-            )
-        }));
-        for fragment_id in fragment_infos.keys() {
-            if let Some(downstreams) = fragment_relations.get(fragment_id) {
-                for downstream in downstreams {
-                    if fragment_infos.contains_key(&downstream.downstream_fragment_id) {
-                        builder.add_edge(*fragment_id, downstream);
-                    }
-                }
-            }
-        }
+        let mut builder = FragmentEdgeBuilder::from_inflight_fragments(
+            fragment_infos.values(),
+            partial_graph_id,
+            partial_graph_recoverer.control_stream_manager(),
+        );
+        builder.add_relations(fragment_relations);
         let mut edges = builder.build();
         let new_actors = edges.collect_actors_to_create(fragment_infos.values().map(|fragment| {
             (
@@ -680,15 +665,9 @@ impl CreatingStreamingJobControl {
         let downstreams = fragment_infos
             .keys()
             .filter_map(|fragment_id| {
-                let downstreams = fragment_relations
-                    .get(fragment_id)?
-                    .iter()
-                    .filter(|relation| {
-                        fragment_infos.contains_key(&relation.downstream_fragment_id)
-                    })
-                    .cloned()
-                    .collect::<Vec<_>>();
-                (!downstreams.is_empty()).then_some((*fragment_id, downstreams))
+                fragment_relations
+                    .get(fragment_id)
+                    .map(|relation| (*fragment_id, relation.clone()))
             })
             .collect();
         let job_stream_actors = fragment_infos
@@ -947,49 +926,33 @@ impl CreatingStreamingJobControl {
                 .values()
                 .flat_map(|resp| &resp.create_mview_progress),
         );
-        self.is_ready_to_merge(pending_barrier_num)
+        self.is_ready_to_merge() && pending_barrier_num <= self.max_lagged_barrier_num
     }
 
-    fn is_ready_to_merge(&self, pending_partial_graph_barriers: usize) -> bool {
-        let pending_log_barriers = if let CreatingStreamingJobStatus::ConsumingLogStore {
-            pending_barriers,
-            ..
+    fn is_ready_to_merge(&self) -> bool {
+        if let CreatingStreamingJobStatus::ConsumingLogStore {
+            pending_barriers, ..
         } = &self.status
         {
-            pending_barriers.len()
+            pending_barriers.is_empty()
         } else {
-            return false;
-        };
-        is_log_store_merge_ready(
-            pending_log_barriers,
-            pending_partial_graph_barriers,
-            self.max_lagged_barrier_num,
-        )
+            false
+        }
     }
 
     pub(crate) fn should_merge_to_upstream(
         &self,
         partial_graph_manager: &PartialGraphManager,
     ) -> bool {
-        if !matches!(
-            self.status,
-            CreatingStreamingJobStatus::ConsumingLogStore { .. }
-        ) {
+        if !self.is_ready_to_merge() {
             return false;
         }
 
         // A job that is ready to merge has finished initialization and is not resetting, so its
         // partial graph must be running.
-        self.is_ready_to_merge(partial_graph_manager.pending_barrier_num(self.partial_graph_id))
+        partial_graph_manager.pending_barrier_num(self.partial_graph_id)
+            <= self.max_lagged_barrier_num
     }
-}
-
-fn is_log_store_merge_ready(
-    pending_log_barriers: usize,
-    pending_partial_graph_barriers: usize,
-    max_lagged_barriers: usize,
-) -> bool {
-    pending_log_barriers == 0 && pending_partial_graph_barriers <= max_lagged_barriers
 }
 
 impl CreatingStreamingJobControl {
@@ -1194,13 +1157,6 @@ mod tests {
 
         opts.in_flight_barrier_nums = usize::MAX;
         assert_eq!(snapshot_backfill_max_pending_barrier_num(&opts), usize::MAX);
-    }
-
-    #[test]
-    fn test_log_store_merge_readiness() {
-        assert!(!is_log_store_merge_ready(1, 0, 2));
-        assert!(is_log_store_merge_ready(0, 2, 2));
-        assert!(!is_log_store_merge_ready(0, 3, 2));
     }
 
     #[test]

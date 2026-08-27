@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::assert_matches;
 use std::fmt::{Display, Formatter};
 
 use risingwave_common::util::epoch::EpochPair;
@@ -33,29 +32,25 @@ type BufferedRows = u64;
 pub(crate) enum BackfillState {
     ConsumingUpstreamTableOrSource(ConsumedEpoch, ConsumedRows, BufferedRows),
     DoneConsumingUpstreamTableOrSource(ConsumedRows, BufferedRows),
-    /// The recreated snapshot-backfill actor has entered normal upstream consumption after merge.
-    DoneConsumingLogStore,
 }
 
 impl BackfillState {
     pub fn to_pb(self, fragment_id: FragmentId, actor_id: ActorId) -> PbCreateMviewProgress {
-        let (done, consumed_epoch, consumed_rows, pending_epoch_lag, buffered_rows) = match self {
+        let (done, consumed_epoch, consumed_rows, buffered_rows) = match self {
             BackfillState::ConsumingUpstreamTableOrSource(
                 consumed_epoch,
                 consumed_rows,
                 buffered_rows,
-            ) => (false, consumed_epoch, consumed_rows, 0, buffered_rows),
+            ) => (false, consumed_epoch, consumed_rows, buffered_rows),
             BackfillState::DoneConsumingUpstreamTableOrSource(consumed_rows, buffered_rows) => {
-                (true, 0, consumed_rows, 0, buffered_rows)
+                (true, 0, consumed_rows, buffered_rows)
             }
-            BackfillState::DoneConsumingLogStore => (true, 0, 0, 0, 0),
         };
         PbCreateMviewProgress {
             backfill_actor_id: actor_id,
             done,
             consumed_epoch,
             consumed_rows,
-            pending_epoch_lag,
             buffered_rows,
             fragment_id,
         }
@@ -78,9 +73,6 @@ impl Display for BackfillState {
                     "DoneConsumingUpstreamTable(rows: {}, buffered: {})",
                     rows, buffered
                 )
-            }
-            BackfillState::DoneConsumingLogStore => {
-                write!(f, "DoneConsumingLogStore")
             }
         }
     }
@@ -333,16 +325,6 @@ impl CreateMviewProgressReporter {
             epoch,
             BackfillState::DoneConsumingUpstreamTableOrSource(current_consumed_rows, buffered_rows),
         );
-    }
-
-    pub(crate) fn finish_consuming_log_store(&mut self, epoch: EpochPair) {
-        assert_matches!(
-            self.state,
-            Some(BackfillState::DoneConsumingUpstreamTableOrSource(_, _)) | None,
-            "cannot finish log store progress at state {:?}",
-            self.state
-        );
-        self.update_inner(epoch, BackfillState::DoneConsumingLogStore);
     }
 }
 

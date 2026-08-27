@@ -1613,23 +1613,15 @@ impl DatabaseCheckpointControl {
                         );
                         // new actors belong to the database partial graph
                         let partial_graph_id = to_partial_graph_id(self.database_id, None);
-                        let mut edge_builder = FragmentEdgeBuilder::new(
+                        let mut edge_builder = FragmentEdgeBuilder::from_inflight_fragments(
                             info.upstream_fragment_downstreams
                                 .keys()
                                 .map(|upstream_fragment_id| {
                                     self.database_info.fragment(*upstream_fragment_id)
                                 })
-                                .chain(new_fragment_info.values())
-                                .map(|fragment| {
-                                    (
-                                        fragment.fragment_id,
-                                        EdgeBuilderFragmentInfo::from_inflight(
-                                            fragment,
-                                            partial_graph_id,
-                                            partial_graph_manager.control_stream_manager(),
-                                        ),
-                                    )
-                                }),
+                                .chain(new_fragment_info.values()),
+                            partial_graph_id,
+                            partial_graph_manager.control_stream_manager(),
                         );
                         edge_builder.add_relations(&info.upstream_fragment_downstreams);
                         edge_builder.add_relations(&info.downstreams);

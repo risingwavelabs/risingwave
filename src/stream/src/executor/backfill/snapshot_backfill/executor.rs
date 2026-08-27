@@ -342,7 +342,6 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
             "skip backfill"
         );
         let mut barrier_epoch = first_upstream_barrier.epoch;
-        let mut need_report_finish = true;
         let current_stream_key_indices = self
             .stream_key
             .iter()
@@ -373,10 +372,6 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                     epoch_row_count = 0;
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(self.actor_ctx.id);
                     barrier_epoch = barrier.epoch;
-                    if need_report_finish {
-                        need_report_finish = false;
-                        self.progress.finish_consuming_log_store(barrier_epoch);
-                    }
                     let post_commit = backfill_state.commit(barrier.epoch).await?;
                     yield Message::Barrier(barrier);
                     if let Some(new_vnode_bitmap) =
@@ -782,32 +777,34 @@ mod tests {
             .await;
     }
 
-    fn start_progress_epochs(test_env: &HummockTestEnv, max_epoch: u64) {
+    async fn start_progress_epochs(test_env: &HummockTestEnv, max_epoch: u64) {
         for epoch in 1..=max_epoch {
             test_env
                 .storage
                 .start_epoch(test_epoch(epoch), HashSet::from_iter([PROGRESS_TABLE_ID]));
         }
+        test_env.storage.flush_events_for_test().await;
     }
 
     async fn persist_finished_progress(
         test_env: &HummockTestEnv,
-        initial_epoch: EpochPair,
+        write_epoch: EpochPair,
+        progress_epoch: u64,
     ) -> StateTable<HummockStorage> {
         let mut table = progress_state_table(test_env.storage.clone()).await;
-        table.init_epoch(initial_epoch).await.unwrap();
+        table.init_epoch(write_epoch).await.unwrap();
         let vnodes: Vec<_> = table.vnodes().iter_vnodes().collect();
         for vnode in vnodes {
             table.insert(OwnedRow::new(vec![
                 Some(vnode.to_scalar().into()),
-                Some((initial_epoch.prev as i64).into()),
+                Some((progress_epoch as i64).into()),
                 Some(0_i64.into()),
                 Some(true.into()),
                 None,
             ]));
         }
 
-        let mut commit_epoch = initial_epoch;
+        let mut commit_epoch = write_epoch;
         commit_epoch.inc_for_test();
         table.commit_for_test(commit_epoch).await.unwrap();
         let result = test_env
@@ -824,6 +821,25 @@ mod tests {
             .storage
             .wait_version(test_env.manager.get_current_version().await)
             .await;
+
+        while commit_epoch.prev < progress_epoch {
+            commit_epoch.inc_for_test();
+            table.commit_for_test(commit_epoch).await.unwrap();
+            let result = test_env
+                .storage
+                .seal_and_sync_epoch(commit_epoch.prev, HashSet::from_iter([PROGRESS_TABLE_ID]))
+                .await
+                .unwrap();
+            test_env
+                .meta_client
+                .commit_epoch_with_change_log(commit_epoch.prev, result, None)
+                .await
+                .unwrap();
+            test_env
+                .storage
+                .wait_version(test_env.manager.get_current_version().await)
+                .await;
+        }
 
         progress_state_table(test_env.storage.clone()).await
     }
@@ -902,6 +918,7 @@ mod tests {
         source_env
             .storage
             .start_epoch(epoch.curr, HashSet::from_iter([SOURCE_TABLE_ID]));
+        source_env.storage.flush_events_for_test().await;
         source_state_table.init_epoch(epoch).await.unwrap();
 
         commit_insert_epoch(
@@ -936,7 +953,7 @@ mod tests {
             &[4],
         )
         .await;
-        start_progress_epochs(&progress_env, 5);
+        start_progress_epochs(&progress_env, 5).await;
 
         let barrier_manager = LocalBarrierManager::for_test();
         let progress = CreateMviewProgressReporter::for_test(barrier_manager);
@@ -1043,6 +1060,7 @@ mod tests {
         source_env
             .storage
             .start_epoch(epoch.curr, HashSet::from_iter([SOURCE_TABLE_ID]));
+        source_env.storage.flush_events_for_test().await;
         source_state_table.init_epoch(epoch).await.unwrap();
 
         commit_insert_epoch(
@@ -1077,10 +1095,14 @@ mod tests {
             &[4],
         )
         .await;
-        start_progress_epochs(&progress_env, 6);
-        let initial_barrier = Barrier::new_test_barrier(test_epoch(1));
-        let progress_state_table =
-            persist_finished_progress(&progress_env, initial_barrier.epoch).await;
+        start_progress_epochs(&progress_env, 7).await;
+        let initial_barrier = Barrier::new_test_barrier(test_epoch(6));
+        let progress_state_table = persist_finished_progress(
+            &progress_env,
+            EpochPair::new_test_epoch(test_epoch(1)),
+            initial_barrier.epoch.prev,
+        )
+        .await;
 
         let barrier_manager = LocalBarrierManager::for_test();
         let progress = CreateMviewProgressReporter::for_test(barrier_manager.clone());
@@ -1128,7 +1150,7 @@ mod tests {
             .send(DispatcherMessage::Chunk(StreamChunk::from_pretty(" I\n + 5")).into())
             .await
             .unwrap();
-        let next_barrier = Barrier::new_test_barrier(test_epoch(2));
+        let next_barrier = Barrier::new_test_barrier(test_epoch(7));
         upstream_tx
             .send(DispatcherMessage::Barrier(next_barrier.clone().into_dispatcher()).into())
             .await
