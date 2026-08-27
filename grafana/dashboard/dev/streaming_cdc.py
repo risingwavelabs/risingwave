@@ -144,12 +144,12 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_count(
-                    "MySQL CDC Binlog Retention Gap",
-                    "A positive value means the RisingWave checkpoint file is older than the upstream oldest retained binlog file.",
+                    "MySQL CDC Binlog Retention Risk Margin",
+                    "Retained binlog range midpoint minus the RisingWave checkpoint file sequence. A non-negative value means the checkpoint has entered the older half of the retained range.",
                     [
                         panels.target(
-                            f"clamp_min({metric('mysql_cdc_binlog_file_seq_min')} - on(source_id) {metric('stream_mysql_cdc_state_binlog_file_seq')}, 0)",
-                            "source_id {{source_id}} {{hostname}}:{{port}} - Retention Gap",
+                            f"(({metric('mysql_cdc_binlog_file_seq_max')} + {metric('mysql_cdc_binlog_file_seq_min')}) / 2 - on(source_id) {metric('stream_mysql_cdc_state_binlog_file_seq')})",
+                            "source_id {{source_id}} {{hostname}}:{{port}} - Retention Risk Margin",
                         ),
                     ],
                 ),

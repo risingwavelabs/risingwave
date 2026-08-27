@@ -12,9 +12,14 @@ mysql_cdc_binlog_file_lag = (
     f"clamp_min({metric('mysql_cdc_binlog_file_seq_max')} - on(source_id) "
     f"{metric('stream_mysql_cdc_state_binlog_file_seq')}, 0)"
 )
-mysql_cdc_binlog_retention_gap = (
-    f"clamp_min({metric('mysql_cdc_binlog_file_seq_min')} - on(source_id) "
-    f"{metric('stream_mysql_cdc_state_binlog_file_seq')}, 0)"
+mysql_cdc_binlog_retention_risk_margin = (
+    f"(({metric('mysql_cdc_binlog_file_seq_max')} + "
+    f"{metric('mysql_cdc_binlog_file_seq_min')}) / 2 - on(source_id) "
+    f"{metric('stream_mysql_cdc_state_binlog_file_seq')})"
+)
+mysql_cdc_binlog_retention_risk = (
+    f"{alert_when(mysql_cdc_binlog_file_lag)} and "
+    f"{alert_threshold(mysql_cdc_binlog_retention_risk_margin, 0)}"
 )
 
 @section
@@ -40,7 +45,7 @@ def _(outer_panels: Panels):
     - Join Amplification: If the join amplification is high, it means the join is not able to process the data in time.
 - Cross-DB Log Retention Expiring: a cross-database MV changelog consumer's last consumed changelog epoch will expire within 12 hours.
 - PG CDC WAL Lag Too High: the PostgreSQL CDC WAL lag (upstream_max_lsn - state_table_lsn) exceeds 20 GiB. Check `Streaming CDC` > `PostgreSQL CDC State Table WAL Lag` and verify replication slot health.
-- MySQL CDC Binlog File Lag Too High: the MySQL CDC checkpoint is at least 20 files behind the upstream newest file, or its checkpoint file is older than the upstream oldest retained file. Check `Streaming CDC` > `MySQL CDC Binlog File Lag` and `MySQL CDC Binlog Retention Gap`.
+- MySQL CDC Binlog File Lag Too High: the MySQL CDC checkpoint is at least 20 files behind the upstream newest file, or it is behind the newest file and has entered the older half of the retained binlog range. Check `Streaming CDC` > `MySQL CDC Binlog File Lag` and `MySQL CDC Binlog Retention Risk Margin`.
 """,
                     height=10,
                 ),
@@ -76,7 +81,7 @@ def _(outer_panels: Panels):
                         ),
                         panels.target(
                             f"{alert_threshold(mysql_cdc_binlog_file_lag, 20)} or "
-                            f"{alert_when(mysql_cdc_binlog_retention_gap)}",
+                            f"({mysql_cdc_binlog_retention_risk})",
                             "MySQL CDC Binlog File Lag Too High source {{source_id}} {{hostname}}:{{port}}",
                         ),
                     ],
