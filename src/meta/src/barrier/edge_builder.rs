@@ -17,7 +17,7 @@ use std::collections::{HashMap, HashSet};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::fragment::DistributionType;
-use risingwave_pb::common::{ActorInfo, HostAddress, WorkerNode};
+use risingwave_pb::common::{ActorInfo, HostAddress};
 use risingwave_pb::id::{PartialGraphId, SubscriberId};
 use risingwave_pb::stream_plan::StreamNode;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
@@ -57,37 +57,6 @@ impl EdgeBuilderFragmentInfo {
                 (
                     (actor_id, actor.vnode_bitmap.clone()),
                     (actor_id, control_stream_manager.host_addr(actor.worker_id)),
-                )
-            })
-            .unzip();
-        Self {
-            distribution_type: info.distribution_type,
-            actors,
-            actor_location,
-            partial_graph_id,
-        }
-    }
-
-    /// Build from an already-inflight fragment using worker node map for host resolution.
-    ///
-    /// Unlike [`from_inflight`](Self::from_inflight), this does not require a
-    /// `ControlStreamManager` and can be used when only worker node metadata is available
-    /// (e.g., during `render_runtime_info` before the control streams are fully set up).
-    pub fn from_inflight_with_worker_nodes(
-        info: &InflightFragmentInfo,
-        partial_graph_id: PartialGraphId,
-        worker_nodes: &HashMap<WorkerId, WorkerNode>,
-    ) -> Self {
-        let (actors, actor_location) = info
-            .actors
-            .iter()
-            .map(|(&actor_id, actor)| {
-                (
-                    (actor_id, actor.vnode_bitmap.clone()),
-                    (
-                        actor_id,
-                        worker_nodes[&actor.worker_id].host.clone().unwrap(),
-                    ),
                 )
             })
             .unzip();
@@ -223,10 +192,35 @@ impl FragmentEdgeBuilder {
         }
     }
 
+    pub(super) fn from_inflight_fragments<'a>(
+        fragment_infos: impl IntoIterator<Item = &'a InflightFragmentInfo>,
+        partial_graph_id: PartialGraphId,
+        control_stream_manager: &ControlStreamManager,
+    ) -> Self {
+        Self::new(fragment_infos.into_iter().map(|info| {
+            (
+                info.fragment_id,
+                EdgeBuilderFragmentInfo::from_inflight(
+                    info,
+                    partial_graph_id,
+                    control_stream_manager,
+                ),
+            )
+        }))
+    }
+
     pub(super) fn add_relations(&mut self, relations: &FragmentDownstreamRelation) {
-        for (fragment_id, relations) in relations {
+        for fragment_id in self.fragments.keys().copied().collect::<Vec<_>>() {
+            let Some(relations) = relations.get(&fragment_id) else {
+                continue;
+            };
             for relation in relations {
-                self.add_edge(*fragment_id, relation);
+                if self
+                    .fragments
+                    .contains_key(&relation.downstream_fragment_id)
+                {
+                    self.add_edge(fragment_id, relation);
+                }
             }
         }
     }
@@ -421,10 +415,7 @@ mod tests {
                 .into_iter()
                 .filter(|(fragment_id, _)| *fragment_id != upstream_fragment_id),
         );
-        builder.add_relations(&HashMap::from([(
-            backfill_input_fragment_id,
-            vec![relation(backfill_output_fragment_id)],
-        )]));
+        builder.add_relations(&relations);
         let edges = builder.build();
 
         assert!(!edges.dispatchers.contains_key(&upstream_fragment_id));
