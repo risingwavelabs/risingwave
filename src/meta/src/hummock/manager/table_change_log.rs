@@ -17,12 +17,17 @@ use std::collections::{HashMap, HashSet};
 use anyhow::{Context, anyhow};
 use risingwave_common::catalog::TableId;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_hummock_sdk::change_log::TableChangeLog;
 use risingwave_hummock_sdk::version::HummockVersion;
-use sea_orm::{ColumnTrait, Condition, EntityTrait, QueryFilter, TransactionTrait};
+use sea_orm::{
+    ColumnTrait, Condition, ConnectionTrait, DbBackend, EntityTrait, FromQueryResult, QueryFilter,
+    QueryTrait, TransactionTrait,
+};
 
 use crate::controller::streaming_job::TableChangeLogTruncateInfo;
 use crate::hummock::HummockManager;
 use crate::hummock::error::{Error, Result};
+use crate::hummock::model::ext::to_table_change_log;
 
 fn update_truncate_epoch(
     truncate_epochs: &mut HashMap<TableId, u64>,
@@ -144,6 +149,7 @@ impl HummockManager {
         let txn = sql_store.conn.begin().await?;
         let batch_size = self.env.opts.table_change_log_delete_batch_size as usize;
         let mut rows_affected = 0;
+        let mut may_delete_object_ids = HashSet::new();
         for batch in truncate_epochs.chunks(batch_size) {
             let mut condition = Condition::any();
             for (table_id, truncate_epoch) in batch {
@@ -162,11 +168,50 @@ impl HummockManager {
                         ),
                 );
             }
-            rows_affected += risingwave_meta_model::hummock_table_change_log::Entity::delete_many()
-                .filter(condition)
-                .exec(&txn)
-                .await?
-                .rows_affected;
+            let (change_logs_to_delete, deleted_count) = match txn.get_database_backend() {
+                DbBackend::Postgres => {
+                    let mut delete =
+                        risingwave_meta_model::hummock_table_change_log::Entity::delete_many()
+                            .filter(condition)
+                            .into_query();
+                    delete.returning_all();
+                    let statement = DbBackend::Postgres.build(&delete);
+                    let change_logs_to_delete = txn
+                        .query_all(statement)
+                        .await?
+                        .iter()
+                        .map(|row| {
+                            risingwave_meta_model::hummock_table_change_log::Model::from_query_result(
+                                row, "",
+                            )
+                        })
+                        .collect::<std::result::Result<Vec<_>, _>>()?;
+                    let deleted_count = change_logs_to_delete.len() as u64;
+                    (change_logs_to_delete, deleted_count)
+                }
+                DbBackend::MySql | DbBackend::Sqlite => {
+                    // MySQL does not support DELETE RETURNING, and SQLite returning support is not
+                    // enabled in SeaORM, so select the rows in the same transaction before deleting.
+                    let change_logs_to_delete =
+                        risingwave_meta_model::hummock_table_change_log::Entity::find()
+                            .filter(condition.clone())
+                            .all(&txn)
+                            .await?;
+                    let deleted_count =
+                        risingwave_meta_model::hummock_table_change_log::Entity::delete_many()
+                            .filter(condition)
+                            .exec(&txn)
+                            .await?
+                            .rows_affected;
+                    (change_logs_to_delete, deleted_count)
+                }
+            };
+            for change_log_to_delete in change_logs_to_delete {
+                let deleted_change_log =
+                    TableChangeLog::new([to_table_change_log(change_log_to_delete)]);
+                may_delete_object_ids.extend(deleted_change_log.get_object_ids());
+            }
+            rows_affected += deleted_count;
         }
         txn.commit().await?;
 
@@ -175,7 +220,15 @@ impl HummockManager {
                 change_log.truncate(truncate_epoch);
             }
         }
-        tracing::info!(rows_affected, "truncated table change logs");
+        drop(versioning);
+        let may_delete_object_count = may_delete_object_ids.len();
+        self.gc_manager
+            .add_may_delete_object_ids(may_delete_object_ids.into_iter());
+        tracing::info!(
+            rows_affected,
+            may_delete_object_count,
+            "truncated table change logs"
+        );
         Ok(())
     }
 }

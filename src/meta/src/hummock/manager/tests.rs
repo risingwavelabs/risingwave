@@ -203,13 +203,29 @@ async fn test_truncate_table_change_log_persisted_and_in_memory() {
     let old_epoch = test_epoch(10_000);
     let truncate_epoch = test_epoch(20_000);
     let committed_epoch = test_epoch(30_000);
-    let change_logs =
-        [old_epoch, truncate_epoch, committed_epoch].map(|checkpoint_epoch| EpochNewChangeLog {
-            new_value: vec![],
-            old_value: vec![],
+    let change_logs = [
+        (old_epoch, vec![1], vec![2]),
+        (truncate_epoch, vec![3], vec![4]),
+        (committed_epoch, vec![5], vec![6]),
+    ]
+    .map(
+        |(checkpoint_epoch, new_object_ids, old_object_ids)| EpochNewChangeLog {
+            new_value: new_object_ids
+                .into_iter()
+                .map(|object_id| {
+                    gen_sstable_info(object_id, vec![table_id.as_raw_id()], checkpoint_epoch)
+                })
+                .collect(),
+            old_value: old_object_ids
+                .into_iter()
+                .map(|object_id| {
+                    gen_sstable_info(object_id, vec![table_id.as_raw_id()], checkpoint_epoch)
+                })
+                .collect(),
             non_checkpoint_epochs: vec![],
             checkpoint_epoch,
-        });
+        },
+    );
 
     {
         let mut versioning = hummock_manager.versioning.write().await;
@@ -277,6 +293,16 @@ async fn test_truncate_table_change_log_persisted_and_in_memory() {
         .epochs()
         .collect_vec();
     assert_eq!(in_memory_epochs, vec![truncate_epoch, committed_epoch]);
+    assert_eq!(
+        hummock_manager
+            .gc_manager
+            .try_take_may_delete_object_ids(1)
+            .unwrap(),
+        HashSet::from([
+            HummockObjectId::Sstable(1.into()),
+            HummockObjectId::Sstable(2.into()),
+        ])
+    );
 }
 fn get_compaction_group_object_ids(
     version: &HummockVersion,
