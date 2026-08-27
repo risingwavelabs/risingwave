@@ -172,8 +172,10 @@ where
 }
 
 /// States flow happened from top to down.
+#[derive(PartialEq, Eq)]
 enum PgProtocolState {
     Startup,
+    Authentication,
     Regular,
 }
 
@@ -513,7 +515,9 @@ where
                         return None;
                     }
 
-                    PsqlError::StartupError(_) | PsqlError::PasswordError => {
+                    PsqlError::StartupError(_)
+                    | PsqlError::PasswordError
+                    | PsqlError::ProtocolError(_) => {
                         self.stream
                             .write_no_flush(BeMessage::ErrorResponse {
                                 error: &e,
@@ -574,6 +578,13 @@ where
     }
 
     async fn do_process_inner(&mut self, msg: FeMessage) -> PsqlResult<()> {
+        if self.state == PgProtocolState::Authentication && !matches!(&msg, FeMessage::Password(_))
+        {
+            return Err(PsqlError::ProtocolError(
+                "expected PasswordMessage during authentication".to_owned(),
+            ));
+        }
+
         // Ignore util sync message.
         if self.ignore_util_sync {
             if let FeMessage::Sync = msg {
@@ -663,7 +674,7 @@ where
                 .read_startup()
                 .await
                 .map(|message: FeMessage| (message, None)),
-            PgProtocolState::Regular => {
+            PgProtocolState::Authentication | PgProtocolState::Regular => {
                 self.stream.read_header().await?;
                 let guard = if let Some(ref header) = self.stream.read_header {
                     let payload_len = std::cmp::max(header.payload_len, 0) as u64;
@@ -756,7 +767,7 @@ where
                 .map_err(|e| PsqlError::StartupError(e.into()))?;
         }
 
-        match session.user_authenticator() {
+        self.state = match session.user_authenticator() {
             UserAuthenticator::None => {
                 self.stream.write_no_flush(BeMessage::AuthenticationOk)?;
 
@@ -777,21 +788,23 @@ where
                         application_name: application_name.cloned(),
                     })?;
                 self.ready_for_query()?;
+                PgProtocolState::Regular
             }
             UserAuthenticator::ClearText(_)
             | UserAuthenticator::OAuth { .. }
             | UserAuthenticator::Ldap(..) => {
                 self.stream
                     .write_no_flush(BeMessage::AuthenticationCleartextPassword)?;
+                PgProtocolState::Authentication
             }
             UserAuthenticator::Md5WithSalt { salt, .. } => {
                 self.stream
                     .write_no_flush(BeMessage::AuthenticationMd5Password(salt))?;
+                PgProtocolState::Authentication
             }
-        }
+        };
 
         self.session = Some(session);
-        self.state = PgProtocolState::Regular;
         Ok(())
     }
 

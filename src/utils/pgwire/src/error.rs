@@ -32,6 +32,9 @@ pub enum PsqlError {
     #[error("Invalid password")]
     PasswordError,
 
+    #[error("Protocol violation: {0}")]
+    ProtocolError(String),
+
     #[error("Failed to run the query: {0}")]
     SimpleQueryError(
         #[source]
