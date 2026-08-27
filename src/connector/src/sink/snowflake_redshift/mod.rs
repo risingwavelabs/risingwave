@@ -42,15 +42,28 @@ pub mod snowflake;
 pub const __ROW_ID: &str = "__row_id";
 pub const __OP: &str = "__op";
 
+fn build_ordered_cdc_row_id(epoch: u64, row_count: u64, actor_id: u32) -> String {
+    // Keep the components fixed-width so the string representation has the same ordering as the
+    // numeric (epoch, row count, actor) tuple. The actor id makes ids from parallel sink writers
+    // distinct while remaining a deterministic tie-breaker.
+    format!("{epoch:020}_{row_count:020}_{actor_id:010}")
+}
+
 pub struct AugmentedRow {
     row_encoder: JsonEncoder,
     current_epoch: u64,
-    current_row_count: usize,
+    current_row_count: u64,
+    actor_id: Option<u32>,
     is_append_only: bool,
 }
 
 impl AugmentedRow {
-    pub fn new(current_epoch: u64, is_append_only: bool, schema: Schema) -> Self {
+    pub fn new(
+        current_epoch: u64,
+        actor_id: Option<u32>,
+        is_append_only: bool,
+        schema: Schema,
+    ) -> Self {
         let row_encoder = JsonEncoder::new(
             schema,
             None,
@@ -64,6 +77,7 @@ impl AugmentedRow {
             row_encoder,
             current_epoch,
             current_row_count: 0,
+            actor_id,
             is_append_only,
         }
     }
@@ -82,10 +96,14 @@ impl AugmentedRow {
             return Ok(row);
         }
         self.current_row_count += 1;
-        row.insert(
-            __ROW_ID.to_owned(),
-            Value::String(format!("{}_{}", self.current_epoch, self.current_row_count)),
-        );
+        let row_id = if let Some(actor_id) = self.actor_id {
+            build_ordered_cdc_row_id(self.current_epoch, self.current_row_count, actor_id)
+        } else {
+            // Preserve the existing Redshift row-id format. Snowflake upsert sinks always provide
+            // an actor id and use the order-safe format above.
+            format!("{}_{}", self.current_epoch, self.current_row_count)
+        };
+        row.insert(__ROW_ID.to_owned(), Value::String(row_id));
         row.insert(
             __OP.to_owned(),
             Value::Number(serde_json::Number::from(op.to_i16())),
@@ -160,6 +178,7 @@ impl SnowflakeRedshiftSinkS3Writer {
     pub fn new(
         s3_config: S3Common,
         schema: Schema,
+        actor_id: Option<u32>,
         is_append_only: bool,
         target_table_name: String,
     ) -> Result<Self> {
@@ -168,7 +187,7 @@ impl SnowflakeRedshiftSinkS3Writer {
             s3_config,
             s3_operator,
             opendal_writer_path: None,
-            augmented_row: AugmentedRow::new(0, is_append_only, schema),
+            augmented_row: AugmentedRow::new(0, actor_id, is_append_only, schema),
             target_table_name,
         })
     }
@@ -331,5 +350,20 @@ impl SnowflakeRedshiftSinkJdbcWriter {
         // TODO: abort should clean up all the data written in this epoch
         self.jdbc_sink_writer.abort().await?;
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::build_ordered_cdc_row_id;
+
+    #[test]
+    fn cdc_row_ids_are_unique_and_numerically_ordered() {
+        assert!(build_ordered_cdc_row_id(100, 10, 1) > build_ordered_cdc_row_id(100, 9, 1));
+        assert!(build_ordered_cdc_row_id(101, 0, 1) > build_ordered_cdc_row_id(100, u64::MAX, 1));
+        assert_ne!(
+            build_ordered_cdc_row_id(100, 10, 1),
+            build_ordered_cdc_row_id(100, 10, 2)
+        );
     }
 }
