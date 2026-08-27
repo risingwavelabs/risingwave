@@ -319,19 +319,19 @@ impl TableFunction {
             }
             CDC_SOURCE_ARG_LEN => {
                 let raw_source_name = expr_impl_to_string_fn(&args[0])?;
-                // Accept `schema.source` and quoted identifiers, matching every other SQL surface.
-                // Historical behavior fed the whole string (dot included) into the catalog lookup,
-                // so a qualified name could never match and an unqualified name only searched the
-                // session `search_path` — which broke sources created in non-default schemas.
-                let object_name =
-                    Parser::parse_object_name_str(&raw_source_name).map_err(|e| {
-                        BindError(format!(
-                            "invalid source name `{}` in {}_query: {}",
-                            raw_source_name,
-                            connector_family(expect_connector_name),
-                            e.to_report_string(),
-                        ))
-                    })?;
+                // Accept `schema.source` and quoted identifiers, matching every other SQL
+                // surface. Historical behavior fed the whole string (dot included) into the
+                // catalog lookup, so a qualified name could never match and an unqualified
+                // name only searched the session `search_path` — which broke sources created
+                // in non-default schemas.
+                let object_name = Parser::parse_object_name_str(&raw_source_name).map_err(|e| {
+                    BindError(format!(
+                        "invalid source name `{}` in {}_query: {}",
+                        raw_source_name,
+                        connector_family(expect_connector_name),
+                        e.to_report_string(),
+                    ))
+                })?;
                 let (explicit_schema, source_name) =
                     Binder::resolve_schema_qualified_name(db_name, &object_name)?;
                 let source_schema_path = match explicit_schema.as_deref() {
@@ -345,7 +345,12 @@ impl TableFunction {
                     .connector_name()
                     .eq_ignore_ascii_case(expect_connector_name)
                 {
-                    return Err(BindError(format!("TVF function only accepts `mysql-cdc` and `postgres-cdc` source. Expected: {}, but got: {}", expect_connector_name, source_catalog.connector_name())).into());
+                    return Err(BindError(format!(
+                        "TVF function only accepts `mysql-cdc` and `postgres-cdc` source. Expected: {}, but got: {}",
+                        expect_connector_name,
+                        source_catalog.connector_name(),
+                    ))
+                    .into());
                 }
 
                 let (props, secret_refs) = source_catalog.with_properties.clone().into_parts();
