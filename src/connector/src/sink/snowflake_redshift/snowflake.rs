@@ -169,6 +169,20 @@ fn default_with_s3() -> bool {
 }
 
 impl SnowflakeV2Config {
+    fn jdbc_writer_table_name(&self, is_append_only: bool) -> Result<&str> {
+        if is_append_only {
+            self.snowflake_target_table_name.as_deref().ok_or_else(|| {
+                SinkError::Config(anyhow!("table.name is required for Snowflake JDBC sink"))
+            })
+        } else {
+            self.snowflake_cdc_table_name.as_deref().ok_or_else(|| {
+                SinkError::Config(anyhow!(
+                    "intermediate.table.name is required for Snowflake JDBC sink"
+                ))
+            })
+        }
+    }
+
     /// Build JDBC Properties for the Snowflake JDBC connection (no URL parameters).
     /// Returns (`jdbc_url`, `driver_properties`).
     /// - `driver_properties` are transformed/used by the Java runner and passed to `DriverManager::getConnection(url, props)`
@@ -580,16 +594,16 @@ impl SnowflakeSinkWriter {
         param: SinkParam,
     ) -> Result<Self> {
         let schema = param.schema();
-        let database = config.snowflake_database.ok_or_else(|| {
+        let database = config.snowflake_database.as_deref().ok_or_else(|| {
             SinkError::Config(anyhow!("database is required for Snowflake JDBC sink"))
         })?;
-        let schema_name = config.snowflake_schema.ok_or_else(|| {
+        let schema_name = config.snowflake_schema.as_deref().ok_or_else(|| {
             SinkError::Config(anyhow!("schema is required for Snowflake JDBC sink"))
         })?;
-        let table_name = config.snowflake_target_table_name.ok_or_else(|| {
-            SinkError::Config(anyhow!("table.name is required for Snowflake JDBC sink"))
-        })?;
         if config.with_s3 {
+            let table_name = config.snowflake_target_table_name.ok_or_else(|| {
+                SinkError::Config(anyhow!("table.name is required for Snowflake JDBC sink"))
+            })?;
             let s3_writer = SnowflakeRedshiftSinkS3Writer::new(
                 config.s3_inner.ok_or_else(|| {
                     SinkError::Config(anyhow!(
@@ -602,11 +616,12 @@ impl SnowflakeSinkWriter {
             )?;
             Ok(Self::S3(s3_writer))
         } else {
+            let table_name = config.jdbc_writer_table_name(is_append_only)?;
             let jdbc_writer = SnowflakeRedshiftSinkJdbcWriter::new(
                 is_append_only,
                 writer_param,
                 param,
-                build_full_table_name(&database, &schema_name, &table_name),
+                build_full_table_name(database, schema_name, table_name),
             )
             .await?;
             Ok(Self::Jdbc(jdbc_writer))
@@ -1234,6 +1249,32 @@ mod tests {
         assert_eq!(map.get("user"), Some(&"RW_USER".to_owned()));
         assert_eq!(map.get("password"), Some(&"secret".to_owned()));
         assert!(!map.contains_key("authenticator"));
+    }
+
+    #[test]
+    fn test_snowflake_jdbc_writer_table_name() {
+        let mut append_only_props = base_properties();
+        append_only_props.insert("password".to_owned(), "secret".to_owned());
+        append_only_props.insert("table.name".to_owned(), "target_table".to_owned());
+        let append_only_config = SnowflakeV2Config::from_btreemap(&append_only_props).unwrap();
+        assert_eq!(
+            append_only_config.jdbc_writer_table_name(true).unwrap(),
+            "target_table"
+        );
+
+        let mut upsert_props = base_properties();
+        upsert_props.insert("password".to_owned(), "secret".to_owned());
+        upsert_props.insert("type".to_owned(), "upsert".to_owned());
+        upsert_props.insert("table.name".to_owned(), "target_table".to_owned());
+        upsert_props.insert(
+            "intermediate.table.name".to_owned(),
+            "intermediate_table".to_owned(),
+        );
+        let upsert_config = SnowflakeV2Config::from_btreemap(&upsert_props).unwrap();
+        assert_eq!(
+            upsert_config.jdbc_writer_table_name(false).unwrap(),
+            "intermediate_table"
+        );
     }
 
     #[test]
