@@ -25,6 +25,7 @@ use risingwave_pb::meta::{
     SetSystemParamRequest, SetSystemParamResponse,
 };
 use risingwave_rpc_client::ComputeClient;
+use thiserror_ext::AsReport;
 use tonic::{Request, Response, Status};
 
 pub struct SystemParamsServiceImpl {
@@ -97,18 +98,21 @@ impl SystemParamsService for SystemParamsServiceImpl {
             .metadata_manager
             .list_worker_node(Some(WorkerType::ComputeNode), None)
             .await
-            .map_err(|e| Status::internal(e.to_string()))?;
+            .map_err(|e| Status::internal(e.to_report_string()))?;
 
         let clear_futures = worker_nodes.into_iter().map(|worker| async move {
             let worker_id = worker.id;
             let host = worker
                 .get_host()
-                .map_err(|e| Status::internal(e.to_string()))?
+                .map_err(|e| Status::internal(e.to_report_string()))?
                 .clone();
             let client = ComputeClient::new((&host).into(), &RpcClientConfig::default())
                 .await
                 .map_err(|e| {
-                    Status::internal(format!("connect to compute node {worker_id}: {e}"))
+                    Status::internal(format!(
+                        "connect to compute node {worker_id}: {}",
+                        e.as_report()
+                    ))
                 })?;
             client
                 .resize_cache(risingwave_pb::compute::ResizeCacheRequest {
@@ -118,7 +122,12 @@ impl SystemParamsService for SystemParamsServiceImpl {
                     clear_data_cache: request.clear_data_cache,
                 })
                 .await
-                .map_err(|e| Status::internal(format!("clear file cache on {worker_id}: {e}")))?;
+                .map_err(|e| {
+                    Status::internal(format!(
+                        "clear file cache on {worker_id}: {}",
+                        e.as_report()
+                    ))
+                })?;
             Ok::<_, Status>(())
         });
 
