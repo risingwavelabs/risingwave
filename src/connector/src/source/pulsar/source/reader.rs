@@ -312,7 +312,7 @@ impl PulsarBrokerReader {
             )
         });
         #[for_await]
-        for msgs in self.into_stream().await.ready_chunks(max_chunk_size) {
+        for msgs in self.into_stream().ready_chunks(max_chunk_size) {
             let msgs = msgs
                 .into_iter()
                 .collect::<Result<Vec<Message<Vec<u8>>>, _>>()?;
@@ -354,7 +354,7 @@ impl PulsarBrokerReader {
         }
     }
 
-    async fn into_stream(self) -> PulsarConsumeStream {
+    fn into_stream(self) -> PulsarConsumeStream {
         let (ack_tx, ack_rx) = tokio::sync::mpsc::unbounded_channel();
         let channel_entry = build_pulsar_ack_channel_id(
             self.source_ctx.source_id,
