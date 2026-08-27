@@ -147,8 +147,8 @@ select id from mysql_query('mysql_cdc_source_ns', 'select id from test;');
 statement error source not found: not_a_source
 select id from mysql_query('mysql_tvf_schema.not_a_source', 'select id from test;');
 
-statement error mysql_query
-select id from mysql_query('some.deep.name.that.is.too.long', 'select id from test;');
+statement error cross-database references are not implemented
+select id from mysql_query('other_db.mysql_tvf_schema.mysql_cdc_source_ns', 'select id from test;');
 
 statement ok
 drop source mysql_tvf_schema.mysql_cdc_source_ns cascade;
