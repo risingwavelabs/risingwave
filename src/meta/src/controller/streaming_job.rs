@@ -71,7 +71,7 @@ use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{PbSinkLogStoreType, PbStreamNode, StreamScanType};
 use risingwave_pb::user::PbUserInfo;
-use risingwave_sqlparser::ast::{Engine, SqlOption, Statement};
+use risingwave_sqlparser::ast::{Engine, SqlOption, SqlOptionValue, Statement, Value};
 use risingwave_sqlparser::parser::{Parser, ParserError};
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::{Expr, Query, SimpleExpr};
@@ -1158,6 +1158,37 @@ impl CatalogController {
         Ok(())
     }
 
+    async fn ensure_cdc_snapshot_options_not_stale(
+        txn: &DatabaseTransaction,
+        streaming_job: &StreamingJob,
+    ) -> MetaResult<()> {
+        let StreamingJob::Table(_, replacement_table, _) = streaming_job else {
+            return Ok(());
+        };
+        if replacement_table.cdc_table_id.is_none() {
+            return Ok(());
+        }
+
+        let current_definition: String = Table::find_by_id(replacement_table.id)
+            .select_only()
+            .column(table::Column::Definition)
+            .into_tuple()
+            .one(txn)
+            .await?
+            .ok_or_else(|| {
+                MetaError::catalog_id_not_found(ObjectType::Table.as_str(), replacement_table.id)
+            })?;
+        if cdc_snapshot_options_from_definition(&current_definition)?
+            != cdc_snapshot_options_from_definition(&replacement_table.definition)?
+        {
+            return Err(MetaError::permission_denied(
+                "CDC snapshot options in the replacement plan are stale",
+            ));
+        }
+
+        Ok(())
+    }
+
     pub async fn create_job_catalog_for_replace(
         &self,
         streaming_job: &StreamingJob,
@@ -1171,6 +1202,7 @@ impl CatalogController {
 
         // 1. check version.
         streaming_job.verify_version_for_replace(&txn).await?;
+        Self::ensure_cdc_snapshot_options_not_stale(&txn, streaming_job).await?;
         // 2. check concurrent replace.
         Self::ensure_job_not_being_altered_or_referenced(&txn, id).await?;
 
@@ -2780,20 +2812,6 @@ impl CatalogController {
         // temporary job depends on this table and must finish before the options can be changed.
         Self::ensure_job_not_being_altered_or_referenced(&txn, table.job_id()).await?;
 
-        // Advancing the version makes a replacement plan generated before this transaction stale.
-        // It prevents that replacement from silently restoring the previous snapshot options.
-        let mut version = table
-            .version
-            .as_ref()
-            .ok_or_else(|| {
-                MetaError::invalid_parameter(format!("table {table_id} has no version"))
-            })?
-            .to_protobuf();
-        version.version = version
-            .version
-            .checked_add(1)
-            .ok_or_else(|| MetaError::invalid_parameter("table version overflow"))?;
-
         let [mut stmt]: [_; 1] = Parser::parse_sql(&table.definition)
             .map_err(|e| MetaError::invalid_parameter(e.to_report_string()))?
             .try_into()
@@ -2830,7 +2848,6 @@ impl CatalogController {
         Table::update(table::ActiveModel {
             table_id: Set(table_id),
             definition: Set(stmt.to_string()),
-            version: Set(Some((&version).into())),
             ..Default::default()
         })
         .exec(&txn)
@@ -3630,6 +3647,44 @@ fn update_stmt_with_props(
     Ok(())
 }
 
+fn cdc_snapshot_options_from_definition(definition: &str) -> MetaResult<BTreeMap<String, String>> {
+    let [stmt]: [_; 1] = Parser::parse_sql(definition)
+        .map_err(|e| MetaError::invalid_parameter(e.to_report_string()))?
+        .try_into()
+        .map_err(|_| MetaError::invalid_parameter("expected exactly one table definition"))?;
+    let Statement::CreateTable { with_options, .. } = stmt else {
+        return Err(MetaError::invalid_parameter(
+            "expected a CREATE TABLE definition",
+        ));
+    };
+
+    with_options
+        .into_iter()
+        .filter_map(|option| {
+            let key = option.name.real_value();
+            matches!(
+                key.as_str(),
+                CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY | CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY
+            )
+            .then_some((key, option.value))
+        })
+        .map(|(key, value)| {
+            let value = match value {
+                SqlOptionValue::Value(Value::CstyleEscapedString(value)) => value.value,
+                SqlOptionValue::Value(Value::SingleQuotedString(value))
+                | SqlOptionValue::Value(Value::Number(value)) => value,
+                SqlOptionValue::Value(Value::Boolean(value)) => value.to_string(),
+                _ => {
+                    return Err(MetaError::invalid_parameter(format!(
+                        "invalid value for CDC snapshot option '{key}'"
+                    )));
+                }
+            };
+            Ok((key, value))
+        })
+        .collect()
+}
+
 #[derive(Debug, PartialEq)]
 struct CdcSnapshotOptionsUpdate {
     snapshot_barrier_interval: Option<u32>,
@@ -3941,5 +3996,28 @@ mod tests {
                 ("snapshot.interval".to_owned(), "'7'".to_owned())
             ]
         );
+    }
+
+    #[test]
+    fn test_extract_cdc_snapshot_options_from_definition() {
+        let numeric = cdc_snapshot_options_from_definition(
+            r#"CREATE TABLE t (v INT) WITH (
+                "snapshot.batch_size" = 2048,
+                "snapshot"."interval" = 7,
+                unrelated = 'value'
+            )"#,
+        )
+        .unwrap();
+        let quoted = cdc_snapshot_options_from_definition(
+            "CREATE TABLE t (v INT) WITH (snapshot.batch_size = '2048', snapshot.interval = '7')",
+        )
+        .unwrap();
+        let stale = cdc_snapshot_options_from_definition(
+            "CREATE TABLE t (v INT) WITH (snapshot.batch_size = '1024', snapshot.interval = '7')",
+        )
+        .unwrap();
+
+        assert_eq!(numeric, quoted);
+        assert_ne!(numeric, stale);
     }
 }
