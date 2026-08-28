@@ -39,6 +39,10 @@ select id, payload from rw_mysql_alter_snapshot_options order by id;
 ----
 1 before
 
+# Metadata-only snapshot option changes must not advance the live DML schema version.
+statement ok
+insert into rw_mysql_alter_snapshot_options values (10, 'rw_before_alter');
+
 statement error snapshot.batch_size must be greater than 0
 alter table rw_mysql_alter_snapshot_options connector with (
   snapshot.batch_size = '0'
@@ -67,9 +71,18 @@ where name = 'rw_mysql_alter_snapshot_options'
 ----
 1
 
+statement ok
+insert into rw_mysql_alter_snapshot_options values (11, 'rw_after_alter');
+
+statement ok
+flush;
+
 # Recovery rebuilds the actor from the updated persisted fragment plan.
 statement ok
 recover;
+
+statement ok
+insert into rw_mysql_alter_snapshot_options values (12, 'rw_after_recover');
 
 system ok
 mysql -e "
@@ -82,6 +95,9 @@ select id, payload from rw_mysql_alter_snapshot_options order by id;
 ----
 1 before
 2 after_recover
+10 rw_before_alter
+11 rw_after_alter
+12 rw_after_recover
 
 # A later automatic schema replacement must accept the advanced table version and preserve the
 # altered snapshot options.
@@ -98,6 +114,9 @@ select id, payload, added from rw_mysql_alter_snapshot_options order by id;
 1 before 7
 2 after_recover 7
 3 after_schema_change 9
+10 rw_before_alter 7
+11 rw_after_alter 7
+12 rw_after_recover 7
 
 query I
 select count(*)
