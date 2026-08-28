@@ -32,6 +32,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::source::ConnectorProperties;
 use risingwave_connector::source::iceberg::IcebergTimeTravelInfo;
 use risingwave_sqlparser::ast::AsOf;
+use thiserror_ext::AsReport;
 
 use crate::TableCatalog;
 use crate::binder::{
@@ -885,7 +886,8 @@ source: {:?}",
                 FunctionCall::cast_mut(&mut expr, &target_type, CastContext::Explicit).map_err(
                     |error| {
                         ErrorCode::InternalError(format!(
-                            "failed to align Iceberg log-store payload type: {error}"
+                            "failed to align Iceberg log-store payload type: {}",
+                            error.as_report()
                         ))
                     },
                 )?;
