@@ -1132,6 +1132,32 @@ impl CatalogController {
         Ok(())
     }
 
+    async fn ensure_job_not_being_altered_or_referenced(
+        txn: &DatabaseTransaction,
+        job_id: JobId,
+    ) -> MetaResult<()> {
+        let referring_cnt = ObjectDependency::find()
+            .join(
+                JoinType::InnerJoin,
+                object_dependency::Relation::Object1.def(),
+            )
+            .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
+            .filter(
+                object_dependency::Column::Oid
+                    .eq(job_id)
+                    .and(object::Column::ObjType.eq(ObjectType::Table))
+                    .and(streaming_job::Column::JobStatus.ne(JobStatus::Created)),
+            )
+            .count(txn)
+            .await?;
+        if referring_cnt != 0 {
+            return Err(MetaError::permission_denied(
+                "job is being altered or referenced by some creating jobs",
+            ));
+        }
+        Ok(())
+    }
+
     pub async fn create_job_catalog_for_replace(
         &self,
         streaming_job: &StreamingJob,
@@ -1146,25 +1172,7 @@ impl CatalogController {
         // 1. check version.
         streaming_job.verify_version_for_replace(&txn).await?;
         // 2. check concurrent replace.
-        let referring_cnt = ObjectDependency::find()
-            .join(
-                JoinType::InnerJoin,
-                object_dependency::Relation::Object1.def(),
-            )
-            .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
-            .filter(
-                object_dependency::Column::Oid
-                    .eq(id)
-                    .and(object::Column::ObjType.eq(ObjectType::Table))
-                    .and(streaming_job::Column::JobStatus.ne(JobStatus::Created)),
-            )
-            .count(&txn)
-            .await?;
-        if referring_cnt != 0 {
-            return Err(MetaError::permission_denied(
-                "job is being altered or referenced by some creating jobs",
-            ));
-        }
+        Self::ensure_job_not_being_altered_or_referenced(&txn, id).await?;
 
         // 3. check parallelism.
         let original_job = StreamingJobModel::find_by_id(id)
@@ -2755,7 +2763,7 @@ impl CatalogController {
         props: BTreeMap<String, String>,
     ) -> MetaResult<()> {
         let snapshot_options_update = CdcSnapshotOptionsUpdate::try_from(&props)?;
-        let inner = self.inner.read().await;
+        let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
 
         let table = Table::find_by_id(table_id)
@@ -2767,6 +2775,24 @@ impl CatalogController {
                 "table {table_id} is not a CDC table"
             )));
         }
+
+        // Serialize with streaming job replacement. If a replacement has already started, its
+        // temporary job depends on this table and must finish before the options can be changed.
+        Self::ensure_job_not_being_altered_or_referenced(&txn, table.job_id()).await?;
+
+        // Advancing the version makes a replacement plan generated before this transaction stale.
+        // It prevents that replacement from silently restoring the previous snapshot options.
+        let mut version = table
+            .version
+            .as_ref()
+            .ok_or_else(|| {
+                MetaError::invalid_parameter(format!("table {table_id} has no version"))
+            })?
+            .to_protobuf();
+        version.version = version
+            .version
+            .checked_add(1)
+            .ok_or_else(|| MetaError::invalid_parameter("table version overflow"))?;
 
         let [mut stmt]: [_; 1] = Parser::parse_sql(&table.definition)
             .map_err(|e| MetaError::invalid_parameter(e.to_report_string()))?
@@ -2804,6 +2830,7 @@ impl CatalogController {
         Table::update(table::ActiveModel {
             table_id: Set(table_id),
             definition: Set(stmt.to_string()),
+            version: Set(Some((&version).into())),
             ..Default::default()
         })
         .exec(&txn)
@@ -3587,7 +3614,7 @@ fn update_stmt_with_props(
 ) -> MetaResult<()> {
     let mut new_sql_options = with_properties
         .iter()
-        .map(|sql_option| (&sql_option.name, sql_option))
+        .map(|sql_option| (sql_option.name.real_value(), sql_option))
         .collect::<IndexMap<_, _>>();
     let add_sql_options = props
         .iter()
@@ -3597,7 +3624,7 @@ fn update_stmt_with_props(
     new_sql_options.extend(
         add_sql_options
             .iter()
-            .map(|sql_option| (&sql_option.name, sql_option)),
+            .map(|sql_option| (sql_option.name.real_value(), sql_option)),
     );
     *with_properties = new_sql_options.into_values().cloned().collect();
     Ok(())
@@ -3618,14 +3645,24 @@ impl TryFrom<&BTreeMap<String, String>> for CdcSnapshotOptionsUpdate {
             snapshot_batch_size: None,
         };
         for (key, value) in props {
-            let parsed = value.parse::<u32>().map_err(|_| {
-                MetaError::invalid_parameter(format!("Invalid value for {key}: {value}"))
-            })?;
             match key.as_str() {
                 CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY => {
-                    update.snapshot_barrier_interval = Some(parsed);
+                    update.snapshot_barrier_interval =
+                        Some(value.parse::<u32>().map_err(|_| {
+                            MetaError::invalid_parameter(format!(
+                                "Invalid value for {key}: {value}"
+                            ))
+                        })?);
                 }
                 CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY => {
+                    let parsed = value.parse::<u32>().map_err(|_| {
+                        MetaError::invalid_parameter(format!("Invalid value for {key}: {value}"))
+                    })?;
+                    if parsed == 0 {
+                        return Err(MetaError::invalid_parameter(format!(
+                            "{CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY} must be greater than 0"
+                        )));
+                    }
                     update.snapshot_batch_size = Some(parsed);
                 }
                 _ => {
@@ -3846,9 +3883,55 @@ mod tests {
         };
         assert!(CdcSnapshotOptionsUpdate::try_from(&invalid_value).is_err());
 
+        let zero_batch_size = btreemap! {
+            CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY.to_owned() => "0".to_owned(),
+        };
+        assert!(CdcSnapshotOptionsUpdate::try_from(&zero_batch_size).is_err());
+
         let unsupported_option = btreemap! {
             "snapshot.unsupported".to_owned() => "1".to_owned(),
         };
         assert!(CdcSnapshotOptionsUpdate::try_from(&unsupported_option).is_err());
+    }
+
+    #[test]
+    fn test_update_stmt_with_quoted_cdc_snapshot_options() {
+        let [
+            Statement::CreateTable {
+                mut with_options, ..
+            },
+        ]: [_; 1] = Parser::parse_sql(
+            r#"CREATE TABLE t (v INT) WITH (
+                "snapshot.batch_size" = '1',
+                "snapshot"."interval" = '1'
+            )"#,
+        )
+        .unwrap()
+        .try_into()
+        .unwrap()
+        else {
+            unreachable!()
+        };
+
+        update_stmt_with_props(
+            &mut with_options,
+            &btreemap! {
+                CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY.to_owned() => "2048".to_owned(),
+                CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY.to_owned() => "7".to_owned(),
+            },
+        )
+        .unwrap();
+
+        assert_eq!(with_options.len(), 2);
+        assert_eq!(
+            with_options
+                .iter()
+                .map(|option| (option.name.real_value(), option.value.to_string()))
+                .collect_vec(),
+            vec![
+                ("snapshot.batch_size".to_owned(), "'2048'".to_owned()),
+                ("snapshot.interval".to_owned(), "'7'".to_owned())
+            ]
+        );
     }
 }
