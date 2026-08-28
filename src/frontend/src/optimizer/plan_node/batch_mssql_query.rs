@@ -88,8 +88,16 @@ impl ToBatchPb for BatchMssqlQuery {
             password: self.core.password.clone(),
             database: self.core.database.clone(),
             query: self.core.query.clone(),
-            encrypt: self.core.encrypt.clone().unwrap_or_else(|| "false".to_owned()),
-            trust_cert: self.core.trust_cert.clone().unwrap_or_else(|| "true".to_owned()),
+            encrypt: self
+                .core
+                .encrypt
+                .clone()
+                .unwrap_or_else(|| "false".to_owned()),
+            trust_cert: self
+                .core
+                .trust_cert
+                .clone()
+                .unwrap_or_else(|| "true".to_owned()),
         })
     }
 }

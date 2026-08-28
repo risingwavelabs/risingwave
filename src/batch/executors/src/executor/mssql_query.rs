@@ -18,7 +18,9 @@ use futures_util::stream::StreamExt;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
-use risingwave_connector::connector_common::sql_server::{create_mssql_client, MssqlConnectionConfig};
+use risingwave_connector::connector_common::sql_server::{
+    MssqlConnectionConfig, create_mssql_client,
+};
 use risingwave_connector::parser::sql_server_row_to_owned_row;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 

@@ -21,10 +21,10 @@ use mysql_async::prelude::*;
 use risingwave_common::array::arrow::IcebergArrowConvert;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::{DataType, ScalarImpl, StructType};
-use risingwave_connector::connector_common::{
-    PgConnectionConfig, create_pg_client,
-    sql_server::{MssqlConnectionConfig, describe_mssql_query},
+use risingwave_connector::connector_common::sql_server::{
+    MssqlConnectionConfig, describe_mssql_query,
 };
+use risingwave_connector::connector_common::{PgConnectionConfig, create_pg_client};
 use risingwave_connector::source::iceberg::{
     FileScanBackend, extract_bucket_and_file_name, get_parquet_fields, list_data_directory,
     new_azblob_operator, new_gcs_operator, new_s3_operator,
@@ -850,8 +850,7 @@ fn expr_impl_to_string_fn(arg: &ExprImpl) -> RwResult<String> {
         }
         Some(Err(err)) => Err(err),
         None => Err(BindError(
-            "postgres_query / mysql_query / mssql_query only accept constant arguments"
-                .to_owned(),
+            "postgres_query / mysql_query / mssql_query only accept constant arguments".to_owned(),
         )
         .into()),
     }

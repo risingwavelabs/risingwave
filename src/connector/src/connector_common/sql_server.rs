@@ -174,13 +174,17 @@ fn mssql_type_to_rw_type_str(type_name: &str) -> anyhow::Result<DataType> {
 
 #[cfg(test)]
 mod tests {
-    use super::mssql_type_to_rw_type_str;
     use risingwave_common::types::DataType;
+
+    use super::mssql_type_to_rw_type_str;
 
     #[test]
     fn mssql_type_to_rw_type_str_base_types() {
         assert_eq!(mssql_type_to_rw_type_str("int").unwrap(), DataType::Int32);
-        assert_eq!(mssql_type_to_rw_type_str("bigint").unwrap(), DataType::Int64);
+        assert_eq!(
+            mssql_type_to_rw_type_str("bigint").unwrap(),
+            DataType::Int64
+        );
         assert_eq!(mssql_type_to_rw_type_str("bit").unwrap(), DataType::Boolean);
         assert_eq!(
             mssql_type_to_rw_type_str("float").unwrap(),

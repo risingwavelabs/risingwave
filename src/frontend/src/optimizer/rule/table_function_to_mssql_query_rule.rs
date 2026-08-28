@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2026 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,8 +26,7 @@ pub struct TableFunctionToMssqlQueryRule {}
 impl Rule<Logical> for TableFunctionToMssqlQueryRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let logical_table_function: &LogicalTableFunction = plan.as_logical_table_function()?;
-        if logical_table_function.table_function().function_type != TableFunctionType::MssqlQuery
-        {
+        if logical_table_function.table_function().function_type != TableFunctionType::MssqlQuery {
             return None;
         }
         assert!(!logical_table_function.with_ordinality());
