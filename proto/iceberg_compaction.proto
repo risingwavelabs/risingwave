@@ -58,6 +58,9 @@ message IcebergCompactionTask {
     SMALL_FILES = 2;
 
     FILES_WITH_DELETE = 3;
+
+    // Compact the union of small and delete-heavy files.
+    AUTO = 4;
   }
 
   TaskType task_type = 3;
