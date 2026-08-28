@@ -745,7 +745,7 @@ fn build_task_planning_config(
                 .small_file_threshold_bytes(iceberg_config.small_files_threshold_mb() * 1024 * 1024)
                 .grouping_strategy(grouping_strategy);
 
-            if let Some(group_filters) = group_filters.clone() {
+            if let Some(group_filters) = group_filters {
                 builder.group_filters(group_filters);
             }
 
