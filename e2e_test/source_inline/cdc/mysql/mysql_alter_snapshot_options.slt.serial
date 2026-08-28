@@ -99,8 +99,7 @@ select id, payload from rw_mysql_alter_snapshot_options order by id;
 11 rw_after_alter
 12 rw_after_recover
 
-# A later automatic schema replacement must accept the advanced table version and preserve the
-# altered snapshot options.
+# A later automatic schema replacement must preserve the altered snapshot options.
 system ok
 mysql -e "
     USE risedev;
