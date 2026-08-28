@@ -83,6 +83,90 @@ select count(*) from rw_iceberg_snapshots where schema_name = 'public' and sourc
 ----
 2
 
+# COW defaults to Auto when compaction is licensed. With no delete files, Auto must still
+# select small data files, compact them, and publish the result to main.
+statement ok
+create table t_cow_auto_small_files(id int primary key, v int)
+with(
+    commit_checkpoint_interval = 1,
+    write_mode = 'copy-on-write',
+    enable_compaction = 'true',
+    compaction.trigger_snapshot_count = '3',
+    enable_snapshot_expiration = 'false'
+) engine = iceberg;
+
+statement ok
+alter sink __iceberg_sink_t_cow_auto_small_files set parallelism = 1;
+
+statement ok
+insert into t_cow_auto_small_files select id, id from generate_series(1, 10) as t(id);
+
+statement ok
+flush;
+
+query TI retry 20 backoff 1s
+select task_type, trigger_snapshot_count
+from rw_iceberg_compaction_schedules
+where sink_name = '__iceberg_sink_t_cow_auto_small_files';
+----
+auto 3
+
+statement ok
+insert into t_cow_auto_small_files select id, id from generate_series(11, 20) as t(id);
+
+statement ok
+flush;
+
+# Both input files are below the default 64 MiB threshold. No delete files exist, so only
+# Auto's small-file predicate can select them.
+query IT retry 20 backoff 1s
+select count(*), max(file_size_in_bytes) < 64 * 1024 * 1024
+from rw_iceberg_all_files
+where schema_name = 'public'
+and source_name = '__iceberg_source_t_cow_auto_small_files'
+and content = 0;
+----
+2 t
+
+query I
+select count(*) from rw_iceberg_all_files
+where schema_name = 'public'
+and source_name = '__iceberg_source_t_cow_auto_small_files'
+and content in (1, 2);
+----
+0
+
+statement ok
+insert into t_cow_auto_small_files select id, id from generate_series(21, 30) as t(id);
+
+statement ok
+flush;
+
+# Do not use VACUUM FULL: the third committed snapshot triggers the default Auto task.
+query I retry 30 backoff 1s
+select count(*) from rw_iceberg_files
+where schema_name = 'public'
+and source_name = '__iceberg_source_t_cow_auto_small_files'
+and content = 'Data';
+----
+1
+
+query II retry 30 backoff 1s
+select count(*), sum(id) from t_cow_auto_small_files;
+----
+30 465
+
+query I
+select count(*) from rw_iceberg_files
+where schema_name = 'public'
+and source_name = '__iceberg_source_t_cow_auto_small_files'
+and content in ('PositionDeletes', 'EqualityDeletes');
+----
+0
+
+statement ok
+DROP TABLE t_cow_auto_small_files;
+
 # COW compaction must keep data files that cannot match an equality delete.
 statement ok
 create table t_cow_incremental(id int primary key, v int)
