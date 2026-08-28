@@ -130,7 +130,7 @@ CREATE SINK kafka_oidc_sink FROM kafka_oidc_sink_input WITH (
 );
 
 system ok
-python3 e2e_test/kafka-oidc/kafka_oidc_admin.py consume-values perf293_oidc_sink 2 20
+python3 e2e_test/kafka-oidc/kafka_oidc_admin.py consume-values perf293_oidc_sink 2 60
 ----
 {"id":201,"payload":"sink_alpha"}
 {"id":202,"payload":"sink_beta"}

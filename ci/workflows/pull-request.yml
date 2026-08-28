@@ -265,7 +265,6 @@ steps:
     timeout_in_minutes: 20
     retry: *auto-retry
 
-
   - label: "end-to-end cdc source test"
     command: "ci/scripts/e2e-source-cdc-test.sh -p ci-dev"
     if: |

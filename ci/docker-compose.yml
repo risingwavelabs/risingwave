@@ -164,7 +164,6 @@ services:
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: admin
       KC_BOOTSTRAP_ADMIN_PASSWORD: admin
-      KC_HEALTH_ENABLED: "true"
     expose:
       - "8080"
     volumes:

@@ -29,6 +29,7 @@ def oidc_config(role: str) -> dict[str, str]:
 
 
 def admin_client() -> AdminClient:
+    # The test realm does not require separate credentials for admin operations.
     return AdminClient(oidc_config("consumer"))
 
 
