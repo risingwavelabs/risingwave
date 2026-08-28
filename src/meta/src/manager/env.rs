@@ -41,6 +41,7 @@ use crate::controller::session_params::{SessionParamsController, SessionParamsCo
 use crate::controller::system_param::{SystemParamsController, SystemParamsControllerRef};
 use crate::hummock::sequence::SequenceGenerator;
 use crate::manager::event_log::{EventLogManagerRef, start_event_log_manager};
+use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
 use crate::manager::{IdleManager, IdleManagerRef, NotificationManager, NotificationManagerRef};
 use crate::model::ClusterId;
 
@@ -88,6 +89,10 @@ pub struct MetaSrvEnv {
     pub opts: Arc<MetaOpts>,
 
     actor_id_generator: Arc<AtomicU32>,
+
+    /// Shared iceberg pk-index sink commit coordinator manager. Held here so the barrier control
+    /// loop can reach it to commit a compaction overwrite inside the paused resolve window
+    iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
 }
 
 /// Options shared by all meta service instances
@@ -518,7 +523,14 @@ impl MetaSrvEnv {
             // Await trees on the meta node is lightweight, thus always enabled.
             await_tree_reg: await_tree::Registry::new(Default::default()),
             actor_id_generator: Arc::new(AtomicU32::new(0)),
+            iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager::new(
+                meta_store_impl.conn.clone(),
+            ),
         })
+    }
+
+    pub fn iceberg_pk_index_sink_manager(&self) -> &IcebergPkIndexSinkManager {
+        &self.iceberg_pk_index_sink_manager
     }
 
     pub fn meta_store(&self) -> SqlMetaStore {

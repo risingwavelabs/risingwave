@@ -989,12 +989,6 @@ for_all_wrapped_id_fields! (
         InjectBarrierRequest.FragmentBuildActorInfo {
             fragment_id: FragmentId,
         }
-        StreamingControlStreamRequest.ControlCompactionWriterRequest {
-            partial_graph_id: PartialGraphId,
-            sink_id: SinkId,
-            task_id: IcebergCompactionTaskId,
-            actor_ids: ActorId,
-        }
         StreamingControlStreamRequest.CreatePartialGraphRequest {
             partial_graph_id: PartialGraphId,
         }

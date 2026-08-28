@@ -1268,7 +1268,15 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                         assert!(failed_databases.insert(database_id, resetting_partial_graphs).is_none());
                                     } else if let Some(database) = collected_databases.remove(&database_id) {
                                         warn!(%database_id, %worker_id, "database initialized but later reset during global recovery");
-                                        let resetting_partial_graphs: HashSet<_> = database_partial_graphs(database_id, database.independent_checkpoint_job_controls.keys().copied()).collect();
+                                        let resetting_partial_graphs: HashSet<_> =
+                                            database_partial_graphs(
+                                                database_id,
+                                                database
+                                                    .independent_checkpoint_job_controls
+                                                    .keys()
+                                                    .copied(),
+                                            )
+                                            .collect();
                                         partial_graph_manager.reset_partial_graphs(resetting_partial_graphs.iter().copied());
                                         assert!(failed_databases.insert(database_id, resetting_partial_graphs).is_none());
                                     } else {

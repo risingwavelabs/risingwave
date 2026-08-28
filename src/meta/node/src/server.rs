@@ -90,7 +90,6 @@ use crate::barrier::BarrierScheduler;
 use crate::controller::SqlMetaStore;
 use crate::controller::system_param::SystemParamsController;
 use crate::hummock::HummockManager;
-use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{IdleManager, MetaOpts, MetaSrvEnv};
 use crate::rpc::election::sql::{MySqlDriver, PostgresDriver, SqlBackendElectionClient};
@@ -474,8 +473,9 @@ pub async fn start_service_as_election_leader(
         env.session_params_manager_impl_ref(),
     ));
 
-    let iceberg_pk_index_sink_manager =
-        IcebergPkIndexSinkManager::new(env.meta_store_ref().conn.clone());
+    // Share the one instance owned by `env` so the barrier control loop (which only carries `env`)
+    // sees the same registered coordinators as the ddl / compaction / recovery paths.
+    let iceberg_pk_index_sink_manager = env.iceberg_pk_index_sink_manager().clone();
     tracing::info!("IcebergPkIndexSinkManager started");
 
     let iceberg_compactor_manager = Arc::new(IcebergCompactorManager::new());
@@ -486,6 +486,7 @@ pub async fn start_service_as_election_leader(
         metadata_manager.clone(),
         iceberg_compactor_manager.clone(),
         meta_metrics.clone(),
+        barrier_scheduler.clone(),
     );
 
     sub_tasks.push(IcebergCompactionManager::compaction_stat_loop(

@@ -1,4 +1,4 @@
-// Copyright 2024 RisingWave Labs
+// Copyright 2026 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -12,18 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub(crate) mod compaction_resolver_job;
-mod control;
-pub(crate) mod independent_job;
-mod recovery;
-mod state;
+//! Main-graph transient job that drives the pk-index compaction resolver pipeline
+//! while the streaming writer is paused.
 
-pub(super) use control::{
-    CheckpointControl, CheckpointControlEvent, DatabaseCheckpointControl,
-    DatabaseCheckpointControlMetrics,
-};
-pub(crate) use independent_job::{
-    BatchRefreshJobCheckpointControl, BatchRefreshLogicalFragments, BatchRefreshRenderResult,
-    CreatingStreamingJobControl, IndependentCheckpointJobControl,
-};
-pub(super) use state::BarrierWorkerState;
+mod control;
+mod render;
+
+pub(crate) use control::{CompactionResolveJob, CompactionResolveJobRegistry};
+pub(crate) use render::{build_resolver_stream_node, output_file_paths, render_resolver_fragment};

@@ -2061,6 +2061,32 @@ impl CatalogController {
         Ok(mview_fragment.into_iter().next().unwrap())
     }
 
+    /// Resolve the iceberg pk-index sink's writer fragment.
+    ///
+    /// The writer fragment is the one whose stream node tree contains an
+    /// `IcebergWithPkIndexWriter` node. Used by the compaction-trigger driver to build a
+    /// `Command::CreateCompactionResolveJob` after a coordinated compaction report. `sink_id` is
+    /// the sink's streaming job id.
+    pub async fn get_iceberg_pk_index_writer_fragment(
+        &self,
+        sink_id: JobId,
+    ) -> MetaResult<FragmentId> {
+        let inner = self.inner.read().await;
+        let fragments: Vec<fragment::Model> = FragmentModel::find()
+            .filter(fragment::Column::JobId.eq(sink_id))
+            .all(&inner.db)
+            .await?;
+
+        find_iceberg_pk_index_writer_fragment(
+            fragments
+                .iter()
+                .map(|f| (f.fragment_id, f.stream_node.to_protobuf())),
+        )
+        .ok_or_else(|| {
+            anyhow::anyhow!("no iceberg pk-index writer fragment found for sink {sink_id}").into()
+        })
+    }
+
     pub async fn has_table_been_migrated(&self, table_id: TableId) -> MetaResult<bool> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
@@ -2128,6 +2154,22 @@ impl CatalogController {
 
         Ok(())
     }
+}
+
+/// Find the first fragment whose stream node tree contains an iceberg pk-index writer.
+fn find_iceberg_pk_index_writer_fragment(
+    fragments: impl IntoIterator<Item = (FragmentId, PbStreamNode)>,
+) -> Option<FragmentId> {
+    fn contains_writer(node: &PbStreamNode) -> bool {
+        matches!(
+            &node.node_body,
+            Some(NodeBody::IcebergWithPkIndexWriter(body)) if body.pk_index_table.is_some()
+        ) || node.input.iter().any(contains_writer)
+    }
+
+    fragments
+        .into_iter()
+        .find_map(|(fragment_id, node)| contains_writer(&node).then_some(fragment_id))
 }
 
 #[cfg(test)]
@@ -2537,5 +2579,43 @@ mod tests {
         );
 
         assert_eq!(policy, "upstream_fragment([1, 2, 3])");
+    }
+
+    #[test]
+    fn test_find_iceberg_pk_index_writer_fragment() {
+        use risingwave_pb::stream_plan::IcebergWithPkIndexWriterNode;
+        use risingwave_pb::stream_plan::stream_node::NodeBody;
+
+        let writer_child = PbStreamNode {
+            node_body: Some(NodeBody::IcebergWithPkIndexWriter(Box::new(
+                IcebergWithPkIndexWriterNode {
+                    pk_index_table: Some(Default::default()),
+                    ..Default::default()
+                },
+            ))),
+            ..Default::default()
+        };
+        let writer_fragment_node = PbStreamNode {
+            identity: "PositionDeleteMerger".to_owned(),
+            input: vec![writer_child],
+            ..Default::default()
+        };
+        let other_fragment_node = PbStreamNode {
+            identity: "Merge".to_owned(),
+            node_body: Some(NodeBody::Merge(Box::default())),
+            ..Default::default()
+        };
+
+        let found = super::find_iceberg_pk_index_writer_fragment(vec![
+            (FragmentId::new(10), other_fragment_node.clone()),
+            (FragmentId::new(20), writer_fragment_node),
+        ]);
+        assert_eq!(found, Some(FragmentId::new(20)));
+
+        let none = super::find_iceberg_pk_index_writer_fragment(vec![(
+            FragmentId::new(10),
+            other_fragment_node,
+        )]);
+        assert_eq!(none, None);
     }
 }

@@ -13,7 +13,8 @@
 // limitations under the License.
 
 use std::collections::hash_map::Entry;
-use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Weak};
 use std::time::{Duration, Instant};
 
 use itertools::Itertools;
@@ -24,7 +25,7 @@ use risingwave_connector::connector_common::{
 use risingwave_connector::sink::SinkParam;
 use risingwave_connector::sink::catalog::{SinkCatalog, SinkId};
 use risingwave_connector::sink::iceberg::{
-    CompactionType, IcebergConfig, should_enable_iceberg_cow,
+    CompactionType, IcebergCommitResult, IcebergConfig, should_enable_iceberg_cow,
 };
 use risingwave_hummock_sdk::HummockContextId;
 use risingwave_pb::iceberg_compaction::IcebergCompactionTask;
@@ -36,6 +37,9 @@ use thiserror_ext::AsReport;
 use tokio::sync::oneshot;
 
 use super::*;
+use crate::barrier::Command::CreateCompactionResolveJob;
+use crate::barrier::CompactionResolveOverwrite;
+use crate::manager::iceberg_pk_index_sink::is_iceberg_pk_index_sink;
 
 /// Compaction track states using type-safe state machine pattern
 #[derive(Debug, Clone)]
@@ -64,6 +68,15 @@ enum CompactionTrackState {
         task_type: TaskType,
         pending_commit_count_at_dispatch: usize,
         report_deadline: Instant,
+        gc_watermark_snapshot: Option<IcebergCommittedSnapshot>,
+    },
+    /// The compactor report was accepted and the transient resolver owns the
+    /// result. The task is not complete until the resolver detach checkpoint and Iceberg
+    /// overwrite are durably committed.
+    Resolving {
+        task_id: IcebergCompactionTaskId,
+        task_type: TaskType,
+        pending_commit_count_at_dispatch: usize,
         gc_watermark_snapshot: Option<IcebergCommittedSnapshot>,
     },
 }
@@ -140,7 +153,8 @@ impl CompactionTrack {
                 ..
             } => *next_compaction_time,
             CompactionTrackState::PendingDispatch { .. }
-            | CompactionTrackState::InFlight { .. } => return false,
+            | CompactionTrackState::InFlight { .. }
+            | CompactionTrackState::Resolving { .. } => return false,
         };
 
         let time_ready = now >= next_compaction_time;
@@ -192,7 +206,8 @@ impl CompactionTrack {
                 ..
             } => next_task_type_override.unwrap_or(self.task_type),
             CompactionTrackState::PendingDispatch { task_type, .. }
-            | CompactionTrackState::InFlight { task_type, .. } => *task_type,
+            | CompactionTrackState::InFlight { task_type, .. }
+            | CompactionTrackState::Resolving { task_type, .. } => *task_type,
         }
     }
 
@@ -211,7 +226,8 @@ impl CompactionTrack {
                 task_type
             }
             CompactionTrackState::PendingDispatch { .. }
-            | CompactionTrackState::InFlight { .. } => {
+            | CompactionTrackState::InFlight { .. }
+            | CompactionTrackState::Resolving { .. } => {
                 unreachable!("Cannot start processing when already processing")
             }
         }
@@ -243,6 +259,9 @@ impl CompactionTrack {
             CompactionTrackState::InFlight { .. } => {
                 unreachable!("Cannot mark dispatched when already in flight")
             }
+            CompactionTrackState::Resolving { .. } => {
+                unreachable!("Cannot mark dispatched while resolving")
+            }
         };
         self.state = CompactionTrackState::InFlight {
             task_id,
@@ -265,6 +284,10 @@ impl CompactionTrack {
             | CompactionTrackState::InFlight {
                 gc_watermark_snapshot,
                 ..
+            }
+            | CompactionTrackState::Resolving {
+                gc_watermark_snapshot,
+                ..
             } => Some(gc_watermark_snapshot.as_ref()),
             CompactionTrackState::Idle { .. } => None,
         }
@@ -278,6 +301,7 @@ impl CompactionTrack {
         self.finish_action == CompactionTrackFinishAction::RemoveTrack
     }
 
+    #[cfg(test)]
     pub(super) fn is_processing_task(&self, task_id: IcebergCompactionTaskId) -> bool {
         matches!(
             &self.state,
@@ -285,6 +309,52 @@ impl CompactionTrack {
                 task_id: current_task_id,
                 ..
             } if *current_task_id == task_id
+        ) || matches!(
+            &self.state,
+            CompactionTrackState::Resolving {
+                task_id: current_task_id,
+                ..
+            } if *current_task_id == task_id
+        )
+    }
+
+    fn is_in_flight_task(&self, task_id: IcebergCompactionTaskId) -> bool {
+        matches!(
+            self.state,
+            CompactionTrackState::InFlight {
+                task_id: current,
+                ..
+            } if current == task_id
+        )
+    }
+
+    fn begin_resolving(&mut self, task_id: IcebergCompactionTaskId) {
+        let CompactionTrackState::InFlight {
+            task_id: in_flight_task_id,
+            task_type,
+            pending_commit_count_at_dispatch,
+            gc_watermark_snapshot,
+            ..
+        } = &mut self.state
+        else {
+            unreachable!("Cannot begin resolving without an in-flight task")
+        };
+        assert_eq!(*in_flight_task_id, task_id);
+        self.state = CompactionTrackState::Resolving {
+            task_id,
+            task_type: *task_type,
+            pending_commit_count_at_dispatch: *pending_commit_count_at_dispatch,
+            gc_watermark_snapshot: gc_watermark_snapshot.take(),
+        };
+    }
+
+    fn is_resolving(&self, task_id: IcebergCompactionTaskId) -> bool {
+        matches!(
+            self.state,
+            CompactionTrackState::Resolving {
+                task_id: current,
+                ..
+            } if current == task_id
         )
     }
 
@@ -298,9 +368,9 @@ impl CompactionTrack {
                 task_id: *task_id,
                 compactor_context_id: *compactor_context_id,
             }),
-            CompactionTrackState::Idle { .. } | CompactionTrackState::PendingDispatch { .. } => {
-                None
-            }
+            CompactionTrackState::Idle { .. }
+            | CompactionTrackState::PendingDispatch { .. }
+            | CompactionTrackState::Resolving { .. } => None,
         }
     }
 
@@ -317,6 +387,10 @@ impl CompactionTrack {
     fn finish_success(&mut self, now: Instant) -> CompactionTrackFinishAction {
         match &self.state {
             CompactionTrackState::InFlight {
+                pending_commit_count_at_dispatch,
+                ..
+            }
+            | CompactionTrackState::Resolving {
                 pending_commit_count_at_dispatch,
                 ..
             } => {
@@ -338,7 +412,7 @@ impl CompactionTrack {
 
     fn finish_failed(&mut self, now: Instant) -> CompactionTrackFinishAction {
         match &self.state {
-            CompactionTrackState::InFlight { .. } => {
+            CompactionTrackState::InFlight { .. } | CompactionTrackState::Resolving { .. } => {
                 self.state = CompactionTrackState::Idle {
                     next_compaction_time: now,
                     next_task_type_override: None,
@@ -378,6 +452,9 @@ impl CompactionTrack {
             CompactionTrackState::InFlight { .. } => {
                 unreachable!("Cannot revert a pre-dispatch failure after dispatch")
             }
+            CompactionTrackState::Resolving { .. } => {
+                unreachable!("Cannot revert a pre-dispatch failure while resolving")
+            }
         }
     }
 
@@ -396,7 +473,103 @@ impl CompactionTrack {
                 *next_compaction_time = now + Duration::from_secs(new_interval_sec);
             }
             CompactionTrackState::PendingDispatch { .. }
-            | CompactionTrackState::InFlight { .. } => {}
+            | CompactionTrackState::InFlight { .. }
+            | CompactionTrackState::Resolving { .. } => {}
+        }
+    }
+}
+
+/// Completion token owned by the barrier command and then by the live resolver
+/// job. Dropping the token without calling `finish(true)` makes the compaction
+/// retryable, which also covers command-application errors and database recovery.
+#[derive(educe::Educe)]
+#[educe(Debug)]
+pub struct CompactionResolveCompletion {
+    sink_id: SinkId,
+    task_id: IcebergCompactionTaskId,
+    #[educe(Debug(ignore))]
+    inner: Weak<RwLock<IcebergCompactionManagerInner>>,
+    finished: AtomicBool,
+}
+
+impl CompactionResolveCompletion {
+    fn new(
+        sink_id: SinkId,
+        task_id: IcebergCompactionTaskId,
+        inner: &Arc<RwLock<IcebergCompactionManagerInner>>,
+    ) -> Self {
+        Self {
+            sink_id,
+            task_id,
+            inner: Arc::downgrade(inner),
+            finished: AtomicBool::new(false),
+        }
+    }
+
+    #[cfg(test)]
+    pub(crate) fn for_test(sink_id: SinkId, task_id: IcebergCompactionTaskId) -> Self {
+        Self {
+            sink_id,
+            task_id,
+            inner: Weak::new(),
+            finished: AtomicBool::new(false),
+        }
+    }
+
+    pub(crate) fn finish(&self, success: bool) {
+        if self.finished.swap(true, Ordering::AcqRel) {
+            return;
+        }
+        let Some(inner) = self.inner.upgrade() else {
+            return;
+        };
+        let now = Instant::now();
+        let waiter = {
+            let mut guard = inner.write();
+            let Some(track) = guard.sink_schedules.get_mut(&self.sink_id) else {
+                return;
+            };
+            if !track.is_resolving(self.task_id) {
+                tracing::warn!(
+                    sink_id = %self.sink_id,
+                    task_id = %self.task_id,
+                    "ignoring stale compaction resolver completion"
+                );
+                return;
+            }
+            let finish_action = if success {
+                track.finish_success(now)
+            } else {
+                track.finish_failed(now)
+            };
+            let waiter = guard.manual_compaction_waiters.remove(&self.sink_id);
+            IcebergCompactionManager::apply_track_finish_action(
+                &mut guard,
+                self.sink_id,
+                finish_action,
+            );
+            waiter
+        };
+        if let Some(waiter) = waiter {
+            let result = if success {
+                Ok(self.task_id)
+            } else {
+                Err(anyhow::anyhow!(
+                    "Manual iceberg compaction resolver task {} for sink {} was abandoned",
+                    self.task_id,
+                    self.sink_id
+                )
+                .into())
+            };
+            let _ = waiter.send(result);
+        }
+    }
+}
+
+impl Drop for CompactionResolveCompletion {
+    fn drop(&mut self) {
+        if !self.finished.load(Ordering::Acquire) {
+            self.finish(false);
         }
     }
 }
@@ -450,13 +623,15 @@ impl IcebergCompactionHandle {
         let sink_catalog = SinkCatalog::from(prost_sink_catalog);
         let param = SinkParam::try_from_sink_catalog(sink_catalog)?;
 
+        let pk_index_coordinated = is_iceberg_pk_index_sink(&param.properties);
+
         let result =
             compactor.send_event(IcebergResponseEvent::CompactTask(IcebergCompactionTask {
                 task_id,
                 sink_id: self.sink_id.as_raw_id(),
                 props: param.properties,
                 task_type: self.task_type as i32,
-                pk_index_coordinated: false,
+                pk_index_coordinated,
             }));
 
         if result.is_ok() {
@@ -477,7 +652,7 @@ impl IcebergCompactionHandle {
                     iceberg_operation = "dispatch_task",
                     sink_id = %self.sink_id,
                     task_id = %task_id,
-                    "iceberg_compaction_dispatch_track_not_pending",
+                    "Iceberg compaction task send succeeded but track was no longer pending dispatch"
                 );
             }
             drop(guard);
@@ -502,7 +677,7 @@ impl IcebergCompactionHandle {
                 error = %e.as_report(),
                 sink_id = %self.sink_id,
                 task_id = %task_id,
-                "iceberg_compaction_cancel_after_schedule_removal_failed",
+                "Failed to cancel iceberg compaction task after schedule removal",
             );
         }
     }
@@ -889,6 +1064,14 @@ impl IcebergCompactionManager {
                     )
                     .into());
                 }
+                CompactionTrackState::Resolving { task_id, .. } => {
+                    return Err(anyhow!(
+                        "iceberg compaction resolver {} is already running for sink {}",
+                        task_id,
+                        sink_id
+                    )
+                    .into());
+                }
                 CompactionTrackState::Idle { .. } => {}
             }
         }
@@ -1087,7 +1270,8 @@ impl IcebergCompactionManager {
                             .as_secs(),
                     ),
                     CompactionTrackState::PendingDispatch { .. }
-                    | CompactionTrackState::InFlight { .. } => None,
+                    | CompactionTrackState::InFlight { .. }
+                    | CompactionTrackState::Resolving { .. } => None,
                 };
                 let is_triggerable = track.should_trigger(now);
 
@@ -1100,6 +1284,7 @@ impl IcebergCompactionManager {
                         CompactionTrackState::Idle { .. } => "idle".to_owned(),
                         CompactionTrackState::PendingDispatch { .. }
                         | CompactionTrackState::InFlight { .. } => "processing".to_owned(),
+                        CompactionTrackState::Resolving { .. } => "resolving".to_owned(),
                     },
                     next_compaction_after_sec,
                     pending_snapshot_count: Some(track.pending_commit_count),
@@ -1112,57 +1297,207 @@ impl IcebergCompactionManager {
         statuses
     }
 
-    pub fn handle_report_task(&self, report: IcebergReportTask) {
+    /// Route a pk-index coordinated-compaction payload to a transient resolver.
+    /// Returns `true` once ownership has transferred to the resolver job.
+    ///
+    /// A `false` result with a payload present tells the caller ([`Self::handle_report_task`]) to
+    /// mark the task failed so the scheduler retries it — silently treating this as success would
+    /// drop a completed rewrite (the output files would never be committed and the input files
+    /// would remain uncompacted forever, since the runner already ran the rewrite without
+    /// committing). This must never panic; every failure path is logged and converted to `false`.
+    async fn route_pk_index_compaction_report(
+        &self,
+        report: &IcebergReportTask,
+        sink_id: SinkId,
+        task_id: IcebergCompactionTaskId,
+    ) -> bool {
+        let Some(result) = &report.pk_index_result else {
+            return false;
+        };
+        let Some(output_metadata) = &result.output_files else {
+            tracing::warn!(
+                sink_id = %sink_id,
+                task_id = %task_id,
+                "pk-index compaction report has no output metadata; treating as failure"
+            );
+            return false;
+        };
+        let output_result = match IcebergCommitResult::try_from(output_metadata) {
+            Ok(result) => result,
+            Err(e) => {
+                tracing::warn!(
+                    sink_id = %sink_id,
+                    task_id = %task_id,
+                    error = %e.as_report(),
+                    "failed to decode pk-index output metadata; treating as failure"
+                );
+                return false;
+            }
+        };
+
+        // Do not commit the overwrite here. The resolver job commits it inside the paused window,
+        // after the writer relinquishes the stale index.
+        match self
+            .enqueue_compaction_resolve_job(
+                sink_id,
+                task_id,
+                output_result,
+                result.input_file_paths.clone(),
+                result.read_snapshot_id,
+            )
+            .await
+        {
+            Ok(()) => true,
+            Err(e) => {
+                tracing::warn!(
+                    error = %e.as_report(),
+                    sink_id = %sink_id,
+                    task_id = %task_id,
+                    "failed to enqueue pk-index compaction resolve job; task will be retried"
+                );
+                false
+            }
+        }
+    }
+
+    /// Enqueue the transient compaction-resolver job onto the sink's database barrier stream.
+    /// Resolves the writer fragment and its pk-index state table from the sink's fragment graph.
+    async fn enqueue_compaction_resolve_job(
+        &self,
+        sink_id: SinkId,
+        task_id: IcebergCompactionTaskId,
+        output_result: IcebergCommitResult,
+        input_file_paths: Vec<String>,
+        read_snapshot_id: i64,
+    ) -> MetaResult<()> {
+        let catalog_controller = &self.metadata_manager.catalog_controller;
+        let database_id = catalog_controller.get_object_database_id(sink_id).await?;
+        let writer_fragment_id = catalog_controller
+            .get_iceberg_pk_index_writer_fragment(sink_id.as_job_id())
+            .await?;
+
+        let completion = Arc::new(CompactionResolveCompletion::new(
+            sink_id,
+            task_id,
+            &self.inner,
+        ));
+        {
+            let mut guard = self.inner.write();
+            let track = guard.sink_schedules.get_mut(&sink_id).ok_or_else(|| {
+                anyhow::anyhow!("compaction track for sink {sink_id} disappeared")
+            })?;
+            if !track.is_in_flight_task(task_id) {
+                return Err(anyhow::anyhow!(
+                    "compaction task {task_id} for sink {sink_id} is no longer in flight"
+                )
+                .into());
+            }
+            track.begin_resolving(task_id);
+        }
+
+        let command = CreateCompactionResolveJob {
+            database_id,
+            sink_id,
+            task_id,
+            writer_fragment_id,
+            overwrite: CompactionResolveOverwrite {
+                output_result,
+                input_file_paths,
+                read_snapshot_id,
+            },
+            completion: completion.clone(),
+        };
+        tracing::info!(
+            %sink_id,
+            task_id = %task_id,
+            %writer_fragment_id,
+            "enqueuing pk-index compaction resolve job"
+        );
+        let result = self
+            .barrier_scheduler
+            .run_command_no_wait(database_id, command);
+        if result.is_err() {
+            completion.finish(false);
+        }
+        result
+    }
+
+    pub async fn handle_report_task(&self, report: IcebergReportTask) {
         let sink_id = SinkId::from(report.sink_id);
         let task_id = report.task_id;
         let status = IcebergReportTaskStatus::try_from(report.status)
             .unwrap_or(IcebergReportTaskStatus::Unspecified);
         let now = Instant::now();
 
+        // For success reports carrying a pk-index payload, enqueue the transient resolve job before
+        // touching the state machine: its outcome decides whether the track finishes successfully
+        // (enqueue ok) or as failed (enqueue error, so the scheduler retries). Reports without a
+        // payload (non-coordinated tasks, or coordinated tasks with nothing to compact) skip this
+        // entirely and behave exactly as today.
+        //
+        // Only route a report whose task is still the sink's in-flight task. The create arm also
+        // deduplicates concurrent live reports for the same sink.
+        let is_live_task = {
+            let guard = self.inner.read();
+            guard
+                .sink_schedules
+                .get(&sink_id)
+                .is_some_and(|track| track.is_in_flight_task(task_id))
+        };
+        let resolve_enqueued = if status == IcebergReportTaskStatus::Success && is_live_task {
+            self.route_pk_index_compaction_report(&report, sink_id, task_id)
+                .await
+        } else {
+            false
+        };
+
         let waiter = {
             let mut guard = self.inner.write();
             let mut waiter = None;
 
             match guard.sink_schedules.get_mut(&sink_id) {
-                Some(track) if track.is_processing_task(task_id) => {
+                Some(track) if resolve_enqueued && track.is_resolving(task_id) => {
+                    // The resolver completion token now owns this track.
+                }
+                Some(track) if track.is_in_flight_task(task_id) => {
                     let finish_action = match status {
-                        IcebergReportTaskStatus::Success => track.finish_success(now),
+                        IcebergReportTaskStatus::Success => {
+                            if report.pk_index_result.is_some() && resolve_enqueued {
+                                unreachable!("an enqueued resolver must transition the track")
+                            } else if report.pk_index_result.is_some() {
+                                tracing::warn!(
+                                    sink_id = %sink_id,
+                                    task_id = %task_id,
+                                    "pk-index compaction resolve was not enqueued; marking task failed for retry"
+                                );
+                                Some(track.finish_failed(now))
+                            } else {
+                                Some(track.finish_success(now))
+                            }
+                        }
                         IcebergReportTaskStatus::Failed | IcebergReportTaskStatus::Unspecified => {
                             tracing::warn!(
                                 iceberg_component = "compaction_scheduler",
                                 iceberg_operation = "handle_report",
                                 sink_id = %sink_id,
                                 task_id = %task_id,
-                                status = ?status,
-                                error_message = report.error_message.as_deref().unwrap_or_default(),
-                                "iceberg_compaction_task_reported_failure",
+                                error_message = report.error_message.clone().unwrap_or_default(),
+                                "Iceberg compaction task reported failure"
                             );
-                            track.finish_failed(now)
+                            Some(track.finish_failed(now))
                         }
                     };
 
-                    Self::apply_track_finish_action(&mut guard, sink_id, finish_action);
-                    waiter = guard.manual_compaction_waiters.remove(&sink_id);
+                    if let Some(finish_action) = finish_action {
+                        Self::apply_track_finish_action(&mut guard, sink_id, finish_action);
+                        waiter = guard.manual_compaction_waiters.remove(&sink_id);
+                    }
                 }
                 Some(_) => {
-                    tracing::warn!(
-                        iceberg_component = "compaction_scheduler",
-                        iceberg_operation = "handle_report",
-                        sink_id = %sink_id,
-                        task_id = %task_id,
-                        status = ?status,
-                        "iceberg_compaction_report_ignored_stale",
-                    );
+                    tracing::warn!(sink_id = %sink_id, task_id = %task_id, "Ignoring stale iceberg compaction report");
                 }
                 None => {
-                    tracing::warn!(
-                        iceberg_component = "compaction_scheduler",
-                        iceberg_operation = "handle_report",
-                        sink_id = %sink_id,
-                        task_id = %task_id,
-                        status = ?status,
-                        "iceberg_compaction_report_unknown_sink",
-                    );
+                    tracing::warn!(sink_id = %sink_id, task_id = %task_id, "Received iceberg compaction report for unknown sink");
                 }
             }
 
