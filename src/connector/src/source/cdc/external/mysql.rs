@@ -854,9 +854,7 @@ mod tests {
     use risingwave_common::types::DataType;
     use sea_schema::mysql::def::{ColumnType, IndexInfo, IndexOrder, IndexPart, IndexType};
 
-    use super::{
-        mysql_type_is_unsigned_bigint, primary_key_names, type_name_to_mysql_type,
-    };
+    use super::{mysql_type_is_unsigned_bigint, primary_key_names, type_name_to_mysql_type};
     use crate::source::cdc::external::mysql::MySqlExternalTable;
     use crate::source::cdc::external::{
         CdcOffset, ExternalTableConfig, ExternalTableReader, MySqlExternalTableReader, MySqlOffset,
