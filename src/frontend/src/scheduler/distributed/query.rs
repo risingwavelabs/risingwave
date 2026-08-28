@@ -72,9 +72,11 @@ pub struct QueryExecution {
     shutdown_tx: Sender<QueryMessage>,
     /// Identified by `process_id`, `secret_key`. Query in the same session should have same key.
     pub session_id: SessionId,
-    /// Whether a PostgreSQL `CancelRequest` for the session should cancel this query.
+    /// Whether a PostgreSQL `CancelRequest` for the session should cancel this query. For example,
+    /// the query for a cursor should never be canceled by the `CancelRequest` for the session.
     can_session_cancel: bool,
     /// Permit to execute the query. Once query finishes execution, this is dropped.
+    #[expect(dead_code)]
     pub permit: Option<tokio::sync::OwnedSemaphorePermit>,
 }
 

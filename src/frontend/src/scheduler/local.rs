@@ -65,7 +65,7 @@ pub struct LocalQueryExecution {
     session: Arc<SessionImpl>,
     worker_node_manager: WorkerNodeSelector,
     timeout: Option<Duration>,
-    shutdown_rx: Option<ShutdownToken>,
+    shutdown_rx: ShutdownToken,
 }
 
 impl LocalQueryExecution {
@@ -76,7 +76,7 @@ impl LocalQueryExecution {
         support_barrier_read: bool,
         session: Arc<SessionImpl>,
         timeout: Option<Duration>,
-        shutdown_rx: Option<ShutdownToken>,
+        shutdown_rx: ShutdownToken,
     ) -> Self {
         let worker_node_manager =
             WorkerNodeSelector::new(front_env.worker_node_manager_ref(), support_barrier_read);
@@ -92,13 +92,12 @@ impl LocalQueryExecution {
     }
 
     fn shutdown_rx(&self) -> ShutdownToken {
-        self.shutdown_rx
-            .clone()
-            .unwrap_or_else(|| self.session.reset_cancel_query_flag())
+        self.shutdown_rx.clone()
     }
 
     #[try_stream(ok = DataChunk, error = RwError)]
-    /// Builds and drains the local executor using the selected shutdown token.
+    /// Builds the local executor and yields chunks until it completes or is canceled. There could
+    /// be remaining chunks discarded after the cancel signal received.
     pub async fn run_inner(self, shutdown_rx: ShutdownToken) {
         debug!(
             query_id = %self.query.query_id,

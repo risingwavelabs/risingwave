@@ -106,15 +106,19 @@ impl QueryExecutionInfo {
 
 pub type QueryExecutionInfoRef = Arc<RwLock<QueryExecutionInfo>>;
 
-/// Cancels a distributed query if scheduling is dropped before stream ownership is transferred.
-struct PendingQueryRegistration {
+/// Guards the atomic handoff of a distributed query registration to [`DistributedQueryStream`].
+///
+/// If scheduling fails or is cancelled before the stream takes ownership, dropping this guard
+/// removes the query from the execution map and aborts it. Once the stream is created,
+/// [`Self::disarm`] transfers cleanup responsibility to the stream.
+struct DistributedQueryRegistrationAtomicGuard {
     query_id: QueryId,
     query_execution: Arc<QueryExecution>,
     query_execution_info: QueryExecutionInfoRef,
     armed: bool,
 }
 
-impl PendingQueryRegistration {
+impl DistributedQueryRegistrationAtomicGuard {
     /// Arms cleanup for a query that has been inserted into the execution map.
     fn new(
         query_id: QueryId,
@@ -135,7 +139,7 @@ impl PendingQueryRegistration {
     }
 }
 
-impl Drop for PendingQueryRegistration {
+impl Drop for DistributedQueryRegistrationAtomicGuard {
     fn drop(&mut self) {
         if !self.armed {
             return;
@@ -160,17 +164,6 @@ impl QueryExecutionInfo {
 
     pub fn delete_query(&mut self, query_id: &QueryId) {
         self.query_execution_map.remove(query_id);
-    }
-
-    pub fn abort_queries(&self, session_id: SessionId) {
-        for query in self.query_execution_map.values() {
-            // `QueryExecutionInfo` might have queries from different sessions.
-            if query.session_id == session_id && query.can_session_cancel() {
-                let query = query.clone();
-                // Spawn a task to abort. Avoid await point in this function.
-                tokio::spawn(async move { query.abort("cancelled by user".to_owned()).await });
-            }
-        }
     }
 }
 
@@ -273,11 +266,6 @@ impl QueryManager {
             .env()
             .query_manager()
             .add_query(query_id.clone(), query_execution.clone());
-        let mut registration = PendingQueryRegistration::new(
-            query_id.clone(),
-            query_execution.clone(),
-            self.query_execution_info.clone(),
-        );
 
         let worker_node_manager_reader = WorkerNodeSelector::new(
             self.worker_node_manager.clone(),
@@ -285,6 +273,11 @@ impl QueryManager {
         );
 
         // Starts the execution of the query.
+        let mut registration = DistributedQueryRegistrationAtomicGuard::new(
+            query_id.clone(),
+            query_execution.clone(),
+            self.query_execution_info.clone(),
+        );
         let query_result_fetcher = query_execution
             .start(
                 context.clone(),
@@ -295,15 +288,27 @@ impl QueryManager {
                 self.query_metrics.clone(),
             )
             .await?;
-        let stream = query_result_fetcher.stream_from_channel();
         registration.disarm();
-        Ok(stream)
+        Ok(query_result_fetcher.stream_from_channel())
     }
 
-    /// Cancels queries that opted into PostgreSQL session cancellation.
-    pub fn cancel_queries_in_session(&self, session_id: SessionId) {
+    /// Cancels distributed non-cursor queries in `session_id`.
+    ///
+    /// A PostgreSQL `CancelRequest` targets the session's current statement, so cursor-owned
+    /// queries are excluded: one session can have multiple cursor queries running concurrently.
+    /// When the session ends or the frontend shuts down, the session manager calls this method for
+    /// ordinary queries and separately shuts down the cursor manager, whose session-scoped token
+    /// terminates all cursor-owned queries.
+    pub fn cancel_non_cursor_queries_in_session(&self, session_id: SessionId) {
         let query_execution_info = self.query_execution_info.read().unwrap();
-        query_execution_info.abort_queries(session_id);
+        for query in query_execution_info.query_execution_map.values() {
+            // `QueryExecutionInfo` might have queries from different sessions.
+            if query.session_id == session_id && query.can_session_cancel() {
+                let query = query.clone();
+                // Spawn a task to abort. Avoid await point in this function.
+                tokio::spawn(async move { query.abort("cancelled by user".to_owned()).await });
+            }
+        }
     }
 
     /// Cancels one distributed query without blocking its caller on teardown.

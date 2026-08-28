@@ -657,17 +657,27 @@ pub fn local_execute(
     local_execute_inner(session, query, timeout, None, None)
 }
 
-/// Starts a cursor-owned local query using an explicit shutdown token and snapshot.
+/// Starts a cursor-owned local query using a cursor-scoped shutdown token and snapshot.
 pub fn local_execute_for_cursor(
     session: Arc<SessionImpl>,
     query: Query,
-    shutdown_rx: ShutdownToken,
+    query_shutdown_rx: ShutdownToken,
     snapshot: ReadSnapshot,
 ) -> Result<LocalQueryStream> {
-    local_execute_inner(session, query, None, Some(shutdown_rx), Some(snapshot))
+    local_execute_inner(
+        session,
+        query,
+        None,
+        Some(query_shutdown_rx),
+        Some(snapshot),
+    )
 }
 
 /// Builds a local query stream with caller-selected cancellation and snapshot ownership.
+///
+/// `shutdown_rx` supplies a caller-owned cancellation token. When it is `None`, normal statement
+/// execution resets and uses the session-scoped `CancelRequest` token. Resolving that fallback
+/// here lets [`LocalQueryExecution::new`] always receive a concrete token.
 ///
 /// `snapshot` supplies a caller-owned storage view. When it is `None`, the query uses the snapshot
 /// pinned by the current session transaction.
@@ -679,6 +689,7 @@ fn local_execute_inner(
     snapshot: Option<ReadSnapshot>,
 ) -> Result<LocalQueryStream> {
     let front_env = session.env();
+    let shutdown_rx = shutdown_rx.unwrap_or_else(|| session.reset_cancel_query_flag());
     let snapshot = snapshot.unwrap_or_else(|| session.pinned_snapshot());
 
     snapshot.fill_batch_query_epoch(&mut query)?;

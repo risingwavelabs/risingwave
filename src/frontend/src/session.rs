@@ -1399,7 +1399,9 @@ impl SessionImpl {
             info!("Cancel query request sent.");
         }
         info!("Trying to cancel query in distributed mode.");
-        self.env.query_manager().cancel_queries_in_session(self.id)
+        self.env
+            .query_manager()
+            .cancel_non_cursor_queries_in_session(self.id)
     }
 
     pub fn cancel_current_creating_job(&self) {
@@ -1599,7 +1601,8 @@ impl SessionManager for SessionManagerImpl {
     }
 
     fn end_session(&self, session: &Self::Session) {
-        session.get_cursor_manager().shutdown();
+        session.cancel_current_query();
+        session.get_cursor_manager().initiate_shutdown();
         self.delete_session(&session.session_id());
     }
 
@@ -1612,6 +1615,7 @@ impl SessionManager for SessionManagerImpl {
             .cloned()
             .collect_vec();
         for session in sessions {
+            session.cancel_current_query();
             session.get_cursor_manager().shutdown_and_wait().await;
         }
         // Clean up the session map.

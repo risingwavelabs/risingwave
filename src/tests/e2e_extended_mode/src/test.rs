@@ -45,14 +45,6 @@ macro_rules! test_eq {
     };
 }
 
-fn assert_contiguous_ids(rows: &[Row], first_id: i32, expected_len: usize) -> anyhow::Result<()> {
-    test_eq!(rows.len(), expected_len);
-    for (offset, row) in rows.iter().enumerate() {
-        test_eq!(row.get::<_, i32>(0), first_id + offset as i32);
-    }
-    Ok(())
-}
-
 impl TestSuite {
     pub fn new(
         db_name: String,
@@ -599,6 +591,18 @@ impl TestSuite {
         Ok(())
     }
 
+    fn assert_contiguous_ids(
+        rows: &[Row],
+        first_id: i32,
+        expected_len: usize,
+    ) -> anyhow::Result<()> {
+        test_eq!(rows.len(), expected_len);
+        for (offset, row) in rows.iter().enumerate() {
+            test_eq!(row.get::<_, i32>(0), first_id + offset as i32);
+        }
+        Ok(())
+    }
+
     async fn subscription_fetch_cancel(&self, is_distributed: bool) -> anyhow::Result<()> {
         let client = self.create_client(is_distributed).await?;
         let suffix = if is_distributed { "dist" } else { "local" };
@@ -651,7 +655,7 @@ impl TestSuite {
             client.query("fetch 1 from cur with (timeout = '10s')", &[]),
         )
         .await??;
-        assert_contiguous_ids(&rows, 1, 1)?;
+        Self::assert_contiguous_ids(&rows, 1, 1)?;
 
         let rows = tokio::time::timeout(
             Duration::from_secs(2),
@@ -701,7 +705,7 @@ impl TestSuite {
             client.query("fetch 1 from query_cancel_cur", &[]),
         )
         .await??;
-        assert_contiguous_ids(&rows, 1, 1)?;
+        Self::assert_contiguous_ids(&rows, 1, 1)?;
 
         let rows = client.query("fetch 1 from query_cancel_cur", &[]).await?;
         test_eq!(rows.len(), 0);
@@ -769,7 +773,7 @@ impl TestSuite {
             let query_rows = client
                 .query(&format!("fetch {FETCH_SIZE} from query_timeout_cur"), &[])
                 .await?;
-            assert_contiguous_ids(&query_rows, first_id, FETCH_SIZE)?;
+            Self::assert_contiguous_ids(&query_rows, first_id, FETCH_SIZE)?;
 
             let subscription_rows = client
                 .query(
@@ -777,7 +781,7 @@ impl TestSuite {
                     &[],
                 )
                 .await?;
-            assert_contiguous_ids(&subscription_rows, first_id, FETCH_SIZE)?;
+            Self::assert_contiguous_ids(&subscription_rows, first_id, FETCH_SIZE)?;
 
             if batch_index + 1 < TOTAL_ROWS / FETCH_SIZE {
                 tokio::time::sleep(Duration::from_millis(600)).await;
