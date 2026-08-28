@@ -10,9 +10,11 @@ permissions:
 
 jobs:
   label-community-contributor:
-    # Only label unaffiliated users and contributors, not owners, members, or collaborators.
+    # External community contributors submit pull requests from forks. Requiring a fork also
+    # avoids misclassifying private organization members whose association appears as CONTRIBUTOR.
     if: >-
       github.event.pull_request.user.type == 'User' &&
+      github.event.pull_request.head.repo.full_name != github.repository &&
       contains(
         fromJSON('["NONE", "CONTRIBUTOR", "FIRST_TIMER", "FIRST_TIME_CONTRIBUTOR"]'),
         github.event.pull_request.author_association
