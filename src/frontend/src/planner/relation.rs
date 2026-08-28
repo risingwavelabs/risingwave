@@ -326,6 +326,7 @@ impl Planner {
                 && let Some(log_store_scan) = self.plan_iceberg_log_store_scan(
                     &base_table.table_catalog,
                     logical_iceberg_intermediate_scan.schema(),
+                    &logical_source.core.column_catalog,
                     committed_epoch,
                 )?
             {
@@ -782,6 +783,7 @@ source: {:?}",
         &self,
         table_catalog: &TableCatalog,
         target_schema: &Schema,
+        source_columns: &[ColumnCatalog],
         committed_epoch: Option<u64>,
     ) -> Result<Option<PlanRef>> {
         let Some(sink_name) = table_catalog.iceberg_sink_name() else {
@@ -830,8 +832,23 @@ source: {:?}",
         else {
             return Ok(None);
         };
-        let payload_col_idx = (row_op_idx + 1..log_store_table.columns().len()).collect_vec();
-        if payload_col_idx.len() != target_schema.len() {
+        // The log-store payload can contain hidden upstream columns such as `_rw_timestamp`
+        // that are not part of the Iceberg table schema. Do not let those implementation-only
+        // columns prevent the pending rows from being planned.
+        let payload_col_idx = log_store_table
+            .columns()
+            .iter()
+            .enumerate()
+            .skip(row_op_idx + 1)
+            .filter_map(|(idx, column)| (!column.is_hidden).then_some(idx))
+            .collect_vec();
+        if source_columns.len() != target_schema.len()
+            || payload_col_idx.len()
+                != source_columns
+                    .iter()
+                    .filter(|column| !column.is_hidden)
+                    .count()
+        {
             return Ok(None);
         }
 
@@ -873,16 +890,18 @@ source: {:?}",
 
         let source_types = log_store_scan.schema().data_types();
         let target_types = target_schema.data_types();
-        if source_types == target_types {
-            return Ok(Some(log_store_scan));
-        }
-
-        let cast_exprs = source_types
-            .into_iter()
+        let mut payload_idx = 0;
+        let project_exprs = source_columns
+            .iter()
             .zip_eq_fast(target_types)
-            .enumerate()
-            .map(|(idx, (source_type, target_type))| {
-                let mut expr: ExprImpl = InputRef::new(idx, source_type).into();
+            .map(|(source_column, target_type)| {
+                if source_column.is_hidden {
+                    return Ok(Literal::new(None, target_type).into());
+                }
+
+                let source_type = source_types[payload_idx].clone();
+                let mut expr: ExprImpl = InputRef::new(payload_idx, source_type).into();
+                payload_idx += 1;
                 FunctionCall::cast_mut(&mut expr, &target_type, CastContext::Explicit).map_err(
                     |error| {
                         ErrorCode::InternalError(format!(
@@ -894,7 +913,7 @@ source: {:?}",
                 Ok(expr)
             })
             .collect::<Result<Vec<_>>>()?;
-        Ok(Some(LogicalProject::create(log_store_scan, cast_exprs)))
+        Ok(Some(LogicalProject::create(log_store_scan, project_exprs)))
     }
 
     fn get_iceberg_source_by_table_catalog(
