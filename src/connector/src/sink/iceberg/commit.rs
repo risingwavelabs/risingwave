@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -28,7 +29,7 @@ use risingwave_common::array::arrow::arrow_schema_iceberg::{
 };
 use risingwave_common::array::arrow::{IcebergArrowConvert, IcebergCreateTableArrowConvert};
 use risingwave_common::bail;
-use risingwave_common::catalog::Field;
+use risingwave_common::catalog::{Field, RISINGWAVE_ICEBERG_COMMIT_EPOCH};
 use risingwave_common::error::IcebergError;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::connector_service::sink_metadata::Metadata::Serialized;
@@ -739,6 +740,10 @@ impl IcebergSinkCommitter {
                         .fast_append()
                         .set_snapshot_id(snapshot_id)
                         .set_target_branch(target_branch.clone())
+                        .set_snapshot_properties(HashMap::from([(
+                            RISINGWAVE_ICEBERG_COMMIT_EPOCH.to_owned(),
+                            epoch.to_string(),
+                        )]))
                         .add_data_files(data_files);
 
                     let tx = append_action.apply(txn).map_err(|err| {
