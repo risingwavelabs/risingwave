@@ -138,7 +138,9 @@ rdkafka = { workspace = true, features = [
     "ssl",
     "gssapi",
     "zstd",
+    # Keep release builds from dynamically linking libssl through libcurl.
     "curl",
+    "curl-static",
 ] }
 redis = { workspace = true, features = [
     "aio",
