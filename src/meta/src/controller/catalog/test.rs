@@ -24,7 +24,8 @@ mod tests {
     use risingwave_pb::common::{HostAddress, WorkerNode, WorkerType, worker_node};
     use risingwave_pb::meta::SubscribeType;
     use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
-    use risingwave_pb::stream_plan::PbStreamNode;
+    use risingwave_pb::stream_plan::stream_node::PbNodeBody;
+    use risingwave_pb::stream_plan::{PbStreamNode, StreamScanNode, StreamScanType};
     use tokio::sync::{mpsc, oneshot};
 
     use crate::barrier::Command;
@@ -2657,6 +2658,97 @@ mod tests {
                 .one(db)
                 .await?
                 .is_none()
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_get_table_change_log_truncate_info() -> MetaResult<()> {
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let pb_view = PbView {
+            schema_id: TEST_SCHEMA_ID,
+            database_id: TEST_DATABASE_ID,
+            name: "change_log_upstream".to_owned(),
+            owner: TEST_OWNER_ID as _,
+            sql: "CREATE VIEW change_log_upstream AS SELECT 1".to_owned(),
+            ..Default::default()
+        };
+        mgr.create_view(pb_view, HashSet::new()).await?;
+        let upstream_table_id: TableId = View::find()
+            .select_only()
+            .column(view::Column::ViewId)
+            .filter(view::Column::Name.eq("change_log_upstream"))
+            .into_tuple::<ViewId>()
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap()
+            .as_object_id()
+            .as_table_id();
+        let mut subscription = PbSubscription {
+            name: "change_log_subscription".to_owned(),
+            definition: "CREATE SUBSCRIPTION change_log_subscription FROM change_log_upstream"
+                .to_owned(),
+            retention_seconds: 123,
+            database_id: TEST_DATABASE_ID,
+            schema_id: TEST_SCHEMA_ID,
+            dependent_table_id: upstream_table_id,
+            owner: TEST_OWNER_ID as _,
+            subscription_state: SubscriptionState::Created as _,
+            ..Default::default()
+        };
+        mgr.create_subscription_catalog(&mut subscription).await?;
+
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let (job_id, _, state_table_id) =
+            insert_test_streaming_job(&txn, "snapshot_job", true, None).await?;
+        let mut job = streaming_job::Entity::find_by_id(job_id)
+            .one(&txn)
+            .await?
+            .unwrap()
+            .into_active_model();
+        job.job_status = Set(JobStatus::Creating);
+        job.update(&txn).await?;
+        fragment::ActiveModel {
+            fragment_id: Set(FragmentId::new(100)),
+            job_id: Set(job_id),
+            fragment_type_mask: Set(FragmentTypeFlag::SnapshotBackfillStreamScan as i32),
+            distribution_type: Set(fragment::DistributionType::Hash),
+            stream_node: Set(StreamNode::from(&PbStreamNode {
+                node_body: Some(PbNodeBody::StreamScan(Box::new(StreamScanNode {
+                    table_id: upstream_table_id,
+                    stream_scan_type: StreamScanType::SnapshotBackfill as i32,
+                    snapshot_backfill_epoch: None,
+                    ..Default::default()
+                }))),
+                ..Default::default()
+            })),
+            state_table_ids: Set(vec![state_table_id].into()),
+            upstream_fragment_id: Set(I32Array::default()),
+            vnode_count: Set(1),
+            parallelism: Set(None),
+        }
+        .insert(&txn)
+        .await?;
+        txn.commit().await?;
+        drop(inner);
+
+        let truncate_info = mgr.get_table_change_log_truncate_info().await?;
+        assert_eq!(
+            truncate_info.subscription_retention_seconds,
+            HashMap::from([(upstream_table_id, 123)])
+        );
+        assert_eq!(truncate_info.independent_jobs.len(), 1);
+        let independent_job = &truncate_info.independent_jobs[0];
+        assert_eq!(independent_job.job_id, job_id);
+        assert_eq!(
+            independent_job.state_table_ids,
+            HashSet::from([state_table_id])
+        );
+        assert_eq!(
+            independent_job.upstream_table_snapshot_epochs,
+            HashMap::from([(upstream_table_id, None)])
         );
 
         Ok(())

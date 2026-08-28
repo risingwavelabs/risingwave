@@ -674,6 +674,22 @@ pub async fn start_service_as_election_leader(
                 let catalog_controller = catalog_controller.clone();
                 Box::pin(async move {
                     catalog_controller
+                        .get_table_change_log_truncate_info()
+                        .await
+                        .map(Some)
+                        .unwrap_or_else(|e| {
+                            tracing::warn!(err = %e.as_report(), "failed to collect table change log retention metadata");
+                            None
+                        })
+                })
+            })
+        },
+        {
+            let catalog_controller = metadata_manager.catalog_controller.clone();
+            Box::new(move || {
+                let catalog_controller = catalog_controller.clone();
+                Box::pin(async move {
+                    catalog_controller
                         .get_pinned_snapshot_epochs()
                         .await
                         .map(Some)
