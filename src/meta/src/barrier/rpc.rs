@@ -30,6 +30,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::Epoch;
+use risingwave_common::util::retry::exponential_backoff;
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_common::util::tracing::TracingContext;
 use risingwave_connector::source::SplitImpl;
@@ -58,7 +59,6 @@ use risingwave_pb::stream_service::{
 use risingwave_rpc_client::StreamingControlHandle;
 use thiserror_ext::AsReport;
 use tokio::time::{Instant, sleep};
-use tokio_retry::strategy::ExponentialBackoff;
 use tracing::{debug, error, info, warn};
 use uuid::Uuid;
 
@@ -218,9 +218,8 @@ impl ControlStreamManager {
             }
         }
         let node_host = node.host.clone().unwrap();
-        let mut backoff = ExponentialBackoff::from_millis(100)
-            .max_delay(Duration::from_secs(3))
-            .factor(5);
+        let mut backoff =
+            exponential_backoff(Duration::from_millis(100), 5, Duration::from_secs(3));
         const MAX_RETRY: usize = 5;
         for i in 1..=MAX_RETRY {
             match context
@@ -315,9 +314,11 @@ impl ControlStreamManager {
     ) -> BoxFuture<'static, StreamingControlHandle> {
         async move {
             let mut attempt = 0;
-            let backoff = ExponentialBackoff::from_millis(100)
-                .max_delay(Duration::from_mins(1))
-                .factor(5);
+            let backoff = exponential_backoff(
+                Duration::from_millis(100),
+                5,
+                Duration::from_mins(1),
+            );
             let init_request = PbInitRequest { term_id };
             for delay in backoff {
                 attempt += 1;

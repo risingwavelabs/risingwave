@@ -89,9 +89,9 @@ use crate::controller::utils::{
     PartialObject, build_object_group_for_delete, check_if_belongs_to_iceberg_table,
     check_relation_name_duplicate, check_sink_into_table_cycle, ensure_job_not_canceled,
     ensure_object_id, ensure_user_id, fetch_target_fragments, get_belong_objects,
-    get_belong_objects_by_ids, get_table_columns, grant_default_privileges_automatically,
-    insert_fragment_relations, list_object_dependencies_by_object_id, list_user_info_by_ids,
-    upsert_user_privileges,
+    get_belong_objects_by_ids, get_referring_objects, get_table_columns,
+    grant_default_privileges_automatically, insert_fragment_relations,
+    list_object_dependencies_by_object_id, list_user_info_by_ids, upsert_user_privileges,
 };
 use crate::error::MetaErrorInner;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
@@ -1435,21 +1435,21 @@ impl CatalogController {
         // 1. check version.
         streaming_job.verify_version_for_replace(&txn).await?;
         // 2. check concurrent replace.
-        let referring_cnt = ObjectDependency::find()
-            .join(
-                JoinType::InnerJoin,
-                object_dependency::Relation::Object1.def(),
-            )
-            .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
+        let referring_objects =
+            get_referring_objects(id.as_object_id(), streaming_job.object_type(), &txn).await?;
+        let referring_job_ids = referring_objects
+            .iter()
+            .map(|object| object.oid.as_job_id())
+            .collect_vec();
+        let non_created_referring_job_count = StreamingJobModel::find()
             .filter(
-                object_dependency::Column::Oid
-                    .eq(id)
-                    .and(object::Column::ObjType.eq(ObjectType::Table))
+                streaming_job::Column::JobId
+                    .is_in(referring_job_ids)
                     .and(streaming_job::Column::JobStatus.ne(JobStatus::Created)),
             )
             .count(&txn)
             .await?;
-        if referring_cnt != 0 {
+        if non_created_referring_job_count != 0 {
             return Err(MetaError::permission_denied(
                 "job is being altered or referenced by some creating jobs",
             ));
@@ -3788,6 +3788,10 @@ impl CatalogController {
                     PbNodeBody::Sink(node) => {
                         rate_limit = node.rate_limit;
                         node_name = Some("SINK");
+                    }
+                    PbNodeBody::Dml(node) => {
+                        rate_limit = node.rate_limit;
+                        node_name = Some("DML");
                     }
                     _ => {}
                 }

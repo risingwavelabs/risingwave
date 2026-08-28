@@ -176,10 +176,10 @@ hashbrown0_16 = { package = "hashbrown", version = "0.16.1", features = [
 ] }
 hytra = "0.1"
 # branch dev_rebase_main_20260807
-iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "c39309944d2b7f1c81ae2d24c3aa32fd1da66590" }
-iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "c39309944d2b7f1c81ae2d24c3aa32fd1da66590" }
-iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "c39309944d2b7f1c81ae2d24c3aa32fd1da66590" }
-iceberg-storage-opendal = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "c39309944d2b7f1c81ae2d24c3aa32fd1da66590", features = [
+iceberg = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "5020f93609cd61cb993682eb65852e4f565613e3" }
+iceberg-catalog-glue = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "5020f93609cd61cb993682eb65852e4f565613e3" }
+iceberg-catalog-rest = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "5020f93609cd61cb993682eb65852e4f565613e3" }
+iceberg-storage-opendal = { git = "https://github.com/risingwavelabs/iceberg-rust.git", rev = "5020f93609cd61cb993682eb65852e4f565613e3", features = [
     "opendal-azblob",
     "opendal-azdls",
     "opendal-fs",
@@ -200,7 +200,8 @@ mysql_async = { version = "0.36", features = [
     "native-tls-tls",
     "rust_decimal",
 ] }
-opendal = "0.55"
+opendal = "0.58.1"
+opendal-http-transport-reqwest = "0.58.1"
 openssl = "0.10.80"
 opentelemetry = "0.31"
 opentelemetry-otlp = { version = "0.31", features = ["grpc-tonic"] }
