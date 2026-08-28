@@ -20,7 +20,7 @@ use pg_interval::Interval;
 use rust_decimal::Decimal;
 use tokio::select;
 use tokio_postgres::types::Type;
-use tokio_postgres::{Client, NoTls};
+use tokio_postgres::{Client, NoTls, Row};
 
 pub struct TestSuite {
     config: String,
@@ -43,6 +43,14 @@ macro_rules! test_eq {
             }
         }
     };
+}
+
+fn assert_contiguous_ids(rows: &[Row], first_id: i32, expected_len: usize) -> anyhow::Result<()> {
+    test_eq!(rows.len(), expected_len);
+    for (offset, row) in rows.iter().enumerate() {
+        test_eq!(row.get::<_, i32>(0), first_id + offset as i32);
+    }
+    Ok(())
 }
 
 impl TestSuite {
@@ -85,8 +93,12 @@ impl TestSuite {
         self.simple_cancel(true).await?;
         self.complex_cancel(false).await?;
         self.complex_cancel(true).await?;
+        self.query_cursor_fetch_cancel(false).await?;
+        self.query_cursor_fetch_cancel(true).await?;
         self.subscription_fetch_cancel(false).await?;
         self.subscription_fetch_cancel(true).await?;
+        self.cursor_queries_survive_statement_timeout(false).await?;
+        self.cursor_queries_survive_statement_timeout(true).await?;
         self.subquery_with_param().await?;
         self.create_mview_with_parameter().await?;
         Ok(())
@@ -611,26 +623,191 @@ impl TestSuite {
 
         let cancel_token = client.cancel_token();
         let fetch_handle = tokio::spawn(async move {
-            client
+            let result = client
                 .query("fetch 1 from cur with (timeout = '60s')", &[])
-                .await
+                .await;
+            (client, result)
         });
 
         tokio::time::sleep(Duration::from_secs(1)).await;
         cancel_token.cancel_query(NoTls).await?;
 
-        let result = tokio::time::timeout(Duration::from_secs(10), fetch_handle).await??;
+        let (client, result) =
+            tokio::time::timeout(Duration::from_secs(10), fetch_handle).await??;
         if result.is_ok() {
             return Err(anyhow!(
                 "subscription cursor fetch should be cancelled by CancelRequest"
             ));
         }
 
-        let cleanup_client = self.create_client(is_distributed).await?;
-        cleanup_client
+        let producer = self.create_client(is_distributed).await?;
+        producer
+            .execute(&format!("insert into {table_name} values (1)"), &[])
+            .await?;
+        producer.execute("flush", &[]).await?;
+
+        let rows = tokio::time::timeout(
+            Duration::from_secs(10),
+            client.query("fetch 1 from cur with (timeout = '10s')", &[]),
+        )
+        .await??;
+        assert_contiguous_ids(&rows, 1, 1)?;
+
+        let rows = tokio::time::timeout(
+            Duration::from_secs(2),
+            client.query("fetch 1 from cur", &[]),
+        )
+        .await??;
+        test_eq!(rows.len(), 0);
+
+        client.execute("close cur", &[]).await?;
+        client
             .execute(&format!("drop subscription {subscription_name}"), &[])
             .await?;
-        cleanup_client
+        client
+            .execute(&format!("drop table {table_name}"), &[])
+            .await?;
+        Ok(())
+    }
+
+    async fn query_cursor_fetch_cancel(&self, is_distributed: bool) -> anyhow::Result<()> {
+        let client = self.create_client(is_distributed).await?;
+        client
+            .execute(
+                "declare query_cancel_cur cursor for select 1::int as id, pg_sleep(3)",
+                &[],
+            )
+            .await?;
+
+        let cancel_token = client.cancel_token();
+        let fetch_handle = tokio::spawn(async move {
+            let result = client.query("fetch 1 from query_cancel_cur", &[]).await;
+            (client, result)
+        });
+
+        tokio::time::sleep(Duration::from_millis(500)).await;
+        cancel_token.cancel_query(NoTls).await?;
+
+        let (client, result) =
+            tokio::time::timeout(Duration::from_secs(10), fetch_handle).await??;
+        if result.is_ok() {
+            return Err(anyhow!(
+                "query cursor fetch should be cancelled by CancelRequest"
+            ));
+        }
+
+        let rows = tokio::time::timeout(
+            Duration::from_secs(10),
+            client.query("fetch 1 from query_cancel_cur", &[]),
+        )
+        .await??;
+        assert_contiguous_ids(&rows, 1, 1)?;
+
+        let rows = client.query("fetch 1 from query_cancel_cur", &[]).await?;
+        test_eq!(rows.len(), 0);
+        client.execute("close query_cancel_cur", &[]).await?;
+        Ok(())
+    }
+
+    async fn cursor_queries_survive_statement_timeout(
+        &self,
+        is_distributed: bool,
+    ) -> anyhow::Result<()> {
+        const TOTAL_ROWS: usize = 100_000;
+        const FETCH_SIZE: usize = 10_000;
+
+        let client = self.create_client(is_distributed).await?;
+        let suffix = if is_distributed { "dist" } else { "local" };
+        let table_name = format!("cursor_timeout_t_{suffix}");
+        let subscription_name = format!("cursor_timeout_sub_{suffix}");
+
+        client
+            .execute(
+                &format!("create table {table_name}(id int primary key)"),
+                &[],
+            )
+            .await?;
+        client
+            .execute(
+                &format!(
+                    "create subscription {subscription_name} from {table_name} with(retention = '1D')"
+                ),
+                &[],
+            )
+            .await?;
+        client
+            .execute(
+                &format!("insert into {table_name} select * from generate_series(1, {TOTAL_ROWS})"),
+                &[],
+            )
+            .await?;
+        client.execute("flush", &[]).await?;
+
+        client
+            .execute("set statement_timeout = '500ms'", &[])
+            .await?;
+        client
+            .execute(
+                &format!(
+                    "declare query_timeout_cur cursor for select id from {table_name} order by id"
+                ),
+                &[],
+            )
+            .await?;
+        client
+            .execute(
+                &format!(
+                    "declare subscription_timeout_cur subscription cursor for {subscription_name} full"
+                ),
+                &[],
+            )
+            .await?;
+
+        for batch_index in 0..TOTAL_ROWS / FETCH_SIZE {
+            let first_id = (batch_index * FETCH_SIZE + 1) as i32;
+
+            let query_rows = client
+                .query(&format!("fetch {FETCH_SIZE} from query_timeout_cur"), &[])
+                .await?;
+            assert_contiguous_ids(&query_rows, first_id, FETCH_SIZE)?;
+
+            let subscription_rows = client
+                .query(
+                    &format!("fetch {FETCH_SIZE} from subscription_timeout_cur"),
+                    &[],
+                )
+                .await?;
+            assert_contiguous_ids(&subscription_rows, first_id, FETCH_SIZE)?;
+
+            if batch_index + 1 < TOTAL_ROWS / FETCH_SIZE {
+                tokio::time::sleep(Duration::from_millis(600)).await;
+            }
+        }
+
+        client.execute("set statement_timeout = 0", &[]).await?;
+        test_eq!(
+            client
+                .query("fetch 1 from query_timeout_cur", &[])
+                .await?
+                .len(),
+            0
+        );
+        test_eq!(
+            client
+                .query("fetch 1 from subscription_timeout_cur", &[])
+                .await?
+                .len(),
+            0
+        );
+
+        client.execute("close query_timeout_cur", &[]).await?;
+        client
+            .execute("close subscription_timeout_cur", &[])
+            .await?;
+        client
+            .execute(&format!("drop subscription {subscription_name}"), &[])
+            .await?;
+        client
             .execute(&format!("drop table {table_name}"), &[])
             .await?;
         Ok(())
