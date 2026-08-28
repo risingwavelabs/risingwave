@@ -17,13 +17,15 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{Display, Formatter};
 use std::mem;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 use std::task::{Context, Poll};
 use std::time::Instant;
 
 use anyhow::anyhow;
 use bytes::Bytes;
+use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
+use futures_async_stream::try_stream;
 use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::StatementType;
@@ -36,8 +38,6 @@ use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::{DataType, ScalarImpl, StructType, StructValue};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::HummockVersionId;
-use tokio::sync::{mpsc, oneshot};
-use tokio::task::JoinHandle;
 
 use super::SessionImpl;
 use crate::catalog::TableId;
@@ -60,26 +60,27 @@ use crate::scheduler::plan_fragmenter::QueryId;
 use crate::scheduler::{
     DistributedQueryStream, LocalQueryStream, QueryManager, ReadSnapshot, SchedulerError,
 };
-use crate::utils::Condition;
+use crate::utils::{Condition, WithOptions};
 use crate::{OptimizerContext, OptimizerContextRef, TableCatalog};
 
-/// Cancellation and buffering resources shared by one cursor's foreground and producer tasks.
+/// Cancellation resources shared by a cursor and its underlying query executors.
 struct CursorLifecycle {
+    /// Sender used to stop every query executor owned by this cursor.
     shutdown_tx: ShutdownSender,
+    /// Cloneable token through which the cursor and its query executors observe cursor shutdown.
     shutdown_rx: ShutdownToken,
+    /// Cloneable token through which this cursor observes termination of its frontend session.
     session_shutdown_rx: ShutdownToken,
-    data_chunk_channel_capacity: usize,
 }
 
 impl CursorLifecycle {
     /// Creates lifecycle resources for a cursor in the given session.
-    fn new(session_shutdown_rx: ShutdownToken, data_chunk_channel_capacity: usize) -> Self {
+    fn new(session_shutdown_rx: ShutdownToken) -> Self {
         let (shutdown_tx, shutdown_rx) = ShutdownToken::new();
         Self {
             shutdown_tx,
             shutdown_rx,
             session_shutdown_rx,
-            data_chunk_channel_capacity,
         }
     }
 
@@ -98,7 +99,7 @@ impl CursorLifecycle {
         (self.shutdown_rx.clone(), self.session_shutdown_rx.clone())
     }
 
-    /// Signals this cursor's producer and underlying query executor to stop cooperatively.
+    /// Signals this cursor's underlying query executor to stop cooperatively.
     fn shutdown(&self) {
         self.shutdown_tx.cancel();
     }
@@ -110,24 +111,31 @@ impl Drop for CursorLifecycle {
     }
 }
 
-/// The local or distributed query stream owned by a cursor producer.
+/// The local or distributed query stream owned by a cursor.
 enum CursorQueryStreamInner {
     /// A query executed by the frontend's local batch executor.
     Local {
+        /// Data chunks produced by the local batch executor.
         stream: LocalQueryStream,
+        /// Sender used to cancel the local executor if this stream is dropped before EOF.
         shutdown_tx: ShutdownSender,
     },
     /// A query scheduled through the distributed query manager.
     Distributed {
+        /// Data chunks produced by the distributed query execution.
         stream: DistributedQueryStream,
+        /// Manager used to cancel the distributed query if this stream is dropped before EOF.
         query_manager: QueryManager,
+        /// Identifier passed to [`QueryManager`] when cancelling the distributed query.
         query_id: QueryId,
     },
 }
 
 /// A cursor-owned query stream that cancels unfinished execution when dropped.
 pub struct CursorQueryStream {
+    /// Concrete local or distributed query stream and its cancellation resources.
     inner: CursorQueryStreamInner,
+    /// Whether the concrete stream has reached EOF and therefore no longer needs cancellation.
     finished: bool,
 }
 
@@ -195,11 +203,17 @@ impl Drop for CursorQueryStream {
 /// Metadata needed to format a raw data chunk for PostgreSQL.
 enum CursorDataChunkKind {
     /// A chunk from a regular query cursor.
-    Query { fields: Arc<Vec<Field>> },
+    Query {
+        /// Fields used to format every raw column in the query chunk.
+        fields: Arc<Vec<Field>>,
+    },
     /// A chunk from either the snapshot or log-store phase of a subscription cursor.
     Subscription {
+        /// Field mapping that was current when this chunk was produced.
         fields: Arc<FieldsManager>,
+        /// Whether this chunk came from the initial upstream-table snapshot.
         from_snapshot: bool,
+        /// Snapshot epoch or log-store timestamp represented by this chunk.
         rw_timestamp: u64,
     },
 }
@@ -207,28 +221,83 @@ enum CursorDataChunkKind {
 #[derive(Clone)]
 /// One raw chunk produced independently of any PostgreSQL `FETCH` format.
 struct CursorDataChunk {
+    /// Unformatted rows received from the local or distributed query executor.
     chunk: DataChunk,
+    /// Metadata needed to format and project the raw rows for a later `FETCH`.
     kind: CursorDataChunkKind,
 }
 
+impl CursorDataChunk {
+    /// Converts this raw chunk into rows for one PostgreSQL `FETCH`.
+    fn into_pg_rows(
+        self,
+        formats: &[Format],
+        session_data: &StaticSessionData,
+    ) -> Result<Vec<Row>> {
+        match self.kind {
+            CursorDataChunkKind::Query { fields } => {
+                let column_types = fields.iter().map(|field| field.data_type()).collect_vec();
+                to_pg_rows(&column_types, self.chunk, formats, session_data)
+            }
+            CursorDataChunkKind::Subscription {
+                fields,
+                from_snapshot,
+                rw_timestamp,
+            } => {
+                let (row_fields, row_formats) =
+                    fields.get_row_stream_fields_and_formats(formats, from_snapshot)?;
+                let column_types = row_fields
+                    .iter()
+                    .map(|field| field.data_type())
+                    .collect_vec();
+                let raw_formats = if row_formats.is_empty() {
+                    &[][..]
+                } else {
+                    &row_formats[..column_types.len()]
+                };
+                to_pg_rows(&column_types, self.chunk, raw_formats, session_data)?
+                    .into_iter()
+                    .map(|row| {
+                        let mut row = SubscriptionCursor::build_row(
+                            row.take(),
+                            (!from_snapshot).then_some(rw_timestamp),
+                            &row_formats,
+                            session_data,
+                        )?;
+                        Ok(row.project(&fields.row_output_col_indices))
+                    })
+                    .try_collect()
+            }
+        }
+    }
+}
+
 #[derive(Clone)]
-/// A non-row event that separates phases of cursor production.
+/// A non-row event that separates phases of cursor execution.
 enum CursorDataChunkBarrier {
     /// The only query owned by a regular query cursor has completed.
     QueryEnd,
-    /// A subscription query has started and exposes a new producer state to the foreground.
+    /// A subscription query has started and exposes a new stream state to the foreground.
     SubscriptionQueryStarted {
-        /// The producer state corresponding to the newly started query.
-        state: SubscriptionCursorState,
+        /// Whether the query reads the initial upstream-table snapshot.
+        from_snapshot: bool,
+        /// The snapshot epoch or log-store timestamp read by the query.
+        rw_timestamp: u64,
+        /// The next log-store timestamp expected after this query, when known.
+        expected_timestamp: Option<u64>,
+        /// The time at which query initialization began.
+        init_query_timer: Instant,
         /// The output fields for chunks produced by the query.
         output_fields: Vec<Field>,
         /// The time at which this subscription query's retained data is no longer valid.
         expires_at: Instant,
     },
-    /// A subscription query completed and the producer advanced to the supplied next position.
-    SubscriptionBatch {
-        /// The next log-store position the producer will inspect.
-        next_state: SubscriptionCursorState,
+    /// A subscription query completed and the stream advanced to the supplied next epoch.
+    SubscriptionNewEpoch {
+        /// The timestamp from which the stream will search.
+        seek_timestamp: u64,
+        /// The exact next timestamp required to detect a retention gap, when known.
+        expected_timestamp: Option<u64>,
     },
     /// No subscription log-store epoch is currently available.
     SubscriptionIdle,
@@ -237,7 +306,7 @@ enum CursorDataChunkBarrier {
 }
 
 #[derive(Clone)]
-/// A raw chunk or producer control barrier sent to the cursor foreground.
+/// A raw chunk or cursor control barrier.
 enum CursorDataChunkEvent {
     /// A data chunk whose rows can be formatted by the current `FETCH`.
     Chunk(CursorDataChunk),
@@ -245,84 +314,32 @@ enum CursorDataChunkEvent {
     Barrier(CursorDataChunkBarrier),
 }
 
-/// A producer-backed channel shared by concrete query and subscription data streams.
-struct CursorDataChunkReceiver {
-    /// Receives raw chunks and producer barriers without PostgreSQL row formatting.
-    event_rx: mpsc::Receiver<std::result::Result<CursorDataChunkEvent, BoxedError>>,
-    /// Completes after the producer observes lifecycle shutdown or reaches a terminal event.
-    producer_handle: Option<JoinHandle<()>>,
-}
-
-impl Drop for CursorDataChunkReceiver {
-    fn drop(&mut self) {
-        let Some(producer_handle) = self.producer_handle.take() else {
-            return;
-        };
-        if let Ok(runtime) = tokio::runtime::Handle::try_current() {
-            runtime.spawn(async move {
-                if let Err(error) = producer_handle.await {
-                    tracing::warn!(%error, "cursor producer task failed during shutdown");
-                }
-            });
-        }
-    }
-}
-
-/// A regular query cursor's immediately started raw data stream.
+/// A regular query cursor's demand-driven raw data stream.
 struct QueryCursorDataChunkStream {
-    /// Shared channel and producer-task teardown resources.
-    receiver: CursorDataChunkReceiver,
+    /// Boxed coroutine that owns the query stream and emits chunks followed by `QueryEnd`.
+    inner: BoxStream<'static, std::result::Result<CursorDataChunkEvent, BoxedError>>,
 }
 
 impl QueryCursorDataChunkStream {
-    /// Starts a producer for an already-created regular query cursor.
-    fn new(
-        mut query_stream: CursorQueryStream,
-        fields: Vec<Field>,
-        lifecycle: &CursorLifecycle,
-    ) -> Self {
-        let (event_tx, event_rx) = mpsc::channel(lifecycle.data_chunk_channel_capacity);
-        let mut shutdown_rx = lifecycle.shutdown_rx.clone();
-        let mut session_shutdown_rx = lifecycle.session_shutdown_rx.clone();
-        let query_fields = Arc::new(fields);
-        let producer_handle = tokio::spawn(async move {
-            loop {
-                let next = tokio::select! {
-                    biased;
-                    _ = shutdown_rx.cancelled() => break,
-                    _ = session_shutdown_rx.cancelled() => break,
-                    next = query_stream.next() => next,
-                };
-                let event = match next {
-                    Some(Ok(chunk)) => Ok(CursorDataChunkEvent::Chunk(CursorDataChunk {
-                        chunk,
-                        kind: CursorDataChunkKind::Query {
-                            fields: query_fields.clone(),
-                        },
-                    })),
-                    Some(Err(error)) => Err(error),
-                    None => Ok(CursorDataChunkEvent::Barrier(
-                        CursorDataChunkBarrier::QueryEnd,
-                    )),
-                };
-                let terminal = !matches!(&event, Ok(CursorDataChunkEvent::Chunk(_)));
-                let sent = tokio::select! {
-                    biased;
-                    _ = shutdown_rx.cancelled() => false,
-                    _ = session_shutdown_rx.cancelled() => false,
-                    result = event_tx.send(event) => result.is_ok(),
-                };
-                if terminal || !sent {
-                    break;
-                }
-            }
-        });
+    /// Wraps an already-created query stream without adding another task or channel.
+    fn new(query_stream: CursorQueryStream, fields: Vec<Field>) -> Self {
         Self {
-            receiver: CursorDataChunkReceiver {
-                event_rx,
-                producer_handle: Some(producer_handle),
-            },
+            inner: Self::event_stream(query_stream, fields).boxed(),
         }
+    }
+
+    #[try_stream(ok = CursorDataChunkEvent, error = BoxedError)]
+    async fn event_stream(mut query_stream: CursorQueryStream, fields: Vec<Field>) {
+        let query_fields = Arc::new(fields);
+        while let Some(chunk) = query_stream.next().await {
+            yield CursorDataChunkEvent::Chunk(CursorDataChunk {
+                chunk: chunk?,
+                kind: CursorDataChunkKind::Query {
+                    fields: query_fields.clone(),
+                },
+            });
+        }
+        yield CursorDataChunkEvent::Barrier(CursorDataChunkBarrier::QueryEnd);
     }
 }
 
@@ -330,49 +347,190 @@ impl Stream for QueryCursorDataChunkStream {
     type Item = std::result::Result<CursorDataChunkEvent, BoxedError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.get_mut().receiver.event_rx.poll_recv(cx)
+        self.get_mut().inner.poll_next_unpin(cx)
     }
 }
 
-/// A subscription cursor's deferred raw data stream.
+/// A subscription cursor's demand-driven raw data stream.
 struct SubscriptionCursorDataChunkStream {
-    /// Shared channel and producer-task teardown resources.
-    receiver: CursorDataChunkReceiver,
-    /// Releases the deferred subscription producer on the first `FETCH`.
-    start_tx: Option<oneshot::Sender<()>>,
+    /// Boxed coroutine that owns all query execution and state transitions for the subscription.
+    inner: BoxStream<'static, std::result::Result<CursorDataChunkEvent, BoxedError>>,
 }
 
 impl SubscriptionCursorDataChunkStream {
-    /// Starts a deferred subscription producer when a subscription cursor's first `FETCH` begins.
-    fn new(mut producer: SubscriptionDataChunkProducer, lifecycle: &CursorLifecycle) -> Self {
-        let (event_tx, event_rx) = mpsc::channel(lifecycle.data_chunk_channel_capacity);
-        let (start_tx, start_rx) = oneshot::channel();
-        let mut shutdown_rx = lifecycle.shutdown_rx.clone();
-        let mut session_shutdown_rx = lifecycle.session_shutdown_rx.clone();
-        let producer_handle = tokio::spawn(async move {
-            tokio::select! {
-                biased;
-                _ = shutdown_rx.cancelled() => return,
-                _ = session_shutdown_rx.cancelled() => return,
-                _ = start_rx => {}
-            }
-            producer
-                .run(event_tx, &mut shutdown_rx, &mut session_shutdown_rx)
-                .await;
-        });
+    /// Owns the complete subscription execution coroutine without spawning another task.
+    #[allow(clippy::too_many_arguments)]
+    fn new(
+        subscription: Arc<SubscriptionCatalog>,
+        dependent_table_id: TableId,
+        handler_context: SubscriptionCursorHandlerContext,
+        fields_manager: FieldsManager,
+        state: SubscriptionCursorDataChunkStreamState,
+        cursor_metrics: Arc<CursorMetrics>,
+        query_shutdown_tx: ShutdownSender,
+        query_shutdown_rx: ShutdownToken,
+    ) -> Self {
         Self {
-            receiver: CursorDataChunkReceiver {
-                event_rx,
-                producer_handle: Some(producer_handle),
-            },
-            start_tx: Some(start_tx),
+            inner: Self::event_stream(
+                subscription,
+                dependent_table_id,
+                handler_context,
+                fields_manager,
+                state,
+                cursor_metrics,
+                query_shutdown_tx,
+                query_shutdown_rx,
+            )
+            .boxed(),
         }
     }
 
-    /// Starts this subscription producer exactly once.
-    fn start(&mut self) {
-        if let Some(start_tx) = self.start_tx.take() {
-            _ = start_tx.send(());
+    #[try_stream(ok = CursorDataChunkEvent, error = BoxedError)]
+    #[allow(clippy::too_many_arguments)]
+    async fn event_stream(
+        subscription: Arc<SubscriptionCatalog>,
+        dependent_table_id: TableId,
+        handler_context: SubscriptionCursorHandlerContext,
+        mut fields_manager: FieldsManager,
+        mut state: SubscriptionCursorDataChunkStreamState,
+        cursor_metrics: Arc<CursorMetrics>,
+        query_shutdown_tx: ShutdownSender,
+        query_shutdown_rx: ShutdownToken,
+    ) {
+        loop {
+            let current_state =
+                mem::replace(&mut state, SubscriptionCursorDataChunkStreamState::Invalid);
+            match current_state {
+                SubscriptionCursorDataChunkStreamState::InitLogStoreQuery {
+                    seek_timestamp,
+                    expected_timestamp,
+                } => {
+                    let handler_args = handler_context.handler_args()?;
+                    let (rw_timestamp, next_expected_timestamp) =
+                        match SubscriptionCursor::get_next_rw_timestamp(
+                            seek_timestamp,
+                            dependent_table_id,
+                            expected_timestamp,
+                            handler_args,
+                            &subscription,
+                        )
+                        .await?
+                        {
+                            (Some(rw_timestamp), next_expected_timestamp) => {
+                                (rw_timestamp, next_expected_timestamp)
+                            }
+                            (None, _) => {
+                                state = SubscriptionCursorDataChunkStreamState::InitLogStoreQuery {
+                                    seek_timestamp,
+                                    expected_timestamp,
+                                };
+                                yield CursorDataChunkEvent::Barrier(
+                                    CursorDataChunkBarrier::SubscriptionIdle,
+                                );
+                                let session = handler_context.handler_args()?.session;
+                                session
+                                    .env
+                                    .hummock_snapshot_manager()
+                                    .wait_table_change_log_notification(
+                                        dependent_table_id,
+                                        seek_timestamp,
+                                    )
+                                    .await?;
+                                continue;
+                            }
+                        };
+
+                    let handler_args = handler_context.handler_args()?;
+                    let snapshot = ReadSnapshot::FrontendPinned {
+                        snapshot: handler_args
+                            .session
+                            .env
+                            .hummock_snapshot_manager()
+                            .acquire(),
+                    };
+                    let (query_stream, init_query_timer, catalog) =
+                        SubscriptionCursor::initiate_query(
+                            Some(rw_timestamp),
+                            dependent_table_id,
+                            handler_args,
+                            query_shutdown_tx.clone(),
+                            query_shutdown_rx.clone(),
+                            snapshot,
+                        )
+                        .await?;
+                    let schema_changed = fields_manager.try_refill_fields(&catalog);
+                    state = SubscriptionCursorDataChunkStreamState::Fetch {
+                        from_snapshot: false,
+                        rw_timestamp,
+                        query_stream,
+                        expected_timestamp: next_expected_timestamp,
+                        init_query_timer,
+                    };
+                    yield CursorDataChunkEvent::Barrier(
+                        CursorDataChunkBarrier::SubscriptionQueryStarted {
+                            from_snapshot: false,
+                            rw_timestamp,
+                            expected_timestamp: next_expected_timestamp,
+                            init_query_timer,
+                            output_fields: fields_manager.get_output_fields(),
+                            expires_at: Instant::now()
+                                + Duration::from_secs(subscription.retention_seconds),
+                        },
+                    );
+                    if schema_changed {
+                        yield CursorDataChunkEvent::Barrier(CursorDataChunkBarrier::SchemaChanged);
+                    }
+                }
+                SubscriptionCursorDataChunkStreamState::Fetch {
+                    from_snapshot,
+                    rw_timestamp,
+                    mut query_stream,
+                    expected_timestamp,
+                    init_query_timer,
+                } => match query_stream.next().await {
+                    Some(Ok(chunk)) => {
+                        state = SubscriptionCursorDataChunkStreamState::Fetch {
+                            from_snapshot,
+                            rw_timestamp,
+                            query_stream,
+                            expected_timestamp,
+                            init_query_timer,
+                        };
+                        yield CursorDataChunkEvent::Chunk(CursorDataChunk {
+                            chunk,
+                            kind: CursorDataChunkKind::Subscription {
+                                fields: Arc::new(fields_manager.clone()),
+                                from_snapshot,
+                                rw_timestamp,
+                            },
+                        });
+                    }
+                    Some(Err(error)) => Err(error)?,
+                    None => {
+                        cursor_metrics
+                            .subscription_cursor_query_duration
+                            .with_label_values(&[&subscription.name])
+                            .observe(init_query_timer.elapsed().as_millis() as _);
+                        let (seek_timestamp, expected_timestamp) =
+                            if let Some(expected_timestamp) = expected_timestamp {
+                                (expected_timestamp, Some(expected_timestamp))
+                            } else {
+                                (rw_timestamp + 1, None)
+                            };
+                        state = SubscriptionCursorDataChunkStreamState::InitLogStoreQuery {
+                            seek_timestamp,
+                            expected_timestamp,
+                        };
+                        yield CursorDataChunkEvent::Barrier(
+                            CursorDataChunkBarrier::SubscriptionNewEpoch {
+                                seek_timestamp,
+                                expected_timestamp,
+                            },
+                        );
+                    }
+                },
+                SubscriptionCursorDataChunkStreamState::Invalid => return Ok(()),
+            }
         }
     }
 }
@@ -381,33 +539,43 @@ impl Stream for SubscriptionCursorDataChunkStream {
     type Item = std::result::Result<CursorDataChunkEvent, BoxedError>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
-        self.get_mut().receiver.event_rx.poll_recv(cx)
+        self.get_mut().inner.poll_next_unpin(cx)
     }
 }
 
 /// A raw event retained until a successful `FETCH` commits past it.
 struct CachedCursorDataChunkEvent {
+    /// Raw chunk or control barrier already polled from the irreversible underlying stream.
     event: CursorDataChunkEvent,
-    row_offset: usize,
+    /// Number of leading formatted output rows already committed for a chunk; zero for a barrier.
+    row_offset_in_chunk: usize,
 }
 
 /// Rows formatted for the current `FETCH` and their next raw-chunk offset.
 struct FormattedCursorDataChunk {
+    /// Formatted-row offset immediately after the last row tentatively yielded by this `FETCH`.
     next_offset: usize,
+    /// Formatted rows in this raw chunk that have not yet been yielded by this `FETCH`.
     rows: VecDeque<Row>,
 }
 
 /// Tentative row and raw-event progress shared by every kind of `FETCH` command.
-struct CursorPgResponseFetchStateCommon {
+struct CursorPgResponseFetchStateInner {
+    /// PostgreSQL result formats requested by this `FETCH`.
     formats: Vec<Format>,
+    /// Session settings captured when this `FETCH` began and needed for row formatting.
     session_data: StaticSessionData,
+    /// Tentative index of the cached event currently being processed or to be processed next.
     next_event_index: usize,
-    current_chunk: Option<FormattedCursorDataChunk>,
+    /// Current raw chunk formatted using this `FETCH`'s formats, if one is being processed.
+    current_formatted_chunk: Option<FormattedCursorDataChunk>,
+    /// Number of rows tentatively returned to this `FETCH` so far.
     yielded_rows: usize,
+    /// Whether cursor-specific boundary handling has ended this `FETCH`.
     finished: bool,
 }
 
-impl CursorPgResponseFetchStateCommon {
+impl CursorPgResponseFetchStateInner {
     /// Creates uncommitted progress for a new `FETCH` command.
     fn new(formats: &[Format], session: &SessionImpl) -> Self {
         Self {
@@ -416,7 +584,7 @@ impl CursorPgResponseFetchStateCommon {
                 timezone: session.config().timezone(),
             },
             next_event_index: 0,
-            current_chunk: None,
+            current_formatted_chunk: None,
             yielded_rows: 0,
             finished: false,
         }
@@ -428,13 +596,13 @@ enum CursorPgResponseFetchState {
     /// Tentative progress for a regular query cursor.
     Query {
         /// Row and raw-event progress shared with subscription cursors.
-        common: CursorPgResponseFetchStateCommon,
+        inner: CursorPgResponseFetchStateInner,
     },
-    /// Tentative progress and producer metadata for a subscription cursor.
+    /// Tentative progress and raw-stream metadata for a subscription cursor.
     Subscription {
         /// Row and raw-event progress shared with regular query cursors.
-        common: CursorPgResponseFetchStateCommon,
-        /// Whether an idle `FETCH` waits for the producer to receive future data.
+        inner: CursorPgResponseFetchStateInner,
+        /// Whether an idle `FETCH` waits for the raw stream to receive future data.
         wait_for_data: bool,
         /// Producer position to commit after this `FETCH` succeeds.
         next_subscription_state: Option<SubscriptionCursorState>,
@@ -442,49 +610,39 @@ enum CursorPgResponseFetchState {
         next_output_fields: Option<Vec<Field>>,
         /// Retention deadline to commit after this `FETCH` succeeds.
         next_expires_at: Option<Instant>,
-        /// Producer-idle status to commit after this `FETCH` succeeds.
-        next_subscription_idle: Option<bool>,
     },
 }
 
 impl CursorPgResponseFetchState {
     /// Returns the tentative progress shared by both cursor kinds.
-    fn common(&self) -> &CursorPgResponseFetchStateCommon {
+    fn inner(&self) -> &CursorPgResponseFetchStateInner {
         match self {
-            Self::Query { common } | Self::Subscription { common, .. } => common,
+            Self::Query { inner } | Self::Subscription { inner, .. } => inner,
         }
     }
 
     /// Returns mutable tentative progress shared by both cursor kinds.
-    fn common_mut(&mut self) -> &mut CursorPgResponseFetchStateCommon {
+    fn inner_mut(&mut self) -> &mut CursorPgResponseFetchStateInner {
         match self {
-            Self::Query { common } | Self::Subscription { common, .. } => common,
+            Self::Query { inner } | Self::Subscription { inner, .. } => inner,
         }
     }
 
     /// Returns whether an idle subscription `FETCH` should wait for newly produced data.
     fn wait_for_data(&self) -> bool {
         match self {
-            Self::Query { .. } => false,
+            Self::Query { .. } => unreachable!("query fetch cannot wait for new data"),
             Self::Subscription { wait_for_data, .. } => *wait_for_data,
         }
     }
 
-    /// Records the subscription-idle status to commit after a successful `FETCH`.
-    fn set_next_subscription_idle(&mut self, idle: bool) {
-        match self {
-            Self::Query { .. } => unreachable!("query fetch cannot update subscription state"),
-            Self::Subscription {
-                next_subscription_idle,
-                ..
-            } => *next_subscription_idle = Some(idle),
-        }
-    }
-
     /// Records metadata for a newly started subscription query.
-    fn set_subscription_query_started(
+    fn update_when_subscription_query_started(
         &mut self,
-        state: SubscriptionCursorState,
+        from_snapshot: bool,
+        rw_timestamp: u64,
+        expected_timestamp: Option<u64>,
+        init_query_timer: Instant,
         output_fields: Vec<Field>,
         expires_at: Instant,
     ) {
@@ -496,31 +654,50 @@ impl CursorPgResponseFetchState {
                 next_expires_at,
                 ..
             } => {
-                *next_subscription_state = Some(state);
+                *next_subscription_state = Some(SubscriptionCursorState::Fetch {
+                    from_snapshot,
+                    rw_timestamp,
+                    expected_timestamp,
+                    init_query_timer,
+                });
                 *next_output_fields = Some(output_fields);
                 *next_expires_at = Some(expires_at);
             }
         }
     }
 
-    /// Records the next subscription log-store position.
-    fn set_next_subscription_state(&mut self, state: SubscriptionCursorState) {
+    /// Records the next subscription log-store epoch.
+    fn update_when_subscription_new_epoch(
+        &mut self,
+        seek_timestamp: u64,
+        expected_timestamp: Option<u64>,
+    ) {
         match self {
             Self::Query { .. } => unreachable!("query fetch cannot update subscription state"),
             Self::Subscription {
                 next_subscription_state,
                 ..
-            } => *next_subscription_state = Some(state),
+            } => {
+                *next_subscription_state = Some(SubscriptionCursorState::InitLogStoreQuery {
+                    seek_timestamp,
+                    expected_timestamp,
+                });
+            }
         }
     }
 }
 
 /// State shared by concrete query and subscription PostgreSQL response streams.
-struct CursorPgResponseStreamCommon<S> {
+struct CursorPgResponseStreamInner<S> {
+    /// Irreversible source of raw chunks and ordered cursor control barriers.
     data_stream: S,
+    /// Raw events polled from `data_stream` but not yet fully committed by a successful `FETCH`.
     cached_events: VecDeque<CachedCursorDataChunkEvent>,
+    /// Tentative progress for the active `FETCH`, or `None` between commands.
     fetch_state: Option<CursorPgResponseFetchState>,
+    /// Output fields committed by successful preceding `FETCH` commands.
     output_fields: Vec<Field>,
+    /// Whether this response stream has entered an unrecoverable terminal state.
     failed: bool,
 }
 
@@ -528,13 +705,13 @@ struct CursorPgResponseStreamCommon<S> {
 enum CursorPgResponsePollItem {
     /// A formatted PostgreSQL row.
     Row(Row),
-    /// A producer control barrier interpreted by the concrete response stream.
+    /// A cursor-specific control barrier interpreted by the concrete response stream.
     Barrier(CursorDataChunkBarrier),
-    /// The underlying cursor producer channel closed.
-    DataStreamEnd,
+    /// The underlying raw data stream ended.
+    DataChunkStreamEnd,
 }
 
-impl<S> CursorPgResponseStreamCommon<S> {
+impl<S> CursorPgResponseStreamInner<S> {
     /// Creates shared response-stream state around one concrete raw-event stream.
     fn new(data_stream: S, output_fields: Vec<Field>) -> Self {
         Self {
@@ -551,16 +728,16 @@ impl<S> CursorPgResponseStreamCommon<S> {
         self.output_fields.clone()
     }
 
-    /// Returns whether the producer reported a terminal internal failure through the channel.
+    /// Returns whether the raw data stream reported an internal failure.
     fn is_failed(&self) -> bool {
         self.failed
     }
 
     /// Returns whether the active `FETCH` has reached its command boundary.
-    fn fetch_finished(&self) -> bool {
+    fn is_fetch_finished(&self) -> bool {
         self.fetch_state
             .as_ref()
-            .is_some_and(|state| state.common().finished)
+            .is_some_and(|state| state.inner().finished)
     }
 
     /// Marks the active `FETCH` as complete without committing its tentative position yet.
@@ -568,7 +745,7 @@ impl<S> CursorPgResponseStreamCommon<S> {
         self.fetch_state
             .as_mut()
             .expect("response stream must be inside a FETCH")
-            .common_mut()
+            .inner_mut()
             .finished = true;
     }
 
@@ -587,23 +764,27 @@ impl<S> CursorPgResponseStreamCommon<S> {
     }
 
     /// Commits raw-event progress and returns cursor-kind-specific metadata to its owner.
-    fn commit_fetch_state(&mut self) -> Option<CursorPgResponseFetchState> {
+    ///
+    /// Fully consumed cached events are removed. If the active chunk was only partly consumed,
+    /// its raw event is retained and its committed `row_offset` is advanced so the next `FETCH`
+    /// can reformat the chunk and resume at the first uncommitted row.
+    fn commit_fetch(&mut self) -> Option<CursorPgResponseFetchState> {
         let mut fetch_state = self.fetch_state.take()?;
         let next_event_index = {
-            let common = fetch_state.common_mut();
-            if let Some(chunk) = common.current_chunk.take() {
+            let inner = fetch_state.inner_mut();
+            if let Some(chunk) = inner.current_formatted_chunk.take() {
+                let event = self
+                    .cached_events
+                    .get_mut(inner.next_event_index)
+                    .expect("current formatted chunk must have a cached raw chunk");
+                debug_assert!(matches!(event.event, CursorDataChunkEvent::Chunk(_)));
                 if chunk.rows.is_empty() {
-                    common.next_event_index += 1;
+                    inner.next_event_index += 1;
                 } else {
-                    let event = self
-                        .cached_events
-                        .get_mut(common.next_event_index)
-                        .expect("current formatted chunk must have a cached raw chunk");
-                    debug_assert!(matches!(event.event, CursorDataChunkEvent::Chunk(_)));
-                    event.row_offset = chunk.next_offset;
+                    event.row_offset_in_chunk = chunk.next_offset;
                 }
             }
-            common.next_event_index
+            inner.next_event_index
         };
         drop(self.cached_events.drain(..next_event_index));
         Some(fetch_state)
@@ -613,56 +794,13 @@ impl<S> CursorPgResponseStreamCommon<S> {
     fn abort_fetch(&mut self) {
         self.fetch_state = None;
     }
-
-    /// Formats a raw query or subscription chunk for one PostgreSQL `FETCH`.
-    fn format_chunk(
-        data: &CursorDataChunk,
-        formats: &[Format],
-        session_data: &StaticSessionData,
-    ) -> Result<Vec<Row>> {
-        match &data.kind {
-            CursorDataChunkKind::Query { fields } => {
-                let column_types = fields.iter().map(|field| field.data_type()).collect_vec();
-                to_pg_rows(&column_types, data.chunk.clone(), formats, session_data)
-            }
-            CursorDataChunkKind::Subscription {
-                fields,
-                from_snapshot,
-                rw_timestamp,
-            } => {
-                let (row_fields, row_formats) =
-                    fields.get_row_stream_fields_and_formats(formats, *from_snapshot)?;
-                let column_types = row_fields
-                    .iter()
-                    .map(|field| field.data_type())
-                    .collect_vec();
-                let raw_formats = if row_formats.is_empty() {
-                    &[][..]
-                } else {
-                    &row_formats[..column_types.len()]
-                };
-                to_pg_rows(&column_types, data.chunk.clone(), raw_formats, session_data)?
-                    .into_iter()
-                    .map(|row| {
-                        let mut row = SubscriptionCursor::build_row(
-                            row.take(),
-                            (!*from_snapshot).then_some(*rw_timestamp),
-                            &row_formats,
-                            session_data,
-                        )?;
-                        Ok(row.project(&fields.row_output_col_indices))
-                    })
-                    .try_collect()
-            }
-        }
-    }
 }
 
-impl<S> CursorPgResponseStreamCommon<S>
+impl<S> CursorPgResponseStreamInner<S>
 where
     S: Stream<Item = std::result::Result<CursorDataChunkEvent, BoxedError>> + Unpin,
 {
-    /// Polls one formatted row, control barrier, or producer-channel termination.
+    /// Polls one formatted row, control barrier, or raw-stream termination.
     fn poll_next_item(&mut self, cx: &mut Context<'_>) -> Poll<Result<CursorPgResponsePollItem>> {
         loop {
             let Some(fetch_state) = self.fetch_state.as_mut() else {
@@ -673,66 +811,71 @@ where
             };
 
             {
-                let common = fetch_state.common_mut();
-                if let Some(chunk) = common.current_chunk.as_mut()
-                    && let Some(row) = chunk.rows.pop_front()
-                {
-                    chunk.next_offset += 1;
-                    common.yielded_rows += 1;
-                    return Poll::Ready(Ok(CursorPgResponsePollItem::Row(row)));
+                // The first level cache: consume the current formatted chunk's remaining rows
+                // before poll the next chunk.
+                let inner = fetch_state.inner_mut();
+                if let Some(chunk) = inner.current_formatted_chunk.as_mut() {
+                    if let Some(row) = chunk.rows.pop_front() {
+                        chunk.next_offset += 1;
+                        inner.yielded_rows += 1;
+                        return Poll::Ready(Ok(CursorPgResponsePollItem::Row(row)));
+                    } else {
+                        // Dispose the completely-consumed formatted chunk and try to find the next raw chunk
+                        // in the local cache, which is the second level cache.
+                        fetch_state.inner_mut().current_formatted_chunk.take();
+                        fetch_state.inner_mut().next_event_index += 1
+                    }
                 }
             }
 
-            if fetch_state.common_mut().current_chunk.take().is_some() {
-                fetch_state.common_mut().next_event_index += 1;
-                continue;
-            }
-
-            let event_index = fetch_state.common().next_event_index;
+            let event_index = fetch_state.inner().next_event_index;
+            // All cached events have been consumed, poll a new one.
             if event_index == self.cached_events.len() {
                 match self.data_stream.poll_next_unpin(cx) {
                     Poll::Pending => return Poll::Pending,
                     Poll::Ready(Some(Ok(event))) => {
                         self.cached_events.push_back(CachedCursorDataChunkEvent {
                             event,
-                            row_offset: 0,
+                            row_offset_in_chunk: 0,
                         });
                         continue;
                     }
                     Poll::Ready(Some(Err(error))) => {
                         self.failed = true;
-                        fetch_state.common_mut().finished = true;
+                        fetch_state.inner_mut().finished = true;
                         return Poll::Ready(Err(error.into()));
                     }
                     Poll::Ready(None) => {
-                        fetch_state.common_mut().finished = true;
-                        return Poll::Ready(Ok(CursorPgResponsePollItem::DataStreamEnd));
+                        fetch_state.inner_mut().finished = true;
+                        return Poll::Ready(Ok(CursorPgResponsePollItem::DataChunkStreamEnd));
                     }
                 }
             }
             debug_assert!(event_index < self.cached_events.len());
             let event = self.cached_events[event_index].event.clone();
-            let row_offset = self.cached_events[event_index].row_offset;
+            let row_offset = self.cached_events[event_index].row_offset_in_chunk;
 
             match event {
                 CursorDataChunkEvent::Chunk(data) => {
-                    let rows = match Self::format_chunk(
-                        &data,
-                        &fetch_state.common().formats,
-                        &fetch_state.common().session_data,
+                    let rows = match data.into_pg_rows(
+                        &fetch_state.inner().formats,
+                        &fetch_state.inner().session_data,
                     ) {
                         Ok(rows) => rows,
                         Err(error) => {
                             return Poll::Ready(Err(error));
                         }
                     };
-                    fetch_state.common_mut().current_chunk = Some(FormattedCursorDataChunk {
-                        next_offset: row_offset,
-                        rows: rows.into_iter().skip(row_offset).collect(),
-                    });
+                    fetch_state.inner_mut().current_formatted_chunk =
+                        Some(FormattedCursorDataChunk {
+                            next_offset: row_offset,
+                            rows: rows.into_iter().skip(row_offset).collect(),
+                        });
                 }
                 CursorDataChunkEvent::Barrier(barrier) => {
-                    fetch_state.common_mut().next_event_index += 1;
+                    // Barrier is instantly consumed, not like Chunk, which we keep consuming it
+                    // until all rows within it are consumed.
+                    fetch_state.inner_mut().next_event_index += 1;
                     return Poll::Ready(Ok(CursorPgResponsePollItem::Barrier(barrier)));
                 }
             }
@@ -742,37 +885,38 @@ where
 
 /// A regular query cursor's rollback-safe PostgreSQL response stream.
 struct QueryCursorPgResponseStream {
-    common: CursorPgResponseStreamCommon<QueryCursorDataChunkStream>,
+    /// Shared raw-event cache and per-`FETCH` tentative progress.
+    inner: CursorPgResponseStreamInner<QueryCursorDataChunkStream>,
 }
 
 impl QueryCursorPgResponseStream {
     /// Creates the foreground stream for a regular query cursor.
     fn new(data_stream: QueryCursorDataChunkStream, output_fields: Vec<Field>) -> Self {
         Self {
-            common: CursorPgResponseStreamCommon::new(data_stream, output_fields),
+            inner: CursorPgResponseStreamInner::new(data_stream, output_fields),
         }
     }
 
     /// Returns the output fields committed by previous `FETCH` commands.
     fn fields(&self) -> Vec<Field> {
-        self.common.fields()
+        self.inner.fields()
     }
 
     /// Begins tentative progress for one regular query `FETCH` command.
     fn begin_fetch(&mut self, formats: &[Format], session: &SessionImpl) {
-        self.common.fetch_state = Some(CursorPgResponseFetchState::Query {
-            common: CursorPgResponseFetchStateCommon::new(formats, session),
+        self.inner.fetch_state = Some(CursorPgResponseFetchState::Query {
+            inner: CursorPgResponseFetchStateInner::new(formats, session),
         });
     }
 
     /// Commits the current `FETCH` position.
     fn commit_fetch(&mut self) {
-        _ = self.common.commit_fetch_state();
+        _ = self.inner.commit_fetch();
     }
 
     /// Rolls back the current `FETCH` while retaining every raw event for the next command.
     fn abort_fetch(&mut self) {
-        self.common.abort_fetch();
+        self.inner.abort_fetch();
     }
 }
 
@@ -781,28 +925,28 @@ impl Stream for QueryCursorPgResponseStream {
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
-        if this.common.fetch_finished() {
+        if this.inner.is_fetch_finished() {
             return Poll::Ready(None);
         }
-        match this.common.poll_next_item(cx) {
+        match this.inner.poll_next_item(cx) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(Err(error)) => Poll::Ready(Some(Err(error))),
             Poll::Ready(Ok(CursorPgResponsePollItem::Row(row))) => Poll::Ready(Some(Ok(row))),
             Poll::Ready(Ok(CursorPgResponsePollItem::Barrier(
-                CursorDataChunkBarrier::QueryEnd | CursorDataChunkBarrier::SchemaChanged,
+                CursorDataChunkBarrier::QueryEnd,
             ))) => {
-                this.common.finish_fetch();
+                this.inner.finish_fetch();
                 Poll::Ready(None)
             }
             Poll::Ready(Ok(CursorPgResponsePollItem::Barrier(_))) => {
-                this.common.finish_fetch();
+                this.inner.finish_fetch();
                 Poll::Ready(Some(Err(ErrorCode::InternalError(
-                    "query cursor received a subscription producer barrier".to_owned(),
+                    "query cursor received a non-query barrier".to_owned(),
                 )
                 .into())))
             }
-            Poll::Ready(Ok(CursorPgResponsePollItem::DataStreamEnd)) => {
-                if this.common.failed {
+            Poll::Ready(Ok(CursorPgResponsePollItem::DataChunkStreamEnd)) => {
+                if this.inner.failed {
                     Poll::Ready(Some(Err(ErrorCode::InternalError(
                         "Cursor data stream has terminated with an error; close and recreate the cursor"
                             .to_owned(),
@@ -818,9 +962,16 @@ impl Stream for QueryCursorPgResponseStream {
 
 /// A subscription cursor's rollback-safe PostgreSQL response stream and committed metadata.
 struct SubscriptionCursorPgResponseStream {
-    common: CursorPgResponseStreamCommon<SubscriptionCursorDataChunkStream>,
+    /// Shared raw-event cache, active per-`FETCH` state, and committed output fields.
+    inner: CursorPgResponseStreamInner<SubscriptionCursorDataChunkStream>,
+    /// Logical subscription position committed by the most recent successful `FETCH`.
     subscription_state: SubscriptionCursorState,
+    /// Retention deadline associated with the committed subscription position.
     expires_at: Instant,
+    /// Whether the raw stream is specifically waiting for the next available epoch.
+    ///
+    /// This distinguishes that idle wait from an ordinary `Poll::Pending` produced while an
+    /// active query is still executing.
     subscription_idle: bool,
 }
 
@@ -833,7 +984,7 @@ impl SubscriptionCursorPgResponseStream {
         expires_at: Instant,
     ) -> Self {
         Self {
-            common: CursorPgResponseStreamCommon::new(data_stream, output_fields),
+            inner: CursorPgResponseStreamInner::new(data_stream, output_fields),
             subscription_state,
             expires_at,
             subscription_idle: false,
@@ -842,7 +993,7 @@ impl SubscriptionCursorPgResponseStream {
 
     /// Returns the output fields committed by previous `FETCH` commands.
     fn fields(&self) -> Vec<Field> {
-        self.common.fields()
+        self.inner.fields()
     }
 
     /// Returns the subscription state committed by the foreground stream.
@@ -855,34 +1006,31 @@ impl SubscriptionCursorPgResponseStream {
         now > self.expires_at
     }
 
-    /// Returns whether the producer reported a terminal internal failure through the channel.
+    /// Returns whether the raw data stream reported a terminal internal failure.
     fn is_failed(&self) -> bool {
-        self.common.is_failed()
+        self.inner.is_failed()
     }
 
-    /// Starts deferred production and begins tentative subscription `FETCH` progress.
+    /// Begins tentative subscription `FETCH` progress.
     fn begin_fetch(&mut self, formats: &[Format], session: &SessionImpl, wait_for_data: bool) {
-        self.common.fetch_state = Some(CursorPgResponseFetchState::Subscription {
-            common: CursorPgResponseFetchStateCommon::new(formats, session),
+        self.inner.fetch_state = Some(CursorPgResponseFetchState::Subscription {
+            inner: CursorPgResponseFetchStateInner::new(formats, session),
             wait_for_data,
             next_subscription_state: None,
             next_output_fields: None,
             next_expires_at: None,
-            next_subscription_idle: None,
         });
-        self.common.data_stream.start();
     }
 
-    /// Commits the current `FETCH` position and its ordered producer metadata.
+    /// Commits the current `FETCH` position and its ordered raw-stream metadata.
     fn commit_fetch(&mut self) {
-        let Some(fetch_state) = self.common.commit_fetch_state() else {
+        let Some(fetch_state) = self.inner.commit_fetch() else {
             return;
         };
         let CursorPgResponseFetchState::Subscription {
             next_subscription_state,
             next_output_fields,
             next_expires_at,
-            next_subscription_idle,
             ..
         } = fetch_state
         else {
@@ -892,19 +1040,16 @@ impl SubscriptionCursorPgResponseStream {
             self.subscription_state = state;
         }
         if let Some(output_fields) = next_output_fields {
-            self.common.output_fields = output_fields;
+            self.inner.output_fields = output_fields;
         }
         if let Some(expires_at) = next_expires_at {
             self.expires_at = expires_at;
-        }
-        if let Some(subscription_idle) = next_subscription_idle {
-            self.subscription_idle = subscription_idle;
         }
     }
 
     /// Rolls back the current `FETCH` while retaining every raw event for the next command.
     fn abort_fetch(&mut self) {
-        self.common.abort_fetch();
+        self.inner.abort_fetch();
     }
 }
 
@@ -914,83 +1059,89 @@ impl Stream for SubscriptionCursorPgResponseStream {
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
         loop {
-            if this.common.fetch_finished() {
+            if this.inner.is_fetch_finished() {
                 return Poll::Ready(None);
             }
-            match this.common.poll_next_item(cx) {
+            match this.inner.poll_next_item(cx) {
                 Poll::Pending if this.subscription_idle => {
-                    let fetch_state = this.common.fetch_state();
-                    if fetch_state.common().yielded_rows > 0 || !fetch_state.wait_for_data() {
-                        this.common.finish_fetch();
+                    let fetch_state = this.inner.fetch_state();
+                    if fetch_state.inner().yielded_rows > 0 || !fetch_state.wait_for_data() {
+                        this.inner.finish_fetch();
                         return Poll::Ready(None);
                     }
                     return Poll::Pending;
                 }
                 Poll::Pending => return Poll::Pending,
                 Poll::Ready(Err(error)) => {
-                    if this.common.failed {
+                    if this.inner.failed {
                         this.subscription_state = SubscriptionCursorState::Invalid;
                     }
                     return Poll::Ready(Some(Err(error)));
                 }
                 Poll::Ready(Ok(CursorPgResponsePollItem::Row(row))) => {
-                    if this.subscription_idle {
-                        this.common
-                            .fetch_state_mut()
-                            .set_next_subscription_idle(false);
-                    }
+                    this.subscription_idle = false;
                     return Poll::Ready(Some(Ok(row)));
                 }
                 Poll::Ready(Ok(CursorPgResponsePollItem::Barrier(barrier))) => {
-                    if this.subscription_idle {
-                        this.common
-                            .fetch_state_mut()
-                            .set_next_subscription_idle(false);
-                    }
+                    this.subscription_idle = false;
                     let should_finish = match barrier {
                         CursorDataChunkBarrier::QueryEnd
                         | CursorDataChunkBarrier::SchemaChanged => true,
                         CursorDataChunkBarrier::SubscriptionQueryStarted {
-                            state,
+                            from_snapshot,
+                            rw_timestamp,
+                            expected_timestamp,
+                            init_query_timer,
                             output_fields,
                             expires_at,
                         } => {
-                            this.common
+                            this.inner
                                 .fetch_state_mut()
-                                .set_subscription_query_started(state, output_fields, expires_at);
+                                .update_when_subscription_query_started(
+                                    from_snapshot,
+                                    rw_timestamp,
+                                    expected_timestamp,
+                                    init_query_timer,
+                                    output_fields,
+                                    expires_at,
+                                );
                             false
                         }
-                        CursorDataChunkBarrier::SubscriptionBatch { next_state } => {
-                            this.common
+                        CursorDataChunkBarrier::SubscriptionNewEpoch {
+                            seek_timestamp,
+                            expected_timestamp,
+                        } => {
+                            this.inner
                                 .fetch_state_mut()
-                                .set_next_subscription_state(next_state);
-                            this.common.fetch_state().common().yielded_rows > 0
+                                .update_when_subscription_new_epoch(
+                                    seek_timestamp,
+                                    expected_timestamp,
+                                );
+                            this.inner.fetch_state().inner().yielded_rows > 0
                         }
                         CursorDataChunkBarrier::SubscriptionIdle => {
-                            this.common
-                                .fetch_state_mut()
-                                .set_next_subscription_idle(true);
-                            let fetch_state = this.common.fetch_state();
-                            fetch_state.common().yielded_rows > 0 || !fetch_state.wait_for_data()
+                            this.subscription_idle = true;
+                            let fetch_state = this.inner.fetch_state();
+                            fetch_state.inner().yielded_rows > 0 || !fetch_state.wait_for_data()
                         }
                     };
                     if should_finish {
-                        this.common.finish_fetch();
+                        this.inner.finish_fetch();
                         return Poll::Ready(None);
                     }
                 }
-                Poll::Ready(Ok(CursorPgResponsePollItem::DataStreamEnd)) => {
-                    if this.common.failed {
+                Poll::Ready(Ok(CursorPgResponsePollItem::DataChunkStreamEnd)) => {
+                    if this.inner.failed {
                         return Poll::Ready(Some(Err(ErrorCode::InternalError(
                             "Cursor data stream has terminated with an error; close and recreate the cursor"
                                 .to_owned(),
                         )
                         .into())));
                     }
-                    this.common.failed = true;
+                    this.inner.failed = true;
                     this.subscription_state = SubscriptionCursorState::Invalid;
                     return Poll::Ready(Some(Err(ErrorCode::InternalError(
-                        "Subscription cursor producer terminated unexpectedly; close and recreate the cursor"
+                        "Subscription cursor data stream terminated unexpectedly; close and recreate the cursor"
                             .to_owned(),
                     )
                     .into())));
@@ -1002,12 +1153,14 @@ impl Stream for SubscriptionCursorPgResponseStream {
 
 /// A PostgreSQL `CancelRequest` handle scoped to exactly one `FETCH` command.
 pub struct FetchCursorCancelHandle {
+    /// Sender registered with the session so a PostgreSQL `CancelRequest` can cancel this `FETCH`.
     cancel_tx: ShutdownSender,
+    /// Token awaited by the active `FETCH` loop.
     cancel_rx: ShutdownToken,
 }
 
 impl FetchCursorCancelHandle {
-    /// Creates an uncancelled per-`FETCH` handle.
+    /// Creates an uncanceled per-`FETCH` handle.
     pub fn new() -> Self {
         let (cancel_tx, cancel_rx) = ShutdownToken::new();
         Self {
@@ -1064,27 +1217,21 @@ impl Cursor {
     }
 }
 
-/// A regular query cursor whose raw producer survives individual `FETCH` cancellation.
+/// A regular query cursor whose raw stream survives individual `FETCH` cancellation.
 pub struct QueryCursor {
-    /// Declared first so cursor drop signals shutdown before the producer receiver is dropped.
+    /// Declared first so cursor drop signals shutdown before the raw stream is dropped.
     lifecycle: CursorLifecycle,
     /// Owns raw-event caching and tentative per-`FETCH` progress.
     pg_response_stream: QueryCursorPgResponseStream,
 }
 
 impl QueryCursor {
-    /// Creates a lifecycle, schedules a planned query, and starts its raw chunk producer.
+    /// Creates a lifecycle, schedules a planned query, and wraps its raw chunk stream.
     pub(crate) async fn new(
         session: Arc<SessionImpl>,
         plan_fragmenter_result: BatchPlanFragmenterResult,
     ) -> Result<Self> {
-        let lifecycle = CursorLifecycle::new(
-            session.get_cursor_manager().session_shutdown_token(),
-            session
-                .env()
-                .frontend_config()
-                .cursor_data_chunk_channel_capacity,
-        );
+        let lifecycle = CursorLifecycle::new(session.get_cursor_manager().session_shutdown_token());
         let query_shutdown_tx = lifecycle.query_shutdown_sender();
         let query_shutdown_rx = lifecycle.query_shutdown_token();
         let snapshot = session.pinned_snapshot();
@@ -1096,8 +1243,7 @@ impl QueryCursor {
             snapshot,
         )
         .await?;
-        let chunk_stream =
-            QueryCursorDataChunkStream::new(query_stream, fields.clone(), &lifecycle);
+        let chunk_stream = QueryCursorDataChunkStream::new(query_stream, fields.clone());
         Ok(Self {
             lifecycle,
             pg_response_stream: QueryCursorPgResponseStream::new(chunk_stream, fields),
@@ -1173,19 +1319,17 @@ impl QueryCursor {
 }
 
 #[derive(Clone)]
-/// Foreground-visible subscription position received from ordered producer barriers.
+/// Foreground-visible subscription position received from ordered raw-stream barriers.
 enum SubscriptionCursorState {
-    /// The producer has not yet started the initial snapshot query for a `FULL` cursor.
-    InitSnapshotQuery,
-    /// The producer is looking for the next available subscription log-store epoch.
+    /// The cursor is looking for the next available subscription log-store epoch.
     InitLogStoreQuery {
-        /// The timestamp from which the producer will search.
+        /// The timestamp from which the stream will search.
         seek_timestamp: u64,
 
         /// When present, the next available timestamp must exactly match this value.
         expected_timestamp: Option<u64>,
     },
-    /// The producer has started a snapshot or log-store query at this logical position.
+    /// The cursor has started a snapshot or log-store query at this logical position.
     Fetch {
         /// Whether the query reads the initial upstream-table snapshot rather than the log store.
         from_snapshot: bool,
@@ -1199,14 +1343,13 @@ enum SubscriptionCursorState {
         /// The time at which query initialization began, used only for diagnostics.
         init_query_timer: Instant,
     },
-    /// The producer reported an unrecoverable error.
+    /// The raw stream reported an unrecoverable error.
     Invalid,
 }
 
 impl Display for SubscriptionCursorState {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            SubscriptionCursorState::InitSnapshotQuery => write!(f, "InitSnapshotQuery"),
             SubscriptionCursorState::InitLogStoreQuery {
                 seek_timestamp,
                 expected_timestamp,
@@ -1351,24 +1494,22 @@ impl FieldsManager {
     }
 }
 
-/// The complete subscription data-fetch state machine, owned only by the producer task.
-enum SubscriptionProducerState {
-    /// Waits for the first `FETCH` before pinning and querying the `FULL` snapshot.
-    InitSnapshotQuery,
+/// The complete state machine owned by a subscription cursor's raw stream.
+enum SubscriptionCursorDataChunkStreamState {
     /// Searches for the next available subscription log-store epoch.
     InitLogStoreQuery {
-        /// The timestamp from which the producer searches.
+        /// The timestamp from which the stream searches.
         seek_timestamp: u64,
         /// An exact timestamp required to detect retention gaps.
         expected_timestamp: Option<u64>,
     },
-    /// Streams one active snapshot or log-store query into the raw-event channel.
+    /// Streams one active snapshot or log-store query into raw cursor events.
     Fetch {
         /// Whether this is the initial upstream-table snapshot.
         from_snapshot: bool,
         /// The snapshot epoch or log-store timestamp read by the query.
         rw_timestamp: u64,
-        /// The query stream owned by the producer.
+        /// The query stream owned by the cursor's raw stream.
         query_stream: CursorQueryStream,
         /// The next timestamp expected after this query, when known.
         expected_timestamp: Option<u64>,
@@ -1379,33 +1520,63 @@ enum SubscriptionProducerState {
     Invalid,
 }
 
-/// Background subscription state machine that communicates exclusively through raw events.
-struct SubscriptionDataChunkProducer {
-    subscription: Arc<SubscriptionCatalog>,
-    dependent_table_id: TableId,
-    handler_args: HandlerArgs,
-    fields_manager: FieldsManager,
-    state: SubscriptionProducerState,
-    cursor_metrics: Arc<CursorMetrics>,
-    query_shutdown_tx: ShutdownSender,
-    query_shutdown_rx: ShutdownToken,
+/// Session context needed to plan later subscription batches without retaining the session while
+/// the cursor stream is dormant.
+struct SubscriptionCursorHandlerContext {
+    /// Weak session reference so a dormant cursor cannot keep a terminated session alive.
+    session: Weak<SessionImpl>,
+    /// Original SQL text retained for planning later subscription queries.
+    sql: Arc<str>,
+    /// Normalized SQL text retained for query diagnostics and metrics.
+    normalized_sql: String,
+    /// Statement options retained for planning later subscription queries.
+    with_options: WithOptions,
 }
 
-/// A subscription cursor with foreground state committed only from producer channel barriers.
+impl SubscriptionCursorHandlerContext {
+    fn new(handler_args: &HandlerArgs) -> Self {
+        Self {
+            session: Arc::downgrade(&handler_args.session),
+            sql: handler_args.sql.clone(),
+            normalized_sql: handler_args.normalized_sql.clone(),
+            with_options: handler_args.with_options.clone(),
+        }
+    }
+
+    fn handler_args(&self) -> Result<HandlerArgs> {
+        let session = self.session.upgrade().ok_or_else(|| {
+            ErrorCode::InternalError("session ended while polling subscription cursor".to_owned())
+        })?;
+        Ok(HandlerArgs {
+            session,
+            sql: self.sql.clone(),
+            normalized_sql: self.normalized_sql.clone(),
+            with_options: self.with_options.clone(),
+        })
+    }
+}
+
+/// A subscription cursor with foreground state committed only from raw-stream barriers.
 pub struct SubscriptionCursor {
-    /// Declared first so cursor drop signals shutdown before the producer receiver is dropped.
+    /// Declared first so cursor drop signals shutdown before its raw stream is dropped.
     lifecycle: CursorLifecycle,
+    /// Name under which this cursor is registered in its session.
     cursor_name: String,
+    /// Catalog entry for the subscription followed by this cursor.
     subscription: Arc<SubscriptionCatalog>,
+    /// Upstream table read by snapshot and log-store queries.
     dependent_table_id: TableId,
+    /// Raw-event cache, tentative progress, and foreground-committed subscription metadata.
     pg_response_stream: SubscriptionCursorPgResponseStream,
+    /// Metrics updated by this cursor's query and `FETCH` lifecycle.
     cursor_metrics: Arc<CursorMetrics>,
+    /// Completion time of the most recent successful `FETCH`.
     last_fetch: Instant,
 }
 
 impl SubscriptionCursor {
-    /// Declares a deferred subscription cursor without starting its first query.
-    pub fn new(
+    /// Declares a subscription cursor and captures a `FULL` cursor's snapshot immediately.
+    pub async fn new(
         cursor_name: String,
         start_timestamp: Option<u64>,
         subscription: Arc<SubscriptionCatalog>,
@@ -1418,47 +1589,67 @@ impl SubscriptionCursor {
                 .session
                 .get_cursor_manager()
                 .session_shutdown_token(),
-            handler_args
-                .session
-                .env()
-                .frontend_config()
-                .cursor_data_chunk_channel_capacity,
         );
         let query_shutdown_tx = lifecycle.query_shutdown_sender();
         let query_shutdown_rx = lifecycle.query_shutdown_token();
-        let table_catalog = handler_args.session.get_table_by_id(dependent_table_id)?;
-        let (producer_state, cursor_state) = if let Some(start_timestamp) = start_timestamp {
-            (
-                SubscriptionProducerState::InitLogStoreQuery {
-                    seek_timestamp: start_timestamp,
-                    expected_timestamp: None,
-                },
-                SubscriptionCursorState::InitLogStoreQuery {
-                    seek_timestamp: start_timestamp,
-                    expected_timestamp: None,
-                },
-            )
-        } else {
-            (
-                SubscriptionProducerState::InitSnapshotQuery,
-                SubscriptionCursorState::InitSnapshotQuery,
-            )
-        };
+        let (stream_state, cursor_state, fields_manager) =
+            if let Some(start_timestamp) = start_timestamp {
+                let table_catalog = handler_args.session.get_table_by_id(dependent_table_id)?;
+                (
+                    SubscriptionCursorDataChunkStreamState::InitLogStoreQuery {
+                        seek_timestamp: start_timestamp,
+                        expected_timestamp: None,
+                    },
+                    SubscriptionCursorState::InitLogStoreQuery {
+                        seek_timestamp: start_timestamp,
+                        expected_timestamp: None,
+                    },
+                    FieldsManager::new(&table_catalog),
+                )
+            } else {
+                // `FULL` is the only subscription mode represented by `None`. Pin its snapshot
+                // during `DECLARE`; every `SINCE` mode stays in `InitLogStoreQuery` without one.
+                let snapshot = handler_args.session.pinned_snapshot();
+                let pinned_epoch = Self::snapshot_epoch(&snapshot, dependent_table_id)?;
+                let (query_stream, init_query_timer, table_catalog) = Self::initiate_query(
+                    None,
+                    dependent_table_id,
+                    handler_args.clone(),
+                    query_shutdown_tx.clone(),
+                    query_shutdown_rx.clone(),
+                    snapshot,
+                )
+                .await?;
+                (
+                    SubscriptionCursorDataChunkStreamState::Fetch {
+                        from_snapshot: true,
+                        rw_timestamp: pinned_epoch,
+                        query_stream,
+                        expected_timestamp: None,
+                        init_query_timer,
+                    },
+                    SubscriptionCursorState::Fetch {
+                        from_snapshot: true,
+                        rw_timestamp: pinned_epoch,
+                        expected_timestamp: None,
+                        init_query_timer,
+                    },
+                    FieldsManager::new(&table_catalog),
+                )
+            };
 
-        let fields_manager = FieldsManager::new(&table_catalog);
         let output_fields = fields_manager.get_output_fields();
         let expires_at = Instant::now() + Duration::from_secs(subscription.retention_seconds);
-        let producer = SubscriptionDataChunkProducer {
-            subscription: subscription.clone(),
+        let chunk_stream = SubscriptionCursorDataChunkStream::new(
+            subscription.clone(),
             dependent_table_id,
-            handler_args: handler_args.clone(),
+            SubscriptionCursorHandlerContext::new(handler_args),
             fields_manager,
-            state: producer_state,
-            cursor_metrics: cursor_metrics.clone(),
+            stream_state,
+            cursor_metrics.clone(),
             query_shutdown_tx,
             query_shutdown_rx,
-        };
-        let chunk_stream = SubscriptionCursorDataChunkStream::new(producer, &lifecycle);
+        );
 
         Ok(Self {
             lifecycle,
@@ -1476,7 +1667,28 @@ impl SubscriptionCursor {
         })
     }
 
-    /// Executes one SQL `FETCH` while preserving producer progress across timeout or cancellation.
+    fn snapshot_epoch(snapshot: &ReadSnapshot, dependent_table_id: TableId) -> Result<u64> {
+        match snapshot {
+            ReadSnapshot::FrontendPinned { snapshot, .. } => snapshot
+                .version()
+                .state_table_info
+                .info()
+                .get(&dependent_table_id)
+                .ok_or_else(|| anyhow!("dependent_table_id {dependent_table_id} not exists").into())
+                .map(|info| info.committed_epoch),
+            ReadSnapshot::Other(_) => Err(ErrorCode::InternalError(
+                "Fetch Cursor can't start from specified query epoch. May run `set query_epoch = 0;`"
+                    .to_owned(),
+            )
+            .into()),
+            ReadSnapshot::ReadUncommitted => Err(ErrorCode::InternalError(
+                "Fetch Cursor don't support read uncommitted".to_owned(),
+            )
+            .into()),
+        }
+    }
+
+    /// Executes one SQL `FETCH` while preserving raw-stream progress across timeout or cancellation.
     pub async fn fetch(
         &mut self,
         count: u32,
@@ -1513,9 +1725,9 @@ impl SubscriptionCursor {
             timeout_seconds.map(|seconds| Instant::now() + Duration::from_secs(seconds));
         let timeout = tokio::time::sleep(Duration::from_secs(timeout_seconds.unwrap_or(0)));
         tokio::pin!(timeout);
-        let fetch_cursor_timer = Instant::now();
         let mut ans = Vec::with_capacity(std::cmp::min(100, count) as usize);
         while ans.len() < count as usize {
+            let fetch_row_timer = Instant::now();
             tokio::select! {
                 biased;
                 _ = cancel_handle.cancelled() => {
@@ -1537,7 +1749,13 @@ impl SubscriptionCursor {
                     ).into());
                 }
                 row = self.pg_response_stream.next() => match row {
-                    Some(Ok(row)) => ans.push(row),
+                    Some(Ok(row)) => {
+                        self.cursor_metrics
+                            .subscription_cursor_fetch_duration
+                            .with_label_values(&[&self.subscription.name])
+                            .observe(fetch_row_timer.elapsed().as_millis() as _);
+                        ans.push(row);
+                    }
                     Some(Err(error)) => {
                         self.pg_response_stream.abort_fetch();
                         return Err(error);
@@ -1551,10 +1769,6 @@ impl SubscriptionCursor {
             }
         }
         self.pg_response_stream.commit_fetch();
-        self.cursor_metrics
-            .subscription_cursor_fetch_duration
-            .with_label_values(&[&self.subscription.name])
-            .observe(fetch_cursor_timer.elapsed().as_millis() as _);
         self.last_fetch = Instant::now();
         Ok((ans, desc))
     }
@@ -1601,15 +1815,7 @@ impl SubscriptionCursor {
         handler_args: HandlerArgs,
     ) -> Result<RwBatchQueryPlanResult> {
         match self.pg_response_stream.subscription_state().clone() {
-            // Only used to return generated plans, so rw_timestamp are meaningless
-            SubscriptionCursorState::InitSnapshotQuery => {
-                Self::init_batch_plan_for_subscription_cursor(
-                    None,
-                    self.dependent_table_id,
-                    handler_args,
-                    None,
-                )
-            }
+            // Only used to return generated plans, so rw_timestamp is meaningless.
             SubscriptionCursorState::InitLogStoreQuery { .. } => {
                 Self::init_batch_plan_for_subscription_cursor(
                     Some(0),
@@ -1907,396 +2113,21 @@ impl SubscriptionCursor {
         self.subscription.name.as_str()
     }
 
-    /// Formats the foreground-committed producer position for diagnostics.
+    /// Formats the foreground-committed stream position for diagnostics.
     pub fn state_info_string(&self) -> String {
         self.pg_response_stream.subscription_state().to_string()
     }
 }
 
-impl SubscriptionDataChunkProducer {
-    async fn send_event(
-        event_tx: &mpsc::Sender<std::result::Result<CursorDataChunkEvent, BoxedError>>,
-        event: std::result::Result<CursorDataChunkEvent, BoxedError>,
-        shutdown_rx: &mut ShutdownToken,
-        session_shutdown_rx: &mut ShutdownToken,
-    ) -> bool {
-        tokio::select! {
-            biased;
-            _ = shutdown_rx.cancelled() => false,
-            _ = session_shutdown_rx.cancelled() => false,
-            result = event_tx.send(event) => result.is_ok(),
-        }
-    }
-
-    /// Runs the subscription producer state machine until shutdown or a terminal error.
-    async fn run(
-        &mut self,
-        event_tx: mpsc::Sender<std::result::Result<CursorDataChunkEvent, BoxedError>>,
-        shutdown_rx: &mut ShutdownToken,
-        session_shutdown_rx: &mut ShutdownToken,
-    ) {
-        loop {
-            let state = mem::replace(&mut self.state, SubscriptionProducerState::Invalid);
-            match state {
-                SubscriptionProducerState::InitSnapshotQuery => {
-                    let snapshot = self.handler_args.session.pinned_snapshot();
-                    let pinned_epoch: Result<u64> = match &snapshot {
-                        ReadSnapshot::FrontendPinned { snapshot, .. } => snapshot
-                            .version()
-                            .state_table_info
-                            .info()
-                            .get(&self.dependent_table_id)
-                            .ok_or_else(|| {
-                                anyhow!(
-                                    "dependent_table_id {} not exists",
-                                    self.dependent_table_id
-                                )
-                                .into()
-                            })
-                            .map(|info| info.committed_epoch),
-                        ReadSnapshot::Other(_) => Err(ErrorCode::InternalError(
-                            "Fetch Cursor can't start from specified query epoch. May run `set query_epoch = 0;`"
-                                .to_owned(),
-                        )
-                        .into()),
-                        ReadSnapshot::ReadUncommitted => Err(ErrorCode::InternalError(
-                            "Fetch Cursor don't support read uncommitted".to_owned(),
-                        )
-                        .into()),
-                    };
-                    let pinned_epoch = match pinned_epoch {
-                        Ok(pinned_epoch) => pinned_epoch,
-                        Err(error) => {
-                            _ = Self::send_event(
-                                &event_tx,
-                                Err(error.into()),
-                                shutdown_rx,
-                                session_shutdown_rx,
-                            )
-                            .await;
-                            return;
-                        }
-                    };
-                    let initiated = tokio::select! {
-                        biased;
-                        _ = shutdown_rx.cancelled() => return,
-                        _ = session_shutdown_rx.cancelled() => return,
-                        result = SubscriptionCursor::initiate_query(
-                            None,
-                            self.dependent_table_id,
-                            self.handler_args.clone(),
-                            self.query_shutdown_tx.clone(),
-                            self.query_shutdown_rx.clone(),
-                            snapshot,
-                        ) => result,
-                    };
-                    let (query_stream, init_query_timer, catalog) = match initiated {
-                        Ok(result) => result,
-                        Err(error) => {
-                            _ = Self::send_event(
-                                &event_tx,
-                                Err(error.into()),
-                                shutdown_rx,
-                                session_shutdown_rx,
-                            )
-                            .await;
-                            return;
-                        }
-                    };
-                    let schema_changed = self.fields_manager.try_refill_fields(&catalog);
-                    let cursor_state = SubscriptionCursorState::Fetch {
-                        from_snapshot: true,
-                        rw_timestamp: pinned_epoch,
-                        expected_timestamp: None,
-                        init_query_timer,
-                    };
-                    self.state = SubscriptionProducerState::Fetch {
-                        from_snapshot: true,
-                        rw_timestamp: pinned_epoch,
-                        query_stream,
-                        expected_timestamp: None,
-                        init_query_timer,
-                    };
-                    if !Self::send_event(
-                        &event_tx,
-                        Ok(CursorDataChunkEvent::Barrier(
-                            CursorDataChunkBarrier::SubscriptionQueryStarted {
-                                state: cursor_state,
-                                output_fields: self.fields_manager.get_output_fields(),
-                                expires_at: Instant::now()
-                                    + Duration::from_secs(self.subscription.retention_seconds),
-                            },
-                        )),
-                        shutdown_rx,
-                        session_shutdown_rx,
-                    )
-                    .await
-                    {
-                        return;
-                    }
-                    if schema_changed
-                        && !Self::send_event(
-                            &event_tx,
-                            Ok(CursorDataChunkEvent::Barrier(
-                                CursorDataChunkBarrier::SchemaChanged,
-                            )),
-                            shutdown_rx,
-                            session_shutdown_rx,
-                        )
-                        .await
-                    {
-                        return;
-                    }
-                }
-                SubscriptionProducerState::InitLogStoreQuery {
-                    seek_timestamp,
-                    expected_timestamp,
-                } => {
-                    let next_timestamp = tokio::select! {
-                        biased;
-                        _ = shutdown_rx.cancelled() => return,
-                        _ = session_shutdown_rx.cancelled() => return,
-                        result = SubscriptionCursor::get_next_rw_timestamp(
-                            seek_timestamp,
-                            self.dependent_table_id,
-                            expected_timestamp,
-                            self.handler_args.clone(),
-                            &self.subscription,
-                        ) => result,
-                    };
-                    let (rw_timestamp, next_expected_timestamp) = match next_timestamp {
-                        Ok((Some(rw_timestamp), next_expected_timestamp)) => {
-                            (rw_timestamp, next_expected_timestamp)
-                        }
-                        Ok((None, _)) => {
-                            self.state = SubscriptionProducerState::InitLogStoreQuery {
-                                seek_timestamp,
-                                expected_timestamp,
-                            };
-                            if !Self::send_event(
-                                &event_tx,
-                                Ok(CursorDataChunkEvent::Barrier(
-                                    CursorDataChunkBarrier::SubscriptionIdle,
-                                )),
-                                shutdown_rx,
-                                session_shutdown_rx,
-                            )
-                            .await
-                            {
-                                return;
-                            }
-                            let notification = tokio::select! {
-                                biased;
-                                _ = shutdown_rx.cancelled() => return,
-                                _ = session_shutdown_rx.cancelled() => return,
-                                result = self.handler_args.session.env
-                                    .hummock_snapshot_manager()
-                                    .wait_table_change_log_notification(
-                                        self.dependent_table_id,
-                                        seek_timestamp,
-                                    ) => result,
-                            };
-                            if let Err(error) = notification {
-                                _ = Self::send_event(
-                                    &event_tx,
-                                    Err(error.into()),
-                                    shutdown_rx,
-                                    session_shutdown_rx,
-                                )
-                                .await;
-                                return;
-                            }
-                            continue;
-                        }
-                        Err(error) => {
-                            _ = Self::send_event(
-                                &event_tx,
-                                Err(error.into()),
-                                shutdown_rx,
-                                session_shutdown_rx,
-                            )
-                            .await;
-                            return;
-                        }
-                    };
-
-                    // The cursor producer can outlive the FETCH transaction, so its query must
-                    // own a snapshot instead of consulting the session transaction state.
-                    let snapshot = ReadSnapshot::FrontendPinned {
-                        snapshot: self
-                            .handler_args
-                            .session
-                            .env
-                            .hummock_snapshot_manager()
-                            .acquire(),
-                    };
-                    let initiated = tokio::select! {
-                        biased;
-                        _ = shutdown_rx.cancelled() => return,
-                        _ = session_shutdown_rx.cancelled() => return,
-                        result = SubscriptionCursor::initiate_query(
-                            Some(rw_timestamp),
-                            self.dependent_table_id,
-                            self.handler_args.clone(),
-                            self.query_shutdown_tx.clone(),
-                            self.query_shutdown_rx.clone(),
-                            snapshot,
-                        ) => result,
-                    };
-                    let (query_stream, init_query_timer, catalog) = match initiated {
-                        Ok(result) => result,
-                        Err(error) => {
-                            _ = Self::send_event(
-                                &event_tx,
-                                Err(error.into()),
-                                shutdown_rx,
-                                session_shutdown_rx,
-                            )
-                            .await;
-                            return;
-                        }
-                    };
-                    let schema_changed = self.fields_manager.try_refill_fields(&catalog);
-                    let cursor_state = SubscriptionCursorState::Fetch {
-                        from_snapshot: false,
-                        rw_timestamp,
-                        expected_timestamp: next_expected_timestamp,
-                        init_query_timer,
-                    };
-                    self.state = SubscriptionProducerState::Fetch {
-                        from_snapshot: false,
-                        rw_timestamp,
-                        query_stream,
-                        expected_timestamp: next_expected_timestamp,
-                        init_query_timer,
-                    };
-                    if !Self::send_event(
-                        &event_tx,
-                        Ok(CursorDataChunkEvent::Barrier(
-                            CursorDataChunkBarrier::SubscriptionQueryStarted {
-                                state: cursor_state,
-                                output_fields: self.fields_manager.get_output_fields(),
-                                expires_at: Instant::now()
-                                    + Duration::from_secs(self.subscription.retention_seconds),
-                            },
-                        )),
-                        shutdown_rx,
-                        session_shutdown_rx,
-                    )
-                    .await
-                    {
-                        return;
-                    }
-                    if schema_changed
-                        && !Self::send_event(
-                            &event_tx,
-                            Ok(CursorDataChunkEvent::Barrier(
-                                CursorDataChunkBarrier::SchemaChanged,
-                            )),
-                            shutdown_rx,
-                            session_shutdown_rx,
-                        )
-                        .await
-                    {
-                        return;
-                    }
-                }
-                SubscriptionProducerState::Fetch {
-                    from_snapshot,
-                    rw_timestamp,
-                    mut query_stream,
-                    expected_timestamp,
-                    init_query_timer,
-                } => {
-                    let next = tokio::select! {
-                        biased;
-                        _ = shutdown_rx.cancelled() => return,
-                        _ = session_shutdown_rx.cancelled() => return,
-                        next = query_stream.next() => next,
-                    };
-                    match next {
-                        Some(Ok(chunk)) => {
-                            self.state = SubscriptionProducerState::Fetch {
-                                from_snapshot,
-                                rw_timestamp,
-                                query_stream,
-                                expected_timestamp,
-                                init_query_timer,
-                            };
-                            let data = CursorDataChunk {
-                                chunk,
-                                kind: CursorDataChunkKind::Subscription {
-                                    fields: Arc::new(self.fields_manager.clone()),
-                                    from_snapshot,
-                                    rw_timestamp,
-                                },
-                            };
-                            if !Self::send_event(
-                                &event_tx,
-                                Ok(CursorDataChunkEvent::Chunk(data)),
-                                shutdown_rx,
-                                session_shutdown_rx,
-                            )
-                            .await
-                            {
-                                return;
-                            }
-                        }
-                        Some(Err(error)) => {
-                            _ = Self::send_event(
-                                &event_tx,
-                                Err(error),
-                                shutdown_rx,
-                                session_shutdown_rx,
-                            )
-                            .await;
-                            return;
-                        }
-                        None => {
-                            self.cursor_metrics
-                                .subscription_cursor_query_duration
-                                .with_label_values(&[&self.subscription.name])
-                                .observe(init_query_timer.elapsed().as_millis() as _);
-                            let (seek_timestamp, expected_timestamp) =
-                                if let Some(expected_timestamp) = expected_timestamp {
-                                    (expected_timestamp, Some(expected_timestamp))
-                                } else {
-                                    (rw_timestamp + 1, None)
-                                };
-                            self.state = SubscriptionProducerState::InitLogStoreQuery {
-                                seek_timestamp,
-                                expected_timestamp,
-                            };
-                            let next_state = SubscriptionCursorState::InitLogStoreQuery {
-                                seek_timestamp,
-                                expected_timestamp,
-                            };
-                            if !Self::send_event(
-                                &event_tx,
-                                Ok(CursorDataChunkEvent::Barrier(
-                                    CursorDataChunkBarrier::SubscriptionBatch { next_state },
-                                )),
-                                shutdown_rx,
-                                session_shutdown_rx,
-                            )
-                            .await
-                            {
-                                return;
-                            }
-                        }
-                    }
-                }
-                SubscriptionProducerState::Invalid => return,
-            }
-        }
-    }
-}
-
 /// Owns every named cursor and the session-wide cursor shutdown signal.
 pub struct CursorManager {
+    /// Session-local cursors, locked across each `FETCH` to serialize cursor access.
     cursor_map: tokio::sync::Mutex<HashMap<String, Cursor>>,
+    /// Metrics shared by all cursors in this frontend process.
     cursor_metrics: Arc<CursorMetrics>,
+    /// Sender canceled when this frontend session begins shutting down.
     session_shutdown_tx: ShutdownSender,
+    /// Token cloned into cursors so active `FETCH` commands observe session shutdown.
     session_shutdown_rx: ShutdownToken,
 }
 
@@ -2312,14 +2143,33 @@ impl CursorManager {
         }
     }
 
-    /// Returns a token observed by every producer and foreground stream in this session.
+    /// Returns a token observed by every cursor foreground in this session.
     pub fn session_shutdown_token(&self) -> ShutdownToken {
         self.session_shutdown_rx.clone()
     }
 
-    /// Signals all cursor foregrounds, producers, and query executors to stop cooperatively.
-    pub fn shutdown(&self) {
+    /// Signals active `FETCH` commands, then explicitly drops all cursor-owned streams.
+    ///
+    /// An active `FETCH` holds the cursor-map lock while it awaits its response stream. In that
+    /// case cancellation releases the lock and this cleanup task clears the map afterward.
+    pub fn shutdown(self: &Arc<Self>) {
+        if !self.session_shutdown_tx.cancel() {
+            return;
+        }
+        if let Ok(mut cursor_map) = self.cursor_map.try_lock() {
+            cursor_map.clear();
+            return;
+        }
+        let cursor_manager = self.clone();
+        tokio::spawn(async move {
+            cursor_manager.cursor_map.lock().await.clear();
+        });
+    }
+
+    /// Completes session shutdown only after all cursor-owned streams have been dropped.
+    pub async fn shutdown_and_wait(&self) {
         self.session_shutdown_tx.cancel();
+        self.cursor_map.lock().await.clear();
     }
 
     /// Declares and registers a subscription cursor.
@@ -2340,7 +2190,8 @@ impl CursorManager {
             dependent_table_id,
             handler_args,
             self.cursor_metrics.clone(),
-        )?;
+        )
+        .await?;
         let mut cursor_map = self.cursor_map.lock().await;
         self.cursor_metrics
             .subscription_cursor_declare_duration
@@ -2509,81 +2360,60 @@ impl CursorManager {
 mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
 
+    use futures::FutureExt;
     use risingwave_common::array::DataChunkTestExt;
-    use risingwave_common::config::FrontendConfig;
     use risingwave_sqlparser::parser::Parser;
+    use tokio::sync::{mpsc, oneshot};
 
     use super::*;
 
-    impl CursorDataChunkReceiver {
-        /// Creates a synthetic producer stream with an explicitly configured channel capacity.
-        fn for_test(
-            events: Vec<CursorDataChunkEvent>,
-            lifecycle: &CursorLifecycle,
-            start_rx: Option<oneshot::Receiver<()>>,
-        ) -> (Self, Arc<AtomicBool>) {
-            let (event_tx, event_rx) = mpsc::channel(lifecycle.data_chunk_channel_capacity);
-            let mut producer_shutdown_rx = lifecycle.shutdown_rx.clone();
+    impl QueryCursorDataChunkStream {
+        #[try_stream(ok = CursorDataChunkEvent, error = BoxedError)]
+        async fn events_for_test(events: Vec<CursorDataChunkEvent>, started: Arc<AtomicBool>) {
+            started.store(true, Ordering::Relaxed);
+            for event in events {
+                yield event;
+            }
+        }
+
+        /// Creates a synthetic query stream that begins only when polled.
+        fn for_test(events: Vec<CursorDataChunkEvent>) -> (Self, Arc<AtomicBool>) {
             let started = Arc::new(AtomicBool::new(false));
-            let started_for_task = started.clone();
-            let producer_handle = tokio::spawn(async move {
-                if let Some(start_rx) = start_rx {
-                    tokio::select! {
-                        biased;
-                        _ = producer_shutdown_rx.cancelled() => return,
-                        _ = start_rx => {}
-                    }
-                }
-                started_for_task.store(true, Ordering::Relaxed);
-                for event in events {
-                    if event_tx.send(Ok(event)).await.is_err() {
-                        return;
-                    }
-                }
-                producer_shutdown_rx.cancelled().await;
-            });
             (
                 Self {
-                    event_rx,
-                    producer_handle: Some(producer_handle),
+                    inner: Self::events_for_test(events, started.clone()).boxed(),
                 },
                 started,
             )
         }
-    }
 
-    impl QueryCursorDataChunkStream {
-        /// Creates an immediately started synthetic query producer.
-        fn for_test(
-            events: Vec<CursorDataChunkEvent>,
-            lifecycle: &CursorLifecycle,
-        ) -> (Self, Arc<AtomicBool>) {
-            let (receiver, started) = CursorDataChunkReceiver::for_test(events, lifecycle, None);
-            (Self { receiver }, started)
+        #[try_stream(ok = CursorDataChunkEvent, error = BoxedError)]
+        async fn pending_for_test(started: Arc<AtomicBool>, resume_rx: oneshot::Receiver<()>) {
+            started.store(true, Ordering::Relaxed);
+            resume_rx.await.unwrap();
+            yield CursorDataChunkEvent::Barrier(CursorDataChunkBarrier::QueryEnd);
         }
     }
 
     impl SubscriptionCursorDataChunkStream {
-        /// Creates a deferred synthetic subscription producer.
-        fn for_test(
-            events: Vec<CursorDataChunkEvent>,
-            lifecycle: &CursorLifecycle,
-        ) -> (Self, Arc<AtomicBool>) {
-            let (start_tx, start_rx) = oneshot::channel();
-            let (receiver, started) =
-                CursorDataChunkReceiver::for_test(events, lifecycle, Some(start_rx));
+        #[try_stream(ok = CursorDataChunkEvent, error = BoxedError)]
+        async fn events_for_test(events: Vec<CursorDataChunkEvent>, started: Arc<AtomicBool>) {
+            started.store(true, Ordering::Relaxed);
+            for event in events {
+                yield event;
+            }
+            std::future::pending::<()>().await;
+        }
+
+        /// Creates a synthetic subscription stream that begins only when polled.
+        fn for_test(events: Vec<CursorDataChunkEvent>) -> (Self, Arc<AtomicBool>) {
+            let started = Arc::new(AtomicBool::new(false));
             (
                 Self {
-                    receiver,
-                    start_tx: Some(start_tx),
+                    inner: Self::events_for_test(events, started.clone()).boxed(),
                 },
                 started,
             )
-        }
-
-        /// Returns the configured event-channel capacity.
-        fn channel_capacity(&self) -> usize {
-            self.receiver.event_rx.max_capacity()
         }
     }
 
@@ -2593,14 +2423,12 @@ mod tests {
         HandlerArgs::new(session, &statement, sql).unwrap()
     }
 
-    fn test_lifecycle(channel_capacity: usize) -> CursorLifecycle {
+    fn test_lifecycle() -> CursorLifecycle {
         let (_, session_shutdown_rx) = ShutdownToken::new();
-        CursorLifecycle::new(session_shutdown_rx, channel_capacity)
+        CursorLifecycle::new(session_shutdown_rx)
     }
 
-    fn query_data_stream(
-        channel_capacity: usize,
-    ) -> (
+    fn query_data_stream() -> (
         CursorLifecycle,
         QueryCursorDataChunkStream,
         Vec<Field>,
@@ -2621,8 +2449,8 @@ mod tests {
             }),
             CursorDataChunkEvent::Barrier(CursorDataChunkBarrier::QueryEnd),
         ];
-        let lifecycle = test_lifecycle(channel_capacity);
-        let (stream, started) = QueryCursorDataChunkStream::for_test(events, &lifecycle);
+        let lifecycle = test_lifecycle();
+        let (stream, started) = QueryCursorDataChunkStream::for_test(events);
         (lifecycle, stream, fields, started)
     }
 
@@ -2642,19 +2470,12 @@ mod tests {
 
     fn subscription_data_stream(
         from_snapshot: bool,
-        channel_capacity: usize,
     ) -> (
         CursorLifecycle,
         SubscriptionCursorDataChunkStream,
         Arc<AtomicBool>,
     ) {
         let fields = Arc::new(subscription_fields());
-        let fetch_state = SubscriptionCursorState::Fetch {
-            from_snapshot,
-            rw_timestamp: 1 << 16,
-            expected_timestamp: None,
-            init_query_timer: Instant::now(),
-        };
         let chunk = if from_snapshot {
             DataChunk::from_pretty(
                 "i
@@ -2670,29 +2491,35 @@ mod tests {
                  3 Insert",
             )
         };
-        let events = vec![
-            CursorDataChunkEvent::Barrier(CursorDataChunkBarrier::SubscriptionQueryStarted {
-                state: fetch_state,
-                output_fields: fields.get_output_fields(),
-                expires_at: Instant::now() + Duration::from_secs(60),
-            }),
+        let mut events = vec![];
+        if !from_snapshot {
+            events.push(CursorDataChunkEvent::Barrier(
+                CursorDataChunkBarrier::SubscriptionQueryStarted {
+                    from_snapshot,
+                    rw_timestamp: 1 << 16,
+                    expected_timestamp: None,
+                    init_query_timer: Instant::now(),
+                    output_fields: fields.get_output_fields(),
+                    expires_at: Instant::now() + Duration::from_secs(60),
+                },
+            ));
+        }
+        events.extend([
             CursorDataChunkEvent::Chunk(CursorDataChunk {
                 chunk,
                 kind: CursorDataChunkKind::Subscription {
-                    fields: fields.clone(),
+                    fields,
                     from_snapshot,
                     rw_timestamp: 1 << 16,
                 },
             }),
-            CursorDataChunkEvent::Barrier(CursorDataChunkBarrier::SubscriptionBatch {
-                next_state: SubscriptionCursorState::InitLogStoreQuery {
-                    seek_timestamp: (1 << 16) + 1,
-                    expected_timestamp: None,
-                },
+            CursorDataChunkEvent::Barrier(CursorDataChunkBarrier::SubscriptionNewEpoch {
+                seek_timestamp: (1 << 16) + 1,
+                expected_timestamp: None,
             }),
-        ];
-        let lifecycle = test_lifecycle(channel_capacity);
-        let (stream, started) = SubscriptionCursorDataChunkStream::for_test(events, &lifecycle);
+        ]);
+        let lifecycle = test_lifecycle();
+        let (stream, started) = SubscriptionCursorDataChunkStream::for_test(events);
         (lifecycle, stream, started)
     }
 
@@ -2702,7 +2529,12 @@ mod tests {
         from_snapshot: bool,
     ) -> SubscriptionCursor {
         let state = if from_snapshot {
-            SubscriptionCursorState::InitSnapshotQuery
+            SubscriptionCursorState::Fetch {
+                from_snapshot: true,
+                rw_timestamp: 1 << 16,
+                expected_timestamp: None,
+                init_query_timer: Instant::now(),
+            }
         } else {
             SubscriptionCursorState::InitLogStoreQuery {
                 seek_timestamp: 1 << 16,
@@ -2752,7 +2584,7 @@ mod tests {
         // CancelRequest discards the tentative read position, while the raw chunk remains in
         // this cursor-owned response stream.
         response_stream.abort_fetch();
-        assert!(!response_stream.common.cached_events.is_empty());
+        assert!(!response_stream.inner.cached_events.is_empty());
 
         response_stream.begin_fetch(&formats, session);
         let row = response_stream.next().await.unwrap().unwrap();
@@ -2770,10 +2602,10 @@ mod tests {
         let row = response_stream.next().await.unwrap().unwrap();
         assert_text_value(&row, b"1");
         response_stream.abort_fetch();
-        assert!(!response_stream.common.cached_events.is_empty());
+        assert!(!response_stream.inner.cached_events.is_empty());
         assert!(matches!(
             response_stream.subscription_state(),
-            SubscriptionCursorState::InitSnapshotQuery
+            SubscriptionCursorState::InitLogStoreQuery { .. }
         ));
 
         response_stream.begin_fetch(&formats, session, false);
@@ -2783,7 +2615,7 @@ mod tests {
         assert!(matches!(
             response_stream.subscription_state(),
             SubscriptionCursorState::Fetch {
-                from_snapshot: true,
+                from_snapshot: false,
                 ..
             }
         ));
@@ -2804,14 +2636,97 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_dropping_next_keeps_try_stream_await_state() {
+        let started = Arc::new(AtomicBool::new(false));
+        let (resume_tx, resume_rx) = oneshot::channel();
+        let mut stream = QueryCursorDataChunkStream {
+            inner: QueryCursorDataChunkStream::pending_for_test(started.clone(), resume_rx).boxed(),
+        };
+
+        assert!(stream.next().now_or_never().is_none());
+        assert!(started.load(Ordering::Relaxed));
+        resume_tx.send(()).unwrap();
+
+        assert!(matches!(
+            stream.next().await.unwrap().unwrap(),
+            CursorDataChunkEvent::Barrier(CursorDataChunkBarrier::QueryEnd)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_session_shutdown_interrupts_fetch_and_drops_cursor_stream() {
+        let session = Arc::new(SessionImpl::mock());
+        let cursor_manager = session.get_cursor_manager();
+        let lifecycle = CursorLifecycle::new(cursor_manager.session_shutdown_token());
+        let query_shutdown_rx = lifecycle.query_shutdown_token();
+        let (_chunk_tx, chunk_rx) = mpsc::channel(1);
+        let fields = vec![Field::with_name(DataType::Int32, "v")];
+        let query_stream = CursorQueryStream::local(
+            tokio_stream::wrappers::ReceiverStream::new(chunk_rx),
+            lifecycle.query_shutdown_sender(),
+        );
+        let cursor = QueryCursor {
+            lifecycle,
+            pg_response_stream: QueryCursorPgResponseStream::new(
+                QueryCursorDataChunkStream::new(query_stream, fields.clone()),
+                fields,
+            ),
+        };
+        cursor_manager
+            .add_query_cursor("cur".to_owned(), cursor)
+            .await
+            .unwrap();
+
+        let fetch_manager = cursor_manager.clone();
+        let fetch_args = handler_args(session);
+        let fetch = tokio::spawn(async move {
+            fetch_manager
+                .get_rows_with_cursor(
+                    "cur",
+                    1,
+                    fetch_args,
+                    &vec![],
+                    None,
+                    &mut FetchCursorCancelHandle::new(),
+                )
+                .await
+        });
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if cursor_manager.cursor_map.try_lock().is_err() {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("FETCH must acquire the cursor map");
+
+        cursor_manager.shutdown();
+        let error = tokio::time::timeout(Duration::from_secs(1), fetch)
+            .await
+            .expect("session shutdown must wake FETCH")
+            .unwrap()
+            .expect_err("session shutdown must fail the active FETCH");
+        assert!(error.to_string().contains("Session ended"));
+        tokio::time::timeout(Duration::from_secs(1), async {
+            loop {
+                if cursor_manager.cursor_map.lock().await.is_empty() {
+                    break;
+                }
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("session shutdown must drop every cursor-owned stream");
+        assert!(query_shutdown_rx.is_cancelled());
+    }
+
+    #[tokio::test]
     async fn test_query_cancel_timeout_and_format_changes_preserve_cursor_data() {
         let session = Arc::new(SessionImpl::mock());
         let args = handler_args(session.clone());
-        let capacity = session
-            .env()
-            .frontend_config()
-            .cursor_data_chunk_channel_capacity;
-        let (lifecycle, chunk_stream, fields, _) = query_data_stream(capacity);
+        let (lifecycle, chunk_stream, fields, _) = query_data_stream();
         let mut cursor = QueryCursor {
             lifecycle,
             pg_response_stream: QueryCursorPgResponseStream::new(chunk_stream, fields),
@@ -2859,18 +2774,18 @@ mod tests {
         for from_snapshot in [true, false] {
             let session = Arc::new(SessionImpl::mock());
             let args = handler_args(session.clone());
-            let capacity = session
-                .env()
-                .frontend_config()
-                .cursor_data_chunk_channel_capacity;
-            let (lifecycle, chunk_stream, started) =
-                subscription_data_stream(from_snapshot, capacity);
+            let (lifecycle, chunk_stream, started) = subscription_data_stream(from_snapshot);
             let mut cursor = subscription_cursor(lifecycle, chunk_stream, from_snapshot);
+            let cursor_metrics = Arc::new(CursorMetrics::new(&prometheus::Registry::new()));
+            cursor.cursor_metrics = cursor_metrics.clone();
+            let fetch_duration = cursor_metrics
+                .subscription_cursor_fetch_duration
+                .with_label_values(&[&cursor.subscription.name]);
 
             tokio::task::yield_now().await;
             assert!(
                 !started.load(Ordering::Relaxed),
-                "FULL and SINCE both defer production until their first FETCH"
+                "the high-level raw stream must remain demand-driven"
             );
 
             let mut cancelled_fetch = FetchCursorCancelHandle::new();
@@ -2880,9 +2795,13 @@ mod tests {
                 .await
                 .expect_err("CancelRequest must terminate only this FETCH");
             assert!(error.to_string().contains("Cancelled by user"));
+            assert_eq!(fetch_duration.get_sample_count(), 0);
             session.clear_cancel_query_flag();
             tokio::task::yield_now().await;
-            assert!(started.load(Ordering::Relaxed));
+            assert!(
+                !started.load(Ordering::Relaxed),
+                "a pre-cancelled FETCH must not advance the raw stream"
+            );
 
             let (rows, _) = cursor
                 .fetch(
@@ -2894,8 +2813,10 @@ mod tests {
                 )
                 .await
                 .unwrap();
+            assert!(started.load(Ordering::Relaxed));
             assert_eq!(rows.len(), 1);
             assert_text_value(&rows[0], b"1");
+            assert_eq!(fetch_duration.get_sample_count(), 1);
 
             let (rows, _) = cursor
                 .fetch(
@@ -2910,18 +2831,15 @@ mod tests {
             assert_eq!(rows.len(), 2);
             assert_binary_i32(&rows[0], 2);
             assert_binary_i32(&rows[1], 3);
+            assert_eq!(fetch_duration.get_sample_count(), 3);
         }
     }
 
     #[tokio::test]
     async fn test_cancelled_fetch_keeps_response_stream_cache() {
         let session = SessionImpl::mock();
-        let capacity = session
-            .env()
-            .frontend_config()
-            .cursor_data_chunk_channel_capacity;
 
-        let (_query_lifecycle, stream, fields, _) = query_data_stream(capacity);
+        let (_query_lifecycle, stream, fields, _) = query_data_stream();
         assert_query_cancelled_fetch_keeps_response_stream_cache(
             QueryCursorPgResponseStream::new(stream, fields),
             &session,
@@ -2929,12 +2847,15 @@ mod tests {
         )
         .await;
 
-        let (_subscription_lifecycle, stream, _) = subscription_data_stream(true, capacity);
+        let (_subscription_lifecycle, stream, _) = subscription_data_stream(false);
         assert_subscription_cancelled_fetch_keeps_response_stream_cache(
             SubscriptionCursorPgResponseStream::new(
                 stream,
                 subscription_fields().get_output_fields(),
-                SubscriptionCursorState::InitSnapshotQuery,
+                SubscriptionCursorState::InitLogStoreQuery {
+                    seek_timestamp: 1 << 16,
+                    expected_timestamp: None,
+                },
                 Instant::now() + Duration::from_secs(60),
             ),
             &session,
@@ -2944,23 +2865,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_cursor_test_stream_uses_configured_channel_capacity() {
-        let config: FrontendConfig =
-            toml::from_str("cursor_data_chunk_channel_capacity = 3").unwrap();
-        let (_lifecycle, stream, _) =
-            subscription_data_stream(true, config.cursor_data_chunk_channel_capacity);
-        assert_eq!(stream.channel_capacity(), 3);
-    }
-
-    #[tokio::test]
     async fn test_subscription_idle_barrier_remains_nonblocking_across_fetches() {
-        let lifecycle = test_lifecycle(1);
-        let (stream, _) = SubscriptionCursorDataChunkStream::for_test(
-            vec![CursorDataChunkEvent::Barrier(
+        let (stream, _) =
+            SubscriptionCursorDataChunkStream::for_test(vec![CursorDataChunkEvent::Barrier(
                 CursorDataChunkBarrier::SubscriptionIdle,
-            )],
-            &lifecycle,
-        );
+            )]);
         let mut response_stream = SubscriptionCursorPgResponseStream::new(
             stream,
             subscription_fields().get_output_fields(),

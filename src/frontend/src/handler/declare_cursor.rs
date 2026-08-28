@@ -155,7 +155,7 @@ pub async fn handle_bound_declare_query_cursor(
     Ok(PgResponse::empty_result(StatementType::DECLARE_CURSOR))
 }
 
-/// Plans a cursor statement and creates its raw producer stream.
+/// Plans a cursor statement and creates its raw data stream.
 pub async fn create_query_cursor_from_stmt(
     handler_args: HandlerArgs,
     stmt: Statement,

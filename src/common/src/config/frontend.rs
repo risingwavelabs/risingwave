@@ -12,8 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use serde::de::Error as _;
-
 use super::hba::HbaConfig;
 use super::*;
 
@@ -39,14 +37,6 @@ pub struct FrontendConfig {
     #[serde(default = "default::frontend::stream_flush_threshold_bytes")]
     pub stream_flush_threshold_bytes: usize,
 
-    /// Capacity of the channel buffering data chunks and barrier events between each cursor's
-    /// asynchronous producer and its `FETCH` stream. Must be greater than `0`.
-    #[serde(
-        default = "default::frontend::cursor_data_chunk_channel_capacity",
-        deserialize_with = "deserialize_cursor_data_chunk_channel_capacity"
-    )]
-    pub cursor_data_chunk_channel_capacity: usize,
-
     /// Host-based authentication configuration
     #[serde(default = "HbaConfig::default")]
     pub hba_config: HbaConfig,
@@ -60,21 +50,6 @@ pub struct FrontendConfig {
     /// frontend host. Enabled by default in debug builds for local development.
     #[serde(default = "default::frontend::unsafe_enable_local_fs_connector")]
     pub unsafe_enable_local_fs_connector: bool,
-}
-
-fn deserialize_cursor_data_chunk_channel_capacity<'de, D>(
-    deserializer: D,
-) -> Result<usize, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let value = usize::deserialize(deserializer)?;
-    if value == 0 {
-        return Err(D::Error::custom(
-            "frontend.cursor_data_chunk_channel_capacity must be greater than 0",
-        ));
-    }
-    Ok(value)
 }
 
 pub mod default {
@@ -94,10 +69,6 @@ pub mod default {
 
         pub fn stream_flush_threshold_bytes() -> usize {
             64 * 1024
-        }
-
-        pub fn cursor_data_chunk_channel_capacity() -> usize {
-            10
         }
 
         pub fn webhook_auth_max_clock_skew_ms() -> u64 {

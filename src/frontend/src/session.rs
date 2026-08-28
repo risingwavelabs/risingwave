@@ -1612,7 +1612,7 @@ impl SessionManager for SessionManagerImpl {
             .cloned()
             .collect_vec();
         for session in sessions {
-            session.get_cursor_manager().shutdown();
+            session.get_cursor_manager().shutdown_and_wait().await;
         }
         // Clean up the session map.
         self.env.sessions_map().write().clear();
