@@ -44,6 +44,11 @@ alter table rw_mysql_alter_snapshot_options connector with (
   snapshot.batch_size = '0'
 );
 
+statement error snapshot.interval must be greater than 0
+alter table rw_mysql_alter_snapshot_options connector with (
+  snapshot.interval = '0'
+);
+
 statement ok
 alter table rw_mysql_alter_snapshot_options connector with (
   snapshot.batch_size = '16',

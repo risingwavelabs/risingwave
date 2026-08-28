@@ -3647,12 +3647,15 @@ impl TryFrom<&BTreeMap<String, String>> for CdcSnapshotOptionsUpdate {
         for (key, value) in props {
             match key.as_str() {
                 CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY => {
-                    update.snapshot_barrier_interval =
-                        Some(value.parse::<u32>().map_err(|_| {
-                            MetaError::invalid_parameter(format!(
-                                "Invalid value for {key}: {value}"
-                            ))
-                        })?);
+                    let parsed = value.parse::<u32>().map_err(|_| {
+                        MetaError::invalid_parameter(format!("Invalid value for {key}: {value}"))
+                    })?;
+                    if parsed == 0 {
+                        return Err(MetaError::invalid_parameter(format!(
+                            "{CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY} must be greater than 0"
+                        )));
+                    }
+                    update.snapshot_barrier_interval = Some(parsed);
                 }
                 CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY => {
                     let parsed = value.parse::<u32>().map_err(|_| {
@@ -3887,6 +3890,11 @@ mod tests {
             CDC_BACKFILL_SNAPSHOT_BATCH_SIZE_KEY.to_owned() => "0".to_owned(),
         };
         assert!(CdcSnapshotOptionsUpdate::try_from(&zero_batch_size).is_err());
+
+        let zero_interval = btreemap! {
+            CDC_BACKFILL_SNAPSHOT_INTERVAL_KEY.to_owned() => "0".to_owned(),
+        };
+        assert!(CdcSnapshotOptionsUpdate::try_from(&zero_interval).is_err());
 
         let unsupported_option = btreemap! {
             "snapshot.unsupported".to_owned() => "1".to_owned(),
