@@ -206,7 +206,12 @@ impl crate::JsonSchema {
             .await?;
         let avro_schema =
             rw_catch_unwind(|| jst::convert_avro(&self.0, jst::Context::default()).to_string())
-                .map_err(|_| anyhow!("failed to convert JSON schema to Avro schema"))?;
+                .map_err(|payload| {
+                    anyhow!(
+                        "failed to convert JSON schema to Avro schema: {}",
+                        panic_message::panic_message(&payload)
+                    )
+                })?;
         let schema =
             apache_avro::Schema::parse_str(&avro_schema).context("failed to parse avro schema")?;
         avro_schema_to_fields(&schema, Some(MapHandling::Jsonb))

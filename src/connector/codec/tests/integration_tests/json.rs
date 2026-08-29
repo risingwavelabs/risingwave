@@ -231,22 +231,24 @@ async fn test_json_schema_parse() {
 
 #[tokio::test]
 async fn test_invalid_json_schema_returns_error() {
-    for schema in [
-        r#"{"type":"nonsense"}"#,
-        r#"{"type":[]}"#,
-        r#"{"type":"array"}"#,
+    for (schema, cause) in [
+        (r#"{"type":"nonsense"}"#, "unknown variant `nonsense`"),
+        (r#"{"type":[]}"#, "empty union is not allowed"),
+        (r#"{"type":"array"}"#, "array missing item"),
     ] {
         let mut json_schema = JsonSchema::parse_str(schema).unwrap();
 
-        let result = json_schema
+        let error = json_schema
             .json_schema_to_columns(Url::parse("http://test_schema_uri.test").unwrap())
-            .await;
+            .await
+            .unwrap_err()
+            .to_string();
 
-        assert_eq!(
-            result.unwrap_err().to_string(),
-            "failed to convert JSON schema to Avro schema",
-            "{schema}"
+        assert!(
+            error.starts_with("failed to convert JSON schema to Avro schema: "),
+            "{schema}: {error}"
         );
+        assert!(error.contains(cause), "{schema}: {error}");
     }
 }
 
