@@ -207,7 +207,7 @@ impl Drop for CursorQueryStream {
                 query_manager,
                 query_id,
                 ..
-            } => query_manager.cancel_query(query_id, "cursor closed"),
+            } => query_manager.cancel_cursor_query(query_id, "cursor closed"),
         }
     }
 }

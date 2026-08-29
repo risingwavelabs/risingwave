@@ -29,6 +29,7 @@ use risingwave_pb::batch_plan::TaskOutputId;
 use risingwave_pb::common::HostAddress;
 use risingwave_rpc_client::ComputeClientPoolRef;
 use tokio::sync::OwnedSemaphorePermit;
+use tracing::warn;
 
 use super::QueryExecution;
 use super::stats::DistributedQueryMetrics;
@@ -311,8 +312,10 @@ impl QueryManager {
         }
     }
 
-    /// Cancels one distributed query without blocking its caller on teardown.
-    pub fn cancel_query(&self, query_id: &QueryId, reason: impl Into<String>) {
+    /// Cancels one cursor-owned distributed query without blocking its caller on teardown.
+    ///
+    /// Ordinary queries are deliberately rejected so their cancellation remains session-scoped.
+    pub fn cancel_cursor_query(&self, query_id: &QueryId, reason: impl Into<String>) {
         let query_execution = self
             .query_execution_info
             .read()
@@ -321,6 +324,13 @@ impl QueryManager {
             .get(query_id)
             .cloned();
         if let Some(query_execution) = query_execution {
+            if query_execution.can_session_cancel() {
+                warn!(
+                    ?query_id,
+                    "Ignoring cursor cancellation for an ordinary query"
+                );
+                return;
+            }
             let reason = reason.into();
             tokio::spawn(async move { query_execution.abort(reason).await });
         }

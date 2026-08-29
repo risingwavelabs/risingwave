@@ -2053,3 +2053,46 @@ pub fn cancel_creating_jobs_in_session(session_id: SessionId, sessions_map: Sess
         false
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn session_for_manager_test(env: FrontendEnv, id: SessionId) -> Arc<SessionImpl> {
+        Arc::new(SessionImpl::new(
+            env,
+            AuthContext::new(
+                DEFAULT_DATABASE_NAME.to_owned(),
+                DEFAULT_SUPER_USER.to_owned(),
+                DEFAULT_SUPER_USER_ID,
+            ),
+            UserAuthenticator::None,
+            id,
+            Address::Tcp(SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), 8080)).into(),
+            SessionConfig::default(),
+        ))
+    }
+
+    /// Verifies that frontend shutdown interrupts every ordinary query and cursor before clearing
+    /// the session registry.
+    #[tokio::test]
+    async fn test_session_manager_shutdown_cancels_queries_and_cursors() {
+        let env = FrontendEnv::mock();
+        let manager = SessionManagerImpl {
+            env: env.clone(),
+            _join_handles: vec![],
+            _shutdown_senders: vec![],
+            number: AtomicI32::new(0),
+        };
+        let session = session_for_manager_test(env, (1, 2));
+        let query_shutdown = session.reset_cancel_query_flag();
+        let cursor_shutdown = session.get_cursor_manager().session_shutdown_token();
+        manager.insert_session(session);
+
+        SessionManager::shutdown(&manager).await;
+
+        assert!(query_shutdown.is_cancelled());
+        assert!(cursor_shutdown.is_cancelled());
+        assert!(manager.env.sessions_map().read().is_empty());
+    }
+}

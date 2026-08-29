@@ -472,6 +472,7 @@ impl QueryRunner {
 pub(crate) mod tests {
     use std::collections::HashMap;
     use std::sync::{Arc, RwLock};
+    use std::time::Duration;
 
     use fixedbitset::FixedBitSet;
     use risingwave_batch::worker_manager::worker_node_manager::{
@@ -489,6 +490,7 @@ pub(crate) mod tests {
     use risingwave_pb::plan_common::JoinType;
     use risingwave_rpc_client::ComputeClientPool;
 
+    use super::{QueryExecution, QueryMessage, QueryState};
     use crate::TableCatalog;
     use crate::catalog::catalog_service::CatalogReader;
     use crate::catalog::root_catalog::Catalog;
@@ -500,11 +502,83 @@ pub(crate) mod tests {
         LogicalScan, ToBatch, generic,
     };
     use crate::optimizer::property::{Cardinality, Distribution, Order};
-    use crate::scheduler::distributed::QueryExecution;
     use crate::scheduler::plan_fragmenter::{BatchPlanFragmenter, Query};
     use crate::scheduler::{DistributedQueryMetrics, ExecutionContext, QueryExecutionInfo};
     use crate::session::SessionImpl;
     use crate::utils::Condition;
+
+    async fn receive_pending_query_message(query: &QueryExecution) -> QueryMessage {
+        let mut state = query.state.write().await;
+        let QueryState::Pending { msg_receiver } = &mut *state else {
+            panic!("query must remain pending in this test");
+        };
+        tokio::time::timeout(Duration::from_secs(1), msg_receiver.recv())
+            .await
+            .expect("query cancellation message must arrive")
+            .expect("query control channel must remain open")
+    }
+
+    async fn assert_no_pending_query_message(query: &QueryExecution) {
+        let mut state = query.state.write().await;
+        let QueryState::Pending { msg_receiver } = &mut *state else {
+            panic!("query must remain pending in this test");
+        };
+        assert!(matches!(
+            msg_receiver.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ));
+    }
+
+    /// Verifies that session cancellation targets only ordinary queries in that session, while
+    /// cursor cancellation rejects ordinary queries and targets only the selected cursor query.
+    #[tokio::test]
+    async fn test_distributed_query_cancellation_filters_by_session_and_cursor_ownership() {
+        let query_manager = SessionImpl::mock().env().query_manager().clone();
+        let target_session = (1, 2);
+
+        let cancellable_query = create_query().await;
+        let cancellable_query_id = cancellable_query.query_id().clone();
+        let cancellable_query = Arc::new(QueryExecution::new(
+            cancellable_query,
+            target_session,
+            None,
+            true,
+        ));
+        query_manager.add_query(cancellable_query_id.clone(), cancellable_query.clone());
+
+        let cursor_query = create_query().await;
+        let cursor_query_id = cursor_query.query_id().clone();
+        let cursor_query = Arc::new(QueryExecution::new(
+            cursor_query,
+            target_session,
+            None,
+            false,
+        ));
+        query_manager.add_query(cursor_query_id.clone(), cursor_query.clone());
+
+        let other_session_query = create_query().await;
+        let other_session_query_id = other_session_query.query_id().clone();
+        let other_session_query =
+            Arc::new(QueryExecution::new(other_session_query, (3, 4), None, true));
+        query_manager.add_query(other_session_query_id, other_session_query.clone());
+
+        query_manager.cancel_non_cursor_queries_in_session(target_session);
+        assert!(matches!(
+            receive_pending_query_message(&cancellable_query).await,
+            QueryMessage::CancelQuery(reason) if reason == "cancelled by user"
+        ));
+        assert_no_pending_query_message(&cursor_query).await;
+        assert_no_pending_query_message(&other_session_query).await;
+
+        query_manager.cancel_cursor_query(&cancellable_query_id, "cursor closed");
+        assert_no_pending_query_message(&cancellable_query).await;
+
+        query_manager.cancel_cursor_query(&cursor_query_id, "cursor closed");
+        assert!(matches!(
+            receive_pending_query_message(&cursor_query).await,
+            QueryMessage::CancelQuery(reason) if reason == "cursor closed"
+        ));
+    }
 
     #[tokio::test]
     async fn test_query_should_not_hang_with_empty_worker() {
