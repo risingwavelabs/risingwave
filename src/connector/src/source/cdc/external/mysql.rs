@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 
 use anyhow::{Context, anyhow};
-use chrono::{DateTime, NaiveDateTime};
+use chrono::{DateTime, Datelike, NaiveDateTime, Timelike};
 use futures::stream::BoxStream;
 use futures::{StreamExt, pin_mut, stream};
 use futures_async_stream::try_stream;
@@ -257,6 +257,25 @@ pub fn timestamp_val_to_timestamptz(value_text: &str) -> ConnectorResult<String>
     Ok(postgres_timestamptz
         .format("%Y-%m-%d %H:%M:%S%:z")
         .to_string())
+}
+
+fn naive_datetime_to_mysql_value(datetime: NaiveDateTime) -> ConnectorResult<Value> {
+    let year = datetime.year();
+    if !(0..=9999).contains(&year) {
+        bail!("year `{year}` is outside the range supported by MySQL [0, 9999]");
+    }
+
+    // `mysql_common` rejects years before 1000 when converting from chrono, even though
+    // MySQL can return such values and its binary protocol can represent them.
+    Ok(Value::Date(
+        year as u16,
+        datetime.month() as u8,
+        datetime.day() as u8,
+        datetime.hour() as u8,
+        datetime.minute() as u8,
+        datetime.second() as u8,
+        datetime.nanosecond() / 1000,
+    ))
 }
 
 pub fn type_name_to_mysql_type(ty_name: &str) -> Option<ColumnType> {
@@ -734,9 +753,13 @@ impl MySqlExternalTableReader {
                             DataType::Float32 => Value::from(value.into_float32().into_inner()),
                             DataType::Float64 => Value::from(value.into_float64().into_inner()),
                             DataType::Varchar => Value::from(String::from(value.into_utf8())),
-                            DataType::Date => Value::from(value.into_date().0),
+                            DataType::Date => naive_datetime_to_mysql_value(
+                                value.into_date().0.and_time(Default::default()),
+                            )?,
                             DataType::Time => Value::from(value.into_time().0),
-                            DataType::Timestamp => Value::from(value.into_timestamp().0),
+                            DataType::Timestamp => {
+                                naive_datetime_to_mysql_value(value.into_timestamp().0)?
+                            }
                             DataType::Decimal => Value::from(value.into_decimal().to_string()),
                             DataType::Timestamptz => {
                                 // Convert timestamptz to NaiveDateTime for MySQL TIMESTAMP comparison
@@ -744,7 +767,7 @@ impl MySqlExternalTableReader {
                                 let ts = value.into_timestamptz();
                                 let datetime_utc = ts.to_datetime_utc();
                                 let naive_datetime = datetime_utc.naive_utc();
-                                Value::from(naive_datetime)
+                                naive_datetime_to_mysql_value(naive_datetime)?
                             }
                             _ => bail!("unsupported primary key data type: {}", ty),
                         };
@@ -844,14 +867,19 @@ impl MySqlExternalTableReader {
 mod tests {
     use std::collections::HashMap;
 
+    use chrono::NaiveDate;
     use futures::pin_mut;
     use futures_async_stream::for_await;
     use maplit::{convert_args, hashmap};
+    use mysql_common::value::Value;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
     use risingwave_common::types::DataType;
     use sea_schema::mysql::def::ColumnType;
 
-    use super::{mysql_type_is_unsigned_bigint, mysql_type_to_rw_type, type_name_to_mysql_type};
+    use super::{
+        mysql_type_is_unsigned_bigint, mysql_type_to_rw_type, naive_datetime_to_mysql_value,
+        type_name_to_mysql_type,
+    };
     use crate::source::cdc::external::mysql::MySqlExternalTable;
     use crate::source::cdc::external::{
         CdcOffset, ExternalTableConfig, ExternalTableReader, MySqlExternalTableReader, MySqlOffset,
@@ -946,6 +974,29 @@ mod tests {
             mysql_type_to_rw_type(&parse_mysql_type_name("BIGINT UNSIGNED")).unwrap();
         assert_eq!(serial_type, DataType::Decimal);
         assert_eq!(serial_type, unsigned_bigint_type);
+    }
+
+    #[test]
+    fn test_mysql_value_from_early_date() {
+        let datetime = NaiveDate::from_ymd_opt(23, 4, 5)
+            .unwrap()
+            .and_hms_micro_opt(6, 7, 8, 9)
+            .unwrap();
+
+        assert_eq!(
+            naive_datetime_to_mysql_value(datetime).unwrap(),
+            Value::Date(23, 4, 5, 6, 7, 8, 9)
+        );
+    }
+
+    #[test]
+    fn test_mysql_value_rejects_year_outside_protocol_range() {
+        let datetime = NaiveDate::from_ymd_opt(-1, 1, 1)
+            .unwrap()
+            .and_hms_opt(0, 0, 0)
+            .unwrap();
+
+        assert!(naive_datetime_to_mysql_value(datetime).is_err());
     }
 
     #[ignore]
