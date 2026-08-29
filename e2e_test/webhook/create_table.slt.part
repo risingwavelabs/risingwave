@@ -35,6 +35,33 @@ create table github_hmac_sha256 (
   'sha256=' || encode(hmac(test_secret, data, 'sha256'), 'hex')
 );
 
+# https://docs.xquik.com/webhooks/verification
+statement ok
+create table xquik_hmac_sha256 (
+  "eventType" varchar,
+  "schemaVersion" int,
+  "deliveryId" varchar,
+  "streamEventId" varchar,
+  "occurredAt" timestamptz,
+  username varchar,
+  data JSONB
+) WITH (
+  connector = 'webhook',
+) VALIDATE SECRET test_secret AS secure_compare(
+  headers->>'x-xquik-signature',
+  'sha256=' || encode(
+    hmac(
+      test_secret,
+      convert_to(
+        headers->>'x-xquik-timestamp' || '.' || headers->>'x-xquik-nonce' || '.',
+        'UTF8'
+      ) || payload,
+      'sha256'
+    ),
+    'hex'
+  )
+);
+
 statement ok
 create table segment_hmac_sha1 (
   data JSONB

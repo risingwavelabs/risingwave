@@ -1,9 +1,12 @@
 import argparse
-import requests
-import json
-import sys
-import hmac
 import hashlib
+import hmac
+import json
+import secrets
+import sys
+import time
+
+import requests
 
 message = {
     "event": "order.created",
@@ -106,6 +109,35 @@ def send_github_hmac_sha256(secret):
     headers = {
         "Content-Type": "application/json",
         "X-Hub-Signature-256": signature  # Custom signature header
+    }
+    send_webhook(url, headers, payload_json)
+
+
+def send_xquik_hmac_sha256(secret):
+    timestamp = str(time.time_ns() // 1_000_000)
+    payload = {
+        "eventType": "tweet.new",
+        "schemaVersion": 1,
+        "deliveryId": f"delivery-{timestamp}",
+        "streamEventId": "event-9001",
+        "occurredAt": "2026-08-22T07:30:00.000Z",
+        "username": "risingwave",
+        "data": {
+            "id": "tweet-1",
+            "text": "Streaming data with RisingWave",
+        },
+    }
+    nonce = secrets.token_hex(16)
+    url = SERVER_URL + "xquik_hmac_sha256"
+
+    payload_json = json.dumps(payload)
+    signing_string = f"{timestamp}.{nonce}.{payload_json}"
+    signature = generate_signature_hmac(secret, signing_string, 'sha256', "sha256=")
+    headers = {
+        "Content-Type": "application/json",
+        "X-Xquik-Timestamp": timestamp,
+        "X-Xquik-Nonce": nonce,
+        "X-Xquik-Signature": signature,
     }
     send_webhook(url, headers, payload_json)
 
@@ -293,6 +325,8 @@ if __name__ == "__main__":
     # github
     send_github_hmac_sha1(secret)
     send_github_hmac_sha256(secret)
+    # xquik
+    send_xquik_hmac_sha256(secret)
     # rudderstack, AWS EventBridge and HubSpot with API Key.
     send_rudderstack(secret)
     # segment
