@@ -2868,6 +2868,13 @@ mod tests {
         .expect(message);
     }
 
+    async fn advance_time_for_test(duration: Duration) {
+        #[cfg(madsim)]
+        tokio::time::advance(duration);
+        #[cfg(not(madsim))]
+        tokio::time::advance(duration).await;
+    }
+
     /// Covers ownership and teardown invariants for cursor-managed query streams throughout the
     /// cursor and session lifecycle.
     mod cursor_lifecycle_tests {
@@ -3582,7 +3589,7 @@ mod tests {
                 (cursor, result)
             });
             wait_for_flag_for_test(&waiting, "FETCH must wait between query chunks").await;
-            tokio::time::advance(Duration::from_secs(1)).await;
+            advance_time_for_test(Duration::from_secs(1)).await;
             let (mut cursor, result) = fetch.await.unwrap();
             let (rows, _) = result.unwrap();
             // A positive timeout returns and commits all rows available before the gate.
@@ -3798,7 +3805,7 @@ mod tests {
             });
             wait_for_flag_for_test(&waiting, "subscription FETCH must wait for its third query")
                 .await;
-            tokio::time::advance(Duration::from_secs(1)).await;
+            advance_time_for_test(Duration::from_secs(1)).await;
             let (mut cursor, result) = fetch.await.unwrap();
             let (rows, _) = result.unwrap();
             // Rows 1-4 and their two completed epochs are committed when the positive timeout fires.
