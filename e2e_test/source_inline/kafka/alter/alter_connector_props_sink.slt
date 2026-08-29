@@ -120,6 +120,14 @@ ALTER SINK s_sink_secret_direct CONNECTOR WITH (
     properties.sasl.password = secret sink_password_2
 );
 
+query I
+select count(*)
+from rw_sinks
+where name = 's_sink_secret_direct'
+  and definition ILIKE '%properties.sasl.password = secret public.sink_password_2%';
+----
+1
+
 statement error
 ALTER SINK s_sink_secret_direct CONNECTOR WITH (
     commit_checkpoint_interval = '2'
