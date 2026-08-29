@@ -89,6 +89,8 @@ impl TestSuite {
         self.query_cursor_fetch_cancel(true).await?;
         self.subscription_fetch_cancel(false).await?;
         self.subscription_fetch_cancel(true).await?;
+        self.cursor_fetch_timeout_cancel_and_resume(false).await?;
+        self.cursor_fetch_timeout_cancel_and_resume(true).await?;
         self.cursor_queries_survive_statement_timeout(false).await?;
         self.cursor_queries_survive_statement_timeout(true).await?;
         self.subquery_with_param().await?;
@@ -665,6 +667,120 @@ impl TestSuite {
         test_eq!(rows.len(), 0);
 
         client.execute("close cur", &[]).await?;
+        client
+            .execute(&format!("drop subscription {subscription_name}"), &[])
+            .await?;
+        client
+            .execute(&format!("drop table {table_name}"), &[])
+            .await?;
+        Ok(())
+    }
+
+    /// Verifies a positive query-cursor `FETCH` timeout, then subscription cancellation after
+    /// crossing an epoch boundary and immediate resumption from available cursor progress.
+    async fn cursor_fetch_timeout_cancel_and_resume(
+        &self,
+        is_distributed: bool,
+    ) -> anyhow::Result<()> {
+        let client = self.create_client(is_distributed).await?;
+
+        client
+            .execute(
+                "declare fetch_timeout_cur cursor for \
+                 select 1::int as id, pg_sleep(0) \
+                 union all \
+                 select 2::int, pg_sleep(5)",
+                &[],
+            )
+            .await?;
+        let rows = tokio::time::timeout(
+            Duration::from_secs(10),
+            client.query("fetch 10 from fetch_timeout_cur with (timeout = '1s')", &[]),
+        )
+        .await??;
+        // The per-`FETCH` timeout returns the first completed branch promptly instead of waiting
+        // five seconds for the cursor query's second branch.
+        Self::assert_contiguous_ids(&rows, 1, 1)?;
+        client.execute("close fetch_timeout_cur", &[]).await?;
+
+        let producer = self.create_client(is_distributed).await?;
+        let suffix = if is_distributed { "dist" } else { "local" };
+        let table_name = format!("sub_progress_t_{suffix}");
+        let subscription_name = format!("sub_progress_{suffix}");
+
+        client
+            .execute(
+                &format!("create table {table_name}(id int primary key)"),
+                &[],
+            )
+            .await?;
+        client
+            .execute(
+                &format!(
+                    "create subscription {subscription_name} from {table_name} with(retention = '1D')"
+                ),
+                &[],
+            )
+            .await?;
+        client
+            .execute(
+                &format!(
+                    "declare progress_cur subscription cursor for {subscription_name} since now()"
+                ),
+                &[],
+            )
+            .await?;
+
+        // Initialize the lazy `SINCE` cursor and leave it waiting for its first log-store epoch.
+        let rows = client.query("fetch 1 from progress_cur", &[]).await?;
+        test_eq!(rows.len(), 0);
+
+        producer
+            .execute(&format!("insert into {table_name} values (1)"), &[])
+            .await?;
+        producer.execute("flush", &[]).await?;
+        producer
+            .execute(
+                &format!("insert into {table_name} select * from generate_series(2, 1000001)"),
+                &[],
+            )
+            .await?;
+        producer.execute("flush", &[]).await?;
+
+        let cancel_token = client.cancel_token();
+        let fetch_handle = tokio::spawn(async move {
+            let result = client
+                .query(
+                    "fetch 2000000 from progress_cur with (timeout = '60s')",
+                    &[],
+                )
+                .await;
+            (client, result)
+        });
+
+        // The first epoch contributes row 1. The large following epoch keeps the next query active,
+        // creating a real cancellation point after the first epoch boundary has been crossed.
+        tokio::time::sleep(Duration::from_secs(1)).await;
+        cancel_token.cancel_query(NoTls).await?;
+
+        let (client, result) =
+            tokio::time::timeout(Duration::from_secs(10), fetch_handle).await??;
+        if result.is_ok() {
+            return Err(anyhow!(
+                "subscription FETCH with tentative epoch progress should be cancelled"
+            ));
+        }
+
+        let rows = tokio::time::timeout(
+            Duration::from_secs(10),
+            client.query("fetch 1 from progress_cur with (timeout = '0s')", &[]),
+        )
+        .await??;
+        // Cancellation returned no partial result, but the same cursor must still expose one row
+        // immediately through a nonblocking `FETCH`. Exact cache-position rollback is unit-tested.
+        test_eq!(rows.len(), 1);
+
+        client.execute("close progress_cur", &[]).await?;
         client
             .execute(&format!("drop subscription {subscription_name}"), &[])
             .await?;

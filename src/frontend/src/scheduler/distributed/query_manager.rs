@@ -371,3 +371,66 @@ impl Debug for QueryResultFetcher {
             .finish()
     }
 }
+
+#[cfg(test)]
+mod cursor_lifecycle_tests {
+    use super::*;
+    use crate::scheduler::distributed::query::tests::create_query;
+
+    /// Verifies the query-registration handoff from scheduling to the result stream: dropping an
+    /// armed guard cleans up an interrupted query, while disarming it preserves the registration
+    /// for stream-owned cleanup.
+    #[tokio::test]
+    async fn test_distributed_query_registration_guard_handoff() {
+        let query = create_query().await;
+        let query_id = query.query_id().clone();
+        let query_execution = Arc::new(QueryExecution::new(query, (0, 0), None, false));
+        let query_execution_info = Arc::new(RwLock::new(QueryExecutionInfo::default()));
+        query_execution_info
+            .write()
+            .unwrap()
+            .add_query(query_id.clone(), query_execution.clone());
+
+        drop(DistributedQueryRegistrationAtomicGuard::new(
+            query_id.clone(),
+            query_execution.clone(),
+            query_execution_info.clone(),
+        ));
+
+        assert!(
+            !query_execution_info
+                .read()
+                .unwrap()
+                .query_execution_map
+                .contains_key(&query_id),
+            "dropping an armed registration guard must remove the query"
+        );
+        let query = create_query().await;
+        let query_id = query.query_id().clone();
+        let query_execution = Arc::new(QueryExecution::new(query, (0, 0), None, false));
+        query_execution_info
+            .write()
+            .unwrap()
+            .add_query(query_id.clone(), query_execution.clone());
+        let mut registration = DistributedQueryRegistrationAtomicGuard::new(
+            query_id.clone(),
+            query_execution,
+            query_execution_info.clone(),
+        );
+        registration.disarm();
+        drop(registration);
+
+        assert!(
+            query_execution_info
+                .read()
+                .unwrap()
+                .query_execution_map
+                .contains_key(&query_id),
+            "disarming must preserve the registration for stream ownership"
+        );
+        query_execution_info
+            .write()
+            .unwrap()
+            .delete_query(&query_id);
+    }
+}

@@ -358,6 +358,8 @@ mod tests {
     use super::*;
     use crate::test_utils::MockFrontendMetaClient;
 
+    /// Verifies that an already-available seek epoch is observed immediately without waiting for
+    /// another version-update notification.
     #[tokio::test]
     async fn test_wait_table_change_log_notification_observes_existing_version() {
         let manager = HummockSnapshotManager::new(Arc::new(MockFrontendMetaClient {}));

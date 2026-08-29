@@ -77,7 +77,7 @@ pub struct QueryExecution {
     can_session_cancel: bool,
     /// Permit to execute the query. Once query finishes execution, this is dropped.
     #[expect(dead_code)]
-    pub permit: Option<tokio::sync::OwnedSemaphorePermit>,
+    permit: Option<tokio::sync::OwnedSemaphorePermit>,
 }
 
 struct QueryRunner {
