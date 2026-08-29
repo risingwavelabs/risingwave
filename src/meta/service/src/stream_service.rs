@@ -752,6 +752,7 @@ impl StreamManagerService for StreamServiceImpl {
             Ok(AlterConnectorPropsObject::IcebergTable) => {
                 let (options_with_secret, sink_id) = self
                     .metadata_manager
+                    .catalog_controller
                     .update_iceberg_table_props_by_table_id(
                         request.object_id.into(),
                         request.changed_props.clone().into_iter().collect(),
