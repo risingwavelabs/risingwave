@@ -228,3 +228,43 @@ async fn test_json_schema_parse() {
     "#]]
     .assert_debug_eq(&column_display);
 }
+
+#[tokio::test]
+async fn test_invalid_json_schema_returns_error() {
+    for schema in [
+        r#"{"type":"nonsense"}"#,
+        r#"{"type":[]}"#,
+        r#"{"type":"array"}"#,
+    ] {
+        let mut json_schema = JsonSchema::parse_str(schema).unwrap();
+
+        let result = json_schema
+            .json_schema_to_columns(Url::parse("http://test_schema_uri.test").unwrap())
+            .await;
+
+        assert_eq!(
+            result.unwrap_err().to_string(),
+            "failed to convert JSON schema to Avro schema",
+            "{schema}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_json_schema_valid_object() {
+    let mut json_schema =
+        JsonSchema::parse_str(r#"{"type":"object","properties":{"id":{"type":"integer"}}}"#)
+            .unwrap();
+
+    let columns = json_schema
+        .json_schema_to_columns(Url::parse("http://test_schema_uri.test").unwrap())
+        .await
+        .unwrap();
+
+    expect![[r#"
+        [
+            id: Int64,
+        ]
+    "#]]
+    .assert_debug_eq(&columns.iter().map(FieldTestDisplay).collect_vec());
+}
