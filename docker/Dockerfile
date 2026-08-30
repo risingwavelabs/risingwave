@@ -78,6 +78,12 @@ ARG DOCKER_SCCACHE_REGION
 ARG DOCKER_SCCACHE_PREFIX
 ARG SCCACHE_VERSION=0.10.0
 
+# Keep the sccache installation independent of the source tree so this layer can
+# be reused across commits.
+RUN if [[ "${ENABLE_DOCKER_SCCACHE}" == "true" ]]; then \
+    cargo install --locked "sccache@${SCCACHE_VERSION}"; \
+  fi
+
 COPY ./ /risingwave
 WORKDIR /risingwave
 
@@ -91,7 +97,6 @@ RUN --mount=type=secret,id=aws_credentials,target=/root/.aws/credentials,require
       echo "DOCKER_SCCACHE_BUCKET must be set when ENABLE_DOCKER_SCCACHE=true" >&2; \
       exit 1; \
     fi; \
-    cargo install --locked "sccache@${SCCACHE_VERSION}"; \
     export RUSTC_WRAPPER=sccache; \
     export SCCACHE_BUCKET="${DOCKER_SCCACHE_BUCKET}"; \
     export SCCACHE_REGION="${DOCKER_SCCACHE_REGION}"; \
