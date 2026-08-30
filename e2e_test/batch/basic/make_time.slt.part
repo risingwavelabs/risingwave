@@ -183,3 +183,71 @@ query T
 select '0001-01-01 12:34:56'::timestamptz - '10 year'::interval;
 ----
 0010-01-01 12:34:56+00:00 BC
+
+query T
+SELECT make_interval();
+----
+00:00:00
+
+query T
+SELECT make_interval(1, 2, 3, 4, 5, 6, 7.8);
+----
+1 year 2 mons 25 days 05:06:07.8
+
+query T
+SELECT make_interval(days => 10);
+----
+10 days
+
+query T
+SELECT make_interval(days := 10);
+----
+10 days
+
+query T
+SELECT make_interval(weeks => 2, days => 3);
+----
+17 days
+
+query T
+SELECT make_interval(1, days => 2);
+----
+1 year 2 days
+
+query IT
+WITH input(some_col) AS (VALUES (10), (NULL::int))
+SELECT some_col, make_interval(days => some_col)
+FROM input
+ORDER BY some_col NULLS LAST;
+----
+10 10 days
+NULL NULL
+
+statement error specified more than once
+SELECT make_interval(days => 1, days => 2);
+
+statement error no argument named
+SELECT make_interval(day => 1);
+
+statement error positional argument cannot follow named argument
+SELECT make_interval(days => 1, 2);
+
+statement ok
+DROP SCHEMA IF EXISTS make_interval_schema CASCADE;
+
+statement ok
+CREATE SCHEMA make_interval_schema;
+
+statement ok
+CREATE FUNCTION make_interval_schema.make_interval(i int)
+RETURNS int
+LANGUAGE sql
+AS $$ select i + 100 $$;
+
+query I
+SELECT make_interval_schema.make_interval(1);
+----
+101
+
+statement ok
+DROP SCHEMA make_interval_schema CASCADE;
