@@ -21,6 +21,9 @@ use crate::expr::{Expr, TableFunctionType};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalPostgresQuery, LogicalTableFunction};
 
+const EXPLICIT_CREDENTIAL_QUERY_ARG_LEN: usize = 6;
+const SOURCE_BACKED_QUERY_ARG_LEN: usize = 8;
+
 /// Transform a special `TableFunction` (with `POSTGRES_QUERY` table function type) into a `LogicalPostgresQuery`
 pub struct TableFunctionToPostgresQueryRule {}
 impl Rule<Logical> for TableFunctionToPostgresQueryRule {
@@ -41,7 +44,6 @@ impl Rule<Logical> for TableFunctionToPostgresQueryRule {
 
             let schema = Schema::new(fields);
 
-            assert!(logical_table_function.table_function().args.len() >= 6);
             let mut eval_args = vec![];
             for arg in &logical_table_function.table_function().args {
                 assert_eq!(arg.return_type(), DataType::Varchar);
@@ -55,6 +57,11 @@ impl Rule<Logical> for TableFunctionToPostgresQueryRule {
                     }
                 }
             }
+            let read_only = match eval_args.len() {
+                EXPLICIT_CREDENTIAL_QUERY_ARG_LEN => false,
+                SOURCE_BACKED_QUERY_ARG_LEN => true,
+                len => unreachable!("postgres_query must have 6 or 8 arguments, got {len}"),
+            };
             let hostname = eval_args[0].clone();
             let port = eval_args[1].clone();
             let username = eval_args[2].clone();
@@ -76,6 +83,7 @@ impl Rule<Logical> for TableFunctionToPostgresQueryRule {
                     query,
                     ssl_mode,
                     ssl_root_cert,
+                    read_only,
                 )
                 .into(),
             )

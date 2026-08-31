@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use anyhow::Context;
+use either::Either;
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
 use risingwave_common::array::DataChunk;
@@ -32,6 +33,7 @@ pub struct PostgresQueryExecutor {
     schema: Schema,
     config: PgConnectionConfig,
     query: String,
+    read_only: bool,
     identity: String,
     chunk_size: usize,
 }
@@ -107,6 +109,7 @@ impl PostgresQueryExecutor {
         schema: Schema,
         config: PgConnectionConfig,
         query: String,
+        read_only: bool,
         identity: String,
         chunk_size: usize,
     ) -> Self {
@@ -114,6 +117,7 @@ impl PostgresQueryExecutor {
             schema,
             config,
             query,
+            read_only,
             identity,
             chunk_size,
         }
@@ -123,16 +127,33 @@ impl PostgresQueryExecutor {
     async fn do_execute(self: Box<Self>) {
         tracing::debug!("postgres_query_executor: started");
 
-        let client = create_pg_client(&self.config, None).await?;
-
+        let mut client = create_pg_client(&self.config, None).await?;
         let params: &[&str] = &[];
-        let row_stream = client
+
+        let execution = if self.read_only {
+            Either::Left(
+                client
+                    .build_transaction()
+                    .read_only(true)
+                    .start()
+                    .await
+                    .context("failed to start read-only transaction for postgres_query")?,
+            )
+        } else {
+            Either::Right(&client)
+        };
+
+        let query_client = match &execution {
+            Either::Left(transaction) => transaction.client(),
+            Either::Right(client) => client,
+        };
+        let row_stream = query_client
             .query_raw(&self.query, params)
             .await
             .context("postgres_query received error from remote server")?;
+
         let mut builder = DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
         tracing::debug!("postgres_query_executor: query executed, start deserializing rows");
-        // deserialize the rows
         #[for_await]
         for row in row_stream {
             let row = row?;
@@ -144,6 +165,14 @@ impl PostgresQueryExecutor {
         if let Some(chunk) = builder.consume_all() {
             yield chunk;
         }
+
+        if let Either::Left(transaction) = execution {
+            transaction
+                .commit()
+                .await
+                .context("failed to commit read-only transaction for postgres_query")?;
+        }
+
         return Ok(());
     }
 }
@@ -180,6 +209,7 @@ impl BoxedExecutorBuilder for PostgresQueryExecutorBuilder {
                 },
             },
             postgres_query_node.query.clone(),
+            postgres_query_node.read_only,
             source.plan_node().get_identity().clone(),
             source.context().get_config().developer.chunk_size,
         )))
