@@ -48,6 +48,159 @@ fn parse_strict_tls_flag(value: &str, default: bool) -> Result<bool, BatchError>
     }
 }
 
+/// Strip SQL line comments (`-- ...`) and block comments (`/* ... */`) from
+/// `s`, replacing them with spaces so that byte offsets and string boundaries
+/// are preserved for downstream string-literal handling. Used by
+/// [`validate_read_only_query`] to avoid matching keywords that appear inside
+/// comments.
+fn strip_sql_comments(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        // Line comment: `-- ...` until newline (or end of string).
+        if i + 1 < bytes.len() && bytes[i] == b'-' && bytes[i + 1] == b'-' {
+            while i < bytes.len() && bytes[i] != b'\n' {
+                out.push(' ');
+                i += 1;
+            }
+            continue;
+        }
+        // Block comment: `/* ... */`.
+        if i + 1 < bytes.len() && bytes[i] == b'/' && bytes[i + 1] == b'*' {
+            out.push(' ');
+            out.push(' ');
+            i += 2;
+            while i + 1 < bytes.len() && !(bytes[i] == b'*' && bytes[i + 1] == b'/') {
+                out.push(if bytes[i] == b'\n' { '\n' } else { ' ' });
+                i += 1;
+            }
+            if i + 1 < bytes.len() {
+                out.push(' ');
+                out.push(' ');
+                i += 2;
+            }
+            continue;
+        }
+        out.push(bytes[i] as char);
+        i += 1;
+    }
+    out
+}
+
+/// Replace string literals (`'...'` and `"..."` — T-SQL also supports the
+/// doubled-quote form `''` for embedded single quotes) with spaces so the
+/// caller can scan for top-level keywords without being fooled by a
+/// `;` or `SELECT` that lives inside a string. Implemented on a comment-
+/// stripped input so `\` escapes inside literals behave like standard T-SQL.
+fn mask_sql_string_literals(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let bytes = s.as_bytes();
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'\'' => {
+                // Doubled single quote `''` is an escaped literal quote, not a
+                // string boundary — treat as one literal character.
+                if i + 1 < bytes.len() && bytes[i + 1] == b'\'' {
+                    out.push(' ');
+                    out.push(' ');
+                    i += 2;
+                } else {
+                    out.push(' ');
+                    i += 1;
+                    while i < bytes.len() && bytes[i] != b'\'' {
+                        out.push(if bytes[i] == b'\n' { '\n' } else { ' ' });
+                        i += 1;
+                    }
+                    if i < bytes.len() {
+                        out.push(' ');
+                        i += 1;
+                    }
+                }
+            }
+            b'"' if i == 0 || bytes[i - 1] == b'\n' || bytes[i - 1] == b' ' || bytes[i - 1] == b'\t' => {
+                // Identifier quoted with `"` — T-SQL syntax. Mask it.
+                out.push(' ');
+                i += 1;
+                while i < bytes.len() && bytes[i] != b'"' {
+                    out.push(if bytes[i] == b'\n' { '\n' } else { ' ' });
+                    i += 1;
+                }
+                if i < bytes.len() {
+                    out.push(' ');
+                    i += 1;
+                }
+            }
+            b => {
+                out.push(b as char);
+                i += 1;
+            }
+        }
+    }
+    out
+}
+
+/// Enforce that the user-provided query is a single read-only `SELECT` (or
+/// `WITH ... SELECT` CTE) statement. Two layers of defense:
+///
+/// 1. The first non-whitespace, non-comment keyword must be `SELECT` or
+///    `WITH`. Anything else (`INSERT`, `UPDATE`, `DELETE`, `DROP`,
+///    `CREATE`, `ALTER`, `TRUNCATE`, `EXEC`, `MERGE`, ...) is rejected.
+/// 2. The query must not contain a top-level `;` (semicolon-delimited
+///    multi-statement batch), since `tiberius::Client::query` accepts a
+///    batch and would happily run every statement against the source
+///    credentials.
+///
+/// Both checks operate on a comment-stripped and string-literal-masked
+/// copy of the query, so a `;` or `DELETE` inside a string or `--` comment
+/// doesn't trigger a false positive. The check is intentionally simple and
+/// rule-of-thumb — anything that fools it would also fool a human reader
+/// at first glance, and a determined attacker already has SQL Server
+/// credentials at this point (the `mssql_query` function never invents new
+/// access).
+fn validate_read_only_query(query: &str) -> Result<(), BatchError> {
+    // 1. Comment-strip + string-mask the query so keyword and semicolon
+    //    searches don't match inside comments / string literals.
+    let stripped = mask_sql_string_literals(&strip_sql_comments(query));
+
+    // 2. The first non-whitespace, non-newline token must be SELECT or
+    //    WITH. Case-insensitive. Anything else is rejected.
+    let first_token = stripped
+        .split(|c: char| c.is_whitespace())
+        .find(|tok| !tok.is_empty())
+        .map(str::to_ascii_lowercase)
+        .unwrap_or_default();
+    if first_token != "select" && first_token != "with" {
+        return Err(BatchError::from(anyhow::anyhow!(
+            "mssql_query only accepts read-only statements \
+             (SELECT / WITH ... SELECT); got `{} ...`",
+            first_token
+        )));
+    }
+
+    // 3. Reject semicolons anywhere in the (comment- and string-stripped)
+    //    query. A trailing `;` after a SELECT is common in client
+    //    tools and is fine — we strip one trailing semicolon before
+    //    scanning.
+    let mut s = stripped.trim_end().to_owned();
+    while let Some(c) = s.chars().last() {
+        if c == ';' || c.is_whitespace() {
+            s.pop();
+        } else {
+            break;
+        }
+    }
+    if s.contains(';') {
+        return Err(BatchError::from(anyhow::anyhow!(
+            "mssql_query does not allow semicolon-delimited batches; \
+             submit a single SELECT statement"
+        )));
+    }
+
+    Ok(())
+}
+
 /// `MssqlQuery` executor. Runs a query against a SQL Server database via `tiberius`.
 pub struct MssqlQueryExecutor {
     schema: Schema,
@@ -104,9 +257,21 @@ impl MssqlQueryExecutor {
     /// `self.query` verbatim, and yields each [`DataChunk`] decoded through
     /// [`sql_server_row_to_owned_row`]. Errors from connection setup, query
     /// execution, or row decoding are propagated as [`BatchError`].
+    ///
+    /// **Security**: the query is first run through
+    /// [`validate_read_only_query`] to refuse DML/DDL or
+    /// semicolon-delimited multi-statement batches. The 2-arg
+    /// source-reference form uses credentials from the named
+    /// `sqlserver-cdc` source, so a DML batch could otherwise modify
+    /// external data; this gate prevents that.
     #[try_stream(ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         tracing::debug!("mssql_query_executor: started");
+
+        // Read-only enforcement: reject DML/DDL or semicolon-delimited
+        // batches before we even open a connection. See
+        // [`validate_read_only_query`] for the exact rules.
+        validate_read_only_query(&self.query)?;
 
         let mut client = create_mssql_client(&self.config)
             .await
@@ -223,5 +388,101 @@ impl BoxedExecutorBuilder for MssqlQueryExecutorBuilder {
             source.plan_node().get_identity().clone(),
             source.context().get_config().developer.chunk_size,
         )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `SELECT * FROM t` is a single read-only statement — must pass.
+    #[test]
+    fn validate_read_only_query_accepts_simple_select() {
+        validate_read_only_query("SELECT * FROM test").unwrap();
+        validate_read_only_query("select * from test").unwrap();
+        validate_read_only_query("  SELECT 1  ").unwrap();
+    }
+
+    /// CTEs (`WITH ... SELECT`) are read-only — must pass.
+    #[test]
+    fn validate_read_only_query_accepts_cte() {
+        validate_read_only_query(
+            "WITH cte AS (SELECT id FROM test) SELECT * FROM cte",
+        )
+        .unwrap();
+    }
+
+    /// A trailing `;` is common in client tools — must be tolerated.
+    #[test]
+    fn validate_read_only_query_accepts_trailing_semicolon() {
+        validate_read_only_query("SELECT 1;").unwrap();
+        validate_read_only_query("SELECT 1 ; ").unwrap();
+    }
+
+    /// Semicolons *inside* the query (multi-statement batches) must be
+    /// rejected. This is the critical guard against
+    /// `SELECT 1; DELETE FROM test` running DML with the source
+    /// credentials.
+    #[test]
+    fn validate_read_only_query_rejects_multi_statement_batch() {
+        let err = validate_read_only_query("SELECT 1; DELETE FROM test").unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("semicolon-delimited"),
+            "expected error to mention semicolon-delimited batches, got: {msg}"
+        );
+
+        // DML after a comment must still be rejected.
+        let err = validate_read_only_query(
+            "-- a comment\nSELECT 1; /* another comment */ DROP TABLE test",
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("semicolon-delimited"));
+    }
+
+    /// DML / DDL statements are rejected regardless of case.
+    #[test]
+    fn validate_read_only_query_rejects_dml_and_ddl() {
+        for q in [
+            "INSERT INTO test VALUES (1)",
+            "update test set x = 1",
+            "DELETE FROM test",
+            "drop table test",
+            "CREATE TABLE x (id int)",
+            "ALTER TABLE test ADD COLUMN x int",
+            "TRUNCATE test",
+            "exec sp_helpdb",
+            "MERGE INTO test USING src ON test.id = src.id",
+        ] {
+            let err = validate_read_only_query(q).unwrap_err();
+            let msg = err.to_string();
+            assert!(
+                msg.contains("read-only"),
+                "expected `read-only` error for `{q}`, got: {msg}"
+            );
+        }
+    }
+
+    /// Keywords that *look* like DML but live inside string literals or
+    /// comments must not trigger a false positive.
+    #[test]
+    fn validate_read_only_query_ignores_dml_in_strings_and_comments() {
+        validate_read_only_query("SELECT 'DROP TABLE test' AS msg FROM t").unwrap();
+        validate_read_only_query("SELECT \"DELETE FROM test\" AS msg FROM t").unwrap();
+        validate_read_only_query(
+            "SELECT 1 -- this comment mentions DELETE but is fine",
+        )
+        .unwrap();
+        validate_read_only_query(
+            "SELECT 1 /* block comment mentioning INSERT is fine */ FROM t",
+        )
+        .unwrap();
+    }
+
+    /// Empty / whitespace-only queries are rejected.
+    #[test]
+    fn validate_read_only_query_rejects_empty() {
+        validate_read_only_query("").unwrap_err();
+        validate_read_only_query("   \n\t  ").unwrap_err();
     }
 }

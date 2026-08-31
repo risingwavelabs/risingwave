@@ -388,11 +388,22 @@ impl TableFunction {
                             .unwrap_or_default(),
                     ));
                 } else if expect_connector_name.eq_ignore_ascii_case("sqlserver-cdc") {
-                    // Default to no encryption + trust-cert (matches local development
-                    // defaults and the executor's `parse::<bool>().unwrap_or(...)`
-                    // fallback). Users that need SSL can fall back to the 8-arg inline
-                    // form with explicit values.
-                    args_vec.push(ExprImpl::literal_varchar("false".to_owned()));
+                    // The CDC source is the source of truth for whether the
+                    // SQL Server connection requires SSL. The executor treats
+                    // anything other than the literal string `"true"` as
+                    // "no encryption" (matching the CDC source-side default
+                    // handling in `connector_common::sql_server::create_mssql_client`).
+                    // The "true" / "false" string is passed through to the
+                    // executor; if the source defined `database.encrypt =
+                    // "true"`, propagate that — otherwise default to "false".
+                    let encrypt = secret_resolved
+                        .get("database.encrypt")
+                        .map(|v| v.eq_ignore_ascii_case("true").to_string())
+                        .unwrap_or_else(|| "false".to_owned());
+                    args_vec.push(ExprImpl::literal_varchar(encrypt));
+                    // The CDC implementation sets `trust_cert` unconditionally
+                    // (see `connector::sink::sqlserver::SqlServerClient::new`),
+                    // so the source-reference form mirrors that.
                     args_vec.push(ExprImpl::literal_varchar("true".to_owned()));
                 }
 
@@ -663,12 +674,15 @@ impl TableFunction {
     /// forms:
     ///
     /// * **2-arg source-reference form**: `mssql_query(<cdc_source_name>, <query>)`.
-    ///   The connection parameters (host, port, user, password, database,
-    ///   encrypt, trust_cert) are looked up from the named
-    ///   `connector = 'sqlserver-cdc'` source.
+    ///   The connection parameters (host, port, user, password, database)
+    ///   are looked up from the named `connector = 'sqlserver-cdc'` source.
+    ///   The `encrypt` argument is taken from the source's
+    ///   `database.encrypt` property (with `true` / non-`true` mapping to
+    ///   `"true"` / `"false"`); `trust_cert` is forced to `"true"` because
+    ///   the CDC implementation sets it unconditionally.
     /// * **8-arg inline form**: `mssql_query(<host>, <port>, <user>, <password>,
     ///   <database>, <query>, <encrypt>, <trust_cert>)`. All eight arguments
-    /// are required; the 6-arg form is *not* supported.
+    ///   are required; the 6-arg form is *not* supported.
     ///
     /// Returns a `TableFunction` whose `return_type` is a `DataType::Struct`
     /// discovered at bind time by calling `describe_mssql_query` against the
