@@ -227,9 +227,9 @@ impl ToArrow for IcebergArrowConvert {
         &self,
         array: &RwVariantArray,
     ) -> Result<arrow_array::ArrayRef, ArrayError> {
-        // Variant's physical Arrow layout has required children. For a SQL NULL row their
-        // bytes are ignored by the parent null bitmap, so `raw_iter`'s valid variant-null
-        // placeholder keeps both child arrays non-null without a special branch per row.
+        // For a SQL NULL row the children's bytes are ignored by the parent null bitmap,
+        // so `raw_iter`'s valid variant-null placeholder keeps both child arrays non-null
+        // without a special branch per row.
         let metadata = Arc::new(arrow_array::BinaryArray::from_iter_values(
             array.raw_iter().map(|variant| variant.metadata()),
         )) as ArrayRef;
@@ -291,10 +291,12 @@ fn variant_arrow_fields() -> arrow_schema::Fields {
             arrow_schema::DataType::Binary,
             false,
         )),
+        // Nullable to match iceberg-rust's layout, which reserves an absent `value`
+        // for shredded variants; we always write it.
         Arc::new(arrow_schema::Field::new(
             "value",
             arrow_schema::DataType::Binary,
-            false,
+            true,
         )),
     ]
     .into()
