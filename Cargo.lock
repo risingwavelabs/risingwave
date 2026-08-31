@@ -27,7 +27,7 @@ dependencies = [
  "regex",
  "toml 1.1.2+spec-1.1.0",
  "windows-registry",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -2100,7 +2100,7 @@ dependencies = [
  "bitflags 2.13.1",
  "cexpr",
  "clang-sys",
- "itertools 0.10.5",
+ "itertools 0.13.0",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -5495,7 +5495,7 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.2",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -8042,6 +8042,15 @@ name = "itertools"
 version = "0.14.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
+dependencies = [
+ "either",
+]
+
+[[package]]
+name = "itertools"
+version = "0.15.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8b4baf93f58d4425749ca49a51c50ebab072c5df6994d08fed93541c331481dc"
 dependencies = [
  "either",
 ]
@@ -10753,7 +10762,7 @@ dependencies = [
  "byteorder",
  "bytes",
  "futures",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "jsonwebtoken",
  "ldap3",
  "madsim-tokio",
@@ -11450,8 +11459,8 @@ version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be769465445e8c1474e9c5dac2018218498557af32d9ed057325ec9a41ae81bf"
 dependencies = [
- "heck 0.4.1",
- "itertools 0.14.0",
+ "heck 0.5.0",
+ "itertools 0.13.0",
  "log",
  "multimap",
  "once_cell",
@@ -11469,8 +11478,8 @@ name = "prost-build"
 version = "0.14.3"
 source = "git+https://github.com/risingwavelabs/prost.git?rev=040a192409e45069158300baec4f402ad1fe101a#040a192409e45069158300baec4f402ad1fe101a"
 dependencies = [
- "heck 0.4.1",
- "itertools 0.14.0",
+ "heck 0.5.0",
+ "itertools 0.13.0",
  "log",
  "multimap",
  "petgraph 0.8.3",
@@ -11491,7 +11500,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8a56d757972c98b346a9b766e3f02746cde6dd1cd1d1d563472929fdd74bec4d"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -11503,7 +11512,7 @@ version = "0.14.3"
 source = "git+https://github.com/risingwavelabs/prost.git?rev=040a192409e45069158300baec4f402ad1fe101a#040a192409e45069158300baec4f402ad1fe101a"
 dependencies = [
  "anyhow",
- "itertools 0.14.0",
+ "itertools 0.13.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -12586,7 +12595,7 @@ dependencies = [
  "gcloud-pubsub",
  "glob",
  "indicatif",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "log",
  "madsim-rdkafka",
  "madsim-tokio",
@@ -12617,7 +12626,7 @@ dependencies = [
  "dialoguer",
  "enum-iterator",
  "fs-err",
- "itertools 0.14.0",
+ "itertools 0.15.0",
 ]
 
 [[package]]
@@ -12640,7 +12649,7 @@ dependencies = [
  "async-trait",
  "bytes",
  "futures",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "madsim-tokio",
  "prost 0.14.3",
  "risingwave_common",
@@ -12669,7 +12678,7 @@ dependencies = [
  "futures-async-stream",
  "futures-util",
  "iceberg",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "linkme",
  "madsim-tokio",
  "madsim-tonic",
@@ -12717,7 +12726,7 @@ dependencies = [
  "futures-util",
  "hashbrown 0.17.1",
  "iceberg",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "linkme",
  "madsim-tokio",
  "mysql_async",
@@ -12753,7 +12762,7 @@ dependencies = [
  "clap",
  "futures",
  "futures-async-stream",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "madsim-tokio",
  "nix 0.31.3",
  "plotters",
@@ -12863,7 +12872,7 @@ dependencies = [
  "http-body 1.0.1",
  "humantime",
  "ipnet",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "itoa",
  "jiff 0.1.15",
  "jni",
@@ -12959,7 +12968,7 @@ name = "risingwave_common_heap_profiling"
 version = "3.2.0-alpha"
 dependencies = [
  "chrono",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "madsim-tokio",
  "madsim-tonic",
  "parking_lot 0.12.5",
@@ -12999,7 +13008,7 @@ dependencies = [
  "hyper 1.9.0",
  "hyper-util",
  "hytra",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "libc",
  "mach2 0.6.0",
  "madsim-tokio",
@@ -13022,7 +13031,7 @@ name = "risingwave_common_proc_macro"
 version = "3.2.0-alpha"
 dependencies = [
  "bae",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "proc-macro-error 1.0.4",
  "proc-macro2",
  "quote",
@@ -13150,7 +13159,7 @@ dependencies = [
  "foyer",
  "futures",
  "futures-async-stream",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "madsim-tokio",
  "madsim-tonic",
  "maplit",
@@ -13239,7 +13248,7 @@ dependencies = [
  "iceberg-catalog-rest",
  "iceberg-storage-opendal",
  "indexmap 2.14.0",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "jni",
  "madsim-rdkafka",
  "madsim-tokio",
@@ -13332,7 +13341,7 @@ dependencies = [
  "expect-test",
  "fs-err",
  "hex",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "jsonbb",
  "jsonschema-transpiler",
  "madsim-tokio",
@@ -13370,7 +13379,7 @@ dependencies = [
  "futures",
  "hex",
  "inquire",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "madsim-tokio",
  "madsim-tonic",
  "prost 0.14.3",
@@ -13404,7 +13413,7 @@ dependencies = [
  "assert_matches",
  "futures",
  "futures-async-stream",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "madsim-tokio",
  "parking_lot 0.12.5",
  "paste",
@@ -13465,7 +13474,7 @@ dependencies = [
  "futures",
  "futures-async-stream",
  "futures-util",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "linkme",
  "madsim-tokio",
  "num-traits",
@@ -13512,7 +13521,7 @@ dependencies = [
  "hex-literal",
  "hmac 0.12.1",
  "iceberg",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "jsonbb",
  "linkme",
  "madsim-tokio",
@@ -13550,7 +13559,7 @@ dependencies = [
 name = "risingwave_expr_macro"
 version = "0.1.0"
 dependencies = [
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "proc-macro-error 1.0.4",
  "proc-macro2",
  "quote",
@@ -13590,7 +13599,7 @@ dependencies = [
  "futures-async-stream",
  "iana-time-zone",
  "iceberg",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "jsonbb",
  "linkme",
  "madsim-tokio",
@@ -13671,7 +13680,7 @@ version = "3.2.0-alpha"
 dependencies = [
  "bytes",
  "hex",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "risingwave_common",
  "risingwave_common_estimate_size",
  "risingwave_pb",
@@ -13693,7 +13702,7 @@ dependencies = [
  "foyer",
  "futures",
  "futures-async-stream",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "madsim-tokio",
  "parking_lot 0.12.5",
  "rand 0.9.5",
@@ -13723,7 +13732,7 @@ dependencies = [
  "foyer",
  "futures",
  "futures-async-stream",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "madsim-tokio",
  "mockall",
  "parking_lot 0.12.5",
@@ -13842,7 +13851,7 @@ dependencies = [
  "http 1.4.0",
  "iceberg",
  "indexmap 2.14.0",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "jsonbb",
  "lz4",
  "madsim-tokio",
@@ -13979,7 +13988,7 @@ dependencies = [
  "await-tree",
  "chrono",
  "futures",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "madsim-tokio",
  "madsim-tonic",
  "rand 0.9.5",
@@ -14025,7 +14034,7 @@ dependencies = [
  "fail",
  "futures",
  "futures-async-stream",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "madsim",
  "madsim-aws-sdk-s3",
  "madsim-tokio",
@@ -14075,7 +14084,7 @@ version = "3.2.0-alpha"
 dependencies = [
  "anyhow",
  "expect-test",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "libtest-mimic",
  "madsim-tokio",
  "paste",
@@ -14184,7 +14193,7 @@ dependencies = [
  "glob",
  "iceberg",
  "indexmap 2.14.0",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "madsim",
  "madsim-rdkafka",
  "madsim-tokio",
@@ -14233,7 +14242,7 @@ version = "3.2.0-alpha"
 dependencies = [
  "anyhow",
  "console",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "libtest-mimic",
  "matches",
  "serde",
@@ -14257,7 +14266,7 @@ dependencies = [
  "clap",
  "console",
  "expect-test",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "libtest-mimic",
  "madsim-tokio",
  "rand 0.9.5",
@@ -14324,7 +14333,7 @@ dependencies = [
  "hex",
  "iceberg",
  "iceberg-compaction-core",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "libc",
  "lz4",
  "madsim-tokio",
@@ -14399,7 +14408,7 @@ dependencies = [
  "hytra",
  "iceberg",
  "indexmap 2.14.0",
- "itertools 0.14.0",
+ "itertools 0.15.0",
  "jsonbb",
  "madsim-tokio",
  "madsim-tonic",
@@ -14757,7 +14766,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys 0.11.0",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -14868,7 +14877,7 @@ dependencies = [
  "security-framework 3.5.1",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -14952,7 +14961,7 @@ dependencies = [
 name = "rw_iter_util"
 version = "0.0.0"
 dependencies = [
- "itertools 0.14.0",
+ "itertools 0.15.0",
 ]
 
 [[package]]
@@ -15923,7 +15932,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -16635,10 +16644,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "0136791f7c95b1f6dd99f9cc786b91bb81c3800b639b3478e561ddb7be95e5f1"
 dependencies = [
  "fastrand",
- "getrandom 0.3.1",
+ "getrandom 0.4.2",
  "once_cell",
  "rustix 1.1.3",
- "windows-sys 0.60.2",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]
