@@ -172,7 +172,93 @@ fn remote_input_connect_retry_backoff() -> impl Iterator<Item = Duration> {
     .map(jitter)
 }
 
+/// Aggregates connection-failure logging per upstream peer. During a recovery storm, thousands of
+/// remote inputs may fail against the same unreachable peer at once; a warning per input per
+/// attempt would flood the logs. Instead, individual failures are logged at debug level, and once
+/// a peer keeps failing, a single warning per peer is emitted at most once per `WARN_INTERVAL`,
+/// carrying the number of failures observed since the last warning.
+mod connect_failure_log {
+    use std::collections::HashMap;
+    use std::sync::{LazyLock, Mutex};
+    use std::time::Duration;
+
+    use risingwave_common::util::addr::HostAddr;
+    use tokio::time::Instant;
+
+    /// Escalate to a warning only after a peer fails this many times in a row, so that a
+    /// transient blip during startup stays at debug level.
+    const WARN_THRESHOLD: u64 = 3;
+    /// Emit at most one warning per peer per this interval.
+    const WARN_INTERVAL: Duration = Duration::from_secs(5);
+
+    #[derive(Default)]
+    struct PeerFailures {
+        consecutive: u64,
+        since_last_warn: u64,
+        last_warn: Option<Instant>,
+    }
+
+    static PEER_FAILURES: LazyLock<Mutex<HashMap<HostAddr, PeerFailures>>> =
+        LazyLock::new(Default::default);
+
+    /// Records a connection failure against the peer. Returns
+    /// `Some((consecutive_failures, failures_since_last_warn))` if the caller should log a
+    /// warning on behalf of this peer, or `None` to stay at debug level.
+    pub(super) fn on_failure(peer: &HostAddr) -> Option<(u64, u64)> {
+        let mut peers = PEER_FAILURES.lock().unwrap();
+        let state = peers.entry(peer.clone()).or_default();
+        state.consecutive += 1;
+        state.since_last_warn += 1;
+        if state.consecutive < WARN_THRESHOLD {
+            return None;
+        }
+        let now = Instant::now();
+        if state
+            .last_warn
+            .is_some_and(|last| now.duration_since(last) < WARN_INTERVAL)
+        {
+            return None;
+        }
+        state.last_warn = Some(now);
+        Some((
+            state.consecutive,
+            std::mem::take(&mut state.since_last_warn),
+        ))
+    }
+
+    /// Clears the failure state of the peer after a successful connection.
+    pub(super) fn on_success(peer: &HostAddr) {
+        PEER_FAILURES.lock().unwrap().remove(peer);
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+
+        #[tokio::test(start_paused = true)]
+        async fn test_warn_escalation_is_aggregated_per_peer() {
+            let peer: HostAddr = "test-warn-escalation:5688".parse().unwrap();
+
+            // Below the threshold: stay at debug.
+            assert_eq!(on_failure(&peer), None);
+            assert_eq!(on_failure(&peer), None);
+            // Reaching the threshold: warn once with the aggregated count.
+            assert_eq!(on_failure(&peer), Some((3, 3)));
+            // Within the interval: suppressed again.
+            assert_eq!(on_failure(&peer), None);
+            // After the interval: warn again, reporting only the failures since the last warning.
+            tokio::time::advance(WARN_INTERVAL).await;
+            assert_eq!(on_failure(&peer), Some((5, 2)));
+
+            // A successful connection resets the state.
+            on_success(&peer);
+            assert_eq!(on_failure(&peer), None);
+        }
+    }
+}
+
 async fn retry_connection_errors<T, F, Fut>(
+    peer: &HostAddr,
     mut operation: F,
     mut retry_backoff: impl Iterator<Item = Duration>,
 ) -> Result<T, RpcError>
@@ -182,14 +268,31 @@ where
 {
     loop {
         match operation().await {
-            Ok(value) => return Ok(value),
+            Ok(value) => {
+                connect_failure_log::on_success(peer);
+                return Ok(value);
+            }
             Err(err) if err.is_connection_error() => {
                 let retry_delay = retry_backoff.next().expect("retry strategy is infinite");
-                tracing::debug!(
-                    error = %err.as_report(),
-                    ?retry_delay,
-                    "transient RPC connection failure; retrying"
-                );
+                if let Some((consecutive_failures, failures_since_last_warn)) =
+                    connect_failure_log::on_failure(peer)
+                {
+                    tracing::warn!(
+                        %peer,
+                        consecutive_failures,
+                        failures_since_last_warn,
+                        error = %err.as_report(),
+                        ?retry_delay,
+                        "RPC connection to upstream peer keeps failing; retrying"
+                    );
+                } else {
+                    tracing::debug!(
+                        %peer,
+                        error = %err.as_report(),
+                        ?retry_delay,
+                        "transient RPC connection failure; retrying"
+                    );
+                }
                 tokio::time::sleep(retry_delay).await;
             }
             Err(err) => return Err(err),
@@ -215,6 +318,7 @@ impl RemoteInput {
         // retry transient failures in place. Aborting the actor on a term reset cancels this loop.
         let client_pool = local_barrier_manager.env.client_pool();
         let client = retry_connection_errors(
+            &upstream_addr,
             || client_pool.get_by_addr(upstream_addr.clone()),
             remote_input_connect_retry_backoff(),
         )
@@ -444,6 +548,7 @@ mod tests {
     async fn retry_transient_connection_errors() {
         let attempts = AtomicUsize::new(0);
         retry_connection_errors(
+            &"test-retry-transient:5688".parse().unwrap(),
             || {
                 let attempt = attempts.fetch_add(1, Ordering::SeqCst);
                 std::future::ready(if attempt < 2 {
@@ -466,6 +571,7 @@ mod tests {
     async fn do_not_retry_non_connection_errors() {
         let attempts = AtomicUsize::new(0);
         let result = retry_connection_errors(
+            &"test-no-retry:5688".parse().unwrap(),
             || {
                 attempts.fetch_add(1, Ordering::SeqCst);
                 std::future::ready(Err::<(), _>(RpcError::from_compute_status(
