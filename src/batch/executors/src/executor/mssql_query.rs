@@ -262,6 +262,15 @@ fn validate_read_only_query(query: &str) -> Result<(), BatchError> {
         )));
     }
 
+    for forbidden in ["openquery", "openrowset", "opendatasource"] {
+        if masked.to_ascii_lowercase().contains(forbidden) {
+            return Err(BatchError::from(anyhow::anyhow!(
+                "mssql_query does not allow `{forbidden}`; \
+                 pass-through statements cannot be validated as read-only"
+            )));
+        }
+    }
+
     let mut s = masked.trim_end().to_owned();
     while let Some(c) = s.chars().last() {
         if c == ';' || c.is_whitespace() {
@@ -614,11 +623,14 @@ mod tests {
 
     /// `INTO` mentioned in a column list (e.g. inside parentheses) is
     /// fine — only top-level `INTO` is rejected.
-    #[test]
-    fn validate_read_only_query_allows_into_in_subquery() {
+     #[test]
+     fn validate_read_only_query_allows_into_in_subquery() {
+        // `IN` must not match the `INTO` keyword check.
         validate_read_only_query(
-            "WITH cte AS (SELECT 1 AS x) SELECT * FROM cte WHERE x IN (SELECT 1)",
+             "WITH cte AS (SELECT 1 AS x) SELECT * FROM cte WHERE x IN (SELECT 1)",
         )
         .unwrap();
-    }
+        // `INTO` inside parentheses is not top level.
+        validate_read_only_query("SELECT 1 AS [INTO] FROM t").unwrap();
+     }
 }
