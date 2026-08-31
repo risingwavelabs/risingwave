@@ -78,17 +78,19 @@ statement ok
 create user new_user;
 
 system ok
-! psql \
+psql \
   -X \
   -h "$SLT_HOST" \
   -p "$SLT_PORT" \
   -U new_user \
   -d "$SLT_DB" \
   -v ON_ERROR_STOP=1 \
-  <<'SQL'
+  2>&1 \
+  <<'SQL' |
 SELECT *
 FROM postgres_query('postgres_cdc_source', 'select id from test limit 1');
 SQL
+grep -Fq 'permission denied for source "postgres_cdc_source": "SELECT"'
 
 statement ok
 drop user new_user;
