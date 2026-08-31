@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use risingwave_common::util::meta_addr::MetaAddressStrategyParseError;
 use risingwave_error::tonic::TonicStatusWrapperExt as _;
 use thiserror::Error;
@@ -93,9 +95,40 @@ impl RpcError {
                  | tonic::Code::Unimplemented // meta leader service not started
             ),
             RpcError::MetaAddressParse(_) => false,
-            RpcError::Internal(anyhow) => anyhow
-                .downcast_ref::<Self>() // this skips all contexts attached to the error
-                .is_some_and(Self::is_connection_error),
+            RpcError::Internal(anyhow) => {
+                // `moka::Cache::try_get_with` wraps loader errors in `Arc`, while `anyhow`
+                // preserves that wrapper when attaching context.
+                let error = anyhow
+                    .downcast_ref::<Self>() // this skips all contexts attached to the error
+                    .or_else(|| anyhow.downcast_ref::<Arc<Self>>().map(Arc::as_ref));
+                error.is_some_and(Self::is_connection_error)
+            }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use anyhow::Context as _;
+
+    use super::*;
+
+    fn wrap_like_cache_loader(error: RpcError) -> RpcError {
+        let result: std::result::Result<(), Arc<RpcError>> = Err(Arc::new(error));
+        result
+            .context("failed to create cached RPC client")
+            .unwrap_err()
+            .into()
+    }
+
+    #[test]
+    fn classify_cache_loader_errors() {
+        let connection_error =
+            RpcError::from_compute_status(tonic::Status::unavailable("compute node is starting"));
+        assert!(wrap_like_cache_loader(connection_error).is_connection_error());
+
+        let application_error =
+            RpcError::from_compute_status(tonic::Status::invalid_argument("invalid request"));
+        assert!(!wrap_like_cache_loader(application_error).is_connection_error());
     }
 }

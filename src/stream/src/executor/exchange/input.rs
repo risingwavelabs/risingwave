@@ -24,6 +24,7 @@ use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::{HostAddr, is_local_address};
 use risingwave_common::util::retry::exponential_backoff;
 use risingwave_rpc_client::error::RpcError;
+use thiserror_ext::AsReport;
 use tokio_retry::strategy::jitter;
 
 use super::permit::Receiver;
@@ -185,7 +186,7 @@ where
             Err(err) if err.is_connection_error() => {
                 let retry_delay = retry_backoff.next().expect("retry strategy is infinite");
                 tracing::debug!(
-                    error = %err,
+                    error = %err.as_report(),
                     ?retry_delay,
                     "transient RPC connection failure; retrying"
                 );
