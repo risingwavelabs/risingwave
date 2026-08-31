@@ -14,7 +14,7 @@
 
 use std::sync::Arc;
 
-use anyhow::Context;
+use anyhow::{Context, anyhow};
 use itertools::Itertools;
 use mysql_async::consts::ColumnType as MySqlColumnType;
 use mysql_async::prelude::*;
@@ -46,6 +46,26 @@ const INLINE_ARG_LEN: usize = 6;
 /// `encrypt` and `trust_cert` (8 total) on top of the standard 6.
 const MSSQL_INLINE_ARG_LEN: usize = 8;
 const CDC_SOURCE_ARG_LEN: usize = 2;
+
+/// Parse a strict boolean TVF argument. Returns the default when the argument
+/// is absent (e.g. the 2-arg source-reference form) and an error when the user
+/// supplies a value that is not a case-insensitive `true` / `false`. We avoid
+/// `s.parse::<bool>().unwrap_or(default)` because that would silently coerce
+/// typos like `yes` or `1` — and a typo on a security-critical flag like
+/// `trust_cert` would weaken transport security without any user-visible error.
+fn parse_strict_bool_arg(value: Option<&String>, default: bool) -> anyhow::Result<bool> {
+    match value {
+        None => Ok(default),
+        Some(s) => match s.trim().to_ascii_lowercase().as_str() {
+            "true" => Ok(true),
+            "false" => Ok(false),
+            other => Err(anyhow::anyhow!(
+                "expected 'true' or 'false', got {:?}",
+                other
+            )),
+        },
+    }
+}
 
 /// A table function takes a row as input and returns a table. It is also known as Set-Returning
 /// Function.
@@ -382,8 +402,9 @@ impl TableFunction {
                 return Err(BindError(
                     "postgres_query / mysql_query / mssql_query accept either \
                     2 arguments: (cdc_source_name varchar, query varchar) or \
-                    6 arguments: (hostname varchar, port varchar, username varchar, password varchar, database_name varchar, query varchar); \
-                    mssql_query additionally accepts 8 arguments with `encrypt` and `trust_cert` after the query"
+                    6 arguments (postgres_query / mysql_query only): \
+                    (hostname varchar, port varchar, username varchar, password varchar, database_name varchar, query varchar); \
+                    mssql_query requires 8 arguments in the inline form, with `encrypt` and `trust_cert` after the query"
                         .to_owned(),
                 )
                 .into());
@@ -674,14 +695,15 @@ impl TableFunction {
                     // Inline (8-arg) form carries encrypt/trust_cert; CDC
                     // source (2-arg) form omits them and we fall back to
                     // conservative defaults (off encryption, trust cert).
-                    let encrypt = evaled_args
-                        .get(6)
-                        .map(|s| s.parse::<bool>().unwrap_or(false))
-                        .unwrap_or(false);
-                    let trust_cert = evaled_args
-                        .get(7)
-                        .map(|s| s.parse::<bool>().unwrap_or(true))
-                        .unwrap_or(true);
+                    // Both options must parse cleanly to a boolean; if the
+                    // user supplies an invalid value (e.g. "yes" or "1"),
+                    // reject the query rather than silently coercing it —
+                    // otherwise a typo could open a plaintext connection or
+                    // bypass certificate validation.
+                    let encrypt = parse_strict_bool_arg(evaled_args.get(6), false)
+                        .context("invalid `encrypt` value for mssql_query: expected 'true' or 'false'")?;
+                    let trust_cert = parse_strict_bool_arg(evaled_args.get(7), true)
+                        .context("invalid `trust_cert` value for mssql_query: expected 'true' or 'false'")?;
 
                     let conn_config = MssqlConnectionConfig {
                         host: evaled_args[0].clone(),

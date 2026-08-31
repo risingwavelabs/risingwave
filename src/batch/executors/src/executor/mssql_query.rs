@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use anyhow::Context;
+use anyhow::anyhow;
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
 use risingwave_common::array::DataChunk;
@@ -26,6 +27,26 @@ use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::BatchError;
 use crate::executor::{BoxedExecutor, BoxedExecutorBuilder, Executor, ExecutorBuilder};
+
+/// Parse a strict boolean TLS flag from a plan-node string. Mirror of the
+/// binder-side parser: the binder validates user input, but the executor
+/// re-validates because plan nodes can be deserialized from disk or
+/// produced by older planner versions. Invalid values are an error, never a
+/// silent fallback to a permissive default.
+fn parse_strict_tls_flag(value: &str, default: bool) -> Result<bool, BatchError> {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "true" => Ok(true),
+        "false" => Ok(false),
+        // The empty string is reserved as the "absent argument" sentinel
+        // and falls back to the default; the binder only emits it for the
+        // 2-arg source-reference form, never for an inline 8-arg call.
+        "" => Ok(default),
+        other => Err(BatchError::from(anyhow::anyhow!(
+            "expected 'true' or 'false', got {:?}",
+            other
+        ))),
+    }
+}
 
 /// `MssqlQuery` executor. Runs a query against a SQL Server database via `tiberius`.
 pub struct MssqlQueryExecutor {
@@ -96,10 +117,15 @@ impl MssqlQueryExecutor {
 
         futures::pin_mut!(row_stream);
 
-        // Deserialize rows. All per-cell decoding is inlined into the loop
-        // body so we don't need any helper that names `tiberius::Row`.
+        // Deserialize rows. Decoding is delegated to the canonical
+        // [`sql_server_row_to_owned_row`] helper in the connector crate, which
+        // routes through [`ScalarImplTiberiusWrapper`] — the RisingWave-side
+        // `tiberius::FromSql` impl. It handles: `Decimal` ← `Numeric`,
+        // `Timestamptz` ← `DateTimeOffset`, `Varchar` ← `UniqueIdentifier`
+        // (uppercased) / `Xml`, etc.
         //
-        // Decoding strategy: route through [`ScalarImplTiberiusWrapper`], the
+        // Cells whose target [`DataType`] has no direct tiberius mapping (e.g.
+        // `Jsonb`, `Interval`) are returned as NULL with a warning. Cells
         // canonical RisingWave-side `tiberius::FromSql` impl in the connector
         // crate. It handles: `Decimal` ← `Numeric`, `Timestamptz` ←
         // `DateTimeOffset`, `Varchar` ← `UniqueIdentifier` (uppercased) /
@@ -150,8 +176,15 @@ impl BoxedExecutorBuilder for MssqlQueryExecutorBuilder {
         // Default `encrypt=false`, `trust_cert=true` matches local development
         // defaults (sqlcmd `-C` flag). `trust_cert=true` forces TLS via
         // `EncryptionLevel::Required` inside `create_mssql_client`.
-        let encrypt = mssql_query_node.encrypt.parse::<bool>().unwrap_or(false);
-        let trust_cert = mssql_query_node.trust_cert.parse::<bool>().unwrap_or(true);
+        //
+        // These values are pre-validated at bind time. A parse error here
+        // means the plan was produced by a non-conforming client (e.g. a
+        // different planner version or hand-crafted proto) — fail loudly
+        // rather than silently downgrading to insecure defaults.
+        let encrypt = parse_strict_tls_flag(&mssql_query_node.encrypt, false)
+            .context("invalid `encrypt` value in MssqlQuery plan node")?;
+        let trust_cert = parse_strict_tls_flag(&mssql_query_node.trust_cert, true)
+            .context("invalid `trust_cert` value in MssqlQuery plan node")?;
 
         Ok(Box::new(MssqlQueryExecutor::new(
             Schema::from_iter(mssql_query_node.columns.iter().map(Field::from)),

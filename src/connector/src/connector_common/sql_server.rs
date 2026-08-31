@@ -147,6 +147,18 @@ pub async fn describe_mssql_query(
         rw_types.push((column_name, data_type));
     }
 
+    if rw_types.is_empty() {
+        // `sp_describe_first_result_set` returns zero rows when the statement
+        // produces no result set, or when every column is hidden. Refuse to
+        // build a zero-column table function: downstream code (e.g. the
+        // executor's per-row decoder) would silently drop every row because
+        // there are no fields to decode into.
+        return Err(anyhow!(
+            "the query does not produce any result column: {:?}",
+            user_query
+        ));
+    }
+
     Ok(rw_types)
 }
 
@@ -167,7 +179,7 @@ fn mssql_type_to_rw_type_str(type_name: &str) -> anyhow::Result<DataType> {
         "bit" => DataType::Boolean,
         "binary" | "varbinary" => DataType::Bytea,
         "tinyint" | "smallint" => DataType::Int16,
-        "int" => DataType::Int32,
+        "int" | "integer" => DataType::Int32,
         "bigint" => DataType::Int64,
         "real" => DataType::Float32,
         "float" => DataType::Float64,

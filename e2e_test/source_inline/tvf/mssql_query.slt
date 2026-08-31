@@ -189,3 +189,6 @@ SELECT * FROM mssql_query(
 # ------------ cleanup stage ------------
 statement ok
 DROP SOURCE mssql_tvf_source CASCADE;
+
+system ok
+sqlcmd -C -d master -Q "ALTER DATABASE mssql_tvf_test SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE mssql_tvf_test;" -b
