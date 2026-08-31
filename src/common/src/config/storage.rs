@@ -1028,13 +1028,7 @@ pub mod default {
         }
 
         pub fn compactor_max_task_multiplier() -> f32 {
-            match std::env::var("RW_COMPACTOR_MODE")
-                .unwrap_or_default()
-                .as_str()
-            {
-                mode if mode.contains("iceberg") => 12.0000,
-                _ => 3.0000,
-            }
+            3.0
         }
 
         pub fn compactor_memory_available_proportion() -> f64 {
