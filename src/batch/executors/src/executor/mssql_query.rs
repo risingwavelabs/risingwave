@@ -58,20 +58,32 @@ pub struct MssqlQueryExecutor {
 }
 
 impl Executor for MssqlQueryExecutor {
+    /// Return the result schema, which was discovered at bind time via
+    /// `describe_mssql_query` and stored at construction. The schema has one
+    /// field per visible column of the user query (synthetically named
+    /// `column_N` for unnamed columns such as `SELECT COUNT(*)`).
     fn schema(&self) -> &risingwave_common::catalog::Schema {
         &self.schema
     }
 
+    /// Return the identity string copied from the plan node, used in
+    /// tracing and error messages.
     fn identity(&self) -> &str {
         &self.identity
     }
 
+    /// Consume the executor and return a stream of `DataChunk`s. Delegates
+    /// to the `#[try_stream]`-decorated `do_execute` async fn.
     fn execute(self: Box<Self>) -> super::BoxedDataChunkStream {
         self.do_execute().boxed()
     }
 }
 
 impl MssqlQueryExecutor {
+    /// Build a new [`MssqlQueryExecutor`] from the pre-discovered schema,
+    /// connection config, the user query, the plan node identity, and the
+    /// batch chunk size. The schema is computed at bind time by
+    /// `describe_mssql_query`; this constructor only stores it.
     pub fn new(
         schema: Schema,
         config: MssqlConnectionConfig,
@@ -88,6 +100,10 @@ impl MssqlQueryExecutor {
         }
     }
 
+    /// Stream query results. Connects to SQL Server via `tiberius`, runs
+    /// `self.query` verbatim, and yields each [`DataChunk`] decoded through
+    /// [`sql_server_row_to_owned_row`]. Errors from connection setup, query
+    /// execution, or row decoding are propagated as [`BatchError`].
     #[try_stream(ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
         tracing::debug!("mssql_query_executor: started");
@@ -156,9 +172,15 @@ impl MssqlQueryExecutor {
     }
 }
 
+/// Builder for [`MssqlQueryExecutor`]. Unpacks a [`NodeBody::MssqlQuery`]
+/// batch plan node into a ready-to-execute [`MssqlQueryExecutor`].
 pub struct MssqlQueryExecutorBuilder {}
 
 impl BoxedExecutorBuilder for MssqlQueryExecutorBuilder {
+    /// Decode a `NodeBody::MssqlQuery` batch plan node, parse the SQL Server
+    /// port as `u16`, validate the `encrypt` / `trust_cert` TLS flags
+    /// strictly (any non-`true`/`false` value is a build error rather than
+    /// a silent fallback), and assemble the [`MssqlConnectionConfig`].
     async fn new_boxed_executor(
         source: &ExecutorBuilder<'_>,
         _inputs: Vec<BoxedExecutor>,

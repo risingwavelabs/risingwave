@@ -659,6 +659,22 @@ impl TableFunction {
         }
     }
 
+    /// Bind a `mssql_query(...)` table function call. Supports both calling
+    /// forms:
+    ///
+    /// * **2-arg source-reference form**: `mssql_query(<cdc_source_name>, <query>)`.
+    ///   The connection parameters (host, port, user, password, database,
+    ///   encrypt, trust_cert) are looked up from the named
+    ///   `connector = 'sqlserver-cdc'` source.
+    /// * **8-arg inline form**: `mssql_query(<host>, <port>, <user>, <password>,
+    ///   <database>, <query>, <encrypt>, <trust_cert>)`. All eight arguments
+    /// are required; the 6-arg form is *not* supported.
+    ///
+    /// Returns a `TableFunction` whose `return_type` is a `DataType::Struct`
+    /// discovered at bind time by calling `describe_mssql_query` against the
+    /// user-provided query. The `encrypt` and `trust_cert` flags are parsed
+    /// strictly (any value other than case-insensitive `true` / `false` is
+    /// a bind error).
     pub fn new_mssql_query(
         catalog_reader: &CatalogReadGuard,
         db_name: &str,

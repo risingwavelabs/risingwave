@@ -21,9 +21,17 @@ use crate::expr::{Expr, TableFunctionType};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalMssqlQuery, LogicalTableFunction};
 
-/// Transform a special `TableFunction` (with `MSSQL_QUERY` table function type) into a `LogicalMssqlQuery`
+/// Optimizer rule that rewrites a `LogicalTableFunction` of type
+/// `MSSQL_QUERY` into a `LogicalMssalQuery` plan node. Registered in the
+/// `TABLE_FUNCTION_TO_MSSQL_QUERY` stage of the logical optimization
+/// pipeline (after the equivalent `postgres_query` and `mysql_query`
+/// rules). Validates that exactly 8 arguments were supplied; the 2-arg
+/// source-reference form is handled earlier by the binder, not here.
 pub struct TableFunctionToMssqlQueryRule {}
 impl Rule<Logical> for TableFunctionToMssqlQueryRule {
+    /// Apply the rewrite: if the plan is a `LogicalTableFunction` of
+    /// type `MSSQL_QUERY`, build a `LogicalMssalQuery` from its 8 inline
+    /// arguments. Returns `None` for any other plan.
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let logical_table_function: &LogicalTableFunction = plan.as_logical_table_function()?;
         if logical_table_function.table_function().function_type != TableFunctionType::MssqlQuery {
@@ -86,6 +94,8 @@ impl Rule<Logical> for TableFunctionToMssqlQueryRule {
 }
 
 impl TableFunctionToMssqlQueryRule {
+    /// Construct a boxed instance for registration in the
+    /// `TABLE_FUNCTION_TO_MSSQL_QUERY` stage.
     pub fn create() -> BoxedRule {
         Box::new(TableFunctionToMssqlQueryRule {})
     }
