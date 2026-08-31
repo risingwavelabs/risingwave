@@ -40,16 +40,16 @@ pub(crate) fn reject_variant_in_udf_signature(
 }
 
 fn validate_retry_for_skipped_materialization(
-    skip_materializing_eval_result: bool,
+    unsafe_skip_materializing_exprs: bool,
     always_retry_on_network_error: bool,
     supports_always_retry_on_network_error: bool,
 ) -> Result<()> {
-    if skip_materializing_eval_result
+    if unsafe_skip_materializing_exprs
         && supports_always_retry_on_network_error
         && !always_retry_on_network_error
     {
         return Err(ErrorCode::InvalidParameterValue(
-            "`always_retry_on_network_error` must be true when `skip_materializing_eval_result` is true for an external scalar UDF"
+            "`always_retry_on_network_error` must be true when `unsafe_skip_materializing_exprs` is true for an external scalar UDF"
                 .to_owned(),
         )
         .into());
@@ -121,12 +121,12 @@ pub async fn handle_create_function(
     let always_retry_on_network_error = with_options
         .always_retry_on_network_error
         .unwrap_or_default();
-    let skip_materializing_eval_result = with_options
-        .skip_materializing_eval_result
+    let unsafe_skip_materializing_exprs = with_options
+        .unsafe_skip_materializing_exprs
         .unwrap_or_default();
-    if skip_materializing_eval_result && !is_immutable {
+    if unsafe_skip_materializing_exprs && !is_immutable {
         return Err(ErrorCode::InvalidParameterValue(
-            "`IMMUTABLE` must be specified when `skip_materializing_eval_result` is true"
+            "`IMMUTABLE` must be specified when `unsafe_skip_materializing_exprs` is true"
                 .to_owned(),
         )
         .into());
@@ -209,7 +209,7 @@ pub async fn handle_create_function(
     };
     let udf_impl = risingwave_expr::sig::find_udf_impl(&language, runtime.as_deref(), link)?;
     validate_retry_for_skipped_materialization(
-        skip_materializing_eval_result,
+        unsafe_skip_materializing_exprs,
         always_retry_on_network_error,
         (udf_impl.supports_always_retry_on_network_error)(udf_kind),
     )?;
@@ -241,7 +241,7 @@ pub async fn handle_create_function(
         compressed_binary: output.compressed_binary,
         owner: session.user_id(),
         always_retry_on_network_error,
-        skip_materializing_eval_result,
+        unsafe_skip_materializing_exprs,
         is_async: with_options.r#async,
         is_batched: with_options.batch,
         created_at_epoch: None,
@@ -283,7 +283,7 @@ mod tests {
     /// Verifies option dependencies, catalog propagation, recursive purity, and top-level
     /// materialization for a regular scalar UDF.
     #[tokio::test]
-    async fn test_skip_materializing_eval_result() {
+    async fn test_unsafe_skip_materializing_exprs() {
         let frontend = LocalFrontend::new(Default::default()).await;
 
         frontend.run_sql("create table t(v int)").await.unwrap();
@@ -294,7 +294,7 @@ mod tests {
         let error = validate_retry_for_skipped_materialization(true, false, true).unwrap_err();
         assert!(
             error.to_string().contains(
-                "`always_retry_on_network_error` must be true when `skip_materializing_eval_result` is true for an external scalar UDF"
+                "`always_retry_on_network_error` must be true when `unsafe_skip_materializing_exprs` is true for an external scalar UDF"
             ),
             "{error}"
         );
@@ -304,13 +304,13 @@ mod tests {
             .run_sql(
                 r#"create function rejected_without_immutable(v int)
                    returns int
-                   with (skip_materializing_eval_result = true)"#,
+                   with (unsafe_skip_materializing_exprs = true)"#,
             )
             .await
             .unwrap_err();
         assert!(
             error.to_string().contains(
-                "`IMMUTABLE` must be specified when `skip_materializing_eval_result` is true"
+                "`IMMUTABLE` must be specified when `unsafe_skip_materializing_exprs` is true"
             ),
             "{error}"
         );
@@ -319,7 +319,7 @@ mod tests {
             .run_sql(
                 r#"create function identity_without_stored_result(v int)
                    returns int immutable
-                   with (skip_materializing_eval_result = true)"#,
+                   with (unsafe_skip_materializing_exprs = true)"#,
             )
             .await
             .unwrap();
@@ -336,11 +336,11 @@ mod tests {
             .unwrap();
         // The validated option must survive catalog creation so expression planning sees the
         // same materialization policy that was specified in CREATE FUNCTION.
-        assert!(function.skip_materializing_eval_result);
+        assert!(function.unsafe_skip_materializing_exprs);
         drop(catalog_reader);
 
-        // An opted-out immutable UDF with only pure arguments is recursively pure, so its project
-        // needs no StreamMaterializedExprs state table.
+        // An opted-out UDF declared immutable with only pure arguments is classified as recursively
+        // pure, so its project needs no StreamMaterializedExprs state table.
         let plan = frontend
             .get_explain_output(
                 "explain create materialized view mv as \
@@ -394,7 +394,7 @@ mod tests {
             .run_sql(
                 r#"create function identity_without_stored_result(v int)
                    returns int immutable
-                   with (skip_materializing_eval_result = true)"#,
+                   with (unsafe_skip_materializing_exprs = true)"#,
             )
             .await
             .unwrap();

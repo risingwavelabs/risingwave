@@ -45,19 +45,19 @@ drop function rand_series(int);
 # External scalar UDFs require network retries when opting out of stored results. Validation runs
 # before RisingWave connects to the UDF server, so this test does not require a running server.
 skipif madsim
-statement error `always_retry_on_network_error` must be true when `skip_materializing_eval_result` is true for an external scalar UDF
+statement error `always_retry_on_network_error` must be true when `unsafe_skip_materializing_exprs` is true for an external scalar UDF
 create function rejected_external_without_retry(v int) returns int language java immutable
 as 'identity'
 using link 'http://localhost:8815'
-with (skip_materializing_eval_result = true);
+with (unsafe_skip_materializing_exprs = true);
 
 skipif madsim
-statement error `IMMUTABLE` must be specified when `skip_materializing_eval_result` is true
+statement error `IMMUTABLE` must be specified when `unsafe_skip_materializing_exprs` is true
 create function rejected_without_immutable(v int) returns int language javascript as $$
 export function rejected_without_immutable(v) {
     return v;
 }
-$$ with (skip_materializing_eval_result = true);
+$$ with (unsafe_skip_materializing_exprs = true);
 
 # Embedded scalar UDFs execute locally and do not use the external network-retry loop.
 skipif madsim
@@ -66,7 +66,7 @@ create function identity_without_stored_result(v int) returns int language javas
 export function identity_without_stored_result(v) {
     return v;
 }
-$$ with (skip_materializing_eval_result = true);
+$$ with (unsafe_skip_materializing_exprs = true);
 
 skipif madsim
 statement ok
@@ -79,7 +79,7 @@ $$ with (always_retry_on_network_error = true);
 # The per-function execution policy must be visible to users through the function catalog.
 skipif madsim
 query TB
-select name, skip_materializing_eval_result
+select name, unsafe_skip_materializing_exprs
 from rw_catalog.rw_functions
 where name in ('identity_with_stored_result', 'identity_without_stored_result')
 order by name;

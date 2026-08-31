@@ -52,7 +52,7 @@ pub struct Model {
     pub kind: FunctionKind,
     // Keep these as dedicated columns rather than entries in `options`.
     pub always_retry_on_network_error: bool,
-    pub skip_materializing_eval_result: bool,
+    pub unsafe_skip_materializing_exprs: bool,
     pub options: Option<Property>,
 }
 
@@ -119,7 +119,7 @@ impl From<PbFunction> for ActiveModel {
             compressed_binary: Set(function.compressed_binary),
             kind: Set(function.kind.unwrap().into()),
             always_retry_on_network_error: Set(function.always_retry_on_network_error),
-            skip_materializing_eval_result: Set(function.skip_materializing_eval_result),
+            unsafe_skip_materializing_exprs: Set(function.unsafe_skip_materializing_exprs),
             options: Set(Some(options.into())),
         }
     }

@@ -409,7 +409,7 @@ where
 
 impl ExprVisitor for ImpureAnalyzer {
     fn visit_user_defined_function(&mut self, func_call: &UserDefinedFunction) {
-        if !func_call.catalog.skip_materializing_eval_result {
+        if !func_call.catalog.unsafe_skip_materializing_exprs {
             let name = &func_call.catalog.name;
             self.impure = Some(format!("user-defined function `{name}`").into());
         } else {
@@ -422,7 +422,7 @@ impl ExprVisitor for ImpureAnalyzer {
         // share `TableFunction` with built-ins and carry their catalog in `user_defined`.
         if func_call.function_type == TableFunctionType::UserDefined {
             let catalog = func_call.user_defined.as_ref().unwrap();
-            if !catalog.skip_materializing_eval_result {
+            if !catalog.unsafe_skip_materializing_exprs {
                 self.impure =
                     Some(format!("user-defined table function `{}`", catalog.name).into());
             } else {
@@ -459,10 +459,11 @@ impl ExprVisitor for ImpureAnalyzer {
 ///
 /// This classification combines semantic purity with UDF result-materialization policy.
 /// Semantically impure nodes are non-deterministic or have side effects. A UDF with
-/// `skip_materializing_eval_result = true` follows the recursive purity of its arguments because
-/// creating such a UDF requires `IMMUTABLE`.
+/// `unsafe_skip_materializing_exprs = true` follows the recursive purity of its arguments because
+/// creating such a UDF requires an `IMMUTABLE` declaration. The planner trusts that declaration;
+/// it cannot guarantee that the implementation is deterministic or side-effect-free.
 ///
-/// A UDF with `skip_materializing_eval_result = false` is classified as impure even if it is
+/// A UDF with `unsafe_skip_materializing_exprs = false` is classified as impure even if it is
 /// actually deterministic and side-effect-free. Keeping result materialization enabled may be
 /// desirable solely as a caching optimization. Therefore, an expression classified as impure is
 /// not necessarily semantically impure.
@@ -473,7 +474,7 @@ pub fn is_pure(expr: &ExprImpl) -> bool {
 /// Returns whether the planner classifies an expression as impure.
 ///
 /// This is the inverse of [`is_pure`]. It returns `true` when any node is semantically impure or
-/// when a UDF has `skip_materializing_eval_result = false`. In the latter case, streaming
+/// when a UDF has `unsafe_skip_materializing_exprs = false`. In the latter case, streaming
 /// projection planning materializes the complete top-level expression on retract inputs so the
 /// evaluated result can be preserved. UPSERT projects bypass result materialization independently
 /// of this classification.
@@ -513,7 +514,7 @@ mod tests {
     use crate::expr::{ExprImpl, FunctionCall, InputRef, UserDefinedFunction, is_impure, is_pure};
 
     fn udf_expr(
-        skip_materializing_eval_result: bool,
+        unsafe_skip_materializing_exprs: bool,
         return_type: DataType,
         args: Vec<ExprImpl>,
     ) -> ExprImpl {
@@ -521,7 +522,7 @@ mod tests {
             name: "test_udf".to_owned(),
             kind: Some(Kind::Scalar(ScalarFunction {})),
             return_type: Some(return_type.into()),
-            skip_materializing_eval_result,
+            unsafe_skip_materializing_exprs,
             ..Default::default()
         });
         UserDefinedFunction::new(Arc::new(catalog), args).into()
@@ -564,14 +565,14 @@ mod tests {
 
     /// Verifies that UDF result-materialization settings participate in recursive purity analysis.
     #[test]
-    fn test_udf_skip_materializing_eval_result() {
+    fn test_udf_unsafe_skip_materializing_exprs() {
         let input: ExprImpl = InputRef::new(0, DataType::Int16).into();
 
         let materialized_udf = udf_expr(false, DataType::Int16, vec![input.clone()]);
         expect_impure(&materialized_udf);
 
-        // Creation requires an opted-out UDF to be IMMUTABLE, so it is pure when all of its
-        // descendants are pure.
+        // Creation requires an opted-out UDF to be declared IMMUTABLE, so the planner classifies
+        // it as pure when all of its descendants are pure.
         let skipped_udf = udf_expr(true, DataType::Int16, vec![input]);
         expect_pure(&skipped_udf);
 
