@@ -33,7 +33,7 @@ CREATE CONNECTION iceberg_compaction_type_validation_connection WITH (
     type = 'iceberg',
     catalog.name = 'demo',
     catalog.type = 'storage',
-    warehouse.path = 's3a://icebergdata/demo',
+    warehouse.path = 's3a://icebergdata',
     s3.endpoint = 'http://127.0.0.1:9301',
     s3.region = 'us-east-1',
     s3.access.key = 'hummockadmin',
