@@ -19,7 +19,6 @@ use itertools::Itertools;
 use mysql_async::consts::ColumnType as MySqlColumnType;
 use mysql_async::prelude::*;
 use risingwave_common::array::arrow::IcebergArrowConvert;
-use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::{DataType, ScalarImpl, StructType};
 use risingwave_connector::connector_common::sql_server::{
     MssqlConnectionConfig, describe_mssql_query,
@@ -34,9 +33,7 @@ pub use risingwave_pb::expr::table_function::PbType as TableFunctionType;
 use tokio_postgres::types::Type as TokioPgType;
 
 use super::{Expr, ExprImpl, ExprRewriter, Literal, RwResult, infer_type};
-use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
-use crate::catalog::root_catalog::SchemaPath;
 use crate::error::ErrorCode::BindError;
 use crate::expr::reject_impure;
 use crate::utils::FRONTEND_RUNTIME;
@@ -425,19 +422,7 @@ impl TableFunction {
         Ok(cast_args)
     }
 
-    pub fn new_postgres_query(
-        catalog_reader: &CatalogReadGuard,
-        db_name: &str,
-        schema_path: SchemaPath<'_>,
-        args: Vec<ExprImpl>,
-    ) -> RwResult<Self> {
-        let args = Self::handle_postgres_or_mysql_query_args(
-            catalog_reader,
-            db_name,
-            schema_path,
-            args,
-            "postgres-cdc",
-        )?;
+    pub fn new_postgres_query(args: Vec<ExprImpl>) -> RwResult<Self> {
         let evaled_args = args
             .iter()
             .map(expr_impl_to_string_fn)
@@ -524,19 +509,7 @@ impl TableFunction {
         }
     }
 
-    pub fn new_mysql_query(
-        catalog_reader: &CatalogReadGuard,
-        db_name: &str,
-        schema_path: SchemaPath<'_>,
-        args: Vec<ExprImpl>,
-    ) -> RwResult<Self> {
-        let args = Self::handle_postgres_or_mysql_query_args(
-            catalog_reader,
-            db_name,
-            schema_path,
-            args,
-            "mysql-cdc",
-        )?;
+    pub fn new_mysql_query(args: Vec<ExprImpl>) -> RwResult<Self> {
         let evaled_args = args
             .iter()
             .map(expr_impl_to_string_fn)
@@ -888,7 +861,7 @@ impl Expr for TableFunction {
     }
 }
 
-fn expr_impl_to_string_fn(arg: &ExprImpl) -> RwResult<String> {
+pub(crate) fn expr_impl_to_string_fn(arg: &ExprImpl) -> RwResult<String> {
     match arg.try_fold_const() {
         Some(Ok(value)) => {
             let Some(scalar) = value else {
