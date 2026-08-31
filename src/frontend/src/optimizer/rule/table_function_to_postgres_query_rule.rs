@@ -18,7 +18,7 @@ use risingwave_common::types::{DataType, ScalarImpl};
 
 use super::prelude::{PlanRef, *};
 use crate::expr::{Expr, TableFunctionType};
-use crate::optimizer::plan_node::generic::GenericPlanRef;
+use crate::optimizer::plan_node::generic::{self, GenericPlanRef};
 use crate::optimizer::plan_node::{LogicalPostgresQuery, LogicalTableFunction};
 
 const EXPLICIT_CREDENTIAL_QUERY_ARG_LEN: usize = 6;
@@ -72,8 +72,7 @@ impl Rule<Logical> for TableFunctionToPostgresQueryRule {
             let ssl_root_cert = eval_args.get(7).cloned();
 
             Some(
-                LogicalPostgresQuery::new(
-                    logical_table_function.ctx(),
+                LogicalPostgresQuery::new(generic::PostgresQuery {
                     schema,
                     hostname,
                     port,
@@ -84,7 +83,8 @@ impl Rule<Logical> for TableFunctionToPostgresQueryRule {
                     ssl_mode,
                     ssl_root_cert,
                     read_only,
-                )
+                    ctx: logical_table_function.ctx(),
+                })
                 .into(),
             )
         } else {
