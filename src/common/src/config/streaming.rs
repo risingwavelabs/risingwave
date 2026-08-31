@@ -127,7 +127,8 @@ pub struct StreamingDeveloperConfig {
     /// The maximum rate per second at which a compute node starts remote exchange subscriptions.
     /// This smooths actor startup and recovery bursts without limiting the number of in-flight
     /// subscriptions, which could deadlock actors with remote input dependencies.
-    /// Set to 0 to disable the limit.
+    /// As a rule of thumb, keep `rate >= remote exchange inputs on the busiest compute node /
+    /// target recovery seconds`. Set to 0 to disable the limit.
     #[serde(default = "default::developer::stream_remote_input_subscription_rate_limit")]
     pub remote_input_subscription_rate_limit: u64,
 

@@ -240,7 +240,7 @@ pub mod default {
         }
 
         pub fn stream_remote_input_subscription_rate_limit() -> u64 {
-            256
+            2048
         }
 
         pub fn stream_project_expr_concurrency() -> usize {
