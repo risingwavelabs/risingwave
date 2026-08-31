@@ -207,6 +207,8 @@ mod tests {
 
     use super::mssql_type_to_rw_type_str;
 
+    /// Verify that the common base SQL Server types map to the expected
+    /// RisingWave `DataType`s: int/bigint/bit/float/date/datetime2/datetimeoffset/uniqueidentifier.
     #[test]
     fn mssql_type_to_rw_type_str_base_types() {
         assert_eq!(mssql_type_to_rw_type_str("int").unwrap(), DataType::Int32);
@@ -234,6 +236,9 @@ mod tests {
         );
     }
 
+    /// Verify that parameterized SQL Server types (`nvarchar(50)`,
+    /// `VARCHAR(255)`, `decimal(18, 2)`, `datetime2(7)`) are correctly
+    /// stripped of their parenthesized suffix and mapped.
     #[test]
     fn mssql_type_to_rw_type_str_parameterized() {
         assert_eq!(
@@ -254,6 +259,9 @@ mod tests {
         );
     }
 
+    /// Verify that unknown SQL Server types (`geometry`, `hierarchyid`,
+    /// `sql_variant`) yield an error rather than silently mapping to
+    /// the wrong type.
     #[test]
     fn mssql_type_to_rw_type_str_unknown() {
         assert!(mssql_type_to_rw_type_str("geometry").is_err());
