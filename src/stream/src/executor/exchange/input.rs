@@ -247,6 +247,9 @@ mod connect_failure_log {
             // Within the interval: suppressed again.
             assert_eq!(on_failure(&peer), None);
             // After the interval: warn again, reporting only the failures since the last warning.
+            #[cfg(madsim)]
+            tokio::time::advance(WARN_INTERVAL);
+            #[cfg(not(madsim))]
             tokio::time::advance(WARN_INTERVAL).await;
             assert_eq!(on_failure(&peer), Some((5, 2)));
 
