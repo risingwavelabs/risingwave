@@ -15,35 +15,85 @@
 use std::fmt::{Debug, Formatter};
 use std::num::NonZeroU64;
 use std::sync::Arc;
+use std::time::Duration;
 
 use hytra::TrAdder;
 use risingwave_common::config::StreamingConfig;
 pub(crate) use risingwave_common::id::WorkerId as WorkerNodeId;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
 use risingwave_common::util::addr::HostAddr;
-use risingwave_common_rate_limit::{RateLimit, RateLimiter};
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_rpc_client::{ComputeClientPoolRef, MetaClient};
 use risingwave_storage::StateStoreImpl;
 use tokio::sync::Semaphore;
+use tokio::time::{Instant, Interval, MissedTickBehavior};
 
-struct RemoteInputSubscriptionRateLimiter(RateLimiter);
+/// A cancellation-safe FIFO pacer for remote input subscriptions.
+///
+/// Waiters queue on the semaphore instead of reserving future time slots, so dropping actors does
+/// not leave rate-limit debt for the next recovery attempt.
+struct RemoteInputSubscriptionRateLimiter {
+    tokens: Arc<Semaphore>,
+    rate: NonZeroU64,
+}
 
 impl RemoteInputSubscriptionRateLimiter {
+    const MAX_BURST: usize = 1;
+
     fn new(rate: u64) -> Option<Arc<Self>> {
-        NonZeroU64::new(rate).map(|rate| Arc::new(Self(RateLimiter::new(RateLimit::Fixed(rate)))))
+        NonZeroU64::new(rate).map(|rate| {
+            let rate_limiter = Arc::new(Self {
+                tokens: Arc::new(Semaphore::new(Self::MAX_BURST)),
+                rate,
+            });
+            Self::spawn_token_producer(&rate_limiter.tokens, rate);
+            rate_limiter
+        })
     }
 
     async fn wait(&self) {
-        self.0.wait(1).await;
+        self.tokens
+            .acquire()
+            .await
+            .expect("remote input subscription rate limiter is never closed")
+            .forget();
+    }
+
+    fn spawn_token_producer(tokens: &Arc<Semaphore>, rate: NonZeroU64) {
+        let tokens = Arc::downgrade(tokens);
+        let mut interval = Self::token_interval(rate);
+        tokio::spawn(async move {
+            loop {
+                interval.tick().await;
+                let Some(tokens) = tokens.upgrade() else {
+                    return;
+                };
+                Self::replenish_token(&tokens);
+            }
+        });
+    }
+
+    fn replenish_token(tokens: &Semaphore) {
+        if tokens.available_permits() < Self::MAX_BURST {
+            tokens.add_permits(1);
+        }
+    }
+
+    fn token_interval(rate: NonZeroU64) -> Interval {
+        let nanos_per_token = (Duration::from_secs(1).as_nanos() as u64 / rate.get()).max(1);
+        let period = Duration::from_nanos(nanos_per_token);
+        let mut interval = tokio::time::interval_at(Instant::now() + period, period);
+        // Do not catch up missed ticks after the runtime stalls, which would create a burst.
+        interval.set_missed_tick_behavior(MissedTickBehavior::Delay);
+        interval
     }
 }
 
 impl Debug for RemoteInputSubscriptionRateLimiter {
     fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
         f.debug_tuple("RemoteInputSubscriptionRateLimiter")
-            .field(&self.0.rate_limit())
+            .field(&self.rate)
             .finish()
     }
 }
@@ -207,5 +257,93 @@ impl StreamEnvironment {
 
     pub fn kv_log_store_historical_read_semaphore(&self) -> Option<Arc<Semaphore>> {
         self.kv_log_store_historical_read_semaphore.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use tokio::sync::{mpsc, oneshot};
+    use tokio::task::JoinHandle;
+
+    use super::*;
+
+    fn rate_limiter_without_producer() -> Arc<RemoteInputSubscriptionRateLimiter> {
+        Arc::new(RemoteInputSubscriptionRateLimiter {
+            tokens: Arc::new(Semaphore::new(0)),
+            rate: NonZeroU64::new(1).unwrap(),
+        })
+    }
+
+    async fn enqueue_waiter(
+        rate_limiter: Arc<RemoteInputSubscriptionRateLimiter>,
+        id: usize,
+        completed_tx: mpsc::UnboundedSender<usize>,
+    ) -> JoinHandle<()> {
+        let (ready_tx, ready_rx) = oneshot::channel();
+        let handle = tokio::spawn(async move {
+            ready_tx.send(()).unwrap();
+            rate_limiter.wait().await;
+            completed_tx.send(id).unwrap();
+        });
+        ready_rx.await.unwrap();
+        handle
+    }
+
+    async fn next_completed(completed_rx: &mut mpsc::UnboundedReceiver<usize>) -> usize {
+        tokio::time::timeout(Duration::from_secs(1), completed_rx.recv())
+            .await
+            .expect("waiter should receive a token")
+            .expect("completion channel should stay open")
+    }
+
+    #[tokio::test]
+    async fn test_remote_input_subscription_rate_limiter_is_fifo() {
+        let rate_limiter = rate_limiter_without_producer();
+        let (completed_tx, mut completed_rx) = mpsc::unbounded_channel();
+        let mut waiters = Vec::new();
+        for id in 0..3 {
+            waiters.push(enqueue_waiter(rate_limiter.clone(), id, completed_tx.clone()).await);
+        }
+
+        for id in 0..3 {
+            rate_limiter.tokens.add_permits(1);
+            assert_eq!(next_completed(&mut completed_rx).await, id);
+        }
+        for waiter in waiters {
+            waiter.await.unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn test_cancelled_waiters_leave_no_rate_limit_debt() {
+        let rate_limiter = rate_limiter_without_producer();
+        let (completed_tx, mut completed_rx) = mpsc::unbounded_channel();
+        let mut stale_waiters = Vec::new();
+        for id in 0..16 {
+            stale_waiters
+                .push(enqueue_waiter(rate_limiter.clone(), id, completed_tx.clone()).await);
+        }
+        for waiter in stale_waiters {
+            waiter.abort();
+            assert!(waiter.await.unwrap_err().is_cancelled());
+        }
+
+        let fresh_waiter = enqueue_waiter(rate_limiter.clone(), 16, completed_tx).await;
+        rate_limiter.tokens.add_permits(1);
+        assert_eq!(next_completed(&mut completed_rx).await, 16);
+        fresh_waiter.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_token_producer_has_bounded_burst_and_delays_missed_ticks() {
+        let tokens = Semaphore::new(0);
+        for _ in 0..10 {
+            RemoteInputSubscriptionRateLimiter::replenish_token(&tokens);
+        }
+        assert_eq!(tokens.available_permits(), 1);
+
+        let interval =
+            RemoteInputSubscriptionRateLimiter::token_interval(NonZeroU64::new(256).unwrap());
+        assert_eq!(interval.missed_tick_behavior(), MissedTickBehavior::Delay);
     }
 }
