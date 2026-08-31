@@ -95,6 +95,9 @@ const KILL_IGNORE_FILES: &[&str] = &[
     "transaction/tolerance.slt",
     "transaction/cursor.slt",
     "transaction/cursor_multi_conn.slt",
+    // Manual background DDL creation is not retryable if its frontend is killed: the job may
+    // finish after the client loses the CREATE response.
+    "alter_mv/alter_mv_concurrency_check.slt",
 ];
 
 /// Randomly set DDL statements to use `background_ddl`
