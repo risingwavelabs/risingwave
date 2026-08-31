@@ -116,18 +116,35 @@ pub async fn describe_mssql_query(
 
     let mut rw_types = vec![];
     while let Some(row) = row_stream.try_next().await? {
-        // Column ordinal 2 -> `name` (sysname / nvarchar).
-        let name: &str = row.try_get::<&str, _>(2)?.unwrap_or("");
-        if name.is_empty() {
-            // Skip hidden/unnamed columns (e.g. literal projections).
-            continue;
-        }
+        // Column ordinal 0 -> `is_hidden` (bit). 0 = visible, 1 = hidden
+        // (a column hidden from the client, e.g. an unused join key).
+        // Column ordinal 1 -> `column_ordinal` (int). 1-based position
+        // of this column in the result set; used to disambiguate unnamed
+        // columns (`COUNT(*)` etc.) since `name` is empty for those.
+        // Column ordinal 2 -> `name` (sysname / nvarchar). Empty for
+        // hidden or computed-but-unnamed columns.
         // Column ordinal 5 -> `system_type_name` (e.g. "int", "nvarchar(50)",
         // "decimal(18,2)").
+        let is_hidden = row.try_get::<bool, _>(0)?.unwrap_or(false);
+        if is_hidden {
+            // Skip hidden columns: they are not visible in the result set.
+            continue;
+        }
+        let column_ordinal: i32 = row.try_get::<i32, _>(1)?.unwrap_or(0);
+        let name: &str = row.try_get::<&str, _>(2)?.unwrap_or("");
         let type_name: &str = row.try_get::<&str, _>(5)?.unwrap_or("");
+
         let data_type = mssql_type_to_rw_type_str(type_name)
             .with_context(|| format!("unsupported column type {:?}", type_name))?;
-        rw_types.push((name.to_owned(), data_type));
+        // Visible but unnamed columns (e.g. `SELECT COUNT(*) FROM t`) get a
+        // synthetic `column_N` name where N is the 1-based column ordinal.
+        // We keep the same default-name convention as the CDC source.
+        let column_name = if name.is_empty() {
+            format!("column_{column_ordinal}")
+        } else {
+            name.to_owned()
+        };
+        rw_types.push((column_name, data_type));
     }
 
     Ok(rw_types)
