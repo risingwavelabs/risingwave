@@ -853,13 +853,10 @@ impl DatabaseCheckpointControl {
 }
 
 impl DatabaseCheckpointControl {
-    /// return creating job table fragment id -> (backfill progress epoch , {`upstream_mv_table_id`})
-    fn collect_backfill_pinned_upstream_log_epoch(
-        &self,
-    ) -> HashMap<JobId, (u64, HashSet<TableId>)> {
+    fn collect_backfill_pinned_upstream_tables(&self) -> HashSet<TableId> {
         self.independent_checkpoint_job_controls
-            .iter()
-            .map(|(job_id, job)| (*job_id, job.pinned_upstream_log_epoch()))
+            .values()
+            .flat_map(|job| job.pinned_upstream_tables())
             .collect()
     }
 
@@ -1002,8 +999,8 @@ impl DatabaseCheckpointControl {
                         }
                     }
                     IndependentCheckpointJobControl::BatchRefresh(batch_refresh_job) => {
-                        if let Some((epoch, resps, info, tracking_job)) =
-                            batch_refresh_job.start_completing(partial_graph_manager)
+                        if let Some((epoch, resps, info, tracking_job)) = batch_refresh_job
+                            .start_completing(partial_graph_manager, committed_epoch)
                         {
                             let resps = resps.into_values().collect_vec();
                             if let Some(tracking_job) = tracking_job {
@@ -1086,7 +1083,7 @@ impl DatabaseCheckpointControl {
                     &info,
                     task,
                     resps_to_commit,
-                    self.collect_backfill_pinned_upstream_log_epoch(),
+                    self.collect_backfill_pinned_upstream_tables(),
                 );
                 self.completing_barrier = Some(info.barrier_info.epoch());
                 task.finished_jobs.extend(staging_commit_info.finished_jobs);
