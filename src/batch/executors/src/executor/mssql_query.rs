@@ -12,8 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::Context;
-use anyhow::anyhow;
+use anyhow::{Context, anyhow};
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
 use risingwave_common::array::DataChunk;
@@ -48,26 +47,86 @@ fn parse_strict_tls_flag(value: &str, default: bool) -> Result<bool, BatchError>
     }
 }
 
-/// Strip SQL line comments (`-- ...`) and block comments (`/* ... */`) from
-/// `s`, replacing them with spaces so that byte offsets and string boundaries
-/// are preserved for downstream string-literal handling. Used by
-/// [`validate_read_only_query`] to avoid matching keywords that appear inside
-/// comments.
-fn strip_sql_comments(s: &str) -> String {
+/// Replace string literals, line/block comments, and `"..."` quoted
+/// identifiers with spaces (preserving newlines) so the caller can scan
+/// for top-level keywords without being fooled by SQL embedded inside.
+///
+/// **Must be a single pass**: a two-pass approach (`strip_sql_comments`
+/// then `mask_sql_string_literals`) is vulnerable to a payload such as
+/// `SELECT '--'\n; DELETE FROM t` — the comment stripper eats the `--`
+/// inside the `'--'` literal, swallows the closing `'`, and the trailing
+/// `; DELETE` ends up un-masked.
+fn mask_sql_for_validation(s: &str) -> String {
     let mut out = String::with_capacity(s.len());
     let bytes = s.as_bytes();
     let mut i = 0;
     while i < bytes.len() {
-        // Line comment: `-- ...` until newline (or end of string).
+        if bytes[i] == b'\'' {
+            // Single-quoted string literal: '...'. T-SQL escaped quote is ''.
+            out.push(' ');
+            i += 1;
+            while i < bytes.len() {
+                if bytes[i] == b'\'' {
+                    if i + 1 < bytes.len() && bytes[i + 1] == b'\'' {
+                        out.push(' ');
+                        out.push(' ');
+                        i += 2;
+                        continue;
+                    }
+                    out.push(' ');
+                    i += 1;
+                    break;
+                }
+                out.push(if bytes[i] == b'\n' { '\n' } else { ' ' });
+                i += 1;
+            }
+            continue;
+        }
+        if bytes[i] == b'"' {
+            // Quoted identifier "..." (T-SQL). Only valid at a word
+            // boundary; in any other position `"` would not appear.
+            let prev = if i > 0 { bytes[i - 1] } else { b' ' };
+            if matches!(prev, b'\n' | b' ' | b'\t' | b'(' | b',' | b'.') {
+                out.push(' ');
+                i += 1;
+                while i < bytes.len() && bytes[i] != b'"' {
+                    out.push(if bytes[i] == b'\n' { '\n' } else { ' ' });
+                    i += 1;
+                }
+                if i < bytes.len() {
+                    out.push(' ');
+                    i += 1;
+                }
+                continue;
+            }
+        }
+        if bytes[i] == b'[' {
+            // Bracketed identifier [name] (T-SQL standard escape for
+            // reserved words, e.g. `SELECT 1 AS [INTO] FROM t`). Masked
+            // so the contents don't match keyword checks below.
+            out.push(' ');
+            i += 1;
+            while i < bytes.len() && bytes[i] != b']' {
+                out.push(if bytes[i] == b'\n' { '\n' } else { ' ' });
+                i += 1;
+            }
+            if i < bytes.len() {
+                out.push(' ');
+                i += 1;
+            }
+            continue;
+        }
         if i + 1 < bytes.len() && bytes[i] == b'-' && bytes[i + 1] == b'-' {
+            // Line comment -- ...  (only reached when not inside a string
+            // — strings are handled by the first branch above).
             while i < bytes.len() && bytes[i] != b'\n' {
                 out.push(' ');
                 i += 1;
             }
             continue;
         }
-        // Block comment: `/* ... */`.
         if i + 1 < bytes.len() && bytes[i] == b'/' && bytes[i + 1] == b'*' {
+            // Block comment /* ... */
             out.push(' ');
             out.push(' ');
             i += 2;
@@ -88,88 +147,55 @@ fn strip_sql_comments(s: &str) -> String {
     out
 }
 
-/// Replace string literals (`'...'` and `"..."` — T-SQL also supports the
-/// doubled-quote form `''` for embedded single quotes) with spaces so the
-/// caller can scan for top-level keywords without being fooled by a
-/// `;` or `SELECT` that lives inside a string. Implemented on a comment-
-/// stripped input so `\` escapes inside literals behave like standard T-SQL.
-fn mask_sql_string_literals(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    let bytes = s.as_bytes();
+fn has_top_level_keyword(masked: &str, keyword: &str) -> bool {
+    let bytes = masked.as_bytes();
+    let kw = keyword.as_bytes();
+    let kw_len = kw.len();
+    let mut depth: i32 = 0;
     let mut i = 0;
-    while i < bytes.len() {
+    while i + kw_len <= bytes.len() {
         match bytes[i] {
-            b'\'' => {
-                // Doubled single quote `''` is an escaped literal quote, not a
-                // string boundary — treat as one literal character.
-                if i + 1 < bytes.len() && bytes[i + 1] == b'\'' {
-                    out.push(' ');
-                    out.push(' ');
-                    i += 2;
-                } else {
-                    out.push(' ');
-                    i += 1;
-                    while i < bytes.len() && bytes[i] != b'\'' {
-                        out.push(if bytes[i] == b'\n' { '\n' } else { ' ' });
-                        i += 1;
-                    }
-                    if i < bytes.len() {
-                        out.push(' ');
-                        i += 1;
-                    }
+            b'(' => depth += 1,
+            b')' => depth -= 1,
+            _ => {
+                if depth == 0
+                    && bytes[i..i + kw_len].eq_ignore_ascii_case(kw)
+                    && (i == 0 || !is_ident_char(bytes[i - 1]))
+                    && (i + kw_len >= bytes.len() || !is_ident_char(bytes[i + kw_len]))
+                {
+                    return true;
                 }
-            }
-            b'"' if i == 0 || bytes[i - 1] == b'\n' || bytes[i - 1] == b' ' || bytes[i - 1] == b'\t' => {
-                // Identifier quoted with `"` — T-SQL syntax. Mask it.
-                out.push(' ');
-                i += 1;
-                while i < bytes.len() && bytes[i] != b'"' {
-                    out.push(if bytes[i] == b'\n' { '\n' } else { ' ' });
-                    i += 1;
-                }
-                if i < bytes.len() {
-                    out.push(' ');
-                    i += 1;
-                }
-            }
-            b => {
-                out.push(b as char);
-                i += 1;
             }
         }
+        i += 1;
     }
-    out
+    false
 }
 
-/// Enforce that the user-provided query is a single read-only `SELECT` (or
-/// `WITH ... SELECT` CTE) statement. Two layers of defense:
-///
-/// 1. The first non-whitespace, non-comment keyword must be `SELECT` or
-///    `WITH`. Anything else (`INSERT`, `UPDATE`, `DELETE`, `DROP`,
-///    `CREATE`, `ALTER`, `TRUNCATE`, `EXEC`, `MERGE`, ...) is rejected.
-/// 2. The query must not contain a top-level `;` (semicolon-delimited
-///    multi-statement batch), since `tiberius::Client::query` accepts a
-///    batch and would happily run every statement against the source
-///    credentials.
-///
-/// Both checks operate on a comment-stripped and string-literal-masked
-/// copy of the query, so a `;` or `DELETE` inside a string or `--` comment
-/// doesn't trigger a false positive. The check is intentionally simple and
-/// rule-of-thumb — anything that fools it would also fool a human reader
-/// at first glance, and a determined attacker already has SQL Server
-/// credentials at this point (the `mssql_query` function never invents new
-/// access).
-fn validate_read_only_query(query: &str) -> Result<(), BatchError> {
-    // 1. Comment-strip + string-mask the query so keyword and semicolon
-    //    searches don't match inside comments / string literals.
-    let stripped = mask_sql_string_literals(&strip_sql_comments(query));
+fn is_ident_char(b: u8) -> bool {
+    b.is_ascii_alphanumeric() || b == b'_'
+}
 
-    // 2. The first non-whitespace, non-newline token must be SELECT or
-    //    WITH. Case-insensitive. Anything else is rejected.
-    let first_token = stripped
-        .split(|c: char| c.is_whitespace())
+/// Enforce that the user-provided query is a single read-only `SELECT` or
+/// `WITH ... SELECT` CTE. Rejects:
+///  - non-`SELECT`/`WITH` first keyword (INSERT/UPDATE/DELETE/DDL/EXEC/...),
+///  - `WITH cte AS (...) DELETE FROM t` — CTE followed by a write,
+///  - `SELECT ... INTO new_table FROM src` — `INTO` is a write in T-SQL,
+///  - semicolon-delimited multi-statement batches (`tiberius::Client::query`
+///    would happily run every statement against the source credentials).
+///
+/// This is a lexical scan, not a full parser; the production source-
+/// reference form should be paired with a read-only SQL Server principal.
+fn validate_read_only_query(query: &str) -> Result<(), BatchError> {
+    let masked = mask_sql_for_validation(query);
+
+    let first_token: String = masked
+        .split(|c: char| c.is_whitespace() || c == '(' || c == ';')
         .find(|tok| !tok.is_empty())
-        .map(str::to_ascii_lowercase)
+        .map(|tok| {
+            tok.trim_end_matches(|c: char| matches!(c, ')' | ',' | '.'))
+                .to_ascii_lowercase()
+        })
         .unwrap_or_default();
     if first_token != "select" && first_token != "with" {
         return Err(BatchError::from(anyhow::anyhow!(
@@ -179,11 +205,64 @@ fn validate_read_only_query(query: &str) -> Result<(), BatchError> {
         )));
     }
 
-    // 3. Reject semicolons anywhere in the (comment- and string-stripped)
-    //    query. A trailing `;` after a SELECT is common in client
-    //    tools and is fine — we strip one trailing semicolon before
-    //    scanning.
-    let mut s = stripped.trim_end().to_owned();
+    if first_token == "with" {
+        // Find the end of the CTE clause. A CTE clause is one or more
+        // comma-separated `name AS (subquery)` definitions followed by a
+        // single main statement (`SELECT`/`INSERT`/`UPDATE`/`DELETE`/`MERGE`).
+        // We find every top-level close paren and pick the FIRST one whose
+        // next non-whitespace token at depth 0 is not `,` — that's where
+        // the CTE list ends and the main statement begins. Using the
+        // last close paren instead breaks for `WITH c AS (...) SELECT *
+        // FROM t WHERE x IN (SELECT 1)`, where the trailing subquery's
+        // close paren would be mis-identified as the CTE boundary.
+        let mut top_close_parens: Vec<usize> = Vec::new();
+        let mut depth: i32 = 0;
+        for (idx, c) in masked.char_indices() {
+            match c {
+                '(' => depth += 1,
+                ')' => {
+                    depth -= 1;
+                    if depth == 0 {
+                        top_close_parens.push(idx);
+                    }
+                }
+                _ => {}
+            }
+        }
+        let mut cte_end: Option<usize> = None;
+        for pos in top_close_parens {
+            let rest = masked[pos + 1..].trim_start();
+            if !rest.starts_with(',') {
+                cte_end = Some(pos + 1);
+                break;
+            }
+        }
+        let after_cte = masked[cte_end.unwrap_or(masked.len())..].trim_start();
+        let next_token = after_cte
+            .split(|c: char| c.is_whitespace() || c == '(' || c == ';')
+            .find(|tok| !tok.is_empty())
+            .map(|tok| {
+                tok.trim_end_matches(|c: char| matches!(c, ')' | ',' | '.'))
+                    .to_ascii_lowercase()
+            })
+            .unwrap_or_default();
+        if next_token != "select" {
+            return Err(BatchError::from(anyhow::anyhow!(
+                "mssql_query WITH clause must end with a SELECT; \
+                 got `WITH ... {} ...`",
+                next_token
+            )));
+        }
+    }
+
+    if has_top_level_keyword(&masked, "INTO") {
+        return Err(BatchError::from(anyhow::anyhow!(
+            "mssql_query does not allow SELECT ... INTO \
+             (writes are not permitted)"
+        )));
+    }
+
+    let mut s = masked.trim_end().to_owned();
     while let Some(c) = s.chars().last() {
         if c == ';' || c.is_whitespace() {
             s.pop();
@@ -406,10 +485,7 @@ mod tests {
     /// CTEs (`WITH ... SELECT`) are read-only — must pass.
     #[test]
     fn validate_read_only_query_accepts_cte() {
-        validate_read_only_query(
-            "WITH cte AS (SELECT id FROM test) SELECT * FROM cte",
-        )
-        .unwrap();
+        validate_read_only_query("WITH cte AS (SELECT id FROM test) SELECT * FROM cte").unwrap();
     }
 
     /// A trailing `;` is common in client tools — must be tolerated.
@@ -469,14 +545,9 @@ mod tests {
     fn validate_read_only_query_ignores_dml_in_strings_and_comments() {
         validate_read_only_query("SELECT 'DROP TABLE test' AS msg FROM t").unwrap();
         validate_read_only_query("SELECT \"DELETE FROM test\" AS msg FROM t").unwrap();
-        validate_read_only_query(
-            "SELECT 1 -- this comment mentions DELETE but is fine",
-        )
-        .unwrap();
-        validate_read_only_query(
-            "SELECT 1 /* block comment mentioning INSERT is fine */ FROM t",
-        )
-        .unwrap();
+        validate_read_only_query("SELECT 1 -- this comment mentions DELETE but is fine").unwrap();
+        validate_read_only_query("SELECT 1 /* block comment mentioning INSERT is fine */ FROM t")
+            .unwrap();
     }
 
     /// Empty / whitespace-only queries are rejected.
@@ -484,5 +555,70 @@ mod tests {
     fn validate_read_only_query_rejects_empty() {
         validate_read_only_query("").unwrap_err();
         validate_read_only_query("   \n\t  ").unwrap_err();
+    }
+
+    /// Bypass #1: `SELECT '--'\n; DELETE FROM t`. The earlier two-pass
+    /// masker ate the `--` inside the `'--'` literal, hiding the
+    /// trailing `; DELETE` from the validation. The single-pass masker
+    /// now processes strings before comments, so the closing `'` is
+    /// recognized correctly and the `;` triggers the rejection.
+    #[test]
+    fn validate_read_only_query_rejects_delete_after_string_with_dashes() {
+        let q = "SELECT '--'\n; DELETE FROM test";
+        let err = validate_read_only_query(q).unwrap_err();
+        assert!(
+            err.to_string().contains("semicolon-delimited"),
+            "expected semicolon-delimited error for {q:?}, got: {err}"
+        );
+    }
+
+    /// Bypass #2: `WITH cte AS (...) DELETE FROM t`. The first-token
+    /// check accepted `WITH`; we now also verify that the post-CTE
+    /// statement is `SELECT`.
+    #[test]
+    fn validate_read_only_query_rejects_with_followed_by_delete() {
+        let q = "WITH cte AS (SELECT 1 AS x) DELETE FROM test";
+        let err = validate_read_only_query(q).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("WITH clause must end with a SELECT"),
+            "expected `WITH ... SELECT` error for {q:?}, got: {err}"
+        );
+    }
+
+    /// `SELECT ... INTO new_table FROM src` is a write in T-SQL and must
+    /// be rejected.
+    #[test]
+    fn validate_read_only_query_rejects_select_into() {
+        let q = "SELECT * INTO new_table FROM src";
+        let err = validate_read_only_query(q).unwrap_err();
+        assert!(
+            err.to_string().contains("SELECT ... INTO"),
+            "expected `SELECT ... INTO` error for {q:?}, got: {err}"
+        );
+    }
+
+    /// `WITH cte AS (...) INSERT INTO t SELECT *` is also a write, but
+    /// reaches us via the WITH-check (post-CTE token is INSERT, not
+    /// SELECT) rather than the first-token check.
+    #[test]
+    fn validate_read_only_query_rejects_with_followed_by_insert() {
+        let q = "WITH cte AS (SELECT 1 AS x) INSERT INTO t SELECT x FROM cte";
+        let err = validate_read_only_query(q).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("WITH clause must end with a SELECT"),
+            "expected `WITH ... SELECT` error for {q:?}, got: {err}"
+        );
+    }
+
+    /// `INTO` mentioned in a column list (e.g. inside parentheses) is
+    /// fine — only top-level `INTO` is rejected.
+    #[test]
+    fn validate_read_only_query_allows_into_in_subquery() {
+        validate_read_only_query(
+            "WITH cte AS (SELECT 1 AS x) SELECT * FROM cte WHERE x IN (SELECT 1)",
+        )
+        .unwrap();
     }
 }
