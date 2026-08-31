@@ -27,7 +27,7 @@ prost-types = { workspace = true }
 proto-src-confluent = "0.1"
 proto-src-google-type = "0.1"
 protox = "0.9.1"
-reqwest = { version = "0.12.2", features = ["json"] }
+reqwest = { version = "0.13.4", features = ["json"] }
 risingwave_common = { workspace = true }
 risingwave_pb = { workspace = true }
 rust_decimal = "1"
