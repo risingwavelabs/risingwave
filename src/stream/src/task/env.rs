@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::fmt::{Debug, Formatter};
+use std::num::NonZeroU64;
 use std::sync::Arc;
 
 use hytra::TrAdder;
@@ -19,11 +21,32 @@ use risingwave_common::config::StreamingConfig;
 pub(crate) use risingwave_common::id::WorkerId as WorkerNodeId;
 use risingwave_common::system_param::local_manager::LocalSystemParamsManagerRef;
 use risingwave_common::util::addr::HostAddr;
+use risingwave_common_rate_limit::{RateLimit, RateLimiter};
 use risingwave_connector::source::monitor::SourceMetrics;
 use risingwave_dml::dml_manager::DmlManagerRef;
 use risingwave_rpc_client::{ComputeClientPoolRef, MetaClient};
 use risingwave_storage::StateStoreImpl;
 use tokio::sync::Semaphore;
+
+struct RemoteInputSubscriptionRateLimiter(RateLimiter);
+
+impl RemoteInputSubscriptionRateLimiter {
+    fn new(rate: u64) -> Option<Arc<Self>> {
+        NonZeroU64::new(rate).map(|rate| Arc::new(Self(RateLimiter::new(RateLimit::Fixed(rate)))))
+    }
+
+    async fn wait(&self) {
+        self.0.wait(1).await;
+    }
+}
+
+impl Debug for RemoteInputSubscriptionRateLimiter {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        f.debug_tuple("RemoteInputSubscriptionRateLimiter")
+            .field(&self.0.rate_limit())
+            .finish()
+    }
+}
 
 /// The global environment for task execution.
 /// The instance will be shared by every task.
@@ -62,6 +85,9 @@ pub struct StreamEnvironment {
     /// Compute client pool for streaming gRPC exchange.
     client_pool: ComputeClientPoolRef,
 
+    /// Smooths remote input subscription bursts without limiting in-flight requests.
+    remote_input_subscription_rate_limiter: Option<Arc<RemoteInputSubscriptionRateLimiter>>,
+
     /// Semaphore to limit the number of kv log store readers concurrently reading historical data.
     /// `None` means unlimited.
     kv_log_store_historical_read_semaphore: Option<Arc<Semaphore>>,
@@ -90,6 +116,9 @@ impl StreamEnvironment {
                 None
             }
         };
+        let remote_input_subscription_rate_limiter = RemoteInputSubscriptionRateLimiter::new(
+            global_config.developer.remote_input_subscription_rate_limit,
+        );
         StreamEnvironment {
             server_addr,
             global_config,
@@ -101,6 +130,7 @@ impl StreamEnvironment {
             total_mem_val: Arc::new(TrAdder::new()),
             meta_client: Some(meta_client),
             client_pool,
+            remote_input_subscription_rate_limiter,
             kv_log_store_historical_read_semaphore,
         }
     }
@@ -124,6 +154,7 @@ impl StreamEnvironment {
             total_mem_val: Arc::new(TrAdder::new()),
             meta_client: None,
             client_pool: Arc::new(ComputeClientPool::for_test()),
+            remote_input_subscription_rate_limiter: None,
             kv_log_store_historical_read_semaphore: None,
         }
     }
@@ -166,6 +197,12 @@ impl StreamEnvironment {
 
     pub fn client_pool(&self) -> ComputeClientPoolRef {
         self.client_pool.clone()
+    }
+
+    pub async fn wait_remote_input_subscription(&self) {
+        if let Some(rate_limiter) = &self.remote_input_subscription_rate_limiter {
+            rate_limiter.wait().await;
+        }
     }
 
     pub fn kv_log_store_historical_read_semaphore(&self) -> Option<Arc<Semaphore>> {

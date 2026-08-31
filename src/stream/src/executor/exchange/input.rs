@@ -12,14 +12,19 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::future::Future;
 use std::pin::Pin;
 use std::task::{Context, Poll};
+use std::time::Duration;
 
 use either::Either;
 use local_input::LocalInputStreamInner;
 use pin_project::pin_project;
 use risingwave_common::config::StreamingConfig;
 use risingwave_common::util::addr::{HostAddr, is_local_address};
+use risingwave_common::util::retry::exponential_backoff;
+use risingwave_rpc_client::error::RpcError;
+use tokio_retry::strategy::jitter;
 
 use super::permit::Receiver;
 use crate::executor::prelude::*;
@@ -154,6 +159,43 @@ use remote_input::RemoteInputStreamInner;
 use risingwave_pb::common::ActorInfo;
 use risingwave_pb::id::PartialGraphId;
 
+const REMOTE_INPUT_CONNECT_RETRY_BASE_DELAY: Duration = Duration::from_millis(100);
+const REMOTE_INPUT_CONNECT_RETRY_MAX_DELAY: Duration = Duration::from_secs(10);
+
+fn remote_input_connect_retry_backoff() -> impl Iterator<Item = Duration> {
+    exponential_backoff(
+        REMOTE_INPUT_CONNECT_RETRY_BASE_DELAY,
+        2,
+        REMOTE_INPUT_CONNECT_RETRY_MAX_DELAY,
+    )
+    .map(jitter)
+}
+
+async fn retry_connection_errors<T, F, Fut>(
+    mut operation: F,
+    mut retry_backoff: impl Iterator<Item = Duration>,
+) -> Result<T, RpcError>
+where
+    F: FnMut() -> Fut,
+    Fut: Future<Output = Result<T, RpcError>>,
+{
+    loop {
+        match operation().await {
+            Ok(value) => return Ok(value),
+            Err(err) if err.is_connection_error() => {
+                let retry_delay = retry_backoff.next().expect("retry strategy is infinite");
+                tracing::debug!(
+                    error = %err,
+                    ?retry_delay,
+                    "transient RPC connection failure; retrying"
+                );
+                tokio::time::sleep(retry_delay).await;
+            }
+            Err(err) => return Err(err),
+        }
+    }
+}
+
 impl RemoteInput {
     /// Create a remote input from compute client and related info. Should provide the corresponding
     /// compute client of where the actor is placed.
@@ -168,11 +210,22 @@ impl RemoteInput {
     ) -> StreamExecutorResult<Self> {
         let actor_id = up_down_ids.0;
 
-        let client = local_barrier_manager
+        // Establishing the compute client has no server-side subscription state, so it is safe to
+        // retry transient failures in place. Aborting the actor on a term reset cancels this loop.
+        let client_pool = local_barrier_manager.env.client_pool();
+        let client = retry_connection_errors(
+            || client_pool.get_by_addr(upstream_addr.clone()),
+            remote_input_connect_retry_backoff(),
+        )
+        .await?;
+
+        // Limit only the rate of starting subscriptions. Holding a concurrency permit until
+        // `get_stream` returns can deadlock when upstream actors are waiting on their own remote
+        // inputs before they can provide this actor's output receiver.
+        local_barrier_manager
             .env
-            .client_pool()
-            .get_by_addr(upstream_addr)
-            .await?;
+            .wait_remote_input_subscription()
+            .await;
         let (stream, permits_tx) = client
             .get_stream(
                 up_down_ids.0,
@@ -375,5 +428,54 @@ impl DispatcherMessageBatch {
             DispatcherMessageBatch::Chunk(c) => Either::Right(DispatcherMessage::Chunk(c)),
             DispatcherMessageBatch::Watermark(w) => Either::Right(DispatcherMessage::Watermark(w)),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use tonic::Status;
+
+    use super::*;
+
+    #[tokio::test]
+    async fn retry_transient_connection_errors() {
+        let attempts = AtomicUsize::new(0);
+        retry_connection_errors(
+            || {
+                let attempt = attempts.fetch_add(1, Ordering::SeqCst);
+                std::future::ready(if attempt < 2 {
+                    Err(RpcError::from_compute_status(Status::unavailable(
+                        "compute starting",
+                    )))
+                } else {
+                    Ok(())
+                })
+            },
+            std::iter::repeat(Duration::ZERO),
+        )
+        .await
+        .unwrap();
+
+        assert_eq!(attempts.load(Ordering::SeqCst), 3);
+    }
+
+    #[tokio::test]
+    async fn do_not_retry_non_connection_errors() {
+        let attempts = AtomicUsize::new(0);
+        let result = retry_connection_errors(
+            || {
+                attempts.fetch_add(1, Ordering::SeqCst);
+                std::future::ready(Err::<(), _>(RpcError::from_compute_status(
+                    Status::invalid_argument("invalid subscription"),
+                )))
+            },
+            std::iter::repeat(Duration::ZERO),
+        )
+        .await;
+
+        assert!(result.is_err());
+        assert_eq!(attempts.load(Ordering::SeqCst), 1);
     }
 }

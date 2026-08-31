@@ -124,6 +124,13 @@ pub struct StreamingDeveloperConfig {
     #[serde(default = "default::developer::stream_exchange_concurrent_dispatchers")]
     pub exchange_concurrent_dispatchers: usize,
 
+    /// The maximum rate per second at which a compute node starts remote exchange subscriptions.
+    /// This smooths actor startup and recovery bursts without limiting the number of in-flight
+    /// subscriptions, which could deadlock actors with remote input dependencies.
+    /// Set to 0 to disable the limit.
+    #[serde(default = "default::developer::stream_remote_input_subscription_rate_limit")]
+    pub remote_input_subscription_rate_limit: u64,
+
     /// The maximum number of chunks that `ProjectExecutor` evaluates concurrently.
     ///
     /// - `1` means no chunk-level concurrency.
