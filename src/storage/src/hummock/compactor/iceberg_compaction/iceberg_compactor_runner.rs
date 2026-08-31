@@ -63,6 +63,18 @@ static ICEBERG_COMPACTION_METRICS_REGISTRY: LazyLock<Box<PrometheusMetricsRegist
         ))
     });
 
+const PARTITIONED_TABLE_OUTPUT_PARALLELISM_DIVISOR: u32 = 8;
+
+fn output_parallelism_limit(max_parallelism: u32, is_partitioned: bool) -> usize {
+    // Every output stream owns a partition-aware writer, so partitioned tables can fan out to
+    // substantially more active writers than the planner's output parallelism suggests.
+    if is_partitioned {
+        (max_parallelism / PARTITIONED_TABLE_OUTPUT_PARALLELISM_DIVISOR).max(1) as usize
+    } else {
+        max_parallelism as usize
+    }
+}
+
 #[derive(Builder, Debug, Clone)]
 pub struct IcebergCompactorRunnerConfig {
     #[builder(default = "4")]
@@ -689,7 +701,10 @@ fn build_task_planning_config(
     compaction_kind: IcebergCompactionKind,
     iceberg_config: &IcebergConfig,
     config: &IcebergCompactorRunnerConfig,
+    is_partitioned: bool,
 ) -> HummockResult<IcebergTaskPlanningConfig> {
+    let max_output_parallelism = output_parallelism_limit(config.max_parallelism, is_partitioned);
+
     let grouping_strategy = match iceberg_config.write_mode {
         IcebergWriteMode::CopyOnWrite => iceberg_compaction_core::config::GroupingStrategy::Single,
         IcebergWriteMode::MergeOnRead => match config.target_binpack_group_size_mb {
@@ -719,7 +734,7 @@ fn build_task_planning_config(
             let mut builder = AutoCompactionConfigBuilder::default();
             builder
                 .max_input_parallelism(config.max_parallelism as usize)
-                .max_output_parallelism(config.max_parallelism as usize)
+                .max_output_parallelism(max_output_parallelism)
                 .min_size_per_partition(config.min_size_per_partition)
                 .max_file_count_per_partition(config.max_file_count_per_partition as usize)
                 .target_file_size_bytes(iceberg_config.target_file_size_mb() * 1024 * 1024)
@@ -741,7 +756,7 @@ fn build_task_planning_config(
             let mut builder = SmallFilesConfigBuilder::default();
             builder
                 .max_input_parallelism(config.max_parallelism as usize)
-                .max_output_parallelism(config.max_parallelism as usize)
+                .max_output_parallelism(max_output_parallelism)
                 .min_size_per_partition(config.min_size_per_partition)
                 .max_file_count_per_partition(config.max_file_count_per_partition as usize)
                 .target_file_size_bytes(iceberg_config.target_file_size_mb() * 1024 * 1024)
@@ -761,7 +776,7 @@ fn build_task_planning_config(
         IcebergCompactionKind::Full => {
             let config = FullCompactionConfigBuilder::default()
                 .max_input_parallelism(config.max_parallelism as usize)
-                .max_output_parallelism(config.max_parallelism as usize)
+                .max_output_parallelism(max_output_parallelism)
                 .min_size_per_partition(config.min_size_per_partition)
                 .max_file_count_per_partition(config.max_file_count_per_partition as usize)
                 .target_file_size_bytes(iceberg_config.target_file_size_mb() * 1024 * 1024)
@@ -775,7 +790,7 @@ fn build_task_planning_config(
         IcebergCompactionKind::FilesWithDeletes => {
             let config = FilesWithDeletesConfigBuilder::default()
                 .max_input_parallelism(config.max_parallelism as usize)
-                .max_output_parallelism(config.max_parallelism as usize)
+                .max_output_parallelism(max_output_parallelism)
                 .min_size_per_partition(config.min_size_per_partition)
                 .max_file_count_per_partition(config.max_file_count_per_partition as usize)
                 .target_file_size_bytes(iceberg_config.target_file_size_mb() * 1024 * 1024)
@@ -792,7 +807,7 @@ fn build_task_planning_config(
             // the metadata diff in `publish_cow_snapshot_to_main`.
             let config = FilesWithDeletesConfigBuilder::default()
                 .max_input_parallelism(config.max_parallelism as usize)
-                .max_output_parallelism(config.max_parallelism as usize)
+                .max_output_parallelism(max_output_parallelism)
                 .min_size_per_partition(config.min_size_per_partition)
                 .max_file_count_per_partition(config.max_file_count_per_partition as usize)
                 .target_file_size_bytes(iceberg_config.target_file_size_mb() * 1024 * 1024)
@@ -838,7 +853,6 @@ pub async fn create_task_execution(
     let parsed_task_type = TaskType::try_from(task_type)
         .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
     let compaction_kind = IcebergCompactionKind::resolve(parsed_task_type, &iceberg_config)?;
-    let planning_config = build_task_planning_config(compaction_kind, &iceberg_config, &config)?;
 
     let branch = commit_branch(iceberg_config.r#type.as_str(), iceberg_config.write_mode);
 
@@ -846,6 +860,9 @@ pub async fn create_task_execution(
         .load_table(&table_ident)
         .await
         .map_err(|e| HummockError::compaction_executor(e.as_report()))?;
+    let is_partitioned = !table.metadata().default_partition_spec().is_unpartitioned();
+    let planning_config =
+        build_task_planning_config(compaction_kind, &iceberg_config, &config, is_partitioned)?;
 
     let compaction_plans = match planning_config {
         IcebergTaskPlanningConfig::Auto(config) => {
@@ -1209,6 +1226,13 @@ mod tests {
     }
 
     #[test]
+    fn test_output_parallelism_limit() {
+        assert_eq!(output_parallelism_limit(32, false), 32);
+        assert_eq!(output_parallelism_limit(32, true), 4);
+        assert_eq!(output_parallelism_limit(7, true), 1);
+    }
+
+    #[test]
     fn test_build_auto_compaction_planning_config() {
         let iceberg_config = IcebergConfig::from_btreemap(BTreeMap::from([
             ("connector".to_owned(), "iceberg".to_owned()),
@@ -1252,13 +1276,14 @@ mod tests {
             IcebergCompactionKind::Auto,
             &iceberg_config,
             &runner_config,
+            true,
         )
         .unwrap() else {
             panic!("expected auto planning config");
         };
 
         assert_eq!(config.max_input_parallelism, 8);
-        assert_eq!(config.max_output_parallelism, 8);
+        assert_eq!(config.max_output_parallelism, 1);
         assert_eq!(config.min_size_per_partition, 512 * 1024 * 1024);
         assert_eq!(config.max_file_count_per_partition, 16);
         assert_eq!(config.target_file_size_bytes, 256 * 1024 * 1024);
