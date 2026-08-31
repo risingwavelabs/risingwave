@@ -156,13 +156,13 @@ struct CowPublishPlan {
 }
 
 #[derive(Debug, Default)]
-struct CowPruningStatistics {
+struct CowRewriteStatistics {
     snapshot_data_file_count: usize,
     snapshot_data_file_size_bytes: u64,
     rewritten_data_file_count: usize,
     rewritten_data_file_size_bytes: u64,
-    pruned_data_file_count: usize,
-    pruned_data_file_size_bytes: u64,
+    skipped_rewrite_data_file_count: usize,
+    skipped_rewrite_data_file_size_bytes: u64,
 }
 
 impl CowPublishPlan {
@@ -588,22 +588,22 @@ async fn build_cow_publish_data_files(
     table: &Table,
     publish_plan: &CowPublishPlan,
     output_data_files: Vec<DataFile>,
-) -> HummockResult<(Vec<DataFile>, CowPruningStatistics)> {
+) -> HummockResult<(Vec<DataFile>, CowRewriteStatistics)> {
     let mut planned_snapshot_files =
         live_data_files_for_snapshot(table, publish_plan.snapshot_id).await?;
-    let pruning_statistics = retain_unrewritten_data_files(
+    let rewrite_statistics = retain_unrewritten_data_files(
         &mut planned_snapshot_files,
         &publish_plan.rewritten_data_file_paths,
     );
     planned_snapshot_files.extend(output_data_files);
-    Ok((planned_snapshot_files, pruning_statistics))
+    Ok((planned_snapshot_files, rewrite_statistics))
 }
 
 fn retain_unrewritten_data_files(
     planned_snapshot_files: &mut Vec<DataFile>,
     rewritten_data_file_paths: &HashSet<String>,
-) -> CowPruningStatistics {
-    let mut statistics = CowPruningStatistics::default();
+) -> CowRewriteStatistics {
+    let mut statistics = CowRewriteStatistics::default();
     planned_snapshot_files.retain(|file| {
         statistics.snapshot_data_file_count = statistics.snapshot_data_file_count.saturating_add(1);
         statistics.snapshot_data_file_size_bytes = statistics
@@ -622,10 +622,10 @@ fn retain_unrewritten_data_files(
         }
     });
 
-    statistics.pruned_data_file_count = statistics
+    statistics.skipped_rewrite_data_file_count = statistics
         .snapshot_data_file_count
         .saturating_sub(statistics.rewritten_data_file_count);
-    statistics.pruned_data_file_size_bytes = statistics
+    statistics.skipped_rewrite_data_file_size_bytes = statistics
         .snapshot_data_file_size_bytes
         .saturating_sub(statistics.rewritten_data_file_size_bytes);
     statistics
@@ -663,7 +663,7 @@ async fn publish_cow_snapshot_to_main(
     publish_plan: &CowPublishPlan,
     output_data_files: Vec<DataFile>,
 ) -> HummockResult<()> {
-    let (published_files, pruning_statistics) =
+    let (published_files, rewrite_statistics) =
         build_cow_publish_data_files(table, publish_plan, output_data_files).await?;
 
     tracing::info!(
@@ -673,12 +673,12 @@ async fn publish_cow_snapshot_to_main(
         table = %table.identifier(),
         ingestion_branch,
         planned_snapshot_id = publish_plan.snapshot_id,
-        snapshot_data_file_count = pruning_statistics.snapshot_data_file_count,
-        snapshot_data_file_size_bytes = pruning_statistics.snapshot_data_file_size_bytes,
-        rewritten_data_file_count = pruning_statistics.rewritten_data_file_count,
-        rewritten_data_file_size_bytes = pruning_statistics.rewritten_data_file_size_bytes,
-        pruned_data_file_count = pruning_statistics.pruned_data_file_count,
-        pruned_data_file_size_bytes = pruning_statistics.pruned_data_file_size_bytes,
+        snapshot_data_file_count = rewrite_statistics.snapshot_data_file_count,
+        snapshot_data_file_size_bytes = rewrite_statistics.snapshot_data_file_size_bytes,
+        rewritten_data_file_count = rewrite_statistics.rewritten_data_file_count,
+        rewritten_data_file_size_bytes = rewrite_statistics.rewritten_data_file_size_bytes,
+        skipped_rewrite_data_file_count = rewrite_statistics.skipped_rewrite_data_file_count,
+        skipped_rewrite_data_file_size_bytes = rewrite_statistics.skipped_rewrite_data_file_size_bytes,
         "iceberg_cow_data_files_pruned",
     );
 
@@ -1264,7 +1264,7 @@ mod tests {
             snapshot_id: 1,
             rewritten_data_file_paths: HashSet::from(["data/old.parquet".to_owned()]),
         };
-        let (published_files, _) = build_cow_publish_data_files(
+        let (published_files, rewrite_statistics) = build_cow_publish_data_files(
             &table,
             &publish_plan,
             vec![test_data_file("data/compacted.parquet")],
@@ -1275,6 +1275,12 @@ mod tests {
             sorted_file_paths(&published_files),
             vec!["data/clean.parquet", "data/compacted.parquet"]
         );
+        assert_eq!(rewrite_statistics.snapshot_data_file_count, 2);
+        assert_eq!(rewrite_statistics.snapshot_data_file_size_bytes, 2);
+        assert_eq!(rewrite_statistics.rewritten_data_file_count, 1);
+        assert_eq!(rewrite_statistics.rewritten_data_file_size_bytes, 1);
+        assert_eq!(rewrite_statistics.skipped_rewrite_data_file_count, 1);
+        assert_eq!(rewrite_statistics.skipped_rewrite_data_file_size_bytes, 1);
     }
 
     #[test]
