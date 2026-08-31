@@ -308,12 +308,14 @@ fn field_is_compatible(
     use risingwave_common::types::DataType as RwDataType;
 
     // A Variant is physically an Arrow struct, but its extension metadata makes it a leaf
-    // Iceberg type. Check that metadata before the generic struct recursion below.
-    if matches!(rw_type, RwDataType::Variant) {
-        return Ok(matches!(
-            IcebergArrowConvert.type_from_field(arrow_field),
-            Ok(RwDataType::Variant)
-        ));
+    // Iceberg type. The binding is exclusive in both directions: a plain struct mimicking
+    // the physical layout must not be written into a VARIANT column.
+    let arrow_is_variant = matches!(
+        IcebergArrowConvert.type_from_field(arrow_field),
+        Ok(RwDataType::Variant)
+    );
+    if matches!(rw_type, RwDataType::Variant) || arrow_is_variant {
+        return Ok(matches!(rw_type, RwDataType::Variant) && arrow_is_variant);
     }
 
     let converted_arrow_data_type = IcebergArrowConvert
@@ -349,13 +351,12 @@ fn field_is_compatible(
             if rw_fields.len() != arrow_fields.len() {
                 return Ok(false);
             }
-            for arrow_field in arrow_fields {
-                let Some((_, rw_type)) = rw_fields
-                    .iter()
-                    .find(|(name, _)| name == arrow_field.name())
-                else {
+            // `struct_to_arrow` writes struct children by position, so nested fields
+            // must match by position as well, like the top-level column-order check.
+            for ((rw_name, rw_type), arrow_field) in rw_fields.iter().zip_eq_fast(arrow_fields) {
+                if rw_name != arrow_field.name().as_str() {
                     return Ok(false);
-                };
+                }
                 if !field_is_compatible(rw_type, arrow_field)? {
                     return Ok(false);
                 }
