@@ -74,4 +74,30 @@ select * from postgres_query('postgres_cdc_source', 'select * from test where id
 100 t 1 1 1 1 1 1.0 2021-01-01 00:00:00 2021-01-01 00:00:00 2021-01-01 08:00:00+00:00 text varchar 1 day {} \x01
 
 statement ok
+create user postgres_query_read_only_user;
+
+statement ok
+grant select on source postgres_cdc_source to postgres_query_read_only_user;
+
+# SELECT privilege on a source must not authorize upstream writes.
+system ok
+! psql \
+  -X \
+  -h "$SLT_HOST" \
+  -p "$SLT_PORT" \
+  -U postgres_query_read_only_user \
+  -d "$SLT_DB" \
+  -v ON_ERROR_STOP=1 \
+  <<'SQL'
+SELECT *
+FROM postgres_query(
+  'postgres_cdc_source',
+  'update test set v12 = ''mutated'' where id = 1'
+);
+SQL
+
+statement ok
+drop user postgres_query_read_only_user;
+
+statement ok
 drop source postgres_cdc_source;
