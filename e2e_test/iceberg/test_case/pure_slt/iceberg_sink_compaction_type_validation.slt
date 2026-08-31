@@ -9,6 +9,13 @@ DROP SINK IF EXISTS iceberg_mor_small_files_disabled;
 statement ok
 DROP SINK IF EXISTS iceberg_mor_files_with_delete_disabled;
 
+system ok
+sparksql --e "
+DROP TABLE IF EXISTS demo.demo_db.iceberg_cow_without_explicit_compaction_type PURGE;
+DROP TABLE IF EXISTS demo.demo_db.iceberg_mor_small_files_disabled PURGE;
+DROP TABLE IF EXISTS demo.demo_db.iceberg_mor_files_with_delete_disabled PURGE;
+"
+
 statement ok
 DROP CONNECTION IF EXISTS iceberg_compaction_type_validation_connection;
 
@@ -113,6 +120,13 @@ DROP SINK iceberg_mor_small_files_disabled;
 
 statement ok
 DROP SINK iceberg_mor_files_with_delete_disabled;
+
+system ok
+sparksql --e "
+DROP TABLE IF EXISTS demo.demo_db.iceberg_cow_without_explicit_compaction_type PURGE;
+DROP TABLE IF EXISTS demo.demo_db.iceberg_mor_small_files_disabled PURGE;
+DROP TABLE IF EXISTS demo.demo_db.iceberg_mor_files_with_delete_disabled PURGE;
+"
 
 statement ok
 DROP CONNECTION iceberg_compaction_type_validation_connection;
