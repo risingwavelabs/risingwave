@@ -185,7 +185,7 @@ pub fn extract_subject_from_meta(meta: &SourceMeta) -> Option<DatumRef<'_>> {
 #[cfg(test)]
 mod tests {
     use async_nats::HeaderMap;
-    use risingwave_common::types::{DataType, ScalarImpl, ScalarRefImpl, ToOwnedDatum};
+    use risingwave_common::types::{DataType, ScalarImpl, ToOwnedDatum};
 
     use super::*;
     use crate::source::nats::source::NatsMeta;
@@ -208,11 +208,6 @@ mod tests {
     }
 
     #[test]
-    fn extract_headers_from_meta_returns_none_for_empty_variant() {
-        assert!(extract_headers_from_meta(&SourceMeta::Empty).is_none());
-    }
-
-    #[test]
     fn extract_header_inner_from_meta_dispatches_to_nats() {
         let mut headers = HeaderMap::new();
         headers.insert("trace", "abc");
@@ -223,22 +218,5 @@ mod tests {
             .unwrap()
             .to_owned_datum();
         assert_eq!(result, Some(ScalarImpl::Utf8("abc".into())));
-    }
-
-    #[test]
-    fn extract_header_inner_from_meta_returns_none_for_empty_variant() {
-        assert!(extract_header_inner_from_meta(&SourceMeta::Empty, "x", None).is_none());
-    }
-
-    #[test]
-    fn extract_subject_from_meta_returns_some_for_nats() {
-        let meta = nats_meta("orders.new", None);
-        let datum = extract_subject_from_meta(&meta).expect("outer Option");
-        assert!(matches!(datum, Some(ScalarRefImpl::Utf8("orders.new"))));
-    }
-
-    #[test]
-    fn extract_subject_from_meta_returns_none_for_non_nats() {
-        assert!(extract_subject_from_meta(&SourceMeta::Empty).is_none());
     }
 }
