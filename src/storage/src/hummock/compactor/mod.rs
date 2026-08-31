@@ -767,7 +767,7 @@ pub fn start_iceberg_compactor(
                                     let plan_index = meta.plan_index;
                                     let required_parallelism = runner.required_parallelism();
                                     let runner_sink_id = runner.sink_id;
-                                    let runner_task_type = runner.task_type;
+                                    let runner_compaction_kind = runner.compaction_kind();
                                     let runner_table = runner.table_ident.to_string();
                                     let push_result = task_queue.push(meta, Some(runner));
 
@@ -780,7 +780,7 @@ pub fn start_iceberg_compactor(
                                                 task_id = %task_id,
                                                 sink_id = runner_sink_id,
                                                 plan_index = plan_index,
-                                                task_type = ?runner_task_type,
+                                                task_type = ?runner_compaction_kind,
                                                 table = %runner_table,
                                                 required_parallelism = required_parallelism,
                                                 "iceberg_compaction_plan_enqueued",
@@ -793,7 +793,7 @@ pub fn start_iceberg_compactor(
                                                 task_id = %task_id,
                                                 sink_id = runner_sink_id,
                                                 plan_index = plan_index,
-                                                task_type = ?runner_task_type,
+                                                task_type = ?runner_compaction_kind,
                                                 table = %runner_table,
                                                 required_parallelism = required_parallelism,
                                                 pending_budget = pending_parallelism_budget,
@@ -811,7 +811,7 @@ pub fn start_iceberg_compactor(
                                                 task_id = %task_id,
                                                 sink_id = runner_sink_id,
                                                 plan_index = plan_index,
-                                                task_type = ?runner_task_type,
+                                                task_type = ?runner_compaction_kind,
                                                 table = %runner_table,
                                                 required_parallelism = required_parallelism,
                                                 max_parallelism = max_task_parallelism,
@@ -825,7 +825,7 @@ pub fn start_iceberg_compactor(
                                                 task_id = %task_id,
                                                 sink_id = runner_sink_id,
                                                 plan_index = plan_index,
-                                                task_type = ?runner_task_type,
+                                                task_type = ?runner_compaction_kind,
                                                 table = %runner_table,
                                                 required_parallelism = required_parallelism,
                                                 "iceberg_compaction_plan_rejected_invalid_parallelism",
@@ -838,7 +838,7 @@ pub fn start_iceberg_compactor(
                                                 task_id = %task_id,
                                                 sink_id = runner_sink_id,
                                                 plan_index = plan_index,
-                                                task_type = ?runner_task_type,
+                                                task_type = ?runner_compaction_kind,
                                                 table = %runner_table,
                                                 "iceberg_compaction_plan_rejected_duplicate",
                                             );
@@ -1491,7 +1491,7 @@ fn schedule_queued_tasks(
             continue;
         };
         let runner_sink_id = runner.sink_id;
-        let runner_task_type = runner.task_type;
+        let runner_compaction_kind = runner.compaction_kind();
         let runner_table = runner.table_ident.to_string();
 
         let executor = compactor_context.compaction_executor.clone();
@@ -1510,7 +1510,7 @@ fn schedule_queued_tasks(
             task_id = %task_id,
             sink_id = runner_sink_id,
             plan_index = plan_index,
-            task_type = ?runner_task_type,
+            task_type = ?runner_compaction_kind,
             table = %runner_table,
             unique_ident = ?unique_ident,
             required_parallelism = popped_task.meta.required_parallelism,
@@ -1539,7 +1539,7 @@ fn schedule_queued_tasks(
                             task_id = %task_key.0,
                             sink_id = runner_sink_id,
                             plan_index = task_key.1,
-                            task_type = ?runner_task_type,
+                            task_type = ?runner_compaction_kind,
                             table = %runner_table,
                             "iceberg_compaction_plan_cancelled",
                         );
@@ -1551,7 +1551,7 @@ fn schedule_queued_tasks(
                             task_id = %task_key.0,
                             sink_id = runner_sink_id,
                             plan_index = task_key.1,
-                            task_type = ?runner_task_type,
+                            task_type = ?runner_compaction_kind,
                             table = %runner_table,
                             "iceberg_compaction_plan_failed",
                         );
@@ -1571,7 +1571,7 @@ fn schedule_queued_tasks(
                     task_id = %task_key.0,
                     sink_id = runner_sink_id,
                     plan_index = task_key.1,
-                    task_type = ?runner_task_type,
+                    task_type = ?runner_compaction_kind,
                     table = %runner_table,
                     "iceberg_compaction_plan_completion_send_failed",
                 );

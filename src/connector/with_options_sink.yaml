@@ -455,7 +455,11 @@ HttpConfig:
   fields:
   - name: url
     field_type: String
-    comments: The endpoint URL to POST data to.
+    comments: The endpoint URL to send data to.
+    required: false
+  - name: method
+    field_type: String
+    comments: HTTP request method. Supported values are `POST` and `PUT`. Defaults to `POST`.
     required: false
   - name: content_type
     field_type: String
