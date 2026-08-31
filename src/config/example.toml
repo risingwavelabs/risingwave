@@ -53,7 +53,6 @@ periodic_tombstone_reclaim_compaction_interval_sec = 600
 move_table_size_limit = 10737418240
 split_group_size_limit = 68719476736
 cut_table_size_limit = 1073741824
-protect_drop_table_with_incoming_sink = false
 do_not_config_object_storage_lifecycle = false
 partition_vnode_count = 16
 table_high_write_throughput_threshold = 16777216
@@ -136,6 +135,7 @@ hummock_time_travel_filter_out_objects_list_version_batch_size = 10
 hummock_time_travel_filter_out_objects_list_delta_batch_size = 1000
 table_change_log_insert_batch_size = 1000
 table_change_log_delete_batch_size = 1000
+table_change_log_truncate_interval_sec = 600
 
 [meta.developer.compute_client_config]
 connect_timeout_secs = 5

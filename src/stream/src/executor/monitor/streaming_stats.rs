@@ -36,7 +36,7 @@ use risingwave_connector::sink::catalog::SinkId;
 use risingwave_pb::id::ExecutorId;
 
 use crate::common::log_store_impl::kv_log_store::{
-    REWIND_BACKOFF_BASE, REWIND_BACKOFF_FACTOR_MS, REWIND_MAX_DELAY,
+    REWIND_BACKOFF_MULTIPLIER, REWIND_INITIAL_DELAY, REWIND_MAX_DELAY,
 };
 use crate::executor::prelude::ActorId;
 use crate::task::FragmentId;
@@ -1102,8 +1102,8 @@ impl StreamingMetrics {
         .unwrap();
 
         let kv_log_store_rewind_delay_opts = {
-            let first_delay_secs = (REWIND_BACKOFF_FACTOR_MS * REWIND_BACKOFF_BASE) as f64 / 1000.0;
-            let base = REWIND_BACKOFF_BASE as f64;
+            let first_delay_secs = REWIND_INITIAL_DELAY.as_secs_f64();
+            let base = REWIND_BACKOFF_MULTIPLIER as f64;
             let bucket_count = (REWIND_MAX_DELAY.as_secs_f64() / first_delay_secs)
                 .log(base)
                 .ceil() as usize;
