@@ -335,6 +335,13 @@ pub async fn parse_schema_change(
             {
                 for col in columns.array_elements().unwrap() {
                     let name = jsonb_access_field!(col, "name", string);
+                    // MySQL column names are normalized when the initial schema is
+                    // discovered. Apply the same normalization to schema changes so
+                    // auto schema change can compare the two schemas consistently.
+                    let name = match connector_props {
+                        ConnectorProperties::MysqlCdc(_) => name.to_lowercase(),
+                        _ => name,
+                    };
                     let type_name = jsonb_access_field!(col, "typeName", string);
                     // User-defined types (enum, composite) are not in the
                     // `type_name_to_pg_type` whitelist because their type names are
