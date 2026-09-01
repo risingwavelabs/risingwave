@@ -134,6 +134,9 @@ assert_redacted \
 assert_redacted \
   "rw_sources.connector_props" \
   "SELECT connector_props FROM rw_catalog.rw_sources WHERE name = \$\$$source_name\$\$;"
+assert_redacted \
+  "rw_relation_info.definition" \
+  "SELECT definition FROM rw_catalog.rw_relation_info WHERE relationname = \$\$$source_name\$\$ AND relationtype = \$\$SOURCE\$\$;"
 '
 
 statement ok

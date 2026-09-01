@@ -203,7 +203,7 @@ async fn read_relation_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwRelat
                     schemaname: schema.clone(),
                     relationname: t.name.clone(),
                     relationowner: t.owner,
-                    definition: t.create_sql_purified(),
+                    definition: t.create_sql_redacted(),
                     relationtype: "SOURCE".into(),
                     relationid: t.id.as_relation_id(),
                     relationtimezone: timezone,
