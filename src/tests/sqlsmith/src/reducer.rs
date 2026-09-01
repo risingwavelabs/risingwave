@@ -45,7 +45,9 @@ pub async fn shrink_file(
     // reduce failed sql
     let reduced_sql = shrink_statements(&file_contents)?;
 
-    // shrink the reduced sql
+    // shrink the reduced sql.
+    // The reducer logs the EXPLAIN plan internally, before its schema is
+    // dropped, so it is no longer the caller's responsibility here.
     let reduced_sql = shrink_with_reducer(&reduced_sql, client, restore_cmd).await?;
 
     // write reduced sql
@@ -105,16 +107,22 @@ fn shrink_statements(sql: &str) -> Result<String> {
     Ok(sql)
 }
 
-/// Shrink function using path-based reduction
-async fn shrink_with_reducer(sql: &str, client: Client, restore_cmd: &str) -> Result<String> {
+/// Shrink function using path-based reduction.
+///
+/// `Reducer::reduce` logs the EXPLAIN plan for the reduced failing query
+/// internally, while its reduction schema is still alive — see that method
+/// for details.
+async fn shrink_with_reducer(
+    sql: &str,
+    client: Client,
+    restore_cmd: &str,
+) -> Result<String> {
     let sql_statements = parse_sql(sql);
     let proceeding_stmts = sql_statements.split_last().unwrap().1.to_vec();
     let checker = Checker::new(client, proceeding_stmts, restore_cmd.to_owned());
     let mut reducer = Reducer::new(checker);
 
-    let reduced_sql = reducer.reduce(sql).await?;
-
-    Ok(reduced_sql)
+    reducer.reduce(sql).await
 }
 
 pub(crate) fn find_ddl_references(sql_statements: &[Statement]) -> HashSet<String> {
