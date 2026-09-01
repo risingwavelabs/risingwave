@@ -912,18 +912,12 @@ impl BatchRefreshJobCheckpointControl {
     pub(crate) fn start_completing(
         &mut self,
         partial_graph_manager: &mut PartialGraphManager,
-        upstream_committed_epoch: u64,
     ) -> Option<(
         u64,
         HashMap<WorkerId, BarrierCompleteResponse>,
         PartialGraphBarrierInfo,
         Option<TrackingJob>,
     )> {
-        // Do not complete any barrier until upstream has committed the snapshot epoch,
-        // since completing the first barrier persists the snapshot epoch to catalog.
-        if upstream_committed_epoch < self.snapshot_epoch {
-            return None;
-        }
         match &self.status {
             BatchRefreshJobStatus::ConsumingSnapshot { .. }
             | BatchRefreshJobStatus::FinishingSnapshot { .. }

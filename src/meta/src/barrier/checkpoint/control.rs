@@ -983,73 +983,66 @@ impl DatabaseCheckpointControl {
     ) {
         // `Vec::new` is a const fn, and do not have memory allocation, and therefore is lightweight enough
         let mut independent_jobs_task = vec![];
-        if let Some(committed_epoch) = self.committed_epoch {
-            // `Vec::new` is a const fn, and do not have memory allocation, and therefore is lightweight enough
-            let mut finished_jobs = Vec::new();
-            let min_upstream_inflight_barrier = partial_graph_manager
-                .first_inflight_barrier(self.partial_graph_id)
-                .map(|epoch| epoch.prev);
-            for (job_id, job) in &mut self.independent_checkpoint_job_controls {
-                let Some(job) = job.running_mut() else {
-                    continue;
-                };
-                match job {
-                    IndependentCheckpointJob::CreatingStreamingJob(creating_job) => {
-                        if let Some((epoch, resps, info, is_finish_epoch)) = creating_job
-                            .start_completing(
-                                partial_graph_manager,
-                                min_upstream_inflight_barrier,
-                                committed_epoch,
-                            )
-                        {
-                            let resps = resps.into_values().collect_vec();
-                            if is_finish_epoch {
-                                assert!(info.notifier.is_none());
-                                finished_jobs.push((*job_id, epoch, resps));
-                                continue;
-                            };
-                            independent_jobs_task.push((*job_id, epoch, resps, info));
-                        }
+        let mut finished_jobs = Vec::new();
+        let min_upstream_inflight_barrier = partial_graph_manager
+            .first_inflight_barrier(self.partial_graph_id)
+            .map(|epoch| epoch.prev);
+        for (job_id, job) in &mut self.independent_checkpoint_job_controls {
+            let Some(job) = job.ready_mut() else {
+                continue;
+            };
+            match job {
+                IndependentCheckpointJob::CreatingStreamingJob(creating_job) => {
+                    if let Some((epoch, resps, info, is_finish_epoch)) = creating_job
+                        .start_completing(partial_graph_manager, min_upstream_inflight_barrier)
+                    {
+                        let resps = resps.into_values().collect_vec();
+                        if is_finish_epoch {
+                            assert!(info.notifier.is_none());
+                            finished_jobs.push((*job_id, epoch, resps));
+                            continue;
+                        };
+                        independent_jobs_task.push((*job_id, epoch, resps, info));
                     }
-                    IndependentCheckpointJob::BatchRefresh(batch_refresh_job) => {
-                        if let Some((epoch, resps, info, tracking_job)) = batch_refresh_job
-                            .start_completing(partial_graph_manager, committed_epoch)
-                        {
-                            let resps = resps.into_values().collect_vec();
-                            if let Some(tracking_job) = tracking_job {
-                                let task = task.get_or_insert_default();
-                                task.finished_jobs.push(tracking_job);
-                            }
-                            independent_jobs_task.push((*job_id, epoch, resps, info));
+                }
+                IndependentCheckpointJob::BatchRefresh(batch_refresh_job) => {
+                    if let Some((epoch, resps, info, tracking_job)) =
+                        batch_refresh_job.start_completing(partial_graph_manager)
+                    {
+                        let resps = resps.into_values().collect_vec();
+                        if let Some(tracking_job) = tracking_job {
+                            let task = task.get_or_insert_default();
+                            task.finished_jobs.push(tracking_job);
                         }
+                        independent_jobs_task.push((*job_id, epoch, resps, info));
                     }
                 }
             }
-            if !finished_jobs.is_empty() {
-                partial_graph_manager.remove_partial_graphs(
-                    finished_jobs
-                        .iter()
-                        .map(|(job_id, ..)| to_partial_graph_id(self.database_id, Some(*job_id)))
-                        .collect(),
-                );
-            }
-            for (job_id, epoch, resps) in finished_jobs {
-                debug!(epoch, %job_id, "finish creating job");
-                // It's safe to remove the creating job, because on CompleteJobType::Finished,
-                // all previous barriers have been collected and completed.
-                // `finished_jobs` was populated above only from a Running creating job, and the
-                // map cannot change between that scan and this removal.
-                let Some(IndependentCheckpointJobControl::Running {
-                    job: IndependentCheckpointJob::CreatingStreamingJob(creating_streaming_job),
-                    ..
-                }) = self.independent_checkpoint_job_controls.remove(&job_id)
-                else {
-                    panic!("finished job {job_id} should be a creating streaming job");
-                };
-                let tracking_job = creating_streaming_job.into_tracking_job();
-                self.finishing_jobs_collector
-                    .collect(epoch, job_id, (resps, tracking_job));
-            }
+        }
+        if !finished_jobs.is_empty() {
+            partial_graph_manager.remove_partial_graphs(
+                finished_jobs
+                    .iter()
+                    .map(|(job_id, ..)| to_partial_graph_id(self.database_id, Some(*job_id)))
+                    .collect(),
+            );
+        }
+        for (job_id, epoch, resps) in finished_jobs {
+            debug!(epoch, %job_id, "finish creating job");
+            // It's safe to remove the creating job, because on CompleteJobType::Finished,
+            // all previous barriers have been collected and completed.
+            // `finished_jobs` was populated above only from a Running creating job, and the
+            // map cannot change between that scan and this removal.
+            let Some(IndependentCheckpointJobControl::Running {
+                job: IndependentCheckpointJob::CreatingStreamingJob(creating_streaming_job),
+                ..
+            }) = self.independent_checkpoint_job_controls.remove(&job_id)
+            else {
+                panic!("finished job {job_id} should be a creating streaming job");
+            };
+            let tracking_job = creating_streaming_job.into_tracking_job();
+            self.finishing_jobs_collector
+                .collect(epoch, job_id, (resps, tracking_job));
         }
         let mut observed_non_checkpoint = false;
         self.finishing_jobs_collector.advance_collected();
@@ -1140,6 +1133,9 @@ impl DatabaseCheckpointControl {
                 assert_eq!(command_prev_epoch, Some(epoch.prev));
                 self.committed_epoch = Some(epoch.prev);
                 partial_graph_manager.ack_completed(self.partial_graph_id, epoch.prev);
+                for job in self.independent_checkpoint_job_controls.values_mut() {
+                    job.on_upstream_database_ack_completed(epoch.prev);
+                }
                 self.last_committed_barrier_time
                     .get_or_insert_with(|| {
                         GLOBAL_META_METRICS

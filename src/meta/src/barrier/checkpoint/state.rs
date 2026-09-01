@@ -41,6 +41,7 @@ use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::checkpoint::{
     BatchRefreshJobCheckpointControl, BatchRefreshLogicalFragments, CreatingStreamingJobControl,
     DatabaseCheckpointControl, IndependentCheckpointJob, IndependentCheckpointJobControl,
+    IndependentCheckpointJobStatus,
 };
 use crate::barrier::command::{
     CreateStreamingJobCommandInfo, PostCollectCommand, ReschedulePlan, ThrottleConfigMap,
@@ -810,6 +811,7 @@ impl DatabaseCheckpointControl {
                         IndependentCheckpointJobControl::batch_refresh(
                             job_id,
                             to_partial_graph_id(self.database_id, Some(job_id)),
+                            IndependentCheckpointJobStatus::Initial { snapshot_epoch },
                             job,
                         ),
                     );

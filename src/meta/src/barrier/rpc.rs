@@ -69,7 +69,7 @@ use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::checkpoint::{
     BarrierWorkerState, BatchRefreshJobCheckpointControl, BatchRefreshRenderResult,
     CreatingStreamingJobControl, DatabaseCheckpointControl, DatabaseCheckpointControlMetrics,
-    IndependentCheckpointJobControl,
+    IndependentCheckpointJobControl, IndependentCheckpointJobStatus,
 };
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::edge_builder::{EdgeBuilderFragmentInfo, FragmentEdgeBuilder};
@@ -1128,6 +1128,7 @@ impl PartialGraphRecoverer<'_> {
                 IndependentCheckpointJobControl::creating_streaming_job(
                     job_id,
                     to_partial_graph_id(database_id, Some(job_id)),
+                    IndependentCheckpointJobStatus::Ready,
                     job,
                 ),
             );
@@ -1207,6 +1208,7 @@ impl PartialGraphRecoverer<'_> {
                 IndependentCheckpointJobControl::batch_refresh(
                     job_id,
                     to_partial_graph_id(database_id, Some(job_id)),
+                    IndependentCheckpointJobStatus::Ready,
                     job,
                 ),
             );
