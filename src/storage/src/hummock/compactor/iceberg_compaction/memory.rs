@@ -337,7 +337,7 @@ fn estimate_prefetch_bytes(plan: &CompactionPlan, format_version: FormatVersion)
                 || !task
                     .deletes
                     .iter()
-                    .any(|delete| delete.file_type == DataContentType::PositionDeletes)
+                    .any(|delete| delete.data_file_content == DataContentType::PositionDeletes)
         }),
         concurrency,
     );
