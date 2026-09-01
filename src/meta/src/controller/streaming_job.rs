@@ -3097,7 +3097,7 @@ impl CatalogController {
             options_with_secret.handle_update(alter_props.clone(), alter_secret_refs)?;
 
         // check if the alter-ed props are valid for all connector
-        validate_sink_props(&connector_type, options_with_secret.clone())?;
+        validate_sink_props(&connector_type, &options_with_secret, &prop_keys)?;
 
         tracing::info!(
             "applying new properties to sink: sink_id={}, options_with_secret={:?}",
@@ -3225,7 +3225,7 @@ impl CatalogController {
             options_with_secret.handle_update(alter_props.clone(), alter_secret_refs)?;
 
         // check if the alter-ed props are valid for all connector
-        validate_sink_props(&connector_type, options_with_secret.clone())?;
+        validate_sink_props(&connector_type, &options_with_secret, &prop_keys)?;
 
         // rewrite the sql for definition field
         let rewrite_sql = {
@@ -3265,6 +3265,14 @@ impl CatalogController {
 
             stmt.to_string()
         };
+
+        update_secret_dependencies(
+            &txn,
+            to_add_secret_dep.clone(),
+            to_remove_secret_dep.clone(),
+            source_id.as_object_id(),
+        )
+        .await?;
 
         update_secret_dependencies(
             &txn,
@@ -3328,6 +3336,10 @@ impl CatalogController {
         let table_streaming_job = streaming_job::Entity::find_by_id(table.job_id())
             .one(&txn)
             .await?;
+        let mut dependencies =
+            list_object_dependencies_by_object_id(&txn, source_id.as_object_id()).await?;
+        dependencies
+            .extend(list_object_dependencies_by_object_id(&txn, sink_id.as_object_id()).await?);
         txn.commit().await?;
         let relation_infos = vec![
             PbObject {
@@ -3351,7 +3363,7 @@ impl CatalogController {
                 NotificationOperation::Update,
                 NotificationInfo::ObjectGroup(PbObjectGroup {
                     objects: relation_infos,
-                    dependencies: vec![],
+                    dependencies,
                 }),
             )
             .await;
@@ -3669,7 +3681,7 @@ impl CatalogController {
                     .handle_update(alter_props.clone(), alter_secret_refs.clone())?;
 
                 // check if the alter-ed props are valid for all connector
-                validate_sink_props(&connector_type, sink_options_with_secret.clone())?;
+                validate_sink_props(&connector_type, &sink_options_with_secret, &prop_keys)?;
 
                 update_secret_dependencies(
                     &txn,
@@ -3988,11 +4000,17 @@ impl CatalogController {
 
 fn validate_sink_props(
     connector_type: &str,
-    with_properties: WithOptionsSecResolved,
+    options_with_secret: &WithOptionsSecResolved,
+    altered_field_names: &[String],
 ) -> MetaResult<()> {
-    let (options, secret_refs) = with_properties.into_parts();
+    check_sink_allow_alter_on_fly_fields(connector_type, altered_field_names)
+        .map_err(|e| SinkError::Config(anyhow!(e)))?;
+
     let resolved_props = LocalSecretManager::global()
-        .fill_secrets(options, secret_refs)
+        .fill_secrets(
+            options_with_secret.as_plaintext().clone(),
+            options_with_secret.as_secret().clone(),
+        )
         .map_err(MetaError::from)?;
 
     match_sink_name_str!(
