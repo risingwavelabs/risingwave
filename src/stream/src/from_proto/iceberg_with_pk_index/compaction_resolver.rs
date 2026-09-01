@@ -94,6 +94,9 @@ impl ExecutorBuilder for CompactionResolverExecutorBuilder {
             .local_barrier_manager
             .subscribe_barrier(params.actor_context.id);
         let local_barrier_manager = params.local_barrier_manager.clone();
+        let meta_client = params.env.meta_client().ok_or_else(|| {
+            anyhow!("meta client is required for iceberg pk-index compaction resolver")
+        })?;
         let exec = CompactionResolverExecutor::new(
             params.actor_context,
             sink_id,
@@ -103,6 +106,7 @@ impl ExecutorBuilder for CompactionResolverExecutorBuilder {
             params.config.developer.chunk_size,
             local_barrier_manager,
             barrier_receiver,
+            meta_client,
         );
         Ok((params.info, exec).into())
     }

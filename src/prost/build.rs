@@ -821,7 +821,7 @@ for_all_wrapped_id_fields! (
         DmlNode {
             table_id: TableId,
         }
-        IcebergPkIndexCompactionUpdate {
+        IcebergPkIndexCompactionContext {
             sink_id: SinkId,
             task_id: IcebergCompactionTaskId,
         }

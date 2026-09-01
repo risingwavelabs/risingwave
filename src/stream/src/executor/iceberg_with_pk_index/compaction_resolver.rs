@@ -38,8 +38,9 @@ use risingwave_connector::sink::iceberg::{
 use risingwave_connector::source::iceberg::ParquetFileReader;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::id::IcebergCompactionTaskId;
-use risingwave_pb::stream_plan::iceberg_pk_index_compaction_update::{Action, ResolverTaskInput};
+use risingwave_pb::stream_plan::iceberg_pk_index_compaction_context::{Phase, ResolverTaskInput};
 use risingwave_pb::stream_service::PbIcebergPkIndexSinkRole;
+use risingwave_rpc_client::MetaClient;
 use tokio::sync::mpsc::UnboundedReceiver;
 use uuid::Uuid;
 
@@ -73,6 +74,7 @@ pub struct CompactionResolverExecutor {
     chunk_size: usize,
     local_barrier_manager: LocalBarrierManager,
     barrier_receiver: UnboundedReceiver<Barrier>,
+    meta_client: MetaClient,
 }
 
 fn resolver_task_from_initial_barrier(
@@ -83,7 +85,7 @@ fn resolver_task_from_initial_barrier(
         Some(context)
             if barrier.is_checkpoint()
                 && context.sink_id == sink_id
-                && context.action == Action::SwitchToResolver as i32 =>
+                && context.phase == Phase::Begin as i32 =>
         {
             let task_input = context.resolver_task_input.clone().ok_or_else(|| {
                 StreamExecutorError::from(anyhow!(
@@ -114,7 +116,7 @@ fn validate_resolver_end_barrier(
                 && barrier.epoch.prev == begin.epoch.curr
                 && context.sink_id == sink_id
                 && context.task_id == task_id
-                && context.action == Action::SwitchToInput as i32
+                && context.phase == Phase::End as i32
                 && context.resolver_task_input.is_none() =>
         {
             Ok(())
@@ -139,6 +141,7 @@ impl CompactionResolverExecutor {
         chunk_size: usize,
         local_barrier_manager: LocalBarrierManager,
         barrier_receiver: UnboundedReceiver<Barrier>,
+        meta_client: MetaClient,
     ) -> Self {
         Self {
             ctx,
@@ -149,6 +152,7 @@ impl CompactionResolverExecutor {
             chunk_size,
             local_barrier_manager,
             barrier_receiver,
+            meta_client,
         }
     }
 
@@ -275,9 +279,18 @@ impl CompactionResolverExecutor {
         let begin_barrier = first_barrier.clone();
         yield Message::Barrier(first_barrier);
 
+        let expected_snapshot = self
+            .meta_client
+            .wait_iceberg_pk_index_sink_epoch(self.sink_id, begin_barrier.epoch.prev)
+            .await?;
+
         let mut conflict_delete_metadata = None;
         #[for_await]
-        for chunk in self.resolve(&task_input, None, &mut conflict_delete_metadata) {
+        for chunk in self.resolve(
+            &task_input,
+            expected_snapshot,
+            &mut conflict_delete_metadata,
+        ) {
             let chunk = chunk.map_err(|e| (e, self.sink_id))?;
             yield Message::Chunk(chunk.into());
         }
@@ -560,7 +573,7 @@ mod tests {
     use parquet::schema::types::{SchemaDescriptor, Type};
     use risingwave_common::array::DataChunkTestExt;
     use risingwave_common::util::epoch::test_epoch;
-    use risingwave_pb::stream_plan::IcebergPkIndexCompactionUpdate;
+    use risingwave_pb::stream_plan::IcebergPkIndexCompactionContext;
 
     use super::*;
 
@@ -614,14 +627,14 @@ mod tests {
 
     fn compaction_barrier(
         epoch: u64,
-        action: Action,
+        phase: Phase,
         resolver_task_input: Option<ResolverTaskInput>,
     ) -> Barrier {
         Barrier::new_test_barrier(test_epoch(epoch)).with_iceberg_pk_index_compaction(
-            IcebergPkIndexCompactionUpdate {
+            IcebergPkIndexCompactionContext {
                 sink_id: SinkId::new(7),
                 task_id: 11.into(),
-                action: action as i32,
+                phase: phase as i32,
                 resolver_task_input,
             },
         )
@@ -634,7 +647,7 @@ mod tests {
             input_data_file_paths: vec!["input.parquet".into()],
             read_snapshot_id: 42,
         };
-        let barrier = compaction_barrier(2, Action::SwitchToResolver, Some(task_input.clone()));
+        let barrier = compaction_barrier(2, Phase::Begin, Some(task_input.clone()));
 
         let (task_id, actual) =
             resolver_task_from_initial_barrier(SinkId::new(7), &barrier).unwrap();
@@ -644,18 +657,13 @@ mod tests {
 
     #[test]
     fn test_resolver_requires_task_input_only_on_b1() {
-        let begin = compaction_barrier(
-            2,
-            Action::SwitchToResolver,
-            Some(ResolverTaskInput::default()),
-        );
-        let end = compaction_barrier(3, Action::SwitchToInput, None);
+        let begin = compaction_barrier(2, Phase::Begin, Some(ResolverTaskInput::default()));
+        let end = compaction_barrier(3, Phase::End, None);
         validate_resolver_end_barrier(SinkId::new(7), &end, &begin, 11.into()).unwrap();
 
-        let invalid_begin = compaction_barrier(2, Action::SwitchToResolver, None);
+        let invalid_begin = compaction_barrier(2, Phase::Begin, None);
         assert!(resolver_task_from_initial_barrier(SinkId::new(7), &invalid_begin).is_err());
-        let invalid_end =
-            compaction_barrier(3, Action::SwitchToInput, Some(ResolverTaskInput::default()));
+        let invalid_end = compaction_barrier(3, Phase::End, Some(ResolverTaskInput::default()));
         assert!(
             validate_resolver_end_barrier(SinkId::new(7), &invalid_end, &begin, 11.into()).is_err()
         );

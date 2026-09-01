@@ -52,8 +52,8 @@ use risingwave_pb::stream_plan::stream_node::PbStreamKind;
 use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    IcebergPkIndexCompactionUpdate, PbBarrier, PbBarrierMutation, PbDispatcher, PbSinkSchemaChange,
-    PbStreamMessageBatch, PbWatermark, SubscriptionUpstreamInfo,
+    IcebergPkIndexCompactionContext, PbBarrier, PbBarrierMutation, PbDispatcher,
+    PbSinkSchemaChange, PbStreamMessageBatch, PbWatermark, SubscriptionUpstreamInfo,
 };
 use smallvec::SmallVec;
 use tokio::sync::mpsc;
@@ -327,7 +327,7 @@ pub struct UpdateMutation {
     pub actor_cdc_table_snapshot_splits: CdcTableSnapshotSplitAssignmentWithGeneration,
     pub sink_schema_change: HashMap<SinkId, PbSinkSchemaChange>,
     pub subscriptions_to_drop: Vec<SubscriptionUpstreamInfo>,
-    pub iceberg_pk_index_compaction: Option<IcebergPkIndexCompactionUpdate>,
+    pub iceberg_pk_index_compaction: Option<IcebergPkIndexCompactionContext>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -452,14 +452,14 @@ impl Barrier {
 
     #[cfg(any(test, feature = "test"))]
     #[must_use]
-    pub fn with_iceberg_pk_index_compaction(self, update: IcebergPkIndexCompactionUpdate) -> Self {
+    pub fn with_iceberg_pk_index_compaction(self, update: IcebergPkIndexCompactionContext) -> Self {
         self.with_mutation(Mutation::Update(UpdateMutation {
             iceberg_pk_index_compaction: Some(update),
             ..Default::default()
         }))
     }
 
-    pub fn iceberg_pk_index_compaction(&self) -> Option<&IcebergPkIndexCompactionUpdate> {
+    pub fn iceberg_pk_index_compaction(&self) -> Option<&IcebergPkIndexCompactionContext> {
         match self.mutation.as_deref() {
             Some(Mutation::Update(update)) => update.iceberg_pk_index_compaction.as_ref(),
             _ => None,

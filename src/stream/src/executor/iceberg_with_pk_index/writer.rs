@@ -24,7 +24,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::id::IcebergCompactionTaskId;
-use risingwave_pb::stream_plan::iceberg_pk_index_compaction_update::Action;
+use risingwave_pb::stream_plan::iceberg_pk_index_compaction_context::Phase;
 use risingwave_pb::stream_service::PbIcebergPkIndexSinkRole;
 use risingwave_storage::StateStore;
 
@@ -309,14 +309,14 @@ where
         &self,
         barrier: &Barrier,
         expected_task: IcebergCompactionTaskId,
-        expected_action: Action,
+        expected_phase: Phase,
         expected_prev: u64,
     ) -> StreamExecutorResult<()> {
         if !barrier.is_checkpoint() || barrier.epoch.prev != expected_prev {
             bail!(
                 "iceberg pk-index writer {} expected checkpoint {:?} starting at {}, got {:?}",
                 self.sink_id,
-                expected_action,
+                expected_phase,
                 expected_prev,
                 barrier
             );
@@ -325,11 +325,11 @@ where
             Some(context)
                 if context.sink_id == self.sink_id
                     && context.task_id == expected_task
-                    && context.action == expected_action as i32
-                    && match expected_action {
-                        Action::SwitchToResolver => context.resolver_task_input.is_some(),
-                        Action::SwitchToInput => context.resolver_task_input.is_none(),
-                        Action::Unspecified => false,
+                    && context.phase == expected_phase as i32
+                    && match expected_phase {
+                        Phase::Begin => context.resolver_task_input.is_some(),
+                        Phase::End => context.resolver_task_input.is_none(),
+                        Phase::Unspecified => false,
                     } =>
             {
                 Ok(())
@@ -337,7 +337,7 @@ where
             _ => bail!(
                 "iceberg pk-index writer {} expected matching {:?} context for task {}, got {:?}",
                 self.sink_id,
-                expected_action,
+                expected_phase,
                 expected_task,
                 barrier
             ),
@@ -368,19 +368,19 @@ where
             Some(context) if context.sink_id == self.sink_id => context,
             _ => return Ok(None),
         };
-        if context.action == Action::SwitchToInput as i32 {
+        if context.phase == Phase::End as i32 {
             bail!(
                 "iceberg pk-index writer {} received unexpected switch-to-input in Normal mode for task {}",
                 self.sink_id,
                 context.task_id
             );
         }
-        if context.action != Action::SwitchToResolver as i32 {
+        if context.phase != Phase::Begin as i32 {
             bail!(
                 "iceberg pk-index writer {} expected switch-to-resolver update for task {}, got {:?}",
                 self.sink_id,
                 context.task_id,
-                context.action
+                context.phase
             );
         }
         if context.resolver_task_input.is_none() {
@@ -515,7 +515,7 @@ where
                     self.validate_compaction_barrier(
                         &barrier,
                         task_id,
-                        Action::SwitchToInput,
+                        Phase::End,
                         begin_epoch.curr,
                     )?;
                     self.mode = WriterInputMode::AligningReplacementInput { task_id, barrier };

@@ -18,7 +18,7 @@ use risingwave_common::id::SinkId;
 use risingwave_connector::sink::Result as SinkResult;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::id::IcebergCompactionTaskId;
-use risingwave_pb::stream_plan::iceberg_pk_index_compaction_update::Action;
+use risingwave_pb::stream_plan::iceberg_pk_index_compaction_context::Phase;
 use risingwave_pb::stream_service::PbIcebergPkIndexSinkRole;
 
 use crate::executor::prelude::*;
@@ -177,8 +177,7 @@ where
     ) -> StreamExecutorResult<Option<IcebergCompactionTaskId>> {
         match barrier.iceberg_pk_index_compaction() {
             Some(context)
-                if context.sink_id == self.sink_id
-                    && context.action == Action::SwitchToInput as i32 =>
+                if context.sink_id == self.sink_id && context.phase == Phase::End as i32 =>
             {
                 if context.resolver_task_input.is_some() {
                     bail!(
@@ -354,14 +353,14 @@ mod tests {
         }
     }
 
-    fn compaction_barrier(epoch: u64, sink_id: SinkId, action: Action) -> Barrier {
+    fn compaction_barrier(epoch: u64, sink_id: SinkId, phase: Phase) -> Barrier {
         Barrier::new_test_barrier(test_epoch(epoch)).with_iceberg_pk_index_compaction(
-            risingwave_pb::stream_plan::IcebergPkIndexCompactionUpdate {
+            risingwave_pb::stream_plan::IcebergPkIndexCompactionContext {
                 sink_id,
                 task_id: 7.into(),
-                action: action as i32,
-                resolver_task_input: (action == Action::SwitchToResolver).then_some(
-                    risingwave_pb::stream_plan::iceberg_pk_index_compaction_update::ResolverTaskInput::default(),
+                phase: phase as i32,
+                resolver_task_input: (phase == Phase::Begin).then_some(
+                    risingwave_pb::stream_plan::iceberg_pk_index_compaction_context::ResolverTaskInput::default(),
                 ),
             },
         )
@@ -522,7 +521,7 @@ mod tests {
         let initial_prev = EpochPair::new_test_epoch(test_epoch(1)).prev;
 
         tx.push_chunk(build_delete_position_chunk(&[("input.parquet", 0)]));
-        tx.send_barrier(compaction_barrier(2, sink_id, Action::SwitchToInput));
+        tx.send_barrier(compaction_barrier(2, sink_id, Phase::End));
         let b2 = executor.next().await.unwrap().unwrap();
         assert!(b2.is_barrier(), "B2 must be observable before re-seeding");
         assert_eq!(
@@ -563,7 +562,7 @@ mod tests {
 
         tx.push_barrier(test_epoch(1), false);
         assert!(executor.next().await.unwrap().unwrap().is_barrier());
-        tx.send_barrier(compaction_barrier(2, sink_id, Action::SwitchToInput));
+        tx.send_barrier(compaction_barrier(2, sink_id, Phase::End));
         assert!(executor.next().await.unwrap().unwrap().is_barrier());
         assert!(
             !second_seed_started.load(Ordering::SeqCst),
@@ -635,7 +634,7 @@ mod tests {
             table_state.insert("output.parquet".to_owned(), BTreeSet::from([4]));
         }
 
-        tx.send_barrier(compaction_barrier(3, sink_id, Action::SwitchToInput));
+        tx.send_barrier(compaction_barrier(3, sink_id, Phase::End));
         assert!(executor.next().await.unwrap().unwrap().is_barrier());
         assert_eq!(
             *seed_epochs.lock().unwrap(),
@@ -695,7 +694,7 @@ mod tests {
         tx.push_barrier(test_epoch(1), false);
         assert!(executor.next().await.unwrap().unwrap().is_barrier());
 
-        tx.send_barrier(compaction_barrier(2, sink_id, Action::SwitchToResolver));
+        tx.send_barrier(compaction_barrier(2, sink_id, Phase::Begin));
         assert!(executor.next().await.unwrap().unwrap().is_barrier());
 
         assert_eq!(seed_epochs.lock().unwrap().len(), 1);
@@ -725,7 +724,7 @@ mod tests {
         tx.push_barrier(test_epoch(1), false);
         assert!(executor.next().await.unwrap().unwrap().is_barrier());
 
-        tx.send_barrier(compaction_barrier(2, SinkId::new(1), Action::SwitchToInput));
+        tx.send_barrier(compaction_barrier(2, SinkId::new(1), Phase::End));
         assert!(executor.next().await.unwrap().unwrap().is_barrier());
 
         assert_eq!(seed_epochs.lock().unwrap().len(), 1);

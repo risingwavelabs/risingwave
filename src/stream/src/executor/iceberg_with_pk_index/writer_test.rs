@@ -23,8 +23,8 @@ use risingwave_common::test_prelude::StreamChunkTestExt;
 use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_common::util::sort_util::OrderType;
-use risingwave_pb::stream_plan::IcebergPkIndexCompactionUpdate;
-use risingwave_pb::stream_plan::iceberg_pk_index_compaction_update::{Action, ResolverTaskInput};
+use risingwave_pb::stream_plan::IcebergPkIndexCompactionContext;
+use risingwave_pb::stream_plan::iceberg_pk_index_compaction_context::{Phase, ResolverTaskInput};
 use risingwave_storage::memory::MemoryStateStore;
 
 use super::*;
@@ -39,20 +39,19 @@ const TEST_FILE_PATH: &str = "file1.parquet";
 fn compaction_update(
     sink_id: SinkId,
     task_id: IcebergCompactionTaskId,
-    action: Action,
-) -> IcebergPkIndexCompactionUpdate {
-    IcebergPkIndexCompactionUpdate {
+    phase: Phase,
+) -> IcebergPkIndexCompactionContext {
+    IcebergPkIndexCompactionContext {
         sink_id,
         task_id,
-        action: action as i32,
-        resolver_task_input: (action == Action::SwitchToResolver)
-            .then_some(ResolverTaskInput::default()),
+        phase: phase as i32,
+        resolver_task_input: (phase == Phase::Begin).then_some(ResolverTaskInput::default()),
     }
 }
 
 #[test]
 fn test_compaction_update_barrier_round_trip() {
-    for action in [Action::SwitchToResolver, Action::SwitchToInput] {
+    for action in [Phase::Begin, Phase::End] {
         let barrier = Barrier::new_test_barrier(test_epoch(2))
             .with_iceberg_pk_index_compaction(compaction_update(SinkId::new(7), 11.into(), action));
         let decoded = Barrier::from_protobuf(&barrier.to_protobuf()).unwrap();
@@ -222,7 +221,7 @@ impl WriterTestHarness {
         self.right_tx.push_barrier(test_epoch(epoch), false);
     }
 
-    fn push_left_compaction_barrier(&mut self, epoch: u64, task_id: u64, action: Action) {
+    fn push_left_compaction_barrier(&mut self, epoch: u64, task_id: u64, action: Phase) {
         self.left_tx.send_barrier(
             Barrier::new_test_barrier(test_epoch(epoch)).with_iceberg_pk_index_compaction(
                 compaction_update(SinkId::new(0), task_id.into(), action),
@@ -230,7 +229,7 @@ impl WriterTestHarness {
         );
     }
 
-    fn push_right_barrier(&mut self, epoch: u64, task_id: u64, action: Action) {
+    fn push_right_barrier(&mut self, epoch: u64, task_id: u64, action: Phase) {
         self.right_tx.send_barrier(
             Barrier::new_test_barrier(test_epoch(epoch)).with_iceberg_pk_index_compaction(
                 compaction_update(SinkId::new(0), task_id.into(), action),
@@ -239,13 +238,13 @@ impl WriterTestHarness {
     }
 
     fn push_compaction_begin(&mut self, epoch: u64, task_id: u64) {
-        self.push_left_compaction_barrier(epoch, task_id, Action::SwitchToResolver);
-        self.push_right_barrier(epoch, task_id, Action::SwitchToResolver);
+        self.push_left_compaction_barrier(epoch, task_id, Phase::Begin);
+        self.push_right_barrier(epoch, task_id, Phase::Begin);
     }
 
     fn push_compaction_seal(&mut self, epoch: u64, task_id: u64) {
-        self.push_right_barrier(epoch, task_id, Action::SwitchToInput);
-        self.push_left_compaction_barrier(epoch, task_id, Action::SwitchToInput);
+        self.push_right_barrier(epoch, task_id, Phase::End);
+        self.push_left_compaction_barrier(epoch, task_id, Phase::End);
     }
 
     fn push_resolver_chunk(&mut self, pretty: &str) {
@@ -596,9 +595,8 @@ async fn test_writer_executor_compaction_allows_other_sink_switch_to_input_in_no
     let mut harness = WriterTestHarness::new().await;
     harness.init().await;
 
-    let barrier = Barrier::new_test_barrier(test_epoch(2)).with_iceberg_pk_index_compaction(
-        compaction_update(SinkId::new(99), 7.into(), Action::SwitchToInput),
-    );
+    let barrier = Barrier::new_test_barrier(test_epoch(2))
+        .with_iceberg_pk_index_compaction(compaction_update(SinkId::new(99), 7.into(), Phase::End));
     harness.left_tx.send_barrier(barrier.clone());
     harness.right_tx.send_barrier(barrier);
     harness.expect_barrier().await;
@@ -610,7 +608,7 @@ async fn test_writer_executor_compaction_rejects_left_watermark_before_b2() {
     harness.init().await;
     harness.push_compaction_begin(2, 7);
     harness.expect_barrier().await;
-    harness.push_right_barrier(3, 7, Action::SwitchToInput);
+    harness.push_right_barrier(3, 7, Phase::End);
     harness.left_tx.push_int64_watermark(0, 42);
 
     let err = harness.executor.next().await.unwrap().unwrap_err();
@@ -672,7 +670,7 @@ async fn test_writer_executor_compaction_rejects_replacement_input_chunk_before_
         " I I
           + 1 10",
     );
-    harness.push_right_barrier(3, 7, Action::SwitchToInput);
+    harness.push_right_barrier(3, 7, Phase::End);
     let err = harness.executor.next().await.unwrap().unwrap_err();
     assert!(
         err.to_string()
@@ -711,8 +709,8 @@ async fn test_writer_executor_compaction_rejects_mismatched_left_and_right_b2() 
     harness.init().await;
     harness.push_compaction_begin(2, 7);
     harness.expect_barrier().await;
-    harness.push_right_barrier(3, 7, Action::SwitchToInput);
-    harness.push_left_compaction_barrier(3, 8, Action::SwitchToInput);
+    harness.push_right_barrier(3, 7, Phase::End);
+    harness.push_left_compaction_barrier(3, 8, Phase::End);
 
     let err = harness.executor.next().await.unwrap().unwrap_err();
     assert!(
@@ -750,7 +748,7 @@ async fn test_writer_executor_compaction_rejects_right_eof_before_b2() {
     right_tx.push_barrier(test_epoch(1), false);
     executor.expect_barrier().await;
     let begin = Barrier::new_test_barrier(test_epoch(2)).with_iceberg_pk_index_compaction(
-        compaction_update(SinkId::new(0), 7.into(), Action::SwitchToResolver),
+        compaction_update(SinkId::new(0), 7.into(), Phase::Begin),
     );
     left_tx.send_barrier(begin.clone());
     right_tx.send_barrier(begin);
@@ -794,7 +792,7 @@ async fn test_writer_executor_compaction_rejects_left_eof_before_b2() {
     right_tx.push_barrier(test_epoch(1), false);
     executor.expect_barrier().await;
     let begin = Barrier::new_test_barrier(test_epoch(2)).with_iceberg_pk_index_compaction(
-        compaction_update(SinkId::new(0), 7.into(), Action::SwitchToResolver),
+        compaction_update(SinkId::new(0), 7.into(), Phase::Begin),
     );
     left_tx.send_barrier(begin.clone());
     right_tx.send_barrier(begin);
@@ -802,7 +800,7 @@ async fn test_writer_executor_compaction_rejects_left_eof_before_b2() {
 
     right_tx.send_barrier(
         Barrier::new_test_barrier(test_epoch(3)).with_iceberg_pk_index_compaction(
-            compaction_update(SinkId::new(0), 7.into(), Action::SwitchToInput),
+            compaction_update(SinkId::new(0), 7.into(), Phase::End),
         ),
     );
     drop(left_tx);
