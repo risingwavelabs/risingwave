@@ -74,12 +74,17 @@ public class DbzConnectorConfig {
     public static final String SQL_SERVER_SCHEMA_NAME = "schema.name";
     public static final String SQL_SERVER_ENCRYPT = "database.encrypt";
 
+    /* Oracle configs */
+    public static final String ORACLE_PDB_NAME = "database.pdb.name";
+    public static final String ORACLE_SCHEMA_NAME = "schema.name";
+
     /* RisingWave configs */
     private static final String DBZ_CONFIG_FILE = "debezium.properties";
     private static final String MYSQL_CONFIG_FILE = "mysql.properties";
     private static final String POSTGRES_CONFIG_FILE = "postgres.properties";
     private static final String MONGODB_CONFIG_FILE = "mongodb.properties";
     private static final String SQL_SERVER_CONFIG_FILE = "sql_server.properties";
+    private static final String ORACLE_CONFIG_FILE = "oracle.properties";
 
     private static final String DBZ_PROPERTY_PREFIX = "debezium.";
 
@@ -368,6 +373,14 @@ public class DbzConnectorConfig {
                 // remove table filtering for the shared Sql Server source, since we
                 // allow user to ingest tables in different schemas
                 LOG.info("Disable table filtering for the shared Sql Server source");
+                dbzProps.remove("table.include.list");
+            }
+        } else if (source == SourceTypeE.ORACLE) {
+            var oracleProps = initiateDbConfig(ORACLE_CONFIG_FILE, substitutor);
+            dbzProps.putAll(oracleProps);
+            if (isCdcSourceJob) {
+                // A shared Oracle source captures tables from multiple schemas in one PDB.
+                LOG.info("Disable table filtering for the shared Oracle source");
                 dbzProps.remove("table.include.list");
             }
         } else {

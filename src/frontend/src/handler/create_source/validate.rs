@@ -133,7 +133,8 @@ pub(crate) fn validate_cdc_heartbeat_interval(
 ) -> Result<()> {
     let heartbeat_required = match connector {
         POSTGRES_CDC_CONNECTOR | CITUS_CDC_CONNECTOR => true,
-        MYSQL_CDC_CONNECTOR | SQL_SERVER_CDC_CONNECTOR | MONGODB_CDC_CONNECTOR => false,
+        MYSQL_CDC_CONNECTOR | SQL_SERVER_CDC_CONNECTOR | MONGODB_CDC_CONNECTOR
+        | ORACLE_CDC_CONNECTOR => false,
         _ => return Ok(()),
     };
     let Some(value) = props.get("debezium.heartbeat.interval.ms") else {
@@ -280,7 +281,8 @@ pub fn validate_compatibility(
         || connector == POSTGRES_CDC_CONNECTOR
         || connector == CITUS_CDC_CONNECTOR
         || connector == MONGODB_CDC_CONNECTOR
-        || connector == SQL_SERVER_CDC_CONNECTOR)
+        || connector == SQL_SERVER_CDC_CONNECTOR
+        || connector == ORACLE_CDC_CONNECTOR)
         && let Some(timeout_value) = props.get("cdc.source.wait.streaming.start.timeout")
         && timeout_value.parse::<u32>().is_err()
     {
@@ -296,7 +298,8 @@ pub fn validate_compatibility(
         || connector == POSTGRES_CDC_CONNECTOR
         || connector == CITUS_CDC_CONNECTOR
         || connector == MONGODB_CDC_CONNECTOR
-        || connector == SQL_SERVER_CDC_CONNECTOR)
+        || connector == SQL_SERVER_CDC_CONNECTOR
+        || connector == ORACLE_CDC_CONNECTOR)
         && let Some(queue_size_value) = props.get("debezium.max.queue.size")
         && queue_size_value.parse::<u32>().is_err()
     {
