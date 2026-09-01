@@ -20,8 +20,8 @@ use iceberg::spec::{Operation, TableMetadata};
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
-    ColumnCatalog, Engine, Field, RISINGWAVE_ICEBERG_COMMIT_EPOCH, RISINGWAVE_ICEBERG_ROW_ID,
-    ROW_ID_COLUMN_NAME, Schema,
+    CdcTableDesc, ColumnCatalog, Engine, Field, RISINGWAVE_ICEBERG_COMMIT_EPOCH,
+    RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME, Schema,
 };
 use risingwave_common::constants::log_store::{
     EPOCH_COLUMN_NAME, INSERT_OP_CODE, ROW_OP_COLUMN_NAME, encode_epoch,
@@ -30,6 +30,7 @@ use risingwave_common::session_config::IcebergQueryStorageMode;
 use risingwave_common::types::{DataType, Interval, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_connector::source::ConnectorProperties;
+use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::iceberg::IcebergTimeTravelInfo;
 use risingwave_sqlparser::ast::AsOf;
 use thiserror_ext::AsReport;
@@ -47,7 +48,7 @@ use crate::optimizer::IcebergSnapshotInfo;
 use crate::optimizer::plan_node::generic::{self, GenericPlanRef, SourceNodeKind};
 use crate::optimizer::plan_node::utils::to_iceberg_time_travel_as_of;
 use crate::optimizer::plan_node::{
-    LogicalApply, LogicalGapFill, LogicalHopWindow, LogicalIcebergIntermediateScan,
+    LogicalApply, LogicalCdcScan, LogicalGapFill, LogicalHopWindow, LogicalIcebergIntermediateScan,
     LogicalIcebergMetadataScan, LogicalJoin, LogicalPlanRef as PlanRef, LogicalProject,
     LogicalScan, LogicalShare, LogicalSource, LogicalSysScan, LogicalTableFunction, LogicalUnion,
     LogicalValues,
@@ -341,7 +342,39 @@ impl Planner {
     }
 
     pub(super) fn plan_source(&mut self, source: BoundSource) -> Result<PlanRef> {
-        if source.is_shareable_cdc_connector() {
+        if source.catalog.is_cdc_table_source() {
+            if !matches!(self.plan_for(), PlanFor::Stream) {
+                return Err(ErrorCode::NotSupported(
+                    "batch queries on CDC table sources are not supported".to_owned(),
+                    "Create a materialized view to consume the CDC table source".to_owned(),
+                )
+                .into());
+            }
+            if source.as_of.is_some() {
+                return Err(ErrorCode::NotSupported(
+                    "AS OF on CDC table sources is not supported".to_owned(),
+                    "Remove the AS OF clause".to_owned(),
+                )
+                .into());
+            }
+
+            let desc = source
+                .catalog
+                .info
+                .external_table
+                .as_ref()
+                .expect("checked by is_cdc_table_source");
+            let scan = LogicalCdcScan::create(
+                source.catalog.name.clone(),
+                Rc::new(CdcTableDesc::from_protobuf(desc)),
+                self.ctx(),
+                CdcScanOptions {
+                    disable_backfill: true,
+                    ..Default::default()
+                },
+            );
+            Ok(scan.into())
+        } else if source.is_shareable_cdc_connector() {
             Err(ErrorCode::InternalError(
                 "Should not create MATERIALIZED VIEW or SELECT directly on shared CDC source. HINT: create TABLE from the source instead.".to_owned(),
             )

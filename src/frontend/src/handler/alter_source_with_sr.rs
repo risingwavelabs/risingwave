@@ -208,6 +208,13 @@ pub async fn handler_refresh_schema(
     name: ObjectName,
 ) -> Result<RwPgResponse> {
     let source = fetch_source_catalog_with_db_schema_id(&handler_args.session, &name)?;
+    if source.is_cdc_table_source() {
+        return Err(ErrorCode::NotSupported(
+            "refreshing the schema of a CDC table source is not supported".to_owned(),
+            "Drop and recreate the CDC table source".to_owned(),
+        )
+        .into());
+    }
     let format_encode = get_format_encode_from_source(&source)?;
     handle_alter_source_with_sr(handler_args, name, format_encode).await
 }
@@ -228,6 +235,13 @@ pub async fn handle_alter_source_with_sr(
         )
         .into());
     };
+    if source.is_cdc_table_source() {
+        return Err(ErrorCode::NotSupported(
+            "altering the format or schema of a CDC table source is not supported".to_owned(),
+            "Drop and recreate the CDC table source".to_owned(),
+        )
+        .into());
+    }
 
     check_format_encode(&source, &format_encode)?;
 

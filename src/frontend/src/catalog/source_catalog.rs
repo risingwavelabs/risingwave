@@ -112,6 +112,11 @@ impl SourceCatalog {
         self.with_properties.is_iceberg_connector()
     }
 
+    /// Whether this source represents an external table exposed by a shared CDC source.
+    pub fn is_cdc_table_source(&self) -> bool {
+        self.info.external_table.is_some()
+    }
+
     /// If this source is an iceberg source, returns the corresponding iceberg table name.
     pub fn iceberg_table_name(&self) -> Option<String> {
         if self.name.starts_with(ICEBERG_SOURCE_PREFIX) {

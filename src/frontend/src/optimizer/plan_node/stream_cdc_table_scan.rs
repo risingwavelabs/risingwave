@@ -47,7 +47,10 @@ impl StreamCdcTableScan {
         let base = PlanBase::new_stream_with_core(
             &core,
             distribution,
-            StreamKind::Retract,
+            // Debezium table scans emit upsert semantics: updates contain only the new value,
+            // and deletes may contain only primary-key columns. Declaring this correctly lets
+            // downstream materialization add conflict handling before stateful consumption.
+            StreamKind::Upsert,
             false,
             core.watermark_columns(),
             core.columns_monotonicity(),

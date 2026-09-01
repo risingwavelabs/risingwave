@@ -49,6 +49,23 @@ pub struct CdcTableDesc {
 }
 
 impl CdcTableDesc {
+    pub fn from_protobuf(desc: &ExternalTableDesc) -> Self {
+        Self {
+            table_id: desc.table_id,
+            source_id: desc.source_id,
+            external_table_name: desc.table_name.clone(),
+            pk: desc.pk.iter().map(ColumnOrder::from_protobuf).collect(),
+            columns: desc.columns.iter().map(ColumnDesc::from).collect(),
+            stream_key: desc
+                .stream_key
+                .iter()
+                .map(|index| *index as usize)
+                .collect(),
+            connect_properties: desc.connect_properties.clone(),
+            secret_refs: desc.secret_refs.clone(),
+        }
+    }
+
     pub fn to_protobuf(&self) -> ExternalTableDesc {
         ExternalTableDesc {
             table_id: self.table_id,
