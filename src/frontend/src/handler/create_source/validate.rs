@@ -280,7 +280,8 @@ pub fn validate_compatibility(
         || connector == POSTGRES_CDC_CONNECTOR
         || connector == CITUS_CDC_CONNECTOR
         || connector == MONGODB_CDC_CONNECTOR
-        || connector == SQL_SERVER_CDC_CONNECTOR)
+        || connector == SQL_SERVER_CDC_CONNECTOR
+        || connector == ORACLE_CDC_CONNECTOR)
         && let Some(timeout_value) = props.get("cdc.source.wait.streaming.start.timeout")
         && timeout_value.parse::<u32>().is_err()
     {
@@ -296,7 +297,8 @@ pub fn validate_compatibility(
         || connector == POSTGRES_CDC_CONNECTOR
         || connector == CITUS_CDC_CONNECTOR
         || connector == MONGODB_CDC_CONNECTOR
-        || connector == SQL_SERVER_CDC_CONNECTOR)
+        || connector == SQL_SERVER_CDC_CONNECTOR
+        || connector == ORACLE_CDC_CONNECTOR)
         && let Some(queue_size_value) = props.get("debezium.max.queue.size")
         && queue_size_value.parse::<u32>().is_err()
     {
