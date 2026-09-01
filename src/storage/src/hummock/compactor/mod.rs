@@ -344,6 +344,7 @@ impl Compactor {
 pub fn start_iceberg_compactor(
     compactor_context: CompactorContext,
     hummock_meta_client: Arc<dyn HummockMetaClient>,
+    iceberg_compaction_memory_limit_bytes: usize,
 ) -> (JoinHandle<()>, Sender<()>) {
     let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
     let stream_retry_interval = Duration::from_secs(30);
@@ -358,8 +359,12 @@ pub fn start_iceberg_compactor(
         * compactor_context.storage_opts.compactor_max_task_multiplier)
         .ceil() as u32;
 
-    const MAX_PULL_TASK_COUNT: u32 = 4;
-    let max_pull_task_count = std::cmp::min(max_task_parallelism, MAX_PULL_TASK_COUNT);
+    let max_pull_task_count = std::cmp::min(
+        max_task_parallelism,
+        compactor_context
+            .storage_opts
+            .iceberg_compaction_max_pull_task_count,
+    );
 
     assert_ge!(
         compactor_context.storage_opts.compactor_max_task_multiplier,
@@ -373,8 +378,12 @@ pub fn start_iceberg_compactor(
                 .storage_opts
                 .iceberg_compaction_pending_parallelism_budget_multiplier)
             .ceil() as u32;
-        let mut task_queue =
-            IcebergTaskQueue::new(max_task_parallelism, pending_parallelism_budget);
+        let mut task_queue = IcebergTaskQueue::new_with_metrics(
+            max_task_parallelism,
+            pending_parallelism_budget,
+            iceberg_compaction_memory_limit_bytes,
+            compactor_context.compactor_metrics.clone(),
+        );
 
         // Shutdown tracking for running tasks (task_key -> shutdown_sender)
         let shutdown_map = Arc::new(Mutex::new(HashMap::<TaskKey, Sender<()>>::new()));
@@ -589,6 +598,7 @@ pub fn start_iceberg_compactor(
                                     iceberg_compaction_task,
                                     compactor_runner_config,
                                     compactor_context.compactor_metrics.clone(),
+                                    iceberg_compaction_memory_limit_bytes,
                                 ).await {
                                     Ok(task_execution) => task_execution,
                                     Err(e) => {
@@ -1384,10 +1394,16 @@ fn handle_meta_task_pulling(
 ) -> bool {
     let mut pending_pull_task_count = 0;
     if *pull_task_ack {
-        // Use queue's running parallelism for pull decision
-        let current_running_parallelism = task_queue.running_parallelism_sum();
-        pending_pull_task_count =
-            (max_task_parallelism - current_running_parallelism).min(max_pull_task_count);
+        // Treat both running and queued plans as reserved capacity. The waiting budget can make
+        // this exceed `max_task_parallelism`; saturating subtraction then returns 0 to stop this
+        // backlogged worker from pulling more tasks. The final `min` only caps the request batch
+        // size (to 1 by default).
+        let current_reserved_parallelism = task_queue
+            .running_parallelism_sum()
+            .saturating_add(task_queue.waiting_parallelism_sum());
+        pending_pull_task_count = max_task_parallelism
+            .saturating_sub(current_reserved_parallelism)
+            .min(max_pull_task_count);
 
         if pending_pull_task_count > 0 {
             if let Err(e) = request_sender.send(SubscribeIcebergCompactionEventRequest {

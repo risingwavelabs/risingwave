@@ -182,6 +182,33 @@ def _(outer_panels: Panels):
                     ],
                 ),
 
+                panels.subheader("Memory"),
+                panels.timeseries_bytes(
+                    "Iceberg Compaction Memory Budget",
+                    "heap admission budget for running iceberg compaction plans on this compactor node",
+                    [
+                        panels.target(
+                            f"{metric('storage_iceberg_compaction_memory_budget_bytes')}",
+                            "memory budget",
+                        ),
+                    ],
+                ),
+
+                panels.timeseries_bytes(
+                    "Iceberg Compaction Heap Estimates",
+                    "waiting minimum: estimated minimum heap of queued plans, which does not consume the admission budget; running granted: heap reserved for actively executing plans",
+                    [
+                        panels.target(
+                            f"{metric('storage_iceberg_compaction_waiting_memory_reservation_bytes')}",
+                            "waiting minimum",
+                        ),
+                        panels.target(
+                            f"{metric('storage_iceberg_compaction_running_memory_reservation_bytes')}",
+                            "running granted",
+                        ),
+                    ],
+                ),
+
             ]
         )
     ]
