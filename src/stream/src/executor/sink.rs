@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::assert_matches::assert_matches;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::mem;
 use std::time::{Duration, Instant};
 
@@ -26,6 +26,7 @@ use risingwave_common::array::stream_chunk::StreamChunkMut;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedIntGauge};
+use risingwave_common::row::RowExt;
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_common_estimate_size::collections::EstimatedVec;
 use risingwave_common_rate_limit::RateLimit;
@@ -101,6 +102,32 @@ fn force_delete_only(c: StreamChunk) -> StreamChunk {
         }
     }
     c.into()
+}
+
+// Drop the DELETE messages whose downstream key is inserted again in the same barrier, since such
+// a key is updated rather than deleted from the downstream's perspective.
+fn drop_deletes_of_reinserted_keys(
+    delete_chunks: Vec<StreamChunk>,
+    insert_chunks: &[StreamChunk],
+    downstream_pk: &[usize],
+) -> Vec<StreamChunk> {
+    let inserted_keys: HashSet<_> = insert_chunks
+        .iter()
+        .flat_map(|c| c.rows())
+        .map(|(_, row)| row.project(downstream_pk))
+        .collect();
+    delete_chunks
+        .into_iter()
+        .map(|c| {
+            let mut c: StreamChunkMut = c.into();
+            for (row, mut r) in c.to_rows_mut() {
+                if inserted_keys.contains(&row.project(downstream_pk)) {
+                    r.set_vis(false);
+                }
+            }
+            c.into()
+        })
+        .collect()
 }
 
 /// When the sink is non-append-only, i.e. upsert or retract, we need to do some extra work for
@@ -606,11 +633,6 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 insert_chunks.push(chunk);
                             }
                         }
-                        let chunks = delete_chunks
-                            .into_iter()
-                            .chain(insert_chunks.into_iter())
-                            .collect();
-
                         // 2. If user specifies a primary key, compact the chunk based on the **downstream pk**
                         //    to eliminate any unnecessary updates to external systems. This also rewrites the
                         //    `DELETE` and `INSERT` operations on the same key into `UPDATE` operations, which
@@ -620,6 +642,10 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                         if let Some(downstream_pk) = &downstream_pk
                             && !preserve_row_level_changes
                         {
+                            let chunks = delete_chunks
+                                .into_iter()
+                                .chain(insert_chunks.into_iter())
+                                .collect();
                             let chunks = dispatch_output_kind!(sink_type, KIND, {
                                 StreamChunkCompactor::new(downstream_pk.clone(), chunks)
                                     .into_compacted_chunks_reconstructed::<KIND>(
@@ -634,9 +660,18 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
                                 yield Message::Chunk(c);
                             }
                         } else {
+                            if let Some(downstream_pk) = &downstream_pk
+                                && compact_output_kind(sink_type) == output_kind::UPSERT
+                            {
+                                delete_chunks = drop_deletes_of_reinserted_keys(
+                                    delete_chunks,
+                                    &insert_chunks,
+                                    downstream_pk,
+                                );
+                            }
                             let mut chunk_builder =
                                 StreamChunkBuilder::new(chunk_size, input_data_types.clone());
-                            for chunk in chunks {
+                            for chunk in delete_chunks.into_iter().chain(insert_chunks) {
                                 for (op, row) in chunk.rows() {
                                     if let Some(c) = chunk_builder.append_row(op, row) {
                                         yield Message::Chunk(c);
@@ -1529,6 +1564,15 @@ mod test {
                   + 1 20  2",
             )),
             Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
+            // Downstream key 1 moves to a new stream key, while downstream key 2 is really deleted.
+            Message::Chunk(StreamChunk::from_pretty(
+                " I  I  I
+                  - 1 10  1
+                  - 1 20  2
+                  + 1 30  3
+                  - 2 50  5",
+            )),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
         ])
         .into_executor(schema.clone(), vec![0, 2]);
 
@@ -1574,6 +1618,18 @@ mod test {
                 " I  I  I
                   + 1 10  1
                   + 1 20  2",
+            )
+        );
+
+        executor.next().await.unwrap().unwrap();
+
+        let chunk_msg = executor.next().await.unwrap().unwrap();
+        assert_eq!(
+            chunk_msg.into_chunk().unwrap().compact_vis(),
+            StreamChunk::from_pretty(
+                " I  I  I
+                  - 2 50  5
+                  + 1 30  3",
             )
         );
 
