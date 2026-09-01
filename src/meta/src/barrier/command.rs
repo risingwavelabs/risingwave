@@ -1344,6 +1344,7 @@ impl Command {
                     }),
                     sink_schema_change: Default::default(),
                     subscriptions_to_drop: vec![],
+                    iceberg_pk_index_compaction: None,
                 });
                 tracing::debug!("update mutation: {mutation:?}");
                 Ok(Some(mutation))

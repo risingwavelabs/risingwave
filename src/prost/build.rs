@@ -810,9 +810,6 @@ for_all_wrapped_id_fields! (
         CdcFilterNode {
             upstream_source_id: SourceId,
         }
-        CompactionResolverNode {
-            compaction_task_id: IcebergCompactionTaskId,
-        }
         DeltaIndexJoinNode {
             left_table_id: TableId,
             right_table_id: TableId,
@@ -824,7 +821,7 @@ for_all_wrapped_id_fields! (
         DmlNode {
             table_id: TableId,
         }
-        IcebergPkIndexCompactionContext {
+        IcebergPkIndexCompactionUpdate {
             sink_id: SinkId,
             task_id: IcebergCompactionTaskId,
         }

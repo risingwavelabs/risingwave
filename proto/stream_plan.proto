@@ -59,6 +59,26 @@ message StopMutation {
   repeated uint32 dropped_sink_fragments = 2;
 }
 
+message IcebergPkIndexCompactionUpdate {
+  enum Action {
+    ACTION_UNSPECIFIED = 0;
+    ACTION_SWITCH_TO_RESOLVER = 1;
+    ACTION_SWITCH_TO_INPUT = 2;
+  }
+
+  message ResolverTaskInput {
+    repeated string output_data_file_paths = 1;
+    repeated string input_data_file_paths = 2;
+    int64 read_snapshot_id = 3;
+  }
+
+  uint32 sink_id = 1;
+  uint64 task_id = 2;
+  Action action = 3;
+  // Required for ACTION_SWITCH_TO_RESOLVER and absent for ACTION_SWITCH_TO_INPUT.
+  optional ResolverTaskInput resolver_task_input = 4;
+}
+
 message UpdateMutation {
   message DispatcherUpdate {
     // Dispatcher can be uniquely identified by a combination of actor id and dispatcher id.
@@ -104,6 +124,7 @@ message UpdateMutation {
   source.CdcTableSnapshotSplitsWithGeneration actor_cdc_table_snapshot_splits = 7;
   map<uint32, SinkSchemaChange> sink_schema_change = 8;
   repeated SubscriptionUpstreamInfo subscriptions_to_drop = 9;
+  optional IcebergPkIndexCompactionUpdate iceberg_pk_index_compaction = 10;
 }
 
 message SourceChangeSplitMutation {
@@ -174,19 +195,6 @@ message InjectSourceOffsetsMutation {
   map<string, string> split_offsets = 2;
 }
 
-// Context for an ongoing iceberg pk-index compaction.
-message IcebergPkIndexCompactionContext {
-  enum Phase {
-    PHASE_UNSPECIFIED = 0;
-    PHASE_BEGIN = 1;
-    PHASE_END = 2;
-  }
-
-  uint32 sink_id = 1;
-  uint64 task_id = 2;
-  Phase phase = 3;
-}
-
 message BarrierMutation {
   oneof mutation {
     // Add new dispatchers to some actors, used for creating materialized views.
@@ -247,7 +255,8 @@ message Barrier {
   map<string, string> tracing_context = 2;
   // The kind of the barrier.
   BarrierKind kind = 9;
-  optional IcebergPkIndexCompactionContext iceberg_pk_index_compaction = 10;
+  reserved 10;
+  reserved "iceberg_pk_index_compaction";
 }
 
 message Watermark {
@@ -406,14 +415,12 @@ message IcebergWithPkIndexPositionDeleteMergerNode {
   SinkDesc sink_desc = 1;
 }
 
-// Leaf of a transient pk-index compaction pipeline
+// Leaf of the inactive pk-index compaction pipeline rendered with the sink job.
 message CompactionResolverNode {
   SinkDesc sink_desc = 1;
   catalog.Table pk_index_table = 2;
-  repeated string output_data_file_paths = 3;
-  repeated string input_data_file_paths = 4;
-  int64 read_snapshot_id = 5;
-  uint64 compaction_task_id = 6;
+  reserved 3, 4, 5, 6;
+  reserved "output_data_file_paths", "input_data_file_paths", "read_snapshot_id", "compaction_task_id";
 }
 
 message ProjectNode {
@@ -789,8 +796,10 @@ message MergeNode {
   DispatcherType upstream_dispatcher_type = 3;
   // The schema of input columns. Already deprecated.
   repeated plan_common.Field fields = 4 [deprecated = true];
-  // Allows this merge to start without upstream actors and receive them later through a MergeUpdate.
-  bool allow_no_initial_upstream = 5;
+  // Allows this merge to have no upstream actors, either initially or after a MergeUpdate.
+  // When true, the merge must not use the singleton receiver optimization because a singleton
+  // receiver cannot transition to empty.
+  bool allow_empty_upstream = 5;
 }
 
 // passed from frontend to meta, used by fragmenter to generate `MergeNode`

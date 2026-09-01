@@ -24,7 +24,7 @@ use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::id::IcebergCompactionTaskId;
-use risingwave_pb::stream_plan::iceberg_pk_index_compaction_context::Phase;
+use risingwave_pb::stream_plan::iceberg_pk_index_compaction_update::Action;
 use risingwave_pb::stream_service::PbIcebergPkIndexSinkRole;
 use risingwave_storage::StateStore;
 
@@ -54,7 +54,7 @@ pub enum WriterInputMode {
         task_id: IcebergCompactionTaskId,
         begin_epoch: EpochPair,
     },
-    DrainingLeft {
+    AligningReplacementInput {
         task_id: IcebergCompactionTaskId,
         barrier: Barrier,
     },
@@ -309,14 +309,14 @@ where
         &self,
         barrier: &Barrier,
         expected_task: IcebergCompactionTaskId,
-        expected_phase: Phase,
+        expected_action: Action,
         expected_prev: u64,
     ) -> StreamExecutorResult<()> {
         if !barrier.is_checkpoint() || barrier.epoch.prev != expected_prev {
             bail!(
                 "iceberg pk-index writer {} expected checkpoint {:?} starting at {}, got {:?}",
                 self.sink_id,
-                expected_phase,
+                expected_action,
                 expected_prev,
                 barrier
             );
@@ -325,14 +325,19 @@ where
             Some(context)
                 if context.sink_id == self.sink_id
                     && context.task_id == expected_task
-                    && context.phase == expected_phase as i32 =>
+                    && context.action == expected_action as i32
+                    && match expected_action {
+                        Action::SwitchToResolver => context.resolver_task_input.is_some(),
+                        Action::SwitchToInput => context.resolver_task_input.is_none(),
+                        Action::Unspecified => false,
+                    } =>
             {
                 Ok(())
             }
             _ => bail!(
                 "iceberg pk-index writer {} expected matching {:?} context for task {}, got {:?}",
                 self.sink_id,
-                expected_phase,
+                expected_action,
                 expected_task,
                 barrier
             ),
@@ -344,23 +349,7 @@ where
         left: &Barrier,
         right: &Barrier,
     ) -> StreamExecutorResult<()> {
-        let context_matches = match (
-            left.iceberg_pk_index_compaction(),
-            right.iceberg_pk_index_compaction(),
-        ) {
-            (None, None) => true,
-            (Some(left), Some(right)) => {
-                left.sink_id == right.sink_id
-                    && left.task_id == right.task_id
-                    && left.phase == right.phase
-            }
-            _ => false,
-        };
-        if left.epoch != right.epoch
-            || left.kind != right.kind
-            || left.mutation != right.mutation
-            || !context_matches
-        {
+        if left.epoch != right.epoch || left.kind != right.kind || left.mutation != right.mutation {
             bail!(
                 "iceberg pk-index writer {} received mismatched left/right barriers: left={:?}, right={:?}",
                 self.sink_id,
@@ -379,19 +368,26 @@ where
             Some(context) if context.sink_id == self.sink_id => context,
             _ => return Ok(None),
         };
-        if context.phase == Phase::End as i32 {
+        if context.action == Action::SwitchToInput as i32 {
             bail!(
-                "iceberg pk-index writer {} received unexpected End in Normal mode for task {}",
+                "iceberg pk-index writer {} received unexpected switch-to-input in Normal mode for task {}",
                 self.sink_id,
                 context.task_id
             );
         }
-        if context.phase != Phase::Begin as i32 {
+        if context.action != Action::SwitchToResolver as i32 {
             bail!(
-                "iceberg pk-index writer {} expected Begin context for task {}, got {:?}",
+                "iceberg pk-index writer {} expected switch-to-resolver update for task {}, got {:?}",
                 self.sink_id,
                 context.task_id,
-                context.phase
+                context.action
+            );
+        }
+        if context.resolver_task_input.is_none() {
+            bail!(
+                "iceberg pk-index writer {} missing resolver task input for task {}",
+                self.sink_id,
+                context.task_id
             );
         }
         Ok(Some(context.task_id))
@@ -435,9 +431,10 @@ where
                         yield msg?;
                     }
                 }
-                WriterInputMode::DrainingLeft { task_id, barrier } => {
+                WriterInputMode::AligningReplacementInput { task_id, barrier } => {
                     #[for_await]
-                    for msg in self.execute_draining_left(&mut input, task_id, barrier) {
+                    for msg in self.execute_aligning_replacement_input(&mut input, task_id, barrier)
+                    {
                         yield msg?;
                     }
                 }
@@ -518,24 +515,24 @@ where
                     self.validate_compaction_barrier(
                         &barrier,
                         task_id,
-                        Phase::End,
+                        Action::SwitchToInput,
                         begin_epoch.curr,
                     )?;
-                    self.mode = WriterInputMode::DrainingLeft { task_id, barrier };
+                    self.mode = WriterInputMode::AligningReplacementInput { task_id, barrier };
                     return Ok(());
                 }
             }
         }
 
         bail!(
-            "iceberg pk-index writer {} right input closed before End for task {}",
+            "iceberg pk-index writer {} resolver input closed before switch-to-input for task {}",
             self.sink_id,
             task_id
         );
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_draining_left<'a>(
+    async fn execute_aligning_replacement_input<'a>(
         &'a mut self,
         input: &'a mut BoxedMessageStream,
         task_id: IcebergCompactionTaskId,
@@ -544,15 +541,13 @@ where
         #[for_await]
         for msg in input {
             match msg? {
-                Message::Chunk(chunk) =>
-                {
-                    #[for_await]
-                    for chunk in self.process_chunk(chunk) {
-                        yield Message::Chunk(chunk?.into());
-                    }
-                }
+                Message::Chunk(_) => bail!(
+                    "iceberg pk-index writer {} received a chunk from replacement input before its initial barrier for task {}",
+                    self.sink_id,
+                    task_id
+                ),
                 Message::Watermark(_) => bail!(
-                    "iceberg pk-index writer {} received watermark on left input while draining task {}",
+                    "iceberg pk-index writer {} received watermark from replacement input before its initial barrier for task {}",
                     self.sink_id,
                     task_id
                 ),
@@ -569,7 +564,7 @@ where
         }
 
         bail!(
-            "iceberg pk-index writer {} left input closed before End for task {}",
+            "iceberg pk-index writer {} replacement input closed before its initial barrier for task {}",
             self.sink_id,
             task_id
         );

@@ -1745,6 +1745,7 @@ impl DatabaseCheckpointControl {
                         actor_cdc_table_snapshot_splits: None, /* no cdc table backfill in snapshot backfill */
                         sink_schema_change: Default::default(), /* no sink auto schema change happened here */
                         subscriptions_to_drop,
+                        iceberg_pk_index_compaction: None,
                     }))
                 } else {
                     let fragment_ids = self.database_info.take_pending_backfill_nodes();
@@ -1830,7 +1831,6 @@ impl DatabaseCheckpointControl {
         partial_graph_manager.inject_barrier(
             to_partial_graph_id(self.database_id, None),
             mutation,
-            None,
             &node_actors,
             InflightFragmentInfo::existing_table_ids(self.database_info.fragment_infos()),
             InflightFragmentInfo::workers(self.database_info.fragment_infos()),

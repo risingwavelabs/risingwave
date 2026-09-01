@@ -26,6 +26,16 @@ use crate::task::LocalBarrierManager;
 
 pub struct MergeExecutorBuilder;
 
+fn can_use_singleton_receiver(node: &MergeNode, input_count: usize) -> StreamResult<bool> {
+    Ok(!node.allow_empty_upstream
+        && input_count > 0
+        && match node.get_upstream_dispatcher_type()? {
+            DispatcherType::Unspecified => unreachable!(),
+            DispatcherType::Hash | DispatcherType::Broadcast | DispatcherType::Simple => false,
+            DispatcherType::NoShuffle => true,
+        })
+}
+
 impl MergeExecutorBuilder {
     pub(crate) async fn new_input(
         local_barrier_manager: LocalBarrierManager,
@@ -39,7 +49,7 @@ impl MergeExecutorBuilder {
         let upstream_actors = actor_context
             .initial_upstream_actors
             .get(&upstream_fragment_id);
-        if upstream_actors.is_none() && !node.allow_no_initial_upstream {
+        if upstream_actors.is_none() && !node.allow_empty_upstream {
             return Ok(None);
         }
 
@@ -64,15 +74,7 @@ impl MergeExecutorBuilder {
         // If there's always only one upstream, we can use `ReceiverExecutor`. Note that it can't
         // scale to multiple upstreams. An initially empty merge must stay dynamic to accept a
         // later MergeUpdate, even for dispatcher kinds normally optimized to a singleton.
-        let always_single_input = !inputs.is_empty()
-            && match node.get_upstream_dispatcher_type()? {
-                DispatcherType::Unspecified => unreachable!(),
-                DispatcherType::Hash | DispatcherType::Broadcast => false,
-                // There could be arbitrary number of upstreams with simple dispatcher.
-                DispatcherType::Simple => false,
-                // There should be always only one upstream with no-shuffle dispatcher.
-                DispatcherType::NoShuffle => true,
-            };
+        let always_single_input = can_use_singleton_receiver(node, inputs.len())?;
 
         let upstreams = if always_single_input {
             MergeExecutorUpstream::Singleton(Itertools::exactly_one(inputs.into_iter()).unwrap())
@@ -94,6 +96,35 @@ impl MergeExecutorBuilder {
             executor_stats,
             info,
         )))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use prost::Message;
+
+    use super::*;
+
+    #[test]
+    fn test_allow_empty_upstream_disables_singleton_receiver() {
+        let dynamic = MergeNode {
+            upstream_dispatcher_type: DispatcherType::NoShuffle as i32,
+            allow_empty_upstream: true,
+            ..Default::default()
+        };
+        assert!(!can_use_singleton_receiver(&dynamic, 1).unwrap());
+
+        let singleton = MergeNode {
+            allow_empty_upstream: false,
+            ..dynamic
+        };
+        assert!(can_use_singleton_receiver(&singleton, 1).unwrap());
+    }
+
+    #[test]
+    fn test_allow_empty_upstream_keeps_protobuf_tag_five() {
+        let node = MergeNode::decode([0x28, 0x01].as_slice()).unwrap();
+        assert!(node.allow_empty_upstream);
     }
 }
 

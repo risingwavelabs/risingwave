@@ -18,7 +18,7 @@ use risingwave_common::id::SinkId;
 use risingwave_connector::sink::Result as SinkResult;
 use risingwave_pb::connector_service::SinkMetadata;
 use risingwave_pb::id::IcebergCompactionTaskId;
-use risingwave_pb::stream_plan::iceberg_pk_index_compaction_context::Phase;
+use risingwave_pb::stream_plan::iceberg_pk_index_compaction_update::Action;
 use risingwave_pb::stream_service::PbIcebergPkIndexSinkRole;
 
 use crate::executor::prelude::*;
@@ -58,8 +58,8 @@ pub trait PositionDeleteHandler: Send + 'static {
 /// # Compaction
 ///
 /// Compaction rewrites the very data files this executor's resident delete state is keyed by. On
-/// the `End` half of a coordinated compaction barrier pair, the merger therefore discards that
-/// state and re-seeds from the post-compaction snapshot.
+/// the switch-to-input barrier, the merger therefore discards that state and re-seeds from the
+/// post-compaction snapshot.
 ///
 /// Input schema: [`file_path`: Varchar, `position`: int64]
 /// Output: Barriers and watermarks only; no data chunks (terminal executor in the stream graph).
@@ -125,7 +125,7 @@ where
                 }
                 Message::Barrier(barrier) => {
                     barrier.assume_no_update_vnode_bitmap(self.actor_id)?;
-                    let compaction_resumed = self.compaction_resume_task_id(&barrier);
+                    let compaction_resumed = self.compaction_resume_task_id(&barrier)?;
                     if compaction_resumed.is_some() && !barrier.is_checkpoint() {
                         bail!(
                             "iceberg pk-index merger {} received a non-checkpoint compaction resume barrier {:?}",
@@ -170,16 +170,26 @@ where
         }
     }
 
-    /// The compaction task id if `barrier` carries the `End` half of a coordinated compaction
-    /// barrier pair for this sink, meaning the compaction commits under `barrier.epoch.prev`.
-    fn compaction_resume_task_id(&self, barrier: &Barrier) -> Option<IcebergCompactionTaskId> {
+    /// The compaction task id if `barrier` switches this sink back to its normal input.
+    fn compaction_resume_task_id(
+        &self,
+        barrier: &Barrier,
+    ) -> StreamExecutorResult<Option<IcebergCompactionTaskId>> {
         match barrier.iceberg_pk_index_compaction() {
             Some(context)
-                if context.sink_id == self.sink_id && context.phase == Phase::End as i32 =>
+                if context.sink_id == self.sink_id
+                    && context.action == Action::SwitchToInput as i32 =>
             {
-                Some(context.task_id)
+                if context.resolver_task_input.is_some() {
+                    bail!(
+                        "iceberg pk-index merger {} received resolver task input on switch-to-input for task {}",
+                        self.sink_id,
+                        context.task_id
+                    );
+                }
+                Ok(Some(context.task_id))
             }
-            _ => None,
+            _ => Ok(None),
         }
     }
 }
@@ -344,12 +354,15 @@ mod tests {
         }
     }
 
-    fn compaction_barrier(epoch: u64, sink_id: SinkId, phase: Phase) -> Barrier {
+    fn compaction_barrier(epoch: u64, sink_id: SinkId, action: Action) -> Barrier {
         Barrier::new_test_barrier(test_epoch(epoch)).with_iceberg_pk_index_compaction(
-            crate::executor::IcebergPkIndexCompactionContext {
+            risingwave_pb::stream_plan::IcebergPkIndexCompactionUpdate {
                 sink_id,
                 task_id: 7.into(),
-                phase: phase as i32,
+                action: action as i32,
+                resolver_task_input: (action == Action::SwitchToResolver).then_some(
+                    risingwave_pb::stream_plan::iceberg_pk_index_compaction_update::ResolverTaskInput::default(),
+                ),
             },
         )
     }
@@ -509,7 +522,7 @@ mod tests {
         let initial_prev = EpochPair::new_test_epoch(test_epoch(1)).prev;
 
         tx.push_chunk(build_delete_position_chunk(&[("input.parquet", 0)]));
-        tx.send_barrier(compaction_barrier(2, sink_id, Phase::End));
+        tx.send_barrier(compaction_barrier(2, sink_id, Action::SwitchToInput));
         let b2 = executor.next().await.unwrap().unwrap();
         assert!(b2.is_barrier(), "B2 must be observable before re-seeding");
         assert_eq!(
@@ -550,7 +563,7 @@ mod tests {
 
         tx.push_barrier(test_epoch(1), false);
         assert!(executor.next().await.unwrap().unwrap().is_barrier());
-        tx.send_barrier(compaction_barrier(2, sink_id, Phase::End));
+        tx.send_barrier(compaction_barrier(2, sink_id, Action::SwitchToInput));
         assert!(executor.next().await.unwrap().unwrap().is_barrier());
         assert!(
             !second_seed_started.load(Ordering::SeqCst),
@@ -622,7 +635,7 @@ mod tests {
             table_state.insert("output.parquet".to_owned(), BTreeSet::from([4]));
         }
 
-        tx.send_barrier(compaction_barrier(3, sink_id, Phase::End));
+        tx.send_barrier(compaction_barrier(3, sink_id, Action::SwitchToInput));
         assert!(executor.next().await.unwrap().unwrap().is_barrier());
         assert_eq!(
             *seed_epochs.lock().unwrap(),
@@ -682,7 +695,7 @@ mod tests {
         tx.push_barrier(test_epoch(1), false);
         assert!(executor.next().await.unwrap().unwrap().is_barrier());
 
-        tx.send_barrier(compaction_barrier(2, sink_id, Phase::Begin));
+        tx.send_barrier(compaction_barrier(2, sink_id, Action::SwitchToResolver));
         assert!(executor.next().await.unwrap().unwrap().is_barrier());
 
         assert_eq!(seed_epochs.lock().unwrap().len(), 1);
@@ -712,7 +725,7 @@ mod tests {
         tx.push_barrier(test_epoch(1), false);
         assert!(executor.next().await.unwrap().unwrap().is_barrier());
 
-        tx.send_barrier(compaction_barrier(2, SinkId::new(1), Phase::End));
+        tx.send_barrier(compaction_barrier(2, SinkId::new(1), Action::SwitchToInput));
         assert!(executor.next().await.unwrap().unwrap().is_barrier());
 
         assert_eq!(seed_epochs.lock().unwrap().len(), 1);
