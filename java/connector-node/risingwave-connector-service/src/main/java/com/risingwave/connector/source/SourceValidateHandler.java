@@ -126,7 +126,7 @@ public class SourceValidateHandler {
     /** Validate debezium.heartbeat.interval.ms if specified. If present, it must not be 0. */
     private static void validateHeartbeatInterval(
             Map<String, String> props, boolean isCdcSourceJob) {
-        String intervalStr = props.get("debezium.heartbeat.interval.ms");
+        String intervalStr = props.get(DbzConnectorConfig.HEARTBEAT_INTERVAL_KEY);
         if (intervalStr == null) {
             return; // Not specified, use default
         }
@@ -137,13 +137,14 @@ public class SourceValidateHandler {
         } catch (NumberFormatException e) {
             throw ValidatorUtils.invalidArgument(
                     String.format(
-                            "'debezium.heartbeat.interval.ms' must be a valid number, got: '%s'",
-                            intervalStr));
+                            "'%s' must be a valid number, got: '%s'",
+                            DbzConnectorConfig.HEARTBEAT_INTERVAL_KEY, intervalStr));
         }
 
         // Validate interval is not 0
         if (interval == 0) {
-            throw ValidatorUtils.invalidArgument("'debezium.heartbeat.interval.ms' must not be 0");
+            throw ValidatorUtils.invalidArgument(
+                    String.format("'%s' must not be 0", DbzConnectorConfig.HEARTBEAT_INTERVAL_KEY));
         }
     }
 
@@ -235,8 +236,18 @@ public class SourceValidateHandler {
                 ensureRequiredProps(props, isCdcSourceJob);
                 ensurePropNotBlank(props, DbzConnectorConfig.ORACLE_PDB_NAME);
                 ensurePropNotBlank(props, DbzConnectorConfig.ORACLE_SCHEMA_NAME);
-                validateQueueMemoryRatio(props);
                 validateHeartbeatInterval(props, isCdcSourceJob);
+                if (DbzConnectorConfig.isHeartbeatEnabled(props)) {
+                    ensurePropNotBlank(props, DbzConnectorConfig.ORACLE_HEARTBEAT_TABLE_NAME);
+                }
+                if (props.containsKey(DbzConnectorConfig.HEARTBEAT_ACTION_QUERY_KEY)) {
+                    throw ValidatorUtils.invalidArgument(
+                            String.format(
+                                    "'%s' is generated internally; configure '%s' instead",
+                                    DbzConnectorConfig.HEARTBEAT_ACTION_QUERY_KEY,
+                                    DbzConnectorConfig.ORACLE_HEARTBEAT_TABLE_NAME));
+                }
+                validateQueueMemoryRatio(props);
                 try (var oracleValidator = new OracleValidator(props, isCdcSourceJob)) {
                     oracleValidator.validateAll();
                 }
