@@ -36,7 +36,7 @@ use risingwave_meta::stream::{ParallelismPolicy, ReschedulePolicy, ResourceGroup
 use risingwave_meta::{MetaResult, bail_invalid_parameter, bail_unavailable};
 use risingwave_meta_model::StreamingParallelism;
 use risingwave_pb::catalog::connection::Info as ConnectionInfo;
-use risingwave_pb::catalog::table::OptionalAssociatedSourceId;
+use risingwave_pb::catalog::table::{OptionalAssociatedSourceId, PbCdcTableType};
 use risingwave_pb::catalog::{Comment, Connection, PbCreateType, Secret, Table};
 use risingwave_pb::common::WorkerType;
 use risingwave_pb::common::worker_node::State;
@@ -1350,15 +1350,32 @@ impl DdlService for DdlServiceImpl {
             for table in tables {
                 // Since we only support `ADD` and `DROP` column, we check whether the new columns and the original columns
                 // is a subset of the other.
-                let original_columns: HashSet<(String, DataType)> =
-                    HashSet::from_iter(table.columns.iter().filter_map(|col| {
+                let original_columns_by_name: HashMap<String, ColumnCatalog> = table
+                    .columns
+                    .iter()
+                    .filter_map(|col| {
                         let col = ColumnCatalog::from(col.clone());
                         if col.is_generated() || col.is_hidden() {
                             None
                         } else {
-                            Some((col.column_desc.name.clone(), col.data_type().clone()))
+                            Some((col.column_desc.name.clone(), col))
                         }
-                    }));
+                    })
+                    .collect();
+
+                let original_columns: HashSet<(String, DataType)> = original_columns_by_name
+                    .iter()
+                    .map(|(name, col)| (name.clone(), col.data_type().clone()))
+                    .collect();
+
+                let cdc_table_type =
+                    PbCdcTableType::try_from(table.cdc_table_type.unwrap_or_default())
+                        .unwrap_or(PbCdcTableType::Unspecified);
+                let table_change = normalize_cdc_auto_schema_change_column_names(
+                    table_change.clone(),
+                    cdc_table_type,
+                    &original_columns_by_name,
+                );
 
                 let mut new_columns: HashSet<(String, DataType)> =
                     HashSet::from_iter(table_change.columns.iter().filter_map(|col| {
@@ -1882,4 +1899,143 @@ fn add_auto_schema_change_fail_event_log(
         fail_info,
     };
     event_log_manager.add_event_logs(vec![event_log::Event::AutoSchemaChangeFail(event)]);
+}
+
+fn normalize_cdc_auto_schema_change_column_names(
+    mut table_change: TableSchemaChange,
+    cdc_table_type: PbCdcTableType,
+    original_columns_by_name: &HashMap<String, ColumnCatalog>,
+) -> TableSchemaChange {
+    if cdc_table_type != PbCdcTableType::Mysql {
+        return table_change;
+    }
+
+    // MySQL column names are case-insensitive, while RisingWave catalog names may preserve
+    // explicitly quoted spelling. Reuse that spelling for existing columns and apply the same
+    // lowercase convention as MySQL snapshot discovery only to genuinely new columns.
+    let mut original_names_by_lowercase = HashMap::<String, Option<String>>::new();
+    for original_name in original_columns_by_name.keys() {
+        original_names_by_lowercase
+            .entry(original_name.to_lowercase())
+            .and_modify(|name| *name = None)
+            .or_insert_with(|| Some(original_name.clone()));
+    }
+
+    for column in &mut table_change.columns {
+        let mut column_catalog = ColumnCatalog::from(column.clone());
+        if column_catalog.is_generated() || column_catalog.is_hidden() {
+            continue;
+        }
+
+        let incoming_name = &column_catalog.column_desc.name;
+        let lowercase_name = incoming_name.to_lowercase();
+        let normalized_name = if original_columns_by_name.contains_key(incoming_name) {
+            incoming_name.clone()
+        } else {
+            original_names_by_lowercase
+                .get(&lowercase_name)
+                .and_then(|name| name.clone())
+                .unwrap_or(lowercase_name)
+        };
+
+        column_catalog.column_desc.name = normalized_name;
+        *column = column_catalog.to_protobuf();
+    }
+
+    table_change
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::{ColumnDesc, ColumnId};
+
+    use super::*;
+
+    fn pb_column(name: &str, data_type: DataType) -> risingwave_pb::plan_common::ColumnCatalog {
+        ColumnCatalog::visible(ColumnDesc::named(name, ColumnId::placeholder(), data_type))
+            .to_protobuf()
+    }
+
+    fn pb_table_change(
+        columns: Vec<risingwave_pb::plan_common::ColumnCatalog>,
+    ) -> TableSchemaChange {
+        TableSchemaChange {
+            columns,
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_mysql_cdc_auto_schema_change_normalizes_column_names() {
+        let original_columns_by_name = HashMap::from([
+            (
+                "Id".to_owned(),
+                ColumnCatalog::visible(ColumnDesc::named(
+                    "Id",
+                    ColumnId::placeholder(),
+                    DataType::Int32,
+                )),
+            ),
+            (
+                "Details".to_owned(),
+                ColumnCatalog::visible(ColumnDesc::named(
+                    "Details",
+                    ColumnId::placeholder(),
+                    DataType::Varchar,
+                )),
+            ),
+        ]);
+        let table_change = pb_table_change(vec![
+            pb_column("ID", DataType::Int32),
+            pb_column("details", DataType::Varchar),
+            pb_column("NewCol", DataType::Varchar),
+        ]);
+
+        let normalized = normalize_cdc_auto_schema_change_column_names(
+            table_change,
+            PbCdcTableType::Mysql,
+            &original_columns_by_name,
+        );
+        let column_names = normalized
+            .columns
+            .into_iter()
+            .map(ColumnCatalog::from)
+            .map(|column| column.column_desc.name)
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            column_names,
+            vec!["Id".to_owned(), "Details".to_owned(), "newcol".to_owned(),]
+        );
+    }
+
+    #[test]
+    fn test_non_mysql_cdc_auto_schema_change_preserves_column_names() {
+        let original_columns_by_name = HashMap::from([(
+            "Id".to_owned(),
+            ColumnCatalog::visible(ColumnDesc::named(
+                "Id",
+                ColumnId::placeholder(),
+                DataType::Int32,
+            )),
+        )]);
+        let table_change = pb_table_change(vec![
+            pb_column("ID", DataType::Int32),
+            pb_column("NewCol", DataType::Varchar),
+        ]);
+
+        let normalized = normalize_cdc_auto_schema_change_column_names(
+            table_change,
+            PbCdcTableType::Postgres,
+            &original_columns_by_name,
+        );
+        let column_names = normalized
+            .columns
+            .into_iter()
+            .map(ColumnCatalog::from)
+            .map(|column| column.column_desc.name)
+            .collect::<Vec<_>>();
+
+        assert_eq!(column_names, vec!["ID".to_owned(), "NewCol".to_owned()]);
+    }
 }
