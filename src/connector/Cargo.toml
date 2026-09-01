@@ -26,11 +26,11 @@ source-adbc_snowflake = ["dep:adbc_core", "dep:adbc_snowflake"]
 sink-bigquery = [
     "dep:gcp-bigquery-client",
     "dep:google-cloud-bigquery",
-    "dep:google-cloud-googleapis",
+    "google-cloud-googleapis/bigquery",
 ]
 sink-deltalake = ["dep:deltalake"]
 # TODO: pubsub source is not feature-gated, thus `google-cloud-pubsub` cannot be optional.
-sink-google_pubsub = ["dep:google-cloud-googleapis"]
+sink-google_pubsub = []
 sink-clickhouse = ["dep:clickhouse"]
 sink-doris = []
 sink-starrocks = []
@@ -86,8 +86,7 @@ google-cloud-bigquery = { package = "gcloud-bigquery", version = "1.6", features
 google-cloud-gax = { package = "gcloud-gax", version = "1" }
 google-cloud-googleapis = { package = "gcloud-googleapis", version = "1", features = [
     "pubsub",
-    "bigquery",
-], optional = true }
+] }
 google-cloud-pubsub = { package = "gcloud-pubsub", version = "1.5" }
 iceberg = { workspace = true }
 iceberg-catalog-glue = { workspace = true }

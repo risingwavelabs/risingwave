@@ -1108,8 +1108,13 @@ impl<S: StateStore> Debug for SourceExecutor<S> {
     }
 }
 
+enum WaitCheckpointWorkerEvent {
+    Checkpoint(Epoch, WaitCheckpointTask),
+    Abort(WaitCheckpointTask),
+}
+
 struct WaitCheckpointTaskBuilder {
-    wait_checkpoint_tx: UnboundedSender<(Epoch, WaitCheckpointTask)>,
+    wait_checkpoint_tx: UnboundedSender<WaitCheckpointWorkerEvent>,
     building_task: WaitCheckpointTask,
 }
 
@@ -1159,8 +1164,21 @@ impl WaitCheckpointTaskBuilder {
     fn send(&mut self, epoch: Epoch) {
         let new_task = self.building_task.reset_for_next_epoch();
         self.wait_checkpoint_tx
-            .send((epoch, std::mem::replace(&mut self.building_task, new_task)))
+            .send(WaitCheckpointWorkerEvent::Checkpoint(
+                epoch,
+                std::mem::replace(&mut self.building_task, new_task),
+            ))
             .expect("wait_checkpoint_tx send should succeed");
+    }
+}
+
+impl Drop for WaitCheckpointTaskBuilder {
+    fn drop(&mut self) {
+        let new_task = self.building_task.reset_for_next_epoch();
+        let task = std::mem::replace(&mut self.building_task, new_task);
+        let _ = self
+            .wait_checkpoint_tx
+            .send(WaitCheckpointWorkerEvent::Abort(task));
     }
 }
 
@@ -1190,7 +1208,7 @@ impl WaitCheckpointTaskBuilder {
 ///
 /// See also <https://cloud.google.com/pubsub/docs/subscribe-best-practices#process-messages>
 struct WaitCheckpointWorker<S: StateStore> {
-    wait_checkpoint_rx: UnboundedReceiver<(Epoch, WaitCheckpointTask)>,
+    wait_checkpoint_rx: UnboundedReceiver<WaitCheckpointWorkerEvent>,
     state_store: S,
     table_id: TableId,
     source_id: SourceId,
@@ -1204,7 +1222,11 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
         loop {
             // poll the rx and wait for the epoch commit
             match self.wait_checkpoint_rx.recv().await {
-                Some((epoch, task)) => {
+                Some(WaitCheckpointWorkerEvent::Abort(task)) => {
+                    task.nack_uncommitted_pubsub_messages(self.source_id, &self.source_name)
+                        .await;
+                }
+                Some(WaitCheckpointWorkerEvent::Checkpoint(epoch, task)) => {
                     tracing::debug!("start to wait epoch {}", epoch.0);
                     let ret = self
                         .state_store
@@ -1220,6 +1242,17 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
                         // The wait_checkpoint_rx lifetime is tied to the lifecycle of the source executor actor.
                         // The old actor must be dropped before any subsequent recovery can succeed; see PartialGraphState::abort_and_wait_actors
                         tracing::debug!(epoch = epoch.0, "Drop stale wait checkpoint task.");
+                        task.nack_uncommitted_pubsub_messages(self.source_id, &self.source_name)
+                            .await;
+                        while let Ok(stale_event) = self.wait_checkpoint_rx.try_recv() {
+                            let stale_task = match stale_event {
+                                WaitCheckpointWorkerEvent::Checkpoint(_, task)
+                                | WaitCheckpointWorkerEvent::Abort(task) => task,
+                            };
+                            stale_task
+                                .nack_uncommitted_pubsub_messages(self.source_id, &self.source_name)
+                                .await;
+                        }
                         break;
                     }
                     match ret {
@@ -1256,6 +1289,11 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
                             error = %e.as_report(),
                             "wait epoch {} failed", epoch.0
                             );
+                            task.nack_uncommitted_pubsub_messages(
+                                self.source_id,
+                                &self.source_name,
+                            )
+                            .await;
                         }
                     }
                 }
@@ -1290,6 +1328,22 @@ mod tests {
     use crate::task::LocalBarrierManager;
 
     const MOCK_SOURCE_NAME: &str = "mock_source";
+
+    #[test]
+    fn test_wait_checkpoint_builder_sends_abort_task_on_drop() {
+        let (wait_checkpoint_tx, mut wait_checkpoint_rx) = unbounded_channel();
+        let task_builder = WaitCheckpointTaskBuilder {
+            wait_checkpoint_tx,
+            building_task: WaitCheckpointTask::CommitCdcOffset(None),
+        };
+
+        drop(task_builder);
+
+        assert!(matches!(
+            wait_checkpoint_rx.try_recv().unwrap(),
+            WaitCheckpointWorkerEvent::Abort(WaitCheckpointTask::CommitCdcOffset(None)),
+        ));
+    }
 
     #[tokio::test]
     async fn test_source_executor() {
