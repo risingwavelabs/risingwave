@@ -992,7 +992,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
 ///   because users can optionally include database name for verification, but it needs to be
 ///   stripped to match the format returned by Debezium's `extract_table_name()`.
 /// - For MySQL/Postgres: Returns the original `external_table_name` unchanged.
-fn derive_with_options_for_cdc_table(
+pub(crate) fn derive_with_options_for_cdc_table(
     source_with_properties: &WithOptionsSecResolved,
     external_table_name: String,
 ) -> Result<(WithOptionsSecResolved, String)> {
@@ -1203,7 +1203,7 @@ fn parse_postgres_cdc_external_table_name(external_table_name: &str) -> Result<(
 /// Debezium entries are regex patterns matched against the fully qualified column name
 /// `<namespace>.<table>.<column>`, where namespace is `schema` for Postgres / SQL Server and
 /// `database` for MySQL.
-fn reject_pk_filtered_by_debezium_column_filter(
+pub(crate) fn reject_pk_filtered_by_debezium_column_filter(
     pk_names: &[String],
     cdc_with_options: &WithOptionsSecResolved,
 ) -> Result<()> {
@@ -1539,7 +1539,7 @@ fn generated_columns_check_for_cdc_table(columns: &Vec<ColumnDef>) -> Result<()>
 }
 
 // For both table from cdc source and table with cdc connector
-fn not_null_check_for_cdc_table(
+pub(crate) fn not_null_check_for_cdc_table(
     wildcard_idx: &Option<usize>,
     column_defs: &Vec<ColumnDef>,
 ) -> Result<()> {
@@ -1560,7 +1560,7 @@ fn not_null_check_for_cdc_table(
 }
 
 // Only for table from cdc source
-fn sanity_check_for_table_on_cdc_source(
+pub(crate) fn sanity_check_for_table_on_cdc_source(
     append_only: bool,
     column_defs: &Vec<ColumnDef>,
     wildcard_idx: &Option<usize>,
@@ -1624,7 +1624,7 @@ fn sanity_check_for_table_on_cdc_source(
 }
 
 /// Derive schema for cdc table when create a new Table or alter an existing Table
-async fn bind_cdc_table_schema_externally(
+pub(crate) async fn bind_cdc_table_schema_externally(
     cdc_with_options: WithOptionsSecResolved,
 ) -> Result<(Vec<ColumnCatalog>, Vec<String>, Vec<CdcKeyComparison>)> {
     // read cdc table schema from external db or parsing the schema from SQL definitions
@@ -1666,7 +1666,7 @@ async fn bind_cdc_pk_comparisons_externally(
 }
 
 /// Derive schema for cdc table when create a new Table or alter an existing Table
-fn bind_cdc_table_schema(
+pub(crate) fn bind_cdc_table_schema(
     column_defs: &Vec<ColumnDef>,
     constraints: &Vec<TableConstraint>,
     is_for_replace_plan: bool,
@@ -2156,6 +2156,7 @@ pub async fn create_iceberg_engine_table(
         format_encode: CompatibleFormatEncode::V2(FormatEncodeOptions::none()),
         source_watermarks: vec![],
         include_column_options: vec![],
+        cdc_table_info: None,
     };
 
     let mut source_handler_args = handler_args.clone();
@@ -2523,7 +2524,10 @@ fn get_source_and_resolved_table_name(
     Ok((source, resolved_table_name))
 }
 
-fn check_cdc_source_select_privilege(session: &SessionImpl, source: &SourceCatalog) -> Result<()> {
+pub(crate) fn check_cdc_source_select_privilege(
+    session: &SessionImpl,
+    source: &SourceCatalog,
+) -> Result<()> {
     session.check_privileges(&[ObjectCheckItem::new(
         source.owner,
         AclMode::Select,
@@ -2748,7 +2752,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_cdc_table_requires_select_privilege_on_source() {
+    async fn test_cdc_relations_require_select_privilege_on_source() {
         let frontend = LocalFrontend::new(Default::default()).await;
         // PostgreSQL CDC with an explicit schema avoids querying upstream PK metadata,
         // so this privilege test does not require an external database.
@@ -2788,16 +2792,20 @@ mod tests {
         );
         let create_table =
             "CREATE TABLE cdc_table (id INT PRIMARY KEY) FROM cdc_source TABLE 'public.t'";
+        let create_table_source = "CREATE SOURCE cdc_table_source (id INT PRIMARY KEY) \
+             WITH (snapshot = 'false') FROM cdc_source TABLE 'public.t'";
 
-        let err = frontend
-            .run_sql_with_session(user_session.clone(), create_table)
-            .await
-            .unwrap_err();
-        assert!(
-            err.to_string()
-                .contains("permission denied for source \"cdc_source\": \"SELECT\""),
-            "{err:?}"
-        );
+        for sql in [create_table, create_table_source] {
+            let err = frontend
+                .run_sql_with_session(user_session.clone(), sql)
+                .await
+                .unwrap_err();
+            assert!(
+                err.to_string()
+                    .contains("permission denied for source \"cdc_source\": \"SELECT\""),
+                "{err:?}"
+            );
+        }
 
         frontend
             .run_sql("GRANT SELECT ON SOURCE cdc_source TO cdc_user")
@@ -2805,6 +2813,10 @@ mod tests {
             .unwrap();
         frontend
             .run_sql_with_session(user_session.clone(), create_table)
+            .await
+            .unwrap();
+        frontend
+            .run_sql_with_session(user_session.clone(), create_table_source)
             .await
             .unwrap();
 
