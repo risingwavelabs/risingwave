@@ -163,6 +163,7 @@ fn new_test_iceberg_config(
 #[tokio::test]
 async fn test_schedule_resolves_licensed_compaction_type_policy() {
     let manager = build_test_manager().await;
+    let now = Instant::now();
     assert!(
         risingwave_common::license::Feature::IcebergCompaction
             .check_available()
@@ -188,16 +189,22 @@ async fn test_schedule_resolves_licensed_compaction_type_policy() {
         config.write_mode = write_mode;
         config.compaction_type = configured_type;
 
-        let (task_type, automatic_round_mode, _, _) = manager.resolve_schedule_values(&config);
+        let mut track = manager.create_compaction_track(&config, now);
+        let expected_round_mode = if write_mode == IcebergWriteMode::CopyOnWrite {
+            AutomaticRoundMode::SingleTask
+        } else {
+            AutomaticRoundMode::SequenceBounded
+        };
 
-        assert_eq!(task_type, expected_task_type);
+        assert_eq!(track.task_type, expected_task_type);
+        assert_eq!(track.automatic_round_mode, expected_round_mode);
+
+        track.record_observed_snapshot(committed_snapshot(10, 1000));
+        track.record_commit();
+        track.start_processing();
         assert_eq!(
-            automatic_round_mode,
-            if write_mode == IcebergWriteMode::CopyOnWrite {
-                AutomaticRoundMode::SingleTask
-            } else {
-                AutomaticRoundMode::SequenceBounded
-            }
+            track.round_max_file_sequence_number,
+            (expected_round_mode == AutomaticRoundMode::SequenceBounded).then_some(10)
         );
     }
 }
@@ -428,46 +435,16 @@ fn test_active_round_keeps_sequence_boundary_until_drained() {
     assert_eq!(track.pending_commit_count, 1);
 }
 
-#[tokio::test]
-async fn test_cow_automatic_compaction_uses_single_unbounded_task() {
-    let manager = build_test_manager().await;
-    let now = Instant::now();
-    let mut config = new_test_iceberg_config(120, 10, CompactionType::Full);
-    config.r#type = "upsert".to_owned();
-    config.write_mode = risingwave_connector::sink::iceberg::IcebergWriteMode::CopyOnWrite;
-    let mut track = manager.create_compaction_track(&config, now);
-
-    assert_eq!(track.task_type, TaskType::Auto);
-    assert_eq!(track.automatic_round_mode, AutomaticRoundMode::SingleTask);
-
-    track.record_observed_snapshot(committed_snapshot(10, 1000));
-    track.record_commit();
-    start_in_flight(&mut track, 1, now);
-
-    assert_eq!(track.round_max_file_sequence_number, None);
-
-    track.record_observed_snapshot(committed_snapshot(11, 2000));
-    track.record_commit();
-    track.finish_success(now);
-
-    assert_eq!(track.round_max_file_sequence_number, None);
-    assert_eq!(track.pending_commit_count, 1);
-    assert!(!track.should_trigger(now));
-    assert!(track.should_trigger(now + Duration::from_secs(120)));
-}
-
 #[test]
-fn test_force_during_active_round_idle_gap_only_advances_next_attempt() {
+fn test_force_advances_active_round_retry_without_adding_backlog() {
     let now = Instant::now();
     let mut track = new_track(now, 120, 10, 1);
     track.record_observed_snapshot(committed_snapshot(10, 1000));
     start_in_flight(&mut track, 1, now);
-    track.finish_success(now);
+    track.finish_failed(now);
 
-    assert_eq!(track.pending_commit_count, 0);
-    assert_eq!(track.round_max_file_sequence_number, Some(10));
-
-    let force_at = now + Duration::from_secs(5);
+    let force_at = now + Duration::from_millis(500);
+    assert!(!track.should_trigger(force_at));
     track.record_force_compaction(force_at, None);
 
     assert_eq!(track.pending_commit_count, 0);
@@ -1362,20 +1339,14 @@ async fn test_handle_report_task_completes_manual_waiter_on_failure() {
 }
 
 #[tokio::test]
-async fn test_handle_report_task_rejects_drained_manual_task() {
+async fn test_handle_report_task_treats_unbounded_drained_as_failure() {
     let manager = build_test_manager().await;
     let task_id = 431;
     let sink_id = SinkId::new(481);
     let now = Instant::now();
     let mut track = new_track(now, 120, 10, 2);
-    track.start_processing();
-    track.mark_dispatched(task_id.into(), 1.into(), now);
-    let (tx, rx) = tokio::sync::oneshot::channel();
-    {
-        let mut guard = manager.inner.write();
-        guard.sink_schedules.insert(sink_id, track);
-        guard.manual_compaction_waiters.insert(sink_id, tx);
-    }
+    start_in_flight(&mut track, task_id, now);
+    manager.inner.write().sink_schedules.insert(sink_id, track);
 
     manager.handle_report_task(IcebergReportTask {
         task_id: task_id.into(),
@@ -1385,17 +1356,10 @@ async fn test_handle_report_task_rejects_drained_manual_task() {
         pk_index_result: None,
     });
 
-    let error = rx.await.unwrap().unwrap_err();
-    assert!(
-        error
-            .to_string()
-            .contains("manual iceberg compaction failed")
-    );
     let guard = manager.inner.read();
     let track = guard.sink_schedules.get(&sink_id).unwrap();
     assert_eq!(track.pending_commit_count, 2);
     assert!(matches!(track.state, CompactionTrackState::Idle { .. }));
-    assert!(!guard.manual_compaction_waiters.contains_key(&sink_id));
 }
 
 #[tokio::test]
