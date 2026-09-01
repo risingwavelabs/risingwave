@@ -81,8 +81,14 @@ pub(crate) enum IndependentCheckpointJob {
 
 /// The lifecycle shared by all independent checkpoint jobs.
 pub(crate) enum IndependentCheckpointJobControl {
-    Running(IndependentCheckpointJob),
+    Running {
+        job_id: JobId,
+        partial_graph_id: PartialGraphId,
+        job: IndependentCheckpointJob,
+    },
     Resetting {
+        /// Keep changelog pins until compute acknowledges the partial-graph reset. Before that
+        /// acknowledgment, snapshot-backfill executors may still be stopping and reading logs.
         pinned_upstream_tables: HashSet<TableId>,
         subscriptions_to_drop: Vec<PbSubscriptionUpstreamInfo>,
         notifiers: Vec<CollectionNotifier>,
@@ -90,13 +96,6 @@ pub(crate) enum IndependentCheckpointJobControl {
 }
 
 impl IndependentCheckpointJob {
-    fn partial_graph_id(&self) -> PartialGraphId {
-        match self {
-            Self::CreatingStreamingJob(j) => j.partial_graph_id(),
-            Self::BatchRefresh(j) => j.partial_graph_id(),
-        }
-    }
-
     fn can_drop_independently(&self) -> bool {
         match self {
             Self::CreatingStreamingJob(j) => j.can_drop_independently(),
@@ -104,7 +103,7 @@ impl IndependentCheckpointJob {
         }
     }
 
-    fn pinned_upstream_tables(&self) -> HashSet<TableId> {
+    fn pinned_upstream_tables(&self) -> &HashSet<TableId> {
         match self {
             Self::CreatingStreamingJob(j) => j.pinned_upstream_tables(),
             Self::BatchRefresh(j) => j.pinned_upstream_tables(),
@@ -113,31 +112,40 @@ impl IndependentCheckpointJob {
 }
 
 impl IndependentCheckpointJobControl {
-    pub(crate) fn creating_streaming_job(job: CreatingStreamingJobControl) -> Self {
-        Self::Running(IndependentCheckpointJob::CreatingStreamingJob(job))
+    pub(crate) fn creating_streaming_job(
+        job_id: JobId,
+        partial_graph_id: PartialGraphId,
+        job: CreatingStreamingJobControl,
+    ) -> Self {
+        Self::Running {
+            job_id,
+            partial_graph_id,
+            job: IndependentCheckpointJob::CreatingStreamingJob(job),
+        }
     }
 
-    pub(crate) fn batch_refresh(job: BatchRefreshJobCheckpointControl) -> Self {
-        Self::Running(IndependentCheckpointJob::BatchRefresh(job))
+    pub(crate) fn batch_refresh(
+        job_id: JobId,
+        partial_graph_id: PartialGraphId,
+        job: BatchRefreshJobCheckpointControl,
+    ) -> Self {
+        Self::Running {
+            job_id,
+            partial_graph_id,
+            job: IndependentCheckpointJob::BatchRefresh(job),
+        }
     }
 
     pub(crate) fn running(&self) -> Option<&IndependentCheckpointJob> {
         match self {
-            Self::Running(job) => Some(job),
+            Self::Running { job, .. } => Some(job),
             Self::Resetting { .. } => None,
         }
     }
 
     pub(crate) fn running_mut(&mut self) -> Option<&mut IndependentCheckpointJob> {
         match self {
-            Self::Running(job) => Some(job),
-            Self::Resetting { .. } => None,
-        }
-    }
-
-    pub(crate) fn into_running(self) -> Option<IndependentCheckpointJob> {
-        match self {
-            Self::Running(job) => Some(job),
+            Self::Running { job, .. } => Some(job),
             Self::Resetting { .. } => None,
         }
     }
@@ -151,10 +159,12 @@ impl IndependentCheckpointJobControl {
 
     /// Collect a barrier and return whether a checkpoint should be forced in the next barrier.
     pub(crate) fn collect(&mut self, collected_barrier: CollectedBarrier<'_>) -> bool {
-        match self.running_mut() {
-            Some(IndependentCheckpointJob::CreatingStreamingJob(j)) => j.collect(collected_barrier),
-            Some(IndependentCheckpointJob::BatchRefresh(j)) => j.collect(collected_barrier),
-            None => false,
+        let job = self
+            .running_mut()
+            .expect("barriers should only be collected from a running partial graph");
+        match job {
+            IndependentCheckpointJob::CreatingStreamingJob(j) => j.collect(collected_barrier),
+            IndependentCheckpointJob::BatchRefresh(j) => j.collect(collected_barrier),
         }
     }
 
@@ -168,13 +178,13 @@ impl IndependentCheckpointJobControl {
         }
     }
 
-    pub(crate) fn pinned_upstream_tables(&self) -> HashSet<TableId> {
+    pub(crate) fn pinned_upstream_tables(&self) -> &HashSet<TableId> {
         match self {
-            Self::Running(job) => job.pinned_upstream_tables(),
+            Self::Running { job, .. } => job.pinned_upstream_tables(),
             Self::Resetting {
                 pinned_upstream_tables,
                 ..
-            } => pinned_upstream_tables.clone(),
+            } => pinned_upstream_tables,
         }
     }
 
@@ -216,7 +226,7 @@ impl IndependentCheckpointJobControl {
                 }
                 subscriptions_to_drop
             }
-            Self::Running(_) => {
+            Self::Running { .. } => {
                 panic!("should be resetting when receiving reset partial graph resp")
             }
         }
@@ -224,7 +234,6 @@ impl IndependentCheckpointJobControl {
 
     pub(crate) fn drop(
         &mut self,
-        job_id: JobId,
         notifier: Option<&mut NotifierStarter>,
         partial_graph_manager: &mut PartialGraphManager,
     ) -> bool {
@@ -233,17 +242,23 @@ impl IndependentCheckpointJobControl {
                 notifiers.extend(notifier.map(NotifierStarter::add_notify));
                 true
             }
-            Self::Running(job) if !job.can_drop_independently() => false,
-            Self::Running(job) => {
-                let pinned_upstream_tables = job.pinned_upstream_tables();
-                let subscriptions_to_drop = pinned_upstream_tables
+            Self::Running { job, .. } if !job.can_drop_independently() => false,
+            Self::Running {
+                job_id,
+                partial_graph_id,
+                job,
+            } => {
+                let subscriptions_to_drop = job
+                    .pinned_upstream_tables()
                     .iter()
                     .map(|upstream_mv_table_id| PbSubscriptionUpstreamInfo {
                         subscriber_id: job_id.as_subscriber_id(),
                         upstream_mv_table_id: *upstream_mv_table_id,
                     })
                     .collect();
-                partial_graph_manager.reset_partial_graphs([job.partial_graph_id()]);
+                // Resetting must keep owning the pins after the concrete job is replaced.
+                let pinned_upstream_tables = job.pinned_upstream_tables().clone();
+                partial_graph_manager.reset_partial_graphs([*partial_graph_id]);
                 *self = Self::Resetting {
                     pinned_upstream_tables,
                     subscriptions_to_drop,
@@ -263,7 +278,9 @@ impl IndependentCheckpointJobControl {
     /// meaning caller should not issue a new reset request.
     pub(crate) fn reset(self) -> bool {
         match self {
-            Self::Running(_) => false,
+            // Running jobs have no reset state to drain. Recovery will issue the partial-graph
+            // reset after rebuilding its reset plan.
+            Self::Running { .. } => false,
             Self::Resetting { notifiers, .. } => {
                 for notifier in notifiers {
                     notifier.notify_collected();
@@ -290,7 +307,7 @@ mod tests {
         assert!(job.running().is_none());
         assert!(job.gen_backfill_progress().is_none());
         assert!(job.gen_fragment_backfill_progress().is_empty());
-        assert_eq!(job.pinned_upstream_tables(), pinned_upstream_tables);
+        assert_eq!(job.pinned_upstream_tables(), &pinned_upstream_tables);
         assert!(job.fragment_infos().is_none());
         assert!(job.reset());
     }
