@@ -4012,11 +4012,19 @@ fn validate_sink_props(
             options_with_secret.as_secret().clone(),
         )
         .map_err(MetaError::from)?;
+    let resolved_alter_props = altered_field_names
+        .iter()
+        .filter_map(|field_name| {
+            resolved_props
+                .get(field_name)
+                .map(|value| (field_name.clone(), value.clone()))
+        })
+        .collect();
 
     match_sink_name_str!(
         connector_type,
         SinkType,
-        SinkType::validate_alter_config(&resolved_props),
+        SinkType::validate_alter_config_change(&resolved_props, &resolved_alter_props),
         |sink: &str| Err(SinkError::Config(anyhow!("unsupported sink type {}", sink)))
     )?;
 
