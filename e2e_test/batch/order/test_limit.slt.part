@@ -304,6 +304,29 @@ Caused by these errors (recent errors listed first):
   2: expects an integer or expression that can be evaluated to an integer after LIMIT, but found non-const expression
 
 
+# expression and parameter support in the offset clause
+# Regression test for https://github.com/risingwavelabs/risingwave/issues/23345
+query I
+SELECT * FROM generate_series(0,4,1) as t(v) order by v OFFSET 1+2;
+----
+3
+4
+
+query I
+SELECT * FROM generate_series(0,4,1) as t(v) order by v LIMIT 2 OFFSET 1.5*2;
+----
+3
+4
+
+# A non-constant expression after OFFSET is rejected.
+statement error
+SELECT * FROM generate_series(0,3,1) as t(v) order by v OFFSET generate_series(1, 2);
+
+# A negative offset is rejected.
+statement error
+SELECT * FROM generate_series(0,3,1) as t(v) order by v OFFSET -1;
+
+
 # Subqueries that return negative values
 statement error
 SELECT * FROM integers as int LIMIT (SELECT -1);
