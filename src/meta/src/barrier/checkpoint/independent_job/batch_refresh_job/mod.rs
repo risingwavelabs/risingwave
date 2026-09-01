@@ -1069,13 +1069,13 @@ impl BatchRefreshJobCheckpointControl {
         }
     }
 
-    pub(super) fn pinned_upstream_tables(&self) -> HashSet<TableId> {
+    pub(super) fn pinned_upstream_tables(&self) -> &HashSet<TableId> {
         match &self.status {
             BatchRefreshJobStatus::ConsumingSnapshot { .. }
             | BatchRefreshJobStatus::FinishingSnapshot { .. }
             | BatchRefreshJobStatus::ConsumingLogStore { .. }
             | BatchRefreshJobStatus::InitializingBatchRefresh { .. }
-            | BatchRefreshJobStatus::Idle { .. } => self.snapshot_backfill_upstream_tables.clone(),
+            | BatchRefreshJobStatus::Idle { .. } => &self.snapshot_backfill_upstream_tables,
         }
     }
 
@@ -1431,12 +1431,6 @@ impl BatchRefreshLogicalFragments {
             fragments: ctx.fragments.clone(),
             downstreams: ctx.downstreams.clone(),
         }
-    }
-}
-
-impl BatchRefreshJobCheckpointControl {
-    pub(super) fn partial_graph_id(&self) -> PartialGraphId {
-        self.partial_graph_id
     }
 }
 

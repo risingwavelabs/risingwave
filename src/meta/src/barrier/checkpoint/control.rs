@@ -510,6 +510,8 @@ impl CheckpointControl {
         database_id: DatabaseId,
         job_id: JobId,
     ) {
+        // This is called synchronously after `start_batch_refresh_run` returns `true`, with no
+        // barrier-worker event in between that could transition the job to Resetting.
         let database = self
             .databases
             .get_mut(&database_id)
@@ -864,7 +866,7 @@ impl DatabaseCheckpointControl {
     fn collect_backfill_pinned_upstream_tables(&self) -> HashSet<TableId> {
         self.independent_checkpoint_job_controls
             .values()
-            .flat_map(|job| job.pinned_upstream_tables())
+            .flat_map(|job| job.pinned_upstream_tables().iter().copied())
             .collect()
     }
 
@@ -1035,10 +1037,12 @@ impl DatabaseCheckpointControl {
                 debug!(epoch, %job_id, "finish creating job");
                 // It's safe to remove the creating job, because on CompleteJobType::Finished,
                 // all previous barriers have been collected and completed.
-                let Some(IndependentCheckpointJob::CreatingStreamingJob(creating_streaming_job)) =
-                    self.independent_checkpoint_job_controls
-                        .remove(&job_id)
-                        .and_then(IndependentCheckpointJobControl::into_running)
+                // `finished_jobs` was populated above only from a Running creating job, and the
+                // map cannot change between that scan and this removal.
+                let Some(IndependentCheckpointJobControl::Running {
+                    job: IndependentCheckpointJob::CreatingStreamingJob(creating_streaming_job),
+                    ..
+                }) = self.independent_checkpoint_job_controls.remove(&job_id)
                 else {
                     panic!("finished job {job_id} should be a creating streaming job");
                 };
@@ -1234,7 +1238,7 @@ impl DatabaseCheckpointControl {
                 let Some(job) = self.independent_checkpoint_job_controls.get_mut(job_id) else {
                     return true;
                 };
-                !job.drop(*job_id, notifier_start.as_mut(), partial_graph_manager)
+                !job.drop(notifier_start.as_mut(), partial_graph_manager)
             });
             if streaming_job_ids.is_empty() {
                 if let Some(notifier) = notifier_start {
@@ -1348,6 +1352,8 @@ impl DatabaseCheckpointControl {
 
     /// Get the last committed epoch for a batch refresh job.
     pub(crate) fn get_batch_refresh_trigger_info(&self, job_id: JobId) -> u64 {
+        // `CheckpointControl::next_event` emits a trigger only after matching this job as a
+        // Running batch-refresh job. The worker reads this value before awaiting any other work.
         let job = self
             .independent_checkpoint_job_controls
             .get(&job_id)
@@ -1373,6 +1379,8 @@ impl DatabaseCheckpointControl {
         actor_id_counter: &AtomicU32,
         partial_graph_manager: &mut PartialGraphManager,
     ) -> MetaResult<bool> {
+        // The global barrier worker handles the trigger serially. Although metadata loading is
+        // asynchronous, it does not process a drop/reset event before reaching this call.
         let job = self
             .independent_checkpoint_job_controls
             .get_mut(&job_id)

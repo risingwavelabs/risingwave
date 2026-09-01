@@ -226,63 +226,49 @@ impl CreatingStreamingJobControl {
         let opts = &partial_graph_manager.control_stream_manager().env.opts;
         let max_pending_barrier_num = snapshot_backfill_max_pending_barrier_num(opts);
 
-        let job_control = entry.insert(IndependentCheckpointJobControl::creating_streaming_job(
-            Self {
-                partial_graph_id,
-                job_id,
-                snapshot_backfill_upstream_tables,
-                max_committed_epoch: None,
-                snapshot_epoch,
-                status: CreatingStreamingJobStatus::PlaceHolder, // filled in later code
-                max_lagged_barrier_num,
-                max_pending_barrier_num,
-                upstream_lag: GLOBAL_META_METRICS
-                    .snapshot_backfill_lag
-                    .with_guarded_label_values(&[&format!("{}", job_id)]),
-                node_actors,
-                state_table_ids,
-            },
-        ));
+        let mut job = Self {
+            partial_graph_id,
+            job_id,
+            snapshot_backfill_upstream_tables,
+            max_committed_epoch: None,
+            snapshot_epoch,
+            status: CreatingStreamingJobStatus::PlaceHolder, // filled in later code
+            max_lagged_barrier_num,
+            max_pending_barrier_num,
+            upstream_lag: GLOBAL_META_METRICS
+                .snapshot_backfill_lag
+                .with_guarded_label_values(&[&format!("{}", job_id)]),
+            node_actors,
+            state_table_ids,
+        };
 
         let mut graph_adder = partial_graph_manager.add_partial_graph(
             partial_graph_id,
             CreatingStreamingJobBarrierStats::new(job_id, snapshot_epoch),
         );
 
-        let inject_result = {
-            let Some(IndependentCheckpointJob::CreatingStreamingJob(job)) =
-                job_control.running_mut()
-            else {
-                unreachable!()
-            };
-            Self::inject_barrier(
-                partial_graph_id,
-                graph_adder.manager(),
-                &job.node_actors,
-                &job.state_table_ids,
-                false,
-                initial_barrier_info,
-                Some(actors_to_create),
-                Some(initial_mutation),
-                notifier,
-                Some(create_info),
-            )
-        };
-        if let Err(e) = inject_result {
+        if let Err(e) = Self::inject_barrier(
+            partial_graph_id,
+            graph_adder.manager(),
+            &job.node_actors,
+            &job.state_table_ids,
+            false,
+            initial_barrier_info,
+            Some(actors_to_create),
+            Some(initial_mutation),
+            notifier,
+            Some(create_info),
+        ) {
             graph_adder.failed();
-            *job_control = IndependentCheckpointJobControl::Resetting {
-                pinned_upstream_tables: job_control.pinned_upstream_tables(),
+            entry.insert(IndependentCheckpointJobControl::Resetting {
+                pinned_upstream_tables: job.snapshot_backfill_upstream_tables,
                 subscriptions_to_drop: vec![],
                 notifiers: vec![],
-            };
+            });
             return Err(e);
         }
 
         graph_adder.added();
-        let Some(IndependentCheckpointJob::CreatingStreamingJob(job)) = job_control.running_mut()
-        else {
-            unreachable!()
-        };
         let job_info = CreatingJobInfo {
             fragment_infos,
             upstream_fragment_downstreams: info.upstream_fragment_downstreams.clone(),
@@ -322,6 +308,15 @@ impl CreatingStreamingJobControl {
                 pending_non_checkpoint_barriers,
             };
         }
+        let job_control = entry.insert(IndependentCheckpointJobControl::creating_streaming_job(
+            job_id,
+            partial_graph_id,
+            job,
+        ));
+        let Some(IndependentCheckpointJob::CreatingStreamingJob(job)) = job_control.running_mut()
+        else {
+            unreachable!()
+        };
         Ok(job)
     }
 
@@ -805,8 +800,8 @@ impl CreatingStreamingJobControl {
         }
     }
 
-    pub(super) fn pinned_upstream_tables(&self) -> HashSet<TableId> {
-        self.snapshot_backfill_upstream_tables.clone()
+    pub(super) fn pinned_upstream_tables(&self) -> &HashSet<TableId> {
+        &self.snapshot_backfill_upstream_tables
     }
 
     fn inject_barrier(
@@ -1077,10 +1072,6 @@ impl CreatingStreamingJobControl {
             }
             CreatingStreamingJobStatus::Finishing(_, tracking_job) => tracking_job,
         }
-    }
-
-    pub(super) fn partial_graph_id(&self) -> PartialGraphId {
-        self.partial_graph_id
     }
 
     /// Whether the job can be dropped by resetting its independent partial graph.

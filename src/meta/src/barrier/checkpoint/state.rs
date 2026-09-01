@@ -805,8 +805,14 @@ impl DatabaseCheckpointControl {
                         );
                     }
 
-                    self.independent_checkpoint_job_controls
-                        .insert(job_id, IndependentCheckpointJobControl::batch_refresh(job));
+                    self.independent_checkpoint_job_controls.insert(
+                        job_id,
+                        IndependentCheckpointJobControl::batch_refresh(
+                            job_id,
+                            to_partial_graph_id(self.database_id, Some(job_id)),
+                            job,
+                        ),
+                    );
 
                     // Register permanent subscriber (never unregistered until MV is dropped)
                     for upstream_mv_table_id in snapshot_backfill_info_clone
@@ -1748,14 +1754,12 @@ impl DatabaseCheckpointControl {
             }
         };
 
-        let can_drop_pending_subscriptions = matches!(
+        if matches!(
             mutation,
             None | Some(PbMutation::Update(_)) | Some(PbMutation::DropSubscriptions(_))
-        );
-        if can_drop_pending_subscriptions
-            && !self
-                .pending_independent_job_subscriptions_to_drop
-                .is_empty()
+        ) && !self
+            .pending_independent_job_subscriptions_to_drop
+            .is_empty()
         {
             let subscriptions_to_drop = self.take_pending_independent_job_subscriptions_to_drop();
             if !subscriptions_to_drop.is_empty() {

@@ -1125,7 +1125,11 @@ impl PartialGraphRecoverer<'_> {
             )?;
             independent_checkpoint_job_controls.insert(
                 job_id,
-                IndependentCheckpointJobControl::creating_streaming_job(job),
+                IndependentCheckpointJobControl::creating_streaming_job(
+                    job_id,
+                    to_partial_graph_id(database_id, Some(job_id)),
+                    job,
+                ),
             );
         }
 
@@ -1198,8 +1202,14 @@ impl PartialGraphRecoverer<'_> {
                 self,
                 refresh_interval_sec,
             )?;
-            independent_checkpoint_job_controls
-                .insert(job_id, IndependentCheckpointJobControl::batch_refresh(job));
+            independent_checkpoint_job_controls.insert(
+                job_id,
+                IndependentCheckpointJobControl::batch_refresh(
+                    job_id,
+                    to_partial_graph_id(database_id, Some(job_id)),
+                    job,
+                ),
+            );
         }
 
         self.control_stream_manager()
