@@ -325,12 +325,7 @@ where
             Some(context)
                 if context.sink_id == self.sink_id
                     && context.task_id == expected_task
-                    && context.phase == expected_phase as i32
-                    && match expected_phase {
-                        Phase::Begin => context.resolver_task_input.is_some(),
-                        Phase::End => context.resolver_task_input.is_none(),
-                        Phase::Unspecified => false,
-                    } =>
+                    && context.phase == expected_phase as i32 =>
             {
                 Ok(())
             }
@@ -370,24 +365,17 @@ where
         };
         if context.phase == Phase::End as i32 {
             bail!(
-                "iceberg pk-index writer {} received unexpected switch-to-input in Normal mode for task {}",
+                "iceberg pk-index writer {} received unexpected End in Normal mode for task {}",
                 self.sink_id,
                 context.task_id
             );
         }
         if context.phase != Phase::Begin as i32 {
             bail!(
-                "iceberg pk-index writer {} expected switch-to-resolver update for task {}, got {:?}",
+                "iceberg pk-index writer {} expected Begin context for task {}, got {:?}",
                 self.sink_id,
                 context.task_id,
                 context.phase
-            );
-        }
-        if context.resolver_task_input.is_none() {
-            bail!(
-                "iceberg pk-index writer {} missing resolver task input for task {}",
-                self.sink_id,
-                context.task_id
             );
         }
         Ok(Some(context.task_id))

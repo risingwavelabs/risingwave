@@ -194,8 +194,8 @@ impl FragmentActorBuilder {
 
             NodeBody::IcebergWithPkIndexWriter(_) => {
                 let mut new_stream_node = stream_node.clone();
-                // Frontend marks the dormant resolver merge. Meta also marks the normal merge,
-                // because applying compaction temporarily disconnects that side of the writer.
+                // Compaction alternates between the normal and resolver inputs, so either merge
+                // must be able to remain alive while temporarily disconnected.
                 for (input, new_input) in stream_node
                     .input
                     .iter()

@@ -58,8 +58,8 @@ pub trait PositionDeleteHandler: Send + 'static {
 /// # Compaction
 ///
 /// Compaction rewrites the very data files this executor's resident delete state is keyed by. On
-/// the switch-to-input barrier, the merger therefore discards that state and re-seeds from the
-/// post-compaction snapshot.
+/// the `End` half of a coordinated compaction barrier pair, the merger therefore discards that
+/// state and re-seeds from the post-compaction snapshot.
 ///
 /// Input schema: [`file_path`: Varchar, `position`: int64]
 /// Output: Barriers and watermarks only; no data chunks (terminal executor in the stream graph).
@@ -125,7 +125,7 @@ where
                 }
                 Message::Barrier(barrier) => {
                     barrier.assume_no_update_vnode_bitmap(self.actor_id)?;
-                    let compaction_resumed = self.compaction_resume_task_id(&barrier)?;
+                    let compaction_resumed = self.compaction_resume_task_id(&barrier);
                     if compaction_resumed.is_some() && !barrier.is_checkpoint() {
                         bail!(
                             "iceberg pk-index merger {} received a non-checkpoint compaction resume barrier {:?}",
@@ -170,25 +170,16 @@ where
         }
     }
 
-    /// The compaction task id if `barrier` switches this sink back to its normal input.
-    fn compaction_resume_task_id(
-        &self,
-        barrier: &Barrier,
-    ) -> StreamExecutorResult<Option<IcebergCompactionTaskId>> {
+    /// The compaction task id if `barrier` carries the `End` half of a coordinated compaction
+    /// barrier pair for this sink, meaning the compaction commits under `barrier.epoch.prev`.
+    fn compaction_resume_task_id(&self, barrier: &Barrier) -> Option<IcebergCompactionTaskId> {
         match barrier.iceberg_pk_index_compaction() {
             Some(context)
                 if context.sink_id == self.sink_id && context.phase == Phase::End as i32 =>
             {
-                if context.resolver_task_input.is_some() {
-                    bail!(
-                        "iceberg pk-index merger {} received resolver task input on switch-to-input for task {}",
-                        self.sink_id,
-                        context.task_id
-                    );
-                }
-                Ok(Some(context.task_id))
+                Some(context.task_id)
             }
-            _ => Ok(None),
+            _ => None,
         }
     }
 }
