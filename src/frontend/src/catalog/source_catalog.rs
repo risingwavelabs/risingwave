@@ -28,6 +28,8 @@ use crate::error::Result;
 use crate::session::current::notice_to_user;
 use crate::user::UserId;
 
+pub(crate) const SENSITIVE_PROPERTY_KEYWORDS: &[&str] = &["password"];
+
 /// This struct `SourceCatalog` is used in frontend.
 /// Compared with `PbSource`, it only maintains information used during optimization.
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
@@ -124,6 +126,26 @@ impl SourceCatalog {
     /// Returns the SQL definition when the source was created, purified with best effort.
     pub fn create_sql_purified(&self) -> String {
         self.create_sql_ast_purified()
+            .and_then(|stmt| stmt.try_to_string().map_err(Into::into))
+            .unwrap_or_else(|_| self.create_sql())
+    }
+
+    /// Returns the purified SQL definition with inline password properties redacted.
+    pub fn create_sql_redacted(&self) -> String {
+        self.create_sql_ast_purified()
+            .map(|mut statement| {
+                let ast::Statement::CreateSource { stmt: source_stmt } = &mut statement else {
+                    return statement;
+                };
+
+                for option in &mut source_stmt.with_properties.0 {
+                    if option.is_sensitive(SENSITIVE_PROPERTY_KEYWORDS) {
+                        option.redact();
+                    }
+                }
+
+                statement
+            })
             .and_then(|stmt| stmt.try_to_string().map_err(Into::into))
             .unwrap_or_else(|_| self.create_sql())
     }

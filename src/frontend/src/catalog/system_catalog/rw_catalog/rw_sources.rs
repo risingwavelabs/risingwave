@@ -15,10 +15,12 @@
 use risingwave_common::id::{ConnectionId, SchemaId, SourceId, TableId, UserId};
 use risingwave_common::types::{Fields, JsonbVal, Timestamptz};
 use risingwave_frontend_macro::system_catalog;
+use risingwave_sqlparser::ast::{REDACTED_SQL_OPTION_VALUE, is_sensitive_sql_option_name};
 use serde_json::{Map as JsonMap, json};
 
 use crate::WithOptionsSecResolved;
 use crate::catalog::catalog_service::CatalogReadGuard;
+use crate::catalog::source_catalog::SENSITIVE_PROPERTY_KEYWORDS;
 use crate::catalog::system_catalog::{SysCatalogReaderImpl, get_acl_items};
 use crate::error::Result;
 use crate::handler::create_source::UPSTREAM_SOURCE_KEY;
@@ -93,7 +95,7 @@ fn read_rw_sources_info(reader: &SysCatalogReaderImpl) -> Result<Vec<RwSource>> 
                     append_only: source.append_only,
                     associated_table_id: source.associated_table_id,
                     connection_id: source.connection_id,
-                    definition: source.create_sql_purified(),
+                    definition: source.create_sql_redacted(),
                     acl: get_acl_items(source.id, false, &users, username_map),
                     initialized_at: source.initialized_at_epoch.map(|e| e.as_timestamptz()),
                     created_at: source.created_at_epoch.map(|e| e.as_timestamptz()),
@@ -130,7 +132,12 @@ pub fn serialize_props_with_secret(
     let mut result: JsonMap<String, serde_json::Value> = JsonMap::new();
 
     for (k, v) in inner {
-        result.insert(k, json!({"type": "plaintext", "value": v}));
+        let value = if is_sensitive_sql_option_name(&k, SENSITIVE_PROPERTY_KEYWORDS) {
+            REDACTED_SQL_OPTION_VALUE
+        } else {
+            &v
+        };
+        result.insert(k, json!({"type": "plaintext", "value": value}));
     }
     for (k, v) in secret_ref {
         let secret = catalog_reader

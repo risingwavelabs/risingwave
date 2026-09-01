@@ -59,6 +59,13 @@ use crate::tokenizer::Tokenizer;
 
 pub type RedactSqlOptionKeywordsRef = Arc<HashSet<String>>;
 
+pub const REDACTED_SQL_OPTION_VALUE: &str = "<redacted>";
+
+pub fn is_sensitive_sql_option_name(name: &str, keywords: &[&str]) -> bool {
+    let name = name.to_ascii_lowercase();
+    keywords.iter().any(|keyword| name.contains(keyword))
+}
+
 task_local::task_local! {
     pub static REDACT_SQL_OPTION_KEYWORDS: RedactSqlOptionKeywordsRef;
 }
@@ -3295,6 +3302,17 @@ pub struct SqlOption {
     pub value: SqlOptionValue,
 }
 
+impl SqlOption {
+    pub fn is_sensitive(&self, keywords: &[&str]) -> bool {
+        matches!(&self.value, SqlOptionValue::Value(_))
+            && is_sensitive_sql_option_name(&self.name.real_value(), keywords)
+    }
+
+    pub fn redact(&mut self) {
+        self.value.redact();
+    }
+}
+
 impl fmt::Display for SqlOption {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let should_redact = REDACT_SQL_OPTION_KEYWORDS
@@ -3347,6 +3365,14 @@ impl SqlOptionValue {
     /// Returns a `NULL` value.
     pub const fn null() -> Self {
         Self::Value(Value::Null)
+    }
+
+    pub fn redact(&mut self) {
+        if matches!(self, Self::Value(_)) {
+            *self = Self::Value(Value::SingleQuotedString(
+                REDACTED_SQL_OPTION_VALUE.to_owned(),
+            ));
+        }
     }
 }
 

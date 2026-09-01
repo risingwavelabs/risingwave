@@ -928,7 +928,7 @@ pub fn handle_show_create_object(
                     )
                 })?
                 .ok_or_else(|| CatalogError::not_found("source", name.to_string()))?;
-            (source.create_sql_purified(), schema)
+            (source.create_sql_redacted(), schema)
         }
         ShowCreateType::Index => {
             let (index, schema) = schema_path
