@@ -815,7 +815,10 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
             // The gap check below walks `[resume_pos, start)`; positions the freeze already proved
             // dead (`dead_prefix_end`, monotone under appends) need no walk, so start it past them.
             let gap_from = resume_pos.max(run.matcher.dead_prefix_end());
-            let Some(start) = run.rows.iter().position(|r| Seq(r.seq) == start_seq) else {
+            // `seq` is strictly increasing in buffer position — rows are appended in mint order and
+            // the recovery rebuild re-feeds them in key order — the same invariant the dead-prefix
+            // prune already binary-searches on.
+            let Ok(start) = run.rows.binary_search_by_key(&start_seq.0, |r| r.seq) else {
                 // A provisional match referencing an unfed seq is a matcher-invariant violation.
                 // Fail loud: breaking here instead would re-hit the same match on every visit —
                 // the partition would silently never emit or evict again while its state grows.
@@ -1163,6 +1166,13 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                     matcher: IncrementalMatcher::new(nfa.clone(), skip.clone()),
                     held: None,
                 });
+                // The emit path and the dead-prefix prune binary-search `rows` by `seq`; pin the
+                // invariant where it is produced: state-table key order must feed each partition's
+                // seqs in strictly increasing order (the ordered-input contract).
+                debug_assert!(
+                    run.rows.last().is_none_or(|last| last.seq < seq),
+                    "state-table iteration fed a non-increasing seq into a partition buffer"
+                );
                 run.rows.push(BufferedRow {
                     seq,
                     order_key,
