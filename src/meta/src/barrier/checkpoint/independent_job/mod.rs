@@ -79,9 +79,19 @@ pub(crate) enum IndependentCheckpointJob {
     BatchRefresh(BatchRefreshJobCheckpointControl),
 }
 
+#[derive(Debug, PartialEq, Eq)]
+pub(crate) enum IndependentCheckpointJobStatus {
+    /// The initial barrier cannot be completed until the database has committed the snapshot
+    /// epoch.
+    Initial { snapshot_epoch: u64 },
+    /// The upstream database has committed the snapshot epoch, so barriers may complete.
+    Ready,
+}
+
 /// The lifecycle shared by all independent checkpoint jobs.
 pub(crate) enum IndependentCheckpointJobControl {
     Running {
+        status: IndependentCheckpointJobStatus,
         job_id: JobId,
         partial_graph_id: PartialGraphId,
         job: IndependentCheckpointJob,
@@ -111,13 +121,25 @@ impl IndependentCheckpointJob {
     }
 }
 
+impl IndependentCheckpointJobStatus {
+    fn on_upstream_database_ack_completed(&mut self, committed_epoch: u64) {
+        if let Self::Initial { snapshot_epoch } = self
+            && committed_epoch >= *snapshot_epoch
+        {
+            *self = Self::Ready;
+        }
+    }
+}
+
 impl IndependentCheckpointJobControl {
     pub(crate) fn creating_streaming_job(
         job_id: JobId,
         partial_graph_id: PartialGraphId,
+        status: IndependentCheckpointJobStatus,
         job: CreatingStreamingJobControl,
     ) -> Self {
         Self::Running {
+            status,
             job_id,
             partial_graph_id,
             job: IndependentCheckpointJob::CreatingStreamingJob(job),
@@ -127,9 +149,11 @@ impl IndependentCheckpointJobControl {
     pub(crate) fn batch_refresh(
         job_id: JobId,
         partial_graph_id: PartialGraphId,
+        status: IndependentCheckpointJobStatus,
         job: BatchRefreshJobCheckpointControl,
     ) -> Self {
         Self::Running {
+            status,
             job_id,
             partial_graph_id,
             job: IndependentCheckpointJob::BatchRefresh(job),
@@ -147,6 +171,27 @@ impl IndependentCheckpointJobControl {
         match self {
             Self::Running { job, .. } => Some(job),
             Self::Resetting { .. } => None,
+        }
+    }
+
+    pub(crate) fn ready_mut(&mut self) -> Option<&mut IndependentCheckpointJob> {
+        match self {
+            Self::Running {
+                status: IndependentCheckpointJobStatus::Ready,
+                job,
+                ..
+            } => Some(job),
+            Self::Running {
+                status: IndependentCheckpointJobStatus::Initial { .. },
+                ..
+            }
+            | Self::Resetting { .. } => None,
+        }
+    }
+
+    pub(crate) fn on_upstream_database_ack_completed(&mut self, committed_epoch: u64) {
+        if let Self::Running { status, .. } = self {
+            status.on_upstream_database_ack_completed(committed_epoch);
         }
     }
 
@@ -200,14 +245,24 @@ impl IndependentCheckpointJobControl {
         partial_graph_manager: &mut PartialGraphManager,
         epoch: u64,
     ) {
-        match self.running_mut() {
-            Some(IndependentCheckpointJob::CreatingStreamingJob(j)) => {
-                j.ack_completed(partial_graph_manager, epoch)
+        match self {
+            Self::Running {
+                status: IndependentCheckpointJobStatus::Ready,
+                job: IndependentCheckpointJob::CreatingStreamingJob(j),
+                ..
+            } => j.ack_completed(partial_graph_manager, epoch),
+            Self::Running {
+                status: IndependentCheckpointJobStatus::Ready,
+                job: IndependentCheckpointJob::BatchRefresh(j),
+                ..
+            } => j.ack_completed(partial_graph_manager, epoch),
+            Self::Running {
+                status: IndependentCheckpointJobStatus::Initial { .. },
+                ..
+            } => {
+                panic!("an initial job should transition to ready before completing a barrier")
             }
-            Some(IndependentCheckpointJob::BatchRefresh(j)) => {
-                j.ack_completed(partial_graph_manager, epoch)
-            }
-            None => {
+            Self::Resetting { .. } => {
                 // The job was dropped while the completing task was running in the background.
                 // The partial graph has already been reset, so skip the ack.
             }
@@ -247,6 +302,7 @@ impl IndependentCheckpointJobControl {
                 job_id,
                 partial_graph_id,
                 job,
+                ..
             } => {
                 let subscriptions_to_drop = job
                     .pinned_upstream_tables()
@@ -325,5 +381,20 @@ mod tests {
         };
 
         assert_eq!(job.on_partial_graph_reset(), subscriptions_to_drop);
+    }
+
+    #[test]
+    fn test_initial_status_transitions_on_upstream_database_ack() {
+        let mut status = IndependentCheckpointJobStatus::Initial { snapshot_epoch: 10 };
+
+        status.on_upstream_database_ack_completed(9);
+        assert_eq!(
+            status,
+            IndependentCheckpointJobStatus::Initial { snapshot_epoch: 10 }
+        );
+        status.on_upstream_database_ack_completed(10);
+        assert_eq!(status, IndependentCheckpointJobStatus::Ready);
+        status.on_upstream_database_ack_completed(11);
+        assert_eq!(status, IndependentCheckpointJobStatus::Ready);
     }
 }
