@@ -160,6 +160,48 @@ fn new_test_iceberg_config(
     IcebergConfig::from_btreemap(values).unwrap()
 }
 
+#[tokio::test]
+async fn test_schedule_resolves_licensed_compaction_type_policy() {
+    let manager = build_test_manager().await;
+    assert!(
+        risingwave_common::license::Feature::IcebergCompaction
+            .check_available()
+            .is_ok()
+    );
+
+    for (write_mode, configured_type, expected_task_type) in [
+        (IcebergWriteMode::CopyOnWrite, None, TaskType::Auto),
+        (
+            IcebergWriteMode::CopyOnWrite,
+            Some(CompactionType::Full),
+            TaskType::Auto,
+        ),
+        (IcebergWriteMode::MergeOnRead, None, TaskType::Auto),
+        (
+            IcebergWriteMode::MergeOnRead,
+            Some(CompactionType::Full),
+            TaskType::Full,
+        ),
+    ] {
+        let mut config = new_test_iceberg_config(300, 3, CompactionType::Auto);
+        config.r#type = "upsert".to_owned();
+        config.write_mode = write_mode;
+        config.compaction_type = configured_type;
+
+        let (task_type, automatic_round_mode, _, _) = manager.resolve_schedule_values(&config);
+
+        assert_eq!(task_type, expected_task_type);
+        assert_eq!(
+            automatic_round_mode,
+            if write_mode == IcebergWriteMode::CopyOnWrite {
+                AutomaticRoundMode::SingleTask
+            } else {
+                AutomaticRoundMode::SequenceBounded
+            }
+        );
+    }
+}
+
 #[test]
 fn test_should_trigger_by_pending_commit_threshold() {
     let now = Instant::now();
@@ -395,7 +437,7 @@ async fn test_cow_automatic_compaction_uses_single_unbounded_task() {
     config.write_mode = risingwave_connector::sink::iceberg::IcebergWriteMode::CopyOnWrite;
     let mut track = manager.create_compaction_track(&config, now);
 
-    assert_eq!(track.task_type, TaskType::Full);
+    assert_eq!(track.task_type, TaskType::Auto);
     assert_eq!(track.automatic_round_mode, AutomaticRoundMode::SingleTask);
 
     track.record_observed_snapshot(committed_snapshot(10, 1000));
