@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{Context, anyhow};
+use anyhow::Context;
 use futures_async_stream::try_stream;
 use futures_util::stream::StreamExt;
 use risingwave_common::array::DataChunk;
@@ -214,7 +214,7 @@ fn validate_read_only_query(query: &str) -> Result<(), BatchError> {
         // the CTE list ends and the main statement begins. Using the
         // last close paren instead breaks for `WITH c AS (...) SELECT *
         // FROM t WHERE x IN (SELECT 1)`, where the trailing subquery's
-        // close paren would be mis-identified as the CTE boundary.
+        // close paren would be misidentified as the CTE boundary.
         let mut top_close_parens: Vec<usize> = Vec::new();
         let mut depth: i32 = 0;
         for (idx, c) in masked.char_indices() {
@@ -623,14 +623,14 @@ mod tests {
 
     /// `INTO` mentioned in a column list (e.g. inside parentheses) is
     /// fine — only top-level `INTO` is rejected.
-     #[test]
-     fn validate_read_only_query_allows_into_in_subquery() {
+    #[test]
+    fn validate_read_only_query_allows_into_in_subquery() {
         // `IN` must not match the `INTO` keyword check.
         validate_read_only_query(
-             "WITH cte AS (SELECT 1 AS x) SELECT * FROM cte WHERE x IN (SELECT 1)",
+            "WITH cte AS (SELECT 1 AS x) SELECT * FROM cte WHERE x IN (SELECT 1)",
         )
         .unwrap();
         // `INTO` inside parentheses is not top level.
         validate_read_only_query("SELECT 1 AS [INTO] FROM t").unwrap();
-     }
+    }
 }

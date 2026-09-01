@@ -125,8 +125,8 @@ aws-credential-types = { version = "1", default-features = false, features = [
 ] }
 aws-endpoint = "0.60"
 aws-sdk-dynamodb = { version = "1", default-features = false, features = [
-    "rt-tokio",
     "default-https-client",
+    "rt-tokio",
 ] }
 aws-sdk-glue = { version = "1", default-features = false, features = [
     "default-https-client",

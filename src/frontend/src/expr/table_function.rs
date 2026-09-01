@@ -14,11 +14,12 @@
 
 use std::sync::Arc;
 
-use anyhow::{Context, anyhow};
+use anyhow::Context;
 use itertools::Itertools;
 use mysql_async::consts::ColumnType as MySqlColumnType;
 use mysql_async::prelude::*;
 use risingwave_common::array::arrow::IcebergArrowConvert;
+use risingwave_common::secret::LocalSecretManager;
 use risingwave_common::types::{DataType, ScalarImpl, StructType};
 use risingwave_connector::connector_common::sql_server::{
     MssqlConnectionConfig, describe_mssql_query,
@@ -33,7 +34,9 @@ pub use risingwave_pb::expr::table_function::PbType as TableFunctionType;
 use tokio_postgres::types::Type as TokioPgType;
 
 use super::{Expr, ExprImpl, ExprRewriter, Literal, RwResult, infer_type};
+use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::function_catalog::{FunctionCatalog, FunctionKind};
+use crate::catalog::root_catalog::SchemaPath;
 use crate::error::ErrorCode::BindError;
 use crate::expr::reject_impure;
 use crate::utils::FRONTEND_RUNTIME;
@@ -703,10 +706,12 @@ impl TableFunction {
                     // reject the query rather than silently coercing it —
                     // otherwise a typo could open a plaintext connection or
                     // bypass certificate validation.
-                    let encrypt = parse_strict_bool_arg(evaled_args.get(6), false)
-                        .context("invalid `encrypt` value for mssql_query: expected 'true' or 'false'")?;
-                    let trust_cert = parse_strict_bool_arg(evaled_args.get(7), true)
-                        .context("invalid `trust_cert` value for mssql_query: expected 'true' or 'false'")?;
+                    let encrypt = parse_strict_bool_arg(evaled_args.get(6), false).context(
+                        "invalid `encrypt` value for mssql_query: expected 'true' or 'false'",
+                    )?;
+                    let trust_cert = parse_strict_bool_arg(evaled_args.get(7), true).context(
+                        "invalid `trust_cert` value for mssql_query: expected 'true' or 'false'",
+                    )?;
 
                     let conn_config = MssqlConnectionConfig {
                         host: evaled_args[0].clone(),
