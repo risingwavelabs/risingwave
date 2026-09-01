@@ -19,6 +19,7 @@ package com.risingwave.connector.source.common;
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertThrows;
+import static org.junit.Assert.assertTrue;
 
 import com.risingwave.connector.api.source.SourceTypeE;
 import java.util.HashMap;
@@ -46,6 +47,23 @@ public class OracleConnectorConfigTest {
         assertEquals("online_catalog", properties.getProperty("log.mining.strategy"));
         assertEquals("initial", properties.getProperty("snapshot.mode"));
         assertEquals("RW_CDC_42", properties.getProperty("topic.prefix"));
+        assertEquals("300000", properties.getProperty("heartbeat.interval.ms"));
+        assertEquals(
+                "UPDATE APP.RW_HEARTBEAT SET HEARTBEAT = CASE HEARTBEAT WHEN 0 THEN 1 ELSE 0 END "
+                        + "WHERE ID = 1",
+                properties.getProperty("heartbeat.action.query"));
+    }
+
+    @Test
+    public void disablesOracleHeartbeatWhenIntervalIsAbsent() {
+        var userProps = oracleProperties();
+        userProps.remove(DbzConnectorConfig.HEARTBEAT_INTERVAL_KEY);
+        userProps.remove(DbzConnectorConfig.ORACLE_HEARTBEAT_TABLE_NAME);
+
+        var config = new DbzConnectorConfig(SourceTypeE.ORACLE, 42, null, userProps, false, false);
+
+        assertFalse(config.getResolvedDebeziumProps().containsKey("heartbeat.interval.ms"));
+        assertFalse(config.getResolvedDebeziumProps().containsKey("heartbeat.action.query"));
     }
 
     @Test
@@ -81,6 +99,42 @@ public class OracleConnectorConfigTest {
     }
 
     @Test
+    public void validatesOracleHeartbeatTableAndBuildsActionQuery() {
+        var heartbeatTable = OracleHeartbeatTable.parse("app.rw_heartbeat");
+        assertEquals("APP", heartbeatTable.owner());
+        assertEquals("RW_HEARTBEAT", heartbeatTable.table());
+        assertEquals("APP.RW_HEARTBEAT", heartbeatTable.qualifiedName());
+        assertEquals(
+                "UPDATE APP.RW_HEARTBEAT SET HEARTBEAT = CASE HEARTBEAT WHEN 0 THEN 1 ELSE 0 END "
+                        + "WHERE ID = 1",
+                heartbeatTable.actionQuery());
+
+        assertThrows(RuntimeException.class, () -> OracleHeartbeatTable.parse("RW_HEARTBEAT"));
+        assertThrows(
+                RuntimeException.class,
+                () -> OracleHeartbeatTable.parse("APP.RW_HEARTBEAT; DROP TABLE APP.CUSTOMERS"));
+    }
+
+    @Test
+    public void validatesOracleHeartbeatUpdatePrivilege() {
+        assertFalse(
+                OracleValidator.hasHeartbeatUpdatePrivilege(
+                        "C##DBZUSER", "APP", Set.of(), Set.of(), Set.of()));
+        assertTrue(
+                OracleValidator.hasHeartbeatUpdatePrivilege(
+                        "APP", "APP", Set.of(), Set.of(), Set.of()));
+        assertTrue(
+                OracleValidator.hasHeartbeatUpdatePrivilege(
+                        "C##DBZUSER", "APP", Set.of("UPDATE ANY TABLE"), Set.of(), Set.of()));
+        assertTrue(
+                OracleValidator.hasHeartbeatUpdatePrivilege(
+                        "C##DBZUSER", "APP", Set.of(), Set.of(), Set.of("C##DBZUSER")));
+        assertTrue(
+                OracleValidator.hasHeartbeatUpdatePrivilege(
+                        "C##DBZUSER", "APP", Set.of(), Set.of("CDC_ROLE"), Set.of("CDC_ROLE")));
+    }
+
+    @Test
     public void validatesOracleLoggingConfiguration() {
         OracleValidator.validateLoggingConfiguration("ARCHIVELOG", "YES", "YES");
 
@@ -105,6 +159,8 @@ public class OracleConnectorConfigTest {
         properties.put(DbzConnectorConfig.ORACLE_PDB_NAME, "FREEPDB1");
         properties.put(DbzConnectorConfig.ORACLE_SCHEMA_NAME, "APP");
         properties.put(DbzConnectorConfig.TABLE_NAME, "CUSTOMERS");
+        properties.put(DbzConnectorConfig.HEARTBEAT_INTERVAL_KEY, "300000");
+        properties.put(DbzConnectorConfig.ORACLE_HEARTBEAT_TABLE_NAME, "APP.RW_HEARTBEAT");
         return properties;
     }
 }
