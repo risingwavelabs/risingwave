@@ -526,20 +526,24 @@ pub(crate) mod tests {
         (query_execution, shutdown_rx)
     }
 
-    async fn receive_query_message(msg_receiver: &mut Receiver<QueryMessage>) -> QueryMessage {
-        tokio::time::timeout(Duration::from_secs(1), msg_receiver.recv())
+    async fn assert_receive_query_cancellation_message(msg_receiver: &mut Receiver<QueryMessage>) {
+        let message = tokio::time::timeout(Duration::from_secs(1), msg_receiver.recv())
             .await
             .expect("query cancellation message must arrive")
-            .expect("query control channel must remain open")
+            .expect("query control channel must remain open");
+        assert!(matches!(
+            message,
+            QueryMessage::CancelQuery(reason) if reason == "cancelled by user"
+        ));
     }
 
     async fn assert_no_query_message(msg_receiver: &mut Receiver<QueryMessage>) {
-        // Allow any incorrectly spawned cancellation task to enqueue its message first.
-        tokio::task::yield_now().await;
-        assert!(matches!(
-            msg_receiver.try_recv(),
-            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
-        ));
+        assert!(
+            tokio::time::timeout(Duration::from_millis(100), msg_receiver.recv())
+                .await
+                .is_err(),
+            "excluded query unexpectedly received a cancellation message"
+        );
     }
 
     /// Verifies that session cancellation targets only ordinary queries in that session, while
@@ -568,10 +572,7 @@ pub(crate) mod tests {
         query_manager.add_query(other_session_query_id.clone(), other_session_query.clone());
 
         query_manager.cancel_non_cursor_queries_in_session(target_session);
-        assert!(matches!(
-            receive_query_message(&mut cancellable_query_rx).await,
-            QueryMessage::CancelQuery(reason) if reason == "cancelled by user"
-        ));
+        assert_receive_query_cancellation_message(&mut cancellable_query_rx).await;
         assert_no_query_message(&mut cursor_query_rx).await;
         assert_no_query_message(&mut other_session_query_rx).await;
     }
