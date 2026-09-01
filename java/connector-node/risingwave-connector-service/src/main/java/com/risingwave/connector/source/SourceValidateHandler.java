@@ -231,6 +231,16 @@ public class SourceValidateHandler {
                     sqlServerValidator.validateAll();
                 }
                 break;
+            case ORACLE:
+                ensureRequiredProps(props, isCdcSourceJob);
+                ensurePropNotBlank(props, DbzConnectorConfig.ORACLE_PDB_NAME);
+                ensurePropNotBlank(props, DbzConnectorConfig.ORACLE_SCHEMA_NAME);
+                validateQueueMemoryRatio(props);
+                validateHeartbeatInterval(props, isCdcSourceJob);
+                try (var oracleValidator = new OracleValidator(props, isCdcSourceJob)) {
+                    oracleValidator.validateAll();
+                }
+                break;
             default:
                 LOG.warn("Unknown source type");
                 throw ValidatorUtils.invalidArgument("Unknown source type");
