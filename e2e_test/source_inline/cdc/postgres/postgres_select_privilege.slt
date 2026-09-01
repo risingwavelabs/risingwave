@@ -59,3 +59,98 @@ PGDATABASE=${PGDATABASE:-postgres} psql -v ON_ERROR_STOP=1 -c "
     DROP TABLE IF EXISTS public.pg_cdc_select_privilege_test CASCADE;
     DROP ROLE IF EXISTS rw_cdc_slt_limited;
     "
+
+# A RisingWave source SELECT grant must not expose the inline upstream password.
+system ok
+PGDATABASE=${PGDATABASE:-postgres} psql -v ON_ERROR_STOP=1 -c "
+    SELECT pg_terminate_backend(active_pid)
+    FROM pg_replication_slots
+    WHERE slot_name = 'pg_cdc_password_redaction_slot' AND active_pid IS NOT NULL;
+    SELECT pg_sleep(1);
+    SELECT pg_drop_replication_slot(slot_name)
+    FROM pg_replication_slots
+    WHERE slot_name = 'pg_cdc_password_redaction_slot';
+    DROP PUBLICATION IF EXISTS pg_cdc_password_redaction_pub;
+    CREATE PUBLICATION pg_cdc_password_redaction_pub FOR ALL TABLES;
+    DROP USER IF EXISTS rw_cdc_slt_redaction;
+    CREATE USER rw_cdc_slt_redaction
+        WITH REPLICATION PASSWORD 'rw_cdc_slt_password_marker';
+    "
+
+statement ok
+drop source if exists pg_cdc_password_redaction_source;
+
+statement ok
+create source pg_cdc_password_redaction_source with (
+    connector = 'postgres-cdc',
+    hostname = '${PGHOST:localhost}',
+    port = '${PGPORT:5432}',
+    username = 'rw_cdc_slt_redaction',
+    password = 'rw_cdc_slt_password_marker',
+    database.name = '${PGDATABASE:postgres}',
+    schema.name = 'public',
+    publication.name = 'pg_cdc_password_redaction_pub',
+    slot.name = 'pg_cdc_password_redaction_slot',
+);
+
+statement ok
+drop user if exists pg_cdc_source_reader;
+
+statement ok
+create user pg_cdc_source_reader;
+
+statement ok
+grant select on source pg_cdc_password_redaction_source to pg_cdc_source_reader;
+
+system ok
+bash -c '
+set -euo pipefail
+readonly marker="rw_cdc_slt_password_marker"
+readonly source_name="pg_cdc_password_redaction_source"
+psql_args=(
+  -h "$SLT_HOST"
+  -p "$SLT_PORT"
+  -U pg_cdc_source_reader
+  -d "$SLT_DB"
+  -At
+)
+assert_redacted() {
+  local surface="$1"
+  local sql="$2"
+  local output
+  output=$(psql "${psql_args[@]}" -c "$sql")
+  test -n "$output"
+  if grep -Fq "$marker" <<<"$output"; then
+    echo "$surface exposed the upstream password" >&2
+    exit 1
+  fi
+}
+assert_redacted \
+  "SHOW CREATE SOURCE" \
+  "SHOW CREATE SOURCE $source_name;"
+assert_redacted \
+  "rw_sources.definition" \
+  "SELECT definition FROM rw_catalog.rw_sources WHERE name = \$\$$source_name\$\$;"
+assert_redacted \
+  "rw_sources.connector_props" \
+  "SELECT connector_props FROM rw_catalog.rw_sources WHERE name = \$\$$source_name\$\$;"
+'
+
+statement ok
+drop source pg_cdc_password_redaction_source;
+
+statement ok
+drop user pg_cdc_source_reader;
+
+system ok
+PGDATABASE=${PGDATABASE:-postgres} psql -v ON_ERROR_STOP=1 -c "
+    SELECT pg_terminate_backend(active_pid)
+    FROM pg_replication_slots
+    WHERE slot_name = 'pg_cdc_password_redaction_slot' AND active_pid IS NOT NULL;
+    SELECT pg_sleep(1);
+    SELECT pg_drop_replication_slot(slot_name)
+    FROM pg_replication_slots
+    WHERE slot_name = 'pg_cdc_password_redaction_slot';
+    DROP PUBLICATION IF EXISTS pg_cdc_password_redaction_pub;
+    DROP USER IF EXISTS rw_cdc_slt_redaction;
+    "
