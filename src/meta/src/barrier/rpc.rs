@@ -1439,6 +1439,7 @@ impl ControlStreamManager {
     pub(super) fn reset_partial_graphs(
         &mut self,
         partial_graph_ids: Vec<PartialGraphId>,
+        reset_request_id: u64,
     ) -> HashSet<WorkerId> {
         self.connected_workers()
             .filter_map(|(worker_id, node)| {
@@ -1450,6 +1451,7 @@ impl ControlStreamManager {
                             streaming_control_stream_request::Request::ResetPartialGraphs(
                                 ResetPartialGraphsRequest {
                                     partial_graph_ids: partial_graph_ids.clone(),
+                                    reset_request_id_v2: Some(reset_request_id),
                                 },
                             ),
                         ),

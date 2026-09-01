@@ -31,7 +31,7 @@ use risingwave_pb::stream_service::BarrierCompleteResponse;
 use risingwave_pb::stream_service::streaming_control_stream_response::{
     ResetPartialGraphResponse, Response,
 };
-use tracing::{debug, warn};
+use tracing::{debug, info, warn};
 use uuid::Uuid;
 
 use crate::barrier::BarrierKind;
@@ -156,10 +156,31 @@ impl PartialGraphRunningState {
 struct ResetPartialGraphCollector {
     remaining_workers: HashSet<WorkerId>,
     reset_resps: HashMap<WorkerId, ResetPartialGraphResponse>,
+    reset_request_id: u64,
 }
 
 impl ResetPartialGraphCollector {
     fn collect(&mut self, worker_id: WorkerId, resp: ResetPartialGraphResponse) -> bool {
+        if let Some(received_request_id) = resp.reset_request_id_v2 {
+            if received_request_id < self.reset_request_id {
+                info!(
+                    %worker_id,
+                    partial_graph_id = %resp.partial_graph_id,
+                    received_request_id,
+                    ongoing_request_id = self.reset_request_id,
+                    "ignore stale partial graph reset response"
+                );
+                return false;
+            }
+            assert_eq!(received_request_id, self.reset_request_id);
+        } else {
+            warn!(
+                %worker_id,
+                partial_graph_id = %resp.partial_graph_id,
+                ongoing_request_id = self.reset_request_id,
+                "received partial graph reset response without request id"
+            );
+        }
         assert!(self.remaining_workers.remove(&worker_id));
         self.reset_resps
             .try_insert(worker_id, resp)
@@ -319,6 +340,7 @@ pub(super) struct PartialGraphManager {
     control_stream_manager: ControlStreamManager,
     term_id: String,
     graphs: HashMap<PartialGraphId, PartialGraphStatus>,
+    next_reset_request_id: u64,
 }
 
 impl PartialGraphManager {
@@ -327,6 +349,7 @@ impl PartialGraphManager {
             control_stream_manager: ControlStreamManager::new(env),
             term_id: "uninitialized".to_owned(),
             graphs: HashMap::new(),
+            next_reset_request_id: 0,
         }
     }
 
@@ -342,6 +365,7 @@ impl PartialGraphManager {
             control_stream_manager,
             term_id,
             graphs: Default::default(),
+            next_reset_request_id: 0,
         }
     }
 
@@ -449,12 +473,18 @@ impl PartialGraphManager {
         partial_graph_ids: impl IntoIterator<Item = PartialGraphId>,
     ) {
         let partial_graph_ids = partial_graph_ids.into_iter().collect_vec();
+        let reset_request_id = self.next_reset_request_id;
+        self.next_reset_request_id = self
+            .next_reset_request_id
+            .checked_add(1)
+            .expect("partial graph reset request id overflow");
         let remaining_workers = self
             .control_stream_manager
-            .reset_partial_graphs(partial_graph_ids.clone());
+            .reset_partial_graphs(partial_graph_ids.clone(), reset_request_id);
         let new_collector = || ResetPartialGraphCollector {
             remaining_workers: remaining_workers.clone(),
             reset_resps: Default::default(),
+            reset_request_id,
         };
         for partial_graph_id in partial_graph_ids {
             match self.graphs.entry(partial_graph_id) {
@@ -933,5 +963,36 @@ mod tests {
             .expect("the first barrier should be collected");
         state.completing_epoch = Some(1);
         assert_eq!(state.pending_barrier_num(), 2);
+    }
+
+    #[test]
+    fn test_ignore_stale_partial_graph_reset_response() {
+        let worker_id = WorkerId::new(1);
+        let partial_graph_id = PartialGraphId::new(1);
+        let mut collector = ResetPartialGraphCollector {
+            remaining_workers: HashSet::from([worker_id]),
+            reset_resps: HashMap::new(),
+            reset_request_id: 2,
+        };
+
+        assert!(!collector.collect(
+            worker_id,
+            ResetPartialGraphResponse {
+                partial_graph_id,
+                reset_request_id_v2: Some(1),
+                ..Default::default()
+            },
+        ));
+        assert!(collector.remaining_workers.contains(&worker_id));
+
+        assert!(collector.collect(
+            worker_id,
+            ResetPartialGraphResponse {
+                partial_graph_id,
+                reset_request_id_v2: Some(2),
+                ..Default::default()
+            },
+        ));
+        assert!(collector.remaining_workers.is_empty());
     }
 }

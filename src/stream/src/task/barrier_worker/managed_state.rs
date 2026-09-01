@@ -445,7 +445,9 @@ pub(in crate::task) enum PartialGraphStatus {
     ReceivedExchangeRequest(Vec<(UpDownActorIds, TakeReceiverRequest)>),
     Running(PartialGraphState),
     Suspended(SuspendedPartialGraphState),
-    Resetting,
+    Resetting {
+        reset_request_id: Option<u64>,
+    },
     /// temporary place holder
     Unspecified,
 }
@@ -466,7 +468,7 @@ impl PartialGraphStatus {
             PartialGraphStatus::Suspended(SuspendedPartialGraphState { inner: state, .. }) => {
                 state.abort_and_wait_actors().await;
             }
-            PartialGraphStatus::Resetting => {}
+            PartialGraphStatus::Resetting { .. } => {}
             PartialGraphStatus::Unspecified => {
                 unreachable!()
             }
@@ -480,7 +482,7 @@ impl PartialGraphStatus {
             }
             PartialGraphStatus::Running(state) => Some(state),
             PartialGraphStatus::Suspended(_) => None,
-            PartialGraphStatus::Resetting => {
+            PartialGraphStatus::Resetting { .. } => {
                 unreachable!("should not receive further request during cleaning")
             }
             PartialGraphStatus::Unspecified => {
@@ -496,7 +498,9 @@ impl PartialGraphStatus {
         match self {
             PartialGraphStatus::ReceivedExchangeRequest(_) => Poll::Pending,
             PartialGraphStatus::Running(state) => state.poll_next_event(cx),
-            PartialGraphStatus::Suspended(_) | PartialGraphStatus::Resetting => Poll::Pending,
+            PartialGraphStatus::Suspended(_) | PartialGraphStatus::Resetting { .. } => {
+                Poll::Pending
+            }
             PartialGraphStatus::Unspecified => {
                 unreachable!()
             }
@@ -522,8 +526,9 @@ impl PartialGraphStatus {
         partial_graph_id: PartialGraphId,
         completing_futures: Option<FuturesOrdered<AwaitEpochCompletedFuture>>,
         table_ids_to_clear: &mut HashSet<TableId>,
-    ) -> BoxFuture<'static, ResetPartialGraphOutput> {
-        match replace(self, PartialGraphStatus::Resetting) {
+        reset_request_id: Option<u64>,
+    ) -> Option<BoxFuture<'static, ResetPartialGraphOutput>> {
+        let reset_future = match replace(self, PartialGraphStatus::Resetting { reset_request_id }) {
             PartialGraphStatus::ReceivedExchangeRequest(pending_requests) => {
                 for (_, request) in pending_requests {
                     if let TakeReceiverRequest::Remote { result_sender, .. } = request {
@@ -557,13 +562,27 @@ impl PartialGraphStatus {
                 table_ids_to_clear.extend(state.inner.table_ids.iter().copied());
                 state.reset().boxed()
             }
-            PartialGraphStatus::Resetting => {
-                unreachable!("should not reset for twice");
+            PartialGraphStatus::Resetting {
+                reset_request_id: previous_request_id,
+            } => {
+                if let (Some(previous_request_id), Some(reset_request_id)) =
+                    (previous_request_id, reset_request_id)
+                {
+                    assert!(reset_request_id > previous_request_id);
+                }
+                info!(
+                    %partial_graph_id,
+                    ?reset_request_id,
+                    ?previous_request_id,
+                    "receive duplicate partial graph reset request"
+                );
+                return None;
             }
             PartialGraphStatus::Unspecified => {
                 unreachable!()
             }
-        }
+        };
+        Some(reset_future)
     }
 }
 
@@ -584,7 +603,7 @@ pub(super) enum ManagedBarrierStateEvent {
         actor_id: ActorId,
         err: StreamError,
     },
-    PartialGraphsReset(Vec<(PartialGraphId, ResetPartialGraphOutput)>),
+    PartialGraphsReset(Vec<(PartialGraphId, ResetPartialGraphOutput, Option<u64>)>),
     RegisterLocalUpstreamOutput {
         actor_id: ActorId,
         upstream_actor_id: ActorId,
@@ -603,15 +622,19 @@ impl ManagedBarrierState {
             }
             if let Poll::Ready(Some(result)) = self.resetting_graphs.poll_next_unpin(cx) {
                 let outputs = result.expect("failed to join resetting future");
-                for (partial_graph_id, _) in &outputs {
-                    let PartialGraphStatus::Resetting = self
-                        .partial_graphs
-                        .remove(partial_graph_id)
-                        .expect("should exist")
-                    else {
-                        panic!("should be resetting")
-                    };
-                }
+                let outputs = outputs
+                    .into_iter()
+                    .map(|(partial_graph_id, output)| {
+                        let PartialGraphStatus::Resetting { reset_request_id } = self
+                            .partial_graphs
+                            .remove(&partial_graph_id)
+                            .expect("should exist")
+                        else {
+                            panic!("should be resetting")
+                        };
+                        (partial_graph_id, output, reset_request_id)
+                    })
+                    .collect();
                 return Poll::Ready(ManagedBarrierStateEvent::PartialGraphsReset(outputs));
             }
             Poll::Pending
@@ -1518,7 +1541,36 @@ mod tests {
     use risingwave_common::util::epoch::test_epoch;
 
     use crate::executor::Barrier;
-    use crate::task::barrier_worker::managed_state::PartialGraphManagedBarrierState;
+    use crate::task::PartialGraphId;
+    use crate::task::barrier_worker::managed_state::{
+        PartialGraphManagedBarrierState, PartialGraphStatus,
+    };
+
+    #[test]
+    fn test_duplicate_reset_uses_latest_request_id() {
+        let mut status = PartialGraphStatus::Resetting {
+            reset_request_id: Some(1),
+        };
+        let mut table_ids_to_clear = HashSet::new();
+
+        assert!(
+            status
+                .start_reset(
+                    PartialGraphId::new(1),
+                    None,
+                    &mut table_ids_to_clear,
+                    Some(2),
+                )
+                .is_none()
+        );
+        assert!(table_ids_to_clear.is_empty());
+        assert!(matches!(
+            status,
+            PartialGraphStatus::Resetting {
+                reset_request_id: Some(2)
+            }
+        ));
+    }
 
     #[tokio::test]
     async fn test_managed_state_add_actor() {

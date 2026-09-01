@@ -164,6 +164,9 @@ message StreamingControlStreamRequest {
     repeated uint64 partial_graph_ids = 1;
     reserved 2, 3;
     reserved "reset_request_id", "database_id";
+    // Identifies a reset attempt so that delayed responses from an earlier
+    // attempt cannot complete a newer reset.
+    optional uint64 reset_request_id_v2 = 4;
   }
 
   oneof request {
@@ -192,6 +195,7 @@ message StreamingControlStreamResponse {
     optional ScoredError root_err = 2;
     reserved 3;
     reserved "reset_request_id";
+    optional uint64 reset_request_id_v2 = 4;
   }
 
   oneof response {

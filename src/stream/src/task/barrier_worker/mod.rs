@@ -183,6 +183,7 @@ impl ControlStreamHandle {
         &mut self,
         partial_graph_id: PartialGraphId,
         root_err: Option<ScoredStreamError>,
+        reset_request_id: Option<u64>,
     ) {
         self.send_response(Response::ResetPartialGraph(ResetPartialGraphResponse {
             partial_graph_id,
@@ -190,6 +191,7 @@ impl ControlStreamHandle {
                 err_msg: err.error.to_report_string(),
                 score: err.score.0,
             }),
+            reset_request_id_v2: reset_request_id,
         }));
     }
 
@@ -345,7 +347,7 @@ impl LocalBarrierWorker {
                             PartialGraphStatus::Suspended(state) => {
                                 (format!("suspended: {:?}", state.suspend_time), None)
                             }
-                            PartialGraphStatus::Resetting => ("resetting".to_owned(), None),
+                            PartialGraphStatus::Resetting { .. } => ("resetting".to_owned(), None),
                             PartialGraphStatus::Unspecified => {
                                 unreachable!()
                             }
@@ -393,8 +395,12 @@ impl LocalBarrierWorker {
                             self.on_partial_graph_failure(partial_graph_id, Some(actor_id), err, "recv actor failure");
                         }
                         ManagedBarrierStateEvent::PartialGraphsReset(output) => {
-                            for (partial_graph_id, output) in output {
-                                self.ack_partial_graph_reset(partial_graph_id, Some(output));
+                            for (partial_graph_id, output, reset_request_id) in output {
+                                self.ack_partial_graph_reset(
+                                    partial_graph_id,
+                                    Some(output),
+                                    reset_request_id,
+                                );
                             }
                         }
                         ManagedBarrierStateEvent::RegisterLocalUpstreamOutput{
@@ -440,7 +446,7 @@ impl LocalBarrierWorker {
                                         PartialGraphStatus::Running(graph) => {
                                             !graph.actor_states.is_empty()
                                         }
-                                        PartialGraphStatus::Suspended(_) | PartialGraphStatus::Resetting |
+                                        PartialGraphStatus::Suspended(_) | PartialGraphStatus::Resetting { .. } |
                                             PartialGraphStatus::ReceivedExchangeRequest(_) => {
                                             false
                                         }
@@ -553,7 +559,7 @@ impl LocalBarrierWorker {
                             PartialGraphStatus::Suspended(_) => {
                                 anyhow!("partial graph suspended")
                             }
-                            PartialGraphStatus::Resetting => {
+                            PartialGraphStatus::Resetting { .. } => {
                                 anyhow!("partial graph resetting")
                             }
                             PartialGraphStatus::Unspecified => {
@@ -977,6 +983,7 @@ impl LocalBarrierWorker {
     }
 
     fn reset_partial_graphs(&mut self, req: ResetPartialGraphsRequest) {
+        let reset_request_id = req.reset_request_id_v2;
         let mut table_ids_to_clear = HashSet::new();
         let mut reset_futures = HashMap::new();
         for partial_graph_id in req.partial_graph_ids {
@@ -985,10 +992,13 @@ impl LocalBarrierWorker {
                     partial_graph_id,
                     self.await_epoch_completed_futures.remove(&partial_graph_id),
                     &mut table_ids_to_clear,
+                    reset_request_id,
                 );
-                reset_futures.insert(partial_graph_id, reset_future);
+                if let Some(reset_future) = reset_future {
+                    reset_futures.insert(partial_graph_id, reset_future);
+                }
             } else {
-                self.ack_partial_graph_reset(partial_graph_id, None);
+                self.ack_partial_graph_reset(partial_graph_id, None, reset_request_id);
             }
         }
         if reset_futures.is_empty() {
@@ -1019,6 +1029,7 @@ impl LocalBarrierWorker {
         &mut self,
         partial_graph_id: PartialGraphId,
         reset_output: Option<ResetPartialGraphOutput>,
+        reset_request_id: Option<u64>,
     ) {
         info!(
             %partial_graph_id,
@@ -1029,6 +1040,7 @@ impl LocalBarrierWorker {
         self.control_stream_handle.ack_reset_partial_graph(
             partial_graph_id,
             reset_output.and_then(|output| output.root_err),
+            reset_request_id,
         );
     }
 
