@@ -157,6 +157,40 @@ fn new_test_iceberg_config(
     IcebergConfig::from_btreemap(values).unwrap()
 }
 
+#[tokio::test]
+async fn test_schedule_resolves_licensed_compaction_type_policy() {
+    let manager = build_test_manager().await;
+    assert!(
+        risingwave_common::license::Feature::IcebergCompaction
+            .check_available()
+            .is_ok()
+    );
+
+    for (write_mode, configured_type, expected_task_type) in [
+        (IcebergWriteMode::CopyOnWrite, None, TaskType::Auto),
+        (
+            IcebergWriteMode::CopyOnWrite,
+            Some(CompactionType::Full),
+            TaskType::Auto,
+        ),
+        (IcebergWriteMode::MergeOnRead, None, TaskType::Auto),
+        (
+            IcebergWriteMode::MergeOnRead,
+            Some(CompactionType::Full),
+            TaskType::Full,
+        ),
+    ] {
+        let mut config = new_test_iceberg_config(300, 3, CompactionType::Auto);
+        config.r#type = "upsert".to_owned();
+        config.write_mode = write_mode;
+        config.compaction_type = configured_type;
+
+        let (task_type, _, _) = manager.resolve_schedule_values(&config);
+
+        assert_eq!(task_type, expected_task_type);
+    }
+}
+
 #[test]
 fn test_should_trigger_by_pending_commit_threshold() {
     let now = Instant::now();
@@ -956,6 +990,7 @@ async fn test_apply_sink_update_promotes_temporary_manual_track_when_compaction_
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
+        pk_index_result: None,
     });
 
     let guard = manager.inner.read();
@@ -1099,6 +1134,7 @@ async fn test_handle_report_task_success_consumes_backlog_and_resets_to_idle() {
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
+        pk_index_result: None,
     });
 
     let guard = manager.inner.read();
@@ -1128,6 +1164,7 @@ async fn test_handle_report_task_completes_manual_waiter_on_success() {
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
+        pk_index_result: None,
     });
 
     assert_eq!(rx.await.unwrap().unwrap(), task_id);
@@ -1159,6 +1196,7 @@ async fn test_handle_report_task_completes_manual_waiter_on_failure() {
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Failed as i32,
         error_message: Some("boom".to_owned()),
+        pk_index_result: None,
     });
 
     let error = rx.await.unwrap().unwrap_err();
@@ -1192,6 +1230,7 @@ async fn test_handle_report_task_removes_temporary_manual_track_on_success() {
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
+        pk_index_result: None,
     });
 
     assert_eq!(rx.await.unwrap().unwrap(), task_id);
@@ -1222,6 +1261,7 @@ async fn test_handle_report_task_removes_temporary_manual_track_on_failure() {
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Failed as i32,
         error_message: Some("boom".to_owned()),
+        pk_index_result: None,
     });
 
     let error = rx.await.unwrap().unwrap_err();
@@ -1326,6 +1366,7 @@ async fn test_manual_compaction_waiter_is_not_stolen_during_config_load() {
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
+        pk_index_result: None,
     });
     assert!(
         !manager
@@ -1504,6 +1545,7 @@ async fn test_handle_report_task_failure_preserves_backlog_and_resets_to_idle() 
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Failed as i32,
         error_message: Some("boom".to_owned()),
+        pk_index_result: None,
     });
 
     let guard = manager.inner.read();
@@ -1531,6 +1573,7 @@ async fn test_handle_report_task_ignores_stale_task_id() {
         sink_id: sink_id.as_raw_id(),
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
+        pk_index_result: None,
     });
 
     let guard = manager.inner.read();

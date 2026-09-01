@@ -793,11 +793,8 @@ impl CreatingStreamingJobControl {
         }
     }
 
-    pub(super) fn pinned_upstream_log_epoch(&self) -> (u64, HashSet<TableId>) {
-        (
-            max(self.max_committed_epoch.unwrap_or(0), self.snapshot_epoch),
-            self.snapshot_backfill_upstream_tables.clone(),
-        )
+    pub(super) fn pinned_upstream_tables(&self) -> HashSet<TableId> {
+        self.snapshot_backfill_upstream_tables.clone()
     }
 
     fn inject_barrier(
@@ -820,6 +817,7 @@ impl CreatingStreamingJobControl {
         partial_graph_manager.inject_barrier(
             partial_graph_id,
             mutation,
+            None,
             node_actors,
             table_ids_to_sync.into_iter().flatten().copied(),
             nodes_to_sync_table.into_iter().flatten(),
