@@ -1289,6 +1289,18 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         };
         let mut next_seq: i64 = (max_seq + 1).max(seq_floor(first_epoch));
 
+        // Rows currently retained in memory across this actor's partitions, mirrored into the
+        // `retained_rows` gauge at the end of every buffer-mutating message (chunk, watermark,
+        // and the rebuild sites; a plain barrier mutates no buffer). Retention is bounded only by
+        // match liveness and `WITHIN`, so without this gauge a partition set growing toward memory
+        // exhaustion (a pattern whose closer never arrives keeps its rows forever) is invisible
+        // until the OOM. The chunk arm maintains it incrementally (an increment beside the push,
+        // a decrement beside its eviction counter) because it never iterates the whole partition
+        // map; the watermark arm and the rebuild sites recount exactly, which self-heals any
+        // accounting slip within one watermark.
+        let mut retained_rows: i64 = parts.values().map(|r| r.rows.len() as i64).sum();
+        metrics.match_recognize_retained_rows.set(retained_rows);
+
         #[for_await]
         for msg in input {
             let msg = msg?;
@@ -1364,6 +1376,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                             deadline,
                             row: row_ref.into_owned_row(),
                         });
+                        retained_rows += 1;
                         {
                             let fed = [Seq(seq)];
                             let matcher = DefineMatcher {
@@ -1395,9 +1408,9 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                             &metrics,
                         )
                         .await?;
-                        metrics
-                            .match_recognize_evicted_rows_count
-                            .inc_by((rows_before - run.rows.len()) as u64);
+                        let evicted = (rows_before - run.rows.len()) as u64;
+                        metrics.match_recognize_evicted_rows_count.inc_by(evicted);
+                        retained_rows -= evicted as i64;
                         // Captured while the entry is still borrowed; the removal below needs the
                         // borrow released.
                         let partition_emptied = run.rows.is_empty();
@@ -1431,6 +1444,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         metrics.match_recognize_scan_budget_exhausted_count.inc();
                         report_scan_budget_once(&eval_error_report, &mut reported_budget);
                     }
+                    metrics.match_recognize_retained_rows.set(retained_rows);
                     if let Some(c) = builder.take() {
                         yield Message::Chunk(c);
                     }
@@ -1518,6 +1532,13 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                     for pk in emptied {
                         parts.remove(&pk);
                     }
+                    // Exact recount, not the incremental counter: this arm just iterated every
+                    // partition, so the recount costs what the pass already paid — and it bounds
+                    // the lifetime of any future accounting slip to one watermark instead of
+                    // forever. (The chunk arm keeps the incremental counter: a recount there
+                    // would add a whole-map walk per chunk.)
+                    retained_rows = parts.values().map(|r| r.rows.len() as i64).sum();
+                    metrics.match_recognize_retained_rows.set(retained_rows);
                     if let Some(c) = builder.take() {
                         yield Message::Chunk(c);
                     }
@@ -1554,6 +1575,8 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         )
                         .await?;
                         next_seq = next_seq.max(max_seq + 1).max(seq_floor(barrier_epoch));
+                        retained_rows = parts.values().map(|r| r.rows.len() as i64).sum();
+                        metrics.match_recognize_retained_rows.set(retained_rows);
                     }
                 }
             }

@@ -477,6 +477,7 @@ stream_lookup_cached_entry_count	gauge	table_id,actor_id,fragment_id	Total entry
 stream_lookup_total_query_cache_count	counter	table_id,actor_id,fragment_id	Lookup executor query cache total count		src/stream/src/executor/monitor/streaming_stats.rs
 stream_match_recognize_evicted_rows_count	counter	table_id,actor_id,fragment_id	Buffered rows evicted by the match recognize executor		src/stream/src/executor/monitor/streaming_stats.rs
 stream_match_recognize_matches_emitted_count	counter	table_id,actor_id,fragment_id	Matches emitted by the match recognize executor		src/stream/src/executor/monitor/streaming_stats.rs
+stream_match_recognize_retained_rows	gauge	table_id,actor_id,fragment_id	Rows currently retained in memory by the match recognize executor, summed over the actor's partitions		src/stream/src/executor/monitor/streaming_stats.rs
 stream_match_recognize_scan_budget_exhausted_count	counter	table_id,actor_id,fragment_id	Partition visits that exhausted the match recognize scan budget and degraded conservatively		src/stream/src/executor/monitor/streaming_stats.rs
 stream_match_recognize_within_deadline_overflow_count	counter	table_id,actor_id,fragment_id	Buffered rows whose WITHIN deadline lies past the ORDER BY type's range, so their window never closes		src/stream/src/executor/monitor/streaming_stats.rs
 stream_materialize_cache_hit_count	counter	actor_id,table_id,fragment_id	Materialize executor cache hit count		src/stream/src/executor/monitor/streaming_stats.rs
