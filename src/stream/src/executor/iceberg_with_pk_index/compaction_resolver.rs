@@ -97,7 +97,7 @@ fn resolver_task_from_initial_barrier(
             Ok((context.task_id, task_input))
         }
         _ => Err(StreamExecutorError::from(anyhow!(
-            "compaction resolver sink {} expected initial switch-to-resolver barrier, got {:?}",
+            "compaction resolver sink {} expected initial begin barrier, got {:?}",
             sink_id,
             barrier
         ))),
@@ -122,7 +122,7 @@ fn validate_resolver_end_barrier(
             Ok(())
         }
         _ => Err(StreamExecutorError::from(anyhow!(
-            "compaction resolver sink {} task {} expected switch-to-input barrier, got {:?}",
+            "compaction resolver sink {} task {} expected end barrier, got {:?}",
             sink_id,
             task_id,
             barrier
