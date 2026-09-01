@@ -47,6 +47,7 @@ use risingwave_pb::id::IcebergCompactionTaskId;
 use thiserror_ext::AsReport;
 use tokio::sync::oneshot::Receiver;
 
+use super::memory::estimate_plan_memory;
 use super::{IcebergTaskMeta, PkIndexCompactionResult, build_pk_index_compaction_result};
 use crate::hummock::{HummockError, HummockResult};
 use crate::monitor::CompactorMetrics;
@@ -212,6 +213,7 @@ pub struct IcebergCompactionPlanRunner {
     /// When true, run the rewrite without committing and report the result back to meta for
     /// pk-index coordinated compaction. When false, behavior is unchanged (rewrite + commit).
     pk_index_coordinated: bool,
+    pub memory_reservation_bytes: usize,
 }
 
 impl IcebergCompactionPlanRunner {
@@ -258,6 +260,7 @@ impl IcebergCompactionPlanRunner {
             task_id: self.task_id,
             plan_index: self.plan_index,
             required_parallelism: self.required_parallelism(),
+            memory_reservation_bytes: self.memory_reservation_bytes,
         }
     }
 
@@ -286,6 +289,7 @@ impl IcebergCompactionPlanRunner {
             self.branch,
             self.compaction_plan,
             self.pk_index_coordinated,
+            self.memory_reservation_bytes,
         );
 
         tokio::select! {
@@ -356,6 +360,7 @@ impl IcebergCompactionPlanRunner {
         branch: String,
         compaction_plan: CompactionPlan,
         pk_index_coordinated: bool,
+        memory_reservation_bytes: usize,
     ) -> HummockResult<(RewriteFilesStat, Option<PkIndexCompactionResult>)> {
         let retry_config = CommitManagerRetryConfig::default();
         let compaction = CompactionBuilder::new(catalog.clone(), table_ident.clone())
@@ -436,6 +441,7 @@ impl IcebergCompactionPlanRunner {
             branch = %branch,
             input_parallelism = compaction_plan.recommended_executor_parallelism(),
             output_parallelism = compaction_plan.recommended_output_parallelism(),
+            memory_reservation_bytes,
             statistics = ?statistics,
             "iceberg_compaction_plan_started",
         );
@@ -972,9 +978,20 @@ pub async fn create_task_execution(
         });
     }
 
+    let table_schema = table.metadata().current_schema();
+    let format_version = table.metadata().format_version();
+    let requires_sort = !table.metadata().default_sort_order().fields.is_empty();
     let mut runners = Vec::with_capacity(compaction_plans.len());
 
     for (plan_index, compaction_plan) in compaction_plans.into_iter().enumerate() {
+        let memory_reservation_bytes = estimate_plan_memory(
+            &compaction_plan,
+            table_schema,
+            format_version,
+            config.max_record_batch_rows,
+            config.enable_prefetch,
+            requires_sort,
+        );
         runners.push(IcebergCompactionPlanRunner {
             task_id,
             sink_id,
@@ -988,6 +1005,7 @@ pub async fn create_task_execution(
             branch: branch.clone(),
             compaction_plan,
             pk_index_coordinated,
+            memory_reservation_bytes,
         });
     }
 
