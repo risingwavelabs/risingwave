@@ -1,0 +1,89 @@
+control substitution on
+
+# Regression test for MySQL schema changes when upstream column names are not lowercase.
+# Snapshot discovery and Debezium DDL parsing must produce the same lowercase names.
+
+system ok
+mysql -e "
+    CREATE DATABASE IF NOT EXISTS risedev;
+    USE risedev;
+    DROP TABLE IF EXISTS mysql_auto_schema_change_column_case;
+    CREATE TABLE mysql_auto_schema_change_column_case (
+        Id INT NOT NULL PRIMARY KEY,
+        Details VARCHAR(50),
+        TOPS_CreatedOn INT
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+    INSERT INTO mysql_auto_schema_change_column_case VALUES
+        (1, 'before', 100);
+"
+
+statement ok
+create source s_mysql_auto_schema_change_column_case with (
+  ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
+  username = '${RISEDEV_MYSQL_USER}',
+  password = '${MYSQL_PWD}',
+  database.name = 'risedev',
+  auto.schema.change = 'true'
+);
+
+sleep 2s
+
+statement ok
+create table rw_mysql_auto_schema_change_column_case (
+  id INT,
+  details VARCHAR,
+  tops_createdon INT,
+  primary key (id)
+) with (
+  snapshot = 'true',
+  snapshot.batch_size = 1
+) from s_mysql_auto_schema_change_column_case table 'risedev.mysql_auto_schema_change_column_case';
+
+query ITI retry 10 backoff 1s
+select id, details, tops_createdon
+from rw_mysql_auto_schema_change_column_case
+order by id;
+----
+1 before 100
+
+system ok
+mysql -e "
+    USE risedev;
+    ALTER TABLE mysql_auto_schema_change_column_case ADD COLUMN NewCol VARCHAR(50);
+    INSERT INTO mysql_auto_schema_change_column_case
+        (Id, Details, TOPS_CreatedOn, NewCol)
+    VALUES
+        (2, 'after', 200, 'added');
+"
+
+query ITIT retry 10 backoff 1s
+select id, details, tops_createdon, coalesce(newcol, 'NULL')
+from rw_mysql_auto_schema_change_column_case
+order by id;
+----
+1 before 100 NULL
+2 after 200 added
+
+query TTTT retry 10 backoff 1s
+describe rw_mysql_auto_schema_change_column_case;
+----
+id integer false NULL
+details character varying false NULL
+tops_createdon integer false NULL
+newcol character varying false NULL
+_rw_timestamp timestamp with time zone true NULL
+primary key id NULL NULL
+distribution key id NULL NULL
+table description rw_mysql_auto_schema_change_column_case NULL NULL
+
+statement ok
+drop table rw_mysql_auto_schema_change_column_case;
+
+statement ok
+drop source s_mysql_auto_schema_change_column_case cascade;
+
+system ok
+mysql -e "
+    USE risedev;
+    DROP TABLE IF EXISTS mysql_auto_schema_change_column_case;
+"
