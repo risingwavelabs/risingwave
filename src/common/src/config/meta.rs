@@ -592,6 +592,9 @@ pub struct MetaDeveloperConfig {
 
     #[serde(default = "default::developer::table_change_log_delete_batch_size")]
     pub table_change_log_delete_batch_size: u64,
+
+    #[serde(default = "default::developer::table_change_log_truncate_interval_sec")]
+    pub table_change_log_truncate_interval_sec: u64,
 }
 
 #[serde_with::apply(Option => #[serde(with = "none_as_empty_string")])]

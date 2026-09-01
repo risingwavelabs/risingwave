@@ -7592,7 +7592,7 @@ dependencies = [
 [[package]]
 name = "iceberg"
 version = "0.10.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=5020f93609cd61cb993682eb65852e4f565613e3#5020f93609cd61cb993682eb65852e4f565613e3"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=2768ccf8b1847a14162337d7ef7a76935881fbc8#2768ccf8b1847a14162337d7ef7a76935881fbc8"
 dependencies = [
  "aes-gcm",
  "anyhow",
@@ -7651,7 +7651,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-glue"
 version = "0.10.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=5020f93609cd61cb993682eb65852e4f565613e3#5020f93609cd61cb993682eb65852e4f565613e3"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=2768ccf8b1847a14162337d7ef7a76935881fbc8#2768ccf8b1847a14162337d7ef7a76935881fbc8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7666,7 +7666,7 @@ dependencies = [
 [[package]]
 name = "iceberg-catalog-rest"
 version = "0.10.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=5020f93609cd61cb993682eb65852e4f565613e3#5020f93609cd61cb993682eb65852e4f565613e3"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=2768ccf8b1847a14162337d7ef7a76935881fbc8#2768ccf8b1847a14162337d7ef7a76935881fbc8"
 dependencies = [
  "async-trait",
  "base64 0.22.1",
@@ -7687,7 +7687,7 @@ dependencies = [
 [[package]]
 name = "iceberg-compaction-core"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=9d561d58fba5bfdd0f0f5404e3a3817234ba8285#9d561d58fba5bfdd0f0f5404e3a3817234ba8285"
+source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=53410bea82ff2319196df43e7447ab2bb13da1d6#53410bea82ff2319196df43e7447ab2bb13da1d6"
 dependencies = [
  "async-stream",
  "async-trait",
@@ -7716,7 +7716,7 @@ dependencies = [
 [[package]]
 name = "iceberg-datafusion"
 version = "0.10.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=5020f93609cd61cb993682eb65852e4f565613e3#5020f93609cd61cb993682eb65852e4f565613e3"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=2768ccf8b1847a14162337d7ef7a76935881fbc8#2768ccf8b1847a14162337d7ef7a76935881fbc8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -7732,7 +7732,7 @@ dependencies = [
 [[package]]
 name = "iceberg-storage-opendal"
 version = "0.10.0"
-source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=5020f93609cd61cb993682eb65852e4f565613e3#5020f93609cd61cb993682eb65852e4f565613e3"
+source = "git+https://github.com/risingwavelabs/iceberg-rust.git?rev=2768ccf8b1847a14162337d7ef7a76935881fbc8#2768ccf8b1847a14162337d7ef7a76935881fbc8"
 dependencies = [
  "anyhow",
  "async-trait",
@@ -9632,7 +9632,7 @@ version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "51e219e79014df21a225b1860a479e2dcd7cbd9130f4defd4bd0e191ea31d67d"
 dependencies = [
- "base64 0.21.7",
+ "base64 0.22.1",
  "chrono",
  "getrandom 0.2.11",
  "http 1.4.0",
@@ -11090,19 +11090,19 @@ dependencies = [
 
 [[package]]
 name = "postgres-protocol"
-version = "0.6.6"
+version = "0.6.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "49b6c5ef183cd3ab4ba005f1ca64c21e8bd97ce4699cfea9e8d9a2c4958ca520"
+checksum = "08808e3c483c46e999108051c78334f473d5adb59d78bb80a1268c7e6aa6c514"
 dependencies = [
- "base64 0.21.7",
+ "base64 0.22.1",
  "byteorder",
  "bytes",
  "fallible-iterator 0.2.0",
- "hmac 0.12.1",
- "md-5 0.10.6",
+ "hmac 0.13.0",
+ "md-5 0.11.0",
  "memchr",
- "rand 0.8.5",
- "sha2 0.10.9",
+ "rand 0.10.1",
+ "sha2 0.11.0",
  "stringprep",
 ]
 
