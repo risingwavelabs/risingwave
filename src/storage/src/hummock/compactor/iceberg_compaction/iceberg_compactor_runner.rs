@@ -1031,6 +1031,7 @@ pub async fn create_task_execution(
 mod tests {
     use std::collections::HashMap;
 
+    use iceberg::NamespaceIdent;
     use iceberg::io::FileIO;
     use iceberg::spec::{
         DataFileBuilder, DataFileFormat, FormatVersion, ManifestListWriter, ManifestWriterBuilder,
@@ -1038,7 +1039,6 @@ mod tests {
         SnapshotRetention, SortOrder, Struct, Summary, TableMetadataBuilder, Type,
         UnboundPartitionSpec,
     };
-    use iceberg::{NamespaceIdent, Runtime};
 
     use super::*;
 
@@ -1133,8 +1133,7 @@ mod tests {
                 NamespaceIdent::new("test".to_owned()),
                 "table".to_owned(),
             ))
-            .file_io(FileIO::new_with_memory())
-            .runtime(Runtime::try_current().unwrap())
+            .file_io(FileIO::from_path("memory://").unwrap().build().unwrap())
             .metadata(metadata)
             .build()
             .unwrap()
@@ -1155,6 +1154,7 @@ mod tests {
             let mut writer = ManifestWriterBuilder::new(
                 table.file_io().new_output(&path).unwrap(),
                 Some(snapshot_id),
+                None,
                 table.metadata().current_schema().clone(),
                 table.metadata().default_partition_spec().as_ref().clone(),
             )
@@ -1172,6 +1172,7 @@ mod tests {
             let mut writer = ManifestWriterBuilder::new(
                 table.file_io().new_output(&path).unwrap(),
                 Some(snapshot_id),
+                None,
                 table.metadata().current_schema().clone(),
                 table.metadata().default_partition_spec().as_ref().clone(),
             )
@@ -1185,13 +1186,7 @@ mod tests {
         let manifest_list_path = format!(
             "memory://warehouse/test_table/metadata/snapshot-{snapshot_id}-manifest-list.avro"
         );
-        let output = table
-            .file_io()
-            .new_output(&manifest_list_path)
-            .unwrap()
-            .writer()
-            .await
-            .unwrap();
+        let output = table.file_io().new_output(&manifest_list_path).unwrap();
         let mut writer =
             ManifestListWriter::v2(output, snapshot_id, parent_snapshot_id, snapshot_id);
         writer.add_manifests(manifests.into_iter()).unwrap();
@@ -1260,7 +1255,6 @@ mod tests {
         let table = Table::builder()
             .identifier(table.identifier().clone())
             .file_io(table.file_io().clone())
-            .runtime(Runtime::try_current().unwrap())
             .metadata(metadata)
             .build()
             .unwrap();
