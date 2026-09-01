@@ -197,7 +197,6 @@ impl StreamIcebergWithPkIndexWriter {
             node_body: Some(NodeBody::Merge(Box::new(MergeNode {
                 upstream_fragment_id: 0.into(),
                 upstream_dispatcher_type: right_dispatcher.into(),
-                allow_empty_upstream: true,
                 ..Default::default()
             }))),
             identity: "IcebergCompactionResolverEdge".into(),
