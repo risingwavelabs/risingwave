@@ -200,9 +200,6 @@ pub(crate) struct FrontendEnv {
     /// Not used by the RisingWave batch engine.
     df_spillable_budget_ctx: MemoryContext,
 
-    /// address of the serverless backfill controller.
-    serverless_backfill_controller_addr: String,
-
     /// Prometheus client for querying metrics.
     prometheus_client: Option<PrometheusClient>,
 
@@ -294,7 +291,6 @@ impl FrontendEnv {
             mem_context: MemoryContext::none(),
             #[cfg(feature = "datafusion")]
             df_spillable_budget_ctx: MemoryContext::none(),
-            serverless_backfill_controller_addr: Default::default(),
             prometheus_client: None,
             prometheus_selector: String::new(),
         }
@@ -318,12 +314,12 @@ impl FrontendEnv {
             .advertise_addr
             .as_ref()
             .unwrap_or_else(|| {
-                tracing::warn!("advertise addr is not specified, defaulting to listen_addr");
+                tracing::warn!("advertise address is not specified; defaulting to listen_addr");
                 &opts.listen_addr
             })
             .parse()
             .unwrap();
-        info!("advertise addr is {}", frontend_address);
+        info!("advertise address is {}", frontend_address);
 
         let rpc_addr: HostAddr = opts.frontend_rpc_listener_addr.parse().unwrap();
         let internal_rpc_host_addr = HostAddr {
@@ -451,7 +447,7 @@ impl FrontendEnv {
             join_handles.push(join_handle);
             shutdown_senders.push(shutdown_sender);
         } else {
-            tracing::info!("Telemetry didn't start due to config");
+            tracing::info!("Telemetry did not start because it is disabled by configuration");
         }
 
         tokio::spawn(async move {
@@ -466,7 +462,7 @@ impl FrontendEnv {
                 .unwrap();
         });
         info!(
-            "Health Check RPC Listener is set up on {}",
+            "Health check RPC listener is listening on {}",
             opts.frontend_rpc_listener_addr.clone()
         );
 
@@ -550,7 +546,7 @@ impl FrontendEnv {
         let prometheus_selector = opts.prometheus_selector.unwrap_or_default();
 
         info!(
-            "Frontend  total_memory: {} batch_memory: {}",
+            "Frontend total memory: {}, batch memory: {}",
             convert(total_memory_bytes as _),
             convert(batch_memory_limit as _),
         );
@@ -579,7 +575,6 @@ impl FrontendEnv {
                 frontend_config: config.frontend,
                 meta_config: config.meta,
                 streaming_config: config.streaming,
-                serverless_backfill_controller_addr: opts.serverless_backfill_controller_addr,
                 udf_config: config.udf,
                 source_metrics,
                 creating_streaming_job_tracker,
@@ -647,10 +642,6 @@ impl FrontendEnv {
 
     pub fn session_params_snapshot(&self) -> SessionConfig {
         self.session_params.read_recursive().clone()
-    }
-
-    pub fn sbc_address(&self) -> &String {
-        &self.serverless_backfill_controller_addr
     }
 
     /// Get a reference to the Prometheus client if available.
@@ -1339,13 +1330,14 @@ impl SessionImpl {
         Ok(secret.clone())
     }
 
+    /// Returns `None` when the table's committed epoch has not reached `min_epoch`.
     pub async fn list_change_log_epochs(
         &self,
         table_id: TableId,
         min_epoch: u64,
         max_count: u32,
-    ) -> Result<Vec<u64>> {
-        let Some(max_epoch) = self
+    ) -> Result<Option<Vec<u64>>> {
+        let committed_epoch = self
             .env
             .hummock_snapshot_manager()
             .acquire()
@@ -1354,28 +1346,31 @@ impl SessionImpl {
             .info()
             .get(&table_id)
             .map(|s| s.committed_epoch)
-        else {
-            return Ok(vec![]);
-        };
+            .ok_or_else(|| anyhow!("table id {table_id} has been dropped"))?;
+        if min_epoch > committed_epoch {
+            return Ok(None);
+        }
         let ret = self
             .env
             .meta_client_ref()
             .get_hummock_table_change_log(
                 Some(min_epoch),
-                Some(max_epoch),
+                Some(committed_epoch),
                 Some(iter::once(table_id).collect()),
                 true,
                 Some(max_count),
             )
             .await?;
         let Some(e) = ret.get(&table_id) else {
-            return Ok(vec![]);
+            return Ok(Some(vec![]));
         };
-        Ok(e.iter()
-            .flat_map(|l| l.epochs())
-            .filter(|e| *e >= min_epoch && *e <= max_epoch)
-            .take(max_count as usize)
-            .collect())
+        Ok(Some(
+            e.iter()
+                .flat_map(|l| l.epochs())
+                .filter(|e| *e >= min_epoch && *e <= committed_epoch)
+                .take(max_count as usize)
+                .collect(),
+        ))
     }
 
     pub fn clear_cancel_query_flag(&self) {

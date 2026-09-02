@@ -260,6 +260,9 @@ for_all_wrapped_id_fields! (
         CompactIcebergTableRequest {
             sink_id: SinkId,
         }
+        CompactIcebergTableResponse {
+            task_id: IcebergCompactionTaskId,
+        }
         CreateConnectionRequest {
             database_id: DatabaseId,
             schema_id: SchemaId,
@@ -330,12 +333,22 @@ for_all_wrapped_id_fields! (
         GetTablesResponse {
             tables: TableId,
         }
+        ReplaceJobPlan.ReplaceSink {
+            old_sink_id: SinkId,
+            dependencies: ObjectId,
+        }
         ResetSourceRequest {
             source_id: SourceId,
+        }
+        RewriteIcebergTableManifestsRequest {
+            sink_id: SinkId,
         }
         RisectlResumeBackfillRequest {
             job_id: JobId,
             fragment_id: FragmentId,
+        }
+        WaitIcebergPkIndexSinkEpochRequest {
+            sink_id: SinkId,
         }
         WaitRequest {
             job_id: JobId,
@@ -547,8 +560,17 @@ for_all_wrapped_id_fields! (
         }
     }
     iceberg_compaction {
+        CancelCompactTask {
+            task_id: IcebergCompactionTaskId,
+        }
+        IcebergCompactionTask {
+            task_id: IcebergCompactionTaskId,
+        }
         SubscribeIcebergCompactionEventRequest.Register {
             context_id: WorkerId,
+        }
+        SubscribeIcebergCompactionEventRequest.ReportTask {
+            task_id: IcebergCompactionTaskId,
         }
     }
     meta {
@@ -777,14 +799,19 @@ for_all_wrapped_id_fields! (
             new_upstream_sinks: FragmentId,
             backfill_nodes_to_pause: FragmentId,
             added_actors: ActorId,
+            dropped_actors: ActorId,
             actor_splits: ActorId,
             actor_dispatchers: ActorId,
+            sink_log_store_flush: SinkId,
         }
         BackfillOrder {
             order: RelationId,
         }
         CdcFilterNode {
             upstream_source_id: SourceId,
+        }
+        CompactionResolverNode {
+            compaction_task_id: IcebergCompactionTaskId,
         }
         DeltaIndexJoinNode {
             left_table_id: TableId,
@@ -796,6 +823,10 @@ for_all_wrapped_id_fields! (
         }
         DmlNode {
             table_id: TableId,
+        }
+        IcebergPkIndexCompactionContext {
+            sink_id: SinkId,
+            task_id: IcebergCompactionTaskId,
         }
         ListFinishMutation {
             associated_source_id: SourceId,
@@ -925,7 +956,7 @@ for_all_wrapped_id_fields! (
             backfill_actor_id: ActorId,
             fragment_id: FragmentId,
         }
-        BarrierCompleteResponse.IcebergV3SinkMetadata {
+        BarrierCompleteResponse.IcebergPkIndexSinkMetadata {
             reporter_actor_id: ActorId,
             sink_id: SinkId,
         }
@@ -957,6 +988,12 @@ for_all_wrapped_id_fields! (
         }
         InjectBarrierRequest.FragmentBuildActorInfo {
             fragment_id: FragmentId,
+        }
+        StreamingControlStreamRequest.ControlCompactionWriterRequest {
+            partial_graph_id: PartialGraphId,
+            sink_id: SinkId,
+            task_id: IcebergCompactionTaskId,
+            actor_ids: ActorId,
         }
         StreamingControlStreamRequest.CreatePartialGraphRequest {
             partial_graph_id: PartialGraphId,
@@ -1104,6 +1141,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ".stream_plan.StreamSource",
         ".batch_plan.SourceNode",
         ".batch_plan.IcebergScanNode",
+        ".batch_plan.IcebergMetadataScanNode",
         ".iceberg_compaction.IcebergCompactionTask",
     ];
 
@@ -1200,7 +1238,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .boxed(".stream_plan.StreamNode.node_body.gap_fill")
         .boxed(".stream_plan.StreamNode.node_body.vector_index_lookup_join")
         .boxed(".stream_plan.StreamNode.node_body.iceberg_with_pk_index_writer")
-        .boxed(".stream_plan.StreamNode.node_body.iceberg_with_pk_index_dv_merger")
+        .boxed(".stream_plan.StreamNode.node_body.iceberg_with_pk_index_position_delete_merger")
+        .boxed(".stream_plan.StreamNode.node_body.compaction_resolver")
         // `Udf` is 248 bytes, while 2nd largest field is 32 bytes.
         .boxed(".expr.ExprNode.rex_node.udf")
         // prost-build 0.14+ only derives `Eq`/`Hash` for a subset of messages/oneofs.

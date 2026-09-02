@@ -58,7 +58,7 @@ use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
     BranchedObject, CompactTaskAssignment, CompactTaskProgress, CompactionGroupInfo,
 };
-use risingwave_pb::id::ActorId;
+use risingwave_pb::id::{ActorId, IcebergCompactionTaskId};
 use risingwave_pb::meta::cancel_creating_jobs_request::PbJobs;
 use risingwave_pb::meta::list_actor_splits_response::ActorSplit;
 use risingwave_pb::meta::list_actor_states_response::ActorState;
@@ -406,9 +406,26 @@ impl CatalogWriter for MockCatalogWriter {
         dependencies: HashSet<ObjectId>,
         _resource_type: streaming_job_resource_type::ResourceType,
         _if_not_exists: bool,
+        _since_timestamp_epoch: Option<u64>,
     ) -> Result<()> {
         let sink_id = self.create_sink_inner(sink, graph)?;
         self.insert_object_dependencies(sink_id.as_object_id(), dependencies);
+        Ok(())
+    }
+
+    async fn replace_sink(
+        &self,
+        old_sink_id: SinkId,
+        sink: PbSink,
+        graph: StreamFragmentGraph,
+        _dependencies: HashSet<ObjectId>,
+        _resource_type: streaming_job_resource_type::ResourceType,
+    ) -> Result<()> {
+        let (database_id, schema_id) = self.drop_table_or_sink_id(old_sink_id.as_raw_id());
+        self.catalog
+            .write()
+            .drop_sink(database_id, schema_id, old_sink_id);
+        self.create_sink_inner(sink, graph)?;
         Ok(())
     }
 
@@ -648,6 +665,16 @@ impl CatalogWriter for MockCatalogWriter {
         object_name: &str,
     ) -> Result<()> {
         match object_id {
+            alter_name_request::Object::DatabaseId(database_id) => {
+                let mut database = self
+                    .catalog
+                    .read()
+                    .get_database_by_id(database_id)?
+                    .to_prost();
+                database.name = object_name.to_owned();
+                self.catalog.write().update_database(&database);
+                Ok(())
+            }
             alter_name_request::Object::TableId(table_id) => {
                 self.catalog
                     .write()
@@ -1240,6 +1267,14 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(Some(SystemParams::default().into()))
     }
 
+    async fn clear_file_cache(
+        &self,
+        _clear_meta_cache: bool,
+        _clear_data_cache: bool,
+    ) -> RpcResult<()> {
+        Ok(())
+    }
+
     async fn get_session_params(&self) -> RpcResult<SessionConfig> {
         Ok(Default::default())
     }
@@ -1446,8 +1481,12 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(())
     }
 
-    async fn compact_iceberg_table(&self, _sink_id: SinkId) -> RpcResult<u64> {
-        Ok(1)
+    async fn compact_iceberg_table(&self, _sink_id: SinkId) -> RpcResult<IcebergCompactionTaskId> {
+        Ok(1.into())
+    }
+
+    async fn rewrite_iceberg_table_manifests(&self, _sink_id: SinkId) -> RpcResult<()> {
+        Ok(())
     }
 
     async fn expire_iceberg_table_snapshots(&self, _sink_id: SinkId) -> RpcResult<()> {

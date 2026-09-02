@@ -1260,3 +1260,73 @@ impl Catalog {
             .ok_or_else(|| CatalogError::not_found("class", class_name))
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use risingwave_pb::catalog::{
+        PbCreateType, PbDatabase, PbSchema, PbSink, PbSinkType, PbStreamJobStatus,
+    };
+
+    use super::Catalog;
+
+    fn test_sink(id: u32, name: &str, database_id: u32, schema_id: u32) -> PbSink {
+        PbSink {
+            id: id.into(),
+            name: name.to_owned(),
+            database_id: database_id.into(),
+            schema_id: schema_id.into(),
+            sink_type: PbSinkType::AppendOnly.into(),
+            stream_job_status: PbStreamJobStatus::Creating.into(),
+            create_type: PbCreateType::Background.into(),
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_update_sink_set_schema_drops_old_catalog() {
+        let database_id = 1;
+        let old_schema_id = 2;
+        let new_schema_id = 3;
+        let sink_id = 4;
+        let mut catalog = Catalog::default();
+        catalog.create_database(&PbDatabase {
+            id: database_id.into(),
+            name: "dev".to_owned(),
+            ..Default::default()
+        });
+        catalog.create_schema(&PbSchema {
+            id: old_schema_id.into(),
+            database_id: database_id.into(),
+            name: "public".to_owned(),
+            ..Default::default()
+        });
+        catalog.create_schema(&PbSchema {
+            id: new_schema_id.into(),
+            database_id: database_id.into(),
+            name: "archive".to_owned(),
+            ..Default::default()
+        });
+        catalog.create_sink(&test_sink(
+            sink_id,
+            "replace_kafka_sink",
+            database_id,
+            old_schema_id,
+        ));
+
+        catalog.update_sink(&test_sink(
+            sink_id,
+            "replace_kafka_sink",
+            database_id,
+            new_schema_id,
+        ));
+
+        let old_schema = catalog
+            .get_schema_by_id(database_id.into(), old_schema_id.into())
+            .unwrap();
+        assert!(old_schema.get_sink_by_id(sink_id.into()).is_none());
+        let new_schema = catalog
+            .get_schema_by_id(database_id.into(), new_schema_id.into())
+            .unwrap();
+        assert!(new_schema.get_sink_by_id(sink_id.into()).is_some());
+    }
+}

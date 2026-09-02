@@ -67,6 +67,7 @@ pub(crate) mod checkpoint;
 mod commit_epoch;
 mod compaction;
 pub mod sequence;
+mod table_change_log;
 pub mod table_write_throughput_statistic;
 pub mod time_travel;
 mod timer_task;
@@ -200,17 +201,6 @@ pub type HummockManagerRef = Arc<HummockManager>;
 use risingwave_object_store::object::{ObjectError, ObjectStoreRef, build_remote_object_store};
 use risingwave_pb::catalog::Table;
 
-macro_rules! start_measure_real_process_timer {
-    ($hummock_mgr:expr, $func_name:literal) => {
-        $hummock_mgr
-            .metrics
-            .hummock_manager_real_process_time
-            .with_label_values(&[$func_name])
-            .start_timer()
-    };
-}
-pub(crate) use start_measure_real_process_timer;
-
 use super::IcebergCompactorManager;
 use crate::controller::SqlMetaStore;
 use crate::hummock::manager::compaction_group_manager::CompactionGroupManager;
@@ -281,6 +271,7 @@ impl HummockManager {
     ) -> Result<HummockManagerRef> {
         let sys_params = env.system_params_reader().await;
         let state_store_url = sys_params.state_store();
+        let state_store_url = state_store_url.expose();
 
         let state_store_dir: &str = sys_params.data_directory();
         let use_new_object_prefix_strategy: bool = sys_params.use_new_object_prefix_strategy();
@@ -344,21 +335,25 @@ impl HummockManager {
             env,
             versioning: MonitoredRwLock::new(
                 metrics.hummock_manager_lock_time.clone(),
+                metrics.hummock_manager_real_process_time.clone(),
                 Default::default(),
                 "hummock_manager::versioning",
             ),
             compaction: MonitoredRwLock::new(
                 metrics.hummock_manager_lock_time.clone(),
+                metrics.hummock_manager_real_process_time.clone(),
                 Default::default(),
                 "hummock_manager::compaction",
             ),
             compaction_group_manager: MonitoredRwLock::new(
                 metrics.hummock_manager_lock_time.clone(),
+                metrics.hummock_manager_real_process_time.clone(),
                 compaction_group_manager,
                 "hummock_manager::compaction_group_manager",
             ),
             context_info: MonitoredRwLock::new(
                 metrics.hummock_manager_lock_time.clone(),
+                metrics.hummock_manager_real_process_time.clone(),
                 Default::default(),
                 "hummock_manager::context_info",
             ),
@@ -406,8 +401,6 @@ impl HummockManager {
         });
         instance.init_time_travel_state().await?;
         instance.load_meta_store_state().await?;
-        // may_fill_backward_table_change_logs MUST execute after load_meta_store_state
-        instance.may_fill_backward_table_change_logs().await?;
         instance.start_worker(rx);
         instance.release_invalid_contexts().await?;
         // Release snapshots pinned by meta on restarting.
@@ -424,9 +417,18 @@ impl HummockManager {
         let now = self.load_now().await?;
         *self.now.lock().await = now.unwrap_or(0);
 
-        let mut compaction_guard = self.compaction.write().await;
-        let mut versioning_guard = self.versioning.write().await;
-        let mut context_info_guard = self.context_info.write().await;
+        let mut compaction_guard = self
+            .compaction
+            .write_with_process_name("load_meta_store_state")
+            .await;
+        let mut versioning_guard = self
+            .versioning
+            .write_with_process_name("load_meta_store_state")
+            .await;
+        let mut context_info_guard = self
+            .context_info
+            .write_with_process_name("load_meta_store_state")
+            .await;
         self.load_meta_store_state_impl(
             &mut compaction_guard,
             &mut versioning_guard,
@@ -490,7 +492,7 @@ impl HummockManager {
         } else {
             let default_compaction_config = self
                 .compaction_group_manager
-                .read()
+                .read_with_process_name("load_meta_store_state")
                 .await
                 .default_compaction_config();
             let checkpoint_version = HummockVersion::create_init_version(default_compaction_config);
@@ -519,8 +521,6 @@ impl HummockManager {
                 version_delta.prev_id, redo_state.id
             );
             redo_state.apply_version_delta(version_delta);
-            // backward compatibility: migrate table change log to meta store.
-            redo_state.apply_table_change_log_delta_backward_compatibility(version_delta);
             applied_delta_count += 1;
             if applied_delta_count % 1000 == 0 {
                 tracing::info!("Redo progress {applied_delta_count}/{total_to_apply}.");
@@ -579,7 +579,10 @@ impl HummockManager {
 
         self.initial_compaction_group_config_after_load(
             versioning_guard,
-            self.compaction_group_manager.write().await.deref_mut(),
+            self.compaction_group_manager
+                .write_with_process_name("load_meta_store_state")
+                .await
+                .deref_mut(),
         )
         .await?;
 
@@ -602,7 +605,10 @@ impl HummockManager {
         &self,
         mut version_delta: HummockVersionDelta,
     ) -> Result<(HummockVersion, Vec<CompactionGroupId>)> {
-        let mut versioning_guard = self.versioning.write().await;
+        let mut versioning_guard = self
+            .versioning
+            .write_with_process_name("replay_version_delta")
+            .await;
         // ensure the version id is ascending after replay
         version_delta.id = versioning_guard.current_version.next_version_id();
         version_delta.prev_id = versioning_guard.current_version.id;
@@ -615,7 +621,10 @@ impl HummockManager {
     }
 
     pub async fn disable_commit_epoch(&self) -> Arc<HummockVersion> {
-        let mut versioning_guard = self.versioning.write().await;
+        let mut versioning_guard = self
+            .versioning
+            .write_with_process_name("disable_commit_epoch")
+            .await;
         versioning_guard.disable_commit_epochs = true;
         versioning_guard.current_version.clone()
     }
@@ -643,7 +652,10 @@ impl HummockManager {
         &self,
         table_id: TableId,
     ) -> MetaResult<(u64, UnboundedReceiver<u64>)> {
-        let version = self.versioning.read().await;
+        let version = self
+            .versioning
+            .read_with_process_name("subscribe_table_committed_epoch")
+            .await;
         if let Some(epoch) = version.current_version.table_committed_epoch(table_id) {
             let (tx, rx) = unbounded_channel();
             self.table_committed_epoch_notifiers
@@ -654,7 +666,7 @@ impl HummockManager {
                 .push(tx);
             Ok((epoch, rx))
         } else {
-            Err(anyhow!("table {} not exist", table_id).into())
+            Err(anyhow!("table {} does not exist", table_id).into())
         }
     }
 }

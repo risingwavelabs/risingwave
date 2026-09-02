@@ -20,7 +20,7 @@ use anyhow::anyhow;
 use futures::StreamExt;
 use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::id::{JobId, SinkId};
+use risingwave_common::id::{JobId, PartialGraphId, SinkId};
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::{
@@ -93,6 +93,14 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
         };
         assert!(blocked_databases.is_empty());
         self.0.send(ContextRequest::MarkReady).unwrap();
+    }
+
+    async fn resolve_log_store_epoch<'a>(
+        &'a self,
+        _upstream_table_ids: impl Iterator<Item = risingwave_common::catalog::TableId> + Send + 'a,
+        _since_epoch: u64,
+    ) -> MetaResult<crate::barrier::command::SinceTimestampResolvedEpoch> {
+        Ok(Default::default())
     }
 
     async fn post_collect_command(&self, _command: PostCollectCommand) -> MetaResult<()> {
@@ -171,16 +179,26 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
         unimplemented!()
     }
 
-    async fn pre_commit_iceberg_v3_sink_metadata(
+    async fn pre_commit_iceberg_pk_index_sink_metadata(
         &self,
         _reports: Vec<
-            risingwave_pb::stream_service::barrier_complete_response::IcebergV3SinkMetadata,
+            risingwave_pb::stream_service::barrier_complete_response::IcebergPkIndexSinkMetadata,
         >,
     ) -> MetaResult<Vec<SinkId>> {
         unimplemented!()
     }
 
-    async fn commit_iceberg_v3_sink_metadata(&self, _sink_ids: Vec<SinkId>) -> MetaResult<()> {
+    async fn commit_iceberg_pk_index_sink_metadata(
+        &self,
+        _sink_ids: Vec<SinkId>,
+    ) -> MetaResult<()> {
+        unimplemented!()
+    }
+
+    fn advance_iceberg_pk_index_sink_committed_epochs(
+        &self,
+        _epochs: impl IntoIterator<Item = (PartialGraphId, u64)>,
+    ) {
         unimplemented!()
     }
 }
@@ -343,7 +361,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
         ]),
         state_table_log_epochs: HashMap::new(),
         mv_depended_subscriptions: HashMap::new(),
-        background_jobs: HashSet::new(),
+        creating_jobs: HashSet::new(),
         hummock_version_stats: HummockVersionStats::default(),
         database_infos: vec![Database {
             id: database_id,

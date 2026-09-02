@@ -26,12 +26,13 @@ use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compactio
 use risingwave_hummock_sdk::filter_utils::{
     parse_sstable_filter_layout, parse_sstable_filter_type,
 };
-use risingwave_hummock_sdk::version::GroupDelta;
+use risingwave_hummock_sdk::version::{GroupDelta, HummockVersion};
 use risingwave_meta_model::compaction_config;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::write_limits::WriteLimit;
 use risingwave_pb::hummock::{
-    CompactionConfig, CompactionGroupInfo, PbGroupConstruct, PbGroupDestroy, PbStateTableInfoDelta,
+    CompactionConfig, CompactionGroupInfo, HummockVersionStats, PbGroupConstruct, PbGroupDestroy,
+    PbStateTableInfoDelta,
 };
 use sea_orm::EntityTrait;
 use tokio::sync::OnceCell;
@@ -97,13 +98,20 @@ impl HummockManager {
     /// Should not be called inside [`HummockManager`], because it requests locks internally.
     /// The implementation acquires `versioning` lock.
     pub async fn compaction_group_ids(&self) -> Vec<CompactionGroupId> {
-        get_compaction_group_ids(&self.versioning.read().await.current_version).collect_vec()
+        get_compaction_group_ids(
+            &self
+                .versioning
+                .read_with_process_name("compaction_group_ids")
+                .await
+                .current_version,
+        )
+        .collect_vec()
     }
 
     /// The implementation acquires `compaction_group_manager` lock.
     pub async fn get_compaction_group_map(&self) -> BTreeMap<CompactionGroupId, CompactionGroup> {
         self.compaction_group_manager
-            .read()
+            .read_with_process_name("get_compaction_group_map")
             .await
             .compaction_groups
             .clone()
@@ -149,7 +157,7 @@ impl HummockManager {
     pub async fn purge(&self, valid_ids: &HashSet<TableId>) -> Result<()> {
         let to_unregister = self
             .versioning
-            .read()
+            .read_with_process_name("purge")
             .await
             .current_version
             .state_table_info
@@ -175,9 +183,15 @@ impl HummockManager {
         if pairs.is_empty() {
             return Ok(());
         }
-        let mut versioning_guard = self.versioning.write().await;
+        let mut versioning_guard = self
+            .versioning
+            .write_with_process_name("register_table_ids_for_test")
+            .await;
         let versioning = versioning_guard.deref_mut();
-        let mut compaction_group_manager = self.compaction_group_manager.write().await;
+        let mut compaction_group_manager = self
+            .compaction_group_manager
+            .write_with_process_name("register_table_ids_for_test")
+            .await;
         let current_version = &versioning.current_version;
         let default_config = compaction_group_manager.default_compaction_config();
         let mut compaction_groups_txn = compaction_group_manager.start_compaction_groups_txn();
@@ -291,7 +305,10 @@ impl HummockManager {
             }
         }
 
-        let mut versioning_guard = self.versioning.write().await;
+        let mut versioning_guard = self
+            .versioning
+            .write_with_process_name("unregister_table_ids")
+            .await;
         let versioning = versioning_guard.deref_mut();
         let mut version = HummockVersionTransaction::new(
             &mut versioning.current_version,
@@ -367,7 +384,10 @@ impl HummockManager {
 
         // Purge may cause write to meta store. If it hurts performance while holding versioning
         // lock, consider to make it in batch.
-        let mut compaction_group_manager = self.compaction_group_manager.write().await;
+        let mut compaction_group_manager = self
+            .compaction_group_manager
+            .write_with_process_name("unregister_table_ids")
+            .await;
         let mut compaction_groups_txn = compaction_group_manager.start_compaction_groups_txn();
 
         compaction_groups_txn.purge(HashSet::from_iter(get_compaction_group_ids(
@@ -386,7 +406,10 @@ impl HummockManager {
     ) -> Result<()> {
         {
             // Avoid lock conflicts with `try_update_write_limits``
-            let mut compaction_group_manager = self.compaction_group_manager.write().await;
+            let mut compaction_group_manager = self
+                .compaction_group_manager
+                .write_with_process_name("update_compaction_config")
+                .await;
             let mut compaction_groups_txn = compaction_group_manager.start_compaction_groups_txn();
             compaction_groups_txn
                 .update_compaction_config(compaction_group_ids, config_to_update)?;
@@ -407,11 +430,17 @@ impl HummockManager {
     /// Gets complete compaction group info.
     /// It is the aggregate of `HummockVersion` and `CompactionGroupConfig`
     pub async fn list_compaction_group(&self) -> Vec<CompactionGroupInfo> {
-        let mut versioning_guard = self.versioning.write().await;
+        let mut versioning_guard = self
+            .versioning
+            .write_with_process_name("list_compaction_group")
+            .await;
         let versioning = versioning_guard.deref_mut();
         let current_version = &versioning.current_version;
         let mut results = vec![];
-        let compaction_group_manager = self.compaction_group_manager.read().await;
+        let compaction_group_manager = self
+            .compaction_group_manager
+            .read_with_process_name("list_compaction_group")
+            .await;
 
         for levels in current_version.levels.values() {
             let compaction_config = compaction_group_manager
@@ -436,37 +465,56 @@ impl HummockManager {
         results
     }
 
-    pub async fn calculate_compaction_group_statistic(&self) -> Vec<CompactionGroupStatistic> {
+    pub(crate) fn calculate_compaction_group_statistic_from_snapshot(
+        current_version: &HummockVersion,
+        version_stats: &HummockVersionStats,
+        id_to_config: &BTreeMap<CompactionGroupId, CompactionGroup>,
+    ) -> Vec<CompactionGroupStatistic> {
         let mut infos = vec![];
-        {
-            let versioning_guard = self.versioning.read().await;
-            let manager = self.compaction_group_manager.read().await;
-            let version = &versioning_guard.current_version;
-            for group_id in version.levels.keys() {
-                let mut group_info = CompactionGroupStatistic {
-                    group_id: *group_id,
-                    ..Default::default()
-                };
-                for table_id in version
-                    .state_table_info
-                    .compaction_group_member_table_ids(*group_id)
-                {
-                    let stats_size = versioning_guard
-                        .version_stats
-                        .table_stats
-                        .get(table_id)
-                        .map(|stats| stats.total_key_size + stats.total_value_size)
-                        .unwrap_or(0);
-                    let table_size = std::cmp::max(stats_size, 0) as u64;
-                    group_info.group_size += table_size;
-                    group_info.table_statistic.insert(*table_id, table_size);
-                    group_info.compaction_group_config =
-                        manager.try_get_compaction_group_config(*group_id).unwrap();
-                }
-                infos.push(group_info);
+        for group_id in current_version.levels.keys() {
+            let compaction_group_config = id_to_config
+                .get(group_id)
+                .expect("compaction group config should exist for every group in current version")
+                .clone();
+            let mut group_info = CompactionGroupStatistic {
+                group_id: *group_id,
+                compaction_group_config,
+                ..Default::default()
+            };
+
+            for table_id in current_version
+                .state_table_info
+                .compaction_group_member_table_ids(*group_id)
+            {
+                let stats_size = version_stats
+                    .table_stats
+                    .get(table_id)
+                    .map(|stats| stats.total_key_size + stats.total_value_size)
+                    .unwrap_or(0);
+                let table_size = stats_size.max(0) as u64;
+                group_info.group_size += table_size;
+                group_info.table_statistic.insert(*table_id, table_size);
             }
-        };
+
+            infos.push(group_info);
+        }
         infos
+    }
+
+    pub async fn calculate_compaction_group_statistic(&self) -> Vec<CompactionGroupStatistic> {
+        let versioning_guard = self
+            .versioning
+            .read_with_process_name("calculate_compaction_group_statistic")
+            .await;
+        let manager = self
+            .compaction_group_manager
+            .read_with_process_name("calculate_compaction_group_statistic")
+            .await;
+        Self::calculate_compaction_group_statistic_from_snapshot(
+            &versioning_guard.current_version,
+            &versioning_guard.version_stats,
+            &manager.compaction_groups,
+        )
     }
 
     pub(crate) async fn initial_compaction_group_config_after_load(

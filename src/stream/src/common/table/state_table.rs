@@ -20,7 +20,9 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use anyhow::anyhow;
+use await_tree::InstrumentAwait;
 use bytes::Bytes;
+use educe::Educe;
 use either::Either;
 use foyer::Hint;
 use futures::future::{ready, try_join_all};
@@ -258,6 +260,25 @@ pub type StateTable<S> = StateTableInner<S, BasicSerde>;
 /// Used for `ArrangementBackfill` executor.
 pub type ReplicatedStateTable<S, SD> = StateTableInner<S, SD, true>;
 
+pub type FlushedStateTableReader<S, SD = BasicSerde> = StateTableFlushedSnapshotReader<
+    <<S as StateStore>::Local as LocalStateStore>::FlushedSnapshotReader,
+    SD,
+>;
+
+#[derive(Educe)]
+#[educe(Clone)]
+pub struct StateTableFlushedSnapshotReader<R, SD = BasicSerde>
+where
+    R: StateStoreRead,
+    SD: ValueRowSerde,
+{
+    reader: Arc<R>,
+    pk_serde: OrderedRowSerde,
+    vnodes: Arc<Bitmap>,
+    row_serde: Arc<SD>,
+    metrics: Option<StateTableMetrics>,
+}
+
 // initialize
 impl<S, SD, const IS_REPLICATED: bool> StateTableInner<S, SD, IS_REPLICATED>
 where
@@ -302,14 +323,14 @@ fn consistent_old_value_op(
             let first = match row_serde.deserialize(first) {
                 Ok(rows) => rows,
                 Err(e) => {
-                    error!(error = %e.as_report(), value = ?first, "fail to deserialize serialized value");
+                    error!(error = %e.as_report(), value = ?first, "failed to deserialize the serialized value");
                     return false;
                 }
             };
             let second = match row_serde.deserialize(second) {
                 Ok(rows) => rows,
                 Err(e) => {
-                    error!(error = %e.as_report(), value = ?second, "fail to deserialize serialized value");
+                    error!(error = %e.as_report(), value = ?second, "failed to deserialize the serialized value");
                     return false;
                 }
             };
@@ -1176,6 +1197,16 @@ where
         self.distribution.vnodes()
     }
 
+    pub fn flushed_snapshot_reader(&self) -> FlushedStateTableReader<S, SD> {
+        StateTableFlushedSnapshotReader {
+            reader: Arc::new(self.row_store.state_store.new_flushed_snapshot_reader()),
+            pk_serde: self.pk_serde.clone(),
+            vnodes: self.distribution.vnodes().clone(),
+            row_serde: self.row_store.row_serde.clone(),
+            metrics: self.row_store.metrics.clone(),
+        }
+    }
+
     pub fn value_indices(&self) -> &Option<Vec<usize>> {
         &self.value_indices
     }
@@ -1751,6 +1782,11 @@ where
         let table_watermarks = self.commit_pending_watermark();
         self.row_store
             .seal_current_epoch(new_epoch.curr, table_watermarks, switch_consistent_op)
+            .instrument_await(await_tree::span!(
+                "state_table_commit table_id={} epoch={}",
+                self.table_id,
+                new_epoch.curr
+            ))
             .await?;
         self.epoch = Some(new_epoch);
 
@@ -1822,6 +1858,45 @@ impl FromVnodeBytes for Bytes {
 
 impl FromVnodeBytes for () {
     fn from_vnode_bytes(_vnode: VirtualNode, _bytes: &Bytes) -> Self {}
+}
+
+impl<R, SD> StateTableFlushedSnapshotReader<R, SD>
+where
+    R: StateStoreRead,
+    SD: ValueRowSerde,
+{
+    pub fn vnodes(&self) -> &Arc<Bitmap> {
+        &self.vnodes
+    }
+
+    /// Scans flushed local state without reading uncommitted mem-table data.
+    pub async fn iter_with_vnode(
+        &self,
+        vnode: VirtualNode,
+        pk_range: &(Bound<impl Row>, Bound<impl Row>),
+        prefetch_options: PrefetchOptions,
+    ) -> StreamExecutorResult<impl RowStream<'static>> {
+        if let Some(m) = &self.metrics {
+            m.iter_count.inc();
+        }
+
+        let memcomparable_range = prefix_range_to_memcomparable(&self.pk_serde, pk_range);
+        let iter = self
+            .reader
+            .iter(
+                prefixed_range_with_vnode(memcomparable_range, vnode),
+                ReadOptions {
+                    prefix_hint: None,
+                    prefetch_options,
+                    cache_policy: CachePolicy::Fill(Hint::Normal),
+                },
+            )
+            .await?;
+        let row_serde = self.row_serde.clone();
+        Ok(iter
+            .into_stream(move |(_key, value)| Ok(OwnedRow::new(row_serde.deserialize(value)?)))
+            .map_err(Into::into))
+    }
 }
 
 // Iterator functions
@@ -2438,15 +2513,15 @@ fn fill_non_output_indices(
     data_types: &[DataType],
     chunk: StreamChunk,
 ) -> StreamChunk {
-    let cardinality = chunk.cardinality();
     let (ops, columns, vis) = chunk.into_inner();
+    let capacity = vis.len();
     let mut full_columns = Vec::with_capacity(data_types.len());
     for (i, data_type) in data_types.iter().enumerate() {
         if let Some(j) = i2o_mapping.try_map(i) {
             full_columns.push(columns[j].clone());
         } else {
-            let mut column_builder = ArrayImplBuilder::with_type(cardinality, data_type.clone());
-            column_builder.append_n_null(cardinality);
+            let mut column_builder = ArrayImplBuilder::with_type(capacity, data_type.clone());
+            column_builder.append_n_null(capacity);
             let column: ArrayRef = column_builder.finish().into();
             full_columns.push(column)
         }
@@ -2488,6 +2563,32 @@ mod tests {
             +---+---+---+-----+
             | + | 2 |   | 222 |
             +---+---+---+-----+
+             }"#]],
+        );
+    }
+
+    #[test]
+    fn test_fill_non_output_indices_with_invisible_rows() {
+        let data_types = vec![DataType::Int32, DataType::Int32, DataType::Int32];
+        let replicated_chunk = [
+            OwnedRow::new(vec![Some(222_i32.into()), Some(2_i32.into())]),
+            OwnedRow::new(vec![Some(333_i32.into()), Some(3_i32.into())]),
+        ];
+        let (columns, _) =
+            DataChunk::from_rows(&replicated_chunk, &[DataType::Int32, DataType::Int32])
+                .into_parts();
+        let replicated_chunk = StreamChunk::with_visibility(
+            vec![Op::Insert, Op::Insert],
+            columns,
+            Bitmap::from_iter([false, false]),
+        );
+        let i2o_mapping = ColIndexMapping::new(vec![Some(1), None, Some(0)], 2);
+        let filled_chunk = fill_non_output_indices(&i2o_mapping, &data_types, replicated_chunk);
+        check(
+            filled_chunk,
+            expect![[r#"
+            StreamChunk { cardinality: 0, capacity: 2, data:
+            (empty)
              }"#]],
         );
     }

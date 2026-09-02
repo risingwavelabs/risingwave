@@ -13,6 +13,8 @@
 // limitations under the License.
 
 #![warn(clippy::large_futures, clippy::large_stack_frames)]
+#![allow(unfulfilled_lint_expectations)]
+#![recursion_limit = "256"]
 
 use anyhow::Result;
 use clap::{ArgGroup, Args, Parser, Subcommand};
@@ -337,7 +339,26 @@ enum HummockCommands {
         meta_cache_capacity_mb: Option<u64>,
         #[clap(long)]
         data_cache_capacity_mb: Option<u64>,
+        #[clap(
+            long,
+            help = "Clear the local file-backed meta cache on all compute nodes (best effort)"
+        )]
+        clear_meta_cache: bool,
+        #[clap(
+            long,
+            help = "Clear the local file-backed data cache on all compute nodes (best effort)"
+        )]
+        clear_data_cache: bool,
     },
+    /// Table cache refill tools.
+    #[clap(subcommand)]
+    Refill(RefillCommands),
+}
+
+#[derive(Subcommand)]
+enum RefillCommands {
+    /// Collect table cache refill stats from compute nodes.
+    Stats,
 }
 
 #[derive(Subcommand)]
@@ -520,6 +541,13 @@ enum MetaCommands {
         /// Split offsets in JSON format, e.g. '{"split-0": "100", "split-1": "200"}'
         #[clap(long)]
         offsets: String,
+    },
+
+    /// Apply all schema changes under `src/meta/model/migration` to the meta
+    /// store without starting a meta node. Mirrors `SqlMetaStore::up`.
+    CreateMetaStoreSchema {
+        #[command(flatten)]
+        opts: cmd_impl::meta::CreateMetaStoreSchemaOpts,
     },
 }
 
@@ -905,14 +933,21 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         Commands::Hummock(HummockCommands::ResizeCache {
             meta_cache_capacity_mb,
             data_cache_capacity_mb,
+            clear_meta_cache,
+            clear_data_cache,
         }) => {
             const MIB: u64 = 1024 * 1024;
             cmd_impl::hummock::resize_cache(
                 context,
                 meta_cache_capacity_mb.map(|v| v * MIB),
                 data_cache_capacity_mb.map(|v| v * MIB),
+                clear_meta_cache,
+                clear_data_cache,
             )
             .await?
+        }
+        Commands::Hummock(HummockCommands::Refill(RefillCommands::Stats)) => {
+            cmd_impl::hummock::refill_stats(context).await?
         }
         Commands::Table(TableCommands::Scan {
             mv_name,
@@ -1029,6 +1064,9 @@ async fn start_impl(opts: CliOpts, context: &CtlContext) -> Result<()> {
         }
         Commands::Meta(MetaCommands::InjectSourceOffsets { source_id, offsets }) => {
             cmd_impl::meta::inject_source_offsets(context, source_id, offsets).await?;
+        }
+        Commands::Meta(MetaCommands::CreateMetaStoreSchema { opts }) => {
+            cmd_impl::meta::create_meta_store_schema(opts).await?;
         }
         Commands::Test(TestCommands::Jvm) => cmd_impl::test::test_jvm()?,
     }

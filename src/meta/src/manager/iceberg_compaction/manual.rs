@@ -16,6 +16,7 @@ use anyhow::anyhow;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_request::ReportTask as IcebergReportTask;
 use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_request::report_task::Status as IcebergReportTaskStatus;
+use risingwave_pb::id::IcebergCompactionTaskId;
 
 use super::*;
 
@@ -46,7 +47,10 @@ impl IcebergCompactionManager {
         let _ = waiter.send(result);
     }
 
-    pub async fn trigger_manual_compaction(&self, sink_id: SinkId) -> MetaResult<u64> {
+    pub async fn trigger_manual_compaction(
+        &self,
+        sink_id: SinkId,
+    ) -> MetaResult<IcebergCompactionTaskId> {
         // Fast-fail before registering a waiter when no compactor can pull the
         // scheduler task.
         if self.iceberg_compactor_manager.compactor_num() == 0 {

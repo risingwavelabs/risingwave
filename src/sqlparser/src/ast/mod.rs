@@ -30,9 +30,10 @@ use winnow::ModalResult;
 pub use self::data_type::{DataType, StructField};
 pub use self::ddl::{
     AlterColumnOperation, AlterCompactionGroupOperation, AlterConnectionOperation,
-    AlterDatabaseOperation, AlterFragmentOperation, AlterFunctionOperation, AlterSchemaOperation,
-    AlterSecretOperation, AlterTableOperation, ColumnDef, ColumnOption, ColumnOptionDef,
-    ReferentialAction, SourceWatermark, TableConstraint, WebhookSourceInfo,
+    AlterDatabaseOperation, AlterFragmentOperation, AlterFunctionOperation, AlterRateLimit,
+    AlterRateLimitType, AlterSchemaOperation, AlterSecretOperation, AlterTableOperation, ColumnDef,
+    ColumnOption, ColumnOptionDef, ReferentialAction, SourceWatermark, TableConstraint,
+    WebhookSourceInfo,
 };
 pub use self::legacy_source::{CompatibleFormatEncode, get_delimiter};
 pub use self::operator::{BinaryOperator, QualifiedOperator, UnaryOperator};
@@ -1260,6 +1261,13 @@ pub enum WaitTarget {
     Index(ObjectName),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FileCacheType {
+    Meta,
+    Data,
+    All,
+}
+
 /// A top-level statement (SELECT, INSERT, CREATE, etc.)
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -1699,6 +1707,10 @@ pub enum Statement {
     AlterSystem {
         param: Ident,
         value: SetVariableValue,
+    },
+    /// ALTER SYSTEM CLEAR FILE CACHE [META | DATA | ALL]
+    AlterSystemClearFileCache {
+        cache_type: FileCacheType,
     },
     /// FLUSH the current barrier.
     ///
@@ -2199,7 +2211,13 @@ impl Statement {
                 },
             ),
             Statement::CreateSource { stmt } => write!(f, "CREATE SOURCE {}", stmt,),
-            Statement::CreateSink { stmt } => write!(f, "CREATE SINK {}", stmt,),
+            Statement::CreateSink { stmt } => {
+                if stmt.or_replace {
+                    write!(f, "REPLACE SINK {}", stmt)
+                } else {
+                    write!(f, "CREATE SINK {}", stmt)
+                }
+            }
             Statement::CreateSubscription { stmt } => write!(f, "CREATE SUBSCRIPTION {}", stmt,),
             Statement::CreateConnection { stmt } => write!(f, "CREATE CONNECTION {}", stmt,),
             Statement::DeclareCursor { stmt } => write!(f, "DECLARE {}", stmt,),
@@ -2469,6 +2487,14 @@ impl Statement {
             Statement::AlterSystem { param, value } => {
                 f.write_str("ALTER SYSTEM SET ")?;
                 write!(f, "{param} = {value}",)
+            }
+            Statement::AlterSystemClearFileCache { cache_type } => {
+                f.write_str("ALTER SYSTEM CLEAR FILE CACHE ")?;
+                match cache_type {
+                    FileCacheType::Meta => f.write_str("META"),
+                    FileCacheType::Data => f.write_str("DATA"),
+                    FileCacheType::All => f.write_str("ALL"),
+                }
             }
             Statement::Flush => {
                 write!(f, "FLUSH")

@@ -19,20 +19,21 @@ use std::future::Future;
 use std::sync::Arc;
 
 use arc_swap::ArcSwap;
-use risingwave_common::catalog::DatabaseId;
-use risingwave_common::id::JobId;
+use risingwave_common::catalog::{DatabaseId, TableId};
+use risingwave_common::id::{JobId, PartialGraphId};
 use risingwave_meta_model::SinkId;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::barrier_complete_response::{
-    IcebergV3SinkMetadata as PbIcebergV3SinkMetadata, PbListFinishedSource, PbLoadFinishedSource,
+    IcebergPkIndexSinkMetadata as PbIcebergPkIndexSinkMetadata, PbListFinishedSource,
+    PbLoadFinishedSource,
 };
 use risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest;
 use risingwave_rpc_client::StreamingControlHandle;
 
 use crate::MetaResult;
 use crate::barrier::checkpoint::independent_job::BatchRefreshJobTriggerContext;
-use crate::barrier::command::PostCollectCommand;
+use crate::barrier::command::{PostCollectCommand, SinceTimestampResolvedEpoch};
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::schedule::{MarkReadyOptions, ScheduledBarriers};
 use crate::barrier::{
@@ -41,9 +42,11 @@ use crate::barrier::{
     RecoveryReason, Scheduled, SnapshotBackfillInfo,
 };
 use crate::hummock::{CommitEpochInfo, HummockManagerRef};
-use crate::manager::iceberg_v3_sink::IcebergV3SinkManager;
+use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
+use crate::manager::iceberg_pk_index_sink::IcebergPkIndexSinkManager;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, MetadataManager};
+use crate::serving::ServingVnodeMappingRef;
 use crate::stream::source_manager::SplitAssignment;
 use crate::stream::{GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef};
 
@@ -65,7 +68,12 @@ impl CreateSnapshotBackfillJobCommandInfo {
                 refresh_interval_sec,
             })
         } else {
-            CreateStreamingJobType::SnapshotBackfill(self.snapshot_backfill_info)
+            CreateStreamingJobType::SnapshotBackfill {
+                snapshot_backfill_info: self.snapshot_backfill_info,
+                // `since_epoch` is only used before job creation barriers are injected, and
+                // post-collect snapshot backfill does not go through that path.
+                since_epoch: None,
+            }
         };
         PostCollectCommand::CreateStreamingJob {
             info: self.info,
@@ -89,13 +97,26 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
         recovery_reason: RecoveryReason,
     );
     fn mark_ready(&self, options: MarkReadyOptions);
+    fn resolve_log_store_epoch<'a>(
+        &'a self,
+        upstream_table_ids: impl Iterator<Item = TableId> + Send + 'a,
+        since_epoch: u64,
+    ) -> impl Future<Output = MetaResult<SinceTimestampResolvedEpoch>> + Send + 'a;
+
+    async fn refresh_table_refill_runtime_state_after_recovery(&self) -> MetaResult<()> {
+        Ok(())
+    }
 
     fn post_collect_command(
         &self,
         command: PostCollectCommand,
     ) -> impl Future<Output = MetaResult<()>> + Send + '_;
 
-    async fn notify_creating_job_failed(&self, database_id: Option<DatabaseId>, err: String);
+    fn notify_creating_job_failed(
+        &self,
+        database_id: Option<DatabaseId>,
+        err: String,
+    ) -> impl Future<Output = ()> + Send + '_;
 
     fn finish_creating_job(
         &self,
@@ -113,7 +134,9 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
         init_request: &'a PbInitRequest,
     ) -> impl Future<Output = MetaResult<StreamingControlHandle>> + Send + 'a;
 
-    async fn reload_runtime_info(&self) -> MetaResult<BarrierWorkerRuntimeInfoSnapshot>;
+    fn reload_runtime_info(
+        &self,
+    ) -> impl Future<Output = MetaResult<BarrierWorkerRuntimeInfoSnapshot>> + Send + '_;
 
     async fn reload_database_runtime_info(
         &self,
@@ -144,15 +167,21 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
         last_committed_epoch: u64,
     ) -> impl Future<Output = MetaResult<BatchRefreshJobTriggerContext>> + Send + '_;
 
-    fn pre_commit_iceberg_v3_sink_metadata(
+    fn pre_commit_iceberg_pk_index_sink_metadata(
         &self,
-        reports: Vec<PbIcebergV3SinkMetadata>,
+        reports: Vec<PbIcebergPkIndexSinkMetadata>,
     ) -> impl Future<Output = MetaResult<Vec<SinkId>>> + Send + '_;
 
-    fn commit_iceberg_v3_sink_metadata(
+    fn commit_iceberg_pk_index_sink_metadata(
         &self,
         sink_ids: Vec<SinkId>,
     ) -> impl Future<Output = MetaResult<()>> + Send + '_;
+
+    /// Advance per-database pk-index committed epochs after a checkpoint completion.
+    fn advance_iceberg_pk_index_sink_committed_epochs(
+        &self,
+        epochs: impl IntoIterator<Item = (PartialGraphId, u64)>,
+    );
 }
 
 pub(super) struct GlobalBarrierWorkerContextImpl {
@@ -163,6 +192,8 @@ pub(super) struct GlobalBarrierWorkerContextImpl {
     pub(super) metadata_manager: MetadataManager,
 
     hummock_manager: HummockManagerRef,
+
+    serving_vnode_mapping: ServingVnodeMappingRef,
 
     source_manager: SourceManagerRef,
 
@@ -177,7 +208,9 @@ pub(super) struct GlobalBarrierWorkerContextImpl {
 
     sink_manager: SinkCoordinatorManager,
 
-    pub(super) iceberg_v3_sink_manager: IcebergV3SinkManager,
+    pub(super) iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
+
+    pub(super) iceberg_compaction_manager: IcebergCompactionManagerRef,
 }
 
 impl GlobalBarrierWorkerContextImpl {
@@ -187,26 +220,30 @@ impl GlobalBarrierWorkerContextImpl {
         status: Arc<ArcSwap<BarrierManagerStatus>>,
         metadata_manager: MetadataManager,
         hummock_manager: HummockManagerRef,
+        serving_vnode_mapping: ServingVnodeMappingRef,
         source_manager: SourceManagerRef,
         scale_controller: ScaleControllerRef,
         env: MetaSrvEnv,
         barrier_scheduler: BarrierScheduler,
         refresh_manager: GlobalRefreshManagerRef,
         sink_manager: SinkCoordinatorManager,
-        iceberg_v3_sink_manager: IcebergV3SinkManager,
+        iceberg_pk_index_sink_manager: IcebergPkIndexSinkManager,
+        iceberg_compaction_manager: IcebergCompactionManagerRef,
     ) -> Self {
         Self {
             scheduled_barriers,
             status,
             metadata_manager,
             hummock_manager,
+            serving_vnode_mapping,
             source_manager,
             _scale_controller: scale_controller,
             env,
             barrier_scheduler,
             refresh_manager,
             sink_manager,
-            iceberg_v3_sink_manager,
+            iceberg_pk_index_sink_manager,
+            iceberg_compaction_manager,
         }
     }
 

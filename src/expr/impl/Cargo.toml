@@ -12,7 +12,7 @@ repository = { workspace = true }
 ignored = ["chrono-tz", "futures-async-stream"]
 
 [features]
-udf = ["arrow-udf-runtime", "tonic", "ginepro", "zstd"]
+udf = ["arrow-udf-runtime", "tonic", "ginepro", "zstd", "url"]
 
 [dependencies]
 aho-corasick = "1"
@@ -47,6 +47,7 @@ md5 = { package = "md-5", version = "0.10.6" }
 moka = { version = "0.12.0", features = ["sync"] }
 num-traits = "0.2"
 openssl = { workspace = true }
+prometheus = "0.14"
 rand = { workspace = true }
 regex = { workspace = true }
 risingwave_common = { workspace = true }
@@ -66,8 +67,10 @@ thiserror = { workspace = true }
 thiserror-ext = { workspace = true }
 tokio = { workspace = true }
 # For arrow-udf-runtime/remote
-tonic = { workspace = true, optional = true }
+tonic = { workspace = true, optional = true, features = ["tls-native-roots"] }
 tracing = "0.1"
+url = { version = "2", optional = true }
+uuid = { version = "1", features = ["v4"] }
 zstd = { version = "0.13", default-features = false, optional = true }
 
 [target.'cfg(not(madsim))'.dependencies]

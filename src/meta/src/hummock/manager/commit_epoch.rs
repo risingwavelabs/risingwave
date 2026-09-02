@@ -20,7 +20,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::meta::default::compaction_config;
 use risingwave_common::system_param::reader::SystemParamsRead;
-use risingwave_hummock_sdk::change_log::ChangeLogDelta;
+use risingwave_hummock_sdk::change_log::EpochNewChangeLog;
 use risingwave_hummock_sdk::compaction_group::group_split::split_sst_with_table_ids;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{
@@ -47,9 +47,7 @@ use crate::hummock::metrics_utils::{
 use crate::hummock::model::CompactionGroup;
 use crate::hummock::sequence::{next_compaction_group_id, next_sstable_id};
 use crate::hummock::time_travel::should_mark_next_time_travel_version_snapshot;
-use crate::hummock::{
-    HummockManager, commit_multi_var_with_provided_txn, start_measure_real_process_timer,
-};
+use crate::hummock::{HummockManager, commit_multi_var_with_provided_txn};
 
 pub struct NewTableFragmentInfo {
     pub table_ids: HashSet<TableId>,
@@ -61,7 +59,7 @@ pub struct CommitEpochInfo {
     pub new_table_watermarks: HashMap<TableId, TableWatermarks>,
     pub sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
     pub new_table_fragment_infos: Vec<NewTableFragmentInfo>,
-    pub change_log_delta: HashMap<TableId, ChangeLogDelta>,
+    pub change_log_delta: HashMap<TableId, EpochNewChangeLog>,
     pub vector_index_delta: HashMap<TableId, VectorIndexDelta>,
     /// `table_id` -> `committed_epoch`
     pub tables_to_commit: HashMap<TableId, u64>,
@@ -83,8 +81,10 @@ impl HummockManager {
             tables_to_commit,
             truncate_tables,
         } = commit_info;
-        let mut versioning_guard = self.versioning.write().await;
-        let _timer = start_measure_real_process_timer!(self, "commit_epoch");
+        let mut versioning_guard = self
+            .versioning
+            .write_with_process_name("commit_epoch")
+            .await;
         // Prevent commit new epochs if this flag is set
         if versioning_guard.disable_commit_epochs {
             return Ok(());
@@ -146,8 +146,10 @@ impl HummockManager {
                         .clone(),
                     )
                 } else {
-                    let compaction_group_manager_guard =
-                        self.compaction_group_manager.write().await;
+                    let compaction_group_manager_guard = self
+                        .compaction_group_manager
+                        .write_with_process_name("commit_epoch")
+                        .await;
                     let new_compaction_group_config =
                         compaction_group_manager_guard.default_compaction_config();
                     compaction_group_config = Some(new_compaction_group_config.clone());
@@ -194,7 +196,10 @@ impl HummockManager {
                 group_id_to_config.insert(*cg_id, compaction_group);
             }
         } else {
-            let compaction_group_manager = self.compaction_group_manager.read().await;
+            let compaction_group_manager = self
+                .compaction_group_manager
+                .read_with_process_name("commit_epoch")
+                .await;
             for cg_id in &modified_compaction_groups {
                 let compaction_group = compaction_group_manager
                     .try_get_compaction_group_config(*cg_id)

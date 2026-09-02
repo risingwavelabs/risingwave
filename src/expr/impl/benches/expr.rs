@@ -280,9 +280,7 @@ fn bench_expr(c: &mut Criterion) {
     });
     c.bench_function("constant", |bencher| {
         let constant = LiteralExpression::new(DataType::Int32, Some(1_i32.into()));
-        bencher
-            .to_async(FuturesExecutor)
-            .iter(|| constant.eval(&input))
+        bencher.iter(|| constant.eval(&input))
     });
     c.bench_function("extract(constant)", |bencher| {
         let extract = build_from_pretty(format!(
