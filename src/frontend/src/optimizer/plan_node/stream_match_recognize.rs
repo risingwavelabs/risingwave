@@ -21,7 +21,6 @@ use super::stream::prelude::*;
 use super::utils::TableCatalogBuilder;
 use super::{ExprRewritable, ExprVisitable, PlanBase, PlanRef, Stream, TryToStreamPb, generic};
 use crate::TableCatalog;
-use crate::binder::{DefineSlotKind, MeasureSlotKind};
 use crate::expr::{Expr, ExprRewriter, ExprVisitor};
 use crate::optimizer::plan_node::utils::impl_distill_by_unit;
 use crate::optimizer::property::{Distribution, MonotonicityMap, WatermarkColumns};
@@ -175,19 +174,8 @@ impl TryToStreamPb for StreamMatchRecognize {
                     .slots
                     .iter()
                     .map(|s| MatchRecognizeMeasureSlot {
-                        kind: {
-                            use risingwave_pb::stream_plan::match_recognize_measure_slot::Kind;
-                            match s.kind {
-                                MeasureSlotKind::Last => Kind::Last,
-                                MeasureSlotKind::First => Kind::First,
-                                MeasureSlotKind::Classifier => Kind::Classifier,
-                                MeasureSlotKind::CountStar => Kind::CountStar,
-                                MeasureSlotKind::Count => Kind::Count,
-                                MeasureSlotKind::Min => Kind::Min,
-                                MeasureSlotKind::Max => Kind::Max,
-                                MeasureSlotKind::Sum => Kind::Sum,
-                            }
-                        } as i32,
+                        // The binder's kind IS the wire enum; no conversion layer.
+                        kind: s.kind as i32,
                         vars: s.vars.clone(),
                         col_idx: s.col_idx as u32,
                         data_type: Some(s.data_type.to_protobuf()),
@@ -214,16 +202,8 @@ impl TryToStreamPb for StreamMatchRecognize {
                     .slots
                     .iter()
                     .map(|s| MatchRecognizeDefineSlot {
-                        kind: {
-                            use risingwave_pb::stream_plan::match_recognize_define_slot::Kind;
-                            match s.kind {
-                                DefineSlotKind::SelfCol => Kind::SelfCol,
-                                DefineSlotKind::Prev => Kind::Prev,
-                                DefineSlotKind::Next => Kind::Next,
-                                DefineSlotKind::RunningFirst => Kind::RunningFirst,
-                                DefineSlotKind::RunningLast => Kind::RunningLast,
-                            }
-                        } as i32,
+                        // The binder's kind IS the wire enum; no conversion layer.
+                        kind: s.kind as i32,
                         vars: s.vars.clone(),
                         col_idx: s.col_idx as u32,
                         offset: s.offset as u32,

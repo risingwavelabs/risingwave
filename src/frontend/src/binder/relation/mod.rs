@@ -45,7 +45,7 @@ mod window_table_function;
 pub use gap_fill::BoundGapFill;
 pub use join::BoundJoin;
 pub use match_recognize::{
-    BoundMatchRecognize, BoundMeasure, BoundSymbolDefinition, DefineSlotKind, MeasureSlotKind,
+    BoundMatchRecognize, BoundMeasure, BoundSymbolDefinition, MeasureSlotKind,
 };
 pub use share::{BoundShare, BoundShareInput};
 pub use subquery::BoundSubquery;

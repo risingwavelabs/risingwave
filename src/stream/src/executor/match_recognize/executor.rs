@@ -150,27 +150,11 @@ fn report_scan_budget_once(report: &impl EvalErrorReport, already_reported: &mut
     });
 }
 
-/// How a [`MeasureSlot`] resolves against the rows of a match (mirrors the planner's slot kinds).
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum MeasureSlotKind {
-    /// Column value of the first row labeled `var` within the match.
-    First,
-    /// Column value of the last row labeled `var` (also a bare `var.col` under FINAL semantics).
-    Last,
-    /// The pattern variable bound to the match's last row.
-    Classifier,
-    /// Number of rows in the whole match (`COUNT(*)`).
-    CountStar,
-    /// Number of rows labeled `var` with a non-null `col` (`COUNT(var.col)`).
-    Count,
-    /// Minimum `col` over rows labeled `var` (`MIN(var.col)`).
-    Min,
-    /// Maximum `col` over rows labeled `var` (`MAX(var.col)`).
-    Max,
-    /// `SUM(var.col)`, evaluated by the slot's [`AggSlot`] aggregate kernel. `AVG` is lowered to a
-    /// `Sum` slot plus a `Count` slot and a division expression, so it has no kind of its own.
-    Sum,
-}
+/// How a [`MeasureSlot`] resolves against the rows of a match: the wire enum, used directly (the
+/// variants are documented in `stream_plan.proto`) — a parallel executor-side enum was one more
+/// thing to keep in lockstep with the planner for no representational gain. `Unspecified` is
+/// rejected in [`CompiledMeasure::from_protobuf`], so no constructed slot carries it.
+use risingwave_pb::stream_plan::match_recognize_measure_slot::Kind as MeasureSlotKind;
 
 /// A `SUM`/`AVG` aggregate kernel for a slot, plus the input column type used to feed it.
 struct AggSlot {
@@ -214,29 +198,17 @@ impl CompiledMeasure {
             .slots
             .iter()
             .map(|s| {
-                let kind = {
-                    use risingwave_pb::stream_plan::match_recognize_measure_slot::Kind;
-                    match s.kind() {
-                        Kind::Last => MeasureSlotKind::Last,
-                        Kind::First => MeasureSlotKind::First,
-                        Kind::Classifier => MeasureSlotKind::Classifier,
-                        Kind::CountStar => MeasureSlotKind::CountStar,
-                        Kind::Count => MeasureSlotKind::Count,
-                        Kind::Min => MeasureSlotKind::Min,
-                        Kind::Max => MeasureSlotKind::Max,
-                        Kind::Sum => MeasureSlotKind::Sum,
-                        // Fail fast rather than silently changing measure semantics under a
-                        // corrupt plan or version skew. (An out-of-range wire value decodes as
-                        // UNSPECIFIED via `s.kind()`.)
-                        Kind::Unspecified => {
-                            return Err(anyhow::anyhow!(
-                                "invalid MATCH_RECOGNIZE measure slot kind: {}",
-                                s.kind
-                            )
-                            .into());
-                        }
-                    }
-                };
+                let kind = s.kind();
+                // Fail fast rather than silently changing measure semantics under a corrupt plan
+                // or version skew. (An out-of-range wire value decodes as UNSPECIFIED via
+                // `s.kind()`.) Every later match on the kind relies on this rejection.
+                if kind == MeasureSlotKind::Unspecified {
+                    return Err(anyhow::anyhow!(
+                        "invalid MATCH_RECOGNIZE measure slot kind: {}",
+                        s.kind
+                    )
+                    .into());
+                }
                 let agg = match kind {
                     MeasureSlotKind::Sum => {
                         let call =
@@ -310,6 +282,9 @@ impl MeasureSlot {
                 .filter_map(|(j, _)| rows[start + j].row.datum_at(self.col_idx))
                 .max_by(|a, b| a.default_cmp(b))
                 .map(|r| r.into_scalar_impl()),
+            // Rejected in `from_protobuf`; a constructed slot never carries it. NULL (the
+            // non-strict convention) rather than a panic, should that invariant ever break.
+            MeasureSlotKind::Unspecified => None,
             MeasureSlotKind::Sum => {
                 let agg = self.agg.as_ref().ok_or_else(|| {
                     anyhow::anyhow!("MATCH_RECOGNIZE SUM measure slot has no kernel")
@@ -350,23 +325,11 @@ impl MeasureSlot {
     }
 }
 
-/// How a [`DefineSlot`] resolves against the candidate row (mirrors the planner's slot kinds).
-#[derive(Clone, Copy, PartialEq, Eq)]
-enum DefineSlotKind {
-    /// The candidate row's own column.
-    SelfCol,
-    /// `PREV(col, offset)`: a row `offset` positions earlier in the ordered partition. (Physical
-    /// `NEXT` has no executor kind: the binder rejects it in `DEFINE` and the proto decode rejects
-    /// it from a skewed plan.)
-    Prev,
-    /// `FIRST(var.col)`: the first row labeled `vars` in the in-progress match. The candidate row
-    /// counts as tentatively labeled when `vars` contains the variable being defined (see
-    /// [`DefineMatcher::slot_value`]).
-    RunningFirst,
-    /// `LAST(var.col)` / bare other-variable reference: the last such row (running), which is the
-    /// candidate row itself when `vars` contains the variable being defined.
-    RunningLast,
-}
+/// How a [`DefineSlot`] resolves against the candidate row: the wire enum, used directly (see
+/// [`MeasureSlotKind`] for the rationale). `Unspecified` and physical `Next` — which the binder
+/// rejects in `DEFINE` — are rejected in [`CompiledDefine::from_protobuf`], so no constructed
+/// slot carries them.
+use risingwave_pb::stream_plan::match_recognize_define_slot::Kind as DefineSlotKind;
 
 /// One input a `DEFINE` predicate reads (mirrors the planner's [`DefineSlot`]).
 struct DefineSlot {
@@ -398,33 +361,24 @@ impl CompiledDefine {
             .slots
             .iter()
             .map(|s| {
-                let kind = {
-                    use risingwave_pb::stream_plan::match_recognize_define_slot::Kind;
-                    match s.kind() {
-                        Kind::SelfCol => DefineSlotKind::SelfCol,
-                        Kind::Prev => DefineSlotKind::Prev,
-                        Kind::RunningFirst => DefineSlotKind::RunningFirst,
-                        Kind::RunningLast => DefineSlotKind::RunningLast,
-                        // The binder rejects physical NEXT in DEFINE (a verdict depending on rows
-                        // after the candidate needs per-candidate decidability), so no plan this
-                        // frontend produces carries it — reject rather than evaluate a
-                        // watermark-unsafe, arrival-order-dependent read from a skewed plan.
-                        Kind::Next => {
-                            return Err(StreamExecutorError::from(anyhow::anyhow!(
-                                "physical NEXT in a MATCH_RECOGNIZE DEFINE is not supported"
-                            )));
-                        }
-                        // Fail fast rather than silently treating an unknown kind as a self-column
-                        // reference, which would change the DEFINE predicate's meaning under a
-                        // corrupt plan or version skew.
-                        Kind::Unspecified => {
-                            return Err(StreamExecutorError::from(anyhow::anyhow!(
-                                "invalid MATCH_RECOGNIZE define slot kind: {}",
-                                s.kind
-                            )));
-                        }
-                    }
-                };
+                let kind = s.kind();
+                // The binder rejects physical NEXT in DEFINE (a verdict depending on rows after
+                // the candidate needs per-candidate decidability), so no plan this frontend
+                // produces carries it — reject rather than evaluate a watermark-unsafe,
+                // arrival-order-dependent read from a skewed plan. UNSPECIFIED (also what an
+                // out-of-range wire value decodes to) fails fast rather than silently changing
+                // the predicate's meaning. Every later match on the kind relies on this.
+                if kind == DefineSlotKind::Next {
+                    return Err(StreamExecutorError::from(anyhow::anyhow!(
+                        "physical NEXT in a MATCH_RECOGNIZE DEFINE is not supported"
+                    )));
+                }
+                if kind == DefineSlotKind::Unspecified {
+                    return Err(StreamExecutorError::from(anyhow::anyhow!(
+                        "invalid MATCH_RECOGNIZE define slot kind: {}",
+                        s.kind
+                    )));
+                }
                 Ok(DefineSlot {
                     kind,
                     vars: s.vars.clone(),
@@ -498,6 +452,9 @@ impl DefineMatcher<'_> {
                         .map(|k| match_start + k)
                 })
                 .and_then(col_at),
+            // Both rejected in `from_protobuf`; a constructed slot never carries them. NULL (the
+            // non-strict convention) rather than a panic, should that invariant ever break.
+            DefineSlotKind::Next | DefineSlotKind::Unspecified => None,
         }
     }
 }

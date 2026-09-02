@@ -53,6 +53,11 @@ pub struct MeasureSlot {
     pub agg: Option<PlanAggCall>,
 }
 
+/// How a [`MeasureSlot`] resolves against the rows of a match. This is the wire enum used
+/// directly (the variants are documented in `stream_plan.proto`): a parallel binder-side enum
+/// would only add a conversion layer for the plan node to keep in lockstep.
+pub use risingwave_pb::stream_plan::match_recognize_measure_slot::Kind as MeasureSlotKind;
+
 /// A bound `MEASURES` item: an expression over the per-match synthetic row, its navigation slots,
 /// and the output name.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -63,20 +68,10 @@ pub struct BoundMeasure {
     pub slots: Vec<MeasureSlot>,
 }
 
-/// How a [`DefineSlot`] resolves against the row being tested for membership in a pattern variable.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum DefineSlotKind {
-    /// The candidate row's own column (`var.col` for the variable being defined, or unqualified).
-    SelfCol,
-    /// A physical-offset column: `PREV(col, n)` reads `offset` rows earlier in the ordered partition.
-    Prev,
-    /// `NEXT(col, n)`: `offset` rows later.
-    Next,
-    /// `FIRST(var.col)`: the first row labeled `var` in the in-progress match.
-    RunningFirst,
-    /// `LAST(var.col)` / bare `var.col` of another variable: the last such row (running).
-    RunningLast,
-}
+/// How a [`DefineSlot`] resolves against the row being tested for membership in a pattern
+/// variable. The wire enum, used directly (documented in `stream_plan.proto`); see
+/// [`MeasureSlotKind`] for why there is no parallel binder-side enum.
+pub use risingwave_pb::stream_plan::match_recognize_define_slot::Kind as DefineSlotKind;
 
 /// One input a `DEFINE` predicate reads. A predicate is lowered to an expression over a synthetic
 /// row whose `i`-th column is produced by `slots[i]`; the executor materializes that row for each
