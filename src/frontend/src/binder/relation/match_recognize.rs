@@ -34,29 +34,6 @@ use crate::expr::{
 use crate::optimizer::plan_node::generic::PlanAggCall;
 use crate::utils::Condition;
 
-/// How a [`MeasureSlot`] resolves against the rows of a match.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum MeasureSlotKind {
-    /// The column value of the first row labeled `var` within the match (`FIRST(var.col)`).
-    First,
-    /// The column value of the last row labeled `var` (`LAST(var.col)`, and the meaning of a bare
-    /// `var.col` under ONE ROW PER MATCH FINAL semantics).
-    Last,
-    /// The pattern variable bound to the match's last row (`CLASSIFIER()`).
-    Classifier,
-    /// Number of rows in the whole match (`COUNT(*)`). `var` / `col_idx` unused.
-    CountStar,
-    /// Number of rows labeled `var` whose `col` is non-null (`COUNT(var.col)`).
-    Count,
-    /// Minimum `col` over rows labeled `var` (`MIN(var.col)`).
-    Min,
-    /// Maximum `col` over rows labeled `var` (`MAX(var.col)`).
-    Max,
-    /// Sum of `col` over rows labeled `var` (`SUM(var.col)`); evaluated by the slot's `agg`.
-    /// `AVG` reuses this (plus a `Count` slot) rather than having its own kind.
-    Sum,
-}
-
 /// One navigation input that a measure expression reads. A measure is lowered to an expression over
 /// a synthetic row whose `i`-th column is produced by `slots[i]`; the executor materializes that row
 /// per match (the column values are only knowable once the match and its per-row labels are found)
@@ -504,6 +481,17 @@ impl Binder {
             ));
         }
         for m in &measures {
+            // The hidden per-match id below is addressable by explicit name even though it is
+            // excluded from `SELECT *`; a measure with the same alias would make an outer
+            // `SELECT _match_id` ambiguous. Reserve the name.
+            if m.name == "_match_id" {
+                return Err(crate::error::ErrorCode::BindError(
+                    "the measure alias `_match_id` collides with the hidden per-match id column \
+                     MATCH_RECOGNIZE appends; choose another alias"
+                        .to_owned(),
+                )
+                .into());
+            }
             output_columns.push((
                 false,
                 Field::with_name(m.expr.return_type(), m.name.clone()),
@@ -615,14 +603,45 @@ impl Binder {
             };
             let (vars, col_idx) = resolver.resolve(r.index())?;
             let col_type = r.data_type.clone();
+            // Validate the call through the regular aggregate registry, so what an aggregate
+            // accepts here is exactly what it accepts anywhere else in RisingWave SQL (e.g. no
+            // `max(boolean)`), and the result type is the registry's — the SQL contract must not
+            // depend on where the aggregate appears.
+            let infer = |kind: PbAggKind| -> RwResult<DataType> {
+                Ok(AggCall::new(
+                    kind.into(),
+                    vec![InputRef::new(0, col_type.clone()).into()],
+                    false,
+                    OrderBy::any(),
+                    Condition::true_cond(),
+                    vec![],
+                )?
+                .return_type)
+            };
 
             // COUNT / MIN / MAX fold directly over the matched rows in the executor.
             if let Some((kind, data_type)) = match agg.as_str() {
                 "count" => Some((MeasureSlotKind::Count, DataType::Int64)),
-                "min" => Some((MeasureSlotKind::Min, col_type.clone())),
-                "max" => Some((MeasureSlotKind::Max, col_type.clone())),
+                "min" => Some((MeasureSlotKind::Min, infer(PbAggKind::Min)?)),
+                "max" => Some((MeasureSlotKind::Max, infer(PbAggKind::Max)?)),
                 _ => None,
             } {
+                // The executor's Min/Max fold raw column datums (no kernel), so the declared slot
+                // type must BE the column type. Today every registry min/max signature is
+                // `T -> auto`, so validation cannot change the type — but that is the registry's
+                // property, not this code's; fail here rather than mislabel the output if a
+                // type-changing or cast-matched signature ever appears.
+                if matches!(kind, MeasureSlotKind::Min | MeasureSlotKind::Max)
+                    && data_type != col_type
+                {
+                    bail_not_implemented!(
+                        "{}() over {} in MATCH_RECOGNIZE (the aggregate registry returns {}, but \
+                         the per-match evaluation folds column values directly)",
+                        agg.to_uppercase(),
+                        col_type,
+                        data_type
+                    );
+                }
                 return Ok(BoundMeasure {
                     expr: InputRef::new(0, data_type.clone()).into(),
                     name,
@@ -639,17 +658,6 @@ impl Binder {
             // SUM reuses RisingWave's aggregate kernel so the numeric return type stays faithful. The
             // runtime feeds the kernel a single-column chunk (the projected col), so the call's
             // argument is an InputRef to column 0. AVG is built on top as cast(sum / count).
-            let infer = |kind: PbAggKind| -> RwResult<DataType> {
-                Ok(AggCall::new(
-                    kind.into(),
-                    vec![InputRef::new(0, col_type.clone()).into()],
-                    false,
-                    OrderBy::any(),
-                    Condition::true_cond(),
-                    vec![],
-                )?
-                .return_type)
-            };
             let sum_type = infer(PbAggKind::Sum)?;
             let sum_slot = MeasureSlot {
                 kind: MeasureSlotKind::Sum,
@@ -899,6 +907,12 @@ impl Binder {
             )
             .into());
         }
+        // The executor reads the predicate's result as a boolean, so a non-boolean DEFINE must
+        // fail here with a normal binder error — not on the compute node once data arrives. Same
+        // rule as WHERE/HAVING (untyped literals cast implicitly); Flink rejects this at
+        // validation too ("DEFINE clause must be a condition").
+        let clause = format!("the DEFINE predicate of {symbol}");
+        let expr = expr.enforce_bool_clause(&clause)?;
 
         let (definition, slots) = {
             let mut rewriter = DefineSlotRewriter {
@@ -1514,9 +1528,22 @@ impl NavExtractor<'_> {
     }
 
     fn col_idx(&self, name: &str) -> RwResult<usize> {
-        match self.input_fields.iter().position(|f| f.name == name) {
-            Some(i) => Ok(i),
-            None => bail_not_implemented!("navigation over unknown column {} in DEFINE", name),
+        // Zero, one and many matches are three different answers: with duplicate input column
+        // names (`SELECT v AS x, v + 100 AS x ...`) silently taking the first physical field
+        // would bind the navigation to an arbitrary column and change match results.
+        let mut hits = self
+            .input_fields
+            .iter()
+            .enumerate()
+            .filter(|(_, f)| f.name == name);
+        match (hits.next(), hits.next()) {
+            (Some((i, _)), None) => Ok(i),
+            (None, _) => bail_not_implemented!("navigation over unknown column {} in DEFINE", name),
+            (Some(_), Some(_)) => Err(crate::error::ErrorCode::BindError(format!(
+                "column reference \"{name}\" in MATCH_RECOGNIZE navigation is ambiguous: the \
+                 input has more than one column with that name"
+            ))
+            .into()),
         }
     }
 

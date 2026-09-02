@@ -136,6 +136,58 @@
   binder_error: |-
     Feature is not yet implemented: MATCH_RECOGNIZE WITHIN bound must be a constant expression; input column references are not supported
     No tracking issue yet. Feel free to submit a feature request at https://github.com/risingwavelabs/risingwave/issues/new?labels=type%2Ffeature&template=feature_request.yml
+- name: MATCH_RECOGNIZE rejects a non-boolean DEFINE predicate at bind time
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures b.v as dip
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as a.v, b as b.v < 0
+    );
+  binder_error: argument of the DEFINE predicate of a must be boolean, not type Int32
+- name: MATCH_RECOGNIZE navigation over a duplicated input column name is ambiguous
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from (select id, ts, v as x, v + 100 as x from t) match_recognize (
+      partition by id
+      order by ts
+      measures b.ts as dip
+      one row per match
+      after match skip past last row
+      pattern (a b)
+      define a as a.ts > 0, b as prev(x) > b.ts
+    );
+  binder_error: 'Bind error: column reference "x" in MATCH_RECOGNIZE navigation is ambiguous: the input has more than one column with that name'
+- name: MATCH_RECOGNIZE MEASURES aggregates go through the regular signatures (no max(boolean))
+  sql: |
+    create table t(id int, ts int, flag boolean, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures max(a.flag) as m
+      one row per match
+      after match skip past last row
+      pattern (a+)
+      define a as a.flag
+    );
+  binder_error: function max(boolean) does not exist
+- name: MATCH_RECOGNIZE reserves the hidden _match_id name against measure aliases
+  sql: |
+    create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
+    select * from t match_recognize (
+      partition by id
+      order by ts
+      measures a.v as _match_id
+      one row per match
+      after match skip past last row
+      pattern (a)
+      define a as a.v > 0
+    );
+  binder_error: 'Bind error: the measure alias `_match_id` collides with the hidden per-match id column MATCH_RECOGNIZE appends; choose another alias'
 - name: MATCH_RECOGNIZE MEASURES rejects a subquery (no representation in the executor's scalar expressions)
   sql: |
     create table t(id int, ts int, v int, watermark for ts as ts - 10) append only;
