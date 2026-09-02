@@ -744,8 +744,6 @@ pub fn start_iceberg_compactor(
 
                                 if plan_runners.is_empty() {
                                     // For a bounded round, an empty plan is the terminal proof.
-                                    // Completing the previous admitted batch proves only progress
-                                    // because planning and admission can limit each batch.
                                     tracing::info!(
                                         iceberg_component = "compaction_worker",
                                         iceberg_operation = "enqueue_plan",
@@ -887,11 +885,18 @@ pub fn start_iceberg_compactor(
                                         continue 'start_stream;
                                     }
                                 } else {
-                                    // Track only admitted plans. Completing this batch reports
-                                    // progress; an immediate re-plan rediscovers any deferred work.
+                                    // A bounded round can drain with this task only if every planned
+                                    // runner was admitted. Otherwise an immediate re-plan
+                                    // rediscovers the deferred work.
+                                    let fully_admitted_bounded_round =
+                                        is_bounded_round && admitted_count == planned_count;
                                     task_trackers.insert(
                                         task_id,
-                                        IcebergTaskTracker::new(sink_id, admitted_count),
+                                        IcebergTaskTracker::new(
+                                            sink_id,
+                                            admitted_count,
+                                            fully_admitted_bounded_round,
+                                        ),
                                     );
                                 }
 
@@ -1763,7 +1768,7 @@ mod tests {
         assert_eq!(task_queue.waiting_parallelism_sum(), 7);
 
         let shutdown_map = Arc::new(Mutex::new(HashMap::new()));
-        let mut task_trackers = HashMap::from([(task_id, IcebergTaskTracker::new(10, 2))]);
+        let mut task_trackers = HashMap::from([(task_id, IcebergTaskTracker::new(10, 2, false))]);
 
         cancel_iceberg_task(task_id, &mut task_queue, &shutdown_map, &mut task_trackers);
 
@@ -1779,7 +1784,7 @@ mod tests {
         let shutdown_map = Arc::new(Mutex::new(HashMap::new()));
         let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
         shutdown_map.lock().unwrap().insert(task_key, shutdown_tx);
-        let mut task_trackers = HashMap::from([(task_id, IcebergTaskTracker::new(10, 1))]);
+        let mut task_trackers = HashMap::from([(task_id, IcebergTaskTracker::new(10, 1, false))]);
 
         cancel_iceberg_task(task_id, &mut task_queue, &shutdown_map, &mut task_trackers);
 
