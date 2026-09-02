@@ -217,13 +217,18 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
             stmt.setString(2, table);
             try (var result = stmt.executeQuery()) {
                 result.next();
-                if (result.getInt(1) == 0) {
-                    throw ValidatorUtils.invalidArgument(
-                            String.format(
-                                    "%s '%s.%s' does not exist in PDB '%s'",
-                                    description, owner, table, pdbName));
-                }
+                validateTableExists(description, owner, table, pdbName, result.getInt(1));
             }
+        }
+    }
+
+    static void validateTableExists(
+            String description, String owner, String table, String pdbName, int tableCount) {
+        if (tableCount == 0) {
+            throw ValidatorUtils.invalidArgument(
+                    String.format(
+                            "%s '%s.%s' does not exist in PDB '%s'",
+                            description, owner, table, pdbName));
         }
     }
 

@@ -123,7 +123,7 @@ public class SourceValidateHandler {
         }
     }
 
-    /** Validate debezium.heartbeat.interval.ms if specified. If present, it must not be 0. */
+    /** Validate debezium.heartbeat.interval.ms if specified. If present, it must be positive. */
     private static void validateHeartbeatInterval(
             Map<String, String> props, boolean isCdcSourceJob) {
         String intervalStr = props.get(DbzConnectorConfig.HEARTBEAT_INTERVAL_KEY);
@@ -141,10 +141,11 @@ public class SourceValidateHandler {
                             DbzConnectorConfig.HEARTBEAT_INTERVAL_KEY, intervalStr));
         }
 
-        // Validate interval is not 0
-        if (interval == 0) {
+        if (interval <= 0) {
             throw ValidatorUtils.invalidArgument(
-                    String.format("'%s' must not be 0", DbzConnectorConfig.HEARTBEAT_INTERVAL_KEY));
+                    String.format(
+                            "'%s' must be greater than 0",
+                            DbzConnectorConfig.HEARTBEAT_INTERVAL_KEY));
         }
     }
 

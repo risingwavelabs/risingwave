@@ -125,6 +125,10 @@ use risingwave_common::id::SourceId;
 
 use crate::stream_fragmenter::GraphJobType;
 
+pub(crate) fn is_valid_heartbeat_interval(interval: &str) -> bool {
+    interval.parse::<i64>().is_ok_and(|interval| interval > 0)
+}
+
 fn non_generated_sql_columns(columns: &[ColumnDef]) -> Vec<ColumnDef> {
     columns
         .iter()
@@ -1303,6 +1307,15 @@ pub mod tests {
                 .map(|col| (col.name(), col.data_type().clone()))
                 .collect::<HashMap<&str, DataType>>()
         };
+
+    #[test]
+    fn test_valid_heartbeat_interval() {
+        assert!(super::is_valid_heartbeat_interval("1"));
+        assert!(super::is_valid_heartbeat_interval("300000"));
+        assert!(!super::is_valid_heartbeat_interval("0"));
+        assert!(!super::is_valid_heartbeat_interval("-1"));
+        assert!(!super::is_valid_heartbeat_interval("invalid"));
+    }
 
     #[tokio::test]
     async fn test_create_source_handler() {
