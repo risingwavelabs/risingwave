@@ -97,6 +97,14 @@ impl AggregateFunction for UserDefinedAggregateFunction {
             )
             .into());
         }
+        // The runtime is external input and may return the wrong number of rows. Guard the
+        // cardinality the way the scalar UDF path does (`expr_udf.rs`), so a zero-row
+        // finish surfaces as an error instead of panicking inside `datum_at`.
+        if output.len() != 1 {
+            return Err(
+                anyhow::anyhow!("UDF returned {} rows, but expected 1", output.len()).into(),
+            );
+        }
         Ok(output.datum_at(0))
     }
 
@@ -301,5 +309,26 @@ mod tests {
             msg.contains("invalid map key type"),
             "unexpected error: {msg}"
         );
+    }
+
+    #[tokio::test]
+    async fn misbehaving_runtime_miscounted_finish() {
+        // A zero-row `call_agg_finish` must be a graceful error, not a panic from
+        // `datum_at(0)` (`bitmap.rs` asserts `idx < self.len()`).
+        let msg = get_result_err(
+            DataType::Int64,
+            Arc::new(Int64Array::from(Vec::<Option<i64>>::new())),
+        )
+        .await;
+        assert!(msg.contains("0 rows"), "unexpected error: {msg}");
+
+        // More than one row is equally invalid: `datum_at(0)` would silently return
+        // the first row and discard the rest.
+        let msg = get_result_err(
+            DataType::Int64,
+            Arc::new(Int64Array::from(vec![Some(1i64), Some(2i64)])),
+        )
+        .await;
+        assert!(msg.contains("2 rows"), "unexpected error: {msg}");
     }
 }
