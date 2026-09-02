@@ -53,7 +53,7 @@ fn new_track(
     pending_commit_count: usize,
 ) -> CompactionTrack {
     CompactionTrack {
-        task_type: TaskType::Full,
+        configured_task_type: TaskType::Full,
         write_mode: IcebergWriteMode::CopyOnWrite,
         trigger_interval_sec,
         trigger_snapshot_count,
@@ -92,7 +92,7 @@ fn start_in_flight_on(
     compactor_context_id: HummockContextId,
     now: Instant,
 ) {
-    track.start_processing();
+    track.start_attempt();
     track.mark_dispatched(task_id.into(), compactor_context_id, now);
 }
 
@@ -208,12 +208,12 @@ async fn test_schedule_resolves_licensed_compaction_type_policy() {
         config.compaction_type = configured_type;
 
         let mut track = manager.create_compaction_track(&config, now);
-        assert_eq!(track.task_type, expected_task_type);
+        assert_eq!(track.configured_task_type, expected_task_type);
         assert_eq!(track.write_mode, write_mode);
 
         track.record_observed_snapshot(committed_snapshot(10, 1000));
         track.record_commit();
-        let attempt = track.start_processing();
+        let attempt = track.start_attempt();
         let expected_boundary = (write_mode == IcebergWriteMode::MergeOnRead).then_some(10);
         assert_eq!(track.round_max_file_sequence_number, expected_boundary);
         assert_eq!(attempt.max_file_sequence_number, expected_boundary);
@@ -261,7 +261,7 @@ fn test_record_force_compaction_bootstraps_or_preserves_backlog() {
 }
 
 #[tokio::test]
-async fn test_commit_update_freezes_gc_watermark_after_task_start() {
+async fn test_commit_update_freezes_gc_watermark_after_attempt_start() {
     let manager = build_test_manager().await;
     let sink_id = SinkId::new(404);
     let now = Instant::now();
@@ -284,7 +284,7 @@ async fn test_commit_update_freezes_gc_watermark_after_task_start() {
         .sink_schedules
         .get_mut(&sink_id)
         .unwrap()
-        .start_processing();
+        .start_attempt();
 
     let applied = manager.apply_sink_update(
         &mut guard,
@@ -306,7 +306,7 @@ async fn test_commit_update_freezes_gc_watermark_after_task_start() {
             .map(|s| s.snapshot_id),
         Some(11)
     );
-    match track.processing_gc_watermark_snapshot() {
+    match track.active_attempt_gc_watermark_snapshot() {
         Some(Some(snapshot)) => assert_eq!(snapshot.snapshot_id, 10),
         protection => panic!("unexpected gc watermark: {protection:?}"),
     }
@@ -347,7 +347,7 @@ async fn test_commit_update_freezes_gc_watermark_after_task_start() {
             .map(|s| s.snapshot_id),
         Some(13)
     );
-    match track.processing_gc_watermark_snapshot() {
+    match track.active_attempt_gc_watermark_snapshot() {
         Some(Some(snapshot)) => assert_eq!(snapshot.snapshot_id, 10),
         protection => panic!("unexpected gc watermark: {protection:?}"),
     }
@@ -374,8 +374,8 @@ async fn test_force_update_initializes_observed_snapshot() {
 
     assert!(applied);
     let track = guard.sink_schedules.get_mut(&sink_id).unwrap();
-    track.start_processing();
-    match track.processing_gc_watermark_snapshot() {
+    track.start_attempt();
+    match track.active_attempt_gc_watermark_snapshot() {
         Some(Some(snapshot)) => assert_eq!(snapshot.snapshot_id, 10),
         protection => panic!("unexpected gc watermark: {protection:?}"),
     }
@@ -387,7 +387,7 @@ fn test_manual_task_without_observed_snapshot_has_no_gc_watermark() {
     let skip_sink_id = SinkId::new(42);
     let mut skip_track = new_track(now, 300, 10, 0);
     skip_track.record_force_compaction(now, Some(TaskType::Full));
-    skip_track.start_processing();
+    skip_track.start_attempt();
 
     let mut inner = empty_inner();
     inner.sink_schedules.insert(skip_sink_id, skip_track);
@@ -397,7 +397,7 @@ fn test_manual_task_without_observed_snapshot_has_no_gc_watermark() {
             .sink_schedules
             .get(&skip_sink_id)
             .unwrap()
-            .processing_gc_watermark_snapshot(),
+            .active_attempt_gc_watermark_snapshot(),
         Some(None)
     ));
 }
@@ -437,7 +437,7 @@ fn test_active_round_keeps_sequence_boundary_until_drained() {
 
     assert_eq!(track.round_max_file_sequence_number, Some(10));
     assert!(track.should_trigger(now));
-    track.start_processing();
+    track.start_attempt();
     track.mark_dispatched(2.into(), 1.into(), now);
     track.finish_drained(now);
 
@@ -502,7 +502,7 @@ fn test_finish_failed_preserves_backlog_and_allows_retry() {
 }
 
 #[test]
-fn test_report_timeout_is_based_on_processing_deadline() {
+fn test_report_timeout_starts_at_dispatch() {
     let now = Instant::now();
     let mut track = new_track(now, 120, 10, 5);
     track.report_timeout = Duration::from_secs(17);
@@ -524,7 +524,7 @@ fn test_revert_pre_dispatch_failure_requeues_after_backoff_without_losing_backlo
     let now = Instant::now();
     for additional_commits in [0, 3] {
         let mut track = new_track(now, 120, 10, 5);
-        track.start_processing();
+        track.start_attempt();
         record_commits(&mut track, additional_commits);
 
         let revert_at = now + Duration::from_secs(30);
@@ -551,18 +551,18 @@ fn test_revert_pre_dispatch_failure_requeues_after_backoff_without_losing_backlo
 fn test_mark_dispatched_records_task_id_for_stale_report_filtering() {
     let now = Instant::now();
     let mut track = new_track(now, 120, 10, 5);
-    track.start_processing();
+    track.start_attempt();
     track.mark_dispatched(42.into(), 1.into(), now);
 
-    assert!(track.is_processing_task(42.into()));
-    assert!(!track.is_processing_task(43.into()));
+    assert!(track.is_in_flight_task(42.into()));
+    assert!(!track.is_in_flight_task(43.into()));
 }
 
 #[test]
-fn test_force_compaction_does_not_make_processing_track_triggerable() {
+fn test_force_compaction_does_not_make_active_attempt_triggerable() {
     let now = Instant::now();
     let mut track = new_track(now, 120, 10, 0);
-    track.start_processing();
+    track.start_attempt();
 
     track.record_force_compaction(now, None);
 
@@ -597,7 +597,7 @@ fn test_finish_success_after_force_consumes_force_backlog() {
 }
 
 #[test]
-fn test_record_commit_during_processing_is_preserved_after_success() {
+fn test_record_commit_during_active_attempt_is_preserved_after_success() {
     let now = Instant::now();
     let mut track = new_track(now, 120, 10, 2);
     start_in_flight(&mut track, 1, now);
@@ -655,17 +655,17 @@ fn test_update_interval_same_value_keeps_existing_idle_deadline() {
 }
 
 #[test]
-fn test_update_interval_does_not_interrupt_processing() {
+fn test_update_interval_does_not_interrupt_active_attempt() {
     let now = Instant::now();
     let mut track = new_track(now, 120, 10, 1);
-    track.start_processing();
+    track.start_attempt();
 
     track.update_interval(300, now);
 
     assert_eq!(track.trigger_interval_sec, 300);
     match track.state {
         CompactionTrackState::PendingDispatch { .. } => {}
-        CompactionTrackState::Idle { .. } => panic!("processing state should be preserved"),
+        CompactionTrackState::Idle { .. } => panic!("active attempt should be preserved"),
         CompactionTrackState::InFlight { .. } => {
             panic!("track should remain pending dispatch")
         }
@@ -752,7 +752,7 @@ async fn test_apply_sink_update_refreshes_existing_idle_track() {
     );
 
     let track = guard.sink_schedules.get(&sink_id).unwrap();
-    assert_eq!(track.task_type, TaskType::Auto);
+    assert_eq!(track.configured_task_type, TaskType::Auto);
     assert_eq!(track.trigger_interval_sec, 300);
     assert_eq!(track.trigger_snapshot_count, 3);
     assert_eq!(track.last_config_refresh_at, refresh_at);
@@ -831,7 +831,7 @@ async fn test_apply_sink_update_creates_missing_track() {
     );
 
     let track = guard.sink_schedules.get(&sink_id).unwrap();
-    assert_eq!(track.task_type, TaskType::SmallFiles);
+    assert_eq!(track.configured_task_type, TaskType::SmallFiles);
     assert_eq!(track.trigger_interval_sec, 300);
     assert_eq!(track.trigger_snapshot_count, 3);
     assert_eq!(track.pending_commit_count, 1);
@@ -931,7 +931,7 @@ async fn test_refresh_schedule_config_updates_next_attempt_without_changing_acti
     let manager = build_test_manager().await;
     let now = Instant::now();
     let mut track = new_round_track(now, 300, 3, 1);
-    track.task_type = TaskType::SmallFiles;
+    track.configured_task_type = TaskType::SmallFiles;
     track.record_observed_snapshot(committed_snapshot(10, 1000));
     start_in_flight(&mut track, 1, now);
 
@@ -939,15 +939,15 @@ async fn test_refresh_schedule_config_updates_next_attempt_without_changing_acti
     let refreshed_config = new_test_iceberg_config(42, 7, CompactionType::FilesWithDelete);
     manager.refresh_schedule_config(&mut track, &refreshed_config, refresh_at);
 
-    assert_eq!(track.task_type, TaskType::FilesWithDelete);
-    assert_eq!(track.current_task_type(), TaskType::SmallFiles);
+    assert_eq!(track.configured_task_type, TaskType::FilesWithDelete);
+    assert_eq!(track.effective_task_type(), TaskType::SmallFiles);
     assert_eq!(track.trigger_interval_sec, 42);
     assert_eq!(track.trigger_snapshot_count, 7);
     assert_eq!(track.round_max_file_sequence_number, Some(10));
 
     track.finish_success(refresh_at);
     assert!(track.should_trigger(refresh_at));
-    let next_attempt = track.start_processing();
+    let next_attempt = track.start_attempt();
     assert_eq!(next_attempt.task_type, TaskType::FilesWithDelete);
     assert_eq!(next_attempt.max_file_sequence_number, Some(10));
 }
@@ -975,7 +975,7 @@ async fn test_manual_force_update_uses_selected_task_type_once() {
 
         assert!(applied);
         let track = guard.sink_schedules.get(&sink_id).unwrap();
-        assert_eq!(track.task_type, TaskType::SmallFiles);
+        assert_eq!(track.configured_task_type, TaskType::SmallFiles);
 
         let applied = manager.apply_sink_update(
             &mut guard,
@@ -1011,7 +1011,7 @@ async fn test_manual_force_update_uses_selected_task_type_once() {
 }
 
 #[tokio::test]
-async fn test_apply_sink_update_keeps_processing_track_when_compaction_is_disabled() {
+async fn test_apply_sink_update_keeps_in_flight_attempt_when_compaction_is_disabled() {
     let manager = build_test_manager().await;
     let sink_id = SinkId::new(145);
     let task_id = 8;
@@ -1089,7 +1089,7 @@ async fn test_apply_sink_update_keeps_queued_manual_task_when_compaction_is_disa
 }
 
 #[tokio::test]
-async fn test_apply_sink_update_rejects_temporary_manual_processing_track_without_config() {
+async fn test_apply_sink_update_rejects_temporary_manual_in_flight_attempt_without_config() {
     let manager = build_test_manager().await;
     let sink_id = SinkId::new(149);
     let task_id = 8;
@@ -1226,7 +1226,7 @@ async fn test_cleared_pending_handle_does_not_dispatch_or_restore_track() {
 }
 
 #[tokio::test]
-async fn test_clear_iceberg_maintenance_cancels_inflight_task() {
+async fn test_clear_iceberg_maintenance_cancels_in_flight_task() {
     let manager = build_test_manager().await;
     let sink_id = SinkId::new(467);
     let task_id = 88;
@@ -1269,7 +1269,7 @@ async fn test_pre_dispatch_failure_notifies_manual_waiter_and_removes_temporary_
     let now = Instant::now();
     let mut track = new_track(now, 120, 3, 1);
     track.finish_action = CompactionTrackFinishAction::RemoveTrack;
-    let attempt = track.start_processing();
+    let attempt = track.start_attempt();
     let (tx, rx) = tokio::sync::oneshot::channel();
     {
         let mut guard = manager.inner.write();
@@ -1496,7 +1496,7 @@ async fn test_cancel_manual_compaction_waiter_keeps_pending_track() {
     let sink_id = SinkId::new(51);
     let now = Instant::now();
     let mut track = new_track(now, 120, 10, 2);
-    track.start_processing();
+    track.start_attempt();
     let (tx, rx) = tokio::sync::oneshot::channel();
     {
         let mut guard = manager.inner.write();
@@ -1732,7 +1732,7 @@ async fn test_start_manual_compaction_rejects_existing_pending_task() {
     let sink_id = SinkId::new(501);
     let now = Instant::now();
     let mut track = new_track(now, 120, 10, 2);
-    track.start_processing();
+    track.start_attempt();
     manager.inner.write().sink_schedules.insert(sink_id, track);
 
     let error = manager.start_manual_compaction(sink_id).await.unwrap_err();
@@ -1807,7 +1807,7 @@ async fn test_handle_report_task_ignores_stale_task_id() {
 }
 
 #[tokio::test]
-async fn test_get_top_n_backs_off_after_timed_out_inflight_task() {
+async fn test_get_top_n_backs_off_after_timed_out_in_flight_task() {
     let manager = build_test_manager().await;
     let sink_id = SinkId::new(49);
     let now = Instant::now();

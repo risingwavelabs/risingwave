@@ -43,14 +43,14 @@ const COMPACTION_RETRY_BACKOFF: Duration = Duration::from_secs(1);
 enum CompactionTrackState {
     /// Ready to accept commits and check for trigger conditions.
     ///
-    /// `Idle` is not an active task state. A manual request may leave a
+    /// `Idle` is not an active attempt state. A manual request may leave a
     /// one-shot task here for the next scheduler selection.
     Idle {
         next_compaction_time: Instant,
         /// A one-shot manual task, consumed when the next attempt starts.
         manual_task_type: Option<TaskType>,
     },
-    /// Task has been selected locally but not yet accepted by a compactor.
+    /// An attempt has been selected, but its task has not been sent to a compactor.
     PendingDispatch { attempt: Arc<CompactionAttempt> },
     /// Compaction task is in-flight. `report_deadline` acts as a lease; if it
     /// expires before a report arrives, the task becomes retryable.
@@ -88,7 +88,8 @@ enum CompactionTrackFinishAction {
 
 #[derive(Debug, Clone)]
 pub(super) struct CompactionTrack {
-    task_type: TaskType,
+    /// Configured task type for the next automatic attempt.
+    configured_task_type: TaskType,
     write_mode: IcebergWriteMode,
     trigger_interval_sec: u64,
     /// Minimum pending commit threshold to trigger compaction early.
@@ -100,7 +101,7 @@ pub(super) struct CompactionTrack {
     latest_observed_snapshot: Option<IcebergCommittedSnapshot>,
     /// Inclusive file sequence number boundary for the current automatic compaction round.
     round_max_file_sequence_number: Option<i64>,
-    /// Track lifecycle policy after the queued or selected task finishes.
+    /// Track lifecycle policy after the queued task or active attempt finishes.
     /// Disabling automatic compaction lets an existing task finish before
     /// removing its track; re-enabling can restore `KeepTrack`.
     finish_action: CompactionTrackFinishAction,
@@ -109,7 +110,7 @@ pub(super) struct CompactionTrack {
 
 impl CompactionTrack {
     fn new(
-        task_type: TaskType,
+        configured_task_type: TaskType,
         write_mode: IcebergWriteMode,
         trigger_interval_sec: u64,
         trigger_snapshot_count: usize,
@@ -117,7 +118,7 @@ impl CompactionTrack {
         now: Instant,
     ) -> Self {
         Self {
-            task_type,
+            configured_task_type,
             write_mode,
             trigger_interval_sec,
             trigger_snapshot_count,
@@ -204,38 +205,41 @@ impl CompactionTrack {
         self.last_config_refresh_at = now;
     }
 
-    fn current_task_type(&self) -> TaskType {
+    fn effective_task_type(&self) -> TaskType {
         match &self.state {
             CompactionTrackState::Idle {
                 manual_task_type, ..
-            } => manual_task_type.unwrap_or(self.task_type),
+            } => manual_task_type.unwrap_or(self.configured_task_type),
             CompactionTrackState::PendingDispatch { attempt }
             | CompactionTrackState::InFlight { attempt, .. } => attempt.task_type,
         }
     }
 
-    fn start_processing(&mut self) -> Arc<CompactionAttempt> {
+    fn start_attempt(&mut self) -> Arc<CompactionAttempt> {
         let CompactionTrackState::Idle {
             manual_task_type, ..
         } = &mut self.state
         else {
-            unreachable!("Cannot start processing when already processing")
+            unreachable!("Cannot start an attempt while another attempt is active")
         };
 
         let manual_task_type = manual_task_type.take();
-        let task_type = manual_task_type.unwrap_or(self.task_type);
+        let task_type = manual_task_type.unwrap_or(self.configured_task_type);
+        let starts_new_round = manual_task_type.is_none()
+            && self.write_mode == IcebergWriteMode::MergeOnRead
+            && self.round_max_file_sequence_number.is_none();
+
         // Manual requests are one-shot tasks. Only an automatic sequence-bounded
         // task may start a round and consume the commits covered by its boundary.
-        if manual_task_type.is_none()
-            && self.write_mode == IcebergWriteMode::MergeOnRead
-            && self.round_max_file_sequence_number.is_none()
-        {
-            let boundary = self
+        if starts_new_round {
+            // A snapshot sequence number upper-bounds the file sequence numbers
+            // visible in that snapshot.
+            let max_file_sequence_number = self
                 .latest_observed_snapshot
                 .as_ref()
                 .expect("automatic merge-on-read compaction must start from an observed snapshot")
                 .sequence_number;
-            self.round_max_file_sequence_number = Some(boundary);
+            self.round_max_file_sequence_number = Some(max_file_sequence_number);
             self.pending_commit_count = 0;
         }
         let attempt = Arc::new(CompactionAttempt {
@@ -267,7 +271,7 @@ impl CompactionTrack {
         };
     }
 
-    pub(super) fn processing_gc_watermark_snapshot(
+    pub(super) fn active_attempt_gc_watermark_snapshot(
         &self,
     ) -> Option<Option<&IcebergCommittedSnapshot>> {
         match &self.state {
@@ -287,7 +291,7 @@ impl CompactionTrack {
         self.finish_action == CompactionTrackFinishAction::RemoveTrack
     }
 
-    fn has_queued_or_processing_task(&self) -> bool {
+    fn has_queued_task_or_active_attempt(&self) -> bool {
         matches!(
             &self.state,
             CompactionTrackState::Idle {
@@ -298,7 +302,7 @@ impl CompactionTrack {
         )
     }
 
-    pub(super) fn is_processing_task(&self, task_id: IcebergCompactionTaskId) -> bool {
+    pub(super) fn is_in_flight_task(&self, task_id: IcebergCompactionTaskId) -> bool {
         matches!(
             &self.state,
             CompactionTrackState::InFlight {
@@ -432,7 +436,7 @@ impl CompactionTrack {
         self.finish_action
     }
 
-    fn is_processing_bounded_attempt(&self) -> bool {
+    fn is_in_flight_bounded_attempt(&self) -> bool {
         matches!(
             &self.state,
             CompactionTrackState::InFlight { attempt, .. }
@@ -658,13 +662,13 @@ impl IcebergCompactionManager {
         iceberg_config: &IcebergConfig,
         now: Instant,
     ) {
-        let (task_type, write_mode, trigger_interval_sec, trigger_snapshot_count) =
+        let (configured_task_type, write_mode, trigger_interval_sec, trigger_snapshot_count) =
             self.resolve_schedule_values(iceberg_config);
         debug_assert_eq!(
             track.write_mode, write_mode,
             "Iceberg write mode cannot change while a schedule track exists"
         );
-        track.task_type = task_type;
+        track.configured_task_type = configured_task_type;
         track.trigger_snapshot_count = trigger_snapshot_count;
         track.update_interval(trigger_interval_sec, now);
         track.mark_config_refreshed(now);
@@ -758,7 +762,7 @@ impl IcebergCompactionManager {
             if !config.enable_compaction && !kind.allows_disabled_compaction() {
                 let keep_until_task_finishes =
                     guard.sink_schedules.get_mut(&sink_id).is_some_and(|track| {
-                        let keep = track.has_queued_or_processing_task();
+                        let keep = track.has_queued_task_or_active_attempt();
                         if keep {
                             // Preserve the selected attempt, including its round boundary, so
                             // its report is interpreted consistently. The disabled track is
@@ -841,11 +845,11 @@ impl IcebergCompactionManager {
         iceberg_config: &IcebergConfig,
         now: Instant,
     ) -> CompactionTrack {
-        let (task_type, write_mode, trigger_interval_sec, trigger_snapshot_count) =
+        let (configured_task_type, write_mode, trigger_interval_sec, trigger_snapshot_count) =
             self.resolve_schedule_values(iceberg_config);
 
         CompactionTrack::new(
-            task_type,
+            configured_task_type,
             write_mode,
             trigger_interval_sec,
             trigger_snapshot_count,
@@ -1023,7 +1027,7 @@ impl IcebergCompactionManager {
                 .take(n)
                 .filter_map(|(sink_id, _)| {
                     let track = guard.sink_schedules.get_mut(&sink_id)?;
-                    let attempt = track.start_processing();
+                    let attempt = track.start_attempt();
 
                     Some(IcebergCompactionHandle::new(
                         sink_id,
@@ -1148,7 +1152,10 @@ impl IcebergCompactionManager {
 
                 IcebergCompactionScheduleStatus {
                     sink_id,
-                    task_type: track.current_task_type().as_str_name().to_ascii_lowercase(),
+                    task_type: track
+                        .effective_task_type()
+                        .as_str_name()
+                        .to_ascii_lowercase(),
                     trigger_interval_sec: track.trigger_interval_sec,
                     trigger_snapshot_count: track.trigger_snapshot_count,
                     schedule_state: match track.state {
@@ -1179,11 +1186,11 @@ impl IcebergCompactionManager {
             let mut waiter = None;
 
             match guard.sink_schedules.get_mut(&sink_id) {
-                Some(track) if track.is_processing_task(task_id) => {
+                Some(track) if track.is_in_flight_task(task_id) => {
                     let finish_action = match status {
                         IcebergReportTaskStatus::Success => track.finish_success(now),
                         IcebergReportTaskStatus::Drained
-                            if track.is_processing_bounded_attempt() =>
+                            if track.is_in_flight_bounded_attempt() =>
                         {
                             track.finish_drained(now)
                         }
