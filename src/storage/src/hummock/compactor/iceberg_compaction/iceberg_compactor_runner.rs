@@ -17,12 +17,12 @@ use std::fmt::Debug;
 use std::sync::{Arc, LazyLock};
 
 use derive_builder::Builder;
-use iceberg::spec::{DataContentType, DataFile, MAIN_BRANCH};
+use iceberg::spec::{DataContentType, DataFile, MAIN_BRANCH, Snapshot};
 use iceberg::table::Table;
 use iceberg::{Catalog, TableIdent};
 use iceberg_compaction_core::compaction::{
     CommitConsistencyParams, CommitManagerRetryConfig, Compaction, CompactionBuilder,
-    CompactionPlan, CompactionPlanner, CompactionResult, TargetBranchSequenceGuard,
+    CompactionPlan, CompactionPlanner, CompactionResult, TargetBranchSnapshotGuard,
 };
 use iceberg_compaction_core::config::{
     AutoCompactionConfigBuilder, CompactionExecutionConfigBuilder, CompactionPlanningConfig,
@@ -63,8 +63,6 @@ static ICEBERG_COMPACTION_METRICS_REGISTRY: LazyLock<Box<PrometheusMetricsRegist
         ))
     });
 
-const COW_SOURCE_SNAPSHOT_SEQUENCE_NUMBER_PROPERTY: &str =
-    "risingwave.cow.source-snapshot-sequence-number";
 const MAX_DUPLICATE_DATA_FILE_PATH_SAMPLES: usize = 10;
 
 #[derive(Builder, Debug, Clone)]
@@ -152,6 +150,7 @@ impl IcebergCompactionKind {
 #[derive(Debug)]
 struct CowPublishPlan {
     snapshot_id: i64,
+    expected_target_snapshot_id: Option<i64>,
     rewritten_data_file_paths: HashSet<String>,
 }
 
@@ -169,9 +168,13 @@ struct CowPruningStatistics {
 }
 
 impl CowPublishPlan {
-    fn from_compaction_plan(plan: &CompactionPlan) -> Self {
+    fn from_compaction_plan(
+        plan: &CompactionPlan,
+        expected_target_snapshot_id: Option<i64>,
+    ) -> Self {
         Self {
             snapshot_id: plan.snapshot_id,
+            expected_target_snapshot_id,
             rewritten_data_file_paths: plan
                 .file_group
                 .data_files
@@ -211,6 +214,8 @@ pub struct IcebergCompactionPlanRunner {
     compaction_kind: IcebergCompactionKind,
     branch: String,
     compaction_plan: CompactionPlan,
+    /// `main` snapshot observed in the same table metadata used to build `compaction_plan`.
+    planned_main_snapshot_id: Option<i64>,
     pub memory_reservation_bytes: usize,
 }
 
@@ -311,6 +316,7 @@ impl IcebergCompactionPlanRunner {
             compaction_kind,
             branch,
             compaction_plan,
+            planned_main_snapshot_id,
             memory_reservation_bytes,
         } = self;
 
@@ -326,9 +332,9 @@ impl IcebergCompactionPlanRunner {
         // COW publishing must stay bound to the snapshot used for planning. The ingestion branch
         // may advance while the rewrite is running, and publishing that newer branch state without
         // its delete files would make stale or duplicate rows visible on `main`.
-        let cow_publish_plan = compaction_kind
-            .is_copy_on_write()
-            .then(|| CowPublishPlan::from_compaction_plan(&compaction_plan));
+        let cow_publish_plan = compaction_kind.is_copy_on_write().then(|| {
+            CowPublishPlan::from_compaction_plan(&compaction_plan, planned_main_snapshot_id)
+        });
 
         if !compaction_plan.has_files() {
             if let Some(cow_publish_plan) = cow_publish_plan {
@@ -340,7 +346,6 @@ impl IcebergCompactionPlanRunner {
                     task_id,
                     &compaction,
                     &table,
-                    metrics.as_ref(),
                     &branch,
                     &cow_publish_plan,
                     vec![],
@@ -429,7 +434,6 @@ impl IcebergCompactionPlanRunner {
                 task_id,
                 &compaction,
                 &committed_table,
-                metrics.as_ref(),
                 &branch,
                 &cow_publish_plan,
                 data_files,
@@ -531,15 +535,20 @@ fn deduplicate_data_files_by_path(data_files: &mut Vec<DataFile>) -> (usize, Vec
     (duplicate_count, duplicate_path_samples)
 }
 
-fn cow_publish_watermark_covers(
+/// Returns whether the planned target snapshot itself already fences this source snapshot.
+///
+/// Iceberg sequence numbers are table-global. A matching target snapshot whose sequence is at
+/// least the source sequence either is the source snapshot or was committed after it. When their
+/// file sets are also equal, no older task can cross that target snapshot's commit-time CAS.
+fn cow_publish_is_already_fenced(
     source_sequence_number: i64,
-    target_sequence_number_property: Option<&str>,
+    expected_target_snapshot_id: Option<i64>,
+    target_snapshot: Option<&Snapshot>,
 ) -> bool {
-    target_sequence_number_property
-        .and_then(|value| value.parse::<i64>().ok())
-        .is_some_and(|published_sequence_number| {
-            published_sequence_number >= source_sequence_number
-        })
+    target_snapshot.is_some_and(|snapshot| {
+        Some(snapshot.snapshot_id()) == expected_target_snapshot_id
+            && snapshot.sequence_number() >= source_sequence_number
+    })
 }
 
 fn retain_unrewritten_data_files(
@@ -605,7 +614,6 @@ async fn publish_cow_snapshot_to_main(
     task_id: u64,
     compaction: &Compaction,
     table: &Table,
-    metrics: &CompactorMetrics,
     ingestion_branch: &str,
     publish_plan: &CowPublishPlan,
     output_data_files: Vec<DataFile>,
@@ -643,10 +651,6 @@ async fn publish_cow_snapshot_to_main(
         );
     }
     if pruning_statistics.duplicate_data_file_count > 0 {
-        metrics
-            .iceberg_cow_duplicate_data_file_paths
-            .with_label_values(&["source"])
-            .inc_by(pruning_statistics.duplicate_data_file_count as u64);
         tracing::error!(
             iceberg_component = "compaction_worker",
             iceberg_operation = "deduplicate_cow_publish",
@@ -664,10 +668,6 @@ async fn publish_cow_snapshot_to_main(
     let (main_duplicate_data_file_count, main_duplicate_data_file_path_samples) =
         deduplicate_data_files_by_path(&mut main_files);
     if main_duplicate_data_file_count > 0 {
-        metrics
-            .iceberg_cow_duplicate_data_file_paths
-            .with_label_values(&["target"])
-            .inc_by(main_duplicate_data_file_count as u64);
         tracing::error!(
             iceberg_component = "compaction_worker",
             iceberg_operation = "deduplicate_cow_publish_target",
@@ -681,7 +681,7 @@ async fn publish_cow_snapshot_to_main(
     }
     let (added_files, deleted_files) = diff_data_files(published_files, main_files);
 
-    let planned_snapshot_sequence_number = table
+    let planned_snapshot = table
         .metadata()
         .snapshot_by_id(publish_plan.snapshot_id)
         .ok_or_else(|| {
@@ -689,23 +689,21 @@ async fn publish_cow_snapshot_to_main(
                 "No snapshot found with ID {} while publishing COW compaction",
                 publish_plan.snapshot_id
             ))
-        })?
-        .sequence_number();
-    let target_sequence_number_property = table
+        })?;
+    let target_snapshot = table
         .metadata()
         .snapshot_for_ref(MAIN_BRANCH)
-        .and_then(|snapshot| {
-            snapshot
-                .summary()
-                .additional_properties
-                .get(COW_SOURCE_SNAPSHOT_SEQUENCE_NUMBER_PROPERTY)
-        })
-        .map(String::as_str);
+        .map(AsRef::as_ref);
+    // A source snapshot that made no file-level change still needs a durable ordering point. If
+    // the planned target predates the source, fall through and create a metadata-only overwrite;
+    // future tasks can recognize that snapshot by its native sequence number without a custom
+    // snapshot-summary property.
     if added_files.is_empty()
         && deleted_files.is_empty()
-        && cow_publish_watermark_covers(
-            planned_snapshot_sequence_number,
-            target_sequence_number_property,
+        && cow_publish_is_already_fenced(
+            planned_snapshot.sequence_number(),
+            publish_plan.expected_target_snapshot_id,
+            target_snapshot,
         )
     {
         return Ok(());
@@ -715,12 +713,8 @@ async fn publish_cow_snapshot_to_main(
         starting_snapshot_id: publish_plan.snapshot_id,
         use_starting_sequence_number: true,
         basic_schema_id: table.metadata().current_schema().schema_id(),
-        target_branch_sequence_guard: Some(TargetBranchSequenceGuard {
-            snapshot_property: COW_SOURCE_SNAPSHOT_SEQUENCE_NUMBER_PROPERTY.to_owned(),
-            expected_target_snapshot_id: table
-                .metadata()
-                .snapshot_for_ref(MAIN_BRANCH)
-                .map(|snapshot| snapshot.snapshot_id()),
+        target_branch_snapshot_guard: Some(TargetBranchSnapshotGuard {
+            expected_target_snapshot_id: publish_plan.expected_target_snapshot_id,
         }),
     };
     let commit_manager = compaction.build_commit_manager(consistency_params);
@@ -736,7 +730,7 @@ async fn publish_cow_snapshot_to_main(
         iceberg_operation = "publish_cow_snapshot",
         ingestion_branch,
         planned_snapshot_id = publish_plan.snapshot_id,
-        planned_snapshot_sequence_number,
+        planned_snapshot_sequence_number = planned_snapshot.sequence_number(),
         added_file_count,
         deleted_file_count,
         "iceberg_cow_snapshot_published",
@@ -999,6 +993,10 @@ pub async fn create_task_execution(
     let table_schema = table.metadata().current_schema();
     let format_version = table.metadata().format_version();
     let requires_sort = !table.metadata().default_sort_order().fields.is_empty();
+    let planned_main_snapshot_id = table
+        .metadata()
+        .snapshot_for_ref(MAIN_BRANCH)
+        .map(|snapshot| snapshot.snapshot_id());
     let mut runners = Vec::with_capacity(compaction_plans.len());
     for (plan_index, compaction_plan) in compaction_plans.into_iter().enumerate() {
         let memory_estimate = estimate_plan_memory(
@@ -1027,6 +1025,7 @@ pub async fn create_task_execution(
             compaction_kind,
             branch: branch.clone(),
             compaction_plan,
+            planned_main_snapshot_id,
             memory_reservation_bytes,
         });
     }
@@ -1293,6 +1292,7 @@ mod tests {
 
         let publish_plan = CowPublishPlan {
             snapshot_id: 1,
+            expected_target_snapshot_id: None,
             rewritten_data_file_paths: HashSet::from(["data/old.parquet".to_owned()]),
         };
         let compacted_file = test_data_file("data/compacted.parquet");
@@ -1315,12 +1315,30 @@ mod tests {
     }
 
     #[test]
-    fn test_cow_publish_watermark_covers_source_sequence() {
-        assert!(!cow_publish_watermark_covers(10, None));
-        assert!(!cow_publish_watermark_covers(10, Some("invalid")));
-        assert!(!cow_publish_watermark_covers(10, Some("9")));
-        assert!(cow_publish_watermark_covers(10, Some("10")));
-        assert!(cow_publish_watermark_covers(10, Some("11")));
+    fn test_cow_publish_fence_uses_target_snapshot_and_native_sequence() {
+        let target_snapshot = test_snapshot(10, None, "unused.avro".to_owned(), 10);
+
+        assert!(!cow_publish_is_already_fenced(10, None, None));
+        assert!(!cow_publish_is_already_fenced(
+            10,
+            Some(9),
+            Some(&target_snapshot)
+        ));
+        assert!(!cow_publish_is_already_fenced(
+            11,
+            Some(10),
+            Some(&target_snapshot)
+        ));
+        assert!(cow_publish_is_already_fenced(
+            10,
+            Some(10),
+            Some(&target_snapshot)
+        ));
+        assert!(cow_publish_is_already_fenced(
+            9,
+            Some(10),
+            Some(&target_snapshot)
+        ));
     }
 
     #[test]
