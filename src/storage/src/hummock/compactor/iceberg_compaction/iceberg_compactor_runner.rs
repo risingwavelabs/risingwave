@@ -68,9 +68,6 @@ static ICEBERG_COMPACTION_METRICS_REGISTRY: LazyLock<Box<PrometheusMetricsRegist
 pub struct IcebergCompactorRunnerConfig {
     #[builder(default = "4")]
     pub max_parallelism: u32,
-    /// Planner-side input parallelism limit. Production aligns this with the
-    /// task queue capacity independently from output/execution parallelism.
-    pub max_input_parallelism: u32,
     #[builder(default = "1024 * 1024 * 1024")] // 1GB"
     pub min_size_per_partition: u64,
     #[builder(default = "32")]
@@ -791,7 +788,7 @@ fn build_task_planning_config(
             let is_copy_on_write = compaction_kind.is_copy_on_write();
             let mut builder = AutoCompactionConfigBuilder::default();
             builder
-                .max_input_parallelism(config.max_input_parallelism as usize)
+                .max_input_parallelism(config.max_parallelism as usize)
                 .max_output_parallelism(config.max_parallelism as usize)
                 .min_size_per_partition(config.min_size_per_partition)
                 .max_file_count_per_partition(config.max_file_count_per_partition as usize)
@@ -830,7 +827,7 @@ fn build_task_planning_config(
         IcebergCompactionKind::SmallFiles => {
             let mut builder = SmallFilesConfigBuilder::default();
             builder
-                .max_input_parallelism(config.max_input_parallelism as usize)
+                .max_input_parallelism(config.max_parallelism as usize)
                 .max_output_parallelism(config.max_parallelism as usize)
                 .min_size_per_partition(config.min_size_per_partition)
                 .max_file_count_per_partition(config.max_file_count_per_partition as usize)
@@ -855,7 +852,7 @@ fn build_task_planning_config(
         IcebergCompactionKind::Full => {
             let mut builder = FullCompactionConfigBuilder::default();
             builder
-                .max_input_parallelism(config.max_input_parallelism as usize)
+                .max_input_parallelism(config.max_parallelism as usize)
                 .max_output_parallelism(config.max_parallelism as usize)
                 .min_size_per_partition(config.min_size_per_partition)
                 .max_file_count_per_partition(config.max_file_count_per_partition as usize)
@@ -874,7 +871,7 @@ fn build_task_planning_config(
         IcebergCompactionKind::FilesWithDeletes => {
             let mut builder = FilesWithDeletesConfigBuilder::default();
             builder
-                .max_input_parallelism(config.max_input_parallelism as usize)
+                .max_input_parallelism(config.max_parallelism as usize)
                 .max_output_parallelism(config.max_parallelism as usize)
                 .min_size_per_partition(config.min_size_per_partition)
                 .max_file_count_per_partition(config.max_file_count_per_partition as usize)
@@ -895,7 +892,7 @@ fn build_task_planning_config(
             // affected by deletes need a physical rewrite. Clean files are carried to main by
             // the metadata diff in `publish_cow_snapshot_to_main`.
             let config = FilesWithDeletesConfigBuilder::default()
-                .max_input_parallelism(config.max_input_parallelism as usize)
+                .max_input_parallelism(config.max_parallelism as usize)
                 .max_output_parallelism(config.max_parallelism as usize)
                 .min_size_per_partition(config.min_size_per_partition)
                 .max_file_count_per_partition(config.max_file_count_per_partition as usize)
@@ -1103,7 +1100,6 @@ mod tests {
     fn test_runner_config() -> IcebergCompactorRunnerConfig {
         IcebergCompactorRunnerConfig {
             max_parallelism: 8,
-            max_input_parallelism: 3,
             min_size_per_partition: 512 * 1024 * 1024,
             max_file_count_per_partition: 16,
             enable_validate_compaction: false,
@@ -1398,7 +1394,7 @@ mod tests {
             panic!("expected auto planning config");
         };
 
-        assert_eq!(config.max_input_parallelism, 3);
+        assert_eq!(config.max_input_parallelism, 8);
         assert_eq!(config.max_output_parallelism, 8);
         assert_eq!(config.min_size_per_partition, 512 * 1024 * 1024);
         assert_eq!(config.max_file_count_per_partition, 16);

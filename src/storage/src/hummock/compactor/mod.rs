@@ -652,7 +652,6 @@ pub fn start_iceberg_compactor(
                                 // Note: write_parquet_properties is now built from sink config (IcebergConfig) in create_task_execution
                                 let compactor_runner_config = match IcebergCompactorRunnerConfigBuilder::default()
                                     .max_parallelism((worker_num as f32 * compactor_context.storage_opts.iceberg_compaction_task_parallelism_ratio) as u32)
-                                    .max_input_parallelism(max_task_parallelism)
                                     .min_size_per_partition(compactor_context.storage_opts.iceberg_compaction_min_size_per_partition_mb as u64 * 1024 * 1024)
                                     .max_file_count_per_partition(compactor_context.storage_opts.iceberg_compaction_max_file_count_per_partition)
                                     .enable_validate_compaction(compactor_context.storage_opts.iceberg_compaction_enable_validate)
