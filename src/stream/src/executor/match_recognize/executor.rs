@@ -1065,7 +1065,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
     /// per-actor seq counter strictly above every retained row.
     #[allow(clippy::too_many_arguments)]
     async fn rebuild_partitions(
-        parts: &mut HashMap<OwnedRow, PartitionRun>,
+        parts: &mut hashbrown::HashMap<OwnedRow, PartitionRun>,
         state_table: &StateTable<S>,
         partition_key_indices: &[usize],
         time_col: usize,
@@ -1209,7 +1209,9 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         yield Message::Barrier(barrier);
         state_table.init_epoch(first_epoch).await?;
 
-        let mut parts: HashMap<OwnedRow, PartitionRun> = HashMap::new();
+        // `hashbrown` rather than std for `entry_ref` (see the ingest path below); std's raw
+        // entry API never stabilized.
+        let mut parts: hashbrown::HashMap<OwnedRow, PartitionRun> = hashbrown::HashMap::new();
 
         // Recovery / rescale rebuild: see `rebuild_partitions`.
         let max_seq = Self::rebuild_partitions(
@@ -1317,17 +1319,14 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         }
                         state_table.insert(once(Some(ScalarImpl::Int64(seq))).chain(row_ref));
                         let pk = row_ref.project(&partition_key_indices).into_owned_row();
-                        let run = if parts.contains_key(&pk) {
-                            // Fast path: no pk clone on the overwhelmingly common existing-
-                            // partition case (`entry` would clone the key even on a hit).
-                            parts.get_mut(&pk).expect("checked contains_key")
-                        } else {
-                            parts.entry(pk.clone()).or_insert_with(|| PartitionRun {
-                                rows: Vec::new(),
-                                matcher: IncrementalMatcher::new(nfa.clone(), skip.clone()),
-                                held: None,
-                            })
-                        };
+                        // `entry_ref` hashes and probes once, materializing the key only on a
+                        // vacant insert — one probe fewer than the contains_key/get_mut pair it
+                        // replaced. (The `pk` allocation above is per-row either way.)
+                        let run = parts.entry_ref(&pk).or_insert_with(|| PartitionRun {
+                            rows: Vec::new(),
+                            matcher: IncrementalMatcher::new(nfa.clone(), skip.clone()),
+                            held: None,
+                        });
                         run.rows.push(BufferedRow {
                             seq,
                             order_key,
