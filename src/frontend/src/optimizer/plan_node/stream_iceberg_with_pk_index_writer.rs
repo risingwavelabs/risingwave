@@ -237,7 +237,6 @@ impl StreamIcebergWithPkIndexWriter {
             stream_key: resolver_stream_key,
             fields: resolver_fields,
             stream_kind: PbStreamKind::AppendOnly as i32,
-            ..Default::default()
         };
 
         Ok(PbStreamNode {
