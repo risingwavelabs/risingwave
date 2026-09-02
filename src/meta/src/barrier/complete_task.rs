@@ -25,7 +25,7 @@ use risingwave_common::util::deployment::Deployment;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::{DatabaseId, PartialGraphId};
 use risingwave_pb::stream_service::barrier_complete_response::{
-    PbIcebergPkIndexSinkMetadata, PbListFinishedSource, PbLoadFinishedSource,
+    PbListFinishedSource, PbLoadFinishedSource,
 };
 use tokio::task::JoinHandle;
 
@@ -38,6 +38,7 @@ use crate::barrier::rpc::from_partial_graph_id;
 use crate::barrier::schedule::PeriodicBarriers;
 use crate::hummock::CommitEpochInfo;
 use crate::manager::MetaSrvEnv;
+use crate::manager::iceberg_pk_index_sink::IcebergPkIndexPreCommitMetadata;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::{MetaError, MetaResult};
 
@@ -71,8 +72,9 @@ pub(super) struct CompleteBarrierTask {
     pub(super) load_finished_source_ids: Vec<PbLoadFinishedSource>,
     /// Table IDs that have finished materialize refresh and need completion signaling
     pub(super) refresh_finished_table_job_ids: Vec<JobId>,
-    /// Iceberg pk-index sink reports collected during this barrier
-    pub(super) iceberg_pk_index_sink_metadata: Vec<PbIcebergPkIndexSinkMetadata>,
+    /// Iceberg pk-index sink reports and optional compaction overwrite metadata collected during
+    /// this barrier. They are grouped per sink into one pre-commit before Hummock commits.
+    pub(super) iceberg_pk_index_pre_commit_metadata: Vec<IcebergPkIndexPreCommitMetadata>,
 }
 
 impl CompleteBarrierTask {
@@ -106,15 +108,18 @@ impl CompleteBarrierTask {
                 .barrier_wait_commit_latency
                 .start_timer();
 
-            // Iceberg pk-index sink metadata reports are handled in three steps around hummock `commit_epoch`:
-            //   1. pre_commit: persist pending rows under `pending_sink_state` (no iceberg I/O).
+            // Iceberg pk-index sink metadata is handled in four steps around Hummock `commit_epoch`:
+            //   1. pre_commit: merge ordinary reports with optional compaction metadata and persist
+            //      one pending row per sink under `pending_sink_state`.
             //   2. commit_epoch: advance hummock.
             //   3. commit: drive iceberg overwrite_files for queued epochs.
             //   4. advance_committed_epochs: advance the per-partial-graph committed epoch cursor.
             let mut iceberg_pk_index_commit_sink_ids = Vec::new();
-            if !self.iceberg_pk_index_sink_metadata.is_empty() {
+            if !self.iceberg_pk_index_pre_commit_metadata.is_empty() {
                 let res = context
-                    .pre_commit_iceberg_pk_index_sink_metadata(self.iceberg_pk_index_sink_metadata)
+                    .pre_commit_iceberg_pk_index_sink_metadata(
+                        self.iceberg_pk_index_pre_commit_metadata,
+                    )
                     .await?;
                 iceberg_pk_index_commit_sink_ids = res;
             }

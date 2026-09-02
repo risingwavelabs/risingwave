@@ -915,8 +915,8 @@ mod tests {
 
         async fn pre_commit_iceberg_pk_index_sink_metadata(
             &self,
-            _reports: Vec<
-                risingwave_pb::stream_service::barrier_complete_response::IcebergPkIndexSinkMetadata,
+            _metadata: Vec<
+                crate::manager::iceberg_pk_index_sink::IcebergPkIndexPreCommitMetadata,
             >,
         ) -> MetaResult<Vec<risingwave_meta_model::SinkId>> {
             unimplemented!()
