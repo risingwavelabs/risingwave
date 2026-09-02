@@ -118,7 +118,7 @@ impl DebeziumCdcMeta {
     ///   - User provides: `"risedev.orders"` (same format)
     ///   - Result: Keep entire string → `table_name_start` = 0
     ///
-    /// - **MongoDB** ([Debezium topic names](https://debezium.io/documentation/reference/3.2/connectors/mongodb.html#mongodb-topic-names)):
+    /// - **`MongoDB`** ([Debezium topic names](https://debezium.io/documentation/reference/3.2/connectors/mongodb.html#mongodb-topic-names)):
     ///   `"database.collection"` (1 dot, 2 parts)
     ///   - Example: `"inventory.customers"`
     ///   - Result: Keep entire string → `table_name_start` = 0
