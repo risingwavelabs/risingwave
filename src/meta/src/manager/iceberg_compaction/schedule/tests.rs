@@ -115,7 +115,7 @@ fn committed_snapshot(snapshot_id: i64, timestamp_ms: i64) -> IcebergCommittedSn
         branch: "main".to_owned(),
         snapshot_id,
         timestamp_ms,
-        sequence_number: snapshot_id,
+        max_file_sequence_number: Some(snapshot_id),
     }
 }
 
@@ -218,6 +218,22 @@ async fn test_schedule_resolves_licensed_compaction_type_policy() {
         assert_eq!(track.round_max_file_sequence_number, expected_boundary);
         assert_eq!(attempt.max_file_sequence_number, expected_boundary);
     }
+}
+
+#[test]
+fn test_automatic_compaction_without_file_sequence_bound_stays_unbounded() {
+    let now = Instant::now();
+    let mut track = new_round_track(now, 120, 10, 0);
+    let mut observed_snapshot = committed_snapshot(10, 1000);
+    observed_snapshot.max_file_sequence_number = None;
+    track.record_observed_snapshot(observed_snapshot);
+    track.record_commit();
+
+    let attempt = track.start_attempt();
+
+    assert_eq!(attempt.max_file_sequence_number, None);
+    assert_eq!(track.round_max_file_sequence_number, None);
+    assert_eq!(track.pending_commit_count, 1);
 }
 
 #[test]

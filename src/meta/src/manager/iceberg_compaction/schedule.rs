@@ -225,20 +225,23 @@ impl CompactionTrack {
 
         let manual_task_type = manual_task_type.take();
         let task_type = manual_task_type.unwrap_or(self.configured_task_type);
-        let starts_new_round = manual_task_type.is_none()
+        let new_round_boundary = if manual_task_type.is_none()
             && self.write_mode == IcebergWriteMode::MergeOnRead
-            && self.round_max_file_sequence_number.is_none();
+            && self.round_max_file_sequence_number.is_none()
+        {
+            self.latest_observed_snapshot
+                .as_ref()
+                .expect("automatic merge-on-read compaction must start from an observed snapshot")
+                .max_file_sequence_number
+        } else {
+            None
+        };
 
         // Manual requests are one-shot tasks. Only an automatic sequence-bounded
         // task may start a round and consume the commits covered by its boundary.
-        if starts_new_round {
-            // A snapshot sequence number upper-bounds the file sequence numbers
-            // visible in that snapshot.
-            let max_file_sequence_number = self
-                .latest_observed_snapshot
-                .as_ref()
-                .expect("automatic merge-on-read compaction must start from an observed snapshot")
-                .sequence_number;
+        // Iceberg V1 has no file sequence numbers and keeps the legacy unbounded
+        // single-task behavior.
+        if let Some(max_file_sequence_number) = new_round_boundary {
             self.round_max_file_sequence_number = Some(max_file_sequence_number);
             self.pending_commit_count = 0;
         }

@@ -19,8 +19,9 @@ pub struct IcebergCommittedSnapshot {
     pub branch: String,
     pub snapshot_id: i64,
     pub timestamp_ms: i64,
-    /// Snapshot sequence number, which upper-bounds file sequence numbers visible here.
-    pub sequence_number: i64,
+    /// Inclusive file sequence number boundary for this snapshot. Iceberg V1
+    /// does not support file sequence numbers.
+    pub max_file_sequence_number: Option<i64>,
 }
 
 #[derive(Debug, Clone)]
