@@ -892,7 +892,11 @@ impl StageRunner {
         for (task, task_status) in &*self.tasks {
             // 1. Collect task info and client.
             let loc = &task_status.get_status().location;
-            let addr = loc.as_ref().expect("Get address should not fail");
+            let Some(addr) = loc.as_ref() else {
+                // Task was inserted but never successfully scheduled to a worker (location is
+                // still None). There is nothing to cancel on the compute side; skip it.
+                continue;
+            };
             let client = self
                 .compute_client_pool
                 .get_by_addr(HostAddr::from(addr))
