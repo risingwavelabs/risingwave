@@ -8,10 +8,6 @@ cross_db_log_expiry_headroom = (
     f"({epoch_to_unix_millis(cross_db_last_consumed_min_epoch)} / 1000"
     f" - (time() - max({metric('streaming_table_change_log_retention_seconds', node_filter_enabled=False, table_id_filter_enabled=True)}) by (table_id)))"
 )
-pg_cdc_state_table_lag = (
-    f"clamp_min({metric('pg_cdc_upstream_max_lsn', node_filter_enabled=False)} - on(source_id) "
-    f"group_left(slot_name) {metric('stream_pg_cdc_state_table_lsn', node_filter_enabled=False)}, 0)"
-)
 mysql_cdc_binlog_file_seq_min = metric(
     "mysql_cdc_binlog_file_seq_min", node_filter_enabled=False
 )
@@ -100,7 +96,7 @@ def _(outer_panels: Panels):
                         ),
                         panels.target(
                             alert_threshold(
-                                pg_cdc_state_table_lag,
+                                f"clamp_min({metric('pg_cdc_upstream_max_lsn')} - on(source_id) group_left(slot_name) {metric('stream_pg_cdc_state_table_lsn')}, 0)",
                                 20 * 1024 * 1024 * 1024,
                             ),
                             "PG CDC WAL Lag Too High slot {{slot_name}} source {{source_id}}",
