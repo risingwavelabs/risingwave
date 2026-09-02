@@ -89,7 +89,7 @@ use async_nats::jetstream::context::Context as JetStreamContext;
 pub use manager::{SourceColumnDesc, SourceColumnType};
 use risingwave_common::array::{Array, ArrayRef};
 use risingwave_common::row::OwnedRow;
-use risingwave_pb::id::SourceId;
+use risingwave_pb::id::{ActorId, SourceId};
 use thiserror_ext::AsReport;
 pub use util::fill_adaptive_split;
 
@@ -220,7 +220,8 @@ impl WaitCheckpointTask {
                         continue;
                     };
 
-                    let Some(ack_tx) = PULSAR_ACK_CHANNEL.get(&ack_channel_id).await else {
+                    let Some(ack_tx) = PULSAR_ACK_CHANNEL.lock().get(&ack_channel_id).cloned()
+                    else {
                         GLOBAL_SOURCE_METRICS.inc_connector_ack_failure_count(
                             source_name,
                             "pulsar",
@@ -419,9 +420,17 @@ pub struct CdcTableSnapshotSplitCommon<T: Clone> {
 pub type CdcTableSnapshotSplit = CdcTableSnapshotSplitCommon<OwnedRow>;
 pub type CdcTableSnapshotSplitRaw = CdcTableSnapshotSplitCommon<Vec<u8>>;
 
+/// Build the identifier of the ACK channel for a Pulsar reader.
+///
+/// Multiple actors can consume the same source split in one process, so the actor ID is required
+/// to prevent one reader from replacing another reader's channel.
 #[inline]
-pub fn build_pulsar_ack_channel_id(source_id: SourceId, split_id: &SplitId) -> String {
-    format!("{}-{}", source_id, split_id)
+pub fn build_pulsar_ack_channel_id(
+    source_id: SourceId,
+    split_id: &SplitId,
+    actor_id: ActorId,
+) -> String {
+    format!("{}-{}-{}", source_id, split_id, actor_id)
 }
 
 #[cfg(test)]
@@ -430,6 +439,17 @@ mod tests {
     use tokio::sync::mpsc::error::TryRecvError;
 
     use super::*;
+
+    #[test]
+    fn test_pulsar_ack_channel_id_is_actor_scoped() {
+        let source_id = SourceId::new(7);
+        let split_id: SplitId = "persistent://public/default/topic".into();
+
+        let first = build_pulsar_ack_channel_id(source_id, &split_id, ActorId::new(11));
+        let second = build_pulsar_ack_channel_id(source_id, &split_id, ActorId::new(12));
+
+        assert_ne!(first, second);
+    }
 
     fn message_ids<const N: usize>(values: [Option<&[u8]>; N]) -> ArrayRef {
         BytesArray::from_iter(values).into_ref()
@@ -445,14 +465,14 @@ mod tests {
         let (empty_split_tx, mut empty_split_rx) = tokio::sync::mpsc::unbounded_channel();
 
         PULSAR_ACK_CHANNEL
-            .insert(split_0_channel.clone(), split_0_tx)
-            .await;
+            .lock()
+            .insert(split_0_channel.clone(), split_0_tx);
         PULSAR_ACK_CHANNEL
-            .insert(split_1_channel.clone(), split_1_tx)
-            .await;
+            .lock()
+            .insert(split_1_channel.clone(), split_1_tx);
         PULSAR_ACK_CHANNEL
-            .insert(empty_split_channel.clone(), empty_split_tx)
-            .await;
+            .lock()
+            .insert(empty_split_channel.clone(), empty_split_tx);
 
         WaitCheckpointTask::AckPulsarMessage(vec![
             (split_0_channel.clone(), message_ids([Some(b"split-0-old")])),
@@ -476,8 +496,9 @@ mod tests {
         assert_eq!(split_1_rx.try_recv(), Err(TryRecvError::Empty));
         assert_eq!(empty_split_rx.try_recv(), Err(TryRecvError::Empty));
 
-        PULSAR_ACK_CHANNEL.invalidate(&split_0_channel).await;
-        PULSAR_ACK_CHANNEL.invalidate(&split_1_channel).await;
-        PULSAR_ACK_CHANNEL.invalidate(&empty_split_channel).await;
+        let mut ack_channels = PULSAR_ACK_CHANNEL.lock();
+        ack_channels.remove(&split_0_channel);
+        ack_channels.remove(&split_1_channel);
+        ack_channels.remove(&empty_split_channel);
     }
 }
