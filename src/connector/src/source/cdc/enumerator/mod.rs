@@ -58,6 +58,7 @@ pub struct DebeziumSplitEnumerator<T: CdcSourceTypeTrait> {
     pg_cdc_confirmed_flush_lsn: Option<LabelGuardedIntGauge>,
     mysql_cdc_binlog_file_seq_min: Option<LabelGuardedIntGauge>,
     mysql_cdc_binlog_file_seq_max: Option<LabelGuardedIntGauge>,
+    mysql_cdc_binlog_file_size_bytes: Option<LabelGuardedIntGauge>,
     sqlserver_cdc_upstream_min_lsn: Option<LabelGuardedIntGauge>,
     sqlserver_cdc_upstream_max_lsn: Option<LabelGuardedIntGauge>,
     /// Properties specified in the WITH clause by user for database connection
@@ -159,6 +160,7 @@ where
             pg_cdc_confirmed_flush_lsn: None,
             mysql_cdc_binlog_file_seq_min: None,
             mysql_cdc_binlog_file_seq_max: None,
+            mysql_cdc_binlog_file_size_bytes: None,
             sqlserver_cdc_upstream_min_lsn: None,
             sqlserver_cdc_upstream_max_lsn: None,
             properties: properties_arc,
@@ -468,6 +470,12 @@ impl DebeziumSplitEnumerator<Mysql> {
                 &labels,
             )
             .set(seq as i64);
+            get_or_create_guarded_int_gauge(
+                &mut self.mysql_cdc_binlog_file_size_bytes,
+                &self.metrics.mysql_cdc_binlog_file_size_bytes,
+                &labels,
+            )
+            .set((*newest_size).min(i64::MAX as u64) as i64);
             tracing::debug!(
                 "MySQL CDC source {} ({}:{}): newest binlog = {}, seq = {}, size = {}",
                 self.source_id,

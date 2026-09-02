@@ -82,6 +82,61 @@ fn set_guarded_int_gauge(
         .set(value);
 }
 
+fn update_cdc_state_metrics(
+    metric_guards: &mut CdcStateMetricGuards,
+    metrics: &StreamingMetrics,
+    source_id: &str,
+    split_impl: &SplitImpl,
+) {
+    match split_impl {
+        SplitImpl::PostgresCdc(pg_split) => {
+            if let Some(lsn_value) = pg_split.pg_lsn() {
+                set_guarded_int_gauge(
+                    &mut metric_guards.pg_cdc_state_table_lsn,
+                    &metrics.pg_cdc_state_table_lsn,
+                    source_id,
+                    lsn_value as i64,
+                );
+            }
+        }
+        SplitImpl::MysqlCdc(mysql_split) => {
+            if let Some((file_seq, position)) = mysql_split.mysql_binlog_offset() {
+                set_guarded_int_gauge(
+                    &mut metric_guards.mysql_cdc_state_binlog_file_seq,
+                    &metrics.mysql_cdc_state_binlog_file_seq,
+                    source_id,
+                    file_seq as i64,
+                );
+                set_guarded_int_gauge(
+                    &mut metric_guards.mysql_cdc_state_binlog_position,
+                    &metrics.mysql_cdc_state_binlog_position,
+                    source_id,
+                    position as i64,
+                );
+            }
+        }
+        SplitImpl::SqlServerCdc(sqlserver_split) => {
+            if let Some(lsn) = sqlserver_split.sql_server_change_lsn() {
+                set_guarded_int_gauge(
+                    &mut metric_guards.sqlserver_cdc_state_change_lsn,
+                    &metrics.sqlserver_cdc_state_change_lsn,
+                    source_id,
+                    lsn_u128_to_i64(lsn),
+                );
+            }
+            if let Some(lsn) = sqlserver_split.sql_server_commit_lsn() {
+                set_guarded_int_gauge(
+                    &mut metric_guards.sqlserver_cdc_state_commit_lsn,
+                    &metrics.sqlserver_cdc_state_commit_lsn,
+                    source_id,
+                    lsn_u128_to_i64(lsn),
+                );
+            }
+        }
+        _ => {}
+    }
+}
+
 pub struct SourceExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
 
@@ -482,55 +537,7 @@ impl<S: StateStore> SourceExecutor<S> {
             // Record metrics for CDC sources before moving cache
             let source_id = core.source_id.to_string();
             for split_impl in &cache {
-                // Extract and record CDC-specific metrics based on split type
-                match split_impl {
-                    SplitImpl::PostgresCdc(pg_split) => {
-                        if let Some(lsn_value) = pg_split.pg_lsn() {
-                            set_guarded_int_gauge(
-                                &mut metric_guards.pg_cdc_state_table_lsn,
-                                &self.metrics.pg_cdc_state_table_lsn,
-                                &source_id,
-                                lsn_value as i64,
-                            );
-                        }
-                    }
-                    SplitImpl::MysqlCdc(mysql_split) => {
-                        if let Some((file_seq, position)) = mysql_split.mysql_binlog_offset() {
-                            set_guarded_int_gauge(
-                                &mut metric_guards.mysql_cdc_state_binlog_file_seq,
-                                &self.metrics.mysql_cdc_state_binlog_file_seq,
-                                &source_id,
-                                file_seq as i64,
-                            );
-
-                            set_guarded_int_gauge(
-                                &mut metric_guards.mysql_cdc_state_binlog_position,
-                                &self.metrics.mysql_cdc_state_binlog_position,
-                                &source_id,
-                                position as i64,
-                            );
-                        }
-                    }
-                    SplitImpl::SqlServerCdc(sqlserver_split) => {
-                        if let Some(lsn) = sqlserver_split.sql_server_change_lsn() {
-                            set_guarded_int_gauge(
-                                &mut metric_guards.sqlserver_cdc_state_change_lsn,
-                                &self.metrics.sqlserver_cdc_state_change_lsn,
-                                &source_id,
-                                lsn_u128_to_i64(lsn),
-                            );
-                        }
-                        if let Some(lsn) = sqlserver_split.sql_server_commit_lsn() {
-                            set_guarded_int_gauge(
-                                &mut metric_guards.sqlserver_cdc_state_commit_lsn,
-                                &self.metrics.sqlserver_cdc_state_commit_lsn,
-                                &source_id,
-                                lsn_u128_to_i64(lsn),
-                            );
-                        }
-                    }
-                    _ => {}
-                }
+                update_cdc_state_metrics(metric_guards, &self.metrics, &source_id, split_impl);
             }
 
             core.split_state_store.set_states(cache).await?;
@@ -667,6 +674,7 @@ impl<S: StateStore> SourceExecutor<S> {
 
         core.split_state_store.init_epoch(first_epoch).await?;
         {
+            let source_id = source_id.to_string();
             let committed_reader = core
                 .split_state_store
                 .new_committed_reader(first_epoch)
@@ -676,6 +684,12 @@ impl<S: StateStore> SourceExecutor<S> {
                     committed_reader.try_recover_from_state_store(ele).await?
                 {
                     *ele = recover_state;
+                    update_cdc_state_metrics(
+                        &mut self.cdc_state_metric_guards,
+                        &self.metrics,
+                        &source_id,
+                        ele,
+                    );
                     // if state store is non-empty, we consider it's initialized.
                     is_uninitialized = false;
                 } else {
@@ -1312,12 +1326,15 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
 #[cfg(test)]
 mod tests {
     use maplit::{btreemap, convert_args, hashmap};
+    use prometheus::Registry;
     use prometheus::core::Collector;
     use risingwave_common::catalog::{ColumnId, Field};
+    use risingwave_common::config::MetricLevel;
     use risingwave_common::id::SourceId;
     use risingwave_common::system_param::local_manager::LocalSystemParamsManager;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::util::epoch::{EpochExt, test_epoch};
+    use risingwave_connector::source::cdc::{DebeziumCdcSplit, Mysql};
     use risingwave_connector::source::datagen::DatagenSplit;
     use risingwave_connector::source::reader::desc::test_utils::create_source_desc_builder;
     use risingwave_pb::catalog::StreamSourceInfo;
@@ -1352,6 +1369,84 @@ mod tests {
                     .value()
             );
         }
+    }
+
+    #[tokio::test]
+    async fn test_recovered_mysql_cdc_state_metrics_are_initialized() -> StreamExecutorResult<()> {
+        let mut state_table_handler = SourceStateTableHandler::from_table_catalog(
+            &default_source_internal_table(0x2333),
+            MemoryStateStore::new(),
+        )
+        .await;
+        let offset = r#"{"sourceOffset":{"file":"binlog.000123","pos":45678}}"#;
+        let persisted_split = SplitImpl::MysqlCdc(DebeziumCdcSplit::<Mysql>::new(
+            1001,
+            Some(offset.to_owned()),
+            None,
+        ));
+        let uninitialized_split =
+            SplitImpl::MysqlCdc(DebeziumCdcSplit::<Mysql>::new(1001, None, None));
+        let epoch_1 = EpochPair::new_test_epoch(test_epoch(1));
+        let epoch_2 = EpochPair::new_test_epoch(test_epoch(2));
+        let epoch_3 = EpochPair::new_test_epoch(test_epoch(3));
+
+        state_table_handler.init_epoch(epoch_1).await?;
+        state_table_handler
+            .set_states(vec![persisted_split.clone()])
+            .await?;
+        state_table_handler
+            .state_table_mut()
+            .commit_for_test(epoch_2)
+            .await?;
+        state_table_handler
+            .state_table_mut()
+            .commit_for_test(epoch_3)
+            .await?;
+
+        let recovered_split = state_table_handler
+            .new_committed_reader(epoch_3)
+            .await?
+            .try_recover_from_state_store(&uninitialized_split)
+            .await?
+            .unwrap();
+        assert_eq!(recovered_split, persisted_split);
+
+        let registry = Registry::new();
+        let metrics = StreamingMetrics::new(&registry, MetricLevel::Debug);
+        let mut metric_guards = CdcStateMetricGuards::default();
+        update_cdc_state_metrics(&mut metric_guards, &metrics, "1", &recovered_split);
+
+        for _ in 0..2 {
+            let file_seq = metrics
+                .mysql_cdc_state_binlog_file_seq
+                .collect()
+                .pop()
+                .unwrap();
+            assert_eq!(
+                123.0,
+                file_seq.get_metric()[0]
+                    .get_gauge()
+                    .as_ref()
+                    .unwrap()
+                    .value()
+            );
+
+            let position = metrics
+                .mysql_cdc_state_binlog_position
+                .collect()
+                .pop()
+                .unwrap();
+            assert_eq!(
+                45678.0,
+                position.get_metric()[0]
+                    .get_gauge()
+                    .as_ref()
+                    .unwrap()
+                    .value()
+            );
+        }
+
+        Ok(())
     }
 
     #[tokio::test]

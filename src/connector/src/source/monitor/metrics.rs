@@ -73,6 +73,8 @@ pub struct EnumeratorMetrics {
     pub mysql_cdc_binlog_file_seq_min: LabelGuardedIntGaugeVec,
     /// MySQL CDC binlog file sequence number (max)
     pub mysql_cdc_binlog_file_seq_max: LabelGuardedIntGaugeVec,
+    /// MySQL CDC newest binlog file size in bytes
+    pub mysql_cdc_binlog_file_size_bytes: LabelGuardedIntGaugeVec,
     /// SQL Server CDC upstream minimum LSN
     pub sqlserver_cdc_upstream_min_lsn: LabelGuardedIntGaugeVec,
     /// SQL Server CDC upstream maximum LSN
@@ -132,6 +134,14 @@ impl EnumeratorMetrics {
         )
         .unwrap();
 
+        let mysql_cdc_binlog_file_size_bytes = register_guarded_int_gauge_vec_with_registry!(
+            "mysql_cdc_binlog_file_size_bytes",
+            "Current size in bytes of the MySQL CDC upstream newest binlog file",
+            &["source_id", "hostname", "port"],
+            registry,
+        )
+        .unwrap();
+
         let sqlserver_cdc_upstream_min_lsn = register_guarded_int_gauge_vec_with_registry!(
             "sqlserver_cdc_upstream_min_lsn",
             "SQL Server CDC upstream minimum LSN",
@@ -155,6 +165,7 @@ impl EnumeratorMetrics {
             pg_cdc_upstream_max_lsn,
             mysql_cdc_binlog_file_seq_min,
             mysql_cdc_binlog_file_seq_max,
+            mysql_cdc_binlog_file_size_bytes,
             sqlserver_cdc_upstream_min_lsn,
             sqlserver_cdc_upstream_max_lsn,
         }

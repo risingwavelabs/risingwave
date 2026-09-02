@@ -1,6 +1,28 @@
 from ..common import *
 from . import section
 
+mysql_cdc_binlog_file_seq_min = metric(
+    "mysql_cdc_binlog_file_seq_min", node_filter_enabled=False
+)
+mysql_cdc_binlog_file_seq_max = metric(
+    "mysql_cdc_binlog_file_seq_max", node_filter_enabled=False
+)
+mysql_cdc_binlog_file_size_bytes = metric(
+    "mysql_cdc_binlog_file_size_bytes", node_filter_enabled=False
+)
+stream_mysql_cdc_state_binlog_file_seq = metric(
+    "stream_mysql_cdc_state_binlog_file_seq", node_filter_enabled=False
+)
+stream_mysql_cdc_state_binlog_position = metric(
+    "stream_mysql_cdc_state_binlog_position", node_filter_enabled=False
+)
+mysql_cdc_binlog_position_lag = (
+    f"clamp_min({mysql_cdc_binlog_file_size_bytes} - on(source_id) "
+    f"{stream_mysql_cdc_state_binlog_position}, 0) and on(source_id) "
+    f"({mysql_cdc_binlog_file_seq_max} == on(source_id) "
+    f"{stream_mysql_cdc_state_binlog_file_seq})"
+)
+
 
 @section
 def _(outer_panels: Panels):
@@ -138,7 +160,7 @@ def _(outer_panels: Panels):
                     "Lag measured as the number of binlog files between the upstream newest file and the RisingWave checkpoint.",
                     [
                         panels.target(
-                            f"clamp_min({metric('mysql_cdc_binlog_file_seq_max')} - on(source_id) {metric('stream_mysql_cdc_state_binlog_file_seq')}, 0)",
+                            f"clamp_min({mysql_cdc_binlog_file_seq_max} - on(source_id) {stream_mysql_cdc_state_binlog_file_seq}, 0)",
                             "source_id {{source_id}} {{hostname}}:{{port}} - Binlog File Lag",
                         ),
                     ],
@@ -148,8 +170,18 @@ def _(outer_panels: Panels):
                     "Retained binlog range midpoint minus the RisingWave checkpoint file sequence. A non-negative value means the checkpoint has entered the older half of the retained range.",
                     [
                         panels.target(
-                            f"(({metric('mysql_cdc_binlog_file_seq_max')} + {metric('mysql_cdc_binlog_file_seq_min')}) / 2 - on(source_id) {metric('stream_mysql_cdc_state_binlog_file_seq')})",
+                            f"(({mysql_cdc_binlog_file_seq_max} + {mysql_cdc_binlog_file_seq_min}) / 2 - on(source_id) {stream_mysql_cdc_state_binlog_file_seq})",
                             "source_id {{source_id}} {{hostname}}:{{port}} - Retention Risk Margin",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes(
+                    "MySQL CDC Binlog Position Lag",
+                    "Lag in bytes within the current upstream newest binlog file. This series is shown only while the RisingWave checkpoint is in that same file.",
+                    [
+                        panels.target(
+                            mysql_cdc_binlog_position_lag,
+                            "source_id {{source_id}} {{hostname}}:{{port}} - Binlog Position Lag",
                         ),
                     ],
                 ),
