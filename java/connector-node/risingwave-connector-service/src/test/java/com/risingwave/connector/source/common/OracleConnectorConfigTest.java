@@ -22,7 +22,12 @@ import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
 import com.risingwave.connector.api.source.SourceTypeE;
+import com.risingwave.connector.source.SourceValidateHandler;
+import com.risingwave.proto.ConnectorServiceProto;
+import io.grpc.Status;
+import io.grpc.StatusRuntimeException;
 import java.util.HashMap;
+import java.util.Map;
 import java.util.Set;
 import org.junit.Test;
 
@@ -116,6 +121,60 @@ public class OracleConnectorConfigTest {
     }
 
     @Test
+    public void rejectsUserProvidedOracleHeartbeatActionQuery() {
+        var userProps = oracleProperties();
+        userProps.put(
+                DbzConnectorConfig.HEARTBEAT_ACTION_QUERY_KEY,
+                "UPDATE APP.RW_HEARTBEAT SET HEARTBEAT = 1");
+        var request = oracleValidateRequest(userProps);
+
+        var exception =
+                assertThrows(
+                        StatusRuntimeException.class,
+                        () -> SourceValidateHandler.validateSource(request));
+        assertEquals(Status.Code.INVALID_ARGUMENT, exception.getStatus().getCode());
+        assertEquals(
+                "'debezium.heartbeat.action.query' is generated internally; configure "
+                        + "'heartbeat.table.name' instead",
+                exception.getStatus().getDescription());
+    }
+
+    @Test
+    public void rejectsNonPositiveOracleHeartbeatInterval() {
+        for (var interval : new String[] {"0", "-1"}) {
+            var userProps = oracleProperties();
+            userProps.put(DbzConnectorConfig.HEARTBEAT_INTERVAL_KEY, interval);
+
+            var exception =
+                    assertThrows(
+                            StatusRuntimeException.class,
+                            () ->
+                                    SourceValidateHandler.validateSource(
+                                            oracleValidateRequest(userProps)));
+            assertEquals(Status.Code.INVALID_ARGUMENT, exception.getStatus().getCode());
+            assertEquals(
+                    "'debezium.heartbeat.interval.ms' must be greater than 0",
+                    exception.getStatus().getDescription());
+        }
+    }
+
+    @Test
+    public void validatesOracleSourceTableExistence() {
+        OracleValidator.validateTableExists("Oracle table", "APP", "CUSTOMERS", "FREEPDB1", 1);
+
+        var exception =
+                assertThrows(
+                        StatusRuntimeException.class,
+                        () ->
+                                OracleValidator.validateTableExists(
+                                        "Oracle table", "APP", "CUSTOMERS", "FREEPDB1", 0));
+        assertEquals(Status.Code.INVALID_ARGUMENT, exception.getStatus().getCode());
+        assertEquals(
+                "Oracle table 'APP.CUSTOMERS' does not exist in PDB 'FREEPDB1'",
+                exception.getStatus().getDescription());
+    }
+
+    @Test
     public void validatesOracleHeartbeatUpdatePrivilege() {
         assertFalse(
                 OracleValidator.hasHeartbeatUpdatePrivilege(
@@ -162,5 +221,13 @@ public class OracleConnectorConfigTest {
         properties.put(DbzConnectorConfig.HEARTBEAT_INTERVAL_KEY, "300000");
         properties.put(DbzConnectorConfig.ORACLE_HEARTBEAT_TABLE_NAME, "APP.RW_HEARTBEAT");
         return properties;
+    }
+
+    private static ConnectorServiceProto.ValidateSourceRequest oracleValidateRequest(
+            Map<String, String> properties) {
+        return ConnectorServiceProto.ValidateSourceRequest.newBuilder()
+                .setSourceType(ConnectorServiceProto.SourceType.ORACLE)
+                .putAllProperties(properties)
+                .build();
     }
 }
