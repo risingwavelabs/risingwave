@@ -19,6 +19,7 @@ pub const ICEBERG_ENGINE_OPTION_KEYS: &[&str] = &[
     "partition_by",
     "order_key",
     "commit_checkpoint_interval",
+    "commit_checkpoint_size_threshold_mb",
     "enable_compaction",
     "compaction_interval_sec",
     "enable_snapshot_expiration",
