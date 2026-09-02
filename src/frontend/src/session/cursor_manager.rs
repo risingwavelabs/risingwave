@@ -230,31 +230,6 @@ impl CursorDataChunkStream {
     }
 }
 
-#[cfg(test)]
-mod cursor_lifecycle_tests {
-    use risingwave_common::array::DataChunkTestExt;
-    use tokio::sync::mpsc;
-
-    use super::*;
-
-    /// Verifies that dropping an unfinished local stream owned by a query cursor signals its
-    /// executor-shutdown token instead of leaving background work alive.
-    #[tokio::test]
-    async fn test_dropping_unfinished_local_cursor_queries_cancels_executors() {
-        let (query_shutdown_tx, query_shutdown_rx) = ShutdownToken::new();
-        let (query_chunk_tx, query_chunk_rx) = mpsc::channel(1);
-        query_chunk_tx
-            .try_send(Ok(DataChunk::from_pretty("i\n1")))
-            .unwrap();
-        let query_stream = CursorQueryStream::local(
-            tokio_stream::wrappers::ReceiverStream::new(query_chunk_rx),
-            query_shutdown_tx,
-        );
-        drop(query_stream);
-        // Dropping an ordinary query cursor stream must terminate its still-open executor.
-        assert!(query_shutdown_rx.is_cancelled());
-    }
-}
 pub enum Cursor {
     Subscription(SubscriptionCursor),
     Query(QueryCursor),
@@ -1397,5 +1372,31 @@ impl CursorManager {
             },
             Cursor::Query(_) => Err(ErrorCode::InternalError("The plan of the cursor is the same as the query statement of the as when it was created.".to_owned()).into()),
         }
+    }
+}
+
+#[cfg(test)]
+mod cursor_lifecycle_tests {
+    use risingwave_common::array::DataChunkTestExt;
+    use tokio::sync::mpsc;
+
+    use super::*;
+
+    /// Verifies that dropping an unfinished local stream owned by a query cursor signals its
+    /// executor-shutdown token instead of leaving background work alive.
+    #[tokio::test]
+    async fn test_dropping_unfinished_local_cursor_queries_cancels_executors() {
+        let (query_shutdown_tx, query_shutdown_rx) = ShutdownToken::new();
+        let (query_chunk_tx, query_chunk_rx) = mpsc::channel(1);
+        query_chunk_tx
+            .try_send(Ok(DataChunk::from_pretty("i\n1")))
+            .unwrap();
+        let query_stream = CursorQueryStream::local(
+            tokio_stream::wrappers::ReceiverStream::new(query_chunk_rx),
+            query_shutdown_tx,
+        );
+        drop(query_stream);
+        // Dropping an ordinary query cursor stream must terminate its still-open executor.
+        assert!(query_shutdown_rx.is_cancelled());
     }
 }
