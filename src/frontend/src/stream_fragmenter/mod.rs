@@ -92,7 +92,7 @@ impl BuildFragmentGraphState {
     }
 
     /// Generate an operator id
-    fn gen_operator_id(&mut self) -> StreamNodeLocalOperatorId {
+    pub(crate) fn gen_operator_id(&mut self) -> StreamNodeLocalOperatorId {
         self.next_operator_id -= 1;
         LocalOperatorId::new(self.next_operator_id).into()
     }
@@ -548,6 +548,10 @@ fn build_fragment(
                 current_fragment
                     .fragment_type_mask
                     .add(FragmentTypeFlag::Values);
+                current_fragment.requires_singleton = true;
+            }
+
+            NodeBody::CompactionResolver(_) => {
                 current_fragment.requires_singleton = true;
             }
 
