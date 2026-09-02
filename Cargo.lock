@@ -13337,6 +13337,7 @@ dependencies = [
  "jsonschema-transpiler",
  "madsim-tokio",
  "num-bigint",
+ "panic-message",
  "prost 0.14.3",
  "prost-build 0.14.3",
  "prost-reflect",
