@@ -68,7 +68,7 @@ struct CursorLifecycle {
     shutdown_tx: ShutdownSender,
     /// Cloneable token through which the cursor and its query executors observe cursor shutdown.
     shutdown_rx: ShutdownToken,
-    /// Cloneable token through which this cursor observes termination of its frontend session.
+    // TODO: This will be used to interrupt an active `FETCH` in a follow-up PR.
     #[expect(dead_code)]
     session_shutdown_rx: ShutdownToken,
 }
@@ -84,19 +84,15 @@ impl CursorLifecycle {
         }
     }
 
-    /// Returns a cursor-scoped token for cancelling an underlying query executor.
     fn query_shutdown_token(&self) -> ShutdownToken {
         self.shutdown_rx.clone()
     }
 
-    /// Returns a cursor-scoped sender for cancelling an underlying local query executor.
     fn query_shutdown_sender(&self) -> ShutdownSender {
         self.shutdown_tx.clone()
     }
 
-    /// Returns foreground-owned clones of the cursor and session shutdown tokens. Both tokens
-    /// returned by this function will not only control terminating the single FETCH but also
-    /// terminating the underlying query.
+    // TODO: This will be used to interrupt an active `FETCH` in a follow-up PR.
     #[expect(dead_code)]
     fn shutdown_tokens(&self) -> (ShutdownToken, ShutdownToken) {
         (self.shutdown_rx.clone(), self.session_shutdown_rx.clone())
@@ -1323,7 +1319,6 @@ impl CursorManager {
         }
     }
 
-    /// Returns a token observed by every cursor foreground in this session.
     pub fn session_shutdown_token(&self) -> ShutdownToken {
         self.session_shutdown_rx.clone()
     }
