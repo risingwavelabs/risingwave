@@ -291,12 +291,10 @@ fn variant_arrow_fields() -> arrow_schema::Fields {
             arrow_schema::DataType::Binary,
             false,
         )),
-        // Nullable to match iceberg-rust's layout, which reserves an absent `value`
-        // for shredded variants; we always write it.
         Arc::new(arrow_schema::Field::new(
             "value",
             arrow_schema::DataType::Binary,
-            true,
+            false,
         )),
     ]
     .into()
