@@ -53,11 +53,11 @@ use crate::barrier::worker::GlobalBarrierWorker;
 use crate::barrier::{
     BarrierWorkerRuntimeInfoSnapshot, DatabaseRuntimeInfoSnapshot, RecoveryReason, Scheduled,
 };
-use crate::controller::scale::{LoadedFragment, LoadedFragmentContext, NoShuffleEnsemble};
+use crate::controller::scale::{LoadedFragmentContext, NoShuffleEnsemble};
 use crate::controller::utils::StreamingJobExtraInfo;
 use crate::hummock::CommitEpochInfo;
 use crate::manager::{ActiveStreamingWorkerNodes, MetaOpts, MetaSrvEnv};
-use crate::model::{FragmentDownstreamRelation, FragmentId};
+use crate::model::{Fragment, FragmentDownstreamRelation, FragmentId};
 
 enum ContextRequest {
     AbortAndMarkBlocked(RecoveryReason),
@@ -257,7 +257,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
 
     let fragment_model = |fragment_id: FragmentId, job_id: JobId, table_id: TableId| {
         #[expect(deprecated)]
-        LoadedFragment::from(fragment::Model {
+        Fragment::from(fragment::Model {
             fragment_id,
             job_id,
             fragment_type_mask: 0,

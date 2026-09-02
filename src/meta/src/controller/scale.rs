@@ -19,9 +19,14 @@ use std::sync::atomic::{AtomicU32, Ordering};
 use anyhow::anyhow;
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
-use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask, TableId};
+use risingwave_common::catalog::FragmentTypeFlag;
+#[cfg(test)]
+use risingwave_common::catalog::FragmentTypeMask;
 #[cfg(debug_assertions)]
 use risingwave_common::hash::VnodeBitmapExt;
+#[cfg(test)]
+use risingwave_common::hash::VnodeCount;
+use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::id::JobId;
 use risingwave_common::system_param::AdaptiveParallelismStrategy;
 use risingwave_common::system_param::adaptive_parallelism_strategy::parse_strategy;
@@ -38,7 +43,6 @@ use risingwave_meta_model::{
 };
 use risingwave_meta_model_migration::Condition;
 use risingwave_pb::common::WorkerNode;
-use risingwave_pb::stream_plan::PbStreamNode;
 use sea_orm::{
     ColumnTrait, ConnectionTrait, EntityTrait, JoinType, QueryFilter, QuerySelect, QueryTrait,
     RelationTrait,
@@ -48,7 +52,7 @@ use crate::MetaResult;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::utils::resolve_no_shuffle_actor_mapping;
 use crate::manager::ActiveStreamingWorkerNodes;
-use crate::model::{ActorId, StreamActor};
+use crate::model::{ActorId, Fragment as StreamFragment, StreamActor};
 use crate::stream::{AssignerBuilder, SplitDiffOptions};
 
 pub(crate) async fn resolve_streaming_job_definition<C>(
@@ -178,40 +182,10 @@ impl RenderedGraph {
     }
 }
 
-/// Context loaded asynchronously from database, containing all metadata
-/// required to render actor assignments. This separates async I/O from
-/// sync rendering logic.
-#[derive(Clone, Debug)]
-pub struct LoadedFragment {
-    pub fragment_id: FragmentId,
-    pub job_id: JobId,
-    pub fragment_type_mask: FragmentTypeMask,
-    pub distribution_type: DistributionType,
-    pub vnode_count: usize,
-    pub nodes: PbStreamNode,
-    pub state_table_ids: HashSet<TableId>,
-    pub parallelism: Option<StreamingParallelism>,
-}
-
-impl From<fragment::Model> for LoadedFragment {
-    fn from(model: fragment::Model) -> Self {
-        Self {
-            fragment_id: model.fragment_id,
-            job_id: model.job_id,
-            fragment_type_mask: FragmentTypeMask::from(model.fragment_type_mask),
-            distribution_type: model.distribution_type,
-            vnode_count: model.vnode_count as usize,
-            nodes: model.stream_node.to_protobuf(),
-            state_table_ids: model.state_table_ids.into_inner().into_iter().collect(),
-            parallelism: model.parallelism,
-        }
-    }
-}
-
 #[derive(Default, Debug, Clone)]
 pub struct LoadedFragmentContext {
     pub ensembles: Vec<NoShuffleEnsemble>,
-    pub job_fragments: HashMap<JobId, HashMap<FragmentId, LoadedFragment>>,
+    pub job_fragments: HashMap<JobId, HashMap<FragmentId, StreamFragment>>,
     pub job_map: HashMap<JobId, streaming_job::Model>,
     pub streaming_job_databases: HashMap<JobId, DatabaseId>,
     pub database_map: HashMap<DatabaseId, database::Model>,
@@ -595,6 +569,44 @@ pub(crate) fn render_actor_assignments(
     render_actor_assignments_with_allocator(&mut actor_id_allocator, worker_map, loaded)
 }
 
+/// Render one newly-created job with the same placement implementation used by recovery.
+pub(crate) fn render_new_job_actor_assignments(
+    actor_id_counter: &AtomicU32,
+    worker_map: &HashMap<WorkerId, WorkerNode>,
+    ensembles: &[NoShuffleEnsemble],
+    fragments: &HashMap<FragmentId, StreamFragment>,
+    job: &streaming_job::Model,
+    database_id: DatabaseId,
+    resource_group: &str,
+) -> MetaResult<HashMap<FragmentId, InflightFragmentInfo>> {
+    let job_id = job.job_id;
+    let job_fragments = HashMap::from([(job_id, fragments.clone())]);
+    let jobs = HashMap::from([(job_id, job.clone())]);
+    let job_databases = HashMap::from([(job_id, database_id)]);
+    let resource_groups = HashMap::from([(job_id, resource_group.to_owned())]);
+    let empty_source_ids = HashMap::new();
+    let empty_splits = HashMap::new();
+    let context = RenderActorsContext {
+        fragment_source_ids: &empty_source_ids,
+        fragment_splits: &empty_splits,
+        streaming_job_databases: &job_databases,
+        resource_groups: RenderResourceGroups::Jobs(&resource_groups),
+    };
+    let mut allocator = RenderActorIdAllocator::Persistent(actor_id_counter);
+    let mut rendered = render_actors_with_allocator(
+        &mut allocator,
+        ensembles,
+        &job_fragments,
+        &jobs,
+        worker_map,
+        context,
+    )?;
+    Ok(rendered
+        .remove(&database_id)
+        .and_then(|mut jobs| jobs.remove(&job_id))
+        .unwrap_or_default())
+}
+
 /// Render a graph with preview-only actor ids so callers can compare layouts
 /// without consuming the global actor id generator.
 pub(crate) fn preview_actor_assignments(
@@ -755,7 +767,7 @@ fn render_actor_assignments_with_allocator(
         fragment_source_ids: &loaded.fragment_source_ids,
         fragment_splits: &loaded.fragment_splits,
         streaming_job_databases: &loaded.streaming_job_databases,
-        database_map: &loaded.database_map,
+        resource_groups: RenderResourceGroups::Databases(&loaded.database_map),
     };
 
     let fragments = render_actors_with_allocator(
@@ -810,12 +822,12 @@ where
         return Ok(LoadedFragmentContext::default());
     }
 
-    let mut job_fragments: HashMap<JobId, HashMap<FragmentId, LoadedFragment>> = HashMap::new();
+    let mut job_fragments: HashMap<JobId, HashMap<FragmentId, StreamFragment>> = HashMap::new();
     for (fragment_id, model) in fragment_models {
         job_fragments
             .entry(model.job_id)
             .or_default()
-            .try_insert(fragment_id, LoadedFragment::from(model))
+            .try_insert(fragment_id, StreamFragment::from(model))
             .expect("duplicate fragment id for job");
     }
 
@@ -869,7 +881,23 @@ struct RenderActorsContext<'a> {
     fragment_source_ids: &'a HashMap<FragmentId, SourceId>,
     fragment_splits: &'a HashMap<FragmentId, Vec<SplitImpl>>,
     streaming_job_databases: &'a HashMap<JobId, DatabaseId>,
-    database_map: &'a HashMap<DatabaseId, database::Model>,
+    resource_groups: RenderResourceGroups<'a>,
+}
+
+enum RenderResourceGroups<'a> {
+    Databases(&'a HashMap<DatabaseId, database::Model>),
+    Jobs(&'a HashMap<JobId, String>),
+}
+
+impl RenderResourceGroups<'_> {
+    fn get(&self, job_id: JobId, database_id: DatabaseId) -> Option<String> {
+        match self {
+            Self::Databases(databases) => databases
+                .get(&database_id)
+                .map(|database| database.resource_group.clone()),
+            Self::Jobs(jobs) => jobs.get(&job_id).cloned(),
+        }
+    }
 }
 
 enum RenderActorIdAllocator<'a> {
@@ -902,7 +930,7 @@ impl RenderActorIdAllocator<'_> {
 fn render_actors(
     actor_id_counter: &AtomicU32,
     ensembles: &[NoShuffleEnsemble],
-    job_fragments: &HashMap<JobId, HashMap<FragmentId, LoadedFragment>>,
+    job_fragments: &HashMap<JobId, HashMap<FragmentId, StreamFragment>>,
     job_map: &HashMap<JobId, streaming_job::Model>,
     worker_map: &HashMap<WorkerId, WorkerNode>,
     context: RenderActorsContext<'_>,
@@ -921,7 +949,7 @@ fn render_actors(
 fn render_actors_with_allocator(
     actor_id_allocator: &mut RenderActorIdAllocator<'_>,
     ensembles: &[NoShuffleEnsemble],
-    job_fragments: &HashMap<JobId, HashMap<FragmentId, LoadedFragment>>,
+    job_fragments: &HashMap<JobId, HashMap<FragmentId, StreamFragment>>,
     job_map: &HashMap<JobId, streaming_job::Model>,
     worker_map: &HashMap<WorkerId, WorkerNode>,
     context: RenderActorsContext<'_>,
@@ -930,11 +958,11 @@ fn render_actors_with_allocator(
         fragment_source_ids,
         fragment_splits: fragment_splits_map,
         streaming_job_databases,
-        database_map,
+        resource_groups,
     } = context;
 
     let mut all_fragments: FragmentRenderMap = HashMap::new();
-    let fragment_lookup: HashMap<FragmentId, &LoadedFragment> = job_fragments
+    let fragment_lookup: HashMap<FragmentId, &StreamFragment> = job_fragments
         .values()
         .flat_map(|fragments| fragments.iter())
         .map(|(fragment_id, fragment)| (*fragment_id, fragment))
@@ -968,7 +996,7 @@ fn render_actors_with_allocator(
         let (job_id, distribution_type, vnode_count) = Itertools::exactly_one(
             entry_fragments
                 .iter()
-                .map(|f| (f.job_id, f.distribution_type, f.vnode_count))
+                .map(|f| (f.job_id, f.distribution_type, f.vnode_count()))
                 .dedup(),
         )
         .map_err(|_| anyhow!("Multiple jobs found in no-shuffle ensemble"))?;
@@ -977,12 +1005,12 @@ fn render_actors_with_allocator(
             .get(&job_id)
             .ok_or_else(|| anyhow!("streaming job {job_id} not found"))?;
 
-        let database_resource_group = streaming_job_databases
+        let database_id = *streaming_job_databases
             .get(&job_id)
-            .and_then(|database_id| database_map.get(database_id))
-            .unwrap()
-            .resource_group
-            .clone();
+            .ok_or_else(|| anyhow!("database for streaming job {job_id} not found"))?;
+        let database_resource_group = resource_groups
+            .get(job_id, database_id)
+            .ok_or_else(|| anyhow!("resource group for streaming job {job_id} not found"))?;
 
         let source_entry_fragment = entry_fragments.iter().find(|f| {
             let mask = f.fragment_type_mask;
@@ -997,7 +1025,7 @@ fn render_actors_with_allocator(
             worker_map,
             entry_fragment_parallelism,
             database_resource_group,
-            distribution_type,
+            distribution_type.into(),
             vnode_count,
         )?;
 
@@ -1032,10 +1060,10 @@ fn render_actors_with_allocator(
             let fragment_id = fragment.fragment_id;
             let job_id = fragment.job_id;
             let fragment_type_mask = fragment.fragment_type_mask;
-            let distribution_type = fragment.distribution_type;
+            let distribution_type = fragment.distribution_type.into();
             let stream_node = &fragment.nodes;
             let state_table_ids = &fragment.state_table_ids;
-            let vnode_count = fragment.vnode_count;
+            let vnode_count = fragment.vnode_count();
             let source_id = fragment_source_ids.get(&fragment_id).cloned();
 
             let aligner = ComponentFragmentAligner::new(&actor_template, actor_id_allocator);
@@ -1069,12 +1097,8 @@ fn render_actors_with_allocator(
                 vnode_count,
                 nodes: stream_node.clone(),
                 actors,
-                state_table_ids: state_table_ids.clone(),
+                state_table_ids: state_table_ids.iter().copied().collect(),
             };
-
-            let &database_id = streaming_job_databases.get(&job_id).ok_or_else(|| {
-                anyhow!("streaming job {job_id} not found in streaming_job_databases")
-            })?;
 
             all_fragments
                 .entry(database_id)
@@ -1395,10 +1419,10 @@ impl<'a> ComponentFragmentAligner<'a> {
 #[cfg(debug_assertions)]
 fn debug_sanity_check(
     ensembles: &[NoShuffleEnsemble],
-    job_fragments: &HashMap<JobId, HashMap<FragmentId, LoadedFragment>>,
+    job_fragments: &HashMap<JobId, HashMap<FragmentId, StreamFragment>>,
     jobs: &HashMap<JobId, streaming_job::Model>,
 ) {
-    let fragment_lookup: HashMap<FragmentId, (&LoadedFragment, JobId)> = job_fragments
+    let fragment_lookup: HashMap<FragmentId, (&StreamFragment, JobId)> = job_fragments
         .iter()
         .flat_map(|(job_id, fragments)| {
             fragments
@@ -1453,7 +1477,7 @@ fn debug_sanity_check(
             .flat_map(|fragment_id| {
                 fragment_lookup
                     .get(fragment_id)
-                    .map(|(fragment, _)| fragment.vnode_count)
+                    .map(|(fragment, _)| fragment.vnode_count())
             })
             .unique()
             .collect();
@@ -1469,7 +1493,7 @@ fn debug_sanity_check(
 
 async fn resolve_source_fragments<C>(
     txn: &C,
-    job_fragments: &HashMap<JobId, HashMap<FragmentId, LoadedFragment>>,
+    job_fragments: &HashMap<JobId, HashMap<FragmentId, StreamFragment>>,
 ) -> MetaResult<(
     HashMap<FragmentId, SourceId>,
     HashMap<FragmentId, Vec<SplitImpl>>,
@@ -1703,7 +1727,6 @@ mod tests {
     use risingwave_meta_model::{CreateType, JobStatus};
     use risingwave_pb::common::WorkerType;
     use risingwave_pb::common::worker_node::Property as WorkerProperty;
-    use risingwave_pb::stream_plan::StreamNode as PbStreamNode;
 
     use super::*;
 
@@ -1744,15 +1767,15 @@ mod tests {
         distribution_type: DistributionType,
         vnode_count: i32,
         parallelism: StreamingParallelism,
-    ) -> LoadedFragment {
-        LoadedFragment {
+    ) -> StreamFragment {
+        StreamFragment {
             fragment_id,
             job_id,
             fragment_type_mask: FragmentTypeMask::from(fragment_type_mask),
-            distribution_type,
-            vnode_count: vnode_count as usize,
-            nodes: PbStreamNode::default(),
-            state_table_ids: HashSet::new(),
+            distribution_type: distribution_type.into(),
+            maybe_vnode_count: VnodeCount::set(vnode_count as usize).to_protobuf(),
+            nodes: Default::default(),
+            state_table_ids: vec![],
             parallelism: Some(parallelism),
         }
     }
@@ -2030,7 +2053,7 @@ mod tests {
             fragment_source_ids: &fragment_source_ids,
             fragment_splits: &fragment_splits,
             streaming_job_databases: &streaming_job_databases,
-            database_map: &database_map,
+            resource_groups: RenderResourceGroups::Databases(&database_map),
         };
 
         let result = render_actors(
@@ -2129,7 +2152,7 @@ mod tests {
             fragment_source_ids: &fragment_source_ids,
             fragment_splits: &fragment_splits,
             streaming_job_databases: &streaming_job_databases,
-            database_map: &database_map,
+            resource_groups: RenderResourceGroups::Databases(&database_map),
         };
 
         let result = render_actors(
@@ -2259,7 +2282,7 @@ mod tests {
             fragment_source_ids: &fragment_source_ids,
             fragment_splits: &fragment_splits,
             streaming_job_databases: &streaming_job_databases,
-            database_map: &database_map,
+            resource_groups: RenderResourceGroups::Databases(&database_map),
         };
 
         let result = render_actors(
@@ -2479,7 +2502,7 @@ mod tests {
             fragment_source_ids: &fragment_source_ids,
             fragment_splits: &fragment_splits,
             streaming_job_databases: &streaming_job_databases,
-            database_map: &database_map,
+            resource_groups: RenderResourceGroups::Databases(&database_map),
         };
 
         // Global strategy is FULL (would give 4 actors), but job strategy is BOUNDED(2)
@@ -2572,7 +2595,7 @@ mod tests {
             fragment_source_ids: &fragment_source_ids,
             fragment_splits: &fragment_splits,
             streaming_job_databases: &streaming_job_databases,
-            database_map: &database_map,
+            resource_groups: RenderResourceGroups::Databases(&database_map),
         };
 
         let result = render_actors(
@@ -2665,7 +2688,7 @@ mod tests {
             fragment_source_ids: &fragment_source_ids,
             fragment_splits: &fragment_splits,
             streaming_job_databases: &streaming_job_databases,
-            database_map: &database_map,
+            resource_groups: RenderResourceGroups::Databases(&database_map),
         };
 
         let result = render_actors(
@@ -2760,7 +2783,7 @@ mod tests {
             fragment_source_ids: &fragment_source_ids,
             fragment_splits: &fragment_splits,
             streaming_job_databases: &streaming_job_databases,
-            database_map: &database_map,
+            resource_groups: RenderResourceGroups::Databases(&database_map),
         };
 
         let result = render_actors(
@@ -2847,7 +2870,7 @@ mod tests {
             fragment_source_ids: &fragment_source_ids,
             fragment_splits: &fragment_splits,
             streaming_job_databases: &streaming_job_databases,
-            database_map: &database_map,
+            resource_groups: RenderResourceGroups::Databases(&database_map),
         };
 
         let result = render_actors(
@@ -2933,7 +2956,7 @@ mod tests {
             fragment_source_ids: &fragment_source_ids,
             fragment_splits: &fragment_splits,
             streaming_job_databases: &streaming_job_databases,
-            database_map: &database_map,
+            resource_groups: RenderResourceGroups::Databases(&database_map),
         };
 
         let result = render_actors(

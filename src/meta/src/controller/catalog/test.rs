@@ -1193,11 +1193,13 @@ mod tests {
 
         let fragments = [Fragment {
             fragment_id: FragmentId::new(300),
+            job_id,
             fragment_type_mask: FragmentTypeMask::default(),
             distribution_type: PbFragmentDistributionType::Hash,
             state_table_ids: vec![],
             maybe_vnode_count: Some(1),
             nodes: PbStreamNode::default(),
+            parallelism: None,
         }];
         mgr.prepare_streaming_job(
             job_id,

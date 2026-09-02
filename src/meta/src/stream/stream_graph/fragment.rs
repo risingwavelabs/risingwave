@@ -386,11 +386,13 @@ fn clone_fragment(fragment: &Fragment, id_generator_manager: &IdGeneratorManager
         .as_global_id();
     Fragment {
         fragment_id,
+        job_id: fragment.job_id,
         fragment_type_mask: fragment.fragment_type_mask,
         distribution_type: fragment.distribution_type,
         state_table_ids: fragment.state_table_ids.clone(),
         maybe_vnode_count: fragment.maybe_vnode_count,
         nodes: fragment.nodes.clone(),
+        parallelism: fragment.parallelism.clone(),
     }
 }
 
@@ -2194,11 +2196,13 @@ impl CompleteStreamFragmentGraph {
 
         Fragment {
             fragment_id: inner.fragment_id,
+            job_id: job_id.unwrap_or_default(),
             fragment_type_mask: inner.fragment_type_mask.into(),
             distribution_type,
             state_table_ids,
             maybe_vnode_count: VnodeCount::set(vnode_count).to_protobuf(),
             nodes: stream_node,
+            parallelism: None,
         }
     }
 
@@ -2428,6 +2432,7 @@ mod tests {
 
         let original_fragment = Fragment {
             fragment_id: 1.into(),
+            job_id: JobId::default(),
             fragment_type_mask: FragmentTypeMask::default(),
             distribution_type: PbFragmentDistributionType::Single,
             state_table_ids: vec![],
@@ -2445,6 +2450,7 @@ mod tests {
                 input: vec![project_node],
                 ..Default::default()
             },
+            parallelism: None,
         };
 
         let (new_fragment, _, _) = rewrite_refresh_schema_sink_fragment(
@@ -2551,6 +2557,7 @@ mod tests {
 
         let original_fragment = Fragment {
             fragment_id: 1.into(),
+            job_id: JobId::default(),
             fragment_type_mask: FragmentTypeMask::default(),
             distribution_type: PbFragmentDistributionType::Single,
             state_table_ids: vec![],
@@ -2569,6 +2576,7 @@ mod tests {
                 input: vec![project_node],
                 ..Default::default()
             },
+            parallelism: None,
         };
 
         let (new_fragment, new_schema, new_log_store_table) = rewrite_refresh_schema_sink_fragment(

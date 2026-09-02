@@ -188,11 +188,16 @@ impl StreamActor {
 #[derive(Clone, Debug, Default)]
 pub struct Fragment {
     pub fragment_id: FragmentId,
+    /// Owning streaming job. Filled when a new fragment graph is assigned to a job and when
+    /// persisted fragments are loaded from the catalog.
+    pub job_id: JobId,
     pub fragment_type_mask: FragmentTypeMask,
     pub distribution_type: PbFragmentDistributionType,
     pub state_table_ids: Vec<TableId>,
     pub maybe_vnode_count: Option<u32>,
     pub nodes: StreamNode,
+    /// Per-fragment override used when rendering recovered actors.
+    pub parallelism: Option<StreamingParallelism>,
 }
 
 impl Fragment {
@@ -242,11 +247,13 @@ impl From<fragment::Model> for Fragment {
     fn from(model: fragment::Model) -> Self {
         Self {
             fragment_id: model.fragment_id,
+            job_id: model.job_id,
             fragment_type_mask: FragmentTypeMask::from(model.fragment_type_mask),
             distribution_type: model.distribution_type.into(),
             state_table_ids: model.state_table_ids.into_inner(),
             maybe_vnode_count: VnodeCount::set(model.vnode_count).to_protobuf(),
             nodes: model.stream_node.to_protobuf(),
+            parallelism: model.parallelism,
         }
     }
 }
@@ -434,10 +441,13 @@ impl StreamJobFragments {
     /// Create a new `TableFragments` with state of `Initial`.
     pub fn new(
         stream_job_id: JobId,
-        fragments: BTreeMap<FragmentId, Fragment>,
+        mut fragments: BTreeMap<FragmentId, Fragment>,
         ctx: StreamContext,
         max_parallelism: usize,
     ) -> Self {
+        for fragment in fragments.values_mut() {
+            fragment.job_id = stream_job_id;
+        }
         Self {
             stream_job_id,
             state: State::Initial,
