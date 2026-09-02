@@ -983,14 +983,17 @@ async fn test_over_window_state_cleaning_inner(cache_policy: OverWindowCachePoli
         vec![50, 55, 60, 70]
     );
 
-    // All rows of the partition are below the watermark now, so it's finally cleaned even if not
-    // touched, retaining 60 and 70 only.
+    // Advancing the watermark alone does not schedule inactive partitions for cleaning.
     tx.push_watermark(0, DataType::Int64, 75i64.into());
     tx.push_barrier(test_epoch(7), false);
     stream.expect_barrier().await;
-    assert_eq!(state_order_keys(store.clone(), &calls).await, vec![60, 70]);
+    assert_eq!(
+        state_order_keys(store.clone(), &calls).await,
+        vec![50, 55, 60, 70]
+    );
 
-    // Rows arriving afterwards are computed against the retained rows.
+    // Once the partition is touched again, outputs are computed correctly and stale rows are
+    // cleaned at the following barrier.
     tx.push_chunk(StreamChunk::from_pretty(
         " I  T  I   i
         + 80 p1 108 17",

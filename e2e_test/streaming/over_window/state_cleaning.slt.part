@@ -37,15 +37,15 @@ SELECT * FROM mv ORDER BY k, ts;
 1 50 5 4 6 12
 1 60 6 5 NULL 15
 
-# Push the watermark to 75 with another partition. All rows of partition 1 are below the
-# watermark now, only the 3 closest ones (40, 50, 60) are retained.
+# Push the watermark to 75 with another partition. Partition 1 is not touched, so its last
+# watermark-delay window is retained until it's accessed again.
 statement ok
 INSERT INTO t VALUES (2, 80, 100);
 
 query I retry 30 backoff 1s
 SELECT count(*) FROM ${internal_table_name};
 ----
-4
+5
 
 # Rows arriving afterwards are computed against the retained rows.
 statement ok
@@ -68,7 +68,8 @@ SELECT count(*) FROM ${internal_table_name};
 ----
 5
 
-# Push the watermark to 95. Partition 1 is finally cleaned again, retaining 50, 60, 77.
+# Push the watermark to 95 with partition 2. Partition 1 is not touched and therefore isn't
+# cleaned at this barrier.
 statement ok
 INSERT INTO t VALUES (2, 100, 200);
 
@@ -88,7 +89,7 @@ SELECT * FROM mv ORDER BY k, ts;
 query I retry 30 backoff 1s
 SELECT count(*) FROM ${internal_table_name};
 ----
-5
+6
 
 statement ok
 DROP MATERIALIZED VIEW mv;

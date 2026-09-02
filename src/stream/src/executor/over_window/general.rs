@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet, btree_map, hash_map};
+use std::collections::{BTreeMap, HashSet, btree_map};
 use std::marker::PhantomData;
 use std::ops::RangeInclusive;
 
@@ -44,7 +44,7 @@ use crate::executor::prelude::*;
 /// - State table schema = output schema, state table pk = `partition key | order key | input pk`.
 /// - Output schema = input schema + window function results.
 /// - When [`StateCleaning`] is enabled, stale rows below the watermark of the first order key
-///   column are deleted from the state table at barriers.
+///   column are deleted from recently touched partitions at barriers.
 pub struct OverWindowExecutor<S: StateStore> {
     input: Executor,
     inner: ExecutorInner<S>,
@@ -79,14 +79,8 @@ struct ExecutionVars<S: StateStore> {
     recently_accessed_ranges: BTreeMap<DefaultOrdered<OwnedRow>, RangeInclusive<StateKey>>,
     /// The latest watermark received on the watermark column for state cleaning.
     cleaning_watermark: Option<ScalarImpl>,
-    /// Whether `cleaning_watermark` has advanced since the last state cleaning.
-    cleaning_watermark_advanced: bool,
     /// Partitions touched since the last barrier, which need state cleaning at the next barrier.
     touched_partitions: HashSet<OwnedRow>,
-    /// Partition key => the largest watermark column value seen in the partition. Once the
-    /// watermark passes the value, all rows of the partition are stale, and the partition needs a
-    /// final state cleaning even if it's not touched anymore.
-    pending_final_cleaning: HashMap<OwnedRow, ScalarImpl>,
     stats: ExecutionStats,
     _phantom: PhantomData<S>,
 }
@@ -105,11 +99,10 @@ struct ExecutionVars<S: StateStore> {
 /// members of, or as rows affected by, rows arriving in the future), and all the others can be
 /// safely deleted from the state table.
 ///
-/// The cleaning happens at barriers, for partitions touched since the last barrier, and for
-/// partitions whose rows are all below the watermark (so that partitions no longer receiving
-/// new rows finally retain only `n_retain` rows). This keeps the cost amortized to the number of
-/// rows processed, while the state of each partition is bounded by the retained rows plus the
-/// rows arrived within one watermark delay.
+/// The cleaning happens at barriers for partitions touched since the last barrier. This keeps the
+/// work proportional to recently active partitions and avoids keeping per-partition cleanup
+/// metadata in memory. Active partitions retain only the required rows plus rows not yet behind
+/// the watermark. A partition that stops receiving rows is cleaned lazily when it's touched again.
 #[derive(Debug)]
 pub(super) struct StateCleaning {
     /// Index of the watermark column (the first order key column) in the input schema.
@@ -507,30 +500,8 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 continue;
             }
 
-            if let Some(cleaning) = &this.state_cleaning {
+            if this.state_cleaning.is_some() {
                 vars.touched_partitions.insert(part_key.0.clone());
-                let max_value = delta
-                    .values()
-                    .filter_map(|change| match change {
-                        Change::Insert(row) => row.datum_at(cleaning.watermark_col_idx),
-                        Change::Delete => None,
-                    })
-                    .max_by(|a, b| a.default_cmp(b));
-                if let Some(max_value) = max_value {
-                    match vars.pending_final_cleaning.entry(part_key.0.clone()) {
-                        hash_map::Entry::Vacant(vacant) => {
-                            vacant.insert(max_value.into_scalar_impl());
-                        }
-                        hash_map::Entry::Occupied(mut occupied) => {
-                            if max_value
-                                .default_cmp(&occupied.get().as_scalar_ref_impl())
-                                .is_gt()
-                            {
-                                occupied.insert(max_value.into_scalar_impl());
-                            }
-                        }
-                    }
-                }
             }
 
             // Build changes for current partition.
@@ -645,38 +616,20 @@ impl<S: StateStore> OverWindowExecutor<S> {
         }
     }
 
-    /// Clean up stale rows of the partitions touched since the last barrier, and of the partitions
-    /// whose rows are all below the watermark, according to the latest watermark received.
+    /// Clean up stale rows of the partitions touched since the last barrier, according to the
+    /// latest watermark received.
     /// Returns the number of rows deleted. See [`StateCleaning`].
     async fn clean_state(
         this: &mut ExecutorInner<S>,
         vars: &mut ExecutionVars<S>,
     ) -> StreamExecutorResult<usize> {
         let touched = std::mem::take(&mut vars.touched_partitions);
-        let watermark_advanced = std::mem::take(&mut vars.cleaning_watermark_advanced);
         let (Some(cleaning), Some(watermark)) = (&this.state_cleaning, &vars.cleaning_watermark)
         else {
             return Ok(0);
         };
-        if touched.is_empty() && !watermark_advanced {
+        if touched.is_empty() {
             return Ok(0);
-        }
-
-        let mut partitions: Vec<OwnedRow> = touched.iter().cloned().collect();
-        if watermark_advanced {
-            // Partitions whose rows are all below the watermark need a final cleaning, after
-            // which only `n_retain` rows remain and nothing can be cleaned anymore until new
-            // rows arrive.
-            vars.pending_final_cleaning.retain(|part_key, max_value| {
-                if max_value.default_cmp(watermark).is_lt() {
-                    if !touched.contains(part_key) {
-                        partitions.push(part_key.clone());
-                    }
-                    false
-                } else {
-                    true
-                }
-            });
         }
 
         let row_conv = RowConverter {
@@ -688,7 +641,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
         };
 
         let mut n_deleted = 0;
-        for part_key in partitions {
+        for part_key in touched {
             let mut cache_guard = vars.cached_partitions.get_mut(&part_key);
             // If the partition is not cached (e.g. evicted), use a temporary cache with only
             // sentinels, so that `OverPartition` scans the state table for stale rows.
@@ -738,9 +691,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
             ),
             recently_accessed_ranges: Default::default(),
             cleaning_watermark: None,
-            cleaning_watermark_advanced: false,
             touched_partitions: Default::default(),
-            pending_final_cleaning: Default::default(),
             stats: Default::default(),
             _phantom: PhantomData::<S>,
         };
@@ -765,7 +716,6 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     {
                         // Only used for state cleaning at the next barrier.
                         vars.cleaning_watermark = Some(watermark.val);
-                        vars.cleaning_watermark_advanced = true;
                     }
                     // TODO(rc): We don't propagate watermarks to downstream for now, because rows
                     // below the watermark may still be updated by later rows if there's any
@@ -818,7 +768,6 @@ impl<S: StateStore> OverWindowExecutor<S> {
                         vars.cached_partitions.clear();
                         vars.recently_accessed_ranges.clear();
                         vars.touched_partitions.clear();
-                        vars.pending_final_cleaning.clear();
                     }
 
                     if !this.cache_policy.is_full() {
