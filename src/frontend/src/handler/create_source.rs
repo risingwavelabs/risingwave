@@ -1470,7 +1470,7 @@ async fn handle_create_cdc_table_source(
         created_at_cluster_version: None,
         initialized_at_cluster_version: None,
         rate_limit: None,
-        refresh_mode: upstream_source.refresh_mode.clone(),
+        refresh_mode: upstream_source.refresh_mode,
     };
 
     session
