@@ -54,6 +54,7 @@ pub struct CompactorMetrics {
     pub iceberg_compaction_memory_budget_bytes: IntGauge,
     pub iceberg_compaction_waiting_memory_reservation_bytes: IntGauge,
     pub iceberg_compaction_running_memory_reservation_bytes: IntGauge,
+    pub iceberg_cow_duplicate_data_file_paths: GenericCounterVec<AtomicU64>,
 }
 
 pub static GLOBAL_COMPACTOR_METRICS: LazyLock<CompactorMetrics> =
@@ -283,6 +284,13 @@ impl CompactorMetrics {
                 registry
             )
             .unwrap();
+        let iceberg_cow_duplicate_data_file_paths = register_int_counter_vec_with_registry!(
+            "storage_iceberg_cow_duplicate_data_file_paths",
+            "Number of duplicate data file paths detected while publishing Iceberg COW snapshots",
+            &["snapshot_role"],
+            registry
+        )
+        .unwrap();
         Self {
             compaction_upload_sst_counts,
             compact_fast_runner_bytes,
@@ -313,6 +321,7 @@ impl CompactorMetrics {
             iceberg_compaction_memory_budget_bytes,
             iceberg_compaction_waiting_memory_reservation_bytes,
             iceberg_compaction_running_memory_reservation_bytes,
+            iceberg_cow_duplicate_data_file_paths,
         }
     }
 
