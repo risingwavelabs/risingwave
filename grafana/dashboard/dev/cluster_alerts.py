@@ -14,14 +14,8 @@ mysql_cdc_binlog_file_seq_min = metric(
 mysql_cdc_binlog_file_seq_max = metric(
     "mysql_cdc_binlog_file_seq_max", node_filter_enabled=False
 )
-mysql_cdc_binlog_file_size_bytes = metric(
-    "mysql_cdc_binlog_file_size_bytes", node_filter_enabled=False
-)
 stream_mysql_cdc_state_binlog_file_seq = metric(
     "stream_mysql_cdc_state_binlog_file_seq", node_filter_enabled=False
-)
-stream_mysql_cdc_state_binlog_position = metric(
-    "stream_mysql_cdc_state_binlog_position", node_filter_enabled=False
 )
 mysql_cdc_binlog_file_lag = (
     f"clamp_min({mysql_cdc_binlog_file_seq_max} - on(source_id) "
@@ -35,12 +29,6 @@ mysql_cdc_binlog_retention_risk_margin = (
 mysql_cdc_binlog_retention_risk = (
     f"{alert_when(mysql_cdc_binlog_file_lag)} and "
     f"{alert_threshold(mysql_cdc_binlog_retention_risk_margin, 0)}"
-)
-mysql_cdc_binlog_position_lag = (
-    f"clamp_min({mysql_cdc_binlog_file_size_bytes} - on(source_id) "
-    f"{stream_mysql_cdc_state_binlog_position}, 0) and on(source_id) "
-    f"({mysql_cdc_binlog_file_seq_max} == on(source_id) "
-    f"{stream_mysql_cdc_state_binlog_file_seq})"
 )
 
 @section
@@ -67,9 +55,8 @@ def _(outer_panels: Panels):
 - Cross-DB Log Retention Expiring: a cross-database MV changelog consumer's last consumed changelog epoch will expire within 12 hours.
 - PG CDC WAL Lag Too High: the PostgreSQL CDC WAL lag (upstream_max_lsn - state_table_lsn) exceeds 20 GiB. Check `Streaming CDC` > `PostgreSQL CDC State Table WAL Lag` and verify replication slot health.
 - MySQL CDC Binlog File Lag Too High: the MySQL CDC checkpoint is at least 20 files behind the upstream newest file, or it is behind the newest file and has entered the older half of the retained binlog range. Check `Streaming CDC` > `MySQL CDC Binlog File Lag` and `MySQL CDC Binlog Retention Risk Margin`.
-- MySQL CDC Binlog Position Lag Too High: the MySQL CDC checkpoint is in the newest binlog file but is at least 256 MiB behind its current end. Check `Streaming CDC` > `MySQL CDC Binlog Position Lag`.
 """,
-                    height=11,
+                    height=10,
                 ),
                 panels.timeseries_count(
                     "Streaming Alert Signals",
@@ -105,13 +92,6 @@ def _(outer_panels: Panels):
                             f"{alert_threshold(mysql_cdc_binlog_file_lag, 20)} or "
                             f"({mysql_cdc_binlog_retention_risk})",
                             "MySQL CDC Binlog File Lag Too High source {{source_id}} {{hostname}}:{{port}}",
-                        ),
-                        panels.target(
-                            alert_threshold(
-                                mysql_cdc_binlog_position_lag,
-                                256 * 1024 * 1024,
-                            ),
-                            "MySQL CDC Binlog Position Lag Too High source {{source_id}} {{hostname}}:{{port}}",
                         ),
                     ],
                     ["last"],
