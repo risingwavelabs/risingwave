@@ -55,10 +55,14 @@ use risingwave_pb::meta::{
 };
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{ColumnCatalog, DefaultColumnDesc};
+use risingwave_pb::secret::PbSecretRef;
+use risingwave_pb::secret::secret_ref::PbRefAsType;
 use risingwave_pb::stream_plan::{PbDispatchOutputMapping, PbDispatcher, PbDispatcherType};
 use risingwave_pb::user::grant_privilege::{PbActionWithGrantOption, PbObject as PbGrantObject};
 use risingwave_pb::user::{PbAction, PbGrantPrivilege, PbUserInfo};
-use risingwave_sqlparser::ast::{SqlOption, Statement as SqlStatement};
+use risingwave_sqlparser::ast::{
+    Ident, ObjectName, SecretRefAsType, SecretRefValue, SqlOption, Statement as SqlStatement,
+};
 use risingwave_sqlparser::parser::Parser;
 use sea_orm::sea_query::{
     Alias, CommonTableExpression, Expr, OnConflict, Query, QueryStatementBuilder, SelectStatement,
@@ -563,16 +567,53 @@ pub async fn format_with_option_secret_resolved(
             .map_err(|e| MetaError::invalid_parameter(e.to_report_string()))?;
         options.push(sql_option);
     }
-    for (k, v) in options_with_secret.as_secret() {
-        if let Some(secret_model) = Secret::find_by_id(v.secret_id).one(txn).await? {
-            let sql_option = SqlOption::try_from((k, &format!("SECRET {}", secret_model.name)))
-                .map_err(|e| MetaError::invalid_parameter(e.to_report_string()))?;
-            options.push(sql_option);
-        } else {
-            return Err(MetaError::catalog_id_not_found("secret", v.secret_id));
-        }
+    for (name, secret_ref) in options_with_secret.as_secret() {
+        let secret_ref_value = resolve_secret_ref_value(txn, secret_ref).await?;
+        options.push(SqlOption::from_secret_ref(name, secret_ref_value));
     }
     Ok(options)
+}
+
+async fn resolve_secret_ref_value(
+    txn: &DatabaseTransaction,
+    secret_ref: &PbSecretRef,
+) -> MetaResult<SecretRefValue> {
+    let (secret, object) = Secret::find_by_id(secret_ref.secret_id)
+        .find_also_related(Object)
+        .one(txn)
+        .await?
+        .ok_or_else(|| MetaError::catalog_id_not_found("secret", secret_ref.secret_id))?;
+    let object =
+        object.ok_or_else(|| MetaError::catalog_id_not_found("object", secret_ref.secret_id))?;
+    let schema_id = object.schema_id.ok_or_else(|| {
+        MetaError::invalid_parameter(format!(
+            "secret {} does not belong to a schema",
+            secret_ref.secret_id
+        ))
+    })?;
+    let schema = Schema::find_by_id(schema_id)
+        .one(txn)
+        .await?
+        .ok_or_else(|| MetaError::catalog_id_not_found("schema", schema_id))?;
+
+    let ref_as = match PbRefAsType::try_from(secret_ref.ref_as) {
+        Ok(PbRefAsType::File) => SecretRefAsType::File,
+        Ok(PbRefAsType::Text | PbRefAsType::Unspecified) => SecretRefAsType::Text,
+        Err(_) => {
+            return Err(MetaError::invalid_parameter(format!(
+                "invalid reference type {} for secret {}",
+                secret_ref.ref_as, secret_ref.secret_id
+            )));
+        }
+    };
+
+    Ok(SecretRefValue {
+        secret_name: ObjectName(vec![
+            Ident::from_real_value(&schema.name),
+            Ident::from_real_value(&secret.name),
+        ]),
+        ref_as,
+    })
 }
 
 /// `ensure_object_id` ensures the existence of target object in the cluster.
