@@ -531,6 +531,17 @@ fn deduplicate_data_files_by_path(data_files: &mut Vec<DataFile>) -> (usize, Vec
     (duplicate_count, duplicate_path_samples)
 }
 
+fn cow_publish_watermark_covers(
+    source_sequence_number: i64,
+    target_sequence_number_property: Option<&str>,
+) -> bool {
+    target_sequence_number_property
+        .and_then(|value| value.parse::<i64>().ok())
+        .is_some_and(|published_sequence_number| {
+            published_sequence_number >= source_sequence_number
+        })
+}
+
 fn retain_unrewritten_data_files(
     planned_snapshot_files: &mut Vec<DataFile>,
     rewritten_data_file_paths: &HashSet<String>,
@@ -670,7 +681,33 @@ async fn publish_cow_snapshot_to_main(
     }
     let (added_files, deleted_files) = diff_data_files(published_files, main_files);
 
-    if added_files.is_empty() && deleted_files.is_empty() {
+    let planned_snapshot_sequence_number = table
+        .metadata()
+        .snapshot_by_id(publish_plan.snapshot_id)
+        .ok_or_else(|| {
+            HummockError::compaction_executor(anyhow::anyhow!(
+                "No snapshot found with ID {} while publishing COW compaction",
+                publish_plan.snapshot_id
+            ))
+        })?
+        .sequence_number();
+    let target_sequence_number_property = table
+        .metadata()
+        .snapshot_for_ref(MAIN_BRANCH)
+        .and_then(|snapshot| {
+            snapshot
+                .summary()
+                .additional_properties
+                .get(COW_SOURCE_SNAPSHOT_SEQUENCE_NUMBER_PROPERTY)
+        })
+        .map(String::as_str);
+    if added_files.is_empty()
+        && deleted_files.is_empty()
+        && cow_publish_watermark_covers(
+            planned_snapshot_sequence_number,
+            target_sequence_number_property,
+        )
+    {
         return Ok(());
     }
 
@@ -699,10 +736,7 @@ async fn publish_cow_snapshot_to_main(
         iceberg_operation = "publish_cow_snapshot",
         ingestion_branch,
         planned_snapshot_id = publish_plan.snapshot_id,
-        planned_snapshot_sequence_number = ?table
-            .metadata()
-            .snapshot_by_id(publish_plan.snapshot_id)
-            .map(|snapshot| snapshot.sequence_number()),
+        planned_snapshot_sequence_number,
         added_file_count,
         deleted_file_count,
         "iceberg_cow_snapshot_published",
@@ -1278,6 +1312,15 @@ mod tests {
             statistics.duplicate_data_file_path_samples,
             vec!["data/clean.parquet", "data/compacted.parquet"]
         );
+    }
+
+    #[test]
+    fn test_cow_publish_watermark_covers_source_sequence() {
+        assert!(!cow_publish_watermark_covers(10, None));
+        assert!(!cow_publish_watermark_covers(10, Some("invalid")));
+        assert!(!cow_publish_watermark_covers(10, Some("9")));
+        assert!(cow_publish_watermark_covers(10, Some("10")));
+        assert!(cow_publish_watermark_covers(10, Some("11")));
     }
 
     #[test]
