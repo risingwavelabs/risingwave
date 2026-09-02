@@ -75,7 +75,7 @@ ALTER TABLE plain_students CONNECTOR WITH (properties.receive.message.max.bytes 
 # the table definition is changed accordingly
 query I
 select count(*) from rw_tables
-where definition ILIKE '%secret s2%'
+where definition ILIKE '%properties.receive.message.max.bytes = secret public.s2%'
   and definition ILIKE '%topic = ''kafka_alter_connector_props''%'
   and name = 'plain_students';
 ----
@@ -85,12 +85,12 @@ query I
 select definition from rw_tables
 where name = 'plain_students';
 ----
-CREATE TABLE plain_students ("ID" INT, "firstName" CHARACTER VARYING, "lastName" CHARACTER VARYING, age INT, height REAL, weight REAL) WITH (connector = 'kafka', properties.bootstrap.server = '127.0.0.1:29092', topic = 'kafka_alter_connector_props', properties.receive.message.max.bytes = 'SECRET s2') FORMAT PLAIN ENCODE JSON
+CREATE TABLE plain_students ("ID" INT, "firstName" CHARACTER VARYING, "lastName" CHARACTER VARYING, age INT, height REAL, weight REAL) WITH (connector = 'kafka', properties.bootstrap.server = '127.0.0.1:29092', topic = 'kafka_alter_connector_props', properties.receive.message.max.bytes = secret public.s2) FORMAT PLAIN ENCODE JSON
 
 # the associated source definition is changed accordingly
 query I
 select count(*) from rw_sources
-where definition ILIKE '%secret s2%'
+where definition ILIKE '%properties.receive.message.max.bytes = secret public.s2%'
   and definition ILIKE '%topic = ''kafka_alter_connector_props''%'
   and name = 'plain_students';
 ----
