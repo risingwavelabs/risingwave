@@ -44,10 +44,12 @@ public class Binding {
     public static native boolean validateCdcSourceColumnType(
             int cdcTableType,
             String upstreamTypeName,
-            int rwTypeName,
+            byte[] rwDataType,
             long charMaxLength,
             boolean isUnsigned,
-            String postgresUdtName);
+            String postgresUdtName,
+            String postgresArrayElementTypeName,
+            String postgresArrayElementUdtName);
 
     static native long iteratorNewStreamChunk(long pointer);
 

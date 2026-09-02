@@ -16,16 +16,21 @@ use risingwave_pb::catalog::table::CdcTableType as PbCdcTableType;
 use risingwave_pb::data::data_type::TypeName as PbTypeName;
 
 use crate::types::DataType;
+use crate::types::postgres_type::postgres_point_type;
 
 pub fn cdc_source_column_type_compatible(
     cdc_table_type: PbCdcTableType,
     upstream_type_name: &str,
-    rw_type_name: PbTypeName,
+    rw_type: &DataType,
     char_max_length: Option<i64>,
     is_unsigned: bool,
     postgres_udt_name: Option<&str>,
+    postgres_array_element_type_name: Option<&str>,
+    postgres_array_element_udt_name: Option<&str>,
 ) -> bool {
     let upstream_type_name = upstream_type_name.to_ascii_lowercase();
+    let rw_type_name = rw_type.prost_type_name();
+
     match cdc_table_type {
         PbCdcTableType::Mysql => mysql_source_column_type_compatible(
             &upstream_type_name,
@@ -38,9 +43,11 @@ pub fn cdc_source_column_type_compatible(
         }
         PbCdcTableType::Postgres | PbCdcTableType::Citus => postgres_source_column_type_compatible(
             &upstream_type_name,
-            rw_type_name,
+            rw_type,
             char_max_length,
             postgres_udt_name,
+            postgres_array_element_type_name,
+            postgres_array_element_udt_name,
         ),
         PbCdcTableType::Unspecified | PbCdcTableType::Mongo => false,
     }
@@ -63,16 +70,32 @@ pub fn cdc_auto_schema_change_existing_type_compatible(
         return true;
     }
 
+    if matches!(
+        cdc_table_type,
+        PbCdcTableType::Postgres | PbCdcTableType::Citus
+    ) && matches!(
+        (existing_type, mapped_type),
+        (DataType::List(_), DataType::List(_))
+    ) {
+        // BACKWARD COMPATIBILITY:
+        // Previously, array element types were not validated at table creation,
+        // if we were to validate them now on auto-schema change, thew new schema cannot be updated,
+        // and will result in a schema mismatch
+        return true;
+    }
+
     auto_schema_change_source_type_candidates(cdc_table_type, mapped_type)
         .iter()
         .any(|candidate| {
             cdc_source_column_type_compatible(
                 cdc_table_type,
                 candidate.upstream_type_name,
-                existing_type.prost_type_name(),
+                existing_type,
                 candidate.char_max_length,
                 candidate.is_unsigned,
                 candidate.postgres_udt_name,
+                None,
+                None,
             )
         })
 }
@@ -142,49 +165,69 @@ fn mysql_source_column_type_compatible(
 
 fn postgres_source_column_type_compatible(
     postgres_type: &str,
-    rw_type: PbTypeName,
+    rw_type: &DataType,
     char_max_length: Option<i64>,
     udt_name: Option<&str>,
+    array_element_type_name: Option<&str>,
+    array_element_udt_name: Option<&str>,
 ) -> bool {
     // For creation-time validation, `postgres_type` comes from PostgreSQL information schema
     // DATA_TYPE, such as ARRAY or USER-DEFINED, and is lowercased by the public entry point. For
     // auto schema change, meta only has the already-mapped RW type, so callers pass synthetic
     // candidates below that intentionally reuse these normalized validation tokens.
+    let rw_type_name = rw_type.prost_type_name();
     match postgres_type {
-        "boolean" => rw_type == PbTypeName::Boolean,
-        "bit" => char_max_length.is_none_or(|length| length == 1) && rw_type == PbTypeName::Boolean,
-        "smallint" => rw_type == PbTypeName::Int16,
-        "integer" => rw_type == PbTypeName::Int32,
-        "bigint" | "oid" => rw_type == PbTypeName::Int64,
-        "real" => rw_type == PbTypeName::Float,
-        "double precision" => rw_type == PbTypeName::Double,
-        "character varying" | "character" | "char" => rw_type == PbTypeName::Varchar,
+        "boolean" => rw_type_name == PbTypeName::Boolean,
+        "bit" => {
+            char_max_length.is_none_or(|length| length == 1) && rw_type_name == PbTypeName::Boolean
+        }
+        "smallint" => rw_type_name == PbTypeName::Int16,
+        "integer" => rw_type_name == PbTypeName::Int32,
+        "bigint" | "oid" => rw_type_name == PbTypeName::Int64,
+        "real" => rw_type_name == PbTypeName::Float,
+        "double precision" => rw_type_name == PbTypeName::Double,
+        "character varying" | "character" | "char" => rw_type_name == PbTypeName::Varchar,
         "text" | "xml" | "uuid" | "inet" | "cidr" | "macaddr" | "macaddr8" | "int4range"
         | "int8range" | "numrange" | "tsrange" | "tstzrange" | "daterange" => {
-            rw_type == PbTypeName::Varchar
+            rw_type_name == PbTypeName::Varchar
         }
-        "timestamp with time zone" | "timestamptz" => rw_type == PbTypeName::Timestamptz,
-        "timestamp without time zone" | "timestamp" => rw_type == PbTypeName::Timestamp,
+        "timestamp with time zone" | "timestamptz" => rw_type_name == PbTypeName::Timestamptz,
+        "timestamp without time zone" | "timestamp" => rw_type_name == PbTypeName::Timestamp,
         "time with time zone" | "timetz" | "time without time zone" | "time" => {
-            rw_type == PbTypeName::Time
+            rw_type_name == PbTypeName::Time
         }
-        "interval" => rw_type == PbTypeName::Interval,
-        "bytea" | "geometry" | "geography" => rw_type == PbTypeName::Bytea,
-        "json" | "jsonb" => rw_type == PbTypeName::Jsonb,
-        "date" => rw_type == PbTypeName::Date,
+        "interval" => rw_type_name == PbTypeName::Interval,
+        "bytea" | "geometry" | "geography" => rw_type_name == PbTypeName::Bytea,
+        "json" | "jsonb" => rw_type_name == PbTypeName::Jsonb,
+        "date" => rw_type_name == PbTypeName::Date,
         "numeric" => matches!(
-            rw_type,
+            rw_type_name,
             PbTypeName::Decimal | PbTypeName::Int256 | PbTypeName::Varchar
         ),
-        "money" => rw_type == PbTypeName::Decimal,
-        "point" => rw_type == PbTypeName::Struct,
-        "array" => rw_type == PbTypeName::List,
+        "money" => rw_type_name == PbTypeName::Decimal,
+        "point" => rw_type == &postgres_point_type(),
+        "array" => {
+            let (DataType::List(list_type), Some(element_type_name)) =
+                (rw_type, array_element_type_name)
+            else {
+                return false;
+            };
+
+            postgres_source_column_type_compatible(
+                &element_type_name.to_ascii_lowercase(),
+                list_type.elem(),
+                None,
+                array_element_udt_name,
+                None,
+                None,
+            )
+        }
         "user-defined" => match udt_name.map(str::to_ascii_lowercase).as_deref() {
-            Some("citext") => rw_type == PbTypeName::Varchar,
-            Some("geometry" | "geography") => rw_type == PbTypeName::Bytea,
-            Some("vector") => rw_type == PbTypeName::Vector,
+            Some("citext") => rw_type_name == PbTypeName::Varchar,
+            Some("geometry" | "geography") => rw_type_name == PbTypeName::Bytea,
+            Some("vector") => rw_type_name == PbTypeName::Vector,
             Some("ltree" | "hstore") | None => false,
-            Some(_) => rw_type == PbTypeName::Varchar,
+            Some(_) => rw_type_name == PbTypeName::Varchar,
         },
         _ => false,
     }
@@ -300,7 +343,6 @@ fn postgres_auto_schema_change_source_type_candidates(
 
     match mapped_type {
         DataType::Decimal => vec![Candidate::new("numeric")],
-        DataType::List(_) => vec![Candidate::new("array")],
         _ => vec![],
     }
 }
@@ -328,33 +370,41 @@ mod tests {
         assert!(cdc_source_column_type_compatible(
             PbCdcTableType::Mysql,
             "int",
-            PbTypeName::Int64,
+            &DataType::Int64,
             None,
             true,
+            None,
+            None,
             None,
         ));
         assert!(!cdc_source_column_type_compatible(
             PbCdcTableType::Mysql,
             "int",
-            PbTypeName::Int32,
+            &DataType::Int32,
             None,
             true,
             None,
-        ));
-        assert!(cdc_source_column_type_compatible(
-            PbCdcTableType::Mysql,
-            "bit",
-            PbTypeName::Boolean,
-            Some(1),
-            false,
+            None,
             None,
         ));
         assert!(cdc_source_column_type_compatible(
             PbCdcTableType::Mysql,
             "bit",
-            PbTypeName::Bytea,
+            &DataType::Boolean,
+            Some(1),
+            false,
+            None,
+            None,
+            None,
+        ));
+        assert!(cdc_source_column_type_compatible(
+            PbCdcTableType::Mysql,
+            "bit",
+            &DataType::Bytea,
             Some(8),
             false,
+            None,
+            None,
             None,
         ));
     }
@@ -364,26 +414,52 @@ mod tests {
         assert!(cdc_source_column_type_compatible(
             PbCdcTableType::Postgres,
             "numeric",
-            PbTypeName::Int256,
+            &DataType::Int256,
             None,
             false,
+            None,
+            None,
             None,
         ));
         assert!(cdc_source_column_type_compatible(
             PbCdcTableType::Postgres,
             "USER-DEFINED",
-            PbTypeName::Varchar,
+            &DataType::Varchar,
             None,
             false,
             Some("mood"),
+            None,
+            None,
         ));
         assert!(!cdc_source_column_type_compatible(
             PbCdcTableType::Postgres,
             "bit",
-            PbTypeName::Bytea,
+            &DataType::Bytea,
             Some(8),
             false,
             None,
+            None,
+            None,
+        ));
+        assert!(cdc_source_column_type_compatible(
+            PbCdcTableType::Postgres,
+            "array",
+            &DataType::Int32.list(),
+            None,
+            false,
+            Some("_int4"),
+            Some("integer"),
+            Some("int4"),
+        ));
+        assert!(!cdc_source_column_type_compatible(
+            PbCdcTableType::Postgres,
+            "array",
+            &DataType::Int64.list(),
+            None,
+            false,
+            Some("_int4"),
+            Some("integer"),
+            Some("int4"),
         ));
     }
 
@@ -392,25 +468,31 @@ mod tests {
         assert!(cdc_source_column_type_compatible(
             PbCdcTableType::Sqlserver,
             "int",
-            PbTypeName::Int64,
+            &DataType::Int64,
             None,
             false,
+            None,
+            None,
             None,
         ));
         assert!(cdc_source_column_type_compatible(
             PbCdcTableType::Sqlserver,
             "real",
-            PbTypeName::Double,
+            &DataType::Float64,
             None,
             false,
+            None,
+            None,
             None,
         ));
         assert!(!cdc_source_column_type_compatible(
             PbCdcTableType::Sqlserver,
             "bigint",
-            PbTypeName::Decimal,
+            &DataType::Decimal,
             None,
             false,
+            None,
+            None,
             None,
         ));
     }
@@ -507,7 +589,6 @@ mod tests {
             (PbCdcTableType::Mysql, DataType::Float32),
             (PbCdcTableType::Mysql, DataType::Float64),
             (PbCdcTableType::Postgres, DataType::Decimal),
-            (PbCdcTableType::Postgres, DataType::Int32.list()),
             (PbCdcTableType::Sqlserver, DataType::Int16),
             (PbCdcTableType::Sqlserver, DataType::Int32),
             (PbCdcTableType::Sqlserver, DataType::Float32),
@@ -521,10 +602,12 @@ mod tests {
                     cdc_source_column_type_compatible(
                         cdc_table_type,
                         candidate.upstream_type_name,
-                        mapped_type.prost_type_name(),
+                        &mapped_type,
                         candidate.char_max_length,
                         candidate.is_unsigned,
                         candidate.postgres_udt_name,
+                        None,
+                        None,
                     ),
                     "candidate {:?} is not accepted as mapped type {:?} for {:?}",
                     candidate.upstream_type_name,
