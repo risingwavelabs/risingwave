@@ -7687,7 +7687,7 @@ dependencies = [
 [[package]]
 name = "iceberg-compaction-core"
 version = "0.1.0"
-source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=2f5c803a01cbd8167fd7055c0468274424bf1ace#2f5c803a01cbd8167fd7055c0468274424bf1ace"
+source = "git+https://github.com/nimtable/iceberg-compaction.git?rev=9c8e4266ae4059a4f71ac606578e6899334fac99#9c8e4266ae4059a4f71ac606578e6899334fac99"
 dependencies = [
  "async-stream",
  "async-trait",
