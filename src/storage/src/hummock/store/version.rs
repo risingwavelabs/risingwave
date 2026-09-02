@@ -50,6 +50,7 @@ use crate::hummock::iterator::{
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::sstable::{SstableIteratorReadOptions, SstableIteratorType};
 use crate::hummock::sstable_store::SstableStoreRef;
+use crate::hummock::table_change_log_manager::TableChangeLogManager;
 use crate::hummock::utils::{
     MemoryTracker, filter_single_sst, prune_nonoverlapping_ssts, prune_overlapping_ssts,
     range_overlap, search_sst_idx,
@@ -1139,13 +1140,16 @@ impl HummockVersionReader {
 
     pub async fn iter_log(
         &self,
-        version: PinnedVersion,
         epoch_range: (u64, u64),
         key_range: TableKeyRange,
         options: ReadLogOptions,
+        table_change_log_manager: Arc<TableChangeLogManager>,
     ) -> HummockResult<ChangeLogIterator> {
-        let change_log = {
-            let table_change_logs = version.table_change_log_read_lock();
+        // The end value of `epoch_range` is not greater than max committed epoch, guaranteed by the caller `BatchTableInnerIterLogInner`.
+        let change_log: Vec<_> = {
+            let table_change_logs = table_change_log_manager
+                .fetch_table_change_logs(options.table_id, epoch_range, false, None)
+                .await?;
             if let Some(change_log) = table_change_logs.get(&options.table_id) {
                 change_log.filter_epoch(epoch_range).cloned().collect_vec()
             } else {
@@ -1404,7 +1408,7 @@ mod tests {
             &HashSet::new(),
         );
 
-        let pinned_version = PinnedVersion::new(version, unbounded_channel().0);
+        let pinned_version = PinnedVersion::new(version.into(), unbounded_channel().0);
         let reader = HummockVersionReader::new(
             mock_sstable_store().await,
             Arc::new(HummockStateStoreMetrics::unused()),

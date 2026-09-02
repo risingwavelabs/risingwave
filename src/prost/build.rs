@@ -180,6 +180,9 @@ for_all_wrapped_id_fields! (
         AlterDatabaseParamRequest {
             database_id: DatabaseId,
         }
+        AlterDatabaseResourceGroupRequest {
+            database_id: DatabaseId,
+        }
         AlterFragmentParallelismRequest {
             fragment_ids: FragmentId,
         }
@@ -187,7 +190,7 @@ for_all_wrapped_id_fields! (
             table_id: JobId,
         }
         AlterResourceGroupRequest {
-            table_id: TableId,
+            job_id: JobId,
         }
         AlterSecretRequest {
             database_id: DatabaseId,
@@ -329,10 +332,12 @@ for_all_wrapped_id_fields! (
             start_id: HummockRawObjectId,
             end_id: HummockRawObjectId,
         }
+        GetTableChangeLogsRequest.TableFilter {
+            table_ids: TableId,
+        }
         GetVersionByEpochRequest {
             table_id: TableId,
         }
-
         GroupConstruct {
             new_sst_start_id: HummockSstableId,
             parent_group_id: CompactionGroupId,
@@ -1223,7 +1228,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Compile the proto files.
     tonic_config
         .out_dir(out_dir.as_path())
-        .compile_with_config(prost_config, &protos, &[proto_dir.to_owned()])
+        .compile_protos_with_config(prost_config, &protos, &[proto_dir.to_owned()])
         .expect("Failed to compile grpc!");
 
     // Implement `serde::Serialize` on those structs.

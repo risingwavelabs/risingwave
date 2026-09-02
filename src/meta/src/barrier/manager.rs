@@ -31,7 +31,6 @@ use tokio::task::JoinHandle;
 use tracing::warn;
 
 use crate::MetaResult;
-use crate::barrier::BarrierManagerRequest::MayHaveSnapshotBackfillingJob;
 use crate::barrier::cdc_progress::CdcProgress;
 use crate::barrier::worker::GlobalBarrierWorker;
 use crate::barrier::{
@@ -39,6 +38,7 @@ use crate::barrier::{
     RecoveryReason, UpdateDatabaseBarrierRequest, schedule,
 };
 use crate::hummock::HummockManagerRef;
+use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::stream::{GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef};
@@ -152,16 +152,6 @@ impl GlobalBarrierManager {
         Ok(())
     }
 
-    pub async fn may_snapshot_backfilling_job(&self) -> MetaResult<bool> {
-        let (tx, rx) = oneshot::channel();
-        self.request_tx
-            .send(MayHaveSnapshotBackfillingJob(tx))
-            .context("failed to send has snapshot backfilling job request")?;
-        Ok(rx
-            .await
-            .context("failed to wait has snapshot backfilling job")?)
-    }
-
     pub async fn get_hummock_version_id(&self) -> HummockVersionId {
         self.hummock_manager.get_version_id().await
     }
@@ -199,6 +189,7 @@ impl GlobalBarrierManager {
         hummock_manager: HummockManagerRef,
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
+        iceberg_compaction_manager: IcebergCompactionManagerRef,
         scale_controller: ScaleControllerRef,
         barrier_scheduler: schedule::BarrierScheduler,
         refresh_manager: GlobalRefreshManagerRef,
@@ -213,6 +204,7 @@ impl GlobalBarrierManager {
             hummock_manager,
             source_manager,
             sink_manager,
+            iceberg_compaction_manager,
             scale_controller,
             request_rx,
             barrier_scheduler,

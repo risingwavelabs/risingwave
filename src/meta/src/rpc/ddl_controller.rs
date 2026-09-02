@@ -187,6 +187,7 @@ pub enum DdlCommand {
     CreateSubscription(Subscription),
     DropSubscription(SubscriptionId, DropMode),
     AlterDatabaseParam(DatabaseId, AlterDatabaseParam),
+    AlterDatabaseResourceGroup(DatabaseId, Option<String>, bool),
     AlterStreamingJobConfig(JobId, HashMap<String, String>, Vec<String>),
 }
 
@@ -223,6 +224,7 @@ impl DdlCommand {
             DdlCommand::CreateSubscription(subscription) => Left(subscription.name.clone()),
             DdlCommand::DropSubscription(id, _) => Right(id.as_object_id()),
             DdlCommand::AlterDatabaseParam(id, _) => Right(id.as_object_id()),
+            DdlCommand::AlterDatabaseResourceGroup(id, _, _) => Right(id.as_object_id()),
             DdlCommand::AlterStreamingJobConfig(job_id, _, _) => Right(job_id.as_object_id()),
         }
     }
@@ -251,6 +253,7 @@ impl DdlCommand {
             | DdlCommand::AlterSecret(_)
             | DdlCommand::AlterSwapRename(_)
             | DdlCommand::AlterDatabaseParam(_, _)
+            | DdlCommand::AlterDatabaseResourceGroup(_, _, _)
             | DdlCommand::AlterStreamingJobConfig(_, _, _) => true,
             DdlCommand::CreateStreamingJob { .. }
             | DdlCommand::CreateNonSharedSource(_)
@@ -461,6 +464,10 @@ impl DdlController {
                 DdlCommand::AlterSwapRename(objects) => ctrl.alter_swap_rename(objects).await,
                 DdlCommand::AlterDatabaseParam(database_id, param) => {
                     ctrl.alter_database_param(database_id, param).await
+                }
+                DdlCommand::AlterDatabaseResourceGroup(database_id, resource_group, deferred) => {
+                    ctrl.alter_database_resource_group(database_id, resource_group, deferred)
+                        .await
                 }
                 DdlCommand::AlterStreamingJobConfig(job_id, entries_to_add, keys_to_remove) => {
                     ctrl.alter_streaming_job_config(job_id, entries_to_add, keys_to_remove)
@@ -702,6 +709,21 @@ impl DdlController {
                 updated_db.checkpoint_frequency.map(|v| v as u64),
             )
             .await?;
+        Ok(version)
+    }
+
+    async fn alter_database_resource_group(
+        &self,
+        database_id: DatabaseId,
+        resource_group: Option<String>,
+        _deferred: bool,
+    ) -> MetaResult<NotificationVersion> {
+        let version = self
+            .metadata_manager
+            .catalog_controller
+            .alter_database_resource_group(database_id, resource_group)
+            .await?;
+
         Ok(version)
     }
 
@@ -1031,12 +1053,15 @@ impl DdlController {
                 self.env.event_log_manager_ref().add_event_logs(vec![
                     risingwave_pb::meta::event_log::Event::CreateStreamJobFail(event),
                 ]);
-                let (aborted, _) = self
+                let abort_result = self
                     .metadata_manager
                     .catalog_controller
                     .try_abort_creating_streaming_job(job_id, is_cancelled)
                     .await?;
-                if aborted {
+                self.stream_manager
+                    .iceberg_compaction_manager
+                    .clear_maintenance_for_aborted_job(&abort_result);
+                if abort_result.aborted {
                     tracing::warn!(id = %job_id, is_cancelled, "aborted streaming job");
                     // FIXME: might also need other cleanup here
                     if let Some(source_id) = source_id {
@@ -1205,6 +1230,7 @@ impl DdlController {
             removed_fragments,
             removed_sink_fragment_by_targets,
             removed_iceberg_table_sinks,
+            removed_iceberg_sink_ids,
         } = release_ctx;
 
         let _ = removed_fragments;
@@ -1277,6 +1303,15 @@ impl DdlController {
             self.sink_manager
                 .stop_sink_coordinator(iceberg_sink_ids)
                 .await;
+        }
+
+        // Clear iceberg maintenance (compaction schedule and snapshot expiration) for all
+        // dropped iceberg sinks, including user-created ones with arbitrary names that are
+        // not covered by `removed_iceberg_table_sinks` above.
+        for sink_id in removed_iceberg_sink_ids {
+            self.stream_manager
+                .iceberg_compaction_manager
+                .clear_iceberg_maintenance_by_sink_id(sink_id);
         }
 
         // remove secrets.
@@ -1592,10 +1627,14 @@ impl DdlController {
             .await?;
         let version = match job_status {
             JobStatus::Initial => {
-                self.metadata_manager
+                let abort_result = self
+                    .metadata_manager
                     .catalog_controller
                     .try_abort_creating_streaming_job(job_id.id(), true)
                     .await?;
+                self.stream_manager
+                    .iceberg_compaction_manager
+                    .clear_maintenance_for_aborted_job(&abort_result);
                 IGNORED_NOTIFICATION_VERSION
             }
             JobStatus::Creating => {

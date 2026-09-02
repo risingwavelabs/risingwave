@@ -14,7 +14,7 @@
 
 use risingwave_common::license::LicenseManager;
 use risingwave_common_service::ObserverState;
-use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
+use risingwave_hummock_sdk::version::{HummockVersionDelta, LocalHummockVersion};
 use risingwave_hummock_trace::TraceSpan;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::meta::SubscribeResponse;
@@ -124,7 +124,7 @@ impl ObserverState for HummockObserverNode {
         let _ = self
             .version_update_sender
             .send(HummockVersionUpdate::PinnedVersion(Box::new(
-                HummockVersion::from_rpc_protobuf(
+                LocalHummockVersion::from_rpc_protobuf(
                     &snapshot
                         .hummock_version
                         .expect("should get hummock version"),

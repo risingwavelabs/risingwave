@@ -51,6 +51,7 @@ use crate::barrier::{
 };
 use crate::error::MetaErrorInner;
 use crate::hummock::HummockManagerRef;
+use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
 use crate::manager::sink_coordination::SinkCoordinatorManager;
 use crate::manager::{
     ActiveStreamingWorkerChange, ActiveStreamingWorkerNodes, LocalNotification, MetaSrvEnv,
@@ -138,6 +139,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
 
 impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
     /// Create a new [`crate::barrier::worker::GlobalBarrierWorker`].
+    #[expect(clippy::too_many_arguments)]
     pub async fn new(
         scheduled_barriers: schedule::ScheduledBarriers,
         env: MetaSrvEnv,
@@ -145,6 +147,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
         hummock_manager: HummockManagerRef,
         source_manager: SourceManagerRef,
         sink_manager: SinkCoordinatorManager,
+        iceberg_compaction_manager: IcebergCompactionManagerRef,
         scale_controller: ScaleControllerRef,
         request_rx: mpsc::UnboundedReceiver<BarrierManagerRequest>,
         barrier_scheduler: schedule::BarrierScheduler,
@@ -163,6 +166,7 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             barrier_scheduler,
             refresh_manager,
             sink_manager,
+            iceberg_compaction_manager,
         ));
 
         Self::new_inner(env, request_rx, context).await
@@ -327,11 +331,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                     );
                                 if sender.send(()).is_err() {
                                     warn!("failed to notify finish of update database barrier");
-                                }
-                            }
-                            BarrierManagerRequest::MayHaveSnapshotBackfillingJob(tx) => {
-                                if tx.send(self.checkpoint_control.may_have_snapshot_backfilling_jobs()).is_err() {
-                                    warn!("failed to may have snapshot backfill job");
                                 }
                             }
                         }
@@ -1052,10 +1051,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         }
                         BarrierManagerRequest::UpdateDatabaseBarrier(request) => {
                             update_barrier_requests.push(request);
-                        }
-                        BarrierManagerRequest::MayHaveSnapshotBackfillingJob(tx) => {
-                            // may recover snapshot backfill jobs
-                            let _ = tx.send(true);
                         }
                     }
                 }

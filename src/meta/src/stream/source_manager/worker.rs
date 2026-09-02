@@ -352,14 +352,19 @@ impl ConnectorSourceWorker {
 
         source_is_up(1);
         self.fail_cnt = 0;
-        let mut current_splits = self.current_splits.lock().await;
-        current_splits.splits.replace(
-            splits
-                .into_iter()
-                .map(|split| (split.id(), split))
-                .collect(),
-        );
-        // Call enumerator's `on_tick` method for monitoring tasks
+        {
+            let mut current_splits = self.current_splits.lock().await;
+            current_splits.splits.replace(
+                splits
+                    .into_iter()
+                    .map(|split| (split.id(), split))
+                    .collect(),
+            );
+        }
+
+        // Call enumerator's `on_tick` method for monitoring tasks.
+        // `on_tick` may do unbounded network I/O, so it must not run under
+        // `current_splits` (#26275).
         if let Err(e) = self.enumerator.on_tick().await {
             tracing::error!(
                 "Failed to execute enumerator `on_tick` for source {}: {}",

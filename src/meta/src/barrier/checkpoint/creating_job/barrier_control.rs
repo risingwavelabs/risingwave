@@ -93,6 +93,12 @@ impl CreatingStreamingJobBarrierControl {
         self.inflight_barrier_queue.len()
     }
 
+    pub(super) fn pending_barrier_count(&self) -> usize {
+        self.inflight_barrier_queue.len()
+            + self.pending_barriers_to_complete.len()
+            + usize::from(self.completing_barrier.is_some())
+    }
+
     pub(super) fn is_valid_after_worker_err(&self, worker_id: WorkerId) -> bool {
         self.inflight_barrier_queue
             .values()

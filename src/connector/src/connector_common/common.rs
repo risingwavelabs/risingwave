@@ -362,12 +362,45 @@ pub struct RdKafkaPropertiesCommon {
     #[with_option(allow_alter_on_fly)]
     pub enable_ssl_certificate_verification: Option<bool>,
 
+    /// Initial backoff time in milliseconds before reconnecting to a broker after a connection
+    /// closes.
+    #[serde(rename = "properties.reconnect.backoff.ms")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
+    pub reconnect_backoff_ms: Option<usize>,
+
+    /// Maximum backoff time in milliseconds before reconnecting to a broker after a connection
+    /// closes.
+    #[serde(rename = "properties.reconnect.backoff.max.ms")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
+    pub reconnect_backoff_max_ms: Option<usize>,
+
+    /// Maximum time in milliseconds allowed for broker connection setup, including TCP setup and
+    /// SSL/SASL handshakes.
+    #[serde(rename = "properties.socket.connection.setup.timeout.ms")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
+    pub socket_connection_setup_timeout_ms: Option<usize>,
+
     #[serde(
         rename = "properties.socket.keepalive.enable",
         default = "default_socket_keepalive_enable"
     )]
     #[serde_as(as = "DisplayFromStr")]
     pub socket_keepalive_enable: bool,
+
+    /// Initial backoff time in milliseconds before retrying a failed protocol request.
+    #[serde(rename = "properties.retry.backoff.ms")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
+    pub retry_backoff_ms: Option<usize>,
+
+    /// Maximum backoff time in milliseconds before retrying a failed protocol request.
+    #[serde(rename = "properties.retry.backoff.max.ms")]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly)]
+    pub retry_backoff_max_ms: Option<usize>,
 }
 
 impl RdKafkaPropertiesCommon {
@@ -387,10 +420,25 @@ impl RdKafkaPropertiesCommon {
         if let Some(v) = self.enable_ssl_certificate_verification {
             c.set("enable.ssl.certificate.verification", v.to_string());
         }
+        if let Some(v) = self.reconnect_backoff_ms {
+            c.set("reconnect.backoff.ms", v.to_string());
+        }
+        if let Some(v) = self.reconnect_backoff_max_ms {
+            c.set("reconnect.backoff.max.ms", v.to_string());
+        }
+        if let Some(v) = self.socket_connection_setup_timeout_ms {
+            c.set("socket.connection.setup.timeout.ms", v.to_string());
+        }
         c.set(
             "socket.keepalive.enable",
             self.socket_keepalive_enable.to_string(),
         );
+        if let Some(v) = self.retry_backoff_ms {
+            c.set("retry.backoff.ms", v.to_string());
+        }
+        if let Some(v) = self.retry_backoff_max_ms {
+            c.set("retry.backoff.max.ms", v.to_string());
+        }
     }
 }
 

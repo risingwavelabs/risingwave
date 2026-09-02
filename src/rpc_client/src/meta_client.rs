@@ -47,6 +47,7 @@ use risingwave_common::util::resource_util::hostname;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
 use risingwave_error::bail;
 use risingwave_error::tonic::ErrorIsFromTonicServerImpl;
+use risingwave_hummock_sdk::change_log::{TableChangeLog, TableChangeLogs};
 use risingwave_hummock_sdk::version::{HummockVersion, HummockVersionDelta};
 use risingwave_hummock_sdk::{
     CompactionGroupId, HummockEpoch, HummockVersionId, ObjectIdRange, SyncResult,
@@ -61,6 +62,7 @@ use risingwave_pb::cloud_service::cloud_service_client::CloudServiceClient;
 use risingwave_pb::cloud_service::*;
 use risingwave_pb::common::worker_node::Property;
 use risingwave_pb::common::{HostAddress, OptionalUint32, OptionalUint64, WorkerNode, WorkerType};
+use risingwave_pb::configured_monitor_service_client;
 use risingwave_pb::connector_service::sink_coordination_service_client::SinkCoordinationServiceClient;
 use risingwave_pb::ddl_service::alter_owner_request::Object;
 use risingwave_pb::ddl_service::create_iceberg_table_request::{PbSinkJobInfo, PbTableJobInfo};
@@ -68,6 +70,7 @@ use risingwave_pb::ddl_service::ddl_service_client::DdlServiceClient;
 use risingwave_pb::ddl_service::*;
 use risingwave_pb::hummock::compact_task::TaskStatus;
 use risingwave_pb::hummock::get_compaction_score_response::PickerInfo;
+use risingwave_pb::hummock::get_table_change_logs_request::PbTableFilter;
 use risingwave_pb::hummock::hummock_manager_service_client::HummockManagerServiceClient;
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::subscribe_compaction_event_request::Register;
@@ -474,6 +477,7 @@ impl MetaClient {
         sink: PbSink,
         graph: StreamFragmentGraph,
         dependencies: HashSet<ObjectId>,
+        resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
     ) -> Result<WaitVersion> {
         let request = CreateSinkRequest {
@@ -481,6 +485,9 @@ impl MetaClient {
             fragment_graph: Some(graph),
             dependencies: dependencies.into_iter().collect(),
             if_not_exists,
+            resource_type: Some(PbStreamingJobResourceType {
+                resource_type: Some(resource_type),
+            }),
         };
 
         let resp = self.inner.create_sink(request).await?;
@@ -693,18 +700,36 @@ impl MetaClient {
 
     pub async fn alter_resource_group(
         &self,
-        table_id: TableId,
+        job_id: JobId,
         resource_group: Option<String>,
         deferred: bool,
     ) -> Result<()> {
         let request = AlterResourceGroupRequest {
-            table_id,
+            job_id,
             resource_group,
             deferred,
         };
 
         self.inner.alter_resource_group(request).await?;
         Ok(())
+    }
+
+    pub async fn alter_database_resource_group(
+        &self,
+        database_id: DatabaseId,
+        resource_group: Option<String>,
+        deferred: bool,
+    ) -> Result<WaitVersion> {
+        let request = AlterDatabaseResourceGroupRequest {
+            database_id,
+            resource_group,
+            deferred,
+        };
+
+        let resp = self.inner.alter_database_resource_group(request).await?;
+        Ok(resp
+            .version
+            .ok_or_else(|| anyhow!("wait version not set"))?)
     }
 
     pub async fn alter_swap_rename(
@@ -790,6 +815,7 @@ impl MetaClient {
         index: PbIndex,
         table: PbTable,
         graph: StreamFragmentGraph,
+        resource_type: streaming_job_resource_type::ResourceType,
         if_not_exists: bool,
     ) -> Result<WaitVersion> {
         let request = CreateIndexRequest {
@@ -797,6 +823,9 @@ impl MetaClient {
             index_table: Some(table),
             fragment_graph: Some(graph),
             if_not_exists,
+            resource_type: Some(PbStreamingJobResourceType {
+                resource_type: Some(resource_type),
+            }),
         };
         let resp = self.inner.create_index(request).await?;
         // TODO: handle error in `resp.status` here
@@ -1733,6 +1762,33 @@ impl MetaClient {
         Ok(resp.configs)
     }
 
+    pub async fn get_table_change_logs(
+        &self,
+        epoch_only: bool,
+        start_epoch_inclusive: Option<u64>,
+        end_epoch_inclusive: Option<u64>,
+        table_ids: Option<HashSet<TableId>>,
+        exclude_empty: bool,
+        limit: Option<u32>,
+    ) -> Result<TableChangeLogs> {
+        let req = GetTableChangeLogsRequest {
+            epoch_only,
+            start_epoch_inclusive,
+            end_epoch_inclusive,
+            table_ids: table_ids.map(|iter| PbTableFilter {
+                table_ids: iter.into_iter().collect::<Vec<_>>(),
+            }),
+            exclude_empty,
+            limit,
+        };
+        let resp = self.inner.get_table_change_logs(req).await?;
+        Ok(resp
+            .table_change_logs
+            .into_iter()
+            .map(|(id, change_log)| (TableId::new(id), TableChangeLog::from_protobuf(&change_log)))
+            .collect())
+    }
+
     pub async fn delete_worker_node(&self, worker: HostAddress) -> Result<()> {
         let _resp = self
             .inner
@@ -2141,6 +2197,26 @@ impl HummockMetaClient for MetaClient {
 
         Ok((request_sender, Box::pin(stream)))
     }
+
+    async fn get_table_change_logs(
+        &self,
+        epoch_only: bool,
+        start_epoch_inclusive: Option<u64>,
+        end_epoch_inclusive: Option<u64>,
+        table_ids: Option<HashSet<TableId>>,
+        exclude_empty: bool,
+        limit: Option<u32>,
+    ) -> Result<TableChangeLogs> {
+        self.get_table_change_logs(
+            epoch_only,
+            start_epoch_inclusive,
+            end_epoch_inclusive,
+            table_ids,
+            exclude_empty,
+            limit,
+        )
+        .await
+    }
 }
 
 #[async_trait]
@@ -2210,7 +2286,7 @@ impl GrpcMetaClientCore {
         let cluster_limit_client = ClusterLimitServiceClient::new(channel.clone());
         let hosted_iceberg_catalog_service_client =
             HostedIcebergCatalogServiceClient::new(channel.clone());
-        let monitor_client = MonitorServiceClient::new(channel);
+        let monitor_client = configured_monitor_service_client(MonitorServiceClient::new(channel));
 
         GrpcMetaClientCore {
             cluster_client,
@@ -2608,6 +2684,7 @@ macro_rules! for_all_meta_rpc {
             ,{ ddl_client, alter_fragment_parallelism, AlterFragmentParallelismRequest, AlterFragmentParallelismResponse }
             ,{ ddl_client, alter_cdc_table_backfill_parallelism, AlterCdcTableBackfillParallelismRequest, AlterCdcTableBackfillParallelismResponse }
             ,{ ddl_client, alter_resource_group, AlterResourceGroupRequest, AlterResourceGroupResponse }
+            ,{ ddl_client, alter_database_resource_group, AlterDatabaseResourceGroupRequest, AlterDatabaseResourceGroupResponse }
             ,{ ddl_client, alter_database_param, AlterDatabaseParamRequest, AlterDatabaseParamResponse }
             ,{ ddl_client, create_materialized_view, CreateMaterializedViewRequest, CreateMaterializedViewResponse }
             ,{ ddl_client, create_view, CreateViewRequest, CreateViewResponse }
@@ -2679,6 +2756,7 @@ macro_rules! for_all_meta_rpc {
             ,{ hummock_client, cancel_compact_task, CancelCompactTaskRequest, CancelCompactTaskResponse}
             ,{ hummock_client, get_version_by_epoch, GetVersionByEpochRequest, GetVersionByEpochResponse }
             ,{ hummock_client, merge_compaction_group, MergeCompactionGroupRequest, MergeCompactionGroupResponse }
+            ,{ hummock_client, get_table_change_logs, GetTableChangeLogsRequest, GetTableChangeLogsResponse }
             ,{ user_client, create_user, CreateUserRequest, CreateUserResponse }
             ,{ user_client, update_user, UpdateUserRequest, UpdateUserResponse }
             ,{ user_client, drop_user, DropUserRequest, DropUserResponse }

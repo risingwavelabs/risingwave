@@ -22,6 +22,9 @@ TEST_DIR=.risingwave/e2e_test/backwards-compat-tests/
 # Keep this case on recently verified releases. It relies on Hummock system tables and
 # risectl commands to build a mixed-table SST deterministically.
 HUMMOCK_STALE_TABLE_IDS_MIN_VERSION=2.8.0
+# v2.8.4 backported normalized compact task table ids, so old clusters at this
+# version and later already clean stale table ids from SST metadata.
+HUMMOCK_STALE_TABLE_IDS_FIXED_VERSION=2.8.4
 mkdir -p $TEST_DIR
 cp -r e2e_test/backwards-compat-tests/slt/* $TEST_DIR
 
@@ -121,7 +124,8 @@ seed_hummock_stale_table_ids() {
   rm -f "$TEST_DIR/hummock-stale-table-ids/enabled" \
     "$TEST_DIR/hummock-stale-table-ids/dropped_table_id"
 
-  if version_lt "$OLD_VERSION" "$HUMMOCK_STALE_TABLE_IDS_MIN_VERSION"; then
+  if version_lt "$OLD_VERSION" "$HUMMOCK_STALE_TABLE_IDS_MIN_VERSION" ||
+    version_le "$HUMMOCK_STALE_TABLE_IDS_FIXED_VERSION" "$OLD_VERSION"; then
     echo "--- HUMMOCK STALE TABLE IDS TEST: Skipped for old version ${OLD_VERSION}"
     return
   fi
@@ -415,6 +419,13 @@ seed_old_cluster() {
   echo "--- CDC TEST: Validating old cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/cdc/validate_original.slt"
 
+  # The `pending_sink_state` table and exactly-once Iceberg sinks exist since 2.8.0.
+  if version_le "2.8.0" "$OLD_VERSION"; then
+    echo "--- PENDING SINK STATE TEST: Seeding old cluster with a dropped Iceberg sink"
+    ./risedev mc mb -p hummock-minio/icebergdata || true
+    sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/pending-sink-state/seed.slt"
+  fi
+
   # work around https://github.com/risingwavelabs/risingwave/issues/18650
   echo "--- wait for a version checkpoint"
   sleep 60
@@ -467,6 +478,12 @@ validate_new_cluster() {
 
   echo "--- CDC TEST: Validating new cluster"
   sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/cdc/validate_restart.slt"
+
+  # The `pending_sink_state` table and exactly-once Iceberg sinks exist since 2.8.0.
+  if version_le "2.8.0" "$OLD_VERSION"; then
+    echo "--- PENDING SINK STATE TEST: Validating new cluster"
+    sqllogictest -d dev -h localhost -p 4566 "$TEST_DIR/pending-sink-state/validate_restart.slt"
+  fi
 
   validate_hummock_stale_table_ids
 

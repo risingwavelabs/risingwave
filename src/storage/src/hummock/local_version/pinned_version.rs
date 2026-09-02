@@ -12,20 +12,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::iter::empty;
 use std::ops::Deref;
 use std::sync::{Arc, LazyLock};
 use std::time::{Duration, Instant};
 
 use auto_enums::auto_enum;
-use parking_lot::RwLock;
 use risingwave_common::catalog::TableId;
 use risingwave_common::log::LogSuppressor;
-use risingwave_hummock_sdk::change_log::TableChangeLogCommon;
 use risingwave_hummock_sdk::level::{Level, Levels};
-use risingwave_hummock_sdk::sstable_info::SstableInfo;
-use risingwave_hummock_sdk::version::{HummockVersion, LocalHummockVersion};
+use risingwave_hummock_sdk::version::LocalHummockVersion;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockVersionId, INVALID_VERSION_ID};
 use risingwave_rpc_client::HummockMetaClient;
 use thiserror_ext::AsReport;
@@ -88,7 +85,6 @@ impl Drop for PinnedVersionGuard {
 pub struct PinnedVersion {
     version: Arc<LocalHummockVersion>,
     guard: Arc<PinnedVersionGuard>,
-    table_change_log: Arc<RwLock<HashMap<TableId, TableChangeLogCommon<SstableInfo>>>>,
 }
 
 impl Deref for PinnedVersion {
@@ -101,22 +97,20 @@ impl Deref for PinnedVersion {
 
 impl PinnedVersion {
     pub fn new(
-        version: HummockVersion,
+        version: LocalHummockVersion,
         pinned_version_manager_tx: UnboundedSender<PinVersionAction>,
     ) -> Self {
         let version_id = version.id;
-        let (local_version, table_id_to_change_logs) = version.split_change_log();
         PinnedVersion {
             guard: Arc::new(PinnedVersionGuard::new(
                 version_id,
                 pinned_version_manager_tx,
             )),
-            table_change_log: Arc::new(RwLock::new(table_id_to_change_logs)),
-            version: Arc::new(local_version),
+            version: Arc::new(version),
         }
     }
 
-    pub fn new_pin_version(&self, version: HummockVersion) -> Option<Self> {
+    pub fn new_pin_version(&self, version: LocalHummockVersion) -> Option<Self> {
         assert!(
             version.id >= self.version.id,
             "pinning a older version {}. Current is {}",
@@ -127,14 +121,12 @@ impl PinnedVersion {
             return None;
         }
         let version_id = version.id;
-        let (local_version, table_id_to_change_logs) = version.split_change_log();
         Some(PinnedVersion {
             guard: Arc::new(PinnedVersionGuard::new(
                 version_id,
                 self.guard.pinned_version_manager_tx.clone(),
             )),
-            table_change_log: Arc::new(RwLock::new(table_id_to_change_logs)),
-            version: Arc::new(local_version),
+            version: Arc::new(version),
         })
     }
 
@@ -157,7 +149,6 @@ impl PinnedVersion {
                 version_id,
                 self.guard.pinned_version_manager_tx.clone(),
             )),
-            table_change_log: self.table_change_log.clone(),
             version: Arc::new(version),
         })
     }
@@ -198,19 +189,6 @@ impl PinnedVersion {
             }
             None => empty(),
         }
-    }
-
-    pub fn table_change_log_read_lock(
-        &self,
-    ) -> parking_lot::RwLockReadGuard<'_, HashMap<TableId, TableChangeLogCommon<SstableInfo>>> {
-        self.table_change_log.read()
-    }
-
-    pub fn table_change_log_write_lock(
-        &self,
-    ) -> parking_lot::RwLockWriteGuard<'_, HashMap<TableId, TableChangeLogCommon<SstableInfo>>>
-    {
-        self.table_change_log.write()
     }
 }
 
