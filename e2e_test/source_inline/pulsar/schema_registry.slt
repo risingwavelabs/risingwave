@@ -1,0 +1,98 @@
+control substitution on
+
+system ok
+curl "$PULSAR_HTTP_URL/admin/v2/brokers/ready"
+----
+ok
+
+
+statement ok
+drop materialized view if exists pulsar_avro_registry_mv;
+
+statement ok
+drop source if exists pulsar_avro_registry;
+
+statement ok
+drop source if exists pulsar_avro_schema_mismatch;
+
+statement ok
+drop source if exists pulsar_avro_registry_upsert;
+
+system ok
+python3 e2e_test/commands/pulsar_util.py drop-topic -t 'persistent://public/default/rw-schema-registry-avro' --force
+
+system ok
+python3 e2e_test/commands/pulsar_util.py drop-topic -t 'persistent://public/default/rw-schema-registry-json' --force
+
+system ok
+python3 e2e_test/source_inline/pulsar/schema_registry_test_record.py --topic 'persistent://public/default/rw-schema-registry-avro' <<EOF
+{"id":1,"name":"Alice"}
+{"id":2,"name":"Bob"}
+EOF
+
+system ok
+python3 e2e_test/source_inline/pulsar/schema_registry_test_record.py --schema-type json --topic 'persistent://public/default/rw-schema-registry-json' <<EOF
+{"id":3,"name":"Carol"}
+EOF
+
+statement error expected Pulsar AVRO schema, got JSON
+create source pulsar_avro_schema_mismatch
+with (
+  connector = 'pulsar',
+  service.url = '${PULSAR_BROKER_URL}',
+  topic = 'persistent://public/default/rw-schema-registry-json',
+  scan.startup.mode = 'earliest'
+)
+format plain encode avro (
+  schema.registry = '${PULSAR_HTTP_URL}',
+  schema.registry.type = 'pulsar'
+);
+
+statement error Pulsar Schema Registry requires connector = 'pulsar' with FORMAT PLAIN ENCODE AVRO
+create source pulsar_avro_registry_upsert
+with (
+  connector = 'pulsar',
+  service.url = '${PULSAR_BROKER_URL}',
+  topic = 'persistent://public/default/rw-schema-registry-avro',
+  scan.startup.mode = 'earliest'
+)
+format upsert encode avro (
+  schema.registry = '${PULSAR_HTTP_URL}',
+  schema.registry.type = 'pulsar'
+);
+
+statement ok
+create source pulsar_avro_registry
+with (
+  connector = 'pulsar',
+  service.url = '${PULSAR_BROKER_URL}',
+  topic = 'persistent://public/default/rw-schema-registry-avro',
+  scan.startup.mode = 'earliest'
+)
+format plain encode avro (
+  schema.registry = '${PULSAR_HTTP_URL}',
+  schema.registry.type = 'pulsar'
+);
+
+statement ok
+create materialized view pulsar_avro_registry_mv as
+select id, name from pulsar_avro_registry;
+
+query IT rowsort retry 10 backoff 1s
+select id, name from pulsar_avro_registry_mv;
+----
+1 Alice
+2 Bob
+
+
+statement ok
+drop materialized view pulsar_avro_registry_mv;
+
+statement ok
+drop source pulsar_avro_registry;
+
+system ok
+python3 e2e_test/commands/pulsar_util.py drop-topic -t 'persistent://public/default/rw-schema-registry-avro' --force
+
+system ok
+python3 e2e_test/commands/pulsar_util.py drop-topic -t 'persistent://public/default/rw-schema-registry-json' --force

@@ -17,9 +17,12 @@ use crate::error::ConnectorError;
 pub mod avro;
 mod loader;
 pub mod protobuf;
+pub mod pulsar_schema;
+mod registry_type;
 pub mod schema_registry;
 
 pub use loader::{ConfluentSchemaLoader, SchemaLoader, SchemaVersion};
+pub use registry_type::{SCHEMA_REGISTRY_TYPE_KEY, SchemaRegistryType};
 
 const MESSAGE_NAME_KEY: &str = "message";
 const KEY_MESSAGE_NAME_KEY: &str = "key.message";

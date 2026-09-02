@@ -143,6 +143,7 @@ async fn bind_columns_from_source_for_non_cdc(
     fn get_sr_name_strategy_check(
         options: &mut BTreeMap<String, String>,
         use_sr: bool,
+        registry_type: SchemaRegistryType,
     ) -> Result<Option<i32>> {
         let name_strategy = get_name_strategy_or_default(try_consume_string_from_options(
             options,
@@ -153,8 +154,16 @@ async fn bind_columns_from_source_for_non_cdc(
                 "schema registry name strategy only works with schema registry enabled".to_owned(),
             )));
         }
+        if use_sr && registry_type == SchemaRegistryType::Pulsar && name_strategy.is_some() {
+            return Err(RwError::from(ProtocolError(format!(
+                "`{NAME_STRATEGY_KEY}` is not supported with `{SCHEMA_REGISTRY_TYPE_KEY} = 'pulsar'`"
+            ))));
+        }
         Ok(name_strategy)
     }
+
+    let registry_type = SchemaRegistryType::from_options(&format_encode_options_to_consume)
+        .map_err(|error| RwError::from(ProtocolError(error.to_string())))?;
 
     let mut stream_source_info = StreamSourceInfo {
         format: format_to_prost(&format_encode.format) as i32,
@@ -183,6 +192,7 @@ async fn bind_columns_from_source_for_non_cdc(
             let name_strategy = get_sr_name_strategy_check(
                 &mut format_encode_options_to_consume,
                 use_schema_registry,
+                registry_type,
             )?;
 
             stream_source_info.use_schema_registry = use_schema_registry;
@@ -231,6 +241,7 @@ async fn bind_columns_from_source_for_non_cdc(
                 let name_strategy = get_sr_name_strategy_check(
                     &mut format_encode_options_to_consume,
                     use_schema_registry,
+                    registry_type,
                 )?;
 
                 stream_source_info.use_schema_registry = use_schema_registry;
@@ -451,6 +462,11 @@ pub fn get_schema_location(
 ) -> Result<(AstString, bool)> {
     let schema_location = try_consume_string_from_options(format_encode_options, "schema.location");
     let schema_registry = try_consume_string_from_options(format_encode_options, "schema.registry");
+    if schema_registry.is_none() && format_encode_options.contains_key(SCHEMA_REGISTRY_TYPE_KEY) {
+        return Err(RwError::from(ProtocolError(format!(
+            "`{SCHEMA_REGISTRY_TYPE_KEY}` requires `schema.registry`"
+        ))));
+    }
     match (schema_location, schema_registry) {
         (None, None) => Err(RwError::from(ProtocolError(
             "missing either a schema location or a schema registry".to_owned(),

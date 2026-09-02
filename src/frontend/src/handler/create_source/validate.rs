@@ -123,6 +123,31 @@ fn validate_license(connector: &str) -> Result<()> {
     Ok(())
 }
 
+fn schema_registry_type(format_encode: &FormatEncodeOptions) -> Result<Option<SchemaRegistryType>> {
+    const SCHEMA_REGISTRY_KEY: &str = "schema.registry";
+
+    let options = WithOptions::try_from(format_encode.row_options())?;
+    let uses_schema_registry = options.contains_key(SCHEMA_REGISTRY_KEY)
+        || !options.connection_ref().is_empty()
+        || matches!(
+            (&format_encode.format, &format_encode.row_encode),
+            (Format::Debezium, Encode::Avro)
+        );
+
+    if !uses_schema_registry {
+        if options.contains_key(SCHEMA_REGISTRY_TYPE_KEY) {
+            return Err(RwError::from(ProtocolError(format!(
+                "`{SCHEMA_REGISTRY_TYPE_KEY}` requires `{SCHEMA_REGISTRY_KEY}`"
+            ))));
+        }
+        return Ok(None);
+    }
+
+    SchemaRegistryType::from_options(&options)
+        .map(Some)
+        .map_err(|error| RwError::from(ProtocolError(error.to_string())))
+}
+
 pub fn validate_compatibility(
     format_encode: &FormatEncodeOptions,
     props: &mut BTreeMap<String, String>,
@@ -157,22 +182,48 @@ pub fn validate_compatibility(
         })?;
 
     validate_license(&connector)?;
-    if connector != KAFKA_CONNECTOR {
-        let res = match (&format_encode.format, &format_encode.row_encode) {
-            (Format::Plain, Encode::Protobuf) | (Format::Plain, Encode::Avro) => {
-                let mut options = WithOptions::try_from(format_encode.row_options())?;
-                let (_, use_schema_registry) = get_schema_location(options.inner_mut())?;
-                use_schema_registry
+    match schema_registry_type(format_encode)? {
+        Some(SchemaRegistryType::Pulsar) => {
+            let options = WithOptions::try_from(format_encode.row_options())?;
+            if connector != PULSAR_CONNECTOR
+                || format_encode.format != Format::Plain
+                || format_encode.row_encode != Encode::Avro
+            {
+                return Err(RwError::from(ProtocolError(
+                    "Pulsar Schema Registry requires connector = 'pulsar' with FORMAT PLAIN ENCODE AVRO"
+                        .to_owned(),
+                )));
             }
-            (Format::Debezium, Encode::Avro) => true,
-            (_, _) => false,
-        };
-        if res {
+            if !options.connection_ref().is_empty() {
+                // TODO: Support Pulsar Schema Registry connection references once
+                // `schema_registry` connections support `schema.registry.type = 'pulsar'`
+                // and `schema.registry.auth.token`.
+                return Err(RwError::from(ProtocolError(
+                    "Pulsar Schema Registry does not support schema registry connection references"
+                        .to_owned(),
+                )));
+            }
+            for option in [
+                "schema.location",
+                AWS_GLUE_SCHEMA_ARN_KEY,
+                "schema.registry.name.strategy",
+                SCHEMA_REGISTRY_USERNAME,
+                SCHEMA_REGISTRY_PASSWORD,
+            ] {
+                if options.contains_key(option) {
+                    return Err(RwError::from(ProtocolError(format!(
+                        "`{option}` is not supported with `{SCHEMA_REGISTRY_TYPE_KEY} = 'pulsar'`"
+                    ))));
+                }
+            }
+        }
+        Some(SchemaRegistryType::Confluent) if connector != KAFKA_CONNECTOR => {
             return Err(RwError::from(ProtocolError(format!(
-                "The {} must be kafka when schema registry is used",
+                "The {} must be kafka when Confluent Schema Registry is used",
                 UPSTREAM_SOURCE_KEY
             ))));
         }
+        Some(SchemaRegistryType::Confluent) | None => {}
     }
 
     let compatible_encodes = compatible_formats
@@ -284,4 +335,110 @@ pub fn validate_compatibility(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_sqlparser::ast::SqlOption;
+
+    use super::*;
+
+    fn format_encode(
+        format: Format,
+        encode: Encode,
+        options: &[(&str, &str)],
+    ) -> FormatEncodeOptions {
+        let row_options = options
+            .iter()
+            .map(|(name, value)| {
+                let name = name.to_string();
+                let value = value.to_string();
+                SqlOption::try_from((&name, &value)).unwrap()
+            })
+            .collect();
+        FormatEncodeOptions {
+            format,
+            row_encode: encode,
+            row_options,
+            key_encode: None,
+        }
+    }
+
+    fn source_options(connector: &str) -> BTreeMap<String, String> {
+        BTreeMap::from([("connector".to_owned(), connector.to_owned())])
+    }
+
+    #[test]
+    fn pulsar_registry_requires_explicit_type() {
+        let format_encode = format_encode(
+            Format::Plain,
+            Encode::Avro,
+            &[("schema.registry", "http://localhost:8080")],
+        );
+        assert!(
+            validate_compatibility(&format_encode, &mut source_options(PULSAR_CONNECTOR)).is_err()
+        );
+    }
+
+    #[test]
+    fn pulsar_registry_accepts_plain_avro() {
+        let format_encode = format_encode(
+            Format::Plain,
+            Encode::Avro,
+            &[
+                ("schema.registry", "http://localhost:8080"),
+                (SCHEMA_REGISTRY_TYPE_KEY, "pulsar"),
+            ],
+        );
+        validate_compatibility(&format_encode, &mut source_options(PULSAR_CONNECTOR)).unwrap();
+    }
+
+    #[test]
+    fn pulsar_registry_rejects_upsert_and_confluent_auth_options() {
+        let upsert = format_encode(
+            Format::Upsert,
+            Encode::Avro,
+            &[
+                ("schema.registry", "http://localhost:8080"),
+                (SCHEMA_REGISTRY_TYPE_KEY, "pulsar"),
+            ],
+        );
+        assert!(validate_compatibility(&upsert, &mut source_options(PULSAR_CONNECTOR)).is_err());
+
+        let username = format_encode(
+            Format::Plain,
+            Encode::Avro,
+            &[
+                ("schema.registry", "http://localhost:8080"),
+                (SCHEMA_REGISTRY_TYPE_KEY, "pulsar"),
+                (SCHEMA_REGISTRY_USERNAME, "token"),
+            ],
+        );
+        assert!(validate_compatibility(&username, &mut source_options(PULSAR_CONNECTOR)).is_err());
+    }
+
+    #[test]
+    fn registry_type_requires_registry_url() {
+        let format_encode = format_encode(
+            Format::Plain,
+            Encode::Avro,
+            &[(SCHEMA_REGISTRY_TYPE_KEY, "pulsar")],
+        );
+        assert!(
+            validate_compatibility(&format_encode, &mut source_options(PULSAR_CONNECTOR)).is_err()
+        );
+    }
+
+    #[test]
+    fn explicit_confluent_type_preserves_kafka_behavior() {
+        let format_encode = format_encode(
+            Format::Plain,
+            Encode::Avro,
+            &[
+                ("schema.registry", "http://localhost:8081"),
+                (SCHEMA_REGISTRY_TYPE_KEY, "confluent"),
+            ],
+        );
+        validate_compatibility(&format_encode, &mut source_options(KAFKA_CONNECTOR)).unwrap();
+    }
 }
