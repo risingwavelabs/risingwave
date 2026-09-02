@@ -2914,6 +2914,8 @@ impl CatalogController {
                 .map(|secret_ref| secret_ref.to_protobuf())
                 .unwrap_or_default(),
         );
+        let altered_options_with_secret =
+            WithOptionsSecResolved::new(alter_props.clone(), alter_secret_refs.clone());
         let (to_add_secret_dep, to_remove_secret_dep) =
             options_with_secret.handle_update(alter_props, alter_secret_refs)?;
 
@@ -2946,12 +2948,16 @@ impl CatalogController {
 
             match &mut stmt {
                 Statement::CreateSource { stmt } => {
-                    stmt.with_properties.0 =
-                        format_with_option_secret_resolved(&txn, &options_with_secret).await?;
+                    let altered_sql_options =
+                        format_with_option_secret_resolved(&txn, &altered_options_with_secret)
+                            .await?;
+                    merge_with_options(&mut stmt.with_properties.0, altered_sql_options);
                 }
                 Statement::CreateTable { with_options, .. } => {
-                    *with_options =
-                        format_with_option_secret_resolved(&txn, &options_with_secret).await?;
+                    let altered_sql_options =
+                        format_with_option_secret_resolved(&txn, &altered_options_with_secret)
+                            .await?;
+                    merge_with_options(with_options, altered_sql_options);
                     associate_table_id = source.optional_associated_table_id;
                     preferred_id = associate_table_id.unwrap().as_object_id();
                 }
@@ -3955,6 +3961,19 @@ fn update_stmt_with_props(
     Ok(())
 }
 
+fn merge_with_options(with_properties: &mut Vec<SqlOption>, altered_options: Vec<SqlOption>) {
+    for altered_option in altered_options {
+        if let Some(existing_option) = with_properties
+            .iter_mut()
+            .find(|option| option.name.real_value() == altered_option.name.real_value())
+        {
+            existing_option.value = altered_option.value;
+        } else {
+            with_properties.push(altered_option);
+        }
+    }
+}
+
 async fn update_sink_fragment_props(
     txn: &DatabaseTransaction,
     sink_id: SinkId,
@@ -4075,4 +4094,38 @@ where
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_sqlparser::ast::{SqlOption, Statement};
+
+    use super::{Parser, merge_with_options};
+
+    #[test]
+    fn test_merge_with_options_preserves_original_option_name() {
+        let mut statements = Parser::parse_sql(
+            "CREATE SOURCE s WITH (properties.receive.message.max.bytes = 'old', \
+             connection = kafka_conn) FORMAT PLAIN ENCODE JSON",
+        )
+        .unwrap();
+        let Statement::CreateSource { stmt } = statements.remove(0) else {
+            unreachable!()
+        };
+        let mut with_properties = stmt.with_properties.0;
+        let altered_name = "properties.receive.message.max.bytes".to_owned();
+        let altered_value = "new".to_owned();
+
+        merge_with_options(
+            &mut with_properties,
+            vec![SqlOption::try_from((&altered_name, &altered_value)).unwrap()],
+        );
+
+        assert_eq!(with_properties.len(), 2);
+        assert_eq!(
+            with_properties[0].to_string(),
+            "properties.receive.message.max.bytes = 'new'"
+        );
+        assert_eq!(with_properties[1].to_string(), "connection = kafka_conn");
+    }
 }
