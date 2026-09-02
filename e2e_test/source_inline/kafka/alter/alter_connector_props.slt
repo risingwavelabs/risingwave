@@ -74,13 +74,19 @@ ALTER TABLE plain_students CONNECTOR WITH (properties.receive.message.max.bytes 
 
 # the table definition is changed accordingly
 query I
-select count(*)  from rw_tables where definition ILIKE '%secret s2%' and name = 'plain_students';
+select count(*) from rw_tables
+where definition ILIKE '%secret s2%'
+  and definition ILIKE '%topic = ''kafka_alter_connector_props''%'
+  and name = 'plain_students';
 ----
 1
 
 # the associated source definition is changed accordingly
 query I
-select count(*)  from rw_sources where definition ILIKE '%secret s2%' and name = 'plain_students';
+select count(*) from rw_sources
+where definition ILIKE '%secret s2%'
+  and definition ILIKE '%topic = ''kafka_alter_connector_props''%'
+  and name = 'plain_students';
 ----
 1
 
