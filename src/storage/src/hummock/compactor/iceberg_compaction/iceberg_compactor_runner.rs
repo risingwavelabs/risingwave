@@ -17,12 +17,12 @@ use std::fmt::Debug;
 use std::sync::{Arc, LazyLock};
 
 use derive_builder::Builder;
-use iceberg::spec::{DataContentType, DataFile, MAIN_BRANCH, Snapshot};
+use iceberg::spec::{DataContentType, DataFile, MAIN_BRANCH};
 use iceberg::table::Table;
 use iceberg::{Catalog, TableIdent};
 use iceberg_compaction_core::compaction::{
     CommitConsistencyParams, CommitManagerRetryConfig, Compaction, CompactionBuilder,
-    CompactionPlan, CompactionPlanner, CompactionResult, TargetBranchSnapshotGuard,
+    CompactionPlan, CompactionPlanner, CompactionResult,
 };
 use iceberg_compaction_core::config::{
     AutoCompactionConfigBuilder, CompactionExecutionConfigBuilder, CompactionPlanningConfig,
@@ -62,8 +62,6 @@ static ICEBERG_COMPACTION_METRICS_REGISTRY: LazyLock<Box<PrometheusMetricsRegist
             GLOBAL_METRICS_REGISTRY.clone(),
         ))
     });
-
-const MAX_DUPLICATE_DATA_FILE_PATH_SAMPLES: usize = 10;
 
 #[derive(Builder, Debug, Clone)]
 pub struct IcebergCompactorRunnerConfig {
@@ -150,7 +148,6 @@ impl IcebergCompactionKind {
 #[derive(Debug)]
 struct CowPublishPlan {
     snapshot_id: i64,
-    expected_target_snapshot_id: Option<i64>,
     rewritten_data_file_paths: HashSet<String>,
 }
 
@@ -163,18 +160,12 @@ struct CowPruningStatistics {
     pruned_data_file_count: usize,
     pruned_data_file_size_bytes: u64,
     missing_rewrite_data_file_count: usize,
-    duplicate_data_file_count: usize,
-    duplicate_data_file_path_samples: Vec<String>,
 }
 
 impl CowPublishPlan {
-    fn from_compaction_plan(
-        plan: &CompactionPlan,
-        expected_target_snapshot_id: Option<i64>,
-    ) -> Self {
+    fn from_compaction_plan(plan: &CompactionPlan) -> Self {
         Self {
             snapshot_id: plan.snapshot_id,
-            expected_target_snapshot_id,
             rewritten_data_file_paths: plan
                 .file_group
                 .data_files
@@ -214,8 +205,6 @@ pub struct IcebergCompactionPlanRunner {
     compaction_kind: IcebergCompactionKind,
     branch: String,
     compaction_plan: CompactionPlan,
-    /// `main` snapshot observed in the same table metadata used to build `compaction_plan`.
-    planned_main_snapshot_id: Option<i64>,
     pub memory_reservation_bytes: usize,
 }
 
@@ -316,7 +305,6 @@ impl IcebergCompactionPlanRunner {
             compaction_kind,
             branch,
             compaction_plan,
-            planned_main_snapshot_id,
             memory_reservation_bytes,
         } = self;
 
@@ -332,9 +320,9 @@ impl IcebergCompactionPlanRunner {
         // COW publishing must stay bound to the snapshot used for planning. The ingestion branch
         // may advance while the rewrite is running, and publishing that newer branch state without
         // its delete files would make stale or duplicate rows visible on `main`.
-        let cow_publish_plan = compaction_kind.is_copy_on_write().then(|| {
-            CowPublishPlan::from_compaction_plan(&compaction_plan, planned_main_snapshot_id)
-        });
+        let cow_publish_plan = compaction_kind
+            .is_copy_on_write()
+            .then(|| CowPublishPlan::from_compaction_plan(&compaction_plan));
 
         if !compaction_plan.has_files() {
             if let Some(cow_publish_plan) = cow_publish_plan {
@@ -505,50 +493,30 @@ async fn build_cow_publish_data_files(
 ) -> HummockResult<(Vec<DataFile>, CowPruningStatistics)> {
     let mut planned_snapshot_files =
         live_data_files_for_snapshot(table, publish_plan.snapshot_id).await?;
-    let mut pruning_statistics = retain_unrewritten_data_files(
+    ensure_unique_cow_data_file_paths(&planned_snapshot_files, "source")?;
+    let pruning_statistics = retain_unrewritten_data_files(
         &mut planned_snapshot_files,
         &publish_plan.rewritten_data_file_paths,
     );
     planned_snapshot_files.extend(output_data_files);
-    (
-        pruning_statistics.duplicate_data_file_count,
-        pruning_statistics.duplicate_data_file_path_samples,
-    ) = deduplicate_data_files_by_path(&mut planned_snapshot_files);
+    ensure_unique_cow_data_file_paths(&planned_snapshot_files, "publish")?;
     Ok((planned_snapshot_files, pruning_statistics))
 }
 
-fn deduplicate_data_files_by_path(data_files: &mut Vec<DataFile>) -> (usize, Vec<String>) {
+fn ensure_unique_cow_data_file_paths(
+    data_files: &[DataFile],
+    snapshot_role: &str,
+) -> HummockResult<()> {
     let mut seen_paths = HashSet::with_capacity(data_files.len());
-    let mut duplicate_count = 0;
-    let mut duplicate_path_samples = Vec::new();
-    data_files.retain(|file| {
-        if seen_paths.insert(file.file_path().to_owned()) {
-            true
-        } else {
-            duplicate_count += 1;
-            if duplicate_path_samples.len() < MAX_DUPLICATE_DATA_FILE_PATH_SAMPLES {
-                duplicate_path_samples.push(file.file_path().to_owned());
-            }
-            false
+    for file in data_files {
+        if !seen_paths.insert(file.file_path()) {
+            return Err(HummockError::compaction_executor(anyhow::anyhow!(
+                "Duplicate data file path '{}' found in COW {snapshot_role} snapshot",
+                file.file_path()
+            )));
         }
-    });
-    (duplicate_count, duplicate_path_samples)
-}
-
-/// Returns whether the planned target snapshot itself already fences this source snapshot.
-///
-/// Iceberg sequence numbers are table-global. A matching target snapshot whose sequence is at
-/// least the source sequence either is the source snapshot or was committed after it. When their
-/// file sets are also equal, no older task can cross that target snapshot's commit-time CAS.
-fn cow_publish_is_already_fenced(
-    source_sequence_number: i64,
-    expected_target_snapshot_id: Option<i64>,
-    target_snapshot: Option<&Snapshot>,
-) -> bool {
-    target_snapshot.is_some_and(|snapshot| {
-        Some(snapshot.snapshot_id()) == expected_target_snapshot_id
-            && snapshot.sequence_number() >= source_sequence_number
-    })
+    }
+    Ok(())
 }
 
 fn retain_unrewritten_data_files(
@@ -650,62 +618,12 @@ async fn publish_cow_snapshot_to_main(
             "COW rewrite paths were missing from the planned snapshot",
         );
     }
-    if pruning_statistics.duplicate_data_file_count > 0 {
-        tracing::error!(
-            iceberg_component = "compaction_worker",
-            iceberg_operation = "deduplicate_cow_publish",
-            task_id,
-            table = %table.identifier(),
-            ingestion_branch,
-            planned_snapshot_id = publish_plan.snapshot_id,
-            duplicate_data_file_count = pruning_statistics.duplicate_data_file_count,
-            duplicate_data_file_path_samples = ?pruning_statistics.duplicate_data_file_path_samples,
-            "Duplicate data file paths found while building COW publish snapshot",
-        );
-    }
 
-    let mut main_files = live_data_files_for_branch(table, MAIN_BRANCH).await?;
-    let (main_duplicate_data_file_count, main_duplicate_data_file_path_samples) =
-        deduplicate_data_files_by_path(&mut main_files);
-    if main_duplicate_data_file_count > 0 {
-        tracing::error!(
-            iceberg_component = "compaction_worker",
-            iceberg_operation = "deduplicate_cow_publish_target",
-            task_id,
-            table = %table.identifier(),
-            target_branch = MAIN_BRANCH,
-            main_duplicate_data_file_count,
-            main_duplicate_data_file_path_samples = ?main_duplicate_data_file_path_samples,
-            "Duplicate data file paths found in COW publish target snapshot",
-        );
-    }
+    let main_files = live_data_files_for_branch(table, MAIN_BRANCH).await?;
+    ensure_unique_cow_data_file_paths(&main_files, "target")?;
     let (added_files, deleted_files) = diff_data_files(published_files, main_files);
 
-    let planned_snapshot = table
-        .metadata()
-        .snapshot_by_id(publish_plan.snapshot_id)
-        .ok_or_else(|| {
-            HummockError::compaction_executor(anyhow::anyhow!(
-                "No snapshot found with ID {} while publishing COW compaction",
-                publish_plan.snapshot_id
-            ))
-        })?;
-    let target_snapshot = table
-        .metadata()
-        .snapshot_for_ref(MAIN_BRANCH)
-        .map(AsRef::as_ref);
-    // A source snapshot that made no file-level change still needs a durable ordering point. If
-    // the planned target predates the source, fall through and create a metadata-only overwrite;
-    // future tasks can recognize that snapshot by its native sequence number without a custom
-    // snapshot-summary property.
-    if added_files.is_empty()
-        && deleted_files.is_empty()
-        && cow_publish_is_already_fenced(
-            planned_snapshot.sequence_number(),
-            publish_plan.expected_target_snapshot_id,
-            target_snapshot,
-        )
-    {
+    if added_files.is_empty() && deleted_files.is_empty() {
         return Ok(());
     }
 
@@ -713,9 +631,6 @@ async fn publish_cow_snapshot_to_main(
         starting_snapshot_id: publish_plan.snapshot_id,
         use_starting_sequence_number: true,
         basic_schema_id: table.metadata().current_schema().schema_id(),
-        target_branch_snapshot_guard: Some(TargetBranchSnapshotGuard {
-            expected_target_snapshot_id: publish_plan.expected_target_snapshot_id,
-        }),
     };
     let commit_manager = compaction.build_commit_manager(consistency_params);
     let added_file_count = added_files.len();
@@ -730,7 +645,6 @@ async fn publish_cow_snapshot_to_main(
         iceberg_operation = "publish_cow_snapshot",
         ingestion_branch,
         planned_snapshot_id = publish_plan.snapshot_id,
-        planned_snapshot_sequence_number = planned_snapshot.sequence_number(),
         added_file_count,
         deleted_file_count,
         "iceberg_cow_snapshot_published",
@@ -993,10 +907,6 @@ pub async fn create_task_execution(
     let table_schema = table.metadata().current_schema();
     let format_version = table.metadata().format_version();
     let requires_sort = !table.metadata().default_sort_order().fields.is_empty();
-    let planned_main_snapshot_id = table
-        .metadata()
-        .snapshot_for_ref(MAIN_BRANCH)
-        .map(|snapshot| snapshot.snapshot_id());
     let mut runners = Vec::with_capacity(compaction_plans.len());
     for (plan_index, compaction_plan) in compaction_plans.into_iter().enumerate() {
         let memory_estimate = estimate_plan_memory(
@@ -1025,7 +935,6 @@ pub async fn create_task_execution(
             compaction_kind,
             branch: branch.clone(),
             compaction_plan,
-            planned_main_snapshot_id,
             memory_reservation_bytes,
         });
     }
@@ -1234,7 +1143,7 @@ mod tests {
             &table,
             1,
             None,
-            vec![old_file.clone(), clean_file.clone(), clean_file.clone()],
+            vec![old_file.clone(), clean_file.clone()],
             vec![],
         )
         .await;
@@ -1292,14 +1201,12 @@ mod tests {
 
         let publish_plan = CowPublishPlan {
             snapshot_id: 1,
-            expected_target_snapshot_id: None,
             rewritten_data_file_paths: HashSet::from(["data/old.parquet".to_owned()]),
         };
-        let compacted_file = test_data_file("data/compacted.parquet");
-        let (published_files, statistics) = build_cow_publish_data_files(
+        let (published_files, _) = build_cow_publish_data_files(
             &table,
             &publish_plan,
-            vec![compacted_file.clone(), compacted_file],
+            vec![test_data_file("data/compacted.parquet")],
         )
         .await
         .unwrap();
@@ -1307,38 +1214,17 @@ mod tests {
             sorted_file_paths(&published_files),
             vec!["data/clean.parquet", "data/compacted.parquet"]
         );
-        assert_eq!(statistics.duplicate_data_file_count, 2);
-        assert_eq!(
-            statistics.duplicate_data_file_path_samples,
-            vec!["data/clean.parquet", "data/compacted.parquet"]
-        );
     }
 
     #[test]
-    fn test_cow_publish_fence_uses_target_snapshot_and_native_sequence() {
-        let target_snapshot = test_snapshot(10, None, "unused.avro".to_owned(), 10);
+    fn test_cow_publish_rejects_duplicate_data_file_paths() {
+        let duplicate_file = test_data_file("data/duplicate.parquet");
+        let error =
+            ensure_unique_cow_data_file_paths(&[duplicate_file.clone(), duplicate_file], "source")
+                .unwrap_err();
 
-        assert!(!cow_publish_is_already_fenced(10, None, None));
-        assert!(!cow_publish_is_already_fenced(
-            10,
-            Some(9),
-            Some(&target_snapshot)
-        ));
-        assert!(!cow_publish_is_already_fenced(
-            11,
-            Some(10),
-            Some(&target_snapshot)
-        ));
-        assert!(cow_publish_is_already_fenced(
-            10,
-            Some(10),
-            Some(&target_snapshot)
-        ));
-        assert!(cow_publish_is_already_fenced(
-            9,
-            Some(10),
-            Some(&target_snapshot)
-        ));
+        assert!(error.to_string().contains("data/duplicate.parquet"));
+        assert!(error.to_string().contains("COW source snapshot"));
     }
 
     #[test]
