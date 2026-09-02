@@ -1050,7 +1050,8 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
         Ok(())
     }
 
-    /// Recovery / rescale rebuild: re-feed every retained row in key order — `(partition...,
+    /// Recovery rebuild (rescale restarts the actor and re-enters through this same path):
+    /// re-feed every retained row in key order — `(partition...,
     /// order..., seq)`, so each partition arrives contiguous and ordered. No emission here: an
     /// emittable match is consumed in the same epoch it emits, so retained rows only carry held or
     /// partial matches; anything mid-epoch at a crash is re-delivered by replay and re-triggers.
@@ -1248,7 +1249,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
 
         // Rows currently retained in memory across this actor's partitions, mirrored into the
         // `retained_rows` gauge at the end of every buffer-mutating message (chunk, watermark,
-        // and the rebuild sites; a plain barrier mutates no buffer). Retention is bounded only by
+        // and the recovery rebuild; a plain barrier mutates no buffer). Retention is bounded only by
         // match liveness and `WITHIN`, so without this gauge a partition set growing toward memory
         // exhaustion (a pattern whose closer never arrives keeps its rows forever) is invisible
         // until the OOM. The chunk arm maintains it incrementally (an increment beside the push,
@@ -1504,37 +1505,17 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                     state_table.try_flush().await?;
                 }
                 Message::Barrier(barrier) => {
-                    let barrier_epoch = barrier.epoch;
-                    let post_commit = state_table.commit(barrier.epoch).await?;
-                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(ctx.id);
-                    yield Message::Barrier(barrier);
-                    if let Some((_, _cache_may_stale)) =
-                        post_commit.post_yield_barrier(update_vnode_bitmap).await?
-                    {
-                        // The owned-partition set changed: rebuild from the re-sharded table.
-                        // The seq counter only ever moves forward — gained vnodes may carry
-                        // RETAINED seqs above ours (another actor's counter ran ahead), and their
-                        // CONSUMED matches' seqs are gone from state entirely, so the epoch floor
-                        // is what keeps us from re-minting those (see the seeding comment above).
-                        let max_seq = Self::rebuild_partitions(
-                            &mut parts,
-                            &state_table,
-                            &partition_key_indices,
-                            time_col,
-                            &nfa,
-                            &skip,
-                            &defines,
-                            within.as_ref(),
-                            &within_deadline,
-                            memoizable,
-                            &eval_error_report,
-                            &metrics,
-                        )
+                    // In-place vnode-bitmap updates are a deprecated scaling path: rescale
+                    // restarts the actor, and the post-first-barrier rebuild above reconstructs
+                    // every partition from the re-sharded table (the epoch floor on the seq
+                    // counter is what keeps re-minted seqs impossible across that restart — see
+                    // the seeding comment above). Assert the assumption instead of carrying a
+                    // second, in-place rebuild branch.
+                    barrier.assume_no_update_vnode_bitmap(ctx.id)?;
+                    state_table
+                        .commit_assert_no_update_vnode_bitmap(barrier.epoch)
                         .await?;
-                        next_seq = next_seq.max(max_seq + 1).max(seq_floor(barrier_epoch));
-                        retained_rows = parts.values().map(|r| r.rows.len() as i64).sum();
-                        metrics.match_recognize_retained_rows.set(retained_rows);
-                    }
+                    yield Message::Barrier(barrier);
                 }
             }
         }
