@@ -18,6 +18,7 @@ use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::sink::catalog::desc::SinkDesc;
+use risingwave_pb::stream_plan::compaction_resolver_node::PkColumn;
 use risingwave_pb::stream_plan::stream_node::{NodeBody, PbStreamKind};
 use risingwave_pb::stream_plan::{
     CompactionResolverNode, DispatchStrategy, DispatcherType, ExchangeNode,
@@ -187,16 +188,24 @@ impl StreamIcebergWithPkIndexWriter {
             .clone()
             .with_id(state.gen_table_id_wrapped())
             .to_internal_table_prost();
-        let resolver_schema = resolver_output_schema(&self.sink_desc)
-            .context("build compaction resolver output schema")?;
-        let resolver_fields = resolver_schema.to_prost();
-        let pk_count = self
+        let resolver_fields = resolver_output_schema(&self.sink_desc)
+            .context("build compaction resolver output schema")?
+            .to_prost();
+        let downstream_pk = self
             .sink_desc
             .downstream_pk
             .as_ref()
-            .expect("validated when building the resolver schema")
-            .len();
-        let resolver_stream_key: Vec<u32> = (0..pk_count as u32).collect();
+            .expect("validated when building the resolver schema");
+        let pk_columns: Vec<PkColumn> = downstream_pk
+            .iter()
+            .map(|&idx| PkColumn {
+                data_file_index: idx as u32,
+                column_desc: Some(self.sink_desc.columns[idx].column_desc.to_protobuf()),
+            })
+            .collect();
+        // The resolver output projects the PK columns first in `pk_columns` order, followed by
+        // `file_path` and `position`. These are output-schema indices, not data-file indices.
+        let resolver_stream_key: Vec<u32> = (0..pk_columns.len() as u32).collect();
 
         let left_input = self.input.to_stream_prost(state)?;
         let right_dispatcher = match self.distribution() {
@@ -206,8 +215,10 @@ impl StreamIcebergWithPkIndexWriter {
         let resolver = PbStreamNode {
             node_body: Some(NodeBody::CompactionResolver(Box::new(
                 CompactionResolverNode {
-                    sink_desc: Some(self.sink_desc.to_proto()),
-                    pk_index_table: Some(pk_index_table.clone()),
+                    sink_id: self.sink_desc.id,
+                    properties: self.sink_desc.properties.clone(),
+                    secret_refs: self.sink_desc.secret_refs.clone(),
+                    pk_columns,
                 },
             ))),
             identity: "CompactionResolver".into(),

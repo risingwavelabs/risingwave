@@ -810,6 +810,9 @@ for_all_wrapped_id_fields! (
         CdcFilterNode {
             upstream_source_id: SourceId,
         }
+        CompactionResolverNode {
+            sink_id: SinkId,
+        }
         DeltaIndexJoinNode {
             left_table_id: TableId,
             right_table_id: TableId,
@@ -1132,6 +1135,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ".connector_service.ValidateSourceRequest",
         ".connector_service.GetEventStreamRequest",
         ".connector_service.SinkParam",
+        ".stream_plan.CompactionResolverNode",
         ".stream_plan.SinkDesc",
         ".stream_plan.StreamFsFetch",
         ".stream_plan.SourceBackfillNode",

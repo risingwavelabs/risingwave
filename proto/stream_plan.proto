@@ -415,11 +415,23 @@ message IcebergWithPkIndexPositionDeleteMergerNode {
 }
 
 // Leaf of the inactive pk-index compaction pipeline rendered with the sink job.
+//
+// This message existed in release-3.1, but no producer emitted it into a stream graph, so the old
+// fields were never persisted as part of an actor definition.
 message CompactionResolverNode {
-  SinkDesc sink_desc = 1;
-  catalog.Table pk_index_table = 2;
-  reserved 3, 4, 5, 6;
-  reserved "output_data_file_paths", "input_data_file_paths", "read_snapshot_id", "compaction_task_id";
+  message PkColumn {
+    // Column position in the Iceberg data-file row.
+    uint32 data_file_index = 1;
+    // Type and identity of the corresponding primary-key column.
+    plan_common.ColumnDesc column_desc = 2;
+  }
+
+  // Placeholder from frontend; replaced with the actual job ID by Meta.
+  uint32 sink_id = 1;
+  map<string, string> properties = 2;
+  map<string, secret.SecretRef> secret_refs = 3;
+  // The order defines the primary-key order in resolver output rows.
+  repeated PkColumn pk_columns = 4;
 }
 
 message ProjectNode {
