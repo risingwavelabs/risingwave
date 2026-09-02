@@ -33,7 +33,7 @@ use crate::handler::HandlerArgs;
 use crate::handler::query::{distribute_execute_for_cursor, local_execute_for_cursor};
 use crate::scheduler::ReadSnapshot;
 use crate::session::SessionImpl;
-use crate::session::cursor_manager::{CursorQueryStream, QueryCursor};
+use crate::session::cursor_manager::CursorQueryStream;
 use crate::{Binder, OptimizerContext};
 
 pub async fn handle_declare_cursor(
@@ -87,7 +87,7 @@ pub async fn handle_declare_subscription_cursor(
     // Create cursor based on the response
     if let Err(e) = session
         .get_cursor_manager()
-        .add_subscription_cursor(
+        .create_and_add_subscription_cursor(
             cursor_name.real_value(),
             start_rw_timestamp,
             subscription.dependent_table_id,
@@ -129,12 +129,11 @@ async fn handle_declare_query_cursor(
     cursor_name: Ident,
     query: Box<Query>,
 ) -> Result<RwPgResponse> {
-    let cursor =
-        create_query_cursor_from_stmt(handler_args.clone(), Statement::Query(query)).await?;
-    handler_args
-        .session
-        .get_cursor_manager()
-        .add_query_cursor(cursor_name.real_value(), cursor)
+    let (session, plan_fragmenter_result) =
+        plan_query_cursor(handler_args, Statement::Query(query))?;
+    let cursor_manager = session.get_cursor_manager();
+    cursor_manager
+        .create_and_add_query_cursor(cursor_name.real_value(), session, plan_fragmenter_result)
         .await?;
     Ok(PgResponse::empty_result(StatementType::DECLARE_CURSOR))
 }
@@ -145,21 +144,17 @@ pub async fn handle_bound_declare_query_cursor(
     plan_fragmenter_result: BatchPlanFragmenterResult,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
-    let cursor = create_query_cursor_from_fragment(session, plan_fragmenter_result).await?;
-
-    handler_args
-        .session
-        .get_cursor_manager()
-        .add_query_cursor(cursor_name.real_value(), cursor)
+    let cursor_manager = session.get_cursor_manager();
+    cursor_manager
+        .create_and_add_query_cursor(cursor_name.real_value(), session, plan_fragmenter_result)
         .await?;
     Ok(PgResponse::empty_result(StatementType::DECLARE_CURSOR))
 }
 
-/// Plans a cursor statement and creates its raw data stream.
-pub async fn create_query_cursor_from_stmt(
+fn plan_query_cursor(
     handler_args: HandlerArgs,
     stmt: Statement,
-) -> Result<QueryCursor> {
+) -> Result<(Arc<SessionImpl>, BatchPlanFragmenterResult)> {
     let session = handler_args.session.clone();
     let plan_fragmenter_result = {
         let context = OptimizerContext::from_handler_args(handler_args);
@@ -167,15 +162,7 @@ pub async fn create_query_cursor_from_stmt(
             gen_batch_plan_by_statement(&session, context.into(), stmt)?.unwrap_rw()?;
         gen_batch_plan_fragmenter(&session, plan_result)?
     };
-    create_query_cursor_from_fragment(session, plan_fragmenter_result).await
-}
-
-/// Creates a cursor lifecycle and starts producing chunks for a planned regular query.
-pub async fn create_query_cursor_from_fragment(
-    session: Arc<SessionImpl>,
-    plan_fragmenter_result: BatchPlanFragmenterResult,
-) -> Result<QueryCursor> {
-    QueryCursor::new(session, plan_fragmenter_result).await
+    Ok((session, plan_fragmenter_result))
 }
 
 /// Creates a cursor-owned local or distributed query stream using an explicit snapshot and

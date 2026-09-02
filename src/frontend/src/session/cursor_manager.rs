@@ -1297,7 +1297,9 @@ impl SubscriptionCursor {
 
 /// Owns every named cursor and the session-wide cursor shutdown signal.
 pub struct CursorManager {
-    /// Session-local cursors, locked across each `FETCH` to serialize cursor access.
+    /// Owns all session-local cursors. Removing an entry or clearing the map drops the cursor,
+    /// ending its [`CursorLifecycle`] and cancelling any unfinished query executor. Locked across
+    /// each `FETCH` to serialize cursor access.
     cursor_map: tokio::sync::Mutex<HashMap<String, Cursor>>,
     /// Metrics shared by all cursors in this frontend process.
     cursor_metrics: Arc<CursorMetrics>,
@@ -1348,8 +1350,7 @@ impl CursorManager {
         self.cursor_map.lock().await.clear();
     }
 
-    /// Declares and registers a subscription cursor.
-    pub async fn add_subscription_cursor(
+    pub async fn create_and_add_subscription_cursor(
         &self,
         cursor_name: String,
         start_timestamp: Option<u64>,
@@ -1368,44 +1369,54 @@ impl CursorManager {
             self.cursor_metrics.clone(),
         )
         .await?;
-        let mut cursor_map = self.cursor_map.lock().await;
         self.cursor_metrics
             .subscription_cursor_declare_duration
             .with_label_values(&[&subscription_name])
             .observe(create_cursor_timer.elapsed().as_millis() as _);
 
-        cursor_map.retain(|_, v| {
-            if let Cursor::Subscription(cursor) = v
-                && matches!(cursor.state, State::Invalid)
-            {
-                false
-            } else {
-                true
-            }
-        });
-
-        cursor_map
-            .try_insert(cursor.cursor_name.clone(), Cursor::Subscription(cursor))
-            .map_err(|error| {
-                ErrorCode::CatalogError(
-                    format!("cursor `{}` already exists", error.entry.key()).into(),
-                )
-            })?;
-        Ok(())
+        self.register_cursor(cursor.cursor_name.clone(), Cursor::Subscription(cursor))
+            .await
     }
 
-    /// Registers a regular query cursor and its stable output fields.
-    pub async fn add_query_cursor(&self, cursor_name: String, cursor: QueryCursor) -> Result<()> {
-        self.cursor_map
-            .lock()
+    pub async fn create_and_add_query_cursor(
+        &self,
+        cursor_name: String,
+        session: Arc<SessionImpl>,
+        plan_fragmenter_result: BatchPlanFragmenterResult,
+    ) -> Result<()> {
+        let cursor = QueryCursor::new(session, plan_fragmenter_result).await?;
+        self.register_cursor(cursor_name, Cursor::Query(cursor))
             .await
-            .try_insert(cursor_name, Cursor::Query(cursor))
+    }
+
+    async fn register_cursor(&self, cursor_name: String, cursor: Cursor) -> Result<()> {
+        let mut cursor_map = self.cursor_map.lock().await;
+        if self.session_shutdown_rx.is_cancelled() {
+            return Err(ErrorCode::InternalError(
+                "Session ended while declaring cursor".to_owned(),
+            )
+            .into());
+        }
+
+        if matches!(&cursor, Cursor::Subscription(_)) {
+            cursor_map.retain(|_, v| {
+                if let Cursor::Subscription(cursor) = v
+                    && matches!(cursor.state, State::Invalid)
+                {
+                    false
+                } else {
+                    true
+                }
+            });
+        }
+
+        cursor_map
+            .try_insert(cursor_name, cursor)
             .map_err(|error| {
                 ErrorCode::CatalogError(
                     format!("cursor `{}` already exists", error.entry.key()).into(),
                 )
             })?;
-
         Ok(())
     }
 
@@ -1545,6 +1556,39 @@ mod cursor_lifecycle_tests {
         );
         drop(query_stream);
         // Dropping an ordinary query cursor stream must terminate its still-open executor.
+        assert!(query_shutdown_rx.is_cancelled());
+    }
+
+    /// Verifies that a cursor whose creation finishes after session shutdown cannot register
+    /// itself in the already-cleared cursor map and keep its query executor alive.
+    #[tokio::test]
+    async fn test_cursor_registration_after_session_shutdown_is_rejected() {
+        let cursor_manager = Arc::new(CursorManager::new(Arc::new(CursorMetrics::for_test())));
+        let lifecycle = CursorLifecycle::new(cursor_manager.session_shutdown_token());
+        let query_shutdown_rx = lifecycle.query_shutdown_token();
+        // Keep the sender alive so the local query stream remains pending until cursor cleanup.
+        let (_query_chunk_tx, query_chunk_rx) = mpsc::channel(1);
+        let query_stream = CursorQueryStream::local(
+            tokio_stream::wrappers::ReceiverStream::new(query_chunk_rx),
+            lifecycle.query_shutdown_sender(),
+        );
+
+        // Model a DECLARE that captured its lifecycle before shutdown but completed cursor
+        // creation only after shutdown had already cleared the map.
+        cursor_manager.initiate_shutdown();
+        let cursor = QueryCursor {
+            lifecycle,
+            chunk_stream: cursor_data_chunk_stream(QueryMode::Local, query_stream),
+            fields: vec![],
+            remaining_rows: VecDeque::new(),
+        };
+
+        let error = cursor_manager
+            .register_cursor("cur".to_owned(), Cursor::Query(cursor))
+            .await
+            .expect_err("registration after session shutdown must fail");
+        assert!(error.to_string().contains("Session ended"));
+        assert!(cursor_manager.cursor_map.lock().await.is_empty());
         assert!(query_shutdown_rx.is_cancelled());
     }
 }
