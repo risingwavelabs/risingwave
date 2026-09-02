@@ -14,19 +14,21 @@
 
 use std::collections::HashSet;
 use std::fmt::Debug;
+use std::path::Path;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 use enum_as_inner::EnumAsInner;
 use foyer::{
-    BlockEngineConfig, CacheBuilder, DeviceBuilder, FifoPicker, FsDeviceBuilder, HybridCacheBuilder,
+    BlockEngineConfig, CacheBuilder, DeviceBuilder, FifoPicker, FsDeviceBuilder,
+    HybridCacheBuilder, StorageFilter,
 };
 use futures::FutureExt;
 use futures::future::BoxFuture;
 use mixtrics::registry::prometheus::PrometheusMetricsRegistry;
 use risingwave_common::catalog::TableId;
-use risingwave_common::config::Role;
 use risingwave_common::config::storage::FileCacheRuntimeConfig;
+use risingwave_common::config::{DataFileCacheFilter, Role};
 use risingwave_common::license::Feature;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common_service::RpcNotificationClient;
@@ -43,8 +45,8 @@ use crate::hummock::none::NoneRecentFilter;
 use crate::hummock::sharded::ShardedRecentFilter;
 use crate::hummock::simple::SimpleRecentFilter;
 use crate::hummock::{
-    Block, BlockCacheEventListener, HummockError, HummockStorage, Sstable, SstableBlockIndex,
-    SstableStore, SstableStoreConfig,
+    Block, BlockCacheEventListener, HummockError, HummockStorage, LiveSstFilter, LiveSsts, Sstable,
+    SstableBlockHashBuilder, SstableBlockIndex, SstableStore, SstableStoreConfig,
 };
 use crate::memory::MemoryStateStore;
 use crate::memory::sled::SledStateStore;
@@ -91,7 +93,7 @@ fn build_file_cache_spawner(
 }
 
 #[cfg(test)]
-mod tests {
+mod file_cache_runtime_tests {
     use risingwave_common::config::storage::FileCacheTokioRuntimeConfig;
 
     use super::*;
@@ -158,6 +160,62 @@ static FOYER_METRICS_REGISTRY: LazyLock<Box<PrometheusMetricsRegistry>> = LazyLo
     ))
 });
 
+fn split_data_file_cache_capacity(
+    total_capacity_mb: usize,
+    file_capacity_mb: usize,
+    l0_ratio_in_percent: usize,
+) -> Result<Option<(usize, usize)>, HummockError> {
+    if l0_ratio_in_percent == 0 {
+        return Ok(None);
+    }
+    if l0_ratio_in_percent >= 100 {
+        return Err(HummockError::other(format!(
+            "storage.l0_block_cache_disk_capacity_ratio_in_percent must be less than 100, got {l0_ratio_in_percent}"
+        )));
+    }
+    if file_capacity_mb == 0 {
+        return Err(HummockError::other(
+            "storage.data_file_cache.file_capacity_mb must be positive",
+        ));
+    }
+
+    let total_files = total_capacity_mb / file_capacity_mb;
+    let l0_files = total_files * l0_ratio_in_percent / 100;
+    let stable_files = total_files - l0_files;
+    if l0_files == 0 || stable_files == 0 {
+        return Err(HummockError::other(format!(
+            "split data file cache requires at least one {file_capacity_mb} MiB file on each side, got stable={} MiB and l0={} MiB",
+            stable_files * file_capacity_mb,
+            l0_files * file_capacity_mb,
+        )));
+    }
+    let l0_capacity_mb = l0_files * file_capacity_mb;
+    let stable_capacity_mb = stable_files * file_capacity_mb;
+    Ok(Some((stable_capacity_mb, l0_capacity_mb)))
+}
+
+fn split_block_cache_capacity(
+    total_capacity_mb: usize,
+    l0_ratio_in_percent: usize,
+) -> Result<Option<(usize, usize)>, HummockError> {
+    if l0_ratio_in_percent == 0 {
+        return Ok(None);
+    }
+    if l0_ratio_in_percent >= 100 {
+        return Err(HummockError::other(format!(
+            "storage.l0_block_cache_memory_capacity_ratio_in_percent must be less than 100, got {l0_ratio_in_percent}"
+        )));
+    }
+    let l0_capacity_mb = total_capacity_mb * l0_ratio_in_percent / 100;
+    let stable_capacity_mb = total_capacity_mb - l0_capacity_mb;
+    if l0_capacity_mb == 0 || stable_capacity_mb == 0 {
+        return Err(HummockError::other(format!(
+            "split block cache requires at least 1 MiB on each side, got stable={stable_capacity_mb} MiB and l0={l0_capacity_mb} MiB"
+        )));
+    }
+    Ok(Some((stable_capacity_mb, l0_capacity_mb)))
+}
+
 mod opaque_type {
     use super::*;
 
@@ -178,6 +236,38 @@ mod opaque_type {
     #[define_opaque(SledStateStoreType)]
     pub fn sled(state_store: SledStateStore) -> SledStateStoreType {
         may_dynamic_dispatch(state_store)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{split_block_cache_capacity, split_data_file_cache_capacity};
+
+    #[test]
+    fn test_split_data_file_cache_capacity() {
+        assert_eq!(split_data_file_cache_capacity(1024, 64, 0).unwrap(), None);
+        assert_eq!(
+            split_data_file_cache_capacity(20 * 1024, 64, 10).unwrap(),
+            Some((18 * 1024, 2 * 1024))
+        );
+
+        let invalid_ratio = split_data_file_cache_capacity(1024, 64, 100)
+            .unwrap_err()
+            .to_string();
+        assert!(invalid_ratio.contains("must be less than 100"));
+
+        let too_small = split_data_file_cache_capacity(1024, 64, 1)
+            .unwrap_err()
+            .to_string();
+        assert!(too_small.contains("at least one 64 MiB file on each side"));
+
+        assert_eq!(split_block_cache_capacity(512, 0).unwrap(), None);
+        assert_eq!(
+            split_block_cache_capacity(512, 10).unwrap(),
+            Some((461, 51))
+        );
+        assert!(split_block_cache_capacity(512, 100).is_err());
+        assert!(split_block_cache_capacity(8, 1).is_err());
     }
 }
 pub use opaque_type::{HummockStorageType, MemoryStateStoreType, SledStateStoreType};
@@ -849,6 +939,53 @@ impl StateStoreImpl {
             builder.build().await.map_err(HummockError::foyer_error)?
         };
 
+        let live_ssts = LiveSsts::default();
+        let data_file_cache_available = if opts.data_file_cache_dir.is_empty() {
+            false
+        } else if let Err(e) = Feature::ElasticDiskCache.check_available() {
+            tracing::warn!(error = %e.as_report(), "ElasticDiskCache is not available.");
+            false
+        } else {
+            true
+        };
+        let l0_cache_ratio = opts.l0_block_cache_disk_capacity_ratio_in_percent;
+        let l0_memory_cache_ratio = opts.l0_block_cache_memory_capacity_ratio_in_percent;
+        let l0_memory_eviction_config = opts.l0_block_cache_eviction_config.clone();
+        let split_capacities = if data_file_cache_available {
+            split_data_file_cache_capacity(
+                opts.data_file_cache_capacity_mb,
+                opts.data_file_cache_file_capacity_mb,
+                l0_cache_ratio,
+            )?
+        } else {
+            None
+        };
+        let split_data_file_cache = split_capacities.is_some();
+        let (stable_file_cache_capacity_mb, l0_file_cache_capacity_mb) =
+            split_capacities.unwrap_or((opts.data_file_cache_capacity_mb, 0));
+        let split_block_cache_capacities =
+            split_block_cache_capacity(opts.block_cache_capacity_mb, l0_memory_cache_ratio)?;
+        let split_block_cache = split_block_cache_capacities.is_some();
+        let (stable_block_cache_capacity_mb, l0_block_cache_capacity_mb) =
+            split_block_cache_capacities.unwrap_or((opts.block_cache_capacity_mb, 0));
+        let split_l0_cache = split_data_file_cache || split_block_cache;
+        tracing::info!(
+            l0_disk_ratio_percent = l0_cache_ratio,
+            l0_memory_ratio_percent = l0_memory_cache_ratio,
+            stable_file_cache_capacity_mb,
+            l0_file_cache_capacity_mb,
+            stable_block_cache_capacity_mb,
+            l0_block_cache_capacity_mb,
+            l0_memory_eviction = ?l0_memory_eviction_config,
+            primary_data_file_cache_admission_filter = ?opts.data_file_cache_admission_filter,
+            primary_data_file_cache_reinsertion_filter = ?opts.data_file_cache_reinsertion_filter,
+            l0_data_file_cache_admission_filter = ?opts.l0_data_file_cache_admission_filter,
+            l0_data_file_cache_reinsertion_filter = ?opts.l0_data_file_cache_reinsertion_filter,
+            split_block_cache,
+            split_data_file_cache,
+            "configured L0 cache topology"
+        );
+
         let block_cache = {
             let mut builder = HybridCacheBuilder::new()
                 .with_name("foyer.data")
@@ -856,7 +993,8 @@ impl StateStoreImpl {
                 .with_event_listener(Arc::new(BlockCacheEventListener::new(
                     state_store_metrics.clone(),
                 )))
-                .memory(opts.block_cache_capacity_mb * MB)
+                .memory(stable_block_cache_capacity_mb * MB)
+                .with_hash_builder(SstableBlockHashBuilder::default())
                 .with_shards(opts.block_cache_shard_num)
                 .with_eviction_config(opts.block_cache_eviction_config.clone())
                 .with_weighter(|_: &SstableBlockIndex, value: &Box<Block>| {
@@ -864,44 +1002,123 @@ impl StateStoreImpl {
                 })
                 .storage();
 
-            if !opts.data_file_cache_dir.is_empty() {
-                if let Err(e) = Feature::ElasticDiskCache.check_available() {
-                    tracing::warn!(error = %e.as_report(), "ElasticDiskCache is not available.");
+            if data_file_cache_available {
+                let cache_dir = if split_data_file_cache {
+                    Path::new(&opts.data_file_cache_dir).join("stable")
                 } else {
-                    let device = FsDeviceBuilder::new(&opts.data_file_cache_dir)
-                        .with_capacity(opts.data_file_cache_capacity_mb * MB)
-                        .with_throttle(opts.data_file_cache_throttle.clone())
-                        .build()
-                        .map_err(HummockError::foyer_error)?;
-                    let engine_builder = BlockEngineConfig::new(device)
-                        .with_block_size(opts.data_file_cache_file_capacity_mb * MB)
-                        .with_indexer_shards(opts.data_file_cache_indexer_shards)
-                        .with_flushers(opts.data_file_cache_flushers)
-                        .with_reclaimers(opts.data_file_cache_reclaimers)
-                        .with_buffer_pool_size(opts.data_file_cache_flush_buffer_threshold_mb * MB)
-                        .with_submit_queue_size_threshold(
-                            opts.data_file_cache_submit_queue_size_threshold_mb * MB,
-                        )
-                        .with_clean_block_threshold(
-                            opts.data_file_cache_reclaimers + opts.data_file_cache_reclaimers / 2,
-                        )
-                        .with_recover_concurrency(opts.data_file_cache_recover_concurrency)
-                        .with_blob_index_size(opts.data_file_cache_blob_index_size_kb * KB)
-                        .with_eviction_pickers(vec![Box::new(FifoPicker::new(
-                            opts.data_file_cache_fifo_probation_ratio,
-                        ))]);
-                    builder = builder
-                        .with_engine_config(engine_builder)
-                        .with_recover_mode(opts.data_file_cache_recover_mode)
-                        .with_compression(opts.data_file_cache_compression);
-                    builder = builder.with_spawner(build_file_cache_spawner(
-                        "foyer.data",
-                        &opts.data_file_cache_runtime_config,
-                    )?);
+                    Path::new(&opts.data_file_cache_dir).to_path_buf()
+                };
+                let device = FsDeviceBuilder::new(cache_dir)
+                    .with_capacity(stable_file_cache_capacity_mb * MB)
+                    .with_throttle(opts.data_file_cache_throttle.clone())
+                    .build()
+                    .map_err(HummockError::foyer_error)?;
+                let live_filter = if split_data_file_cache {
+                    LiveSstFilter::stable(live_ssts.clone())
+                } else {
+                    LiveSstFilter::new(live_ssts.clone())
+                };
+                let mut engine_builder = BlockEngineConfig::new(device)
+                    .with_block_size(opts.data_file_cache_file_capacity_mb * MB)
+                    .with_indexer_shards(opts.data_file_cache_indexer_shards)
+                    .with_flushers(opts.data_file_cache_flushers)
+                    .with_reclaimers(opts.data_file_cache_reclaimers)
+                    .with_buffer_pool_size(opts.data_file_cache_flush_buffer_threshold_mb * MB)
+                    .with_submit_queue_size_threshold(
+                        opts.data_file_cache_submit_queue_size_threshold_mb * MB,
+                    )
+                    .with_clean_block_threshold(
+                        opts.data_file_cache_reclaimers + opts.data_file_cache_reclaimers / 2,
+                    )
+                    .with_recover_concurrency(opts.data_file_cache_recover_concurrency)
+                    .with_blob_index_size(opts.data_file_cache_blob_index_size_kb * KB)
+                    .with_eviction_pickers(vec![Box::new(FifoPicker::new(
+                        opts.data_file_cache_fifo_probation_ratio,
+                    ))]);
+                if opts.data_file_cache_admission_filter == DataFileCacheFilter::LiveSst {
+                    engine_builder = engine_builder.with_admission_filter(
+                        StorageFilter::new().with_condition(live_filter.clone()),
+                    );
                 }
+                if opts.data_file_cache_reinsertion_filter == DataFileCacheFilter::LiveSst {
+                    engine_builder = engine_builder
+                        .with_reinsertion_filter(StorageFilter::new().with_condition(live_filter));
+                }
+                builder = builder
+                    .with_engine_config(engine_builder)
+                    .with_recover_mode(opts.data_file_cache_recover_mode)
+                    .with_compression(opts.data_file_cache_compression);
+                builder = builder.with_spawner(build_file_cache_spawner(
+                    "foyer.data",
+                    &opts.data_file_cache_runtime_config,
+                )?);
             }
 
             builder.build().await.map_err(HummockError::foyer_error)?
+        };
+
+        let l0_block_cache = if split_l0_cache {
+            let mut builder = HybridCacheBuilder::new()
+                .with_name("foyer.data.l0")
+                .with_metrics_registry(FOYER_METRICS_REGISTRY.clone())
+                .with_event_listener(Arc::new(BlockCacheEventListener::new(
+                    state_store_metrics.clone(),
+                )))
+                .memory(l0_block_cache_capacity_mb * MB)
+                .with_hash_builder(SstableBlockHashBuilder::default())
+                .with_shards(opts.block_cache_shard_num)
+                .with_eviction_config(l0_memory_eviction_config)
+                .with_weighter(|_: &SstableBlockIndex, value: &Box<Block>| {
+                    std::mem::size_of::<SstableBlockIndex>() + value.estimated_memory_weight()
+                })
+                .storage();
+
+            if split_data_file_cache {
+                let device = FsDeviceBuilder::new(Path::new(&opts.data_file_cache_dir).join("l0"))
+                    .with_capacity(l0_file_cache_capacity_mb * MB)
+                    .with_throttle(opts.data_file_cache_throttle.clone())
+                    .build()
+                    .map_err(HummockError::foyer_error)?;
+                let mut engine_builder = BlockEngineConfig::new(device)
+                    .with_block_size(opts.data_file_cache_file_capacity_mb * MB)
+                    .with_indexer_shards(opts.data_file_cache_indexer_shards)
+                    .with_flushers(opts.data_file_cache_flushers)
+                    .with_reclaimers(opts.data_file_cache_reclaimers)
+                    .with_buffer_pool_size(opts.data_file_cache_flush_buffer_threshold_mb * MB)
+                    .with_submit_queue_size_threshold(
+                        opts.data_file_cache_submit_queue_size_threshold_mb * MB,
+                    )
+                    .with_clean_block_threshold(
+                        opts.data_file_cache_reclaimers + opts.data_file_cache_reclaimers / 2,
+                    )
+                    .with_recover_concurrency(opts.data_file_cache_recover_concurrency)
+                    .with_blob_index_size(opts.data_file_cache_blob_index_size_kb * KB)
+                    .with_eviction_pickers(vec![Box::new(FifoPicker::new(
+                        opts.data_file_cache_fifo_probation_ratio,
+                    ))]);
+                if opts.l0_data_file_cache_admission_filter == DataFileCacheFilter::LiveSst {
+                    engine_builder = engine_builder.with_admission_filter(
+                        StorageFilter::new().with_condition(LiveSstFilter::l0(live_ssts.clone())),
+                    );
+                }
+                if opts.l0_data_file_cache_reinsertion_filter == DataFileCacheFilter::LiveSst {
+                    engine_builder = engine_builder.with_reinsertion_filter(
+                        StorageFilter::new().with_condition(LiveSstFilter::l0(live_ssts.clone())),
+                    );
+                }
+                builder = builder
+                    .with_engine_config(engine_builder)
+                    .with_recover_mode(opts.data_file_cache_recover_mode)
+                    .with_compression(opts.data_file_cache_compression)
+                    .with_spawner(build_file_cache_spawner(
+                        "foyer.data.l0",
+                        &opts.data_file_cache_runtime_config,
+                    )?);
+            }
+
+            Some(builder.build().await.map_err(HummockError::foyer_error)?)
+        } else {
+            None
         };
 
         let vector_meta_cache = CacheBuilder::new(opts.vector_meta_cache_capacity_mb * MB)
@@ -963,6 +1180,8 @@ impl StateStoreImpl {
 
                     meta_cache,
                     block_cache,
+                    l0_block_cache,
+                    live_ssts,
                     vector_meta_cache,
                     vector_block_cache,
                 }));

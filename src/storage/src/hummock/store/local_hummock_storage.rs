@@ -986,13 +986,16 @@ impl IteratorFactory for ForwardIteratorFactory {
         tables: Vec<SstableInfo>,
         sstable_store: SstableStoreRef,
         read_options: Arc<SstableIteratorReadOptions>,
+        cache_level_hint: Option<u32>,
     ) {
-        self.non_overlapping_iters
-            .push(ConcatIteratorInner::<Self::SstableIteratorType>::new(
+        self.non_overlapping_iters.push(
+            ConcatIteratorInner::<Self::SstableIteratorType>::new_with_cache_level_hint(
                 tables,
                 sstable_store,
                 read_options,
-            ));
+                cache_level_hint,
+            ),
+        );
     }
 }
 
@@ -1055,13 +1058,16 @@ impl IteratorFactory for BackwardIteratorFactory {
         mut tables: Vec<SstableInfo>,
         sstable_store: SstableStoreRef,
         read_options: Arc<SstableIteratorReadOptions>,
+        cache_level_hint: Option<u32>,
     ) {
         tables.reverse();
-        self.non_overlapping_iters
-            .push(ConcatIteratorInner::<Self::SstableIteratorType>::new(
+        self.non_overlapping_iters.push(
+            ConcatIteratorInner::<Self::SstableIteratorType>::new_with_cache_level_hint(
                 tables,
                 sstable_store,
                 read_options,
-            ));
+                cache_level_hint,
+            ),
+        );
     }
 }

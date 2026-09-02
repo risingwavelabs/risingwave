@@ -117,6 +117,7 @@ pub async fn get_from_sstable_info(
     sstable_info: &SstableInfo,
     full_key: FullKey<&[u8]>,
     read_options: &ReadOptions,
+    cache_level_hint: Option<u32>,
     dist_key_hash: Option<u64>,
     local_stats: &mut StoreLocalStatistic,
 ) -> HummockResult<Option<impl HummockIterator>> {
@@ -139,10 +140,11 @@ pub async fn get_from_sstable_info(
     }
 
     let mut iter = IteratorStatsGuard::new(
-        SstableIterator::create(
+        SstableIterator::create_with_cache_level_hint(
             sstable,
             sstable_store_ref.clone(),
             Arc::new(SstableIteratorReadOptions::from_read_options(read_options)),
+            cache_level_hint,
             sstable_info,
         ),
         local_stats,
@@ -224,6 +226,7 @@ mod tests {
             &sstable_info,
             key.to_ref(),
             &read_options,
+            None,
             None,
             &mut stats,
         )

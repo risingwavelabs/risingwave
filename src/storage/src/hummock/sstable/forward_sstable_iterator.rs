@@ -34,6 +34,25 @@ pub trait SstableIteratorType: HummockIterator + 'static {
         sstable_store: SstableStoreRef,
         read_options: Arc<SstableIteratorReadOptions>,
         sstable_info_ref: &SstableInfo,
+    ) -> Self
+    where
+        Self: Sized,
+    {
+        Self::create_with_cache_level_hint(
+            sstable,
+            sstable_store,
+            read_options,
+            None,
+            sstable_info_ref,
+        )
+    }
+
+    fn create_with_cache_level_hint(
+        sstable: TableHolder,
+        sstable_store: SstableStoreRef,
+        read_options: Arc<SstableIteratorReadOptions>,
+        cache_level_hint: Option<u32>,
+        sstable_info_ref: &SstableInfo,
     ) -> Self;
 }
 
@@ -54,6 +73,8 @@ pub struct SstableIterator {
     sstable_store: SstableStoreRef,
     stats: StoreLocalStatistic,
     options: Arc<SstableIteratorReadOptions>,
+    /// Level of this SST in the pinned version that created the iterator.
+    cache_level_hint: Option<u32>,
 
     // The readable block window is first restricted by table IDs and then by `scan_end_user_key`.
     // Included/Excluded bounds set its exclusive block end; outer iterators still filter keys
@@ -67,6 +88,16 @@ impl SstableIterator {
         sstable: TableHolder,
         sstable_store: SstableStoreRef,
         options: Arc<SstableIteratorReadOptions>,
+        sstable_info_ref: &SstableInfo,
+    ) -> Self {
+        Self::new_with_cache_level_hint(sstable, sstable_store, options, None, sstable_info_ref)
+    }
+
+    fn new_with_cache_level_hint(
+        sstable: TableHolder,
+        sstable_store: SstableStoreRef,
+        options: Arc<SstableIteratorReadOptions>,
+        cache_level_hint: Option<u32>,
         sstable_info_ref: &SstableInfo,
     ) -> Self {
         let mut block_start_idx_inclusive = 0;
@@ -168,6 +199,7 @@ impl SstableIterator {
             sstable_store,
             stats: StoreLocalStatistic::default(),
             options,
+            cache_level_hint,
             preload_end_block_idx: 0,
             preload_retry_times: 0,
             block_start_idx_inclusive,
@@ -218,12 +250,13 @@ impl SstableIterator {
         if self.preload_stream.is_none() && idx + 1 < self.preload_end_block_idx {
             match self
                 .sstable_store
-                .prefetch_blocks(
+                .prefetch_blocks_with_level_hint(
                     &self.sst,
                     idx,
                     self.preload_end_block_idx,
                     self.options.cache_policy,
                     &mut self.stats,
+                    self.cache_level_hint,
                 )
                 .instrument_await("prefetch_blocks".verbose())
                 .await
@@ -279,12 +312,13 @@ impl SstableIterator {
 
                     match self
                         .sstable_store
-                        .prefetch_blocks(
+                        .prefetch_blocks_with_level_hint(
                             &self.sst,
                             idx,
                             self.preload_end_block_idx,
                             self.options.cache_policy,
                             &mut self.stats,
+                            self.cache_level_hint,
                         )
                         .instrument_await("prefetch_blocks".verbose())
                         .await
@@ -303,7 +337,13 @@ impl SstableIterator {
         if !hit_cache {
             let block = self
                 .sstable_store
-                .get(&self.sst, idx, self.options.cache_policy, &mut self.stats)
+                .get_with_level_hint(
+                    &self.sst,
+                    idx,
+                    self.options.cache_policy,
+                    &mut self.stats,
+                    self.cache_level_hint,
+                )
                 .await?;
             self.block_iter = Some(BlockIterator::new(block));
         };
@@ -402,13 +442,20 @@ impl HummockIterator for SstableIterator {
 }
 
 impl SstableIteratorType for SstableIterator {
-    fn create(
+    fn create_with_cache_level_hint(
         sstable: TableHolder,
         sstable_store: SstableStoreRef,
         options: Arc<SstableIteratorReadOptions>,
+        cache_level_hint: Option<u32>,
         sstable_info_ref: &SstableInfo,
     ) -> Self {
-        SstableIterator::new(sstable, sstable_store, options, sstable_info_ref)
+        SstableIterator::new_with_cache_level_hint(
+            sstable,
+            sstable_store,
+            options,
+            cache_level_hint,
+            sstable_info_ref,
+        )
     }
 }
 
@@ -477,6 +524,27 @@ mod tests {
         assert!(sstable.meta.block_metas.len() > 10);
 
         inner_test_forward_iterator(sstable_store.clone(), sstable, sstable_info).await;
+    }
+
+    #[tokio::test]
+    async fn test_cache_level_hint_does_not_clone_read_options() {
+        let sstable_store = mock_sstable_store().await;
+        let (sstable, sstable_info) =
+            gen_default_test_sstable(default_builder_opt_for_test(), 0, sstable_store.clone())
+                .await;
+        let options = Arc::new(SstableIteratorReadOptions::default());
+        let expected_options = options.clone();
+
+        let sstable_iter = SstableIterator::create_with_cache_level_hint(
+            sstable,
+            sstable_store,
+            options,
+            Some(3),
+            &sstable_info,
+        );
+
+        assert!(Arc::ptr_eq(&sstable_iter.options, &expected_options));
+        assert_eq!(sstable_iter.cache_level_hint, Some(3));
     }
 
     #[tokio::test]

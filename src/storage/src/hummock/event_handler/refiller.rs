@@ -726,6 +726,7 @@ impl DataCacheRefillTaskGenerator<'_> {
                     tasks.push(DataCacheRefillTask {
                         sst: sst.clone(),
                         blks: blk_start..blk_end,
+                        level: self.delta.insert_sst_level,
                     });
                 }
                 blk_start = blk_end;
@@ -877,6 +878,7 @@ impl DataCacheRefillTaskGenerator<'_> {
 struct DataCacheRefillTask {
     sst: TableHolder,
     blks: Range<usize>,
+    level: u32,
 }
 
 impl DataCacheRefillTask {
@@ -1008,13 +1010,16 @@ impl CacheRefillTask {
                     block_idx: blk as u64,
                 };
 
-                let mut writer = context.sstable_store.block_cache().storage_writer(key);
+                let mut writer = context
+                    .sstable_store
+                    .block_cache_for_level(task.level)
+                    .storage_writer(key);
 
                 if writer.filter(size).is_admitted() {
                     admits += 1;
                 }
 
-                contexts.push((writer, range, uncompressed_capacity))
+                contexts.push((key, range, uncompressed_capacity))
             }
 
             if admits as f64 / contexts.len() as f64 >= context.config.threshold {
@@ -1033,29 +1038,28 @@ impl CacheRefillTask {
                         .store()
                         .read(&sstable_store.get_sst_data_path(task.sst.id), range.clone())
                         .await?;
-                    let mut apply_disk_cache_futures = vec![];
-                    for (w, r, uc) in contexts {
+                    for (key, r, uc) in contexts {
                         let offset = r.start - range.start;
                         let len = r.end - r.start;
                         let bytes = data.slice(offset..offset + len);
-                        let future = async move {
-                            let value = Box::new(Block::decode(bytes, uc)?);
-                            // The entry should always be `Some(..)`, use if here for compatible.
-                            if let Some(_entry) = w.force().insert(value) {
-                                GLOBAL_CACHE_REFILL_METRICS
-                                    .data_refill_success_bytes
-                                    .inc_by(len as u64);
-                                GLOBAL_CACHE_REFILL_METRICS
-                                    .data_refill_block_success_total
-                                    .inc();
-                            }
-                            Ok::<_, HummockError>(())
-                        };
-                        apply_disk_cache_futures.push(future);
+                        let mut writer = sstable_store
+                            .block_cache_for_level(task.level)
+                            .storage_writer(key);
+                        // The admission state can change while the object-store read is in
+                        // flight. Recheck with a fresh writer immediately before insertion.
+                        if !writer.filter(size).is_admitted() {
+                            continue;
+                        }
+                        let value = Box::new(Block::decode(bytes, uc)?);
+                        if let Some(_entry) = writer.insert(value) {
+                            GLOBAL_CACHE_REFILL_METRICS
+                                .data_refill_success_bytes
+                                .inc_by(len as u64);
+                            GLOBAL_CACHE_REFILL_METRICS
+                                .data_refill_block_success_total
+                                .inc();
+                        }
                     }
-                    try_join_all(apply_disk_cache_futures)
-                        .await
-                        .map_err(HummockError::file_cache)?;
 
                     GLOBAL_CACHE_REFILL_METRICS
                         .data_refill_success_duration

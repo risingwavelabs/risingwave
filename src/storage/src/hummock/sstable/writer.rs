@@ -16,7 +16,6 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use fail::fail_point;
-use foyer::HybridCacheProperties;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::ObjectStreamingUploader;
 use tokio::task::JoinHandle;
@@ -226,14 +225,11 @@ impl SstableWriter for BatchUploadWriter {
                 // The `block_info` may be empty when there is only range-tombstones, because we
                 //  store them in meta-block.
                 for (block_idx, block) in self.block_info.into_iter().enumerate() {
-                    self.sstable_store.block_cache().insert_with_properties(
-                        SstableBlockIndex {
-                            sst_id: self.object_id,
-                            block_idx: block_idx as _,
-                        },
-                        Box::new(block),
-                        HybridCacheProperties::default().with_hint(hint),
-                    );
+                    let index = SstableBlockIndex {
+                        sst_id: self.object_id,
+                        block_idx: block_idx as _,
+                    };
+                    self.sstable_store.insert_new_l0_cache(index, block, hint);
                 }
             }
             Ok(())
@@ -332,14 +328,11 @@ impl SstableWriter for StreamingUploadWriter {
                 && !self.blocks.is_empty()
             {
                 for (block_idx, block) in self.blocks.into_iter().enumerate() {
-                    self.sstable_store.block_cache().insert_with_properties(
-                        SstableBlockIndex {
-                            sst_id: self.object_id,
-                            block_idx: block_idx as _,
-                        },
-                        Box::new(block),
-                        HybridCacheProperties::default().with_hint(hint),
-                    );
+                    let index = SstableBlockIndex {
+                        sst_id: self.object_id,
+                        block_idx: block_idx as _,
+                    };
+                    self.sstable_store.insert_new_l0_cache(index, block, hint);
                 }
             }
             Ok(())

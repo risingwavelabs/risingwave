@@ -547,6 +547,7 @@ pub trait IteratorFactory {
         sstable_table_infos: Vec<SstableInfo>,
         sstable_store: SstableStoreRef,
         read_options: Arc<SstableIteratorReadOptions>,
+        cache_level_hint: Option<u32>,
     );
 }
 

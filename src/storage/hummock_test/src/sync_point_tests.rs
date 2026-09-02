@@ -83,6 +83,7 @@ async fn test_get_from_sstable_info_success_settles_nested_stats_once() {
         full_key.to_ref(),
         &read_options,
         None,
+        None,
         &mut parent_stats,
     )
     .await
@@ -123,6 +124,7 @@ async fn test_get_from_sstable_info_cancellation_settles_nested_stats() {
         &sstable_info,
         full_key.to_ref(),
         &read_options,
+        None,
         None,
         &mut parent_stats,
     ));

@@ -38,8 +38,8 @@ pub mod udf;
 pub use udf::UdfConfig;
 pub mod storage;
 pub use storage::{
-    CacheEvictionConfig, EvictionConfig, ObjectStoreConfig, StorageConfig, StorageMemoryConfig,
-    extract_storage_memory_config,
+    CacheEvictionConfig, DataFileCacheFilter, EvictionConfig, ObjectStoreConfig, StorageConfig,
+    StorageMemoryConfig, extract_storage_memory_config,
 };
 pub mod merge;
 pub mod mutate;
@@ -532,6 +532,63 @@ pub mod tests {
         let expected = rw_config_to_markdown();
         let actual = expect_test::expect_file!["../../../config/docs.md"];
         actual.assert_eq(&expected);
+    }
+
+    #[test]
+    fn test_l0_cache_ratios_and_policy_are_independent() {
+        let config: RwConfig = toml::from_str(
+            r#"
+            [storage]
+            l0_block_cache_capacity_ratio_in_percent = 50
+            l0_block_cache_memory_capacity_ratio_in_percent = 2
+            data_file_cache_admission_filter = "live-sst"
+            data_file_cache_reinsertion_filter = "none"
+            l0_data_file_cache_admission_filter = "none"
+            l0_data_file_cache_reinsertion_filter = "live-sst"
+
+            [storage.cache.l0_block_cache_eviction]
+            algorithm = "S3Fifo"
+            small_queue_capacity_ratio_in_percent = 20
+            ghost_queue_capacity_ratio_in_percent = 50
+            small_to_main_freq_threshold = 2
+            "#,
+        )
+        .unwrap();
+
+        assert_eq!(
+            config.storage.l0_block_cache_disk_capacity_ratio_in_percent,
+            50
+        );
+        assert_eq!(
+            config
+                .storage
+                .l0_block_cache_memory_capacity_ratio_in_percent,
+            2
+        );
+        assert_eq!(
+            config.storage.data_file_cache_admission_filter,
+            DataFileCacheFilter::LiveSst
+        );
+        assert_eq!(
+            config.storage.data_file_cache_reinsertion_filter,
+            DataFileCacheFilter::None
+        );
+        assert_eq!(
+            config.storage.l0_data_file_cache_admission_filter,
+            Some(DataFileCacheFilter::None)
+        );
+        assert_eq!(
+            config.storage.l0_data_file_cache_reinsertion_filter,
+            Some(DataFileCacheFilter::LiveSst)
+        );
+        assert!(matches!(
+            config.storage.cache.l0_block_cache_eviction,
+            Some(CacheEvictionConfig::S3Fifo {
+                small_queue_capacity_ratio_in_percent: Some(20),
+                ghost_queue_capacity_ratio_in_percent: Some(50),
+                small_to_main_freq_threshold: Some(2),
+            })
+        ));
     }
 
     #[test]

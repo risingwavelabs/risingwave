@@ -37,7 +37,8 @@ use risingwave_storage::hummock::none::NoneRecentFilter;
 use risingwave_storage::hummock::store::HummockStorageIterator;
 use risingwave_storage::hummock::store::version::HummockVersionReader;
 use risingwave_storage::hummock::{
-    CachePolicy, HummockError, SstableStore, SstableStoreConfig, get_committed_read_version_tuple,
+    CachePolicy, HummockError, LiveSsts, SstableBlockHashBuilder, SstableStore, SstableStoreConfig,
+    get_committed_read_version_tuple,
 };
 use risingwave_storage::monitor::{HummockStateStoreMetrics, global_hummock_state_store_metrics};
 use risingwave_storage::row_serde::value_serde::ValueRowSerdeNew;
@@ -91,6 +92,7 @@ pub(crate) async fn new_hummock_java_binding_iter(
             .await?;
         let block_cache = HybridCacheBuilder::new()
             .memory(1 << 10)
+            .with_hash_builder(SstableBlockHashBuilder::default())
             .with_shards(2)
             .storage()
             .build()
@@ -111,6 +113,8 @@ pub(crate) async fn new_hummock_java_binding_iter(
             skip_bloom_filter_in_serde: false,
             meta_cache,
             block_cache,
+            l0_block_cache: None,
+            live_ssts: LiveSsts::default(),
             vector_meta_cache: CacheBuilder::new(1 << 10).build(),
             vector_block_cache: CacheBuilder::new(1 << 10).build(),
         }));

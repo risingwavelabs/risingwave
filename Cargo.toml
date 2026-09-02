@@ -452,6 +452,11 @@ debug = "line-tables-only"
 opt-level = 2
 
 [patch.crates-io]
+foyer = { git = "https://github.com/Li0k/foyer.git", rev = "cd46e4980738af278e144666880d361cab4cb00b" }
+foyer-common = { git = "https://github.com/Li0k/foyer.git", rev = "cd46e4980738af278e144666880d361cab4cb00b" }
+foyer-memory = { git = "https://github.com/Li0k/foyer.git", rev = "cd46e4980738af278e144666880d361cab4cb00b" }
+foyer-storage = { git = "https://github.com/Li0k/foyer.git", rev = "cd46e4980738af278e144666880d361cab4cb00b" }
+foyer-tokio = { git = "https://github.com/Li0k/foyer.git", rev = "cd46e4980738af278e144666880d361cab4cb00b" }
 faiss = { git = "https://github.com/risingwavelabs/faiss-rs.git", rev = "f6f0acb" }
 # Keep transitive madsim-family resolution aligned to the same upstream rev.
 madsim = { git = "https://github.com/risingwavelabs/madsim.git", rev = "595455fd05058b3b48bf281bea3ada1bca3d6646" }

@@ -712,6 +712,7 @@ impl HummockVersionReader {
                 local_sst,
                 full_key.to_ref(),
                 &read_options,
+                Some(0),
                 dist_key_hash,
                 local_stats,
             )
@@ -771,6 +772,7 @@ impl HummockVersionReader {
                             sstable_info,
                             full_key.to_ref(),
                             &read_options,
+                            Some(level.level_idx),
                             dist_key_hash,
                             local_stats,
                         )
@@ -837,6 +839,7 @@ impl HummockVersionReader {
                         sstable_info,
                         full_key.to_ref(),
                         &read_options,
+                        Some(level.level_idx),
                         dist_key_hash,
                         local_stats,
                     )
@@ -1066,10 +1069,11 @@ impl HummockVersionReader {
             }
 
             staging_sst_iter_count += 1;
-            factory.add_staging_sst_iter(F::SstableIteratorType::create(
+            factory.add_staging_sst_iter(F::SstableIteratorType::create_with_cache_level_hint(
                 table_holder,
                 self.sstable_store.clone(),
                 sst_read_options.clone(),
+                Some(0),
                 sstable_info,
             ));
         }
@@ -1096,6 +1100,7 @@ impl HummockVersionReader {
                         sstable_infos,
                         self.sstable_store.clone(),
                         sst_read_options.clone(),
+                        Some(level.level_idx),
                     );
                     local_stats.non_overlapping_iter_count += 1;
                 } else {
@@ -1121,12 +1126,15 @@ impl HummockVersionReader {
                     // We put the SstableIterator in `overlapping_iters` just for convenience since
                     // it overlaps with SSTs in other levels. In metrics reporting, we still count
                     // it in `non_overlapping_iter_count`.
-                    factory.add_overlapping_sst_iter(F::SstableIteratorType::create(
-                        sstable,
-                        self.sstable_store.clone(),
-                        sst_read_options.clone(),
-                        sstable_info,
-                    ));
+                    factory.add_overlapping_sst_iter(
+                        F::SstableIteratorType::create_with_cache_level_hint(
+                            sstable,
+                            self.sstable_store.clone(),
+                            sst_read_options.clone(),
+                            Some(level.level_idx),
+                            sstable_info,
+                        ),
+                    );
                     local_stats.non_overlapping_iter_count += 1;
                 }
             } else {
@@ -1153,12 +1161,15 @@ impl HummockVersionReader {
                     {
                         continue;
                     }
-                    factory.add_overlapping_sst_iter(F::SstableIteratorType::create(
-                        sstable,
-                        self.sstable_store.clone(),
-                        sst_read_options.clone(),
-                        sstable_info,
-                    ));
+                    factory.add_overlapping_sst_iter(
+                        F::SstableIteratorType::create_with_cache_level_hint(
+                            sstable,
+                            self.sstable_store.clone(),
+                            sst_read_options.clone(),
+                            Some(level.level_idx),
+                            sstable_info,
+                        ),
+                    );
                     local_stats.overlapping_iter_count += 1;
                 }
             }
