@@ -98,7 +98,7 @@ use crate::handler::create_table::{
 };
 use crate::handler::util::{
     SourceSchemaCompatExt, check_connector_match_connection_type, ensure_connection_type_allowed,
-    ensure_local_fs_connector_allowed,
+    ensure_local_fs_connector_allowed, ensure_oracle_cdc_connector_allowed,
 };
 use crate::optimizer::plan_node::generic::SourceNodeKind;
 use crate::optimizer::plan_node::{BackfillType, LogicalSource, ToStream, ToStreamContext};
@@ -746,6 +746,9 @@ pub fn bind_connector_props(
     is_create_source: bool,
 ) -> Result<(WithOptions, SourceRefreshMode)> {
     let mut with_properties = handler_args.with_options.clone().into_connector_props();
+    if let Some(connector) = with_properties.get_connector() {
+        ensure_oracle_cdc_connector_allowed(&handler_args.session, &connector)?;
+    }
     validate_compatibility(format_encode, &mut with_properties)?;
     let refresh_mode = {
         let refresh_mode = resolve_source_refresh_mode_in_with_option(&mut with_properties)?;
@@ -1419,6 +1422,26 @@ pub mod tests {
         assert!(
             err.to_string()
                 .contains("frontend.unsafe_enable_local_fs_connector = true"),
+            "{err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_create_oracle_cdc_source_requires_frontend_config() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        let err = frontend
+            .run_sql(
+                r#"CREATE SOURCE oracle_source
+                WITH (connector = 'oracle-cdc')
+                FORMAT PLAIN ENCODE JSON"#
+                    .to_owned(),
+            )
+            .await
+            .unwrap_err();
+
+        assert!(
+            err.to_string()
+                .contains("frontend.unsafe_enable_oracle_cdc = true"),
             "{err:?}"
         );
     }
