@@ -149,9 +149,12 @@ pub(super) mod handlers {
         Path(ty): Path<i32>,
         Extension(srv): Extension<Service>,
     ) -> Result<Json<Vec<WorkerNode>>> {
-        let worker_type = WorkerType::try_from(ty)
-            .map_err(|_| anyhow!("invalid worker type"))
-            .map_err(err)?;
+        let worker_type = match WorkerType::try_from(ty) {
+            Ok(WorkerType::Unspecified) | Err(_) => {
+                return Err(err(anyhow!("invalid worker type: {ty}")));
+            }
+            Ok(worker_type) => worker_type,
+        };
         let mut result = srv
             .metadata_manager
             .list_worker_node(Some(worker_type), None)
