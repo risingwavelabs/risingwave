@@ -63,6 +63,10 @@ impl Rule<Logical> for PushCalculationOfJoinRule {
                 .collect_vec();
             ColIndexMapping::new(map, new_internal_col_num)
         };
+        let temporal_event_time_as_of = join
+            .temporal_event_time_as_of()
+            .cloned()
+            .map(|as_of| col_index_mapping.rewrite_expr(as_of));
         let (mut exprs, new_output_indices) =
             Self::remap_exprs_and_output_indices(exprs, output_indices, &mut col_index_mapping);
         output_indices = new_output_indices;
@@ -128,7 +132,10 @@ impl Rule<Logical> for PushCalculationOfJoinRule {
             right = new_input(right, right_exprs_non_input_ref);
         }
 
-        Some(LogicalJoin::with_output_indices(left, right, join_type, on, output_indices).into())
+        let mut new_join =
+            LogicalJoin::with_output_indices(left, right, join_type, on, output_indices);
+        new_join.set_temporal_event_time_as_of(temporal_event_time_as_of);
+        Some(new_join.into())
     }
 }
 

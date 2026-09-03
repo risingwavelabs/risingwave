@@ -29,7 +29,8 @@ use crate::common::table::state_table::{
 };
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::{
-    ActorContextRef, JoinType, NestedLoopTemporalJoinExecutor, TemporalJoinExecutor,
+    ActorContextRef, EventTimeTemporalJoinExecutor, JoinType, NestedLoopTemporalJoinExecutor,
+    TemporalJoinExecutor,
 };
 use crate::task::AtomicU64Ref;
 
@@ -66,6 +67,113 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
             .map(|&x| x as usize)
             .collect_vec();
         let [source_l, source_r]: [_; 2] = params.input.try_into().unwrap();
+
+        let event_time_keys = match (
+            node.left_event_time_key,
+            node.right_event_time_key,
+            node.event_time_left_time_table.as_ref(),
+            node.event_time_right_key_table.as_ref(),
+            node.event_time_right_time_table.as_ref(),
+        ) {
+            (Some(left_event_time_key), Some(right_event_time_key), Some(_), Some(_), Some(_)) => {
+                Some((left_event_time_key as usize, right_event_time_key as usize))
+            }
+            (None, None, None, None, None) => None,
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "event-time temporal join requires both event-time keys and all event-time state tables"
+                )
+                .into());
+            }
+        };
+
+        if let Some((left_event_time_key, right_event_time_key)) = event_time_keys {
+            let vnodes = Arc::new(
+                params
+                    .vnode_bitmap
+                    .clone()
+                    .expect("vnodes not set for event-time temporal join"),
+            );
+            let left_pending_by_time = StateTableBuilder::new(
+                node.get_event_time_left_time_table()?,
+                store.clone(),
+                Some(vnodes.clone()),
+            )
+            .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)
+            .enable_preload_all_rows_by_config(&params.config)
+            .build()
+            .await;
+            let right_versions_by_key = StateTableBuilder::new(
+                node.get_event_time_right_key_table()?,
+                store.clone(),
+                Some(vnodes.clone()),
+            )
+            .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)
+            .enable_preload_all_rows_by_config(&params.config)
+            .build()
+            .await;
+            let right_versions_by_time = StateTableBuilder::new(
+                node.get_event_time_right_time_table()?,
+                store.clone(),
+                Some(vnodes),
+            )
+            .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)
+            .enable_preload_all_rows_by_config(&params.config)
+            .build()
+            .await;
+
+            let left_join_keys = node
+                .get_left_key()
+                .iter()
+                .map(|key| *key as usize)
+                .collect_vec();
+            let right_join_keys = node
+                .get_right_key()
+                .iter()
+                .map(|key| *key as usize)
+                .collect_vec();
+            let null_safe = node.get_null_safe().clone();
+
+            macro_rules! build_event_time {
+                ($join_type:ident) => {
+                    Ok((
+                        params.info.clone(),
+                        Box::new(
+                            EventTimeTemporalJoinExecutor::<_, { JoinType::$join_type }>::new(
+                                params.actor_context,
+                                params.info,
+                                params.executor_stats,
+                                source_l,
+                                source_r,
+                                left_pending_by_time,
+                                right_versions_by_key,
+                                right_versions_by_time,
+                                params.watermark_epoch,
+                                left_join_keys,
+                                right_join_keys,
+                                null_safe,
+                                condition,
+                                output_indices,
+                                left_event_time_key,
+                                right_event_time_key,
+                                params.config.developer.chunk_size,
+                            ),
+                        ) as Box<dyn Execute>,
+                    )
+                        .into())
+                };
+            }
+
+            return match node.get_join_type()? {
+                JoinTypeProto::Inner => build_event_time!(Inner),
+                JoinTypeProto::LeftOuter => build_event_time!(LeftOuter),
+                other => Err(anyhow::anyhow!(
+                    "unsupported event-time temporal join type: {:?}",
+                    other
+                )
+                .into()),
+            };
+        }
 
         let versioned = table_desc.versioned;
         // Use table_output_indices to select only the column IDs that the right-side

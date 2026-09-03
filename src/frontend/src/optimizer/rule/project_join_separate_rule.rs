@@ -29,7 +29,8 @@ impl Rule<Logical> for ProjectJoinSeparateRule {
             None
         } else {
             let (left, right, on, join_type, output_indices) = join.clone().decompose();
-            let new_join = LogicalJoin::new(left, right, join_type, on);
+            let mut new_join = LogicalJoin::new(left, right, join_type, on);
+            new_join.set_temporal_event_time_as_of(join.temporal_event_time_as_of().cloned());
             let project =
                 LogicalProject::with_out_col_idx(new_join.into(), output_indices.into_iter());
             Some(project.into())

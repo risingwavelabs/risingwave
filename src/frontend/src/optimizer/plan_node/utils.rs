@@ -518,6 +518,13 @@ pub fn to_batch_query_epoch(a: &Option<AsOf>) -> Result<Option<PbBatchQueryEpoch
             )
             .into());
         }
+        AsOf::EventTime(_) => {
+            return Err(ErrorCode::NotSupported(
+                "do not support event-time AS OF in batch query".to_owned(),
+                "event-time AS OF is only supported in temporal joins".to_owned(),
+            )
+            .into());
+        }
         AsOf::TimestampNum(ts) => *ts,
         AsOf::TimestampString(ts) => {
             let date_time = speedate::DateTime::parse_str_rfc3339(ts)
@@ -613,7 +620,9 @@ pub fn to_iceberg_time_travel_as_of(
                 timestamp * 1000 + date_time.time.microsecond as i64 / 1000,
             ))
         }
-        Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
+        Some(AsOf::ProcessTime)
+        | Some(AsOf::EventTime(_))
+        | Some(AsOf::ProcessTimeWithInterval(_)) => {
             unreachable!()
         }
         None => None,
