@@ -97,7 +97,7 @@ alter source non_shared_source_2 connector WITH (properties.receive.message.max.
 
 query I retry 5 backoff 1s
 select count(*) from rw_sources
-where definition ILIKE '%properties.receive.message.max.bytes = secret public.s2%'
+where definition ILIKE '%properties.receive."message"."max".bytes = secret public.s2%'
   and definition ILIKE '%topic = ''test_alter_non_shared_source''%'
   and name = 'non_shared_source_1';
 ----
@@ -106,7 +106,7 @@ where definition ILIKE '%properties.receive.message.max.bytes = secret public.s2
 
 query I retry 5 backoff 1s
 select count(*) from rw_sources
-where definition ILIKE '%properties.receive.message.max.bytes = secret public.s2%'
+where definition ILIKE '%properties.receive."message"."max".bytes = secret public.s2%'
   and definition ILIKE '%topic = ''test_alter_non_shared_source''%'
   and name = 'non_shared_source_2';
 ----
@@ -201,7 +201,7 @@ query I
 select count(*) from rw_sources
 where name = 'non_shared_conn_source'
   and definition ILIKE '%connection = kafka_conn_non_shared%'
-  and definition ILIKE '%properties.receive.message.max.bytes = secret public.s2%';
+  and definition ILIKE '%properties.receive."message"."max".bytes = secret public.s2%';
 ----
 1
 
