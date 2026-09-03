@@ -37,7 +37,9 @@ use status::CreatingStreamingJobStatus;
 use tracing::{debug, info};
 
 use super::super::state::RenderResult;
-use super::{IndependentCheckpointJob, IndependentCheckpointJobControl};
+use super::{
+    IndependentCheckpointJob, IndependentCheckpointJobControl, IndependentCheckpointJobStatus,
+};
 use crate::MetaResult;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::checkpoint::independent_job::creating_job::barrier_control::CreatingStreamingJobBarrierStats;
@@ -115,6 +117,7 @@ impl CreatingStreamingJobControl {
         let info = create_info.info.clone();
         let job_id = info.stream_job_fragments.stream_job_id();
         let database_id = info.streaming_job.database_id();
+        let is_since_timestamp = since_timestamp_upstream_log_epochs.is_some();
         debug!(
             %job_id,
             definition = info.definition,
@@ -308,11 +311,23 @@ impl CreatingStreamingJobControl {
                 pending_non_checkpoint_barriers,
             };
         }
-        let job_control = entry.insert(IndependentCheckpointJobControl::creating_streaming_job(
-            job_id,
-            partial_graph_id,
-            job,
-        ));
+        let job_control = entry.insert(if is_since_timestamp {
+            // Since-timestamp resolution waits for current completion work and requires the
+            // resolved snapshot epoch to be older than the upstream committed epoch.
+            IndependentCheckpointJobControl::creating_streaming_job(
+                job_id,
+                partial_graph_id,
+                IndependentCheckpointJobStatus::Ready,
+                job,
+            )
+        } else {
+            IndependentCheckpointJobControl::creating_streaming_job(
+                job_id,
+                partial_graph_id,
+                IndependentCheckpointJobStatus::Initial { snapshot_epoch },
+                job,
+            )
+        });
         let Some(IndependentCheckpointJob::CreatingStreamingJob(job)) = job_control.running_mut()
         else {
             unreachable!()
@@ -975,17 +990,12 @@ impl CreatingStreamingJobControl {
         &mut self,
         partial_graph_manager: &mut PartialGraphManager,
         min_upstream_inflight_epoch: Option<u64>,
-        upstream_committed_epoch: u64,
     ) -> Option<(
         u64,
         HashMap<WorkerId, BarrierCompleteResponse>,
         PartialGraphBarrierInfo,
         bool,
     )> {
-        // do not commit snapshot backfill job until upstream has committed the snapshot epoch
-        if upstream_committed_epoch < self.snapshot_epoch {
-            return None;
-        }
         let (finished_at_epoch, epoch_end_bound) = match &self.status {
             CreatingStreamingJobStatus::Finishing(finish_at_epoch, _) => {
                 let epoch_end_bound = min_upstream_inflight_epoch
