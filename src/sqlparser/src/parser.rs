@@ -5437,6 +5437,7 @@ impl Parser<'_> {
         // a table alias.
         let mut joins = vec![];
         loop {
+            let join_checkpoint = *self;
             let join = if self.parse_keyword(Keyword::CROSS) {
                 let join_operator = if self.parse_keyword(Keyword::JOIN) {
                     JoinOperator::CrossJoin
@@ -5448,13 +5449,17 @@ impl Parser<'_> {
                     join_operator,
                 }
             } else {
-                let (natural, asof) =
-                    match self.parse_one_of_keywords(&[Keyword::NATURAL, Keyword::ASOF]) {
-                        Some(Keyword::NATURAL) => (true, false),
-                        Some(Keyword::ASOF) => (false, true),
-                        Some(_) => unreachable!(),
-                        None => (false, false),
-                    };
+                let (natural, asof, broadcast) = match self.parse_one_of_keywords(&[
+                    Keyword::NATURAL,
+                    Keyword::ASOF,
+                    Keyword::BROADCAST,
+                ]) {
+                    Some(Keyword::NATURAL) => (true, false, false),
+                    Some(Keyword::ASOF) => (false, true, false),
+                    Some(Keyword::BROADCAST) => (false, false, true),
+                    Some(_) => unreachable!(),
+                    None => (false, false, false),
+                };
                 let peek_keyword = if let Token::Word(w) = self.peek_token().token {
                     w.keyword
                 } else {
@@ -5505,9 +5510,33 @@ impl Parser<'_> {
                     }
                     _ => break,
                 };
-                let relation = self.parse_table_factor()?;
+                let mut relation = self.parse_table_factor()?;
                 let join_constraint = self.parse_join_constraint(natural)?;
                 let join_operator = join_operator_type(join_constraint);
+                if broadcast {
+                    if !matches!(
+                        join_operator,
+                        JoinOperator::Inner(_) | JoinOperator::LeftOuter(_)
+                    ) {
+                        return self.expected_at(
+                            join_checkpoint,
+                            "INNER or LEFT temporal join after BROADCAST",
+                        );
+                    }
+                    match &mut relation {
+                        TableFactor::Table {
+                            as_of: Some(as_of), ..
+                        } if matches!(as_of, AsOf::ProcessTime) => {
+                            *as_of = AsOf::ProcessTimeBroadcast;
+                        }
+                        _ => {
+                            return self.expected_at(
+                                join_checkpoint,
+                                "a table with FOR SYSTEM_TIME AS OF PROCTIME() after BROADCAST JOIN",
+                            );
+                        }
+                    }
+                }
                 let need_constraint = match join_operator {
                     JoinOperator::Inner(JoinConstraint::None) => Some("INNER JOIN"),
                     JoinOperator::AsOfInner(JoinConstraint::None) => Some("ASOF INNER JOIN"),

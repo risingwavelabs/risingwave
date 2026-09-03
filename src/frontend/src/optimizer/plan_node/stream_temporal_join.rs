@@ -32,6 +32,7 @@ use crate::optimizer::plan_node::utils::{IndicesDisplay, TableCatalogBuilder};
 use crate::optimizer::plan_node::{
     EqJoinPredicate, EqJoinPredicateDisplay, StreamExchange, StreamTableScan, TryToStreamPb,
 };
+use crate::optimizer::property::Distribution;
 use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
 use crate::utils::ColIndexMappingRewriteExt;
@@ -42,6 +43,7 @@ pub struct StreamTemporalJoin {
     core: generic::Join<PlanRef>,
     append_only: bool,
     is_nested_loop: bool,
+    is_broadcast: bool,
 }
 
 impl StreamTemporalJoin {
@@ -58,13 +60,24 @@ impl StreamTemporalJoin {
         let right = core.right.clone();
         let exchange: &StreamExchange = right
             .as_stream_exchange()
-            .expect("should be a no shuffle stream exchange");
-        assert!(exchange.no_shuffle());
+            .expect("temporal join lookup side should have an exchange");
         let exchange_input = exchange.input();
         let scan: &StreamTableScan = exchange_input
             .as_stream_table_scan()
             .expect("should be a stream table scan");
-        assert!(matches!(scan.core().as_of, Some(AsOf::ProcessTime)));
+        let is_broadcast = matches!(scan.core().as_of, Some(AsOf::ProcessTimeBroadcast));
+        assert!(matches!(
+            scan.core().as_of,
+            Some(AsOf::ProcessTime | AsOf::ProcessTimeBroadcast)
+        ));
+        if is_broadcast {
+            assert!(!exchange.no_shuffle());
+            assert_eq!(exchange.distribution(), &Distribution::Broadcast);
+            assert!(append_only);
+            assert!(!is_nested_loop);
+        } else {
+            assert!(exchange.no_shuffle());
+        }
 
         let dist = if is_nested_loop {
             // Use right side distribution directly if it's nested loop temporal join.
@@ -104,6 +117,7 @@ impl StreamTemporalJoin {
             core,
             append_only,
             is_nested_loop,
+            is_broadcast,
         })
     }
 
@@ -125,6 +139,10 @@ impl StreamTemporalJoin {
 
     pub fn is_nested_loop(&self) -> bool {
         self.is_nested_loop
+    }
+
+    pub fn is_broadcast(&self) -> bool {
+        self.is_broadcast
     }
 
     /// Return memo-table catalog and its `pk_indices`.
@@ -193,6 +211,9 @@ impl Distill for StreamTemporalJoin {
         ));
 
         vec.push(("nested_loop", Pretty::debug(&self.is_nested_loop)));
+        if self.is_broadcast {
+            vec.push(("broadcast", Pretty::debug(&self.is_broadcast)));
+        }
 
         if let Some(ow) = watermark_pretty(self.base.watermark_columns(), self.schema()) {
             vec.push(("output_watermarks", ow));
@@ -241,8 +262,13 @@ impl TryToStreamPb for StreamTemporalJoin {
         let right = self.right();
         let exchange: &StreamExchange = right
             .as_stream_exchange()
-            .expect("should be a no shuffle stream exchange");
-        assert!(exchange.no_shuffle());
+            .expect("temporal join lookup side should have an exchange");
+        if self.is_broadcast {
+            assert!(!exchange.no_shuffle());
+            assert_eq!(exchange.distribution(), &Distribution::Broadcast);
+        } else {
+            assert!(exchange.no_shuffle());
+        }
         let exchange_input = exchange.input();
         let scan: &StreamTableScan = exchange_input
             .as_stream_table_scan()
@@ -276,6 +302,7 @@ impl TryToStreamPb for StreamTemporalJoin {
                 Some(memo_table.to_internal_table_prost())
             },
             is_nested_loop: self.is_nested_loop,
+            is_broadcast: self.is_broadcast,
         })))
     }
 }

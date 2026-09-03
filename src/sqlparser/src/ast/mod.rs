@@ -3910,6 +3910,8 @@ impl fmt::Display for SetVariableValueSingle {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AsOf {
     ProcessTime,
+    /// Process-time temporal join with the lookup side broadcast to all join actors.
+    ProcessTimeBroadcast,
     // used by time travel
     ProcessTimeWithInterval((String, DateTimeField)),
     // the number of seconds that have elapsed since the Unix epoch, which is January 1, 1970 at 00:00:00 Coordinated Universal Time (UTC).
@@ -3923,7 +3925,9 @@ impl fmt::Display for AsOf {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use AsOf::*;
         match self {
-            ProcessTime => write!(f, " FOR SYSTEM_TIME AS OF PROCTIME()"),
+            ProcessTime | ProcessTimeBroadcast => {
+                write!(f, " FOR SYSTEM_TIME AS OF PROCTIME()")
+            }
             ProcessTimeWithInterval((value, leading_field)) => write!(
                 f,
                 " FOR SYSTEM_TIME AS OF NOW() - '{}' {}",

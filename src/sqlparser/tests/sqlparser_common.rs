@@ -2728,6 +2728,38 @@ fn parse_temporal_join() {
 }
 
 #[test]
+fn parse_broadcast_temporal_join() {
+    let sql = "SELECT * FROM t1 BROADCAST LEFT JOIN t2 FOR SYSTEM_TIME AS OF PROCTIME() ON c1 = c2";
+    let select = verified_only_select(sql);
+    assert_eq!(
+        Join {
+            relation: TableFactor::Table {
+                name: ObjectName(vec![Ident::new_unchecked("t2")]),
+                alias: None,
+                as_of: Some(AsOf::ProcessTimeBroadcast),
+            },
+            join_operator: JoinOperator::LeftOuter(JoinConstraint::On(Expr::BinaryOp {
+                left: Box::new(Expr::Identifier("c1".into())),
+                op: BinaryOperator::Eq,
+                right: Box::new(Expr::Identifier("c2".into())),
+            })),
+        },
+        only(only(select.from).joins),
+    );
+
+    assert_eq!(
+        verified_only_select(sql).to_string(),
+        "SELECT * FROM t1 BROADCAST LEFT JOIN t2 FOR SYSTEM_TIME AS OF PROCTIME() ON c1 = c2"
+    );
+
+    let err = parse_sql_statements("SELECT * FROM t1 BROADCAST JOIN t2 ON c1 = c2").unwrap_err();
+    assert!(
+        err.to_string()
+            .contains("FOR SYSTEM_TIME AS OF PROCTIME() after BROADCAST JOIN")
+    );
+}
+
+#[test]
 fn parse_joins_on() {
     fn join_with_constraint(
         relation: impl Into<String>,

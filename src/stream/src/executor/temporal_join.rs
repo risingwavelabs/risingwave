@@ -60,6 +60,7 @@ pub struct TemporalJoinExecutor<
     chunk_size: usize,
     memo_table: Option<StateTable<S>>,
     metrics: TemporalJoinMetrics,
+    is_broadcast: bool,
 }
 
 #[derive(Default)]
@@ -107,7 +108,7 @@ impl JoinEntry {
 struct TemporalSide<K: HashKey, S: StateStore, SD: ValueRowSerde> {
     source: ReplicatedStateTable<S, SD>,
     table_stream_key_indices: Vec<usize>,
-    cache: ManagedLruCache<K, JoinEntry>,
+    cache: Option<ManagedLruCache<K, JoinEntry>>,
     join_key_data_types: Vec<DataType>,
 }
 
@@ -123,7 +124,13 @@ impl<K: HashKey, S: StateStore, SD: ValueRowSerde> TemporalSide<K, S, SD> {
         for key in keys {
             metrics.temporal_join_total_query_cache_count.inc();
 
-            if self.cache.get(key).is_none() {
+            if self
+                .cache
+                .as_mut()
+                .expect("lookup cache should be enabled")
+                .get(key)
+                .is_none()
+            {
                 metrics.temporal_join_cache_miss_count.inc();
 
                 futs.push(async {
@@ -159,14 +166,73 @@ impl<K: HashKey, S: StateStore, SD: ValueRowSerde> TemporalSide<K, S, SD> {
         #[for_await]
         for res in stream::iter(futs).buffered(16) {
             let (key, entry) = res?;
-            self.cache.put(key, entry);
+            self.cache
+                .as_mut()
+                .expect("lookup cache should be enabled")
+                .put(key, entry);
         }
 
         Ok(())
     }
 
+    /// Fetch records directly from storage without retaining them in an operator cache.
+    async fn fetch_keys_uncached(
+        &self,
+        keys: impl Iterator<Item = &K>,
+        metrics: &TemporalJoinMetrics,
+    ) -> StreamExecutorResult<HashMap<K, JoinEntry>> {
+        let mut unique_keys = HashMap::new();
+        for key in keys {
+            metrics.temporal_join_total_query_cache_count.inc();
+            if let Entry::Vacant(entry) = unique_keys.entry(key.clone()) {
+                metrics.temporal_join_cache_miss_count.inc();
+                entry.insert(());
+            }
+        }
+
+        let mut futs = Vec::with_capacity(unique_keys.len());
+        for key in unique_keys.into_keys() {
+            futs.push(async {
+                let pk_prefix = key.deserialize(&self.join_key_data_types)?;
+                let iter = self
+                    .source
+                    .iter_with_prefix(
+                        &pk_prefix,
+                        &(Bound::<OwnedRow>::Unbounded, Bound::<OwnedRow>::Unbounded),
+                        PrefetchOptions::default(),
+                    )
+                    .await?;
+
+                let mut entry = JoinEntry::default();
+                pin_mut!(iter);
+                while let Some(row) = iter.next().await {
+                    let row: OwnedRow = row?;
+                    entry.insert(
+                        row.as_ref()
+                            .project(&self.table_stream_key_indices)
+                            .into_owned_row(),
+                        row,
+                    );
+                }
+                Ok((key, entry)) as StreamExecutorResult<_>
+            });
+        }
+
+        let mut entries = HashMap::with_capacity(futs.len());
+        #[for_await]
+        for res in stream::iter(futs).buffered(16) {
+            let (key, entry) = res?;
+            entries.insert(key, entry);
+        }
+        Ok(entries)
+    }
+
     fn force_peek(&self, key: &K) -> &JoinEntry {
-        self.cache.peek(key).expect("key should exists")
+        self.cache
+            .as_ref()
+            .expect("lookup cache should be enabled")
+            .peek(key)
+            .expect("key should exist")
     }
 
     fn update(
@@ -181,9 +247,13 @@ impl<K: HashKey, S: StateStore, SD: ValueRowSerde> TemporalSide<K, S, SD> {
                 let Some((op, row)) = r else {
                     continue;
                 };
-                if self.cache.contains(&key) {
+                if self
+                    .cache
+                    .as_ref()
+                    .is_some_and(|cache| cache.contains(&key))
+                {
                     // Update cache
-                    let mut entry = self.cache.get_mut(&key).unwrap();
+                    let mut entry = self.cache.as_mut().unwrap().get_mut(&key).unwrap();
                     let stream_key = row.project(right_stream_key_indices).into_owned_row();
                     match op {
                         Op::Insert | Op::UpdateInsert => {
@@ -485,9 +555,18 @@ pub(super) mod phase1 {
                     None
                 }
             });
-        right_table
-            .fetch_or_promote_keys(to_fetch_keys, metrics)
-            .await?;
+        let uncached_entries = if right_table.cache.is_some() {
+            right_table
+                .fetch_or_promote_keys(to_fetch_keys, metrics)
+                .await?;
+            None
+        } else {
+            Some(
+                right_table
+                    .fetch_keys_uncached(to_fetch_keys, metrics)
+                    .await?,
+            )
+        };
 
         for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.into_iter()) {
             let Some((op, left_row)) = r else {
@@ -499,7 +578,13 @@ pub(super) mod phase1 {
             if APPEND_ONLY {
                 // Append-only temporal join
                 if key.null_bitmap().is_subset(null_matched)
-                    && let join_entry = right_table.force_peek(&key)
+                    && let join_entry = if let Some(entries) = &uncached_entries {
+                        entries
+                            .get(&key)
+                            .expect("join key should have been fetched")
+                    } else {
+                        right_table.force_peek(&key)
+                    }
                     && !join_entry.is_empty()
                 {
                     matched = true;
@@ -529,7 +614,13 @@ pub(super) mod phase1 {
                 match op {
                     Op::Insert | Op::UpdateInsert => {
                         if key.null_bitmap().is_subset(null_matched)
-                            && let join_entry = right_table.force_peek(&key)
+                            && let join_entry = if let Some(entries) = &uncached_entries {
+                                entries
+                                    .get(&key)
+                                    .expect("join key should have been fetched")
+                            } else {
+                                right_table.force_peek(&key)
+                            }
                             && !join_entry.is_empty()
                         {
                             matched = true;
@@ -628,11 +719,13 @@ impl<
         chunk_size: usize,
         join_key_data_types: Vec<DataType>,
         memo_table: Option<StateTable<S>>,
+        is_broadcast: bool,
     ) -> Self {
-        let metrics_info =
-            MetricsInfo::new(metrics.clone(), table.table_id(), ctx.id, "temporal join");
-
-        let cache = ManagedLruCache::unbounded(watermark_sequence, metrics_info);
+        let cache = (!is_broadcast).then(|| {
+            let metrics_info =
+                MetricsInfo::new(metrics.clone(), table.table_id(), ctx.id, "temporal join");
+            ManagedLruCache::unbounded(watermark_sequence, metrics_info)
+        });
 
         let metrics = metrics.new_temporal_join_metrics(table.table_id(), ctx.id, ctx.fragment_id);
 
@@ -655,6 +748,7 @@ impl<
             chunk_size,
             memo_table,
             metrics,
+            is_broadcast,
         }
     }
 
@@ -705,10 +799,14 @@ impl<
 
         #[for_await]
         for msg in input {
-            self.right_table.cache.evict();
-            self.metrics
-                .temporal_join_cached_entry_count
-                .set(self.right_table.cache.len() as i64);
+            if let Some(cache) = self.right_table.cache.as_mut() {
+                cache.evict();
+                self.metrics
+                    .temporal_join_cached_entry_count
+                    .set(cache.len() as i64);
+            } else {
+                self.metrics.temporal_join_cached_entry_count.set(0);
+            }
             match msg? {
                 InternalMessage::WaterMark(watermark) => {
                     let output_watermark_col_idx = *left_to_output.get(&watermark.col_idx).unwrap();
@@ -828,6 +926,11 @@ impl<
                 }
                 InternalMessage::Barrier(updates, barrier) => {
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(self.ctx.id);
+                    let right_update_vnode_bitmap = if self.is_broadcast {
+                        None
+                    } else {
+                        update_vnode_bitmap.clone()
+                    };
 
                     // Write right-side chunks to the replicated state table and update LRU cache.
                     // Must happen before commit.
@@ -852,10 +955,11 @@ impl<
                     yield Message::Barrier(barrier);
 
                     if let Some((_, true)) = right_post_commit
-                        .post_yield_barrier(update_vnode_bitmap.clone())
+                        .post_yield_barrier(right_update_vnode_bitmap)
                         .await?
+                        && let Some(cache) = self.right_table.cache.as_mut()
                     {
-                        self.right_table.cache.clear();
+                        cache.clear();
                     }
                     if let Some(memo_post_commit) = memo_post_commit {
                         memo_post_commit
@@ -919,11 +1023,20 @@ mod tests {
     /// Epoch3:  left side sends (`left_key=1`, `left_val=111`) and (`left_key=3`, `left_val=333`).
     ///
     /// Expected join output in epoch3:
-    ///   (1, 111, 1, 1, 100)  — key=1 row matched from epoch1 data (cache miss → state store read)
-    ///   (1, 111, 1, 2, 200)  — key=1 row matched from epoch1 data (same cache entry)
-    ///   (3, 333, 3, 1, 400)  — key=3 row matched from epoch2 data (cache miss → state store read)
+    ///   (1, 111, 1, 1, 100)  — key=1 row matched from epoch1 data
+    ///   (1, 111, 1, 2, 200)  — key=1 row matched from the same lookup entry
+    ///   (3, 333, 3, 1, 400)  — key=3 row matched from epoch2 data
     #[tokio::test]
-    async fn test_temporal_join_pk_prefix_staging_merge() {
+    async fn test_temporal_join_pk_prefix_staging_merge_cached() {
+        run_temporal_join_pk_prefix_staging_merge(false).await;
+    }
+
+    #[tokio::test]
+    async fn test_broadcast_temporal_join_pk_prefix_staging_merge_uncached() {
+        run_temporal_join_pk_prefix_staging_merge(true).await;
+    }
+
+    async fn run_temporal_join_pk_prefix_staging_merge(is_broadcast: bool) {
         let test_env = prepare_hummock_test_env().await;
         let table_id = TableId::new(1);
 
@@ -1056,6 +1169,7 @@ mod tests {
             1024,
             join_key_data_types,
             None, // no memo table (append-only inner join)
+            is_broadcast,
         );
 
         let mut stream = Box::new(executor).execute();
@@ -1067,7 +1181,7 @@ mod tests {
 
         // Epoch2: right side inserts (3, 1, 400); left side is quiet.
         // The epoch2→epoch3 barrier will trigger write_chunk + commit for the right table,
-        // making (3,1,400) visible as committed epoch2 data.
+        // making (3,1,400) visible in the replicated state table at epoch3.
         right_tx.push_chunk(StreamChunk::from_pretty(
             " i i   i
             + 3 1 400",
@@ -1086,8 +1200,8 @@ mod tests {
             .start_epoch(test_epoch(4), HashSet::from_iter([table_id]));
 
         // Epoch3: left side sends two rows.
-        //   key=1 → cache miss → state store read → finds (1,1,100) and (1,2,200) from epoch1.
-        //   key=3 → cache miss → state store read → finds (3,1,400) from epoch2.
+        //   key=1 → state store read → finds (1,1,100) and (1,2,200) from epoch1.
+        //   key=3 → state store read → finds (3,1,400) from epoch2.
         left_tx.push_chunk(StreamChunk::from_pretty(
             " i   i
             + 1 111
