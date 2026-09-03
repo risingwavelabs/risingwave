@@ -23,6 +23,7 @@ use risingwave_common::types::{
 use thiserror_ext::AsReport;
 use tokio_postgres::types::{FromSql, IsNull, Kind, ToSql, Type, to_sql_checked};
 
+use crate::connector_common::postgres::postgres_point_type;
 use crate::error::ConnectorResult;
 
 #[derive(Clone, Debug)]
@@ -305,6 +306,12 @@ impl ScalarAdapter {
                 Some(ScalarImpl::from(uuid.to_string()))
             }
             (ScalarAdapter::Point(PgPoint { x, y }), &DataType::Struct(_)) => {
+                assert_eq!(
+                    ty,
+                    &postgres_point_type(),
+                    "PostgreSQL point must map to struct<x float64, y float64>"
+                );
+
                 Some(StructValue::new(vec![Some(x.into()), Some(y.into())]).into())
             }
             (ScalarAdapter::Numeric(numeric), &DataType::Varchar) => {
