@@ -146,10 +146,9 @@ impl StreamTemporalJoin {
 
     /// Return the memo-table catalog.
     ///
-    /// A regular temporal join is distributed by the lookup key, so its memo prefix remains
-    /// `join_key + left_stream_key` for compatibility. A broadcast temporal join preserves the
-    /// left input distribution, so its memo prefix is the left stream key itself. The latter
-    /// uniquely identifies the left row and already contains the left distribution key.
+    /// The memo prefix is `join_key + left_stream_key`. A regular temporal join is distributed by
+    /// the lookup key, while a broadcast temporal join preserves the left input distribution and
+    /// maps that distribution key to its copy in the `left_stream_key` part of the prefix.
     ///
     /// Write pattern:
     ///   for each left input row (with insert op), persist the matched right row followed by the
@@ -161,15 +160,11 @@ impl StreamTemporalJoin {
     pub fn infer_memo_table_catalog(&self, right_scan: &StreamTableScan) -> TableCatalog {
         let left_eq_indexes = self.eq_join_predicate().left_eq_indexes();
         let left_stream_key = self.core.left.expect_stream_key();
-        let memo_prefix_indices = if self.is_broadcast {
-            left_stream_key.to_vec()
-        } else {
-            left_eq_indexes
-                .iter()
-                .chain(left_stream_key)
-                .copied()
-                .collect_vec()
-        };
+        let memo_prefix_indices = left_eq_indexes
+            .iter()
+            .chain(left_stream_key)
+            .copied()
+            .collect_vec();
         let read_prefix_len_hint = memo_prefix_indices.len();
 
         // Build internal table
@@ -206,11 +201,11 @@ impl StreamTemporalJoin {
             left_dist_key
                 .iter()
                 .map(|dist_idx| {
-                    let position = memo_prefix_indices
+                    let position = left_stream_key
                         .iter()
                         .position(|idx| idx == dist_idx)
                         .expect("left distribution key must be part of the left stream key");
-                    right_scan_schema.len() + position
+                    right_scan_schema.len() + left_eq_indexes.len() + position
                 })
                 .collect()
         } else {

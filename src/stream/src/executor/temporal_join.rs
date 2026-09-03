@@ -108,7 +108,7 @@ impl JoinEntry {
 struct TemporalSide<K: HashKey, S: StateStore, SD: ValueRowSerde> {
     source: ReplicatedStateTable<S, SD>,
     table_stream_key_indices: Vec<usize>,
-    cache: Option<ManagedLruCache<K, JoinEntry>>,
+    cache: ManagedLruCache<K, JoinEntry>,
     join_key_data_types: Vec<DataType>,
 }
 
@@ -124,13 +124,7 @@ impl<K: HashKey, S: StateStore, SD: ValueRowSerde> TemporalSide<K, S, SD> {
         for key in keys {
             metrics.temporal_join_total_query_cache_count.inc();
 
-            if self
-                .cache
-                .as_mut()
-                .expect("lookup cache should be enabled")
-                .get(key)
-                .is_none()
-            {
+            if self.cache.get(key).is_none() {
                 metrics.temporal_join_cache_miss_count.inc();
 
                 futs.push(async {
@@ -166,73 +160,14 @@ impl<K: HashKey, S: StateStore, SD: ValueRowSerde> TemporalSide<K, S, SD> {
         #[for_await]
         for res in stream::iter(futs).buffered(16) {
             let (key, entry) = res?;
-            self.cache
-                .as_mut()
-                .expect("lookup cache should be enabled")
-                .put(key, entry);
+            self.cache.put(key, entry);
         }
 
         Ok(())
     }
 
-    /// Fetch records directly from storage without retaining them in an operator cache.
-    async fn fetch_keys_uncached(
-        &self,
-        keys: impl Iterator<Item = &K>,
-        metrics: &TemporalJoinMetrics,
-    ) -> StreamExecutorResult<HashMap<K, JoinEntry>> {
-        let mut unique_keys = HashMap::new();
-        for key in keys {
-            metrics.temporal_join_total_query_cache_count.inc();
-            if let Entry::Vacant(entry) = unique_keys.entry(key.clone()) {
-                metrics.temporal_join_cache_miss_count.inc();
-                entry.insert(());
-            }
-        }
-
-        let mut futs = Vec::with_capacity(unique_keys.len());
-        for key in unique_keys.into_keys() {
-            futs.push(async {
-                let pk_prefix = key.deserialize(&self.join_key_data_types)?;
-                let iter = self
-                    .source
-                    .iter_with_prefix(
-                        &pk_prefix,
-                        &(Bound::<OwnedRow>::Unbounded, Bound::<OwnedRow>::Unbounded),
-                        PrefetchOptions::default(),
-                    )
-                    .await?;
-
-                let mut entry = JoinEntry::default();
-                pin_mut!(iter);
-                while let Some(row) = iter.next().await {
-                    let row: OwnedRow = row?;
-                    entry.insert(
-                        row.as_ref()
-                            .project(&self.table_stream_key_indices)
-                            .into_owned_row(),
-                        row,
-                    );
-                }
-                Ok((key, entry)) as StreamExecutorResult<_>
-            });
-        }
-
-        let mut entries = HashMap::with_capacity(futs.len());
-        #[for_await]
-        for res in stream::iter(futs).buffered(16) {
-            let (key, entry) = res?;
-            entries.insert(key, entry);
-        }
-        Ok(entries)
-    }
-
     fn force_peek(&self, key: &K) -> &JoinEntry {
-        self.cache
-            .as_ref()
-            .expect("lookup cache should be enabled")
-            .peek(key)
-            .expect("key should exist")
+        self.cache.peek(key).expect("key should exist")
     }
 
     fn update(
@@ -247,13 +182,9 @@ impl<K: HashKey, S: StateStore, SD: ValueRowSerde> TemporalSide<K, S, SD> {
                 let Some((op, row)) = r else {
                     continue;
                 };
-                if self
-                    .cache
-                    .as_ref()
-                    .is_some_and(|cache| cache.contains(&key))
-                {
+                if self.cache.contains(&key) {
                     // Update cache
-                    let mut entry = self.cache.as_mut().unwrap().get_mut(&key).unwrap();
+                    let mut entry = self.cache.get_mut(&key).unwrap();
                     let stream_key = row.project(right_stream_key_indices).into_owned_row();
                     match op {
                         Op::Insert | Op::UpdateInsert => {
@@ -555,18 +486,9 @@ pub(super) mod phase1 {
                     None
                 }
             });
-        let uncached_entries = if right_table.cache.is_some() {
-            right_table
-                .fetch_or_promote_keys(to_fetch_keys, metrics)
-                .await?;
-            None
-        } else {
-            Some(
-                right_table
-                    .fetch_keys_uncached(to_fetch_keys, metrics)
-                    .await?,
-            )
-        };
+        right_table
+            .fetch_or_promote_keys(to_fetch_keys, metrics)
+            .await?;
 
         for (r, key) in chunk.rows_with_holes().zip_eq_debug(keys.into_iter()) {
             let Some((op, left_row)) = r else {
@@ -578,13 +500,7 @@ pub(super) mod phase1 {
             if APPEND_ONLY {
                 // Append-only temporal join
                 if key.null_bitmap().is_subset(null_matched)
-                    && let join_entry = if let Some(entries) = &uncached_entries {
-                        entries
-                            .get(&key)
-                            .expect("join key should have been fetched")
-                    } else {
-                        right_table.force_peek(&key)
-                    }
+                    && let join_entry = right_table.force_peek(&key)
                     && !join_entry.is_empty()
                 {
                     matched = true;
@@ -598,9 +514,9 @@ pub(super) mod phase1 {
                 }
             } else {
                 // Non-append-only temporal join
-                // The memo table persists each matched right row followed by a prefix identifying
-                // the left row. Regular temporal joins use `join_key + left_stream_key`; broadcast
-                // temporal joins use `left_stream_key`, which also owns the memo state.
+                // The memo table persists each matched right row followed by
+                // `join_key + left_stream_key`. For broadcast temporal joins, its distribution key
+                // refers to the `left_stream_key` portion, so the memo state follows the left side.
                 //
                 // Write pattern:
                 //   for each left input row (with insert op), persist every matched right row.
@@ -616,13 +532,7 @@ pub(super) mod phase1 {
                 match op {
                     Op::Insert | Op::UpdateInsert => {
                         if key.null_bitmap().is_subset(null_matched)
-                            && let join_entry = if let Some(entries) = &uncached_entries {
-                                entries
-                                    .get(&key)
-                                    .expect("join key should have been fetched")
-                            } else {
-                                right_table.force_peek(&key)
-                            }
+                            && let join_entry = right_table.force_peek(&key)
                             && !join_entry.is_empty()
                         {
                             matched = true;
@@ -723,11 +633,9 @@ impl<
         memo_table: Option<StateTable<S>>,
         is_broadcast: bool,
     ) -> Self {
-        let cache = (!is_broadcast).then(|| {
-            let metrics_info =
-                MetricsInfo::new(metrics.clone(), table.table_id(), ctx.id, "temporal join");
-            ManagedLruCache::unbounded(watermark_sequence, metrics_info)
-        });
+        let metrics_info =
+            MetricsInfo::new(metrics.clone(), table.table_id(), ctx.id, "temporal join");
+        let cache = ManagedLruCache::unbounded(watermark_sequence, metrics_info);
 
         let metrics = metrics.new_temporal_join_metrics(table.table_id(), ctx.id, ctx.fragment_id);
 
@@ -768,19 +676,12 @@ impl<
 
         let left_stream_key_indices = self.left.stream_key().to_vec();
         let right_stream_key_indices = self.right.stream_key().to_vec();
-        let memo_table_lookup_prefix = if self.is_broadcast {
-            // Broadcast preserves the left input distribution. Its stream key uniquely identifies
-            // the left row and contains the distribution key, so the memo state follows the left
-            // actor's vnode ownership.
-            left_stream_key_indices
-        } else {
-            // Keep the legacy layout for regular temporal joins and restored plans.
-            self.left_join_keys
-                .iter()
-                .cloned()
-                .chain(left_stream_key_indices)
-                .collect_vec()
-        };
+        let memo_table_lookup_prefix = self
+            .left_join_keys
+            .iter()
+            .cloned()
+            .chain(left_stream_key_indices)
+            .collect_vec();
 
         let null_matched = K::Bitmap::from_bool_vec(self.null_safe);
 
@@ -808,14 +709,10 @@ impl<
 
         #[for_await]
         for msg in input {
-            if let Some(cache) = self.right_table.cache.as_mut() {
-                cache.evict();
-                self.metrics
-                    .temporal_join_cached_entry_count
-                    .set(cache.len() as i64);
-            } else {
-                self.metrics.temporal_join_cached_entry_count.set(0);
-            }
+            self.right_table.cache.evict();
+            self.metrics
+                .temporal_join_cached_entry_count
+                .set(self.right_table.cache.len() as i64);
             match msg? {
                 InternalMessage::WaterMark(watermark) => {
                     let output_watermark_col_idx = *left_to_output.get(&watermark.col_idx).unwrap();
@@ -966,9 +863,8 @@ impl<
                     if let Some((_, true)) = right_post_commit
                         .post_yield_barrier(right_update_vnode_bitmap)
                         .await?
-                        && let Some(cache) = self.right_table.cache.as_mut()
                     {
-                        cache.clear();
+                        self.right_table.cache.clear();
                     }
                     if let Some(memo_post_commit) = memo_post_commit {
                         memo_post_commit
@@ -1043,7 +939,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_broadcast_temporal_join_pk_prefix_staging_merge_uncached() {
+    async fn test_broadcast_temporal_join_pk_prefix_staging_merge_cached() {
         Box::pin(run_temporal_join_pk_prefix_staging_merge(true)).await;
     }
 
@@ -1078,19 +974,24 @@ mod tests {
         .build()
         .await;
 
-        // Memo row: (lookup_id, dim_value, left_id). Its prefix and distribution key are the
-        // broadcast join's left stream key (`left_id`), across 8 vnodes.
+        // Memo row: (right_lookup_id, dim_value, left_lookup_id, left_id). Its prefix remains
+        // `left_lookup_id + left_id`, while its distribution key refers to the `left_id` copy.
         let mut memo_catalog = gen_pbtable_with_dist_key(
             TableId::new(2),
             vec![
                 ColumnDesc::unnamed(ColumnId::new(0), DataType::Int32),
                 ColumnDesc::unnamed(ColumnId::new(1), DataType::Int32),
                 ColumnDesc::unnamed(ColumnId::new(2), DataType::Int32),
+                ColumnDesc::unnamed(ColumnId::new(3), DataType::Int32),
             ],
-            vec![OrderType::ascending(), OrderType::ascending()],
-            vec![2, 0],
-            1,
-            vec![2],
+            vec![
+                OrderType::ascending(),
+                OrderType::ascending(),
+                OrderType::ascending(),
+            ],
+            vec![2, 3, 0],
+            2,
+            vec![3],
         );
         memo_catalog.maybe_vnode_count = Some(8);
         let memo_table =

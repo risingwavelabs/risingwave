@@ -83,11 +83,11 @@
     └── BatchPlanNode
 
     Table 0
-    ├── columns: [ version_id2, version_a2, stream_id1, _rw_timestamp ]
-    ├── primary key: [ $2 ASC, $0 ASC ]
-    ├── value indices: [ 0, 1, 2 ]
-    ├── distribution key: [ 2 ]
-    └── read pk prefix len hint: 1
+    ├── columns: [ version_id2, version_a2, stream_a1, stream_id1, _rw_timestamp ]
+    ├── primary key: [ $2 ASC, $3 ASC, $0 ASC ]
+    ├── value indices: [ 0, 1, 2, 3 ]
+    ├── distribution key: [ 3 ]
+    └── read pk prefix len hint: 2
 
     Table 1
     ├── columns: [ vnode, id1, backfill_finished, row_count, _rw_timestamp ]
