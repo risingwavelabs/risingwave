@@ -14,7 +14,7 @@
 
 use postgres_types::Type as PgType;
 
-use super::{DataType, StructType};
+use super::DataType;
 
 /// `DataType` information extracted from PostgreSQL `pg_type`
 ///
@@ -54,13 +54,6 @@ macro_rules! for_all_base_types {
 #[derive(Debug, thiserror::Error)]
 #[error("Unsupported oid {0}")]
 pub struct UnsupportedOid(i32);
-
-pub fn postgres_point_type() -> DataType {
-    DataType::Struct(StructType::new([
-        ("x", DataType::Float64),
-        ("y", DataType::Float64),
-    ]))
-}
 
 /// Get type information compatible with Postgres type, such as oid, type length.
 impl DataType {
