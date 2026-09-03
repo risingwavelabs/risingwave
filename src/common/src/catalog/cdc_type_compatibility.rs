@@ -217,7 +217,7 @@ fn postgres_source_column_type_compatible(
         "user-defined" => match udt_name.map(str::to_ascii_lowercase).as_deref() {
             Some("citext") => rw_type == &DataType::Varchar,
             Some("geometry" | "geography") => rw_type == &DataType::Bytea,
-            Some("vector") => rw_type == &DataType::Vector,
+            Some("vector") => matches!(rw_type, DataType::Vector(_)),
             Some("ltree" | "hstore") | None => false,
             Some(_) => rw_type == &DataType::Varchar,
         },
