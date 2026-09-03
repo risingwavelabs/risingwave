@@ -3967,7 +3967,7 @@ fn merge_with_options(with_properties: &mut Vec<SqlOption>, altered_options: Vec
             .iter_mut()
             .find(|option| option.name.real_value() == altered_option.name.real_value())
         {
-            existing_option.value = altered_option.value;
+            *existing_option = altered_option;
         } else {
             with_properties.push(altered_option);
         }
@@ -4103,7 +4103,7 @@ mod tests {
     use super::{Parser, merge_with_options};
 
     #[test]
-    fn test_merge_with_options_preserves_original_option_name() {
+    fn test_merge_with_options_normalizes_altered_option_name() {
         let mut statements = Parser::parse_sql(
             "CREATE SOURCE s WITH (properties.receive.message.max.bytes = 'old', \
              connection = kafka_conn) FORMAT PLAIN ENCODE JSON",
@@ -4124,7 +4124,7 @@ mod tests {
         assert_eq!(with_properties.len(), 2);
         assert_eq!(
             with_properties[0].to_string(),
-            "properties.receive.message.max.bytes = 'new'"
+            "properties.receive.\"message\".\"max\".bytes = 'new'"
         );
         assert_eq!(with_properties[1].to_string(), "connection = kafka_conn");
     }
