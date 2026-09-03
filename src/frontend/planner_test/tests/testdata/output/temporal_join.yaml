@@ -51,14 +51,67 @@
 
     Table 4294967294 { columns: [ id1, a1, id2, a2, stream._row_id, _rw_timestamp ], primary key: [ $4 ASC, $0 ASC ], value indices: [ 0, 1, 2, 3, 4 ], distribution key: [ 0, 4 ], read pk prefix len hint: 2 }
 
-- name: Broadcast temporal join requires an append-only left input
+- name: Broadcast temporal join memo table follows the non-append-only left distribution
   sql: |
     create table stream(id1 int primary key, a1 int, b1 int);
     create table version(id2 int, a2 int, b2 int, primary key (id2));
-    select id1, a1, id2, a2 from stream broadcast join version FOR SYSTEM_TIME AS OF PROCTIME() on id1 = id2;
-  stream_error: |-
-    Not supported: Broadcast temporal join requires the left input to be append-only
-    HINT: Please use a regular temporal join for a non-append-only input
+    select id1, a1, id2, a2 from stream broadcast join version FOR SYSTEM_TIME AS OF PROCTIME() on a1 = id2;
+  stream_plan: |-
+    StreamMaterialize { columns: [id1, a1, id2, a2], stream_key: [id1, a1], pk_columns: [id1, a1], pk_conflict: NoCheck }
+    └─StreamExchange { dist: HashShard(stream.id1, stream.a1) }
+      └─StreamTemporalJoin { type: Inner, append_only: false, predicate: stream.a1 = version.id2, nested_loop: false, broadcast: true, output: all }
+        ├─StreamTableScan { table: stream, columns: [stream.id1, stream.a1], stream_scan_type: ArrangementBackfill, stream_key: [stream.id1], pk: [id1], dist: UpstreamHashShard(stream.id1) }
+        └─StreamExchange { dist: Broadcast }
+          └─StreamTableScan { table: version, columns: [version.id2, version.a2], stream_scan_type: UpstreamOnly, stream_key: [version.id2], pk: [id2], dist: UpstreamHashShard(version.id2) }
+  stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [id1, a1, id2, a2], stream_key: [id1, a1], pk_columns: [id1, a1], pk_conflict: NoCheck }
+    └── StreamExchange Hash([0, 1]) from 1
+
+    Fragment 1
+    StreamTemporalJoin { type: Inner, append_only: false, predicate: stream.a1 = version.id2, nested_loop: false, broadcast: true, output: all } { tables: [ TemporalJoinMemo: 0 ] }
+    ├── StreamTableScan { table: stream, columns: [stream.id1, stream.a1], stream_scan_type: ArrangementBackfill, stream_key: [stream.id1], pk: [id1], dist: UpstreamHashShard(stream.id1) }
+    │   ├── tables: [ StreamScan: 1 ]
+    │   ├── Upstream
+    │   └── BatchPlanNode
+    └── StreamExchange Broadcast from 2
+
+    Fragment 2
+    StreamTableScan { table: version, columns: [version.id2, version.a2], stream_scan_type: UpstreamOnly, stream_key: [version.id2], pk: [id2], dist: UpstreamHashShard(version.id2) }
+    ├── tables: [ StreamScan: 2 ]
+    ├── Upstream
+    └── BatchPlanNode
+
+    Table 0
+    ├── columns: [ version_id2, version_a2, stream_id1, _rw_timestamp ]
+    ├── primary key: [ $2 ASC, $0 ASC ]
+    ├── value indices: [ 0, 1, 2 ]
+    ├── distribution key: [ 2 ]
+    └── read pk prefix len hint: 1
+
+    Table 1
+    ├── columns: [ vnode, id1, backfill_finished, row_count, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 2
+    ├── columns: [ vnode, id2, backfill_finished, row_count, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 4294967294
+    ├── columns: [ id1, a1, id2, a2, _rw_timestamp ]
+    ├── primary key: [ $0 ASC, $1 ASC ]
+    ├── value indices: [ 0, 1, 2, 3 ]
+    ├── distribution key: [ 0, 1 ]
+    └── read pk prefix len hint: 2
+
 - name: Inner join type for temporal join
   sql: |
     create table stream(id1 int, a1 int, b1 int) APPEND ONLY;

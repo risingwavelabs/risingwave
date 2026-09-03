@@ -598,13 +598,15 @@ pub(super) mod phase1 {
                 }
             } else {
                 // Non-append-only temporal join
-                // The memo-table pk and columns:
-                // (`join_key` + `left_pk` + `right_pk`) -> (`right_scan_schema` + `join_key` + `left_pk`)
+                // The memo table persists each matched right row followed by a prefix identifying
+                // the left row. Regular temporal joins use `join_key + left_stream_key`; broadcast
+                // temporal joins use `left_stream_key`, which also owns the memo state.
                 //
                 // Write pattern:
-                //   for each left input row (with insert op), construct the memo table pk and insert the row into the memo table.
+                //   for each left input row (with insert op), persist every matched right row.
                 // Read pattern:
-                //   for each left input row (with delete op), construct pk prefix (`join_key` + `left_pk`) to fetch rows and delete them from the memo table.
+                //   for each left input row (with delete op), fetch the historical right rows by
+                //   memo prefix and delete them from the memo table.
                 //
                 // Temporal join supports inner join and left outer join, additionally, it could contain other conditions.
                 // Surprisingly, we could handle them in a unified way with memo table.
@@ -766,12 +768,19 @@ impl<
 
         let left_stream_key_indices = self.left.stream_key().to_vec();
         let right_stream_key_indices = self.right.stream_key().to_vec();
-        let memo_table_lookup_prefix = self
-            .left_join_keys
-            .iter()
-            .cloned()
-            .chain(left_stream_key_indices)
-            .collect_vec();
+        let memo_table_lookup_prefix = if self.is_broadcast {
+            // Broadcast preserves the left input distribution. Its stream key uniquely identifies
+            // the left row and contains the distribution key, so the memo state follows the left
+            // actor's vnode ownership.
+            left_stream_key_indices
+        } else {
+            // Keep the legacy layout for regular temporal joins and restored plans.
+            self.left_join_keys
+                .iter()
+                .cloned()
+                .chain(left_stream_key_indices)
+                .collect_vec()
+        };
 
         let null_matched = K::Bitmap::from_bool_vec(self.null_safe);
 
@@ -992,6 +1001,7 @@ mod tests {
     use std::sync::atomic::AtomicU64;
 
     use risingwave_common::array::*;
+    use risingwave_common::bitmap::Bitmap;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::hash::Key32;
     use risingwave_common::types::{DataType, ScalarRefImpl};
@@ -1000,12 +1010,13 @@ mod tests {
     use risingwave_common::util::value_encoding::BasicSerde;
     use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
     use risingwave_storage::hummock::HummockStorage;
+    use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
     use crate::common::table::state_table::{
         StateTable, StateTableBuilder, StateTableOpConsistencyLevel,
     };
-    use crate::common::table::test_utils::gen_pbtable;
+    use crate::common::table::test_utils::{gen_pbtable, gen_pbtable_with_dist_key};
     use crate::executor::monitor::StreamingMetrics;
     use crate::executor::test_utils::{MockSource, StreamExecutorTestExt};
     use crate::executor::{ActorContext, ExecutorInfo, JoinType};
@@ -1028,12 +1039,180 @@ mod tests {
     ///   (3, 333, 3, 1, 400)  — key=3 row matched from epoch2 data
     #[tokio::test]
     async fn test_temporal_join_pk_prefix_staging_merge_cached() {
-        run_temporal_join_pk_prefix_staging_merge(false).await;
+        Box::pin(run_temporal_join_pk_prefix_staging_merge(false)).await;
     }
 
     #[tokio::test]
     async fn test_broadcast_temporal_join_pk_prefix_staging_merge_uncached() {
-        run_temporal_join_pk_prefix_staging_merge(true).await;
+        Box::pin(run_temporal_join_pk_prefix_staging_merge(true)).await;
+    }
+
+    /// A broadcast temporal join must retract the right row that matched at insert time, even if
+    /// the lookup table has since changed. The lookup replica and left-owned memo table also use
+    /// deliberately different vnode counts here.
+    #[tokio::test]
+    async fn test_broadcast_temporal_join_retracts_memoized_row() {
+        let store = MemoryStateStore::new();
+
+        // Lookup table: (lookup_id, dim_value), distributed across 16 vnodes.
+        let mut right_catalog = gen_pbtable_with_dist_key(
+            TableId::new(1),
+            vec![
+                ColumnDesc::unnamed(ColumnId::new(0), DataType::Int32),
+                ColumnDesc::unnamed(ColumnId::new(1), DataType::Int32),
+            ],
+            vec![OrderType::ascending()],
+            vec![0],
+            1,
+            vec![0],
+        );
+        right_catalog.maybe_vnode_count = Some(16);
+        let right_table = StateTableBuilder::<_, BasicSerde, true, _>::new(
+            &right_catalog,
+            store.clone(),
+            Some(Arc::new(Bitmap::ones(16))),
+        )
+        .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)
+        .with_output_column_ids(vec![ColumnId::new(0), ColumnId::new(1)])
+        .forbid_preload_all_rows()
+        .build()
+        .await;
+
+        // Memo row: (lookup_id, dim_value, left_id). Its prefix and distribution key are the
+        // broadcast join's left stream key (`left_id`), across 8 vnodes.
+        let mut memo_catalog = gen_pbtable_with_dist_key(
+            TableId::new(2),
+            vec![
+                ColumnDesc::unnamed(ColumnId::new(0), DataType::Int32),
+                ColumnDesc::unnamed(ColumnId::new(1), DataType::Int32),
+                ColumnDesc::unnamed(ColumnId::new(2), DataType::Int32),
+            ],
+            vec![OrderType::ascending(), OrderType::ascending()],
+            vec![2, 0],
+            1,
+            vec![2],
+        );
+        memo_catalog.maybe_vnode_count = Some(8);
+        let memo_table =
+            StateTableBuilder::new(&memo_catalog, store, Some(Arc::new(Bitmap::ones(8))))
+                .forbid_preload_all_rows()
+                .build()
+                .await;
+
+        // Left: (left_id, lookup_id, payload), distributed and keyed by `left_id`.
+        let left_schema = Schema::new(vec![
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int32),
+        ]);
+        let (mut left_tx, left_source) = MockSource::channel();
+        let left_executor = left_source.into_executor(left_schema, vec![0]);
+
+        let right_schema = Schema::new(vec![
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int32),
+        ]);
+        let (mut right_tx, right_source) = MockSource::channel();
+        let right_executor = right_source.into_executor(right_schema, vec![0]);
+
+        let output_schema = Schema::new(vec![
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int32),
+            Field::unnamed(DataType::Int32),
+        ]);
+        let info = ExecutorInfo::for_test(
+            output_schema,
+            vec![0],
+            "BroadcastTemporalJoinRetractTest".to_owned(),
+            0,
+        );
+
+        let executor = TemporalJoinExecutor::<
+            Key32,
+            MemoryStateStore,
+            BasicSerde,
+            { JoinType::Inner },
+            false,
+        >::new(
+            ActorContext::for_test(0),
+            info,
+            left_executor,
+            right_executor,
+            right_table,
+            vec![1], // left lookup key
+            vec![0], // right lookup key
+            vec![false],
+            None,
+            vec![0, 1, 2, 3, 4],
+            vec![0], // right stream key
+            Arc::new(AtomicU64::new(0)),
+            Arc::new(StreamingMetrics::unused()),
+            1024,
+            vec![DataType::Int32],
+            Some(memo_table),
+            true,
+        );
+        let mut stream = Box::new(executor).execute();
+
+        left_tx.push_barrier(test_epoch(1), false);
+        right_tx.push_barrier(test_epoch(1), false);
+        stream.expect_barrier().await;
+
+        // Publish dimension v1.
+        right_tx.push_chunk(StreamChunk::from_pretty(
+            " i  i
+             + 1 10",
+        ));
+        left_tx.push_barrier(test_epoch(2), false);
+        right_tx.push_barrier(test_epoch(2), false);
+        stream.expect_barrier().await;
+
+        // The left row joins v1, which is persisted in memo state under `left_id = 100`.
+        left_tx.push_chunk(StreamChunk::from_pretty(
+            " i   i i
+             + 100 1 7",
+        ));
+        assert_eq!(
+            stream.expect_chunk().await,
+            StreamChunk::from_pretty(
+                " i   i i i  i
+                 + 100 1 7 1 10",
+            )
+        );
+        left_tx.push_barrier(test_epoch(3), false);
+        right_tx.push_barrier(test_epoch(3), false);
+        stream.expect_barrier().await;
+
+        // Replace dimension v1 with v2 after the left row was joined.
+        right_tx.push_chunk(StreamChunk::from_pretty(
+            "  i  i
+             U- 1 10
+             U+ 1 20",
+        ));
+        left_tx.push_barrier(test_epoch(4), false);
+        right_tx.push_barrier(test_epoch(4), false);
+        stream.expect_barrier().await;
+
+        // Deleting the old left row must retract v1, while a new row sees v2.
+        left_tx.push_chunk(StreamChunk::from_pretty(
+            " i   i i
+             - 100 1 7
+             + 101 1 8",
+        ));
+        assert_eq!(
+            stream.expect_chunk().await,
+            StreamChunk::from_pretty(
+                " i   i i i  i
+                 - 100 1 7 1 10
+                 + 101 1 8 1 20",
+            )
+        );
+
+        left_tx.push_barrier(test_epoch(5), true);
+        right_tx.push_barrier(test_epoch(5), true);
+        stream.expect_barrier().await;
     }
 
     async fn run_temporal_join_pk_prefix_staging_merge(is_broadcast: bool) {

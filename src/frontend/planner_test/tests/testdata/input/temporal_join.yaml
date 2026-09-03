@@ -14,13 +14,14 @@
   expected_outputs:
   - stream_plan
   - stream_dist_plan
-- name: Broadcast temporal join requires an append-only left input
+- name: Broadcast temporal join memo table follows the non-append-only left distribution
   sql: |
     create table stream(id1 int primary key, a1 int, b1 int);
     create table version(id2 int, a2 int, b2 int, primary key (id2));
-    select id1, a1, id2, a2 from stream broadcast join version FOR SYSTEM_TIME AS OF PROCTIME() on id1 = id2;
+    select id1, a1, id2, a2 from stream broadcast join version FOR SYSTEM_TIME AS OF PROCTIME() on a1 = id2;
   expected_outputs:
-  - stream_error
+  - stream_plan
+  - stream_dist_plan
 - name: Inner join type for temporal join
   sql: |
     create table stream(id1 int, a1 int, b1 int) APPEND ONLY;

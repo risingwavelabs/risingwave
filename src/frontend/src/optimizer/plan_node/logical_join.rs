@@ -1318,14 +1318,7 @@ impl LogicalJoin {
 
         let left = self.left().to_stream(ctx)?;
         let left = if is_broadcast {
-            let left = left.enforce_concrete_distribution();
-            if !left.append_only() {
-                return Err(RwError::from(ErrorCode::NotSupported(
-                    "Broadcast temporal join requires the left input to be append-only".into(),
-                    "Please use a regular temporal join for a non-append-only input".into(),
-                )));
-            }
-            left
+            left.enforce_concrete_distribution()
         } else {
             // Enforce a shuffle for the temporal join LHS to let the scheduler be able to schedule
             // the join fragment together with the RHS with a `no_shuffle` exchange.

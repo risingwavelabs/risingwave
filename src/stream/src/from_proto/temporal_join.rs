@@ -159,10 +159,6 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
                 .collect_vec();
 
             let memo_table = node.get_memo_table();
-            assert!(
-                !is_broadcast || memo_table.is_err(),
-                "broadcast temporal join must be append-only"
-            );
             let memo_table = match memo_table {
                 Ok(memo_table) => {
                     let vnodes = Arc::new(
