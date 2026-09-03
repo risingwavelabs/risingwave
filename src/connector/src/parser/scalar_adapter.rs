@@ -74,7 +74,7 @@ impl ToSql for EnumString {
     }
 }
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug)]
 pub(crate) struct PgPoint {
     x: f64,
     y: f64,
@@ -225,6 +225,26 @@ impl ScalarAdapter {
     ) -> ConnectorResult<ScalarAdapter> {
         Ok(match (scalar, ty, ty.kind()) {
             (ScalarRefImpl::Utf8(s), &Type::UUID, _) => ScalarAdapter::Uuid(s.parse()?),
+            (ScalarRefImpl::Struct(point), &Type::POINT, _) => {
+                let mut fields = point.iter_fields_ref();
+
+                let (
+                    Some(Some(ScalarRefImpl::Float64(x))),
+                    Some(Some(ScalarRefImpl::Float64(y))),
+                    None,
+                ) = (fields.next(), fields.next(), fields.next())
+                else {
+                    return Err(anyhow!(
+                        "failed to convert struct to PostgreSQL point: expected exactly two non-null float64 fields"
+                    )
+                    .into());
+                };
+
+                ScalarAdapter::Point(PgPoint {
+                    x: x.into_inner(),
+                    y: y.into_inner(),
+                })
+            }
             (ScalarRefImpl::Utf8(s), &Type::NUMERIC, _) => {
                 ScalarAdapter::Numeric(string_to_pg_numeric(s))
             }

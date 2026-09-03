@@ -913,6 +913,9 @@ pub fn type_name_to_pg_type(ty_name: &str) -> Option<PgType> {
     }
 }
 
+// Keep this canonical mapping aligned with `postgres_source_column_type_compatible` in
+// `src/common/src/catalog/cdc_type_compatibility.rs`, which validates user-declared RW column
+// types.
 pub fn pg_type_to_rw_type(pg_type: &PgType) -> ConnectorResult<DataType> {
     let data_type = match *pg_type {
         PgType::BOOL => DataType::Boolean,
