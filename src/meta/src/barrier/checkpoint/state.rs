@@ -32,15 +32,15 @@ use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::barrier_mutation::{Mutation, PbMutation};
 use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::{
-    AddMutation, PbStartFragmentBackfillMutation, PbSubscriptionUpstreamInfo, PbUpdateMutation,
-    PbUpstreamSinkInfo,
+    AddMutation, PbDropSubscriptionsMutation, PbStartFragmentBackfillMutation,
+    PbSubscriptionUpstreamInfo, PbUpdateMutation, PbUpstreamSinkInfo,
 };
 use tracing::warn;
 
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::checkpoint::{
     BatchRefreshJobCheckpointControl, BatchRefreshLogicalFragments, CreatingStreamingJobControl,
-    DatabaseCheckpointControl, IndependentCheckpointJobControl,
+    DatabaseCheckpointControl, IndependentCheckpointJob, IndependentCheckpointJobControl,
 };
 use crate::barrier::command::{
     CreateStreamingJobCommandInfo, PostCollectCommand, ReschedulePlan, ThrottleConfigMap,
@@ -377,6 +377,28 @@ pub(super) fn render_actors(
     })
 }
 impl DatabaseCheckpointControl {
+    fn take_pending_independent_job_subscriptions_to_drop(
+        &mut self,
+    ) -> Vec<PbSubscriptionUpstreamInfo> {
+        take(&mut self.pending_independent_job_subscriptions_to_drop)
+            .into_iter()
+            .filter(|info| {
+                let upstream_job_id = info.upstream_mv_table_id.as_job_id();
+                if !self.database_info.contains_job(upstream_job_id) {
+                    // The upstream job and its materialize executors have already been removed, so
+                    // there is no subscriber left to unregister or notify.
+                    return false;
+                }
+                assert_matches!(
+                    self.database_info
+                        .unregister_subscriber(upstream_job_id, info.subscriber_id),
+                    Some(SubscriberType::SnapshotBackfill)
+                );
+                true
+            })
+            .collect()
+    }
+
     /// Collect table IDs to commit and actor IDs to collect from current fragment infos.
     fn collect_base_info(&self) -> (HashSet<TableId>, HashMap<WorkerId, HashSet<ActorId>>) {
         let table_ids_to_commit = self.database_info.existing_table_ids().collect();
@@ -783,8 +805,14 @@ impl DatabaseCheckpointControl {
                         );
                     }
 
-                    self.independent_checkpoint_job_controls
-                        .insert(job_id, IndependentCheckpointJobControl::BatchRefresh(job));
+                    self.independent_checkpoint_job_controls.insert(
+                        job_id,
+                        IndependentCheckpointJobControl::batch_refresh(
+                            job_id,
+                            to_partial_graph_id(self.database_id, Some(job_id)),
+                            job,
+                        ),
+                    );
 
                     // Register permanent subscriber (never unregistered until MV is dropped)
                     for upstream_mv_table_id in snapshot_backfill_info_clone
@@ -1480,14 +1508,14 @@ impl DatabaseCheckpointControl {
         };
 
         let mut finished_snapshot_backfill_jobs = HashSet::new();
-        let mutation = match mutation {
+        let mut mutation = match mutation {
             Some(mutation) => Some(mutation),
             None => {
                 let mut finished_snapshot_backfill_job_info = HashMap::new();
                 if barrier_info.kind.is_checkpoint() {
                     for (&job_id, job) in &mut self.independent_checkpoint_job_controls {
-                        if let IndependentCheckpointJobControl::CreatingStreamingJob(creating_job) =
-                            job
+                        if let Some(IndependentCheckpointJob::CreatingStreamingJob(creating_job)) =
+                            job.running_mut()
                             && creating_job.should_merge_to_upstream(partial_graph_manager)
                         {
                             // The independent actors will stop on this barrier. Apply throttle to
@@ -1726,10 +1754,40 @@ impl DatabaseCheckpointControl {
             }
         };
 
+        if matches!(
+            mutation,
+            None | Some(PbMutation::Update(_)) | Some(PbMutation::DropSubscriptions(_))
+        ) && !self
+            .pending_independent_job_subscriptions_to_drop
+            .is_empty()
+        {
+            let subscriptions_to_drop = self.take_pending_independent_job_subscriptions_to_drop();
+            if !subscriptions_to_drop.is_empty() {
+                match &mut mutation {
+                    None => {
+                        mutation =
+                            Some(PbMutation::DropSubscriptions(PbDropSubscriptionsMutation {
+                                info: subscriptions_to_drop,
+                            }));
+                    }
+                    Some(PbMutation::Update(update)) => {
+                        update.subscriptions_to_drop.extend(subscriptions_to_drop);
+                    }
+                    Some(PbMutation::DropSubscriptions(drop_subscriptions)) => {
+                        drop_subscriptions.info.extend(subscriptions_to_drop);
+                    }
+                    Some(_) => unreachable!("checked compatible mutation above"),
+                }
+            }
+        }
+
         // Forward barrier to independent job controls
         for (job_id, job) in &mut self.independent_checkpoint_job_controls {
+            let Some(job) = job.running_mut() else {
+                continue;
+            };
             match job {
-                IndependentCheckpointJobControl::CreatingStreamingJob(creating_job) => {
+                IndependentCheckpointJob::CreatingStreamingJob(creating_job) => {
                     if finished_snapshot_backfill_jobs.contains(job_id) {
                         continue;
                     }
@@ -1744,7 +1802,7 @@ impl DatabaseCheckpointControl {
                         throttle_mutation,
                     )?;
                 }
-                IndependentCheckpointJobControl::BatchRefresh(batch_refresh_job) => {
+                IndependentCheckpointJob::BatchRefresh(batch_refresh_job) => {
                     let throttle_mutation = throttle_config.as_mut().and_then(|config| {
                         batch_refresh_job
                             .pre_apply_throttle(config)
