@@ -89,7 +89,7 @@ use crate::stream::UpstreamSinkInfo;
 use crate::{MetaResult, model};
 
 /// Some information of running (inflight) actors.
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct InflightActorInfo {
     pub worker_id: WorkerId,
     pub vnode_bitmap: Option<Bitmap>,
@@ -119,7 +119,7 @@ struct FragmentDescRow {
     stream_node: Option<StreamNode>,
 }
 
-#[derive(Clone, Debug)]
+#[derive(Debug)]
 pub struct InflightFragmentInfo {
     pub fragment_id: FragmentId,
     pub distribution_type: DistributionType,
@@ -398,13 +398,11 @@ impl CatalogController {
     )> {
         let fragment::Model {
             fragment_id,
-            job_id,
             fragment_type_mask,
             distribution_type,
             stream_node,
             state_table_ids,
             vnode_count,
-            parallelism,
             ..
         } = fragment;
 
@@ -472,13 +470,11 @@ impl CatalogController {
         let pb_distribution_type = PbFragmentDistributionType::from(distribution_type) as _;
         let pb_fragment = Fragment {
             fragment_id: fragment_id as _,
-            job_id,
             fragment_type_mask: fragment_type_mask.into(),
             distribution_type: pb_distribution_type,
             state_table_ids: pb_state_table_ids,
             maybe_vnode_count: VnodeCount::set(vnode_count).to_protobuf(),
             nodes: stream_node,
-            parallelism,
         };
 
         Ok((pb_fragment, pb_actors, pb_actor_status, pb_actor_splits))
@@ -2217,13 +2213,11 @@ mod tests {
 
         let pb_fragment = Fragment {
             fragment_id: TEST_FRAGMENT_ID as _,
-            job_id: TEST_JOB_ID,
             fragment_type_mask: FragmentTypeMask::from(FragmentTypeFlag::Source as u32),
             distribution_type: PbFragmentDistributionType::Hash as _,
             state_table_ids: vec![TEST_STATE_TABLE_ID as _],
             maybe_vnode_count: VnodeCount::for_test().to_protobuf(),
             nodes: stream_node,
-            parallelism: None,
         };
 
         let fragment =
@@ -2394,7 +2388,6 @@ mod tests {
             state_table_ids: pb_state_table_ids,
             maybe_vnode_count: _,
             nodes,
-            ..
         } = pb_fragment;
 
         assert_eq!(fragment_id, TEST_FRAGMENT_ID);

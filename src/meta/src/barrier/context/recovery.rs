@@ -45,11 +45,12 @@ use crate::barrier::progress::TrackingJob;
 use crate::barrier::rpc::to_partial_graph_id;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::scale::{
-    FragmentRenderMap, LoadedFragmentContext, RenderedGraph, render_actor_assignments,
+    FragmentRenderMap, LoadedFragment, LoadedFragmentContext, RenderedGraph,
+    render_actor_assignments,
 };
 use crate::controller::utils::StreamingJobExtraInfo;
 use crate::manager::ActiveStreamingWorkerNodes;
-use crate::model::{ActorId, Fragment, FragmentDownstreamRelation, FragmentId, StreamActor};
+use crate::model::{ActorId, FragmentDownstreamRelation, FragmentId, StreamActor};
 use crate::rpc::ddl_controller::refill_upstream_sink_union_in_table;
 use crate::stream::cdc::reload_cdc_table_snapshot_splits;
 use crate::stream::{
@@ -314,7 +315,7 @@ fn build_stream_actors(
 impl GlobalBarrierWorkerContextImpl {
     fn resolve_job_committed_epoch(
         job_id: JobId,
-        fragments: &HashMap<FragmentId, Fragment>,
+        fragments: &HashMap<FragmentId, LoadedFragment>,
         state_table_committed_epochs: &HashMap<TableId, u64>,
     ) -> MetaResult<u64> {
         let mut table_id_iter = fragments
@@ -745,7 +746,7 @@ impl GlobalBarrierWorkerContextImpl {
 
     #[expect(clippy::type_complexity)]
     fn resolve_hummock_version_epochs(
-        creating_jobs: impl Iterator<Item = (JobId, &HashMap<FragmentId, Fragment>)>,
+        creating_jobs: impl Iterator<Item = (JobId, &HashMap<FragmentId, LoadedFragment>)>,
         version: &HummockVersion,
         table_change_log: &TableChangeLogs,
     ) -> MetaResult<(

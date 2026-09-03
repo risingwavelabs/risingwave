@@ -51,27 +51,25 @@ use crate::stream::source_manager::SplitAssignment;
 use crate::stream::{GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef};
 
 #[derive(Debug)]
-pub(super) struct CreateSnapshotBackfillJobCommandInfo {
+pub(super) struct CreateIndependentStreamingJobCommandInfo {
     pub info: CreateStreamingJobCommandInfo,
     pub snapshot_backfill_info: SnapshotBackfillInfo,
     pub cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
     pub resolved_split_assignment: SplitAssignment,
-    /// If set, this is a batch refresh job rather than a regular snapshot backfill.
-    pub refresh_interval_sec: Option<u64>,
+    pub kind: IndependentStreamingJobType,
 }
 
-impl CreateSnapshotBackfillJobCommandInfo {
+impl CreateIndependentStreamingJobCommandInfo {
     pub(super) fn into_post_collect(self) -> PostCollectCommand {
-        let kind = if let Some(refresh_interval_sec) = self.refresh_interval_sec {
-            IndependentStreamingJobType::BatchRefresh {
-                refresh_interval_sec,
+        let kind = match self.kind {
+            IndependentStreamingJobType::SnapshotBackfill { .. } => {
+                IndependentStreamingJobType::SnapshotBackfill {
+                    // `since_epoch` is only used before job creation barriers are injected, and
+                    // post-collect snapshot backfill does not go through that path.
+                    since_epoch: None,
+                }
             }
-        } else {
-            IndependentStreamingJobType::SnapshotBackfill {
-                // `since_epoch` is only used before job creation barriers are injected, and
-                // post-collect snapshot backfill does not go through that path.
-                since_epoch: None,
-            }
+            kind @ IndependentStreamingJobType::BatchRefresh { .. } => kind,
         };
         PostCollectCommand::CreateStreamingJob {
             info: self.info,

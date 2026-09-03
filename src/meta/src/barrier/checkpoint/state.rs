@@ -46,7 +46,7 @@ use crate::barrier::checkpoint::{
 use crate::barrier::command::{
     CreateStreamingJobCommandInfo, PostCollectCommand, ReschedulePlan, ThrottleConfigMap,
 };
-use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
+use crate::barrier::context::CreateIndependentStreamingJobCommandInfo;
 use crate::barrier::edge_builder::{EdgeBuilderFragmentInfo, FragmentEdgeBuilder};
 use crate::barrier::info::{
     BarrierInfo, CreateStreamingJobStatus, InflightDatabaseInfo, InflightStreamingJobInfo,
@@ -60,7 +60,7 @@ use crate::barrier::{
 };
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::scale::{
-    ComponentFragmentAligner, EnsembleActorTemplate, NoShuffleEnsemble,
+    ComponentFragmentAligner, EnsembleActorTemplate, LoadedFragment, NoShuffleEnsemble,
     build_no_shuffle_fragment_graph_edges, find_no_shuffle_graphs,
 };
 use crate::model::{
@@ -500,6 +500,7 @@ impl DatabaseCheckpointControl {
 
         let mut notify_database_graph = command.is_some();
         let mut throttle_config: Option<ThrottleConfigMap> = None;
+
         // Each variant handles its own pre-apply, edge building, mutation generation,
         // collect base info, and post-apply. The match produces values consumed by the
         // common snapshot-backfill-merging code that follows.
@@ -610,12 +611,14 @@ impl DatabaseCheckpointControl {
                     let term_id = self.term_id.as_str();
                     let job = CreatingStreamingJobControl::new(
                         entry,
-                        CreateSnapshotBackfillJobCommandInfo {
+                        CreateIndependentStreamingJobCommandInfo {
                             info: info.clone(),
                             snapshot_backfill_info: snapshot_backfill_info.clone(),
                             cross_db_snapshot_backfill_info,
                             resolved_split_assignment: resolved_split_assignment.clone(),
-                            refresh_interval_sec: None,
+                            kind: IndependentStreamingJobType::SnapshotBackfill {
+                                since_epoch: None,
+                            },
                         },
                         notifier.as_mut(),
                         snapshot_backfill_upstream_tables,
@@ -727,7 +730,25 @@ impl DatabaseCheckpointControl {
                             .inner
                             .fragments
                             .iter()
-                            .map(|(&fid, fragment)| (fid, fragment.clone()))
+                            .map(|(&fid, fragment)| {
+                                (
+                                    fid,
+                                    LoadedFragment {
+                                        fragment_id: fid,
+                                        job_id,
+                                        fragment_type_mask: fragment.fragment_type_mask,
+                                        distribution_type: fragment.distribution_type.into(),
+                                        vnode_count: fragment.vnode_count(),
+                                        nodes: fragment.nodes.clone(),
+                                        state_table_ids: fragment
+                                            .state_table_ids
+                                            .iter()
+                                            .cloned()
+                                            .collect(),
+                                        parallelism: None,
+                                    },
+                                )
+                            })
                             .collect(),
                         downstreams: info.stream_job_fragments.downstreams.clone(),
                     };
@@ -772,12 +793,14 @@ impl DatabaseCheckpointControl {
                     let job = BatchRefreshJobCheckpointControl::new(
                         database_id,
                         job_id,
-                        CreateSnapshotBackfillJobCommandInfo {
+                        CreateIndependentStreamingJobCommandInfo {
                             info: info.clone(),
                             snapshot_backfill_info: snapshot_backfill_info_clone.clone(),
                             cross_db_snapshot_backfill_info,
                             resolved_split_assignment: Default::default(),
-                            refresh_interval_sec: Some(refresh_interval_sec),
+                            kind: IndependentStreamingJobType::BatchRefresh {
+                                refresh_interval_sec,
+                            },
                         },
                         notifier.as_mut(),
                         snapshot_backfill_upstream_tables,

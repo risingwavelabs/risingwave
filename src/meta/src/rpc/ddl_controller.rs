@@ -91,13 +91,12 @@ use crate::stream::cdc::{
 };
 use crate::stream::{
     ActorGraphBuildResult, ActorGraphBuilder, AutoRefreshSchemaSinkContext,
-    CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobContextType,
-    CreateStreamingJobOption, FragmentGraphDownstreamContext, FragmentGraphUpstreamContext,
-    GlobalStreamManagerRef, IndependentStreamingJobContext, ParallelismPolicy,
-    ReplaceStreamJobContext, ReschedulePolicy, SourceChange, SourceManagerRef, StreamFragmentGraph,
-    UpstreamSinkInfo, check_sink_fragments_support_refresh_schema, cleanup_dropped_streaming_jobs,
-    create_source_worker, first_variant_column, rewrite_refresh_schema_sink_fragment, state_match,
-    validate_sink,
+    CompleteStreamFragmentGraph, CreateStreamingJobContext, CreateStreamingJobOption,
+    FragmentGraphDownstreamContext, FragmentGraphUpstreamContext, GlobalStreamManagerRef,
+    ParallelismPolicy, ReplaceStreamJobContext, ReschedulePolicy, SourceChange, SourceManagerRef,
+    StreamFragmentGraph, UpstreamSinkInfo, check_sink_fragments_support_refresh_schema,
+    cleanup_dropped_streaming_jobs, create_source_worker, first_variant_column,
+    rewrite_refresh_schema_sink_fragment, state_match, validate_sink,
 };
 use crate::telemetry::report_event;
 use crate::{MetaError, MetaResult};
@@ -2078,46 +2077,6 @@ impl DdlController {
             }
         }
 
-        let refresh_interval_sec = streaming_job_model.refresh_interval_sec.map(|s| s as u64);
-        let create_job_type = if let Some(refresh_interval_sec) = refresh_interval_sec {
-            if since_timestamp_epoch.is_some() {
-                return Err(
-                    anyhow!("since_timestamp should not be specified for batch refresh").into(),
-                );
-            }
-            CreateStreamingJobContextType::Independent {
-                snapshot_backfill_info: snapshot_backfill_info.ok_or_else(|| {
-                    anyhow!("batch refresh materialized view must use snapshot backfill")
-                })?,
-                kind: IndependentStreamingJobContext::BatchRefresh {
-                    refresh_interval_sec,
-                },
-            }
-        } else if let Some(snapshot_backfill_info) = snapshot_backfill_info {
-            CreateStreamingJobContextType::Independent {
-                snapshot_backfill_info,
-                kind: IndependentStreamingJobContext::SnapshotBackfill {
-                    since_timestamp_epoch,
-                },
-            }
-        } else if let Some(new_upstream_sink) = new_upstream_sink {
-            if since_timestamp_epoch.is_some() {
-                return Err(anyhow!(
-                    "since_timestamp should not be specified without snapshot backfill"
-                )
-                .into());
-            }
-            CreateStreamingJobContextType::SinkIntoTable(new_upstream_sink)
-        } else {
-            if since_timestamp_epoch.is_some() {
-                return Err(anyhow!(
-                    "since_timestamp should not be specified without snapshot backfill"
-                )
-                .into());
-            }
-            CreateStreamingJobContextType::Normal
-        };
-
         let ctx = CreateStreamingJobContext {
             upstream_fragment_downstreams,
             database_resource_group,
@@ -2125,8 +2084,9 @@ impl DdlController {
             create_type: stream_job.create_type(),
             job_type: (&stream_job).into(),
             streaming_job: stream_job,
-            create_job_type,
+            new_upstream_sink,
             option: CreateStreamingJobOption {},
+            snapshot_backfill_info,
             cross_db_snapshot_backfill_info,
             fragment_backfill_ordering,
             locality_fragment_state_table_mapping,
@@ -2135,6 +2095,8 @@ impl DdlController {
             resource_type,
             streaming_job_model: streaming_job_model.clone(),
             replace_sink: None,
+            refresh_interval_sec: streaming_job_model.refresh_interval_sec.map(|s| s as u64),
+            since_timestamp_epoch,
         };
 
         Ok((

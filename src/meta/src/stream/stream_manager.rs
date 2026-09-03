@@ -135,7 +135,10 @@ pub struct CreateStreamingJobContext {
 
     pub job_type: StreamingJobType,
 
-    pub create_job_type: CreateStreamingJobContextType,
+    /// Used for sink-into-table.
+    pub new_upstream_sink: Option<UpstreamSinkInfo>,
+
+    pub snapshot_backfill_info: Option<SnapshotBackfillInfo>,
     pub cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
 
     pub cdc_table_snapshot_splits: Option<Vec<CdcTableSnapshotSplitRaw>>,
@@ -157,20 +160,11 @@ pub struct CreateStreamingJobContext {
 
     /// If set, this create command replaces an existing sink while creating the new sink job.
     pub replace_sink: Option<SinkId>,
-}
 
-pub enum IndependentStreamingJobContext {
-    SnapshotBackfill { since_timestamp_epoch: Option<u64> },
-    BatchRefresh { refresh_interval_sec: u64 },
-}
+    /// Batch refresh interval in seconds. If set, the MV uses batch refresh semantics.
+    pub refresh_interval_sec: Option<u64>,
 
-pub enum CreateStreamingJobContextType {
-    Normal,
-    SinkIntoTable(UpstreamSinkInfo),
-    Independent {
-        snapshot_backfill_info: SnapshotBackfillInfo,
-        kind: IndependentStreamingJobContext,
-    },
+    pub since_timestamp_epoch: Option<u64>,
 }
 
 struct StreamingJobExecution {
@@ -607,8 +601,9 @@ impl GlobalStreamManager {
             database_resource_group,
             definition,
             create_type,
-            job_type: streaming_job_type,
-            create_job_type,
+            job_type,
+            new_upstream_sink,
+            snapshot_backfill_info,
             cross_db_snapshot_backfill_info,
             fragment_backfill_ordering,
             locality_fragment_state_table_mapping,
@@ -617,6 +612,8 @@ impl GlobalStreamManager {
             resource_type,
             mut streaming_job_model,
             replace_sink,
+            refresh_interval_sec,
+            since_timestamp_epoch,
             ..
         }: CreateStreamingJobContext,
     ) -> MetaResult<StreamingJob> {
@@ -651,55 +648,13 @@ impl GlobalStreamManager {
         self.finalize_create_streaming_job_resource_group(&resource_type, &mut streaming_job_model)
             .await?;
 
-        let (create_job_type, refresh_interval_sec) = match create_job_type {
-            CreateStreamingJobContextType::Normal => (CreateStreamingJobType::Normal, None),
-            CreateStreamingJobContextType::SinkIntoTable(info) => {
-                (CreateStreamingJobType::SinkIntoTable(info), None)
-            }
-            CreateStreamingJobContextType::Independent {
-                snapshot_backfill_info,
-                kind,
-            } => {
-                let (kind, refresh_interval_sec) = match kind {
-                    IndependentStreamingJobContext::SnapshotBackfill {
-                        since_timestamp_epoch,
-                    } => (
-                        IndependentStreamingJobType::SnapshotBackfill {
-                            since_epoch: since_timestamp_epoch.map(|provided_since_epoch| {
-                                SinceEpochInfo {
-                                    provided_since_epoch,
-                                    resolved: None,
-                                }
-                            }),
-                        },
-                        None,
-                    ),
-                    IndependentStreamingJobContext::BatchRefresh {
-                        refresh_interval_sec,
-                    } => (
-                        IndependentStreamingJobType::BatchRefresh {
-                            refresh_interval_sec,
-                        },
-                        Some(refresh_interval_sec),
-                    ),
-                };
-                (
-                    CreateStreamingJobType::Independent {
-                        snapshot_backfill_info,
-                        kind,
-                    },
-                    refresh_interval_sec,
-                )
-            }
-        };
-
         let info = CreateStreamingJobCommandInfo {
             stream_job_fragments,
             upstream_fragment_downstreams,
             init_split_assignment,
             definition: definition.clone(),
             streaming_job: streaming_job.clone(),
-            job_type: streaming_job_type,
+            job_type,
             create_type,
             database_resource_group,
             fragment_backfill_ordering,
@@ -711,13 +666,15 @@ impl GlobalStreamManager {
             refresh_interval_sec,
         };
 
-        if matches!(
-            &create_job_type,
-            CreateStreamingJobType::Independent {
-                kind: IndependentStreamingJobType::BatchRefresh { .. },
-                ..
+        let create_job_type = if let Some(refresh_interval_sec) = refresh_interval_sec {
+            if since_timestamp_epoch.is_some() {
+                bail!("since_timestamp should not be specified when no snapshot backfill");
             }
-        ) {
+            let snapshot_backfill_info = snapshot_backfill_info.ok_or_else(|| {
+                anyhow::anyhow!(
+                    "batch refresh materialized view must have snapshot backfill upstream"
+                )
+            })?;
             // Batch refresh jobs must not contain source or source-backfill nodes,
             // because we skip split assignment resolution for them.
             for fragment in info.stream_job_fragments.inner.fragments.values() {
@@ -732,7 +689,42 @@ impl GlobalStreamManager {
                     );
                 }
             }
-        }
+            tracing::debug!(
+                ?snapshot_backfill_info,
+                refresh_interval_sec,
+                "sending Command::CreateBatchRefreshStreamingJob"
+            );
+            CreateStreamingJobType::Independent {
+                snapshot_backfill_info,
+                kind: IndependentStreamingJobType::BatchRefresh {
+                    refresh_interval_sec,
+                },
+            }
+        } else if let Some(snapshot_backfill_info) = snapshot_backfill_info {
+            tracing::debug!(
+                ?snapshot_backfill_info,
+                "sending Command::CreateSnapshotBackfillStreamingJob"
+            );
+            CreateStreamingJobType::Independent {
+                snapshot_backfill_info,
+                kind: IndependentStreamingJobType::SnapshotBackfill {
+                    since_epoch: since_timestamp_epoch.map(|provided_since_epoch| SinceEpochInfo {
+                        provided_since_epoch,
+                        resolved: None,
+                    }),
+                },
+            }
+        } else {
+            if since_timestamp_epoch.is_some() {
+                bail!("since_timestamp should not be specified when no snapshot backfill");
+            }
+            tracing::debug!("sending Command::CreateStreamingJob");
+            if let Some(new_upstream_sink) = new_upstream_sink {
+                CreateStreamingJobType::SinkIntoTable(new_upstream_sink)
+            } else {
+                CreateStreamingJobType::Normal
+            }
+        };
 
         let command = Command::CreateStreamingJob {
             info,

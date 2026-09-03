@@ -53,11 +53,11 @@ use crate::barrier::worker::GlobalBarrierWorker;
 use crate::barrier::{
     BarrierWorkerRuntimeInfoSnapshot, DatabaseRuntimeInfoSnapshot, RecoveryReason, Scheduled,
 };
-use crate::controller::scale::{LoadedFragmentContext, NoShuffleEnsemble};
+use crate::controller::scale::{LoadedFragment, LoadedFragmentContext, NoShuffleEnsemble};
 use crate::controller::utils::StreamingJobExtraInfo;
 use crate::hummock::CommitEpochInfo;
 use crate::manager::{ActiveStreamingWorkerNodes, MetaOpts, MetaSrvEnv};
-use crate::model::{Fragment, FragmentDownstreamRelation, FragmentId};
+use crate::model::{FragmentDownstreamRelation, FragmentId};
 
 enum ContextRequest {
     AbortAndMarkBlocked(RecoveryReason),
@@ -177,7 +177,9 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
 
     async fn pre_commit_iceberg_pk_index_sink_metadata(
         &self,
-        _metadata: Vec<crate::manager::iceberg_pk_index_sink::IcebergPkIndexPreCommitMetadata>,
+        _metadata: Vec<
+            crate::manager::iceberg_pk_index_sink::IcebergPkIndexPreCommitMetadata,
+        >,
     ) -> MetaResult<Vec<SinkId>> {
         unimplemented!()
     }
@@ -257,7 +259,7 @@ async fn test_barrier_manager_worker_crash_no_early_commit() {
 
     let fragment_model = |fragment_id: FragmentId, job_id: JobId, table_id: TableId| {
         #[expect(deprecated)]
-        Fragment::from(fragment::Model {
+        LoadedFragment::from(fragment::Model {
             fragment_id,
             job_id,
             fragment_type_mask: 0,
