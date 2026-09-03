@@ -21,9 +21,9 @@ use std::{assert_matches, mem};
 use StageEvent::Failed;
 use anyhow::anyhow;
 use arc_swap::ArcSwap;
+use await_tree::InstrumentAwait;
 use futures::stream::Fuse;
 use futures::{StreamExt, TryStreamExt, stream};
-use futures_async_stream::for_await;
 use itertools::Itertools;
 use risingwave_batch::error::BatchError;
 use risingwave_batch::executor::ExecutorBuilder;
@@ -57,6 +57,7 @@ use crate::catalog::catalog_service::CatalogReader;
 use crate::catalog::{FragmentId, TableId};
 use crate::optimizer::plan_node::BatchPlanNodeType;
 use crate::scheduler::SchedulerError::{TaskExecutionError, TaskRunningOutOfMemory};
+use crate::scheduler::await_tree_key::FrontendTask;
 use crate::scheduler::distributed::QueryMessage;
 use crate::scheduler::distributed::stage::StageState::Pending;
 use crate::scheduler::plan_fragmenter::{
@@ -219,11 +220,22 @@ impl StageExecution {
                     query_id = self.query.query_id.id,
                     stage_id = %self.stage_id,
                 );
-                self.ctx
-                    .session()
-                    .env()
-                    .compute_runtime()
-                    .spawn(async move { runner.run(receiver).instrument(span).await });
+                let env = self.ctx.session().env();
+                let compute_runtime = env.compute_runtime();
+                let await_tree_reg = env.await_tree_reg().cloned();
+                let query_id = self.query.query_id.clone();
+                let stage_id = self.stage_id;
+                let runner = async move { runner.run(receiver).instrument(span).await };
+                if let Some(reg) = await_tree_reg {
+                    let span =
+                        await_tree::span!("Distributed Stage ({}-{})", query_id.id, stage_id);
+                    compute_runtime.spawn(
+                        reg.register(FrontendTask::Stage { query_id, stage_id }, span)
+                            .instrument(runner),
+                    );
+                } else {
+                    compute_runtime.spawn(runner);
+                }
 
                 tracing::trace!(
                     "Stage {:?}-{:?} started.",
@@ -466,7 +478,10 @@ impl StageRunner {
 
         // Await each future and convert them into a set of streams.
         let buffered = stream::iter(futures).buffer_unordered(TASK_SCHEDULING_PARALLELISM);
-        let buffered_streams = buffered.try_collect::<Vec<_>>().await?;
+        let buffered_streams = buffered
+            .try_collect::<Vec<_>>()
+            .instrument_await("create_batch_tasks")
+            .await?;
 
         // Merge different task streams into a single stream.
         let cancelled = pin!(shutdown_rx.cancelled());
@@ -477,7 +492,11 @@ impl StageRunner {
         let mut finished_task_cnt = 0;
         let mut sent_signal_to_next = false;
 
-        while let Some(status_res_inner) = all_streams.next().await {
+        while let Some(status_res_inner) = all_streams
+            .next()
+            .instrument_await("wait_task_status")
+            .await
+        {
             match status_res_inner {
                 Ok(status) => {
                     use risingwave_pb::task_service::task_info_response::TaskStatus as PbTaskStatus;
@@ -594,7 +613,7 @@ impl StageRunner {
                 self.stage_id
             );
             // Waiting for shutdown signal.
-            shutdown.await;
+            shutdown.instrument_await("wait_shutdown").await;
         }
 
         // Received shutdown signal from query runner, should send abort RPC to all CNs.
@@ -607,7 +626,9 @@ impl StageRunner {
             self.stage_id,
             self.tasks.len()
         );
-        self.cancel_all_scheducancled_tasks().await?;
+        self.cancel_all_scheducancled_tasks()
+            .instrument_await("cancel_tasks")
+            .await?;
 
         tracing::trace!(
             "Stage runner [{:?}-{:?}] exited.",
@@ -655,11 +676,18 @@ impl StageRunner {
         let shutdown_rx0 = shutdown_rx.clone();
 
         let result = expr_context_scope(expr_context, async {
-            let executor = executor.build().await?;
+            let executor = executor
+                .build()
+                .instrument_await("build_root_executor")
+                .await?;
             let chunk_stream = executor.execute();
             let cancelled = pin!(shutdown_rx.cancelled());
-            #[for_await]
-            for chunk in chunk_stream.take_until(cancelled) {
+            let mut chunk_stream = pin!(chunk_stream.take_until(cancelled));
+            while let Some(chunk) = chunk_stream
+                .next()
+                .instrument_await("next_root_chunk")
+                .await
+            {
                 if let Err(ref e) = chunk {
                     if shutdown_rx0.is_cancelled() {
                         break;
@@ -668,14 +696,22 @@ impl StageRunner {
                     // This is possible if The Query Runner drop early before schedule the root
                     // executor. Detail described in https://github.com/risingwavelabs/risingwave/issues/6883#issuecomment-1348102037.
                     // The error format is just channel closed so no care.
-                    if let Err(_e) = result_tx.send(chunk.map_err(|e| e.into())).await {
+                    if let Err(_e) = result_tx
+                        .send(chunk.map_err(|e| e.into()))
+                        .instrument_await("send_root_chunk")
+                        .await
+                    {
                         warn!("Root executor has been dropped before receive any events so the send is failed");
                     }
                     // Different from below, return this function and report error.
                     return Err(TaskExecutionError(err_str));
                 } else {
                     // Same for below.
-                    if let Err(_e) = result_tx.send(chunk.map_err(|e| e.into())).await {
+                    if let Err(_e) = result_tx
+                        .send(chunk.map_err(|e| e.into()))
+                        .instrument_await("send_root_chunk")
+                        .await
+                    {
                         warn!("Root executor has been dropped before receive any events so the send is failed");
                     }
                 }

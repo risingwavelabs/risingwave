@@ -24,15 +24,19 @@ use risingwave_pb::monitor_service::{
 };
 use tonic::{Request, Response, Status};
 
+use crate::scheduler::await_tree_key::FrontendTask;
+
 /// Frontend implementation of monitor RPCs, currently reusing the profile service only.
 pub struct MonitorServiceImpl {
     profile_service: ProfileServiceImpl,
+    await_tree_reg: Option<await_tree::Registry>,
 }
 
 impl MonitorServiceImpl {
-    pub fn new(server_config: ServerConfig) -> Self {
+    pub fn new(server_config: ServerConfig, await_tree_reg: Option<await_tree::Registry>) -> Self {
         Self {
             profile_service: ProfileServiceImpl::new(server_config),
+            await_tree_reg,
         }
     }
 }
@@ -43,7 +47,19 @@ impl MonitorService for MonitorServiceImpl {
         &self,
         _request: Request<StackTraceRequest>,
     ) -> Result<Response<StackTraceResponse>, Status> {
-        Err(Status::unimplemented("not implemented in frontend node"))
+        let frontend_traces = if let Some(reg) = &self.await_tree_reg {
+            reg.collect::<FrontendTask>()
+                .into_iter()
+                .map(|(key, trace)| (key.to_string(), trace.to_string()))
+                .collect()
+        } else {
+            Default::default()
+        };
+
+        Ok(Response::new(StackTraceResponse {
+            frontend_traces,
+            ..Default::default()
+        }))
     }
 
     async fn profiling(

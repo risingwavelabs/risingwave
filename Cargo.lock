@@ -13563,6 +13563,7 @@ dependencies = [
  "async-trait",
  "auto_enums",
  "auto_impl",
+ "await-tree",
  "axum",
  "axum-server",
  "base64 0.23.1",
