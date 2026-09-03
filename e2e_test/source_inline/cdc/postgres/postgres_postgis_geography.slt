@@ -214,16 +214,15 @@ create table test_geography_invalid_mapping (
     location varchar
 ) from geography_source table 'public.test_geography_invalid_mapping_upstream';
 
-# TODO: Enable this after explicit array type validation is implemented correctly.
-# statement ok
-# drop table if exists test_geography_array_invalid_mapping;
-#
-# statement error Incompatible data type of column locations
-# create table test_geography_array_invalid_mapping (
-#     id int primary key,
-#     name varchar,
-#     locations varchar[]
-# ) from geography_source table 'public.test_geography_array';
+statement ok
+drop table if exists test_geography_array_invalid_mapping;
+
+statement error Incompatible data type of column locations
+create table test_geography_array_invalid_mapping (
+    id int primary key,
+    name varchar,
+    locations varchar[]
+) from geography_source table 'public.test_geography_array';
 
 # Test: automatic schema discovery maps geography correctly
 
