@@ -604,7 +604,6 @@ impl SnowflakeSinkWriter {
                     ))
                 })?,
                 schema,
-                Some(writer_param.actor_id.as_raw_id()),
                 is_append_only,
                 table_name,
             )?;
@@ -1217,7 +1216,7 @@ fn build_create_merge_into_task_sql(snowflake_task_context: &SnowflakeTaskContex
         .collect::<Vec<String>>()
         .join(", ");
     let row_id_ordering = format!(
-        r#"TRY_TO_NUMBER(SPLIT_PART("{row_id}", '_', 1)) DESC NULLS LAST, TRY_TO_NUMBER(SPLIT_PART("{row_id}", '_', 2)) DESC NULLS LAST, TRY_TO_NUMBER(SPLIT_PART("{row_id}", '_', 3)) DESC NULLS LAST, "{row_id}" DESC"#,
+        r#"TRY_TO_NUMBER(SPLIT_PART("{row_id}", '_', 1)) DESC NULLS LAST, TRY_TO_NUMBER(SPLIT_PART("{row_id}", '_', 2)) DESC NULLS LAST, "{row_id}" DESC"#,
         row_id = __ROW_ID,
     );
 
@@ -1458,7 +1457,7 @@ BEGIN
     USING (
         SELECT *
         FROM (
-            SELECT *, ROW_NUMBER() OVER (PARTITION BY "v1" ORDER BY TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 1)) DESC NULLS LAST, TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 2)) DESC NULLS LAST, TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 3)) DESC NULLS LAST, "__row_id" DESC) AS dedupe_id
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY "v1" ORDER BY TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 1)) DESC NULLS LAST, TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 2)) DESC NULLS LAST, "__row_id" DESC) AS dedupe_id
             FROM "test_db"."test_schema"."test_cdc_table"
         ) AS subquery
         WHERE dedupe_id = 1
@@ -1504,7 +1503,7 @@ BEGIN
     USING (
         SELECT *
         FROM (
-            SELECT *, ROW_NUMBER() OVER (PARTITION BY "id1", "id2" ORDER BY TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 1)) DESC NULLS LAST, TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 2)) DESC NULLS LAST, TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 3)) DESC NULLS LAST, "__row_id" DESC) AS dedupe_id
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY "id1", "id2" ORDER BY TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 1)) DESC NULLS LAST, TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 2)) DESC NULLS LAST, "__row_id" DESC) AS dedupe_id
             FROM "test_db"."test_schema"."cdc_multi_pk"
         ) AS subquery
         WHERE dedupe_id = 1
@@ -1550,7 +1549,7 @@ BEGIN
     USING (
         SELECT *
         FROM (
-            SELECT *, ROW_NUMBER() OVER (PARTITION BY "id" ORDER BY TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 1)) DESC NULLS LAST, TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 2)) DESC NULLS LAST, TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 3)) DESC NULLS LAST, "__row_id" DESC) AS dedupe_id
+            SELECT *, ROW_NUMBER() OVER (PARTITION BY "id" ORDER BY TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 1)) DESC NULLS LAST, TRY_TO_NUMBER(SPLIT_PART("__row_id", '_', 2)) DESC NULLS LAST, "__row_id" DESC) AS dedupe_id
             FROM "test_db"."test_schema"."serverless_cdc_table"
         ) AS subquery
         WHERE dedupe_id = 1
