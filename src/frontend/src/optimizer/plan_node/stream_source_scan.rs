@@ -24,7 +24,7 @@ use risingwave_pb::stream_plan::stream_node::{NodeBody, PbNodeBody};
 
 use super::stream::prelude::*;
 use super::utils::TableCatalogBuilder;
-use super::{PlanBase, PlanRef};
+use super::PlanBase;
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::{Distill, childless_record};
@@ -32,7 +32,7 @@ use crate::optimizer::plan_node::{ExprRewritable, StreamNode, generic};
 use crate::optimizer::property::{Distribution, MonotonicityMap, WatermarkColumns};
 use crate::scheduler::SchedulerResult;
 use crate::stream_fragmenter::BuildFragmentGraphState;
-use crate::{Explain, TableCatalog};
+use crate::TableCatalog;
 
 /// `StreamSourceScan` scans from a *shared source*. It forwards data from the upstream [`StreamSource`],
 /// and also backfills data from the external source.
@@ -107,14 +107,13 @@ impl StreamSourceScan {
     ) -> SchedulerResult<PbStreamNode> {
         use risingwave_pb::stream_plan::*;
 
+        // The raw output of a source does not contain generated columns. Therefore, when a
+        // generated column is the source primary key, the source backfill node cannot expose a
+        // stream key yet. The project immediately above it computes the generated columns and
+        // restores the catalog-declared stream key.
         let stream_key = self
             .stream_key()
-            .unwrap_or_else(|| {
-                panic!(
-                    "should always have a stream key in the stream plan but not, sub plan: {}",
-                    PlanRef::from(self.clone()).explain_to_string()
-                )
-            })
+            .unwrap_or_default()
             .iter()
             .map(|x| *x as u32)
             .collect_vec();
