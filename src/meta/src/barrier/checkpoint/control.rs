@@ -613,6 +613,9 @@ impl CheckpointControl {
                     IndependentCheckpointJob::CreatingStreamingJob(_) => {
                         unreachable!("creating streaming job should not initialize when running")
                     }
+                    IndependentCheckpointJob::IcebergV3(_) => {
+                        unreachable!("Iceberg V3 jobs do not wait for graph initialization")
+                    }
                 }
             }
             DatabaseCheckpointControlStatus::Recovering(state) => {
@@ -1026,6 +1029,19 @@ impl DatabaseCheckpointControl {
                             task.finished_jobs.push(tracking_job);
                         }
                         independent_jobs_task.push((*job_id, epoch, resps, info));
+                    }
+                }
+                IndependentCheckpointJob::IcebergV3(iceberg_job) => {
+                    if let Some((epoch, resps, info, is_finish_epoch)) = iceberg_job
+                        .start_completing(partial_graph_manager, min_upstream_inflight_barrier)
+                    {
+                        assert!(!is_finish_epoch, "Iceberg V3 jobs remain independent");
+                        independent_jobs_task.push((
+                            *job_id,
+                            epoch,
+                            resps.into_values().collect_vec(),
+                            info,
+                        ));
                     }
                 }
             }

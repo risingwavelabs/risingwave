@@ -39,6 +39,7 @@ use crate::MetaResult;
 use crate::barrier::DatabaseRuntimeInfoSnapshot;
 use crate::barrier::checkpoint::{
     BatchRefreshJobCheckpointControl, BatchRefreshLogicalFragments, BatchRefreshRenderResult,
+    IcebergV3JobCheckpointControl, IcebergV3RenderResult, is_iceberg_v3_fragment_nodes,
 };
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::progress::TrackingJob;
@@ -88,6 +89,8 @@ pub struct RenderedDatabaseRuntimeInfo {
     pub source_splits: HashMap<ActorId, Vec<SplitImpl>>,
     /// Batch refresh jobs rendered during `render_runtime_info`.
     pub batch_refresh: HashMap<JobId, BatchRefreshRenderResult>,
+    /// Iceberg V3 jobs rendered independently from the database graph.
+    pub iceberg_v3: HashMap<JobId, IcebergV3RenderResult>,
 }
 
 pub fn render_runtime_info(
@@ -104,18 +107,35 @@ pub fn render_runtime_info(
 
     assert!(!per_database_context.is_empty());
 
-    // Extract batch refresh jobs before rendering via `render_actor_assignments`.
-    // They will be rendered independently using the unified `render_actors_and_build_job_info`.
+    // Closed independent jobs are rendered separately from the database graph. This keeps their
+    // placement independent from upstream actors and renders inactive Iceberg fragments up front.
     let batch_refresh_job_ids: HashSet<JobId> = per_database_context
         .job_map
         .iter()
         .filter(|(_, model)| model.refresh_interval_sec.is_some())
         .map(|(job_id, _)| *job_id)
         .collect();
+    let iceberg_v3_job_ids: HashSet<JobId> = per_database_context
+        .job_fragments
+        .iter()
+        .filter(|(_, fragments)| {
+            is_iceberg_v3_fragment_nodes(fragments.values().map(|fragment| &fragment.nodes))
+        })
+        .map(|(job_id, _)| *job_id)
+        .collect();
+    assert!(
+        batch_refresh_job_ids.is_disjoint(&iceberg_v3_job_ids),
+        "Iceberg V3 jobs cannot be batch refresh jobs"
+    );
+    let independent_job_ids: HashSet<_> = batch_refresh_job_ids
+        .union(&iceberg_v3_job_ids)
+        .copied()
+        .collect();
 
     let mut batch_refresh_logical = HashMap::new();
-    if !batch_refresh_job_ids.is_empty() {
-        let batch_refresh_fragment_ids: HashSet<FragmentId> = batch_refresh_job_ids
+    let mut iceberg_v3_logical = HashMap::new();
+    if !independent_job_ids.is_empty() {
+        let independent_fragment_ids: HashSet<FragmentId> = independent_job_ids
             .iter()
             .flat_map(|job_id| {
                 per_database_context
@@ -127,7 +147,7 @@ pub fn render_runtime_info(
             })
             .collect();
 
-        for &job_id in &batch_refresh_job_ids {
+        for &job_id in &independent_job_ids {
             let fragments = per_database_context.job_fragments.remove(&job_id).unwrap();
             let downstreams = fragments
                 .keys()
@@ -138,20 +158,35 @@ pub fn render_runtime_info(
                         .map(|r| (*fid, r.clone()))
                 })
                 .collect();
-            batch_refresh_logical.insert(
-                job_id,
-                BatchRefreshLogicalFragments {
-                    fragments,
-                    downstreams,
-                },
-            );
+            if batch_refresh_job_ids.contains(&job_id) {
+                batch_refresh_logical.insert(
+                    job_id,
+                    BatchRefreshLogicalFragments {
+                        fragments,
+                        downstreams,
+                    },
+                );
+            } else {
+                iceberg_v3_logical.insert(job_id, (fragments, downstreams));
+            }
         }
 
-        // Remove ensembles that only contain batch refresh fragments.
+        // Closed independent jobs cannot share a no-shuffle ensemble with another job.
         per_database_context.ensembles.retain(|ensemble| {
-            !ensemble
-                .component_fragments()
-                .all(|fid| batch_refresh_fragment_ids.contains(&fid))
+            let mut has_independent_fragment = false;
+            let mut has_database_fragment = false;
+            for fragment_id in ensemble.component_fragments() {
+                if independent_fragment_ids.contains(&fragment_id) {
+                    has_independent_fragment = true;
+                } else {
+                    has_database_fragment = true;
+                }
+            }
+            assert!(
+                !(has_independent_fragment && has_database_fragment),
+                "closed independent job cannot share a no-shuffle ensemble"
+            );
+            has_database_fragment
         });
     }
 
@@ -183,37 +218,52 @@ pub fn render_runtime_info(
         batch_refresh.insert(job_id, render_result);
     }
 
-    // If all fragments were batch refresh, no normal rendering needed.
-    if per_database_context.ensembles.is_empty() {
-        return Ok(Some(RenderedDatabaseRuntimeInfo {
-            job_infos: HashMap::new(),
-            stream_actors: HashMap::new(),
-            source_splits: HashMap::new(),
-            batch_refresh,
-        }));
+    let mut iceberg_v3 = HashMap::new();
+    for (job_id, (fragments, downstreams)) in iceberg_v3_logical {
+        let extra = recovery_context
+            .job_extra_info
+            .get(&job_id)
+            .expect("should have extra info");
+        let streaming_job_model = per_database_context
+            .job_map
+            .get(&job_id)
+            .expect("should have streaming job model");
+        let database_model = &per_database_context.database_map[&database_id];
+        let render_result = IcebergV3JobCheckpointControl::render_actors_and_build_job_info(
+            &fragments,
+            &downstreams,
+            &extra.job_definition,
+            actor_id_generator,
+            worker_nodes.current(),
+            &database_model.resource_group,
+            streaming_job_model,
+            to_partial_graph_id(database_id, Some(job_id)),
+        )?;
+        iceberg_v3.insert(job_id, render_result);
     }
 
-    let RenderedGraph { mut fragments, .. } = render_actor_assignments(
-        actor_id_generator,
-        worker_nodes.current(),
-        &per_database_context,
-    )?;
-
-    let single_database = match fragments.remove(&database_id) {
-        Some(info) => info,
-        None => return Ok(None),
+    let (job_infos, stream_actors) = if per_database_context.ensembles.is_empty() {
+        (HashMap::new(), HashMap::new())
+    } else {
+        let RenderedGraph { mut fragments, .. } = render_actor_assignments(
+            actor_id_generator,
+            worker_nodes.current(),
+            &per_database_context,
+        )?;
+        let single_database = fragments
+            .remove(&database_id)
+            .expect("non-empty database render must produce its database entry");
+        let mut database_map = HashMap::from([(database_id, single_database)]);
+        recovery_table_with_upstream_sinks(
+            &mut database_map,
+            &recovery_context.upstream_sink_recovery,
+        )?;
+        let stream_actors = build_stream_actors(&database_map, &recovery_context.job_extra_info)?;
+        let job_infos = database_map
+            .remove(&database_id)
+            .expect("database entry must exist");
+        (job_infos, stream_actors)
     };
-
-    let mut database_map = HashMap::from([(database_id, single_database)]);
-    recovery_table_with_upstream_sinks(
-        &mut database_map,
-        &recovery_context.upstream_sink_recovery,
-    )?;
-    let stream_actors = build_stream_actors(&database_map, &recovery_context.job_extra_info)?;
-
-    let job_infos = database_map
-        .remove(&database_id)
-        .expect("database entry must exist");
 
     let mut source_splits = HashMap::new();
     for fragment_infos in job_infos.values() {
@@ -229,6 +279,7 @@ pub fn render_runtime_info(
         stream_actors,
         source_splits,
         batch_refresh,
+        iceberg_v3,
     }))
 }
 
@@ -535,7 +586,8 @@ impl GlobalBarrierWorkerContextImpl {
                 })?;
             let manager = &self.iceberg_pk_index_sink_manager;
             futs.push(async move {
-                let partial_graph_id = to_partial_graph_id(pb_sink.database_id, None);
+                let partial_graph_id =
+                    to_partial_graph_id(pb_sink.database_id, Some(pb_sink.id.as_job_id()));
                 let result = manager
                     .register_sink(pb_sink.id, partial_graph_id, config)
                     .await;

@@ -64,11 +64,13 @@ use super::{BarrierKind, TracedEpoch};
 use crate::barrier::BackfillOrderState;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
-use crate::barrier::checkpoint::independent_job::{IndependentJobControl, IndependentJobInfo};
+use crate::barrier::checkpoint::independent_job::{
+    IcebergV3JobCheckpointControl, IcebergV3RenderResult, IndependentJobControl, IndependentJobInfo,
+};
 use crate::barrier::checkpoint::{
     BarrierWorkerState, BatchRefreshJobCheckpointControl, BatchRefreshRenderResult,
     CreatingStreamingJobControl, DatabaseCheckpointControl, DatabaseCheckpointControlMetrics,
-    IndependentCheckpointJobControl, IndependentCheckpointJobStatus,
+    IndependentCheckpointJob, IndependentCheckpointJobControl, IndependentCheckpointJobStatus,
 };
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::edge_builder::{EdgeBuilderFragmentInfo, FragmentEdgeBuilder};
@@ -633,6 +635,7 @@ impl PartialGraphRecoverer<'_> {
         hummock_version_stats: &HummockVersionStats,
         cdc_table_snapshot_splits: &mut HashMap<JobId, CdcTableSnapshotSplits>,
         batch_refresh: HashMap<JobId, BatchRefreshRenderResult>,
+        iceberg_v3: HashMap<JobId, IcebergV3RenderResult>,
     ) -> MetaResult<DatabaseCheckpointControl> {
         let term_id = Uuid::new_v4().to_string();
 
@@ -761,6 +764,28 @@ impl PartialGraphRecoverer<'_> {
             )?
             .0
             .ok_or_else(|| anyhow!("batch refresh job {} has no snapshot backfill info", job_id))?;
+
+            for upstream_table_id in snapshot_backfill_info
+                .upstream_mv_table_id_to_backfill_epoch
+                .keys()
+            {
+                subscribers
+                    .entry(*upstream_table_id)
+                    .or_default()
+                    .try_insert(job_id.as_subscriber_id(), SubscriberType::SnapshotBackfill)
+                    .expect("non-duplicate");
+            }
+        }
+
+        for (job_id, render_result) in &iceberg_v3 {
+            let snapshot_backfill_info = StreamFragmentGraph::collect_snapshot_backfill_info_impl(
+                render_result
+                    .active_fragment_infos()
+                    .values()
+                    .map(|fragment| (&fragment.nodes, fragment.fragment_type_mask)),
+            )?
+            .0
+            .ok_or_else(|| anyhow!("Iceberg V3 job {} has no snapshot backfill info", job_id))?;
 
             for upstream_table_id in snapshot_backfill_info
                 .upstream_mv_table_id_to_backfill_epoch
@@ -1131,6 +1156,87 @@ impl PartialGraphRecoverer<'_> {
             independent_checkpoint_job_controls.insert(job_id, job);
         }
 
+        // Recover Iceberg V3 jobs from their separately rendered closed graphs. The resolver
+        // partition has already been removed from the active runtime graph.
+        for (job_id, render_result) in iceberg_v3 {
+            creating_jobs.remove(&job_id);
+            debug!(%job_id, "recovered Iceberg V3 job");
+
+            let committed_epoch = resolve_jobs_committed_epoch(
+                state_table_committed_epochs,
+                InflightFragmentInfo::existing_table_ids(render_result.all_fragment_infos()),
+            );
+            let snapshot_backfill_info = StreamFragmentGraph::collect_snapshot_backfill_info_impl(
+                render_result
+                    .active_fragment_infos()
+                    .values()
+                    .map(|fragment| (&fragment.nodes, fragment.fragment_type_mask)),
+            )?
+            .0
+            .ok_or_else(|| anyhow!("Iceberg V3 job {} has no snapshot backfill info", job_id))?;
+            let upstream_table_ids: HashSet<_> = snapshot_backfill_info
+                .upstream_mv_table_id_to_backfill_epoch
+                .keys()
+                .copied()
+                .collect();
+            let mut snapshot_epochs = snapshot_backfill_info
+                .upstream_mv_table_id_to_backfill_epoch
+                .values()
+                .copied();
+            let snapshot_epoch = snapshot_epochs
+                .next()
+                .flatten()
+                .ok_or_else(|| anyhow!("Iceberg V3 job {} has no snapshot epoch", job_id))?;
+            if snapshot_epochs.any(|epoch| epoch != Some(snapshot_epoch)) {
+                return Err(
+                    anyhow!("Iceberg V3 job {} has inconsistent snapshot epochs", job_id).into(),
+                );
+            }
+
+            let job_backfill_orders = recover_job_backfill_order(
+                job_extra_info,
+                job_id,
+                render_result.active_downstreams(),
+                render_result.active_fragment_infos(),
+            );
+            let mutation = build_mutation(
+                &Default::default(),
+                Default::default(),
+                &job_backfill_orders,
+                false,
+            );
+            let partial_graph_id = to_partial_graph_id(database_id, Some(job_id));
+            let control = IndependentJobControl::recovered(
+                IndependentJobInfo::from_fragment_infos(
+                    database_id,
+                    job_id,
+                    snapshot_epoch,
+                    upstream_table_ids,
+                    render_result.all_fragment_infos(),
+                ),
+                committed_epoch,
+            );
+            let iceberg_job = IcebergV3JobCheckpointControl::recover(
+                control,
+                &database_job_log_epochs,
+                &barrier_info,
+                job_backfill_orders,
+                hummock_version_stats,
+                mutation,
+                self,
+                render_result,
+            )?;
+            independent_checkpoint_job_controls.insert(
+                job_id,
+                IndependentCheckpointJobControl::iceberg_v3(
+                    job_id,
+                    partial_graph_id,
+                    IndependentCheckpointJobStatus::Ready,
+                    iceberg_job,
+                ),
+            );
+        }
+
         // Recover batch refresh jobs (both idle and consuming snapshot).
         // Actors were already rendered by `render_runtime_info()`.
         for (job_id, render_result) in batch_refresh {
@@ -1233,7 +1339,15 @@ impl PartialGraphRecoverer<'_> {
                                     .into_iter()
                                     .flat_map(move |infos| infos.values().map(move |f| (f, job_id)))
                             }),
-                    ),
+                    )
+                    .chain(independent_checkpoint_job_controls.iter().filter_map(
+                        |(job_id, job)| match job.running() {
+                            Some(IndependentCheckpointJob::IcebergV3(job)) => {
+                                Some((job.resolver_fragment_info(), *job_id))
+                            }
+                            _ => None,
+                        },
+                    )),
             );
 
         let committed_epoch = barrier_info.prev_epoch();
