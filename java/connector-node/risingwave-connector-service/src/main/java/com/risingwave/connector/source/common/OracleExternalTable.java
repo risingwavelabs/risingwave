@@ -158,6 +158,9 @@ final class OracleExternalTable {
     }
 
     private static Connection connect(Map<String, String> properties) throws SQLException {
+        var pdbName =
+                OracleValidator.normalizePdbName(
+                        properties.get(DbzConnectorConfig.ORACLE_PDB_NAME));
         var jdbcUrl =
                 ValidatorUtils.getJdbcUrl(
                         SourceTypeE.ORACLE,
@@ -169,10 +172,6 @@ final class OracleExternalTable {
                         jdbcUrl,
                         properties.get(DbzConnectorConfig.USER),
                         properties.get(DbzConnectorConfig.PASSWORD));
-        var pdbName =
-                normalizeIdentifier(
-                        properties.get(DbzConnectorConfig.ORACLE_PDB_NAME),
-                        DbzConnectorConfig.ORACLE_PDB_NAME);
         try (var statement = connection.createStatement()) {
             statement.execute("ALTER SESSION SET CONTAINER = " + pdbName);
             statement.execute("ALTER SESSION SET TIME_ZONE = 'UTC'");
