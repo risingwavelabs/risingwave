@@ -3910,7 +3910,9 @@ impl fmt::Display for SetVariableValueSingle {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AsOf {
     ProcessTime,
-    /// Process-time temporal join with the lookup side broadcast to all join actors.
+    /// Internal marker for a process-time temporal join whose lookup side is broadcast to all join
+    /// actors. It stays on the lookup relation so optimizer rewrites cannot detach the strategy
+    /// from that relation; [`crate::ast::Join`]'s `Display` renders the modifier in join position.
     ProcessTimeBroadcast,
     // used by time travel
     ProcessTimeWithInterval((String, DateTimeField)),

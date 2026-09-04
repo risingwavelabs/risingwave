@@ -4409,6 +4409,9 @@ impl Parser<'_> {
         &mut self,
         reserved_kwds: &[Keyword],
     ) -> ModalResult<Option<TableAlias>> {
+        if self.peek_broadcast_join() {
+            return Ok(None);
+        }
         match self.parse_optional_alias(reserved_kwds)? {
             Some(name) => {
                 let columns = self.parse_parenthesized_column_list(Optional)?;
@@ -5449,17 +5452,17 @@ impl Parser<'_> {
                     join_operator,
                 }
             } else {
-                let (natural, asof, broadcast) = match self.parse_one_of_keywords(&[
-                    Keyword::NATURAL,
-                    Keyword::ASOF,
-                    Keyword::BROADCAST,
-                ]) {
-                    Some(Keyword::NATURAL) => (true, false, false),
-                    Some(Keyword::ASOF) => (false, true, false),
-                    Some(Keyword::BROADCAST) => (false, false, true),
-                    Some(_) => unreachable!(),
-                    None => (false, false, false),
-                };
+                let broadcast = self.peek_broadcast_join();
+                if broadcast {
+                    let _ = self.next_token();
+                }
+                let (natural, asof) =
+                    match self.parse_one_of_keywords(&[Keyword::NATURAL, Keyword::ASOF]) {
+                        Some(Keyword::NATURAL) => (true, false),
+                        Some(Keyword::ASOF) => (false, true),
+                        Some(_) => unreachable!(),
+                        None => (false, false),
+                    };
                 let peek_keyword = if let Token::Word(w) = self.peek_token().token {
                     w.keyword
                 } else {
@@ -5508,6 +5511,9 @@ impl Parser<'_> {
                     _ if asof => {
                         return self.expected("a join type after ASOF");
                     }
+                    _ if broadcast => {
+                        return self.expected_at(join_checkpoint, "a join type after BROADCAST");
+                    }
                     _ => break,
                 };
                 let mut relation = self.parse_table_factor()?;
@@ -5555,6 +5561,22 @@ impl Parser<'_> {
             joins.push(join);
         }
         Ok(TableWithJoins { relation, joins })
+    }
+
+    /// Whether the next tokens start a supported broadcast join.
+    ///
+    /// `BROADCAST` remains a regular identifier outside this exact position so that existing
+    /// table aliases and identifier formatting remain compatible.
+    fn peek_broadcast_join(&self) -> bool {
+        matches!(
+            self.peek_nth_token(0).token,
+            Token::Word(word)
+                if word.quote_style.is_none() && word.value.eq_ignore_ascii_case("BROADCAST")
+        ) && matches!(
+            self.peek_nth_token(1).token,
+            Token::Word(word)
+                if matches!(word.keyword, Keyword::INNER | Keyword::JOIN | Keyword::LEFT)
+        )
     }
 
     /// A table name or a parenthesized subquery, followed by optional `[AS] alias`

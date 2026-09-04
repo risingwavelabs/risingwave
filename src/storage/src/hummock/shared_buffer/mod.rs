@@ -19,7 +19,7 @@ use std::sync::Arc;
 
 use risingwave_common::metrics::{
     LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGauge,
-    LazyLabelGuardedIntCounter, LazyLabelGuardedIntGauge,
+    LazyLabelGuardedIntCounter, LazyLabelGuardedIntGauge, UintGauge,
 };
 use risingwave_pb::id::{FragmentId, TableId};
 
@@ -30,6 +30,7 @@ pub mod shared_buffer_batch;
 pub(crate) struct TableMemoryMetrics {
     imm_total_size: LabelGuardedIntGauge,
     imm_count: LabelGuardedIntGauge,
+    replicated_imm_size: Option<UintGauge>,
     pub write_batch_tuple_counts: LabelGuardedIntCounter,
     pub write_batch_duration: LabelGuardedHistogram,
     pub write_batch_size: LabelGuardedHistogram,
@@ -60,6 +61,7 @@ impl TableMemoryMetrics {
             imm_count: metrics
                 .per_table_imm_count
                 .with_guarded_label_values(table_labels),
+            replicated_imm_size: is_replicated.then(|| metrics.replicated_imm_size.clone()),
             write_batch_tuple_counts: metrics
                 .write_batch_tuple_counts
                 .with_guarded_label_values(table_labels),
@@ -91,16 +93,46 @@ impl TableMemoryMetrics {
     pub(super) fn inc_imm(&self, imm_size: usize) {
         self.imm_total_size.add(imm_size as _);
         self.imm_count.inc();
+        if let Some(replicated_imm_size) = &self.replicated_imm_size {
+            replicated_imm_size.add(imm_size as _);
+        }
     }
 
     pub(super) fn dec_imm(&self, imm_size: usize) {
         self.imm_total_size.sub(imm_size as _);
         self.imm_count.dec();
+        if let Some(replicated_imm_size) = &self.replicated_imm_size {
+            replicated_imm_size.sub(imm_size as _);
+        }
     }
 }
 
 impl Debug for TableMemoryMetrics {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("TableMemoryMetrics").finish()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use prometheus::Registry;
+    use risingwave_common::config::MetricLevel;
+
+    use super::*;
+
+    #[test]
+    fn test_replicated_imm_size_metric() {
+        let metrics = HummockStateStoreMetrics::new(&Registry::new(), MetricLevel::Info);
+        let replicated =
+            TableMemoryMetrics::new(&metrics, TableId::new(1), FragmentId::new(1), true);
+        let regular = TableMemoryMetrics::new(&metrics, TableId::new(2), FragmentId::new(2), false);
+
+        replicated.inc_imm(42);
+        regular.inc_imm(100);
+        assert_eq!(metrics.replicated_imm_size.get(), 42);
+
+        regular.dec_imm(100);
+        replicated.dec_imm(42);
+        assert_eq!(metrics.replicated_imm_size.get(), 0);
     }
 }

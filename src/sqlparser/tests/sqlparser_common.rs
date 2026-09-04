@@ -2757,6 +2757,35 @@ fn parse_broadcast_temporal_join() {
         err.to_string()
             .contains("FOR SYSTEM_TIME AS OF PROCTIME() after BROADCAST JOIN")
     );
+
+    // BROADCAST is contextual rather than globally reserved, so existing aliases retain their
+    // original meaning whenever they are not immediately followed by a supported join type.
+    for (sql, canonical) in [
+        (
+            "SELECT broadcast.a FROM t broadcast WHERE broadcast.a = 1",
+            "SELECT broadcast.a FROM t AS broadcast WHERE broadcast.a = 1",
+        ),
+        (
+            "SELECT * FROM t broadcast, u",
+            "SELECT * FROM t AS broadcast, u",
+        ),
+        (
+            "SELECT * FROM t broadcast CROSS JOIN u",
+            "SELECT * FROM t AS broadcast CROSS JOIN u",
+        ),
+        (
+            "SELECT * FROM t broadcast RIGHT JOIN u ON true",
+            "SELECT * FROM t AS broadcast RIGHT JOIN u ON true",
+        ),
+        (
+            "SELECT * FROM t \"broadcast\" LEFT JOIN u ON true",
+            "SELECT * FROM t AS \"broadcast\" LEFT JOIN u ON true",
+        ),
+    ] {
+        query(sql, canonical);
+    }
+
+    assert_eq!(Ident::from_real_value("broadcast").to_string(), "broadcast");
 }
 
 #[test]

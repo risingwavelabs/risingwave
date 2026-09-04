@@ -106,7 +106,6 @@ define_keywords!(
     BOOL,
     BOOLEAN,
     BOTH,
-    BROADCAST,
     BY,
     BYTEA,
     CACHE,
@@ -622,7 +621,6 @@ pub const RESERVED_FOR_TABLE_ALIAS: &[Keyword] = &[
     Keyword::RIGHT,
     Keyword::NATURAL,
     Keyword::ASOF,
-    Keyword::BROADCAST,
     Keyword::USING,
     Keyword::CLUSTER,
     // for MSSQL-specific OUTER APPLY (seems reserved in most dialects)

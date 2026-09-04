@@ -161,13 +161,9 @@ impl ExecutorBuilder for TemporalJoinExecutorBuilder {
             let memo_table = node.get_memo_table();
             let memo_table = match memo_table {
                 Ok(memo_table) => {
-                    let vnodes = Arc::new(
-                        params
-                            .vnode_bitmap
-                            .expect("vnodes not set for temporal join"),
-                    );
+                    let vnodes = params.vnode_bitmap.clone().map(Arc::new);
                     Some(
-                        StateTableBuilder::new(memo_table, store.clone(), Some(vnodes.clone()))
+                        StateTableBuilder::new(memo_table, store.clone(), vnodes)
                             .enable_preload_all_rows_by_config(&params.config)
                             .build()
                             .await,

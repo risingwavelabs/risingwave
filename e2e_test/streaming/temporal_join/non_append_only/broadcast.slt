@@ -148,6 +148,57 @@ DROP TABLE raw_events;
 statement ok
 DROP TABLE dimensions;
 
+# A singleton retractable left input has no actor vnode bitmap. Its memo table must use singleton
+# distribution while the lookup side remains fully replicated.
+statement ok
+CREATE TABLE singleton_events(id INT PRIMARY KEY, v INT);
+
+statement ok
+CREATE TABLE singleton_dimensions(id INT PRIMARY KEY, name VARCHAR);
+
+statement ok
+INSERT INTO singleton_dimensions VALUES (1, 'one'), (2, 'two');
+
+statement ok
+CREATE MATERIALIZED VIEW singleton_joined AS
+SELECT s.k, s.c, singleton_dimensions.name
+FROM (SELECT max(id) AS k, count(*) AS c FROM singleton_events) AS s
+BROADCAST LEFT JOIN singleton_dimensions FOR SYSTEM_TIME AS OF PROCTIME()
+ON s.k = singleton_dimensions.id;
+
+statement ok
+INSERT INTO singleton_events VALUES (1, 10);
+
+query IIT
+SELECT * FROM singleton_joined;
+----
+1 1 one
+
+statement ok
+INSERT INTO singleton_events VALUES (2, 20);
+
+query IIT
+SELECT * FROM singleton_joined;
+----
+2 2 two
+
+statement ok
+DELETE FROM singleton_events WHERE id = 2;
+
+query IIT
+SELECT * FROM singleton_joined;
+----
+1 1 one
+
+statement ok
+DROP MATERIALIZED VIEW singleton_joined;
+
+statement ok
+DROP TABLE singleton_events;
+
+statement ok
+DROP TABLE singleton_dimensions;
+
 statement ok
 SET streaming_parallelism = default;
 

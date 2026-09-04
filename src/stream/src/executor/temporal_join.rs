@@ -892,12 +892,12 @@ impl<
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
     use std::sync::atomic::AtomicU64;
 
     use risingwave_common::array::*;
-    use risingwave_common::bitmap::Bitmap;
+    use risingwave_common::bitmap::{Bitmap, BitmapBuilder};
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::hash::Key32;
     use risingwave_common::types::{DataType, ScalarRefImpl};
@@ -905,8 +905,8 @@ mod tests {
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_common::util::value_encoding::BasicSerde;
     use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
+    use risingwave_pb::id::ActorId;
     use risingwave_storage::hummock::HummockStorage;
-    use risingwave_storage::memory::MemoryStateStore;
 
     use super::*;
     use crate::common::table::state_table::{
@@ -915,13 +915,14 @@ mod tests {
     use crate::common::table::test_utils::{gen_pbtable, gen_pbtable_with_dist_key};
     use crate::executor::monitor::StreamingMetrics;
     use crate::executor::test_utils::{MockSource, StreamExecutorTestExt};
-    use crate::executor::{ActorContext, ExecutorInfo, JoinType};
+    use crate::executor::{ActorContext, ExecutorInfo, JoinType, Mutation, UpdateMutation};
 
     /// Tests that a temporal join on a pk-prefix (join key is a strict prefix of the right table's
     /// pk) correctly merges rows committed in epoch1 with rows staged/committed during epoch2, and
     /// produces the right results when the left side arrives in epoch3.
     ///
-    /// Right table: (key INT, seq INT, val INT), pk = (key, seq), SINGLETON distribution.
+    /// Right table: (key INT, seq INT, val INT), pk = (key, seq). The regular variant uses a
+    /// singleton table; the broadcast variant uses a distributed table with all vnodes replicated.
     /// Join condition: `left.left_key` = right.key  (pk prefix: join uses only the first pk column).
     ///
     /// Pre-commit at epoch1: (1,1,100), (1,2,200), (2,1,300)
@@ -948,11 +949,13 @@ mod tests {
     /// deliberately different vnode counts here.
     #[tokio::test]
     async fn test_broadcast_temporal_join_retracts_memoized_row() {
-        let store = MemoryStateStore::new();
+        let test_env = prepare_hummock_test_env().await;
+        let right_table_id = TableId::new(1);
+        let memo_table_id = TableId::new(2);
 
         // Lookup table: (lookup_id, dim_value), distributed across 16 vnodes.
         let mut right_catalog = gen_pbtable_with_dist_key(
-            TableId::new(1),
+            right_table_id,
             vec![
                 ColumnDesc::unnamed(ColumnId::new(0), DataType::Int32),
                 ColumnDesc::unnamed(ColumnId::new(1), DataType::Int32),
@@ -963,9 +966,10 @@ mod tests {
             vec![0],
         );
         right_catalog.maybe_vnode_count = Some(16);
+        test_env.register_table(right_catalog.clone()).await;
         let right_table = StateTableBuilder::<_, BasicSerde, true, _>::new(
             &right_catalog,
-            store.clone(),
+            test_env.storage.clone(),
             Some(Arc::new(Bitmap::ones(16))),
         )
         .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)
@@ -977,7 +981,7 @@ mod tests {
         // Memo row: (right_lookup_id, dim_value, left_lookup_id, left_id). Its prefix remains
         // `left_lookup_id + left_id`, while its distribution key refers to the `left_id` copy.
         let mut memo_catalog = gen_pbtable_with_dist_key(
-            TableId::new(2),
+            memo_table_id,
             vec![
                 ColumnDesc::unnamed(ColumnId::new(0), DataType::Int32),
                 ColumnDesc::unnamed(ColumnId::new(1), DataType::Int32),
@@ -994,11 +998,28 @@ mod tests {
             vec![3],
         );
         memo_catalog.maybe_vnode_count = Some(8);
-        let memo_table =
-            StateTableBuilder::new(&memo_catalog, store, Some(Arc::new(Bitmap::ones(8))))
-                .forbid_preload_all_rows()
-                .build()
-                .await;
+        test_env.register_table(memo_catalog.clone()).await;
+        let memo_table = StateTableBuilder::new(
+            &memo_catalog,
+            test_env.storage.clone(),
+            Some(Arc::new(Bitmap::ones(8))),
+        )
+        .forbid_preload_all_rows()
+        .build()
+        .await;
+
+        // Keep ownership of the memo rows used after the update. The lookup table has a different
+        // vnode count, so incorrectly applying this bitmap to the replica would fail immediately.
+        let mut updated_memo_vnodes = BitmapBuilder::zeroed(8);
+        for left_id in [100, 101] {
+            let vnode = memo_table.compute_vnode_by_pk(OwnedRow::new(vec![
+                Some(1i32.into()),
+                Some(left_id.into()),
+                Some(1i32.into()),
+            ]));
+            updated_memo_vnodes.set(vnode.to_index(), true);
+        }
+        let updated_memo_vnodes = Arc::new(updated_memo_vnodes.finish());
 
         // Left: (left_id, lookup_id, payload), distributed and keyed by `left_id`.
         let left_schema = Schema::new(vec![
@@ -1032,7 +1053,7 @@ mod tests {
 
         let executor = TemporalJoinExecutor::<
             Key32,
-            MemoryStateStore,
+            HummockStorage,
             BasicSerde,
             { JoinType::Inner },
             false,
@@ -1057,6 +1078,10 @@ mod tests {
         );
         let mut stream = Box::new(executor).execute();
 
+        test_env.storage.start_epoch(
+            test_epoch(1),
+            HashSet::from_iter([right_table_id, memo_table_id]),
+        );
         left_tx.push_barrier(test_epoch(1), false);
         right_tx.push_barrier(test_epoch(1), false);
         stream.expect_barrier().await;
@@ -1066,6 +1091,10 @@ mod tests {
             " i  i
              + 1 10",
         ));
+        test_env.storage.start_epoch(
+            test_epoch(2),
+            HashSet::from_iter([right_table_id, memo_table_id]),
+        );
         left_tx.push_barrier(test_epoch(2), false);
         right_tx.push_barrier(test_epoch(2), false);
         stream.expect_barrier().await;
@@ -1082,6 +1111,10 @@ mod tests {
                  + 100 1 7 1 10",
             )
         );
+        test_env.storage.start_epoch(
+            test_epoch(3),
+            HashSet::from_iter([right_table_id, memo_table_id]),
+        );
         left_tx.push_barrier(test_epoch(3), false);
         right_tx.push_barrier(test_epoch(3), false);
         stream.expect_barrier().await;
@@ -1092,9 +1125,21 @@ mod tests {
              U- 1 10
              U+ 1 20",
         ));
-        left_tx.push_barrier(test_epoch(4), false);
-        right_tx.push_barrier(test_epoch(4), false);
+        test_env.storage.start_epoch(
+            test_epoch(4),
+            HashSet::from_iter([right_table_id, memo_table_id]),
+        );
+        let barrier = Barrier::new_test_barrier(test_epoch(4)).with_mutation(Mutation::Update(
+            UpdateMutation {
+                vnode_bitmaps: HashMap::from([(ActorId::new(0), updated_memo_vnodes)]),
+                ..Default::default()
+            },
+        ));
+        left_tx.send_barrier(barrier.clone());
+        right_tx.send_barrier(barrier);
         stream.expect_barrier().await;
+        // Applying the memo vnode update waits for this committed epoch after the barrier yield.
+        test_env.commit_epoch(test_epoch(3)).await;
 
         // Deleting the old left row must retract v1, while a new row sees v2.
         left_tx.push_chunk(StreamChunk::from_pretty(
@@ -1111,6 +1156,10 @@ mod tests {
             )
         );
 
+        test_env.storage.start_epoch(
+            test_epoch(5),
+            HashSet::from_iter([right_table_id, memo_table_id]),
+        );
         left_tx.push_barrier(test_epoch(5), true);
         right_tx.push_barrier(test_epoch(5), true);
         stream.expect_barrier().await;
@@ -1121,8 +1170,9 @@ mod tests {
         let table_id = TableId::new(1);
 
         // Right table schema: (key INT col_id=1, seq INT col_id=2, val INT col_id=3)
-        // pk = (key idx=0, seq idx=1), SINGLETON distribution (empty distribution_key),
-        // read_prefix_len_hint = 2 (= full pk length).
+        // pk = (key idx=0, seq idx=1), read_prefix_len_hint = 2 (= full pk length).
+        // The broadcast variant uses a distributed catalog and owns every lookup vnode; the
+        // regular variant preserves the original singleton coverage.
         let right_col_descs = vec![
             ColumnDesc::unnamed(ColumnId::new(1), DataType::Int32),
             ColumnDesc::unnamed(ColumnId::new(2), DataType::Int32),
@@ -1130,7 +1180,24 @@ mod tests {
         ];
         let order_types = vec![OrderType::ascending(), OrderType::ascending()];
         let pk_indices = vec![0usize, 1];
-        let pbtable = gen_pbtable(table_id, right_col_descs, order_types, pk_indices, 2);
+        let vnode_count = 16;
+        let (pbtable, lookup_vnodes) = if is_broadcast {
+            let mut table = gen_pbtable_with_dist_key(
+                table_id,
+                right_col_descs,
+                order_types,
+                pk_indices,
+                2,
+                vec![0],
+            );
+            table.maybe_vnode_count = Some(vnode_count as _);
+            (table, Some(Arc::new(Bitmap::ones(vnode_count))))
+        } else {
+            (
+                gen_pbtable(table_id, right_col_descs, order_types, pk_indices, 2),
+                None,
+            )
+        };
 
         test_env.register_table(pbtable.clone()).await;
 
@@ -1139,7 +1206,7 @@ mod tests {
             let mut setup_table = StateTable::<HummockStorage>::from_table_catalog_inconsistent_op(
                 &pbtable,
                 test_env.storage.clone(),
-                None,
+                lookup_vnodes.clone(),
             )
             .await;
             test_env
@@ -1180,13 +1247,17 @@ mod tests {
         let right_table = StateTableBuilder::<_, BasicSerde, true, _>::new(
             &pbtable,
             test_env.storage.clone(),
-            None,
+            lookup_vnodes,
         )
         .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)
         .with_output_column_ids(output_column_ids)
         .forbid_preload_all_rows()
         .build()
         .await;
+        let key3_vnode = is_broadcast.then(|| {
+            right_table
+                .compute_vnode_by_pk(OwnedRow::new(vec![Some(3i32.into()), Some(1i32.into())]))
+        });
 
         // Left source: (left_key INT, left_val INT), stream_key = [0].
         let left_schema = Schema::new(vec![
@@ -1270,8 +1341,22 @@ mod tests {
         test_env
             .storage
             .start_epoch(test_epoch(3), HashSet::from_iter([table_id]));
-        left_tx.push_barrier_with_prev_epoch_for_test(test_epoch(3), test_epoch(2), false);
-        right_tx.push_barrier_with_prev_epoch_for_test(test_epoch(3), test_epoch(2), false);
+        let mut barrier = Barrier::with_prev_epoch_for_test(test_epoch(3), test_epoch(2));
+        if let Some(key3_vnode) = key3_vnode {
+            let mut updated_vnodes = BitmapBuilder::zeroed(vnode_count);
+            for vnode in 0..vnode_count {
+                updated_vnodes.set(vnode, vnode != key3_vnode.to_index());
+            }
+            barrier = barrier.with_mutation(Mutation::Update(UpdateMutation {
+                vnode_bitmaps: HashMap::from([(
+                    ActorId::new(0),
+                    Arc::new(updated_vnodes.finish()),
+                )]),
+                ..Default::default()
+            }));
+        }
+        left_tx.send_barrier(barrier.clone());
+        right_tx.send_barrier(barrier);
         stream.expect_barrier().await;
 
         // Start epoch4 before the stop barrier that commits epoch3 data.
