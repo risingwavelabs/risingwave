@@ -76,10 +76,6 @@ pub fn parse_format_encode(p: &mut Parser<'_>) -> ModalResult<CompatibleFormatEn
         let id = p.parse_identifier()?;
         let value = id.real_value();
         let schema = match &value[..] {
-            "protobuf" => {
-                impl_parse_to!(protobuf_schema: ProtobufSchema, p);
-                LegacyRowFormat::Protobuf(protobuf_schema)
-            }
             "debezium_mongo_json" => LegacyRowFormat::DebeziumMongoJson,
             "avro" => {
                 impl_parse_to!(avro_schema: AvroSchema, p);
@@ -106,7 +102,6 @@ pub fn parse_format_encode(p: &mut Parser<'_>) -> ModalResult<CompatibleFormatEn
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum LegacyRowFormat {
-    Protobuf(ProtobufSchema), // Keyword::PROTOBUF ProtobufSchema
     DebeziumMongoJson,
     Avro(AvroSchema),       // Keyword::AVRO
     UpsertAvro(AvroSchema), // Keyword::UpsertAVRO
@@ -117,7 +112,6 @@ pub enum LegacyRowFormat {
 impl LegacyRowFormat {
     pub fn into_format_encode_v2(self) -> FormatEncodeOptions {
         let (format, row_encode) = match self {
-            LegacyRowFormat::Protobuf(_) => (Format::Plain, Encode::Protobuf),
             LegacyRowFormat::DebeziumMongoJson => (Format::DebeziumMongo, Encode::Json),
             LegacyRowFormat::Avro(_) => (Format::Plain, Encode::Avro),
             LegacyRowFormat::UpsertAvro(_) => (Format::Upsert, Encode::Avro),
@@ -126,33 +120,6 @@ impl LegacyRowFormat {
         };
 
         let row_options = match self {
-            LegacyRowFormat::Protobuf(schema) => {
-                let mut options = vec![SqlOption {
-                    name: ObjectName(vec![Ident {
-                        value: "message".into(),
-                        quote_style: None,
-                    }]),
-                    value: Value::SingleQuotedString(schema.message_name.0).into(),
-                }];
-                if schema.use_schema_registry {
-                    options.push(SqlOption {
-                        name: ObjectName(vec![Ident {
-                            value: "schema.registry".into(),
-                            quote_style: None,
-                        }]),
-                        value: Value::SingleQuotedString(schema.row_schema_location.0).into(),
-                    });
-                } else {
-                    options.push(SqlOption {
-                        name: ObjectName(vec![Ident {
-                            value: "schema.location".into(),
-                            quote_style: None,
-                        }]),
-                        value: Value::SingleQuotedString(schema.row_schema_location.0).into(),
-                    })
-                }
-                options
-            }
             LegacyRowFormat::Avro(schema) | LegacyRowFormat::UpsertAvro(schema) => {
                 if schema.use_schema_registry {
                     vec![SqlOption {
@@ -188,55 +155,12 @@ impl fmt::Display for LegacyRowFormat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "ROW FORMAT ")?;
         match self {
-            LegacyRowFormat::Protobuf(protobuf_schema) => {
-                write!(f, "PROTOBUF {}", protobuf_schema)
-            }
             LegacyRowFormat::DebeziumMongoJson => write!(f, "DEBEZIUM_MONGO_JSON"),
             LegacyRowFormat::Avro(avro_schema) => write!(f, "AVRO {}", avro_schema),
             LegacyRowFormat::UpsertAvro(avro_schema) => write!(f, "UPSERT_AVRO {}", avro_schema),
             LegacyRowFormat::Native => write!(f, "NATIVE"),
             LegacyRowFormat::Bytes => write!(f, "BYTES"),
         }
-    }
-}
-
-// sql_grammar!(ProtobufSchema {
-//     [Keyword::MESSAGE],
-//     message_name: AstString,
-//     [Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION],
-//     row_schema_location: AstString,
-// });
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct ProtobufSchema {
-    pub message_name: AstString,
-    pub row_schema_location: AstString,
-    pub use_schema_registry: bool,
-}
-
-impl ParseTo for ProtobufSchema {
-    fn parse_to(p: &mut Parser<'_>) -> ModalResult<Self> {
-        impl_parse_to!([Keyword::MESSAGE], p);
-        impl_parse_to!(message_name: AstString, p);
-        impl_parse_to!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], p);
-        impl_parse_to!(use_schema_registry => [Keyword::CONFLUENT, Keyword::SCHEMA, Keyword::REGISTRY], p);
-        impl_parse_to!(row_schema_location: AstString, p);
-        Ok(Self {
-            message_name,
-            row_schema_location,
-            use_schema_registry,
-        })
-    }
-}
-
-impl fmt::Display for ProtobufSchema {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut v: Vec<String> = vec![];
-        impl_fmt_display!([Keyword::MESSAGE], v);
-        impl_fmt_display!(message_name, v, self);
-        impl_fmt_display!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], v);
-        impl_fmt_display!(use_schema_registry => [Keyword::CONFLUENT, Keyword::SCHEMA, Keyword::REGISTRY], v, self);
-        impl_fmt_display!(row_schema_location, v, self);
-        v.iter().join(" ").fmt(f)
     }
 }
 

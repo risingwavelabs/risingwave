@@ -318,7 +318,6 @@ define_keywords!(
     MAX,
     MEMBER,
     MERGE,
-    MESSAGE,
     META,
     METHOD,
     MIN,
