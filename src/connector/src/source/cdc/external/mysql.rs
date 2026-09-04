@@ -959,6 +959,7 @@ mod tests {
             password: "123456".to_owned(),
             database: "mydb".to_owned(),
             schema: "".to_owned(),
+            pdb_name: "".to_owned(),
             table: "part".to_owned(),
             ssl_mode: Default::default(),
             ssl_root_cert: None,
