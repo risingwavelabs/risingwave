@@ -76,14 +76,6 @@ pub fn parse_format_encode(p: &mut Parser<'_>) -> ModalResult<CompatibleFormatEn
         let id = p.parse_identifier()?;
         let value = id.real_value();
         let schema = match &value[..] {
-            "avro" => {
-                impl_parse_to!(avro_schema: AvroSchema, p);
-                LegacyRowFormat::Avro(avro_schema)
-            }
-            "upsert_avro" => {
-                impl_parse_to!(avro_schema: AvroSchema, p);
-                LegacyRowFormat::UpsertAvro(avro_schema)
-            }
             "native" => LegacyRowFormat::Native, // used internally by schema change
             "bytes" => LegacyRowFormat::Bytes,
             _ => {
@@ -101,8 +93,6 @@ pub fn parse_format_encode(p: &mut Parser<'_>) -> ModalResult<CompatibleFormatEn
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum LegacyRowFormat {
-    Avro(AvroSchema),       // Keyword::AVRO
-    UpsertAvro(AvroSchema), // Keyword::UpsertAVRO
     Native,
     Bytes,
 }
@@ -110,32 +100,11 @@ pub enum LegacyRowFormat {
 impl LegacyRowFormat {
     pub fn into_format_encode_v2(self) -> FormatEncodeOptions {
         let (format, row_encode) = match self {
-            LegacyRowFormat::Avro(_) => (Format::Plain, Encode::Avro),
-            LegacyRowFormat::UpsertAvro(_) => (Format::Upsert, Encode::Avro),
             LegacyRowFormat::Bytes => (Format::Plain, Encode::Bytes),
             LegacyRowFormat::Native => (Format::Native, Encode::Native),
         };
 
         let row_options = match self {
-            LegacyRowFormat::Avro(schema) | LegacyRowFormat::UpsertAvro(schema) => {
-                if schema.use_schema_registry {
-                    vec![SqlOption {
-                        name: ObjectName(vec![Ident {
-                            value: "schema.registry".into(),
-                            quote_style: None,
-                        }]),
-                        value: Value::SingleQuotedString(schema.row_schema_location.0).into(),
-                    }]
-                } else {
-                    vec![SqlOption {
-                        name: ObjectName(vec![Ident {
-                            value: "schema.location".into(),
-                            quote_style: None,
-                        }]),
-                        value: Value::SingleQuotedString(schema.row_schema_location.0).into(),
-                    }]
-                }
-            }
             _ => vec![],
         };
 
@@ -152,43 +121,9 @@ impl fmt::Display for LegacyRowFormat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "ROW FORMAT ")?;
         match self {
-            LegacyRowFormat::Avro(avro_schema) => write!(f, "AVRO {}", avro_schema),
-            LegacyRowFormat::UpsertAvro(avro_schema) => write!(f, "UPSERT_AVRO {}", avro_schema),
             LegacyRowFormat::Native => write!(f, "NATIVE"),
             LegacyRowFormat::Bytes => write!(f, "BYTES"),
         }
-    }
-}
-
-// sql_grammar!(AvroSchema {
-//     [Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION, [Keyword::CONFLUENT, Keyword::SCHEMA,
-// Keyword::REGISTRY]],     row_schema_location: AstString,
-// });
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct AvroSchema {
-    pub row_schema_location: AstString,
-    pub use_schema_registry: bool,
-}
-
-impl ParseTo for AvroSchema {
-    fn parse_to(p: &mut Parser<'_>) -> ModalResult<Self> {
-        impl_parse_to!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], p);
-        impl_parse_to!(use_schema_registry => [Keyword::CONFLUENT, Keyword::SCHEMA, Keyword::REGISTRY], p);
-        impl_parse_to!(row_schema_location: AstString, p);
-        Ok(Self {
-            row_schema_location,
-            use_schema_registry,
-        })
-    }
-}
-
-impl fmt::Display for AvroSchema {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut v: Vec<String> = vec![];
-        impl_fmt_display!([Keyword::ROW, Keyword::SCHEMA, Keyword::LOCATION], v);
-        impl_fmt_display!(use_schema_registry => [Keyword::CONFLUENT, Keyword::SCHEMA, Keyword::REGISTRY], v, self);
-        impl_fmt_display!(row_schema_location, v, self);
-        v.iter().join(" ").fmt(f)
     }
 }
 
