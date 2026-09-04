@@ -1428,7 +1428,6 @@ async fn handle_create_cdc_table_source(
             )
         })
         .collect();
-    let (connect_properties, secret_refs) = cdc_with_options.clone().into_parts();
     let cdc_table_desc = CdcTableDesc {
         table_id: TableId::placeholder(),
         source_id: upstream_source.id,
@@ -1439,14 +1438,32 @@ async fn handle_create_cdc_table_source(
             .map(|column| column.column_desc.clone())
             .collect(),
         stream_key,
-        connect_properties,
-        secret_refs,
+        // Consumers resolve these fields from `source_id` when they are planned. Persisting a
+        // copy here would make credentials and secret references stale after `ALTER SOURCE`.
+        connect_properties: BTreeMap::new(),
+        secret_refs: BTreeMap::new(),
     };
 
     let mut source_info = upstream_source.info.clone();
     source_info.cdc_source_job = false;
     source_info.is_distributed = false;
     source_info.external_table = Some(cdc_table_desc.to_protobuf());
+
+    // A catalog-only table source keeps just enough connector identity for catalog display and
+    // source-kind checks. Connection details belong exclusively to the upstream shared source.
+    let catalog_with_properties = WithOptionsSecResolved::new(
+        BTreeMap::from([
+            (
+                UPSTREAM_SOURCE_KEY.to_owned(),
+                upstream_source
+                    .with_properties
+                    .get_connector()
+                    .expect("validated as a CDC source"),
+            ),
+            (CDC_BACKFILL_ENABLE_KEY.to_owned(), "false".to_owned()),
+        ]),
+        BTreeMap::new(),
+    );
 
     let source_catalog = SourceCatalog {
         id: SourceId::placeholder(),
@@ -1459,7 +1476,7 @@ async fn handle_create_cdc_table_source(
         owner: session.user_id(),
         info: source_info,
         row_id_index: None,
-        with_properties: cdc_with_options,
+        with_properties: catalog_with_properties,
         watermark_descs: vec![],
         associated_table_id: None,
         definition: handler_args.normalized_sql,
