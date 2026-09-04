@@ -1130,55 +1130,6 @@ impl Default for MetaMetrics {
     }
 }
 
-#[cfg(test)]
-mod tests {
-    use risingwave_common::metrics::get_label;
-
-    use super::*;
-
-    fn actor_id(registry: &Registry, metric_name: &str) -> String {
-        let metric_family = registry
-            .gather()
-            .into_iter()
-            .find(|family| family.name() == metric_name)
-            .unwrap();
-        get_label(metric_family.get_metric().first().unwrap(), "actor_id").unwrap()
-    }
-
-    #[test]
-    fn actor_info_is_the_only_meta_actor_id_allowlist() {
-        for level in [MetricLevel::Critical, MetricLevel::Info] {
-            let registry = Registry::new();
-            let metrics = MetaMetrics::new(&registry, level);
-
-            metrics
-                .actor_info
-                .with_label_values(&["11", "22", "compute-0"])
-                .set(1);
-            metrics
-                .sink_info
-                .with_label_values(&["11", "33", "sink"])
-                .set(1);
-
-            assert_eq!(actor_id(&registry, "actor_info"), "11");
-            assert_eq!(actor_id(&registry, "sink_info"), "");
-        }
-    }
-
-    #[test]
-    fn debug_meta_metrics_retain_actor_id() {
-        let registry = Registry::new();
-        let metrics = MetaMetrics::new(&registry, MetricLevel::Debug);
-
-        metrics
-            .sink_info
-            .with_label_values(&["11", "33", "sink"])
-            .set(1);
-
-        assert_eq!(actor_id(&registry, "sink_info"), "11");
-    }
-}
-
 /// Refresh `system_param_info` metrics by reading current system parameters.
 pub async fn refresh_system_param_info_metrics(
     system_params_controller: &SystemParamsControllerRef,
@@ -1756,4 +1707,53 @@ pub fn start_info_monitor(
     });
 
     (join_handle, shutdown_tx)
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::metrics::get_label;
+
+    use super::*;
+
+    fn actor_id(registry: &Registry, metric_name: &str) -> String {
+        let metric_family = registry
+            .gather()
+            .into_iter()
+            .find(|family| family.name() == metric_name)
+            .unwrap();
+        get_label(metric_family.get_metric().first().unwrap(), "actor_id").unwrap()
+    }
+
+    #[test]
+    fn actor_info_is_the_only_meta_actor_id_allowlist() {
+        for level in [MetricLevel::Critical, MetricLevel::Info] {
+            let registry = Registry::new();
+            let metrics = MetaMetrics::new(&registry, level);
+
+            metrics
+                .actor_info
+                .with_label_values(&["11", "22", "compute-0"])
+                .set(1);
+            metrics
+                .sink_info
+                .with_label_values(&["11", "33", "sink"])
+                .set(1);
+
+            assert_eq!(actor_id(&registry, "actor_info"), "11");
+            assert_eq!(actor_id(&registry, "sink_info"), "");
+        }
+    }
+
+    #[test]
+    fn debug_meta_metrics_retain_actor_id() {
+        let registry = Registry::new();
+        let metrics = MetaMetrics::new(&registry, MetricLevel::Debug);
+
+        metrics
+            .sink_info
+            .with_label_values(&["11", "33", "sink"])
+            .set(1);
+
+        assert_eq!(actor_id(&registry, "sink_info"), "11");
+    }
 }
