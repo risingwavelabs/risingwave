@@ -59,11 +59,25 @@ impl PartialGraphBarrierInfo {
         notifier: Option<&mut NotifierStarter>,
         table_ids_to_commit: HashSet<TableId>,
     ) -> Self {
+        Self::with_notifier(
+            post_collect_command,
+            barrier_info,
+            notifier.map(NotifierStarter::add_notify),
+            table_ids_to_commit,
+        )
+    }
+
+    pub(super) fn with_notifier(
+        post_collect_command: PostCollectCommand,
+        barrier_info: BarrierInfo,
+        notifier: Option<CollectionNotifier>,
+        table_ids_to_commit: HashSet<TableId>,
+    ) -> Self {
         Self {
             enqueue_time: Instant::now(),
             post_collect_command,
             barrier_info,
-            notifier: notifier.map(NotifierStarter::add_notify),
+            notifier,
             table_ids_to_commit,
         }
     }

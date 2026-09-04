@@ -20,7 +20,6 @@ use std::time::Duration;
 use itertools::Itertools;
 use risingwave_common::hash::ActorId;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::{FragmentId, PartialGraphId};
 use risingwave_pb::stream_plan::StartFragmentBackfillMutation;
 use risingwave_pb::stream_plan::barrier::PbBarrierKind;
@@ -30,10 +29,11 @@ use risingwave_pb::stream_service::barrier_complete_response::{
 };
 use tracing::warn;
 
+use crate::barrier::checkpoint::independent_job::SnapshotPhaseControl;
 use crate::barrier::checkpoint::independent_job::creating_job::CreatingJobInfo;
 use crate::barrier::command::{ThrottleConfigMap, extract_throttle_config};
 use crate::barrier::partial_graph::PartialGraphManager;
-use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
+use crate::barrier::progress::TrackingJob;
 use crate::barrier::{BarrierInfo, BarrierKind, TracedEpoch};
 use crate::controller::fragment::InflightFragmentInfo;
 
@@ -108,15 +108,10 @@ pub(super) enum CreatingStreamingJobStatus {
     /// Will transit to `ConsumingLogStore` on `update_progress` when
     /// the snapshot has been fully consumed after `update_progress`.
     ConsumingSnapshot {
-        prev_epoch_fake_physical_time: u64,
+        snapshot: SnapshotPhaseControl,
         pending_upstream_barriers: Vec<BarrierInfo>,
-        version_stats: HummockVersionStats,
-        create_mview_tracker: CreateMviewProgressTracker,
         snapshot_backfill_actors: HashSet<ActorId>,
-        snapshot_epoch: u64,
         info: CreatingJobInfo,
-        /// The `prev_epoch` of pending non checkpoint barriers
-        pending_non_checkpoint_barriers: Vec<u64>,
     },
     /// The creating job is consuming log store.
     ///
@@ -141,34 +136,36 @@ impl CreatingStreamingJobStatus {
     ) {
         match self {
             &mut Self::ConsumingSnapshot {
-                ref mut create_mview_tracker,
-                ref version_stats,
-                ref mut prev_epoch_fake_physical_time,
+                ref mut snapshot,
                 ref mut pending_upstream_barriers,
-                ref mut pending_non_checkpoint_barriers,
-                ref snapshot_epoch,
                 ..
             } => {
                 for progress in create_mview_progress {
-                    create_mview_tracker.apply_progress(progress, version_stats);
+                    snapshot
+                        .create_mview_tracker
+                        .apply_progress(progress, &snapshot.version_stats);
                 }
-                if create_mview_tracker.is_finished() {
-                    pending_non_checkpoint_barriers.push(*snapshot_epoch);
+                if snapshot.create_mview_tracker.is_finished() {
+                    snapshot
+                        .pending_non_checkpoint_barriers
+                        .push(snapshot.snapshot_epoch);
 
-                    let prev_epoch = Epoch::from_physical_time(*prev_epoch_fake_physical_time);
+                    let prev_epoch =
+                        Epoch::from_physical_time(snapshot.prev_epoch_fake_physical_time);
                     let pending_barriers: VecDeque<_> = [BarrierInfo {
-                        curr_epoch: TracedEpoch::new(Epoch(*snapshot_epoch)),
+                        curr_epoch: TracedEpoch::new(Epoch(snapshot.snapshot_epoch)),
                         prev_epoch: TracedEpoch::new(prev_epoch),
-                        kind: BarrierKind::Checkpoint(take(pending_non_checkpoint_barriers)),
+                        kind: BarrierKind::Checkpoint(take(
+                            &mut snapshot.pending_non_checkpoint_barriers,
+                        )),
                     }]
                     .into_iter()
                     .chain(pending_upstream_barriers.drain(..))
                     .collect();
 
                     let CreatingStreamingJobStatus::ConsumingSnapshot {
-                        create_mview_tracker,
+                        snapshot,
                         info,
-                        snapshot_epoch,
                         snapshot_backfill_actors,
                         ..
                     } = replace(self, CreatingStreamingJobStatus::PlaceHolder)
@@ -176,7 +173,7 @@ impl CreatingStreamingJobStatus {
                         unreachable!()
                     };
 
-                    let tracking_job = create_mview_tracker.into_tracking_job();
+                    let tracking_job = snapshot.create_mview_tracker.into_tracking_job();
 
                     *self = CreatingStreamingJobStatus::ConsumingLogStore {
                         tracking_job,
@@ -186,7 +183,9 @@ impl CreatingStreamingJobStatus {
                             pending_barriers
                                 .back()
                                 .map(|barrier_info| {
-                                    barrier_info.prev_epoch().saturating_sub(snapshot_epoch)
+                                    barrier_info
+                                        .prev_epoch()
+                                        .saturating_sub(snapshot.snapshot_epoch)
                                 })
                                 .unwrap_or(0),
                         ),
@@ -252,13 +251,12 @@ impl CreatingStreamingJobStatus {
         match self {
             CreatingStreamingJobStatus::ConsumingSnapshot {
                 pending_upstream_barriers,
-                prev_epoch_fake_physical_time,
-                pending_non_checkpoint_barriers,
-                create_mview_tracker,
+                snapshot,
                 ..
             } => {
                 let mutation = mutation.or_else(|| {
-                    let pending_backfill_nodes = create_mview_tracker
+                    let pending_backfill_nodes = snapshot
+                        .create_mview_tracker
                         .take_pending_backfill_nodes()
                         .collect_vec();
                     if pending_backfill_nodes.is_empty() {
@@ -280,8 +278,8 @@ impl CreatingStreamingJobStatus {
                 }
                 vec![(
                     CreatingStreamingJobStatus::new_fake_barrier(
-                        prev_epoch_fake_physical_time,
-                        pending_non_checkpoint_barriers,
+                        &mut snapshot.prev_epoch_fake_physical_time,
+                        &mut snapshot.pending_non_checkpoint_barriers,
                         match barrier_info.kind {
                             BarrierKind::Barrier => PbBarrierKind::Barrier,
                             BarrierKind::Checkpoint(_) => PbBarrierKind::Checkpoint,

@@ -22,7 +22,7 @@
 //!                                                        ↕  (periodic trigger)
 //!                                        `Idle` ← `ConsumingLogStore`
 
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, hash_map};
 use std::mem::{replace, take};
 use std::sync::atomic::AtomicU32;
 
@@ -44,7 +44,11 @@ use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::{debug, info};
 
 use crate::MetaResult;
-use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
+use crate::barrier::checkpoint::independent_job::{
+    IndependentCheckpointJob, IndependentCheckpointJobControl, IndependentCheckpointJobStatus,
+    IndependentJobControl, IndependentJobInfo, InitialPartialGraphRequest, SnapshotPhaseControl,
+    add_initial_partial_graph, build_initial_add_mutation,
+};
 use crate::barrier::command::{PostCollectCommand, ThrottleConfigMap, extract_throttle_config};
 use crate::barrier::context::CreateIndependentStreamingJobCommandInfo;
 use crate::barrier::edge_builder::{EdgeBuilderFragmentInfo, FragmentEdgeBuilder};
@@ -53,11 +57,9 @@ use crate::barrier::notifier::NotifierStarter;
 use crate::barrier::partial_graph::{
     CollectedBarrier, PartialGraphBarrierInfo, PartialGraphManager, PartialGraphStat,
 };
-use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob, collect_done_fragments};
+use crate::barrier::progress::{TrackingJob, collect_done_fragments};
 use crate::barrier::rpc::to_partial_graph_id;
-use crate::barrier::{
-    BackfillOrderState, BackfillProgress, BarrierKind, FragmentBackfillProgress, TracedEpoch,
-};
+use crate::barrier::{BackfillProgress, BarrierKind, FragmentBackfillProgress, TracedEpoch};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::controller::scale::{
     ComponentFragmentAligner, EnsembleActorTemplate, LoadedFragment, NoShuffleEnsemble,
@@ -95,7 +97,6 @@ pub(crate) struct BatchRefreshLogicalFragments {
 pub(crate) struct BatchRefreshRenderResult {
     pub fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
     pub node_actors: HashMap<WorkerId, HashSet<ActorId>>,
-    pub state_table_ids: HashSet<TableId>,
     pub actors_to_create: StreamJobActorsToCreate,
 }
 
@@ -139,14 +140,9 @@ enum BatchRefreshJobStatus {
     /// Once snapshot consumption finishes, the final checkpoint + stop barriers are injected
     /// and the status transitions to `FinishingSnapshot`.
     ConsumingSnapshot {
-        prev_epoch_fake_physical_time: u64,
-        version_stats: HummockVersionStats,
-        create_mview_tracker: CreateMviewProgressTracker,
-        snapshot_epoch: u64,
+        snapshot: SnapshotPhaseControl,
         fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
-        pending_non_checkpoint_barriers: Vec<u64>,
         node_actors: HashMap<WorkerId, HashSet<ActorId>>,
-        state_table_ids: HashSet<TableId>,
     },
     /// The job has finished consuming the snapshot.
     ///
@@ -159,13 +155,12 @@ enum BatchRefreshJobStatus {
         fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
     },
     /// The job is idle, waiting for the next trigger. No partial graph is held.
-    Idle { last_committed_epoch: u64 },
+    Idle,
     /// The job has created a partial graph for periodic refresh and is waiting for
     /// the initial barrier to bootstrap the newly-created actors.
     InitializingBatchRefresh {
         fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
         node_actors: HashMap<WorkerId, HashSet<ActorId>>,
-        state_table_ids: HashSet<TableId>,
         /// Log barriers to inject after the partial graph is initialized. The
         /// last one is the checkpoint stop barrier with `curr_epoch = u64::MAX`.
         pending_log_barriers: Vec<BarrierInfo>,
@@ -195,10 +190,7 @@ enum BatchRefreshJobStatus {
 /// `IndependentCheckpointJobControl` variants.
 #[derive(Debug)]
 pub(crate) struct BatchRefreshJobCheckpointControl {
-    job_id: JobId,
-    partial_graph_id: PartialGraphId,
-    snapshot_backfill_upstream_tables: HashSet<TableId>,
-    snapshot_epoch: u64,
+    control: IndependentJobControl,
     /// Batch refresh interval in seconds. Used to determine when to trigger a refresh run.
     batch_refresh_seconds: u64,
 
@@ -335,6 +327,58 @@ impl RenderedIndependentJobActors {
             stream_actors,
         })
     }
+
+    /// Build the runtime information for the active part of an already-rendered independent job.
+    ///
+    /// Keeping this separate from [`Self::render`] lets jobs with dormant fragments partition the
+    /// rendered graph before any runtime edges are connected.
+    pub(crate) fn build_job_info(
+        self,
+        downstreams: &FragmentDownstreamRelation,
+        partial_graph_id: PartialGraphId,
+        worker_nodes: &HashMap<WorkerId, WorkerNode>,
+    ) -> BatchRefreshRenderResult {
+        let Self {
+            fragment_infos,
+            stream_actors,
+        } = self;
+
+        let mut builder = FragmentEdgeBuilder::new(fragment_infos.values().map(|fragment| {
+            (
+                fragment.fragment_id,
+                EdgeBuilderFragmentInfo::from_inflight_with_worker_nodes(
+                    fragment,
+                    partial_graph_id,
+                    worker_nodes,
+                ),
+            )
+        }));
+        builder.add_relations(downstreams);
+        let mut edges = builder.build();
+
+        let actors_to_create =
+            edges.collect_actors_to_create(fragment_infos.values().map(|fragment| {
+                (
+                    fragment.fragment_id,
+                    &fragment.nodes,
+                    fragment.actors.iter().map(|(actor_id, actor)| {
+                        let stream_actor = stream_actors[&fragment.fragment_id]
+                            .iter()
+                            .find(|stream_actor| stream_actor.actor_id == *actor_id)
+                            .expect("rendered actor should exist");
+                        (stream_actor, actor.worker_id)
+                    }),
+                    vec![], // Independent jobs have no actor-level subscribers.
+                )
+            }));
+
+        let node_actors = InflightFragmentInfo::actor_ids_to_collect(fragment_infos.values());
+        BatchRefreshRenderResult {
+            fragment_infos,
+            node_actors,
+            actors_to_create,
+        }
+    }
 }
 
 impl BatchRefreshJobCheckpointControl {
@@ -345,7 +389,7 @@ impl BatchRefreshJobCheckpointControl {
     /// 2. Render actor assignments (ID allocation, worker placement, vnode bitmap)
     /// 3. Build `StreamActor` structs
     /// 4. Build internal-only edges (no upstream dispatcher edges)
-    /// 5. Produce `fragment_infos`, `node_actors`, `state_table_ids`, `actors_to_create`
+    /// 5. Produce `fragment_infos`, `node_actors`, and `actors_to_create`
     ///
     /// Shared by both the DDL create path and the recovery path.
     pub(crate) fn render_actors_and_build_job_info(
@@ -360,10 +404,7 @@ impl BatchRefreshJobCheckpointControl {
         // Edge building context:
         partial_graph_id: PartialGraphId,
     ) -> MetaResult<BatchRefreshRenderResult> {
-        let RenderedIndependentJobActors {
-            fragment_infos,
-            stream_actors,
-        } = RenderedIndependentJobActors::render(
+        let rendered = RenderedIndependentJobActors::render(
             fragments,
             downstreams,
             definition,
@@ -372,77 +413,7 @@ impl BatchRefreshJobCheckpointControl {
             database_resource_group,
             streaming_job_model,
         )?;
-
-        // Step 4: Build edges (internal-only, no upstream).
-        let mut builder = FragmentEdgeBuilder::new(fragment_infos.values().map(|f| {
-            (
-                f.fragment_id,
-                EdgeBuilderFragmentInfo::from_inflight_with_worker_nodes(
-                    f,
-                    partial_graph_id,
-                    worker_nodes,
-                ),
-            )
-        }));
-        builder.add_relations(downstreams);
-        let mut edges = builder.build();
-
-        let actors_to_create = edges.collect_actors_to_create(fragment_infos.values().map(|f| {
-            (
-                f.fragment_id,
-                &f.nodes,
-                f.actors.iter().map(|(actor_id, actor)| {
-                    let sa = stream_actors[&f.fragment_id]
-                        .iter()
-                        .find(|a| a.actor_id == *actor_id)
-                        .expect("should exist");
-                    (sa, actor.worker_id)
-                }),
-                vec![], // no subscribers for batch refresh jobs
-            )
-        }));
-
-        // Step 5: Build node_actors, state_table_ids.
-        let node_actors = InflightFragmentInfo::actor_ids_to_collect(fragment_infos.values());
-        let state_table_ids =
-            InflightFragmentInfo::existing_table_ids(fragment_infos.values()).collect();
-
-        Ok(BatchRefreshRenderResult {
-            fragment_infos,
-            node_actors,
-            state_table_ids,
-            actors_to_create,
-        })
-    }
-
-    /// Build the initial `Add` mutation for the partial graph's first barrier.
-    ///
-    /// The rendered actors come from a prior `render_actors_and_build_job_info()` call;
-    /// `backfill_nodes_to_pause` is derived from the job's backfill ordering.
-    pub(crate) fn build_initial_partial_graph_mutation(
-        render_result: &BatchRefreshRenderResult,
-        backfill_ordering: &ExtendedFragmentBackfillOrder,
-    ) -> Mutation {
-        let added_actors: Vec<ActorId> = render_result
-            .fragment_infos
-            .values()
-            .flat_map(|f| f.actors.keys().copied())
-            .collect();
-        let backfill_nodes_to_pause = get_nodes_with_backfill_dependencies(backfill_ordering)
-            .into_iter()
-            .collect();
-        Mutation::Add(AddMutation {
-            actor_dispatchers: Default::default(),
-            added_actors,
-            actor_splits: Default::default(),
-            pause: false,
-            subscriptions_to_add: Default::default(),
-            backfill_nodes_to_pause,
-            actor_cdc_table_snapshot_splits: None,
-            new_upstream_sinks: Default::default(),
-            dropped_actors: Default::default(),
-            sink_log_store_flush: Default::default(),
-        })
+        Ok(rendered.build_job_info(downstreams, partial_graph_id, worker_nodes))
     }
 
     /// Derive no-shuffle ensembles from fragment downstreams.
@@ -502,7 +473,8 @@ impl BatchRefreshJobCheckpointControl {
     /// Internally calls `render_actors_and_build_job_info()` and injects the
     /// partial-graph initial barrier.
     #[expect(clippy::too_many_arguments)]
-    pub(crate) fn new(
+    pub(crate) fn new<'a>(
+        entry: hash_map::VacantEntry<'a, JobId, IndependentCheckpointJobControl>,
         database_id: DatabaseId,
         job_id: JobId,
         create_info: CreateIndependentStreamingJobCommandInfo,
@@ -515,7 +487,7 @@ impl BatchRefreshJobCheckpointControl {
         logical: &BatchRefreshLogicalFragments,
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
         batch_refresh_seconds: u64,
-    ) -> MetaResult<Self> {
+    ) -> MetaResult<&'a mut Self> {
         debug!(
             %job_id,
             "new batch refresh job"
@@ -538,89 +510,84 @@ impl BatchRefreshJobCheckpointControl {
             &create_info.info.streaming_job_model,
             partial_graph_id,
         )?;
-        let initial_partial_graph_mutation =
-            Self::build_initial_partial_graph_mutation(&render_result, backfill_ordering);
-
-        let backfill_order_state = BackfillOrderState::new(
+        let initial_partial_graph_mutation = build_initial_add_mutation(
+            &render_result.fragment_infos,
             backfill_ordering,
-            &render_result.fragment_infos,
-            create_info
-                .info
-                .locality_fragment_state_table_mapping
-                .clone(),
+            Default::default(),
         );
-        let create_mview_tracker = CreateMviewProgressTracker::recover(
-            job_id,
+
+        let (snapshot, initial_barrier_info) = SnapshotPhaseControl::for_new_job(
+            snapshot_epoch,
             &render_result.fragment_infos,
-            backfill_order_state,
+            &create_info.info,
             version_stat,
         );
 
-        let mut prev_epoch_fake_physical_time = 0;
-        let mut pending_non_checkpoint_barriers = vec![];
-
-        let initial_barrier_info = super::new_fake_barrier(
-            &mut prev_epoch_fake_physical_time,
-            &mut pending_non_checkpoint_barriers,
-            PbBarrierKind::Checkpoint,
-        );
+        let BatchRefreshRenderResult {
+            fragment_infos,
+            node_actors,
+            actors_to_create,
+        } = render_result;
+        let control = IndependentJobControl::new(IndependentJobInfo::from_fragment_infos(
+            database_id,
+            job_id,
+            snapshot_epoch,
+            snapshot_backfill_upstream_tables,
+            fragment_infos.values(),
+        ));
 
         let mut graph_adder = partial_graph_manager.add_partial_graph(
             partial_graph_id,
             term_id,
             BatchRefreshBarrierStats::new(job_id, snapshot_epoch),
         );
-
-        if let Err(e) = Self::inject_barrier(
+        if let Err(e) = add_initial_partial_graph(
+            &mut graph_adder,
             partial_graph_id,
-            graph_adder.manager(),
-            &render_result.node_actors,
-            &render_result.state_table_ids,
-            initial_barrier_info,
-            Some(render_result.actors_to_create),
-            Some(initial_partial_graph_mutation),
-            notifier,
-            Some(create_info),
-            false,
+            InitialPartialGraphRequest {
+                node_actors: &node_actors,
+                state_table_ids: &control.info.state_table_ids,
+                barrier_info: initial_barrier_info,
+                actors_to_create,
+                mutation: initial_partial_graph_mutation,
+                notifier,
+                create_info,
+            },
         ) {
             graph_adder.failed();
+            entry.insert(IndependentCheckpointJobControl::resetting(
+                control.info.snapshot_backfill_upstream_tables,
+            ));
             return Err(e);
         }
-
         graph_adder.added();
-        assert!(pending_non_checkpoint_barriers.is_empty());
         let this = Self {
-            partial_graph_id,
-            job_id,
-            snapshot_backfill_upstream_tables,
-            snapshot_epoch,
+            control,
             batch_refresh_seconds,
-
             status: BatchRefreshJobStatus::ConsumingSnapshot {
-                prev_epoch_fake_physical_time,
-                version_stats: version_stat.clone(),
-                create_mview_tracker,
-                snapshot_epoch,
-                fragment_infos: render_result.fragment_infos,
-                pending_non_checkpoint_barriers,
-                node_actors: render_result.node_actors,
-                state_table_ids: render_result.state_table_ids,
+                snapshot,
+                fragment_infos,
+                node_actors,
             },
         };
-        Ok(this)
+        let control = entry.insert(IndependentCheckpointJobControl::batch_refresh(
+            job_id,
+            partial_graph_id,
+            IndependentCheckpointJobStatus::Initial { snapshot_epoch },
+            this,
+        ));
+        let Some(IndependentCheckpointJob::BatchRefresh(job)) = control.running_mut() else {
+            unreachable!()
+        };
+        Ok(job)
     }
 
     /// Recover from a persistent state during recovery.
     ///
     /// - If `committed_epoch >= snapshot_epoch` → Idle (snapshot completed before crash).
     /// - If `committed_epoch < snapshot_epoch` → `ConsumingSnapshot` using pre-rendered actors.
-    #[expect(clippy::too_many_arguments)]
     pub(crate) fn recover(
-        database_id: DatabaseId,
-        job_id: JobId,
-        snapshot_backfill_upstream_tables: HashSet<TableId>,
-        snapshot_epoch: u64,
-        committed_epoch: u64,
+        control: IndependentJobControl,
         backfill_order: ExtendedFragmentBackfillOrder,
         version_stat: &HummockVersionStats,
         initial_mutation: Mutation,
@@ -629,7 +596,12 @@ impl BatchRefreshJobCheckpointControl {
         partial_graph_recoverer: &mut crate::barrier::partial_graph::PartialGraphRecoverer<'_>,
         batch_refresh_seconds: u64,
     ) -> MetaResult<Self> {
-        let partial_graph_id = to_partial_graph_id(database_id, Some(job_id));
+        let job_id = control.info.job_id;
+        let partial_graph_id = control.info.partial_graph_id;
+        let snapshot_epoch = control.info.snapshot_epoch;
+        let committed_epoch = control
+            .max_committed_epoch
+            .expect("recovered independent job should have committed");
 
         if committed_epoch >= snapshot_epoch {
             // Snapshot completed; recover to Idle.
@@ -640,15 +612,9 @@ impl BatchRefreshJobCheckpointControl {
                 "recovered idle batch refresh job (no partial graph)"
             );
             return Ok(Self {
-                job_id,
-                partial_graph_id,
-                snapshot_backfill_upstream_tables,
-                snapshot_epoch,
+                control,
                 batch_refresh_seconds,
-
-                status: BatchRefreshJobStatus::Idle {
-                    last_committed_epoch: committed_epoch,
-                },
+                status: BatchRefreshJobStatus::Idle,
             });
         }
 
@@ -660,29 +626,13 @@ impl BatchRefreshJobCheckpointControl {
             "recovered batch refresh job to consuming snapshot"
         );
 
-        let mut prev_epoch_fake_physical_time = Epoch(committed_epoch).physical_time();
-        let mut pending_non_checkpoint_barriers = vec![];
-
-        let locality_fragment_state_table_mapping =
-            crate::barrier::rpc::build_locality_fragment_state_table_mapping(
-                &render_result.fragment_infos,
-            );
-        let backfill_order_state = BackfillOrderState::recover_from_fragment_infos(
-            &backfill_order,
-            &render_result.fragment_infos,
-            locality_fragment_state_table_mapping,
-        );
-
-        let create_mview_tracker = CreateMviewProgressTracker::recover(
+        let (snapshot, first_barrier_info) = SnapshotPhaseControl::for_recovery(
             job_id,
+            snapshot_epoch,
+            committed_epoch,
             &render_result.fragment_infos,
-            backfill_order_state,
+            &backfill_order,
             version_stat,
-        );
-        let first_barrier_info = super::new_fake_barrier(
-            &mut prev_epoch_fake_physical_time,
-            &mut pending_non_checkpoint_barriers,
-            PbBarrierKind::Initial,
         );
 
         partial_graph_recoverer.recover_graph(
@@ -691,26 +641,18 @@ impl BatchRefreshJobCheckpointControl {
             initial_mutation,
             &first_barrier_info,
             &render_result.node_actors,
-            render_result.state_table_ids.iter().copied(),
+            control.info.state_table_ids.iter().copied(),
             render_result.actors_to_create,
             BatchRefreshBarrierStats::new(job_id, snapshot_epoch),
         )?;
 
         Ok(Self {
-            job_id,
-            partial_graph_id,
-            snapshot_backfill_upstream_tables,
-            snapshot_epoch,
+            control,
             batch_refresh_seconds,
             status: BatchRefreshJobStatus::ConsumingSnapshot {
-                prev_epoch_fake_physical_time,
-                version_stats: version_stat.clone(),
-                create_mview_tracker,
+                snapshot,
                 fragment_infos: render_result.fragment_infos,
-                snapshot_epoch,
-                pending_non_checkpoint_barriers,
                 node_actors: render_result.node_actors,
-                state_table_ids: render_result.state_table_ids,
             },
         })
     }
@@ -784,49 +726,41 @@ impl BatchRefreshJobCheckpointControl {
         // Check if snapshot consumption is finished and we need to inject stop barriers.
         let is_finished = matches!(
             &self.status,
-            BatchRefreshJobStatus::ConsumingSnapshot { create_mview_tracker, .. }
-            if create_mview_tracker.is_finished()
+            BatchRefreshJobStatus::ConsumingSnapshot { snapshot, .. }
+            if snapshot.create_mview_tracker.is_finished()
         );
 
         if is_finished {
             // Take the status out to destructure and transition to `FinishingSnapshot`.
             // Use a placeholder; will be overwritten below.
-            let old_status = replace(
-                &mut self.status,
-                BatchRefreshJobStatus::Idle {
-                    last_committed_epoch: 0,
-                },
-            );
+            let old_status = replace(&mut self.status, BatchRefreshJobStatus::Idle);
             let BatchRefreshJobStatus::ConsumingSnapshot {
-                prev_epoch_fake_physical_time,
-                mut pending_non_checkpoint_barriers,
-                snapshot_epoch,
+                mut snapshot,
                 fragment_infos,
-                create_mview_tracker,
                 node_actors,
-                state_table_ids,
-                ..
             } = old_status
             else {
                 unreachable!()
             };
 
-            let tracking_job = create_mview_tracker.into_tracking_job();
+            let tracking_job = snapshot.create_mview_tracker.into_tracking_job();
 
             // Inject final checkpoint at snapshot epoch.
-            pending_non_checkpoint_barriers.push(snapshot_epoch);
-            let prev_epoch = Epoch::from_physical_time(prev_epoch_fake_physical_time);
+            snapshot
+                .pending_non_checkpoint_barriers
+                .push(snapshot.snapshot_epoch);
+            let prev_epoch = Epoch::from_physical_time(snapshot.prev_epoch_fake_physical_time);
             let final_checkpoint = BarrierInfo {
-                curr_epoch: TracedEpoch::new(Epoch(snapshot_epoch)),
+                curr_epoch: TracedEpoch::new(Epoch(snapshot.snapshot_epoch)),
                 prev_epoch: TracedEpoch::new(prev_epoch),
-                kind: BarrierKind::Checkpoint(take(&mut pending_non_checkpoint_barriers)),
+                kind: BarrierKind::Checkpoint(take(&mut snapshot.pending_non_checkpoint_barriers)),
             };
 
             // Inject stop barrier with u64::MAX as curr_epoch and empty nodes_to_sync_table.
             let stop_barrier = BarrierInfo {
-                prev_epoch: TracedEpoch::new(Epoch(snapshot_epoch)),
+                prev_epoch: TracedEpoch::new(Epoch(snapshot.snapshot_epoch)),
                 curr_epoch: TracedEpoch::new(Epoch(u64::MAX)),
-                kind: BarrierKind::Checkpoint(vec![snapshot_epoch]),
+                kind: BarrierKind::Checkpoint(vec![snapshot.snapshot_epoch]),
             };
 
             let stop_actors: Vec<ActorId> = fragment_infos
@@ -835,10 +769,10 @@ impl BatchRefreshJobCheckpointControl {
                 .collect();
 
             Self::inject_barrier(
-                self.partial_graph_id,
+                self.control.info.partial_graph_id,
                 partial_graph_manager,
                 &node_actors,
-                &state_table_ids,
+                &self.control.info.state_table_ids,
                 final_checkpoint,
                 None,
                 None,
@@ -847,10 +781,10 @@ impl BatchRefreshJobCheckpointControl {
                 false,
             )?;
             Self::inject_barrier(
-                self.partial_graph_id,
+                self.control.info.partial_graph_id,
                 partial_graph_manager,
                 &node_actors,
-                &state_table_ids,
+                &self.control.info.state_table_ids,
                 stop_barrier,
                 None,
                 Some(Mutation::Stop(StopMutation {
@@ -869,11 +803,8 @@ impl BatchRefreshJobCheckpointControl {
         } else {
             // Normal barrier — still consuming snapshot.
             let BatchRefreshJobStatus::ConsumingSnapshot {
-                prev_epoch_fake_physical_time,
-                pending_non_checkpoint_barriers,
-                create_mview_tracker,
+                snapshot,
                 node_actors,
-                state_table_ids,
                 ..
             } = &mut self.status
             else {
@@ -882,7 +813,8 @@ impl BatchRefreshJobCheckpointControl {
 
             // Forward a fake barrier to the partial graph.
             let mutation = mutation.or_else(|| {
-                let pending_backfill_nodes = create_mview_tracker
+                let pending_backfill_nodes = snapshot
+                    .create_mview_tracker
                     .take_pending_backfill_nodes()
                     .collect_vec();
                 if pending_backfill_nodes.is_empty() {
@@ -896,8 +828,8 @@ impl BatchRefreshJobCheckpointControl {
                 }
             });
             let barrier_to_inject = super::new_fake_barrier(
-                prev_epoch_fake_physical_time,
-                pending_non_checkpoint_barriers,
+                &mut snapshot.prev_epoch_fake_physical_time,
+                &mut snapshot.pending_non_checkpoint_barriers,
                 match barrier_info.kind {
                     BarrierKind::Barrier => PbBarrierKind::Barrier,
                     BarrierKind::Checkpoint(_) => PbBarrierKind::Checkpoint,
@@ -907,10 +839,10 @@ impl BatchRefreshJobCheckpointControl {
                 },
             );
             Self::inject_barrier(
-                self.partial_graph_id,
+                self.control.info.partial_graph_id,
                 partial_graph_manager,
                 node_actors,
-                state_table_ids,
+                &self.control.info.state_table_ids,
                 barrier_to_inject,
                 None,
                 mutation,
@@ -924,19 +856,17 @@ impl BatchRefreshJobCheckpointControl {
 
     pub(crate) fn collect(&mut self, collected_barrier: CollectedBarrier<'_>) -> bool {
         match &mut self.status {
-            BatchRefreshJobStatus::ConsumingSnapshot {
-                create_mview_tracker,
-                version_stats,
-                ..
-            } => {
+            BatchRefreshJobStatus::ConsumingSnapshot { snapshot, .. } => {
                 for progress in collected_barrier
                     .resps
                     .values()
                     .flat_map(|resp| &resp.create_mview_progress)
                 {
-                    create_mview_tracker.apply_progress(progress, version_stats);
+                    snapshot
+                        .create_mview_tracker
+                        .apply_progress(progress, &snapshot.version_stats);
                 }
-                create_mview_tracker.is_finished()
+                snapshot.create_mview_tracker.is_finished()
             }
             BatchRefreshJobStatus::InitializingBatchRefresh { .. }
             | BatchRefreshJobStatus::ConsumingLogStore { .. } => {
@@ -965,7 +895,7 @@ impl BatchRefreshJobCheckpointControl {
             BatchRefreshJobStatus::ConsumingSnapshot { .. }
             | BatchRefreshJobStatus::FinishingSnapshot { .. }
             | BatchRefreshJobStatus::ConsumingLogStore { .. } => {}
-            BatchRefreshJobStatus::Idle { .. }
+            BatchRefreshJobStatus::Idle
             | BatchRefreshJobStatus::InitializingBatchRefresh { .. } => {
                 return None;
             }
@@ -973,7 +903,7 @@ impl BatchRefreshJobCheckpointControl {
 
         partial_graph_manager
             .start_completing(
-                self.partial_graph_id,
+                self.control.info.partial_graph_id,
                 std::ops::Bound::Unbounded,
                 |_non_checkpoint_epoch, _resps, _| {
                     // Progress already applied in `collect()`.
@@ -987,7 +917,7 @@ impl BatchRefreshJobCheckpointControl {
                 // We must check the status, not just the epoch, to avoid a false positive.
                 let tracking_job = match &mut self.status {
                     BatchRefreshJobStatus::FinishingSnapshot { tracking_job, .. }
-                        if epoch == self.snapshot_epoch =>
+                        if epoch == self.control.info.snapshot_epoch =>
                     {
                         Some(
                             tracking_job
@@ -1008,50 +938,58 @@ impl BatchRefreshJobCheckpointControl {
     ) {
         match &self.status {
             BatchRefreshJobStatus::ConsumingSnapshot { .. } => {
-                partial_graph_manager.ack_completed(self.partial_graph_id, completed_epoch);
+                partial_graph_manager
+                    .ack_completed(self.control.info.partial_graph_id, completed_epoch);
+                self.control.ack_completed(completed_epoch);
             }
             BatchRefreshJobStatus::FinishingSnapshot { tracking_job, .. }
-                if completed_epoch == self.snapshot_epoch =>
+                if completed_epoch == self.control.info.snapshot_epoch =>
             {
-                partial_graph_manager.ack_completed(self.partial_graph_id, completed_epoch);
+                partial_graph_manager
+                    .ack_completed(self.control.info.partial_graph_id, completed_epoch);
+                self.control.ack_completed(completed_epoch);
                 assert!(
                     tracking_job.is_none(),
                     "tracking job should have been taken at start_completing"
                 );
                 info!(
-                    job_id = %self.job_id,
+                    job_id = %self.control.info.job_id,
                     completed_epoch,
                     "batch refresh job: snapshot done, transitioned to idle, removing partial graph"
                 );
-                partial_graph_manager.remove_partial_graphs(vec![self.partial_graph_id]);
-                self.status = BatchRefreshJobStatus::Idle {
-                    last_committed_epoch: completed_epoch,
-                };
+                partial_graph_manager
+                    .remove_partial_graphs(vec![self.control.info.partial_graph_id]);
+                self.status = BatchRefreshJobStatus::Idle;
             }
             BatchRefreshJobStatus::FinishingSnapshot { .. } => {
-                partial_graph_manager.ack_completed(self.partial_graph_id, completed_epoch);
+                partial_graph_manager
+                    .ack_completed(self.control.info.partial_graph_id, completed_epoch);
+                self.control.ack_completed(completed_epoch);
             }
             BatchRefreshJobStatus::ConsumingLogStore {
                 target_upstream_epoch,
                 ..
             } if completed_epoch == *target_upstream_epoch => {
                 let target = *target_upstream_epoch;
-                partial_graph_manager.ack_completed(self.partial_graph_id, completed_epoch);
+                partial_graph_manager
+                    .ack_completed(self.control.info.partial_graph_id, completed_epoch);
+                self.control.ack_completed(completed_epoch);
                 info!(
-                    job_id = %self.job_id,
+                    job_id = %self.control.info.job_id,
                     completed_epoch,
                     target_upstream_epoch = target,
                     "batch refresh job: logstore done, transitioned to idle, removing partial graph"
                 );
-                partial_graph_manager.remove_partial_graphs(vec![self.partial_graph_id]);
-                self.status = BatchRefreshJobStatus::Idle {
-                    last_committed_epoch: target,
-                };
+                partial_graph_manager
+                    .remove_partial_graphs(vec![self.control.info.partial_graph_id]);
+                self.status = BatchRefreshJobStatus::Idle;
             }
             BatchRefreshJobStatus::ConsumingLogStore { .. } => {
-                partial_graph_manager.ack_completed(self.partial_graph_id, completed_epoch);
+                partial_graph_manager
+                    .ack_completed(self.control.info.partial_graph_id, completed_epoch);
+                self.control.ack_completed(completed_epoch);
             }
-            BatchRefreshJobStatus::Idle { .. }
+            BatchRefreshJobStatus::Idle
             | BatchRefreshJobStatus::InitializingBatchRefresh { .. } => {
                 unreachable!("batch refresh job should not be completing in this state")
             }
@@ -1064,14 +1002,11 @@ impl BatchRefreshJobCheckpointControl {
 impl BatchRefreshJobCheckpointControl {
     pub(crate) fn gen_backfill_progress(&self) -> Option<BackfillProgress> {
         match &self.status {
-            BatchRefreshJobStatus::ConsumingSnapshot {
-                create_mview_tracker,
-                ..
-            } => {
-                let progress = if create_mview_tracker.is_finished() {
+            BatchRefreshJobStatus::ConsumingSnapshot { snapshot, .. } => {
+                let progress = if snapshot.create_mview_tracker.is_finished() {
                     "Snapshot finished".to_owned()
                 } else {
-                    let progress = create_mview_tracker.gen_backfill_progress();
+                    let progress = snapshot.create_mview_tracker.gen_backfill_progress();
                     format!("BatchRefresh Snapshot [{}]", progress)
                 };
                 Some(BackfillProgress {
@@ -1088,19 +1023,21 @@ impl BatchRefreshJobCheckpointControl {
                 progress: "BatchRefresh LogStore".to_owned(),
                 backfill_type: PbBackfillType::SnapshotBackfill,
             }),
-            BatchRefreshJobStatus::Idle { .. } => None,
+            BatchRefreshJobStatus::Idle => None,
         }
     }
 
     pub(super) fn gen_fragment_backfill_progress(&self) -> Vec<FragmentBackfillProgress> {
         match &self.status {
             BatchRefreshJobStatus::ConsumingSnapshot {
-                create_mview_tracker,
+                snapshot,
                 fragment_infos,
                 ..
-            } => create_mview_tracker.collect_fragment_progress(fragment_infos, true),
+            } => snapshot
+                .create_mview_tracker
+                .collect_fragment_progress(fragment_infos, true),
             BatchRefreshJobStatus::FinishingSnapshot { fragment_infos, .. } => {
-                collect_done_fragments(self.job_id, fragment_infos)
+                collect_done_fragments(self.control.info.job_id, fragment_infos)
             }
             _ => vec![],
         }
@@ -1112,7 +1049,7 @@ impl BatchRefreshJobCheckpointControl {
             | BatchRefreshJobStatus::FinishingSnapshot { .. }
             | BatchRefreshJobStatus::ConsumingLogStore { .. }
             | BatchRefreshJobStatus::InitializingBatchRefresh { .. }
-            | BatchRefreshJobStatus::Idle { .. } => &self.snapshot_backfill_upstream_tables,
+            | BatchRefreshJobStatus::Idle => &self.control.info.snapshot_backfill_upstream_tables,
         }
     }
 
@@ -1123,8 +1060,7 @@ impl BatchRefreshJobCheckpointControl {
                 Some(fragment_infos)
             }
             BatchRefreshJobStatus::ConsumingLogStore { fragment_infos, .. } => Some(fragment_infos),
-            BatchRefreshJobStatus::FinishingSnapshot { .. }
-            | BatchRefreshJobStatus::Idle { .. } => None,
+            BatchRefreshJobStatus::FinishingSnapshot { .. } | BatchRefreshJobStatus::Idle => None,
         }
     }
 
@@ -1134,13 +1070,13 @@ impl BatchRefreshJobCheckpointControl {
     ) -> Option<Mutation> {
         let BatchRefreshJobStatus::ConsumingSnapshot {
             fragment_infos,
-            create_mview_tracker,
+            snapshot,
             ..
         } = &mut self.status
         else {
             return None;
         };
-        if create_mview_tracker.is_finished() {
+        if snapshot.create_mview_tracker.is_finished() {
             return None;
         }
 
@@ -1159,11 +1095,12 @@ impl BatchRefreshJobCheckpointControl {
     /// Returns `true` if the job is idle and the upstream committed epoch is
     /// far enough ahead of the job's last committed epoch (by `batch_refresh_seconds`).
     pub(crate) fn should_start_refresh(&self, upstream_committed_epoch: u64) -> bool {
-        if let BatchRefreshJobStatus::Idle {
-            last_committed_epoch,
-        } = &self.status
-        {
-            let job_physical_ms = Epoch(*last_committed_epoch).physical_time();
+        if let BatchRefreshJobStatus::Idle = &self.status {
+            let last_committed_epoch = self
+                .control
+                .max_committed_epoch
+                .expect("batch refresh job should have committed when entering Idle");
+            let job_physical_ms = Epoch(last_committed_epoch).physical_time();
             let upstream_physical_ms = Epoch(upstream_committed_epoch).physical_time();
             let threshold_ms = self.batch_refresh_seconds * 1000;
             upstream_physical_ms.saturating_sub(job_physical_ms) >= threshold_ms
@@ -1174,11 +1111,8 @@ impl BatchRefreshJobCheckpointControl {
 
     /// Returns the last committed epoch if the job is idle.
     pub(crate) fn last_committed_epoch(&self) -> Option<u64> {
-        if let BatchRefreshJobStatus::Idle {
-            last_committed_epoch,
-        } = &self.status
-        {
-            Some(*last_committed_epoch)
+        if let BatchRefreshJobStatus::Idle = &self.status {
+            self.control.max_committed_epoch
         } else {
             None
         }
@@ -1208,25 +1142,26 @@ impl BatchRefreshJobCheckpointControl {
         partial_graph_manager: &mut PartialGraphManager,
     ) -> MetaResult<bool> {
         let last_committed_epoch = match &self.status {
-            BatchRefreshJobStatus::Idle {
-                last_committed_epoch,
-            } => *last_committed_epoch,
+            BatchRefreshJobStatus::Idle => self
+                .control
+                .max_committed_epoch
+                .expect("batch refresh job should have committed when entering Idle"),
             _ => panic!(
                 "batch refresh job {}: start_refresh_run called in non-Idle state {:?}",
-                self.job_id, self.status
+                self.control.info.job_id, self.status
             ),
         };
 
         // Resolve log epochs into barrier infos.
         let target_upstream_epoch = context.target_upstream_epoch;
         let Some((first_epoch, pending_log_barriers)) = Self::resolve_log_epoch_barriers(
-            &self.snapshot_backfill_upstream_tables,
+            &self.control.info.snapshot_backfill_upstream_tables,
             &context.upstream_table_log_epochs,
             last_committed_epoch,
         )?
         else {
             info!(
-                job_id = %self.job_id,
+                job_id = %self.control.info.job_id,
                 last_committed_epoch,
                 target_upstream_epoch,
                 "batch refresh job: no log epochs to consume, staying idle"
@@ -1237,7 +1172,7 @@ impl BatchRefreshJobCheckpointControl {
         let log_target_epoch = pending_log_barriers.last().expect("non-empty").prev_epoch();
         if target_upstream_epoch != log_target_epoch {
             info!(
-                job_id = %self.job_id,
+                job_id = %self.control.info.job_id,
                 last_committed_epoch,
                 target_upstream_epoch,
                 log_target_epoch,
@@ -1258,7 +1193,7 @@ impl BatchRefreshJobCheckpointControl {
             worker_nodes,
             &context.database_resource_group,
             &context.streaming_job_model,
-            self.partial_graph_id,
+            self.control.info.partial_graph_id,
         )?;
 
         // Build actors_to_create and initial mutation.
@@ -1282,7 +1217,13 @@ impl BatchRefreshJobCheckpointControl {
         });
 
         let node_actors = &render_result.node_actors;
-        let state_table_ids = &render_result.state_table_ids;
+        let rendered_state_table_ids =
+            InflightFragmentInfo::existing_table_ids(render_result.fragment_infos.values())
+                .collect::<HashSet<_>>();
+        assert_eq!(
+            rendered_state_table_ids, self.control.info.state_table_ids,
+            "batch refresh state tables must remain stable across actor rendering"
+        );
         let initial_barrier = BarrierInfo {
             prev_epoch: TracedEpoch::new(Epoch(last_committed_epoch)),
             curr_epoch: TracedEpoch::new(Epoch(first_epoch)),
@@ -1290,20 +1231,25 @@ impl BatchRefreshJobCheckpointControl {
         };
         let mut partial_graph_recoverer = partial_graph_manager.start_recover();
         let recover_result = partial_graph_recoverer.recover_graph(
-            self.partial_graph_id,
+            self.control.info.partial_graph_id,
             term_id,
             initial_mutation,
             &initial_barrier,
             node_actors,
-            state_table_ids.iter().copied(),
+            self.control.info.state_table_ids.iter().copied(),
             render_result.actors_to_create,
-            BatchRefreshBarrierStats::new(self.job_id, self.snapshot_epoch),
+            BatchRefreshBarrierStats::new(
+                self.control.info.job_id,
+                self.control.info.snapshot_epoch,
+            ),
         );
         match recover_result {
             Ok(()) => {
                 let initializing_partial_graphs = partial_graph_recoverer.all_initializing();
                 debug_assert_eq!(initializing_partial_graphs.len(), 1);
-                debug_assert!(initializing_partial_graphs.contains(&self.partial_graph_id));
+                debug_assert!(
+                    initializing_partial_graphs.contains(&self.control.info.partial_graph_id)
+                );
             }
             Err(e) => {
                 partial_graph_recoverer.failed();
@@ -1312,7 +1258,7 @@ impl BatchRefreshJobCheckpointControl {
         }
 
         info!(
-            job_id = %self.job_id,
+            job_id = %self.control.info.job_id,
             last_committed_epoch,
             target_upstream_epoch,
             num_log_barriers = pending_log_barriers.len(),
@@ -1322,7 +1268,6 @@ impl BatchRefreshJobCheckpointControl {
         self.status = BatchRefreshJobStatus::InitializingBatchRefresh {
             fragment_infos: render_result.fragment_infos,
             node_actors: render_result.node_actors,
-            state_table_ids: render_result.state_table_ids,
             pending_log_barriers,
             target_upstream_epoch,
         };
@@ -1334,23 +1279,17 @@ impl BatchRefreshJobCheckpointControl {
         &mut self,
         partial_graph_manager: &mut PartialGraphManager,
     ) -> MetaResult<()> {
-        let old_status = replace(
-            &mut self.status,
-            BatchRefreshJobStatus::Idle {
-                last_committed_epoch: 0,
-            },
-        );
+        let old_status = replace(&mut self.status, BatchRefreshJobStatus::Idle);
         let BatchRefreshJobStatus::InitializingBatchRefresh {
             fragment_infos,
             node_actors,
-            state_table_ids,
             pending_log_barriers,
             target_upstream_epoch,
         } = old_status
         else {
             panic!(
                 "batch refresh job {}: logstore initialized in unexpected status {:?}",
-                self.job_id, old_status
+                self.control.info.job_id, old_status
             );
         };
 
@@ -1366,10 +1305,10 @@ impl BatchRefreshJobCheckpointControl {
             let is_stop_barrier = idx == final_barrier_idx;
             let mutation = is_stop_barrier.then(|| stop_mutation.take().expect("unused"));
             Self::inject_barrier(
-                self.partial_graph_id,
+                self.control.info.partial_graph_id,
                 partial_graph_manager,
                 &node_actors,
-                &state_table_ids,
+                &self.control.info.state_table_ids,
                 barrier,
                 None,
                 mutation,
