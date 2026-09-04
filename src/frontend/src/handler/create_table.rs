@@ -2685,6 +2685,48 @@ mod tests {
             .await
             .unwrap();
 
+        let table_source = {
+            let catalog_reader = frontend.session_ref().env().catalog_reader().read_guard();
+            catalog_reader
+                .get_source_by_name(
+                    DEFAULT_DATABASE_NAME,
+                    SchemaPath::Name("public"),
+                    "cdc_table_source",
+                )
+                .unwrap()
+                .0
+                .clone()
+        };
+        assert_eq!(table_source.with_properties.len(), 2);
+        assert_eq!(
+            table_source.with_properties.get_connector().as_deref(),
+            Some("mysql-cdc")
+        );
+        assert_eq!(
+            table_source
+                .with_properties
+                .get("snapshot")
+                .map(String::as_str),
+            Some("false")
+        );
+        assert!(table_source.with_properties.as_secret().is_empty());
+        let external_table = table_source.info.external_table.as_ref().unwrap();
+        assert!(external_table.connect_properties.is_empty());
+        assert!(external_table.secret_refs.is_empty());
+
+        let err = frontend
+            .run_sql_with_session(
+                user_session.clone(),
+                "SELECT * FROM mysql_query('cdc_table_source', 'SELECT 1')",
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_report_string()
+                .contains("only accept shared CDC sources, not CDC table sources"),
+            "{err:?}"
+        );
+
         frontend
             .run_sql("REVOKE SELECT ON SOURCE cdc_source FROM cdc_user")
             .await

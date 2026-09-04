@@ -93,6 +93,9 @@ WHERE name = 'mysql_orders_table_source';
 query error batch queries on CDC table sources are not supported
 SELECT * FROM mysql_orders_table_source;
 
+query error mysql_query and postgres_query only accept shared CDC sources, not CDC table sources
+SELECT * FROM mysql_query('mysql_orders_table_source', 'SELECT 1');
+
 statement error altering columns of a CDC table source is not supported
 ALTER SOURCE mysql_orders_table_source ADD COLUMN extra INT;
 
