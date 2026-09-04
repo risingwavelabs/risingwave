@@ -189,7 +189,6 @@ define_keywords!(
     DEFERRABLE,
     DEFERRED,
     DELETE,
-    DELIMITED,
     DENSE_RANK,
     DEREF,
     DESC,

@@ -92,10 +92,6 @@ pub fn parse_format_encode(p: &mut Parser<'_>) -> ModalResult<CompatibleFormatEn
                 impl_parse_to!(avro_schema: AvroSchema, p);
                 LegacyRowFormat::UpsertAvro(avro_schema)
             }
-            "csv" => {
-                impl_parse_to!(csv_info: CsvInfo, p);
-                LegacyRowFormat::Csv(csv_info)
-            }
             "native" => LegacyRowFormat::Native, // used internally by schema change
             "bytes" => LegacyRowFormat::Bytes,
             _ => {
@@ -120,7 +116,6 @@ pub enum LegacyRowFormat {
     UpsertJson,             // Keyword::UPSERT_JSON
     Avro(AvroSchema),       // Keyword::AVRO
     UpsertAvro(AvroSchema), // Keyword::UpsertAVRO
-    Csv(CsvInfo),           // Keyword::CSV
     Native,
     Bytes,
 }
@@ -135,7 +130,6 @@ impl LegacyRowFormat {
             LegacyRowFormat::UpsertJson => (Format::Upsert, Encode::Json),
             LegacyRowFormat::Avro(_) => (Format::Plain, Encode::Avro),
             LegacyRowFormat::UpsertAvro(_) => (Format::Upsert, Encode::Avro),
-            LegacyRowFormat::Csv(_) => (Format::Plain, Encode::Csv),
             LegacyRowFormat::Bytes => (Format::Plain, Encode::Bytes),
             LegacyRowFormat::Native => (Format::Native, Encode::Native),
         };
@@ -187,32 +181,6 @@ impl LegacyRowFormat {
                     }]
                 }
             }
-            LegacyRowFormat::Csv(schema) => {
-                vec![
-                    SqlOption {
-                        name: ObjectName(vec![Ident {
-                            value: "delimiter".into(),
-                            quote_style: None,
-                        }]),
-                        value: Value::SingleQuotedString(
-                            String::from_utf8_lossy(&[schema.delimiter]).into(),
-                        )
-                        .into(),
-                    },
-                    SqlOption {
-                        name: ObjectName(vec![Ident {
-                            value: "without_header".into(),
-                            quote_style: None,
-                        }]),
-                        value: Value::SingleQuotedString(if schema.has_header {
-                            "false".into()
-                        } else {
-                            "true".into()
-                        })
-                        .into(),
-                    },
-                ]
-            }
             _ => vec![],
         };
 
@@ -238,7 +206,6 @@ impl fmt::Display for LegacyRowFormat {
             LegacyRowFormat::DebeziumMongoJson => write!(f, "DEBEZIUM_MONGO_JSON"),
             LegacyRowFormat::Avro(avro_schema) => write!(f, "AVRO {}", avro_schema),
             LegacyRowFormat::UpsertAvro(avro_schema) => write!(f, "UPSERT_AVRO {}", avro_schema),
-            LegacyRowFormat::Csv(csv_info) => write!(f, "CSV {}", csv_info),
             LegacyRowFormat::Native => write!(f, "NATIVE"),
             LegacyRowFormat::Bytes => write!(f, "BYTES"),
         }
@@ -317,12 +284,6 @@ impl fmt::Display for AvroSchema {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct CsvInfo {
-    pub delimiter: u8,
-    pub has_header: bool,
-}
-
 pub fn get_delimiter(chars: &str) -> Result<u8, StrError> {
     match chars {
         "," => Ok(b','),   // comma
@@ -331,32 +292,5 @@ pub fn get_delimiter(chars: &str) -> Result<u8, StrError> {
         other => Err(StrError(format!(
             "The delimiter should be one of ',', ';', E'\\t', but got {other:?}",
         ))),
-    }
-}
-
-impl ParseTo for CsvInfo {
-    fn parse_to(p: &mut Parser<'_>) -> ModalResult<Self> {
-        impl_parse_to!(without_header => [Keyword::WITHOUT, Keyword::HEADER], p);
-        impl_parse_to!([Keyword::DELIMITED, Keyword::BY], p);
-        impl_parse_to!(delimiter: AstString, p);
-        let delimiter = get_delimiter(delimiter.0.as_str())?;
-        Ok(Self {
-            delimiter,
-            has_header: !without_header,
-        })
-    }
-}
-
-impl fmt::Display for CsvInfo {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        if !self.has_header {
-            write!(f, "WITHOUT HEADER ")?;
-        }
-        write!(
-            f,
-            "DELIMITED BY {}",
-            AstString((self.delimiter as char).to_string())
-        )?;
-        Ok(())
     }
 }
