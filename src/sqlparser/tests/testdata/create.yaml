@@ -46,8 +46,12 @@
   formatted_sql: CREATE SOURCE orders (id BIGINT, payload CHARACTER VARYING, PRIMARY KEY (id)) WITH (snapshot = 'false') FROM mysql_src TABLE 'mydb.orders'
 - input: CREATE SOURCE orders (*) WITH (snapshot = 'false') FROM public.mysql_src TABLE 'mydb.orders'
   formatted_sql: CREATE SOURCE orders (*) WITH (snapshot = 'false') FROM public.mysql_src TABLE 'mydb.orders'
+- input: CREATE SOURCE orders (*) WITH (snapshot = 'false') FROM mysql_src TABLE 'mydb.order''s'
+  formatted_sql: CREATE SOURCE orders (*) WITH (snapshot = 'false') FROM mysql_src TABLE 'mydb.order''s'
 - input: CREATE TABLE sbtest10 (id INT PRIMARY KEY, k INT, c CHARACTER VARYING, pad CHARACTER VARYING) FROM sbtest TABLE 'mydb.sbtest10'
   formatted_sql: CREATE TABLE sbtest10 (id INT PRIMARY KEY, k INT, c CHARACTER VARYING, pad CHARACTER VARYING) FROM sbtest TABLE 'mydb.sbtest10'
+- input: CREATE TABLE sbtest10 (id INT PRIMARY KEY, k INT) FROM sbtest TABLE 'mydb.order''s'
+  formatted_sql: CREATE TABLE sbtest10 (id INT PRIMARY KEY, k INT) FROM sbtest TABLE 'mydb.order''s'
 - input: CREATE TABLE sbtest10 (id INT PRIMARY KEY, k INT, c CHARACTER VARYING, pad CHARACTER VARYING) FROM sbtest
   error_msg: |-
     sql parser error: expected TABLE, found: EOF
