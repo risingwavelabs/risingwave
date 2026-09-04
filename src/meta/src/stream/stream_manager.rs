@@ -61,6 +61,7 @@ use crate::model::{
     FragmentReplaceUpstream, StreamActor, StreamContext, StreamJobFragments,
     StreamJobFragmentsToCreate, SubscriptionId,
 };
+use crate::stream::cdc::is_parallelized_backfill_enabled_cdc_scan_fragment;
 use crate::stream::{ReplaceJobSplitPlan, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
@@ -1022,11 +1023,16 @@ impl GlobalStreamManager {
 
         let cdc_fragment_id = {
             let inner = self.metadata_manager.catalog_controller.inner.read().await;
-            let fragments: Vec<(risingwave_meta_model::FragmentId, i32)> = FragmentModel::find()
+            let fragments: Vec<(
+                risingwave_meta_model::FragmentId,
+                i32,
+                risingwave_meta_model::StreamNode,
+            )> = FragmentModel::find()
                 .select_only()
                 .columns([
                     fragment::Column::FragmentId,
                     fragment::Column::FragmentTypeMask,
+                    fragment::Column::StreamNode,
                 ])
                 .filter(fragment::Column::JobId.eq(job_id))
                 .into_tuple()
@@ -1035,10 +1041,13 @@ impl GlobalStreamManager {
 
             let cdc_fragments = fragments
                 .into_iter()
-                .filter_map(|(fragment_id, mask)| {
-                    FragmentTypeMask::from(mask)
-                        .contains(FragmentTypeFlag::StreamCdcScan)
-                        .then_some(fragment_id)
+                .filter_map(|(fragment_id, mask, stream_node)| {
+                    is_parallelized_backfill_enabled_cdc_scan_fragment(
+                        FragmentTypeMask::from(mask),
+                        &stream_node.to_protobuf(),
+                    )
+                    .is_some()
+                    .then_some(fragment_id)
                 })
                 .collect_vec();
 

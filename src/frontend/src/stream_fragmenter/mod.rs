@@ -496,13 +496,13 @@ fn build_fragment(
             }
 
             NodeBody::StreamCdcScan(node) => {
+                current_fragment
+                    .fragment_type_mask
+                    .add(FragmentTypeFlag::StreamCdcScan);
                 if let Some(o) = node.options
                     && CdcScanOptions::from_proto(&o).is_parallelized_backfill()
                 {
                     // Use parallel CDC backfill.
-                    current_fragment
-                        .fragment_type_mask
-                        .add(FragmentTypeFlag::StreamCdcScan);
                 } else {
                     current_fragment
                         .fragment_type_mask
