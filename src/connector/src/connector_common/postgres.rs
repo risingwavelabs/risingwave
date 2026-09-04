@@ -25,13 +25,13 @@ use sea_schema::postgres::def::{ColumnType as SeaType, TableDef, TableInfo};
 use sea_schema::postgres::discovery::SchemaDiscovery;
 use sea_schema::sea_query::{Alias, IntoIden};
 use serde::Deserialize;
-use serde_with::{DisplayFromStr, serde_as};
 use sqlx::postgres::{PgConnectOptions, PgSslMode};
 use sqlx::{PgPool, Row};
 use thiserror_ext::AsReport;
 use tokio_postgres::types::Kind as PgKind;
 use tokio_postgres::{Client as PgClient, NoTls};
 
+use super::TcpKeepaliveConfig;
 #[cfg(not(madsim))]
 use super::maybe_tls_connector::MaybeMakeTlsConnector;
 use crate::error::ConnectorResult;
@@ -127,33 +127,6 @@ impl PgConnectionConfig {
         }
 
         options
-    }
-}
-
-/// TCP keepalive knobs for the long-lived Postgres client used by the sink.
-/// Lives in `connector_common` so both the sink config and the shared
-/// `create_pg_client` helper reference the same definition.
-#[serde_as]
-#[derive(Debug, Clone, Deserialize)]
-pub struct TcpKeepaliveConfig {
-    #[serde(rename = "tcp.keepalive.idle")]
-    #[serde_as(as = "DisplayFromStr")]
-    pub tcp_keepalive_idle: u32,
-    #[serde(rename = "tcp.keepalive.interval")]
-    #[serde_as(as = "DisplayFromStr")]
-    pub tcp_keepalive_interval: u32,
-    #[serde(rename = "tcp.keepalive.count")]
-    #[serde_as(as = "DisplayFromStr")]
-    pub tcp_keepalive_count: u32,
-}
-
-impl Default for TcpKeepaliveConfig {
-    fn default() -> Self {
-        Self {
-            tcp_keepalive_idle: 10 * 60,
-            tcp_keepalive_interval: 10,
-            tcp_keepalive_count: 3,
-        }
     }
 }
 
@@ -683,6 +656,13 @@ pub async fn create_pg_client(
     Ok(client)
 }
 
+pub fn postgres_point_type() -> DataType {
+    DataType::Struct(StructType::new(vec![
+        ("x", DataType::Float64),
+        ("y", DataType::Float64),
+    ]))
+}
+
 // Used for both source and sink connector
 pub fn sea_type_to_rw_type(col_type: &SeaType) -> ConnectorResult<DataType> {
     let dtype = match col_type {
@@ -700,10 +680,7 @@ pub fn sea_type_to_rw_type(col_type: &SeaType) -> ConnectorResult<DataType> {
         SeaType::Time(_) | SeaType::TimeWithTimeZone(_) => DataType::Time,
         SeaType::Interval(_) => DataType::Interval,
         SeaType::Boolean => DataType::Boolean,
-        SeaType::Point => DataType::Struct(StructType::new(vec![
-            ("x", DataType::Float32),
-            ("y", DataType::Float32),
-        ])),
+        SeaType::Point => postgres_point_type(),
         SeaType::Uuid => DataType::Varchar,
         SeaType::Xml => DataType::Varchar,
         SeaType::Json => DataType::Jsonb,

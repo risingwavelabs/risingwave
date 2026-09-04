@@ -20,7 +20,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::meta::default::compaction_config;
 use risingwave_common::system_param::reader::SystemParamsRead;
-use risingwave_hummock_sdk::change_log::ChangeLogDelta;
+use risingwave_hummock_sdk::change_log::EpochNewChangeLog;
 use risingwave_hummock_sdk::compaction_group::group_split::split_sst_with_table_ids;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{
@@ -59,7 +59,7 @@ pub struct CommitEpochInfo {
     pub new_table_watermarks: HashMap<TableId, TableWatermarks>,
     pub sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
     pub new_table_fragment_infos: Vec<NewTableFragmentInfo>,
-    pub change_log_delta: HashMap<TableId, ChangeLogDelta>,
+    pub change_log_delta: HashMap<TableId, EpochNewChangeLog>,
     pub vector_index_delta: HashMap<TableId, VectorIndexDelta>,
     /// `table_id` -> `committed_epoch`
     pub tables_to_commit: HashMap<TableId, u64>,
