@@ -31,6 +31,14 @@ pub async fn handle_reset_source(
     // Fetch source catalog and check privileges
     let source = fetch_source_catalog_with_db_schema_id(&session, &name)?;
 
+    if source.is_cdc_table_source() {
+        return Err(ErrorCode::NotSupported(
+            "RESET is not supported for CDC table sources".to_owned(),
+            "Reset the upstream shared CDC source instead".to_owned(),
+        )
+        .into());
+    }
+
     // Check if the source has an associated table (CDC table)
     if source.associated_table_id.is_some() {
         return Err(ErrorCode::NotSupported(

@@ -96,6 +96,12 @@ SELECT * FROM mysql_orders_table_source;
 statement error altering columns of a CDC table source is not supported
 ALTER SOURCE mysql_orders_table_source ADD COLUMN extra INT;
 
+statement error RESET is not supported for CDC table sources
+ALTER SOURCE mysql_orders_table_source RESET;
+
+statement error SOURCE_RATE_LIMIT is not supported for CDC table sources
+ALTER SOURCE mysql_orders_table_source SET SOURCE_RATE_LIMIT = 100;
+
 statement ok
 CREATE MATERIALIZED VIEW orders_state_1 AS
 SELECT id, payload FROM mysql_orders_table_source;
