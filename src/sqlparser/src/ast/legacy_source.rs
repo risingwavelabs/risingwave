@@ -76,7 +76,6 @@ pub fn parse_format_encode(p: &mut Parser<'_>) -> ModalResult<CompatibleFormatEn
         let id = p.parse_identifier()?;
         let value = id.real_value();
         let schema = match &value[..] {
-            "debezium_mongo_json" => LegacyRowFormat::DebeziumMongoJson,
             "avro" => {
                 impl_parse_to!(avro_schema: AvroSchema, p);
                 LegacyRowFormat::Avro(avro_schema)
@@ -102,7 +101,6 @@ pub fn parse_format_encode(p: &mut Parser<'_>) -> ModalResult<CompatibleFormatEn
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum LegacyRowFormat {
-    DebeziumMongoJson,
     Avro(AvroSchema),       // Keyword::AVRO
     UpsertAvro(AvroSchema), // Keyword::UpsertAVRO
     Native,
@@ -112,7 +110,6 @@ pub enum LegacyRowFormat {
 impl LegacyRowFormat {
     pub fn into_format_encode_v2(self) -> FormatEncodeOptions {
         let (format, row_encode) = match self {
-            LegacyRowFormat::DebeziumMongoJson => (Format::DebeziumMongo, Encode::Json),
             LegacyRowFormat::Avro(_) => (Format::Plain, Encode::Avro),
             LegacyRowFormat::UpsertAvro(_) => (Format::Upsert, Encode::Avro),
             LegacyRowFormat::Bytes => (Format::Plain, Encode::Bytes),
@@ -155,7 +152,6 @@ impl fmt::Display for LegacyRowFormat {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "ROW FORMAT ")?;
         match self {
-            LegacyRowFormat::DebeziumMongoJson => write!(f, "DEBEZIUM_MONGO_JSON"),
             LegacyRowFormat::Avro(avro_schema) => write!(f, "AVRO {}", avro_schema),
             LegacyRowFormat::UpsertAvro(avro_schema) => write!(f, "UPSERT_AVRO {}", avro_schema),
             LegacyRowFormat::Native => write!(f, "NATIVE"),
