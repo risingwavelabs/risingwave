@@ -97,10 +97,6 @@ pub fn parse_format_encode(p: &mut Parser<'_>) -> ModalResult<CompatibleFormatEn
                 LegacyRowFormat::Csv(csv_info)
             }
             "native" => LegacyRowFormat::Native, // used internally by schema change
-            "debezium_avro" => {
-                impl_parse_to!(avro_schema: DebeziumAvroSchema, p);
-                LegacyRowFormat::DebeziumAvro(avro_schema)
-            }
             "bytes" => LegacyRowFormat::Bytes,
             _ => {
                 parser_err!(
@@ -126,7 +122,6 @@ pub enum LegacyRowFormat {
     UpsertAvro(AvroSchema), // Keyword::UpsertAVRO
     Csv(CsvInfo),           // Keyword::CSV
     Native,
-    DebeziumAvro(DebeziumAvroSchema), // Keyword::DEBEZIUM_AVRO
     Bytes,
 }
 
@@ -141,7 +136,6 @@ impl LegacyRowFormat {
             LegacyRowFormat::Avro(_) => (Format::Plain, Encode::Avro),
             LegacyRowFormat::UpsertAvro(_) => (Format::Upsert, Encode::Avro),
             LegacyRowFormat::Csv(_) => (Format::Plain, Encode::Csv),
-            LegacyRowFormat::DebeziumAvro(_) => (Format::Debezium, Encode::Avro),
             LegacyRowFormat::Bytes => (Format::Plain, Encode::Bytes),
             LegacyRowFormat::Native => (Format::Native, Encode::Native),
         };
@@ -192,15 +186,6 @@ impl LegacyRowFormat {
                         value: Value::SingleQuotedString(schema.row_schema_location.0).into(),
                     }]
                 }
-            }
-            LegacyRowFormat::DebeziumAvro(schema) => {
-                vec![SqlOption {
-                    name: ObjectName(vec![Ident {
-                        value: "schema.registry".into(),
-                        quote_style: None,
-                    }]),
-                    value: Value::SingleQuotedString(schema.row_schema_location.0).into(),
-                }]
             }
             LegacyRowFormat::Csv(schema) => {
                 vec![
@@ -255,9 +240,6 @@ impl fmt::Display for LegacyRowFormat {
             LegacyRowFormat::UpsertAvro(avro_schema) => write!(f, "UPSERT_AVRO {}", avro_schema),
             LegacyRowFormat::Csv(csv_info) => write!(f, "CSV {}", csv_info),
             LegacyRowFormat::Native => write!(f, "NATIVE"),
-            LegacyRowFormat::DebeziumAvro(avro_schema) => {
-                write!(f, "DEBEZIUM_AVRO {}", avro_schema)
-            }
             LegacyRowFormat::Bytes => write!(f, "BYTES"),
         }
     }
@@ -332,50 +314,6 @@ impl fmt::Display for AvroSchema {
         impl_fmt_display!(use_schema_registry => [Keyword::CONFLUENT, Keyword::SCHEMA, Keyword::REGISTRY], v, self);
         impl_fmt_display!(row_schema_location, v, self);
         v.iter().join(" ").fmt(f)
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct DebeziumAvroSchema {
-    pub row_schema_location: AstString,
-}
-
-impl fmt::Display for DebeziumAvroSchema {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let mut v: Vec<String> = vec![];
-        impl_fmt_display!(
-            [
-                Keyword::ROW,
-                Keyword::SCHEMA,
-                Keyword::LOCATION,
-                Keyword::CONFLUENT,
-                Keyword::SCHEMA,
-                Keyword::REGISTRY
-            ],
-            v
-        );
-        impl_fmt_display!(row_schema_location, v, self);
-        v.iter().join(" ").fmt(f)
-    }
-}
-
-impl ParseTo for DebeziumAvroSchema {
-    fn parse_to(p: &mut Parser<'_>) -> ModalResult<Self> {
-        impl_parse_to!(
-            [
-                Keyword::ROW,
-                Keyword::SCHEMA,
-                Keyword::LOCATION,
-                Keyword::CONFLUENT,
-                Keyword::SCHEMA,
-                Keyword::REGISTRY
-            ],
-            p
-        );
-        impl_parse_to!(row_schema_location: AstString, p);
-        Ok(Self {
-            row_schema_location,
-        })
     }
 }
 
