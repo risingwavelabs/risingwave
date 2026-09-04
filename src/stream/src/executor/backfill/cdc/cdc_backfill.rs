@@ -375,8 +375,38 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         //
         // Once the backfill loop ends, we forward the upstream directly to the downstream.
         if need_backfill {
+            // Use a disposable reader for the best-effort estimate. Dropping a timed-out query
+            // does not necessarily cancel it upstream, and PostgreSQL/SQL Server readers use a
+            // single connection. Reusing that connection for the snapshot could therefore block
+            // on the abandoned estimate.
+            estimated_row_count = match tokio::time::timeout(
+                Duration::from_secs(5),
+                estimate_upstream_row_count(self.external_table.clone()),
+            )
+            .await
+            {
+                Ok(Ok(estimate)) => estimate,
+                Ok(Err(error)) => {
+                    tracing::warn!(
+                        error = %error.as_report(),
+                        %table_id,
+                        upstream_table_name,
+                        "failed to estimate upstream table row count"
+                    );
+                    None
+                }
+                Err(_) => {
+                    tracing::warn!(
+                        %table_id,
+                        upstream_table_name,
+                        "timed out estimating upstream table row count"
+                    );
+                    None
+                }
+            };
+
             // After init the state table and forward the initial barrier to downstream,
-            // we now try to create the table reader with retry.
+            // create a fresh table reader for the snapshot with retry.
             // If backfill hasn't finished, we can ignore upstream cdc events before we create the table reader.
             let mut table_reader: Option<ExternalTableReaderImpl> = None;
             let external_table = self.external_table.clone();
@@ -441,32 +471,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 self.external_table.clone(),
                 table_reader.expect("table reader must created"),
             );
-
-            estimated_row_count = match tokio::time::timeout(
-                Duration::from_secs(5),
-                upstream_table_reader.estimated_row_count(),
-            )
-            .await
-            {
-                Ok(Ok(estimate)) => estimate,
-                Ok(Err(error)) => {
-                    tracing::warn!(
-                        error = %error.as_report(),
-                        %table_id,
-                        upstream_table_name,
-                        "failed to estimate upstream table row count"
-                    );
-                    None
-                }
-                Err(_) => {
-                    tracing::warn!(
-                        %table_id,
-                        upstream_table_name,
-                        "timed out estimating upstream table row count"
-                    );
-                    None
-                }
-            };
 
             if last_binlog_offset.is_none() {
                 // Limit concurrent CDC connections globally to 10 using a semaphore.
@@ -1034,6 +1038,16 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             }
         }
     }
+}
+
+async fn estimate_upstream_row_count(
+    external_table: ExternalStorageTable,
+) -> StreamExecutorResult<Option<u64>> {
+    let table_reader = external_table.create_table_reader().await?;
+    let upstream_table_reader = UpstreamTableReader::new(external_table, table_reader);
+    let estimate_result = upstream_table_reader.estimated_row_count().await;
+    upstream_table_reader.disconnect().await?;
+    estimate_result
 }
 
 pub(crate) async fn build_reader_and_poll_upstream(
