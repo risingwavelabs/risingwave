@@ -19,23 +19,18 @@ use std::fmt;
 
 use winnow::ModalResult;
 
-use crate::ast::{Encode, Format, FormatEncodeOptions};
-use crate::keywords::Keyword;
+use crate::ast::FormatEncodeOptions;
 use crate::parser::{Parser, StrError};
 use crate::parser_err;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum CompatibleFormatEncode {
-    RowFormat(LegacyRowFormat),
     V2(FormatEncodeOptions),
 }
 
 impl fmt::Display for CompatibleFormatEncode {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            CompatibleFormatEncode::RowFormat(inner) => {
-                write!(f, "{}", inner)
-            }
             CompatibleFormatEncode::V2(inner) => {
                 write!(f, "{}", inner)
             }
@@ -46,7 +41,6 @@ impl fmt::Display for CompatibleFormatEncode {
 impl CompatibleFormatEncode {
     pub(crate) fn into_v2(self) -> FormatEncodeOptions {
         match self {
-            CompatibleFormatEncode::RowFormat(inner) => inner.into_format_encode_v2(),
             CompatibleFormatEncode::V2(inner) => inner,
         }
     }
@@ -64,60 +58,8 @@ pub fn parse_format_encode(p: &mut Parser<'_>) -> ModalResult<CompatibleFormatEn
             parser_err!("key encode clause is not supported in source schema");
         }
         Ok(CompatibleFormatEncode::V2(schema_v2))
-    } else if p.peek_nth_any_of_keywords(0, &[Keyword::ROW])
-        && p.peek_nth_any_of_keywords(1, &[Keyword::FORMAT])
-    {
-        p.expect_keyword(Keyword::ROW)?;
-        p.expect_keyword(Keyword::FORMAT)?;
-        let id = p.parse_identifier()?;
-        let value = id.real_value();
-        let schema = match &value[..] {
-            "native" => LegacyRowFormat::Native, // used internally by schema change
-            "bytes" => LegacyRowFormat::Bytes,
-            _ => {
-                parser_err!(
-                    "expected JSON | UPSERT_JSON | PROTOBUF | DEBEZIUM_JSON | DEBEZIUM_AVRO \
-                    | AVRO | UPSERT_AVRO | BYTES | NATIVE after ROW FORMAT"
-                );
-            }
-        };
-        Ok(CompatibleFormatEncode::RowFormat(schema))
     } else {
         p.expected("description of the format")
-    }
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub enum LegacyRowFormat {
-    Native,
-    Bytes,
-}
-
-impl LegacyRowFormat {
-    pub fn into_format_encode_v2(self) -> FormatEncodeOptions {
-        let (format, row_encode) = match self {
-            LegacyRowFormat::Bytes => (Format::Plain, Encode::Bytes),
-            LegacyRowFormat::Native => (Format::Native, Encode::Native),
-        };
-
-        let row_options = vec![];
-
-        FormatEncodeOptions {
-            format,
-            row_encode,
-            row_options,
-            key_encode: None,
-        }
-    }
-}
-
-impl fmt::Display for LegacyRowFormat {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "ROW FORMAT ")?;
-        match self {
-            LegacyRowFormat::Native => write!(f, "NATIVE"),
-            LegacyRowFormat::Bytes => write!(f, "BYTES"),
-        }
     }
 }
 
