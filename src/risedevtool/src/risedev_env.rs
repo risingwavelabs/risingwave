@@ -17,7 +17,10 @@
 use std::fmt::Write;
 use std::process::Command;
 
-use crate::{Application, HummockInMemoryStrategy, ServiceConfig, add_hummock_backend};
+use crate::{
+    Application, DORIS_CONTAINER_HOST, DORIS_CONTAINER_QUERY_PORT, HummockInMemoryStrategy,
+    ServiceConfig, add_hummock_backend,
+};
 
 /// Generate environment variables (put in file `.risingwave/config/risedev-env`)
 /// from the given service configurations to be used by future
@@ -123,6 +126,8 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 let user = &c.user;
                 let password = &c.password;
                 let database = &c.database;
+                let admin_user = &c.admin_user;
+                let admin_password = &c.admin_password;
                 let url = format!("http://{host}:{http_port}");
                 writeln!(env, r#"DORIS_HOST="{host}""#).unwrap();
                 writeln!(env, r#"DORIS_HTTP_PORT="{http_port}""#).unwrap();
@@ -130,8 +135,16 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 writeln!(env, r#"DORIS_USER="{user}""#).unwrap();
                 writeln!(env, r#"DORIS_PASSWORD="{password}""#).unwrap();
                 writeln!(env, r#"DORIS_DATABASE="{database}""#).unwrap();
+                writeln!(env, r#"DORIS_ADMIN_USER="{admin_user}""#).unwrap();
+                writeln!(env, r#"DORIS_ADMIN_PASSWORD="{admin_password}""#).unwrap();
                 if !c.user_managed {
                     writeln!(env, r#"DORIS_CONTAINER="risedev-{}""#, c.id).unwrap();
+                    writeln!(env, r#"DORIS_CONTAINER_HOST="{DORIS_CONTAINER_HOST}""#).unwrap();
+                    writeln!(
+                        env,
+                        r#"DORIS_CONTAINER_QUERY_PORT="{DORIS_CONTAINER_QUERY_PORT}""#
+                    )
+                    .unwrap();
                 }
                 writeln!(
                     env,

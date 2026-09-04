@@ -1851,6 +1851,8 @@ template:
     user: users
     password: "123456"
     database: demo
+    admin-user: root
+    admin-password: ""
 
     user-managed: false
 

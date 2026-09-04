@@ -19,8 +19,8 @@ use std::time::Duration;
 use anyhow::{Context, Result, ensure};
 
 use super::{ExecuteContext, Task};
-use crate::DorisConfig;
 use crate::wait::wait;
+use crate::{DORIS_CONTAINER_HOST, DORIS_CONTAINER_QUERY_PORT, DorisConfig};
 
 pub struct DorisReadyCheckTask {
     config: DorisConfig,
@@ -58,20 +58,28 @@ impl Task for DorisReadyCheckTask {
                         .arg("-P")
                         .arg(self.config.query_port.to_string())
                         .arg("-u")
-                        .arg(&self.config.user);
-                    if !self.config.password.is_empty() {
-                        command.env("MYSQL_PWD", &self.config.password);
+                        .arg(&self.config.admin_user);
+                    if !self.config.admin_password.is_empty() {
+                        command.env("MYSQL_PWD", &self.config.admin_password);
                     }
                     command
                 } else {
                     let mut command = Command::new("docker");
+                    command.arg("exec");
+                    if !self.config.admin_password.is_empty() {
+                        command
+                            .arg("-e")
+                            .arg(format!("MYSQL_PWD={}", self.config.admin_password));
+                    }
                     command
-                        .arg("exec")
                         .arg(format!("risedev-{}", self.config.id))
                         .arg("mysql")
-                        .arg("-h127.0.0.1")
-                        .arg("-P9030")
-                        .arg("-uroot");
+                        .arg("-h")
+                        .arg(DORIS_CONTAINER_HOST)
+                        .arg("-P")
+                        .arg(DORIS_CONTAINER_QUERY_PORT.to_string())
+                        .arg("-u")
+                        .arg(&self.config.admin_user);
                     command
                 };
 
@@ -100,20 +108,5 @@ impl Task for DorisReadyCheckTask {
 
         ctx.complete_spin();
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::backend_is_alive;
-
-    #[test]
-    fn test_backend_is_alive() {
-        assert!(backend_is_alive(
-            "10002\t127.0.0.1\t9050\t9060\t8040\t8060\t0\t0\t0\ttrue\tfalse"
-        ));
-        assert!(!backend_is_alive(
-            "10002\t127.0.0.1\t9050\t9060\t8040\t8060\t0\t0\t0\tfalse\tfalse"
-        ));
     }
 }
