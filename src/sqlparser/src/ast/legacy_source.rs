@@ -92,7 +92,6 @@ pub fn parse_format_encode(p: &mut Parser<'_>) -> ModalResult<CompatibleFormatEn
                 impl_parse_to!(avro_schema: AvroSchema, p);
                 LegacyRowFormat::UpsertAvro(avro_schema)
             }
-            "maxwell" => LegacyRowFormat::Maxwell,
             "csv" => {
                 impl_parse_to!(csv_info: CsvInfo, p);
                 LegacyRowFormat::Csv(csv_info)
@@ -125,7 +124,6 @@ pub enum LegacyRowFormat {
     UpsertJson,             // Keyword::UPSERT_JSON
     Avro(AvroSchema),       // Keyword::AVRO
     UpsertAvro(AvroSchema), // Keyword::UpsertAVRO
-    Maxwell,                // Keyword::MAXWELL
     Csv(CsvInfo),           // Keyword::CSV
     Native,
     DebeziumAvro(DebeziumAvroSchema), // Keyword::DEBEZIUM_AVRO
@@ -142,7 +140,6 @@ impl LegacyRowFormat {
             LegacyRowFormat::UpsertJson => (Format::Upsert, Encode::Json),
             LegacyRowFormat::Avro(_) => (Format::Plain, Encode::Avro),
             LegacyRowFormat::UpsertAvro(_) => (Format::Upsert, Encode::Avro),
-            LegacyRowFormat::Maxwell => (Format::Maxwell, Encode::Json),
             LegacyRowFormat::Csv(_) => (Format::Plain, Encode::Csv),
             LegacyRowFormat::DebeziumAvro(_) => (Format::Debezium, Encode::Avro),
             LegacyRowFormat::Bytes => (Format::Plain, Encode::Bytes),
@@ -252,7 +249,6 @@ impl fmt::Display for LegacyRowFormat {
             }
             LegacyRowFormat::Json => write!(f, "JSON"),
             LegacyRowFormat::UpsertJson => write!(f, "UPSERT_JSON"),
-            LegacyRowFormat::Maxwell => write!(f, "MAXWELL"),
             LegacyRowFormat::DebeziumJson => write!(f, "DEBEZIUM_JSON"),
             LegacyRowFormat::DebeziumMongoJson => write!(f, "DEBEZIUM_MONGO_JSON"),
             LegacyRowFormat::Avro(avro_schema) => write!(f, "AVRO {}", avro_schema),
