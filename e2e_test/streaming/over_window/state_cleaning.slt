@@ -1,0 +1,16 @@
+# Watermark-driven state cleaning of the `OverWindow` executor, which is enabled when the input is
+# append-only, all window frames are bounded `ROWS` frames, and the first `ORDER BY` column is a
+# watermark column. Run with different cache policies.
+
+statement ok
+set rw_streaming_over_window_cache_policy = full;
+
+include ./state_cleaning.slt.part
+
+statement ok
+set rw_streaming_over_window_cache_policy = recent;
+
+include ./state_cleaning.slt.part
+
+statement ok
+set rw_streaming_over_window_cache_policy = default;

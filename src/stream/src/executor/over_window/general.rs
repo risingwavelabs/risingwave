@@ -21,7 +21,7 @@ use itertools::Itertools;
 use risingwave_common::array::stream_record::Record;
 use risingwave_common::config::streaming::OverWindowCachePolicy as CachePolicy;
 use risingwave_common::row::RowExt;
-use risingwave_common::types::DefaultOrdered;
+use risingwave_common::types::{DefaultOrd, DefaultOrdered, ScalarImpl};
 use risingwave_common::util::memcmp_encoding::{self, MemcmpEncoded};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::window_function::{
@@ -43,6 +43,8 @@ use crate::executor::prelude::*;
 ///
 /// - State table schema = output schema, state table pk = `partition key | order key | input pk`.
 /// - Output schema = input schema + window function results.
+/// - When [`StateCleaning`] is enabled, stale rows below the watermark of the first order key
+///   column are deleted from recently touched partitions at barriers.
 pub struct OverWindowExecutor<S: StateStore> {
     input: Executor,
     inner: ExecutorInner<S>,
@@ -66,6 +68,8 @@ struct ExecutorInner<S: StateStore> {
     /// The maximum size of the chunk produced by executor at a time.
     chunk_size: usize,
     cache_policy: CachePolicy,
+    /// Watermark-driven state cleaning strategy, `None` if disabled.
+    state_cleaning: Option<StateCleaning>,
 }
 
 struct ExecutionVars<S: StateStore> {
@@ -73,8 +77,42 @@ struct ExecutionVars<S: StateStore> {
     cached_partitions: ManagedLruCache<OwnedRow, PartitionCache>,
     /// partition key => recently accessed range.
     recently_accessed_ranges: BTreeMap<DefaultOrdered<OwnedRow>, RangeInclusive<StateKey>>,
+    /// The latest watermark received on the watermark column for state cleaning.
+    cleaning_watermark: Option<ScalarImpl>,
+    /// Partitions touched since the last barrier, which need state cleaning at the next barrier.
+    touched_partitions: HashSet<OwnedRow>,
     stats: ExecutionStats,
     _phantom: PhantomData<S>,
+}
+
+/// Watermark-driven state cleaning strategy of [`OverWindowExecutor`].
+///
+/// This is only enabled when the optimizer decides it's safe, i.e., when the input is append-only,
+/// all window frames are bounded `ROWS` frames, and the first order key column is a watermark
+/// column with NULLs ordered as the largest values.
+///
+/// Under these conditions, a row can only affect (and be affected by) a bounded number of
+/// neighboring rows in the partition. Once a watermark `wm` is received, no row with order key
+/// `< wm` will ever arrive, so rows with order key `< wm` (*stale rows*) can never get new
+/// neighbors on the "smaller" side. Therefore, among the stale rows, only the `n_retain` ones that
+/// are closest to the watermark boundary can still be involved in future computation (as frame
+/// members of, or as rows affected by, rows arriving in the future), and all the others can be
+/// safely deleted from the state table.
+///
+/// The cleaning happens at barriers for partitions touched since the last barrier. This keeps the
+/// work proportional to recently active partitions and avoids keeping per-partition cleanup
+/// metadata in memory. Active partitions retain only the required rows plus rows not yet behind
+/// the watermark. A partition that stops receiving rows is cleaned lazily when it's touched again.
+#[derive(Debug)]
+pub(super) struct StateCleaning {
+    /// Index of the watermark column (the first order key column) in the input schema.
+    pub watermark_col_idx: usize,
+    /// Whether stale rows are at the front (`ASC` order key) or at the back (`DESC` order key)
+    /// of the partition.
+    pub stale_rows_at_front: bool,
+    /// Number of stale rows to retain in each partition, which is the number of preceding rows
+    /// plus the number of following rows of the union of all `ROWS` frames.
+    pub n_retain: usize,
 }
 
 #[derive(Default)]
@@ -134,6 +172,8 @@ pub struct OverWindowExecutorArgs<S: StateStore> {
 
     pub chunk_size: usize,
     pub cache_policy: CachePolicy,
+    /// Whether to enable watermark-driven state cleaning. See [`StateCleaning`].
+    pub enable_state_cleaning: bool,
 }
 
 /// Information about the window function calls.
@@ -244,6 +284,33 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 .collect()
         };
 
+        let state_cleaning = if args.enable_state_cleaning {
+            let all_frames_bounded_rows = calls
+                .iter()
+                .all(|call| call.frame.bounds.is_rows() && !call.frame.bounds.is_unbounded());
+            let bounds = &calls.super_rows_frame_bounds;
+            match (bounds.n_preceding_rows(), bounds.n_following_rows()) {
+                (Some(n_preceding), Some(n_following))
+                    if all_frames_bounded_rows && !args.order_key_indices.is_empty() =>
+                {
+                    Some(StateCleaning {
+                        watermark_col_idx: args.order_key_indices[0],
+                        stale_rows_at_front: args.order_key_order_types[0].is_ascending(),
+                        n_retain: n_preceding + n_following,
+                    })
+                }
+                _ => {
+                    // The optimizer should never enable state cleaning in this case.
+                    tracing::warn!(
+                        "state cleaning is enabled for over window with unbounded or non-`ROWS` frames, ignoring"
+                    );
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         Self {
             input: args.input,
             inner: ExecutorInner {
@@ -260,6 +327,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 watermark_sequence: args.watermark_epoch,
                 chunk_size: args.chunk_size,
                 cache_policy,
+                state_cleaning,
             },
         }
     }
@@ -432,6 +500,10 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 continue;
             }
 
+            if this.state_cleaning.is_some() {
+                vars.touched_partitions.insert(part_key.0.clone());
+            }
+
             // Build changes for current partition.
             let (part_changes, accessed_range) =
                 partition.build_changes(&this.state_table, delta).await?;
@@ -544,6 +616,54 @@ impl<S: StateStore> OverWindowExecutor<S> {
         }
     }
 
+    /// Clean up stale rows of the partitions touched since the last barrier, according to the
+    /// latest watermark received.
+    /// Returns the number of rows deleted. See [`StateCleaning`].
+    async fn clean_state(
+        this: &mut ExecutorInner<S>,
+        vars: &mut ExecutionVars<S>,
+    ) -> StreamExecutorResult<usize> {
+        let touched = std::mem::take(&mut vars.touched_partitions);
+        let (Some(cleaning), Some(watermark)) = (&this.state_cleaning, &vars.cleaning_watermark)
+        else {
+            return Ok(0);
+        };
+        if touched.is_empty() {
+            return Ok(0);
+        }
+
+        let row_conv = RowConverter {
+            state_key_to_table_sub_pk_proj: &this.state_key_to_table_sub_pk_proj,
+            order_key_indices: &this.order_key_indices,
+            order_key_data_types: &this.order_key_data_types,
+            order_key_order_types: &this.order_key_order_types,
+            input_stream_key_indices: &this.input_stream_key,
+        };
+
+        let mut n_deleted = 0;
+        for part_key in touched {
+            let mut cache_guard = vars.cached_partitions.get_mut(&part_key);
+            // If the partition is not cached (e.g. evicted), use a temporary cache with only
+            // sentinels, so that `OverPartition` scans the state table for stale rows.
+            let mut temp_cache = PartitionCache::new();
+            let cache = match cache_guard.as_deref_mut() {
+                Some(cache) => cache,
+                None => &mut temp_cache,
+            };
+            let mut partition =
+                OverPartition::new(&part_key, cache, this.cache_policy, &this.calls, row_conv);
+            let (n, has_more) = partition
+                .clean_stale_rows(&mut this.state_table, cleaning, watermark)
+                .await?;
+            n_deleted += n;
+            if has_more {
+                // continue to clean this partition at the next barrier
+                vars.touched_partitions.insert(part_key.clone());
+            }
+        }
+        Ok(n_deleted)
+    }
+
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn executor_inner(self) {
         let OverWindowExecutor {
@@ -570,6 +690,8 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 metrics_info,
             ),
             recently_accessed_ranges: Default::default(),
+            cleaning_watermark: None,
+            touched_partitions: Default::default(),
             stats: Default::default(),
             _phantom: PhantomData::<S>,
         };
@@ -584,9 +706,20 @@ impl<S: StateStore> OverWindowExecutor<S> {
         for msg in input {
             let msg = msg?;
             match msg {
-                Message::Watermark(_) => {
-                    // TODO(rc): ignore watermark for now, we need to think about watermark for
-                    // window functions like `lead` carefully.
+                Message::Watermark(watermark) => {
+                    if let Some(cleaning) = &this.state_cleaning
+                        && watermark.col_idx == cleaning.watermark_col_idx
+                        && vars
+                            .cleaning_watermark
+                            .as_ref()
+                            .is_none_or(|old| old.default_cmp(&watermark.val).is_lt())
+                    {
+                        // Only used for state cleaning at the next barrier.
+                        vars.cleaning_watermark = Some(watermark.val);
+                    }
+                    // TODO(rc): We don't propagate watermarks to downstream for now, because rows
+                    // below the watermark may still be updated by later rows if there's any
+                    // following frame bound, e.g. `lead`. We need to think about it carefully.
                     continue;
                 }
                 Message::Chunk(chunk) => {
@@ -606,6 +739,11 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     vars.cached_partitions.evict();
                 }
                 Message::Barrier(barrier) => {
+                    let n_cleaned = Self::clean_state(&mut this, &mut vars).await?;
+                    metrics
+                        .over_window_state_cleaned_row_count
+                        .inc_by(n_cleaned as u64);
+
                     let post_commit = this.state_table.commit(barrier.epoch).await?;
 
                     let update_vnode_bitmap = barrier.as_update_vnode_bitmap(this.actor_ctx.id);
@@ -629,6 +767,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                     {
                         vars.cached_partitions.clear();
                         vars.recently_accessed_ranges.clear();
+                        vars.touched_partitions.clear();
                     }
 
                     if !this.cache_policy.is_full() {
