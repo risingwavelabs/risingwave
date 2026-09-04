@@ -20,6 +20,7 @@ use winnow::ModalResult;
 
 use super::ddl::SourceWatermark;
 use super::legacy_source::{CompatibleFormatEncode, parse_format_encode};
+use super::value::escape_single_quote_string;
 use super::{EmitMode, Ident, ObjectType, Query, Value};
 use crate::ast::{
     CdcTableInfo, ColumnDef, ObjectName, REDACT_SQL_OPTION_KEYWORDS, SqlOption, TableConstraint,
@@ -483,7 +484,8 @@ impl fmt::Display for CreateSourceStatement {
         if let Some(info) = &self.cdc_table_info {
             v.push(format!(
                 "FROM {} TABLE '{}'",
-                info.source_name, info.external_table_name
+                info.source_name,
+                escape_single_quote_string(&info.external_table_name)
             ));
         }
         v.iter().join(" ").fmt(f)
