@@ -406,6 +406,8 @@ pub struct DorisConfig {
     pub user: String,
     pub password: String,
     pub database: String,
+    pub admin_user: String,
+    pub admin_password: String,
 
     pub image: String,
     pub user_managed: bool,
