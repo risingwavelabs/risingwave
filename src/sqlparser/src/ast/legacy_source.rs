@@ -17,16 +17,12 @@
 
 use std::fmt;
 
-use itertools::Itertools as _;
 use winnow::ModalResult;
 
-use crate::ast::{
-    AstString, Encode, Format, FormatEncodeOptions, Ident, ObjectName, ParseTo, SqlOption, Value,
-    display_separated,
-};
+use crate::ast::{Encode, Format, FormatEncodeOptions};
 use crate::keywords::Keyword;
 use crate::parser::{Parser, StrError};
-use crate::{impl_fmt_display, impl_parse_to, parser_err};
+use crate::parser_err;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum CompatibleFormatEncode {
@@ -104,9 +100,7 @@ impl LegacyRowFormat {
             LegacyRowFormat::Native => (Format::Native, Encode::Native),
         };
 
-        let row_options = match self {
-            _ => vec![],
-        };
+        let row_options = vec![];
 
         FormatEncodeOptions {
             format,
