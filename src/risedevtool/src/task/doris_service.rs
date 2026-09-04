@@ -15,6 +15,11 @@
 use super::docker_service::{DockerService, DockerServiceConfig};
 use crate::DorisConfig;
 
+pub const DORIS_CONTAINER_HOST: &str = "127.0.0.1";
+pub const DORIS_CONTAINER_HTTP_PORT: u16 = 8030;
+pub const DORIS_CONTAINER_BE_HTTP_PORT: u16 = 8040;
+pub const DORIS_CONTAINER_QUERY_PORT: u16 = 9030;
+
 impl DockerServiceConfig for DorisConfig {
     fn id(&self) -> String {
         self.id.clone()
@@ -30,9 +35,18 @@ impl DockerServiceConfig for DorisConfig {
 
     fn ports(&self) -> Vec<(String, String)> {
         vec![
-            (self.http_port.to_string(), "8030".to_owned()),
-            (self.be_http_port.to_string(), "8040".to_owned()),
-            (self.query_port.to_string(), "9030".to_owned()),
+            (
+                self.http_port.to_string(),
+                DORIS_CONTAINER_HTTP_PORT.to_string(),
+            ),
+            (
+                self.be_http_port.to_string(),
+                DORIS_CONTAINER_BE_HTTP_PORT.to_string(),
+            ),
+            (
+                self.query_port.to_string(),
+                DORIS_CONTAINER_QUERY_PORT.to_string(),
+            ),
         ]
     }
 }
