@@ -393,9 +393,8 @@ public class DbzConnectorConfig {
             // RisingWave backfills each table on demand, so the shared Debezium connector only
             // captures schemas and streams changes. On recovery, rebuild the in-memory schema
             // history and resume from the opaque offset persisted in the CDC split.
-            // TODO(#26804): Once Oracle is wired into shared CDC backfill, `isCdcBackfill` must
-            //  always be true for Oracle sources; remove the implicit Debezium `initial` snapshot
-            //  fallback.
+            // Once Oracle is wired into shared CDC backfill, `isCdcBackfill` must always be true
+            // for Oracle sources; remove the implicit Debezium `initial` snapshot fallback then.
             if (isCdcBackfill) {
                 if (null != startOffset && !startOffset.isBlank()) {
                     oracleProps.setProperty(ORACLE_SNAPSHOT_MODE, "recovery");
