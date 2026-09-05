@@ -116,6 +116,30 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 )
                 .unwrap();
             }
+            ServiceConfig::ClickHouse(c) => {
+                let host = &c.address;
+                let http_port = &c.http_port;
+                let native_port = &c.native_port;
+                let user = &c.user;
+                let password = &c.password;
+                let database = &c.database;
+                let url = format!("http://{host}:{http_port}");
+                writeln!(env, r#"CLICKHOUSE_HOST="{host}""#).unwrap();
+                writeln!(env, r#"CLICKHOUSE_HTTP_PORT="{http_port}""#).unwrap();
+                writeln!(env, r#"CLICKHOUSE_NATIVE_PORT="{native_port}""#).unwrap();
+                writeln!(env, r#"CLICKHOUSE_USER="{user}""#).unwrap();
+                writeln!(env, r#"CLICKHOUSE_PASSWORD="{password}""#).unwrap();
+                writeln!(env, r#"CLICKHOUSE_DATABASE="{database}""#).unwrap();
+                writeln!(env, r#"RISEDEV_CLICKHOUSE_URL="{url}""#).unwrap();
+                if !c.user_managed {
+                    writeln!(env, r#"CLICKHOUSE_CONTAINER="risedev-{}""#, c.id).unwrap();
+                }
+                writeln!(
+                    env,
+                    r#"RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON="connector='clickhouse',clickhouse.url='{url}',clickhouse.user='{user}',clickhouse.password='{password}',clickhouse.database='{database}'""#,
+                )
+                .unwrap();
+            }
             ServiceConfig::MySql(c) if c.application != Application::Metastore => {
                 let host = &c.address;
                 let port = &c.port;
