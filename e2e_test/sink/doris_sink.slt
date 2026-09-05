@@ -19,7 +19,11 @@ statement ok
 DROP TABLE IF EXISTS t6_variant;
 
 system ok retry 120 backoff 1s
-test "$(doris -N -B -e 'SHOW BACKENDS' | awk -F '\t' '$10 == "true" { count++ } END { print count + 0 }')" = "1"
+set -o pipefail
+doris -B --column-names -e 'SHOW BACKENDS' | awk -F '\t' '
+NR == 1 { for (i = 1; i <= NF; i++) if ($i == "Alive") alive_column = i; next }
+alive_column && (tolower($alive_column) == "true" || $alive_column == "1") { found = 1 }
+END { exit !found }'
 
 system ok
 doris -e "
