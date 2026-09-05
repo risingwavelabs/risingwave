@@ -85,8 +85,7 @@ public class OracleConnectorConfigTest {
     public void startsSharedOracleSourceWithoutDataSnapshot() {
         var userProps = oracleProperties();
         userProps.put("debezium.snapshot.mode", "rw_cdc_backfill");
-        var config =
-                new DbzConnectorConfig(SourceTypeE.ORACLE, 42, null, userProps, false, true);
+        var config = new DbzConnectorConfig(SourceTypeE.ORACLE, 42, null, userProps, false, true);
 
         assertEquals("no_data", config.getResolvedDebeziumProps().getProperty("snapshot.mode"));
     }
@@ -101,15 +100,12 @@ public class OracleConnectorConfigTest {
                         + "\"sourceOffset\":{\"scn\":\"3134314\","
                         + "\"commit_scn\":\"3134315:1:8.30.1337\"},"
                         + "\"isHeartbeat\":false}";
-        var config =
-                new DbzConnectorConfig(
-                        SourceTypeE.ORACLE, 42, offset, userProps, false, true);
+        var config = new DbzConnectorConfig(SourceTypeE.ORACLE, 42, offset, userProps, false, true);
         var properties = config.getResolvedDebeziumProps();
 
         assertEquals("recovery", properties.getProperty("snapshot.mode"));
         assertEquals(
-                offset,
-                properties.getProperty(ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE));
+                offset, properties.getProperty(ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE));
         assertEquals("string", properties.getProperty("decimal.handling.mode"));
     }
 
