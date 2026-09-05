@@ -380,7 +380,6 @@ pub struct DorisConfig {
     pub address: String,
     pub http_port: u16,
     pub query_port: u16,
-    pub be_http_port: u16,
 
     pub user: String,
     pub password: String,

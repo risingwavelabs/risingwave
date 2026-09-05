@@ -39,8 +39,10 @@ impl DockerServiceConfig for DorisConfig {
                 self.http_port.to_string(),
                 DORIS_CONTAINER_HTTP_PORT.to_string(),
             ),
+            // Doris includes the BE HTTP port in stream-load redirects. The port therefore
+            // cannot be remapped by Docker without making the redirected URL unreachable.
             (
-                self.be_http_port.to_string(),
+                DORIS_CONTAINER_BE_HTTP_PORT.to_string(),
                 DORIS_CONTAINER_BE_HTTP_PORT.to_string(),
             ),
             (
