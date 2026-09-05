@@ -6179,13 +6179,22 @@ impl Parser<'_> {
     /// Parse a FETCH clause
     pub fn parse_fetch(&mut self) -> ModalResult<Fetch> {
         self.expect_one_of_keywords(&[Keyword::FIRST, Keyword::NEXT])?;
+        // Peek for a bare ROW/ROWS keyword *before* attempting to parse an expression.
+        //
+        // This resolves the grammar conflict called out in
+        // <https://github.com/risingwavelabs/risingwave/issues/19952>: PostgreSQL's `c_expr`
+        // (and our `parse_expr`) is happy to start parsing `ROW(...)` as a row-constructor
+        // expression, which would otherwise swallow the `ROW`/`ROWS` noise word that marks an
+        // *omitted* quantity, e.g. in `FETCH FIRST ROW ONLY`. By checking for the bare keyword
+        // first, we make sure `FETCH FIRST ROW ONLY` is always parsed as "no quantity" rather
+        // than misinterpreting `ROW` as the start of an expression.
         let quantity = if self
             .parse_one_of_keywords(&[Keyword::ROW, Keyword::ROWS])
             .is_some()
         {
             None
         } else {
-            let quantity = self.parse_number_value()?;
+            let quantity = self.parse_expr()?;
             self.expect_one_of_keywords(&[Keyword::ROW, Keyword::ROWS])?;
             Some(quantity)
         };
