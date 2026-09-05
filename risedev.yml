@@ -1880,7 +1880,6 @@ template:
     address: "127.0.0.1"
     http-port: 8030
     query-port: 9030
-    be-http-port: 8040
 
     user: users
     password: "123456"
@@ -1890,7 +1889,6 @@ template:
 
     user-managed: false
 
-    # Only effective when NOT user managed
     image: "apache/doris:doris-all-in-one-2.1.0"
 
   # MySQL service backed by docker.
