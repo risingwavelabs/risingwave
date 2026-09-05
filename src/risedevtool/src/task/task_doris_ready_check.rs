@@ -33,9 +33,17 @@ impl DorisReadyCheckTask {
 }
 
 fn backend_is_alive(output: &str) -> bool {
-    output.lines().any(|line| {
+    let mut lines = output.lines();
+    let Some(alive_column) = lines
+        .next()
+        .and_then(|header| header.split('\t').position(|name| name == "Alive"))
+    else {
+        return false;
+    };
+
+    lines.any(|line| {
         line.split('\t')
-            .nth(9)
+            .nth(alive_column)
             .is_some_and(|value| value.eq_ignore_ascii_case("true") || value == "1")
     })
 }
@@ -84,7 +92,7 @@ impl Task for DorisReadyCheckTask {
                 };
 
                 let output = command
-                    .args(["-N", "-B", "-e", "SHOW BACKENDS"])
+                    .args(["-B", "--column-names", "-e", "SHOW BACKENDS"])
                     .output()
                     .context("failed to query Doris backends")?;
                 ensure!(
