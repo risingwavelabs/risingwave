@@ -1843,6 +1843,29 @@ template:
 
     persist-data: false
 
+  # StarRocks service backed by Docker.
+  starrocks:
+    # Id to be picked-up by services
+    id: starrocks-${query-port}
+
+    # Address and host ports of StarRocks FE.
+    address: "127.0.0.1"
+    http-port: 28030
+    query-port: 29030
+
+    # Credentials and database used by sink tests.
+    user: users
+    password: "123456"
+    database: demo
+
+    admin-user: root
+    admin-password: ""
+
+    image: "starrocks/allin1-ubuntu:3.5.21"
+
+    # If `user-managed` is true, the user is responsible for starting StarRocks.
+    user-managed: false
+
   # MySQL service backed by docker.
   mysql:
     # Id to be picked-up by services
