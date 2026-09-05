@@ -406,6 +406,48 @@ mod tests {
         assert_eq!(context.timezone, Some("Asia/Shanghai".to_owned()));
         assert_eq!(&*context.config_override, "{\"parallelism\":2}");
     }
+
+    fn fragment_type_mask(flags: impl IntoIterator<Item = FragmentTypeFlag>) -> FragmentTypeMask {
+        let mut mask = FragmentTypeMask::empty();
+        for flag in flags {
+            mask.add(flag);
+        }
+        mask
+    }
+
+    #[test]
+    fn test_tracking_progress_skips_only_cdc_fragments() {
+        let fragments = [
+            (
+                fragment_type_mask([FragmentTypeFlag::CdcFilter]),
+                vec![ActorId::new(1)].into_iter(),
+            ),
+            (
+                fragment_type_mask([
+                    FragmentTypeFlag::StreamCdcScan,
+                    FragmentTypeFlag::StreamScan,
+                ]),
+                vec![ActorId::new(2)].into_iter(),
+            ),
+            (
+                fragment_type_mask([FragmentTypeFlag::StreamScan]),
+                vec![ActorId::new(3), ActorId::new(4)].into_iter(),
+            ),
+            (
+                fragment_type_mask([FragmentTypeFlag::SourceScan]),
+                vec![ActorId::new(5)].into_iter(),
+            ),
+        ];
+
+        assert_eq!(
+            StreamJobFragments::tracking_progress_actor_ids_impl(fragments),
+            vec![
+                (ActorId::new(3), BackfillUpstreamType::MView),
+                (ActorId::new(4), BackfillUpstreamType::MView),
+                (ActorId::new(5), BackfillUpstreamType::Source),
+            ]
+        );
+    }
 }
 
 pub type StreamJobActorsToCreate = HashMap<
@@ -490,10 +532,12 @@ impl StreamJobFragments {
     ) -> Vec<(ActorId, BackfillUpstreamType)> {
         let mut actor_ids = vec![];
         for (fragment_type_mask, actors) in fragments {
-            if fragment_type_mask.contains(FragmentTypeFlag::CdcFilter) {
-                // Note: CDC table job contains a StreamScan fragment (StreamCdcScan node) and a CdcFilter fragment.
-                // We don't track any fragments' progress.
-                return vec![];
+            if fragment_type_mask
+                .contains_any([FragmentTypeFlag::CdcFilter, FragmentTypeFlag::StreamCdcScan])
+            {
+                // CDC progress is tracked by its upstream shared source. Skip only the CDC
+                // fragments so unrelated backfill fragments in a mixed job remain tracked.
+                continue;
             }
             if fragment_type_mask.contains_any([
                 FragmentTypeFlag::Values,

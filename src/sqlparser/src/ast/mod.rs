@@ -2148,7 +2148,11 @@ impl Statement {
                 }
                 if let Some(info) = cdc_table_info {
                     write!(f, " FROM {}", info.source_name)?;
-                    write!(f, " TABLE '{}'", info.external_table_name)?;
+                    write!(
+                        f,
+                        " TABLE '{}'",
+                        value::escape_single_quote_string(&info.external_table_name)
+                    )?;
                 }
                 if let Some(info) = webhook_info
                     && let Some(signature_expr) = &info.signature_expr

@@ -20,9 +20,10 @@ use winnow::ModalResult;
 
 use super::ddl::SourceWatermark;
 use super::legacy_source::{CompatibleFormatEncode, parse_format_encode};
+use super::value::escape_single_quote_string;
 use super::{EmitMode, Ident, ObjectType, Query, Value};
 use crate::ast::{
-    ColumnDef, ObjectName, REDACT_SQL_OPTION_KEYWORDS, SqlOption, TableConstraint,
+    CdcTableInfo, ColumnDef, ObjectName, REDACT_SQL_OPTION_KEYWORDS, SqlOption, TableConstraint,
     display_comma_separated, display_separated,
 };
 use crate::keywords::Keyword;
@@ -90,6 +91,8 @@ pub struct CreateSourceStatement {
     pub format_encode: CompatibleFormatEncode,
     pub source_watermarks: Vec<SourceWatermark>,
     pub include_column_options: IncludeOption,
+    /// `FROM cdc_source TABLE database_name.table_name`
+    pub cdc_table_info: Option<CdcTableInfo>,
 }
 
 /// FORMAT means how to get the operation(Insert/Delete) from the input.
@@ -475,8 +478,15 @@ impl fmt::Display for CreateSourceStatement {
         });
 
         impl_fmt_display!(with_properties, v, self);
-        if !is_cdc_source {
+        if self.cdc_table_info.is_none() && !is_cdc_source {
             impl_fmt_display!(format_encode, v, self);
+        }
+        if let Some(info) = &self.cdc_table_info {
+            v.push(format!(
+                "FROM {} TABLE '{}'",
+                info.source_name,
+                escape_single_quote_string(&info.external_table_name)
+            ));
         }
         v.iter().join(" ").fmt(f)
     }

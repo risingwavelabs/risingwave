@@ -231,6 +231,14 @@ impl CatalogController {
         // handle secret ref
         let secret_ids = get_referred_secret_ids_from_source(&pb_source)?;
         let connection_ids = get_referred_connection_ids_from_source(&pb_source);
+        let cdc_source_id = pb_source
+            .info
+            .as_ref()
+            .and_then(|info| info.external_table.as_ref())
+            .map(|table| table.source_id);
+        if let Some(cdc_source_id) = cdc_source_id {
+            ensure_object_id(ObjectType::Source, cdc_source_id, &txn).await?;
+        }
 
         let source_obj = Self::create_object(
             &txn,
@@ -243,17 +251,26 @@ impl CatalogController {
         .await?;
         let source_id = source_obj.oid.as_source_id();
         pb_source.id = source_id;
+        if let Some(external_table) = pb_source
+            .info
+            .as_mut()
+            .and_then(|info| info.external_table.as_mut())
+        {
+            external_table.table_id = source_id.as_cdc_table_id();
+        }
         let source: source::ActiveModel = pb_source.clone().into();
         Source::insert(source).exec(&txn).await?;
 
-        // add secret and connection dependency
+        // Add secret, connection, and upstream shared CDC source dependencies.
         let dep_relation_ids = secret_ids
             .iter()
             .copied()
             .map_into()
-            .chain(connection_ids.iter().copied().map_into());
-        let dependencies = if !secret_ids.is_empty() || !connection_ids.is_empty() {
-            ObjectDependency::insert_many(dep_relation_ids.map(|id| {
+            .chain(connection_ids.iter().copied().map_into())
+            .chain(cdc_source_id.map(|id| id.as_object_id()))
+            .collect_vec();
+        let dependencies = if !dep_relation_ids.is_empty() {
+            ObjectDependency::insert_many(dep_relation_ids.into_iter().map(|id| {
                 object_dependency::ActiveModel {
                     oid: Set(id),
                     used_by: Set(source_id.as_object_id()),
@@ -273,6 +290,11 @@ impl CatalogController {
                     object_id: source_id.as_object_id(),
                     referenced_object_id: id.as_object_id(),
                     referenced_object_type: PbObjectType::Connection as _,
+                }))
+                .chain(cdc_source_id.map(|id| PbObjectDependency {
+                    object_id: source_id.as_object_id(),
+                    referenced_object_id: id.as_object_id(),
+                    referenced_object_type: PbObjectType::Source as _,
                 }))
                 .collect_vec()
         } else {

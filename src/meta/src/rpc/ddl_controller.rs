@@ -688,6 +688,20 @@ impl DdlController {
         source: Source,
         iceberg_table_id: Option<TableId>,
     ) -> MetaResult<NotificationVersion> {
+        if source
+            .info
+            .as_ref()
+            .is_some_and(|info| info.external_table.is_some())
+        {
+            assert!(iceberg_table_id.is_none());
+            let (_, version) = self
+                .metadata_manager
+                .catalog_controller
+                .create_source(source, iceberg_table_id)
+                .await?;
+            return Ok(version);
+        }
+
         let handle = create_source_worker(
             &source,
             self.source_manager.metrics.clone(),

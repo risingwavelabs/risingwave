@@ -1,0 +1,240 @@
+# CDC table sources expose one upstream table as an upsert source. They do not create a
+# streaming job themselves, and every downstream streaming job gets an independent CDC scan.
+
+control substitution on
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+# Make the test rerunnable after a partial failure.
+statement ok
+DROP SOURCE IF EXISTS mysql_orders_table_source CASCADE;
+
+statement ok
+DROP SOURCE IF EXISTS s_mysql_orders_table_source CASCADE;
+
+system ok
+mysql -e "
+    CREATE DATABASE IF NOT EXISTS risedev;
+    USE risedev;
+    DROP TABLE IF EXISTS mysql_orders_table_source;
+    CREATE TABLE mysql_orders_table_source (
+        id INT NOT NULL PRIMARY KEY,
+        payload VARCHAR(50) NOT NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_0900_ai_ci;
+"
+
+system ok
+mysql -e "
+    DROP USER IF EXISTS 'mysql-orders-cdc'@'%';
+    CREATE USER 'mysql-orders-cdc'@'%' IDENTIFIED BY 'abcdef';
+    GRANT SELECT, RELOAD, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'mysql-orders-cdc'@'%';
+    FLUSH PRIVILEGES;
+"
+
+statement ok
+CREATE SOURCE s_mysql_orders_table_source WITH (
+    ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
+    username = 'mysql-orders-cdc',
+    password = 'abcdef',
+    database.name = 'risedev',
+    server.id = '5199'
+);
+
+sleep 2s
+
+# Put a change into the shared CDC stream before any consumer exists. A CDC table source with
+# snapshot=false must not replay it when its downstream jobs are created.
+system ok
+mysql -e "
+    USE risedev;
+    INSERT INTO mysql_orders_table_source VALUES (1, 'before_consumers');
+"
+
+sleep 2s
+
+statement error Invalid input syntax: CDC table sources currently require exactly `WITH \(snapshot = 'false'\)`
+CREATE SOURCE bad_missing_snapshot (
+    id INT,
+    payload VARCHAR,
+    PRIMARY KEY (id)
+) FROM s_mysql_orders_table_source TABLE 'risedev.mysql_orders_table_source';
+
+statement error Invalid input syntax: CDC table sources currently require exactly `WITH \(snapshot = 'false'\)`
+CREATE SOURCE bad_snapshot_true (
+    id INT,
+    payload VARCHAR,
+    PRIMARY KEY (id)
+) WITH (snapshot = 'true')
+FROM s_mysql_orders_table_source TABLE 'risedev.mysql_orders_table_source';
+
+# Exercise schema inference as well as the new CREATE SOURCE grammar.
+statement ok
+CREATE SOURCE mysql_orders_table_source (*)
+WITH (snapshot = 'false')
+FROM s_mysql_orders_table_source TABLE 'risedev.mysql_orders_table_source';
+
+# The table source is catalog-only, not a standalone streaming job.
+query IB
+SELECT count(*), is_shared
+FROM rw_sources
+WHERE name = 'mysql_orders_table_source'
+GROUP BY is_shared;
+----
+1 f
+
+query I
+SELECT count(*)
+FROM rw_catalog.rw_streaming_jobs
+WHERE name = 'mysql_orders_table_source';
+----
+0
+
+query error batch queries on CDC table sources are not supported
+SELECT * FROM mysql_orders_table_source;
+
+query error mysql_query and postgres_query only accept shared CDC sources, not CDC table sources
+SELECT * FROM mysql_query('mysql_orders_table_source', 'SELECT 1');
+
+statement error altering columns of a CDC table source is not supported
+ALTER SOURCE mysql_orders_table_source ADD COLUMN extra INT;
+
+statement error RESET is not supported for CDC table sources
+ALTER SOURCE mysql_orders_table_source RESET;
+
+statement error SOURCE_RATE_LIMIT is not supported for CDC table sources
+ALTER SOURCE mysql_orders_table_source SET SOURCE_RATE_LIMIT = 100;
+
+# Rotate the upstream credential after creating the catalog-only table source. New consumers must
+# resolve the shared source's current connector properties instead of using the copied descriptor.
+system ok
+mysql -e "
+    ALTER USER 'mysql-orders-cdc'@'%' IDENTIFIED BY 'updated-abcdef';
+    FLUSH PRIVILEGES;
+"
+
+statement ok
+ALTER SOURCE s_mysql_orders_table_source CONNECTOR WITH (password = 'updated-abcdef');
+
+sleep 2s
+
+statement ok
+CREATE MATERIALIZED VIEW orders_state_1 AS
+SELECT id, payload FROM mysql_orders_table_source;
+
+statement ok
+CREATE MATERIALIZED VIEW orders_state_2 AS
+SELECT id, upper(payload) AS payload FROM mysql_orders_table_source;
+
+# Cover pruning both non-key and key columns from the CDC scan. The physical scan keeps its full
+# descriptor while a project exposes only the requested column.
+statement ok
+CREATE MATERIALIZED VIEW orders_id_only AS
+SELECT id FROM mysql_orders_table_source;
+
+statement ok
+CREATE MATERIALIZED VIEW orders_payload_only AS
+SELECT payload FROM mysql_orders_table_source;
+
+statement ok
+CREATE MATERIALIZED VIEW orders_changelog AS
+WITH sub AS CHANGELOG FROM mysql_orders_table_source
+SELECT id, payload, changelog_op FROM sub;
+
+query I retry 10 backoff 1s
+SELECT count(*) FROM orders_state_1;
+----
+0
+
+system ok
+mysql -e "
+    USE risedev;
+    INSERT INTO mysql_orders_table_source VALUES (2, 'new');
+"
+
+query IT retry 10 backoff 1s
+SELECT id, payload FROM orders_state_1;
+----
+2 new
+
+query IT retry 10 backoff 1s
+SELECT id, payload FROM orders_state_2;
+----
+2 NEW
+
+query I retry 10 backoff 1s
+SELECT id FROM orders_id_only;
+----
+2
+
+query T retry 10 backoff 1s
+SELECT payload FROM orders_payload_only;
+----
+new
+
+system ok
+mysql -e "
+    USE risedev;
+    UPDATE mysql_orders_table_source SET payload = 'updated' WHERE id = 2;
+    DELETE FROM mysql_orders_table_source WHERE id = 2;
+"
+
+query ITI rowsort retry 10 backoff 1s
+SELECT id, payload, changelog_op FROM orders_changelog;
+----
+2 new 1
+2 updated 1
+2 updated 2
+
+query I retry 10 backoff 1s
+SELECT count(*) FROM orders_state_1;
+----
+0
+
+onlyif can-use-recover
+statement ok
+recover;
+
+system ok
+mysql -e "
+    USE risedev;
+    INSERT INTO mysql_orders_table_source VALUES (3, 'after_recovery');
+"
+
+query IT retry 10 backoff 1s
+SELECT id, payload FROM orders_state_1;
+----
+3 after_recovery
+
+query IT retry 10 backoff 1s
+SELECT id, payload FROM orders_state_2;
+----
+3 AFTER_RECOVERY
+
+statement ok
+DROP MATERIALIZED VIEW orders_changelog;
+
+statement ok
+DROP MATERIALIZED VIEW orders_state_2;
+
+statement ok
+DROP MATERIALIZED VIEW orders_state_1;
+
+statement ok
+DROP MATERIALIZED VIEW orders_payload_only;
+
+statement ok
+DROP MATERIALIZED VIEW orders_id_only;
+
+statement ok
+DROP SOURCE mysql_orders_table_source;
+
+statement ok
+DROP SOURCE s_mysql_orders_table_source;
+
+system ok
+mysql -e "
+    USE risedev;
+    DROP TABLE mysql_orders_table_source;
+    DROP USER IF EXISTS 'mysql-orders-cdc'@'%';
+"

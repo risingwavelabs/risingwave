@@ -59,6 +59,13 @@ pub async fn handle_alter_source_column(
         )
         .into());
     };
+    if catalog.is_cdc_table_source() {
+        return Err(ErrorCode::NotSupported(
+            "altering columns of a CDC table source is not supported".to_owned(),
+            "Drop and recreate the CDC table source".to_owned(),
+        )
+        .into());
+    }
 
     // Currently only allow source without schema registry
     let SourceStruct { encode, .. } = extract_source_struct(&catalog.info)?;

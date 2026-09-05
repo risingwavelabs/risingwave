@@ -20,8 +20,8 @@ use iceberg::spec::{Operation, TableMetadata};
 use itertools::Itertools;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{
-    ColumnCatalog, Engine, Field, RISINGWAVE_ICEBERG_COMMIT_EPOCH, RISINGWAVE_ICEBERG_ROW_ID,
-    ROW_ID_COLUMN_NAME, Schema,
+    CdcTableDesc, ColumnCatalog, Engine, Field, RISINGWAVE_ICEBERG_COMMIT_EPOCH,
+    RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME, Schema,
 };
 use risingwave_common::constants::log_store::{
     EPOCH_COLUMN_NAME, INSERT_OP_CODE, ROW_OP_COLUMN_NAME, encode_epoch,
@@ -29,7 +29,9 @@ use risingwave_common::constants::log_store::{
 use risingwave_common::session_config::IcebergQueryStorageMode;
 use risingwave_common::types::{DataType, Interval, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_connector::WithOptionsSecResolved;
 use risingwave_connector::source::ConnectorProperties;
+use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::iceberg::IcebergTimeTravelInfo;
 use risingwave_sqlparser::ast::AsOf;
 use thiserror_ext::AsReport;
@@ -43,11 +45,12 @@ use crate::binder::{
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::{ErrorCode, Result};
 use crate::expr::{CastContext, Expr, ExprImpl, ExprType, FunctionCall, InputRef, Literal};
+use crate::handler::create_table::derive_with_options_for_cdc_table;
 use crate::optimizer::IcebergSnapshotInfo;
 use crate::optimizer::plan_node::generic::{self, GenericPlanRef, SourceNodeKind};
 use crate::optimizer::plan_node::utils::to_iceberg_time_travel_as_of;
 use crate::optimizer::plan_node::{
-    LogicalApply, LogicalGapFill, LogicalHopWindow, LogicalIcebergIntermediateScan,
+    LogicalApply, LogicalCdcScan, LogicalGapFill, LogicalHopWindow, LogicalIcebergIntermediateScan,
     LogicalIcebergMetadataScan, LogicalJoin, LogicalPlanRef as PlanRef, LogicalProject,
     LogicalScan, LogicalShare, LogicalSource, LogicalSysScan, LogicalTableFunction, LogicalUnion,
     LogicalValues,
@@ -341,7 +344,48 @@ impl Planner {
     }
 
     pub(super) fn plan_source(&mut self, source: BoundSource) -> Result<PlanRef> {
-        if source.is_shareable_cdc_connector() {
+        if source.catalog.is_cdc_table_source() {
+            if !matches!(self.plan_for(), PlanFor::Stream) {
+                return Err(ErrorCode::NotSupported(
+                    "batch queries on CDC table sources are not supported".to_owned(),
+                    "Create a materialized view to consume the CDC table source".to_owned(),
+                )
+                .into());
+            }
+            if source.as_of.is_some() {
+                return Err(ErrorCode::NotSupported(
+                    "AS OF on CDC table sources is not supported".to_owned(),
+                    "Remove the AS OF clause".to_owned(),
+                )
+                .into());
+            }
+
+            let catalog_desc = source
+                .catalog
+                .info
+                .external_table
+                .as_ref()
+                .expect("checked by is_cdc_table_source");
+            let desc = CdcTableDesc::from_protobuf(catalog_desc);
+            let upstream_source = {
+                let session = self.ctx.session_ctx();
+                let catalog_reader = session.env().catalog_reader().read_guard();
+                catalog_reader
+                    .get_source_by_id_with_db(&session.database(), desc.source_id)?
+                    .clone()
+            };
+            let desc = resolve_current_cdc_table_desc(desc, &upstream_source.with_properties)?;
+            let scan = LogicalCdcScan::create(
+                source.catalog.name.clone(),
+                Rc::new(desc),
+                self.ctx(),
+                CdcScanOptions {
+                    disable_backfill: true,
+                    ..Default::default()
+                },
+            );
+            Ok(scan.into())
+        } else if source.is_shareable_cdc_connector() {
             Err(ErrorCode::InternalError(
                 "Should not create MATERIALIZED VIEW or SELECT directly on shared CDC source. HINT: create TABLE from the source instead.".to_owned(),
             )
@@ -952,8 +996,23 @@ fn risingwave_iceberg_commit_epoch(metadata: &TableMetadata, snapshot_id: i64) -
     }
 }
 
+fn resolve_current_cdc_table_desc(
+    mut desc: CdcTableDesc,
+    upstream_properties: &WithOptionsSecResolved,
+) -> Result<CdcTableDesc> {
+    let (current_properties, normalized_external_table_name) =
+        derive_with_options_for_cdc_table(upstream_properties, desc.external_table_name)?;
+    let (connect_properties, secret_refs) = current_properties.into_parts();
+    desc.external_table_name = normalized_external_table_name;
+    desc.connect_properties = connect_properties;
+    desc.secret_refs = secret_refs;
+    Ok(desc)
+}
+
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use iceberg::spec::{
         FormatVersion, MAIN_BRANCH, NestedField, PrimitiveType, Schema as IcebergSchema, Snapshot,
         SortOrder, Summary, TableMetadataBuilder, Type, UnboundPartitionSpec,
@@ -1032,5 +1091,31 @@ mod tests {
             })
             .with_schema_id(0)
             .build()
+    }
+
+    #[test]
+    fn test_resolve_current_cdc_table_desc_replaces_stale_properties() {
+        let desc = CdcTableDesc {
+            external_table_name: "risedev.orders".to_owned(),
+            connect_properties: BTreeMap::from([("hostname".to_owned(), "old-host".to_owned())]),
+            ..Default::default()
+        };
+        let upstream_properties = WithOptionsSecResolved::new(
+            BTreeMap::from([
+                ("connector".to_owned(), "mysql-cdc".to_owned()),
+                ("database.name".to_owned(), "risedev".to_owned()),
+                ("hostname".to_owned(), "new-host".to_owned()),
+            ]),
+            BTreeMap::new(),
+        );
+
+        let desc = resolve_current_cdc_table_desc(desc, &upstream_properties).unwrap();
+
+        assert_eq!(desc.connect_properties.get("hostname").unwrap(), "new-host");
+        assert_eq!(desc.connect_properties.get("table.name").unwrap(), "orders");
+        assert_eq!(
+            desc.connect_properties.get("database.name").unwrap(),
+            "risedev"
+        );
     }
 }
