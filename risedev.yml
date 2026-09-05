@@ -1314,6 +1314,21 @@ profile:
       - use: compactor
       - use: redis
 
+  local-starrocks-sink-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+        id: minio-local-starrocks-sink-test
+      - use: sqlite
+        id: sqlite-local-starrocks-sink-test
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: starrocks
+
   local-nats-test:
     config-path: src/config/ci-recovery.toml
     steps:
