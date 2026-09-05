@@ -34,8 +34,8 @@ use risedev::{
     MinioService, MoatService, MongoDbService, MongoDbSetupTask, MotoService, MqttService,
     MySqlService, NatsService, OpenSearchService, OracleService, PostgresService,
     PrometheusService, PubsubService, PulsarService, RISEDEV_NAME, RedisService,
-    SchemaRegistryService, ServiceConfig, SqlServerService, SqliteConfig, Task, TaskGroup,
-    TempoService, generate_risedev_env, preflight_check,
+    SchemaRegistryService, ServiceConfig, SqlServerService, SqliteConfig, StarrocksService, Task,
+    TaskGroup, TempoService, generate_risedev_env, preflight_check,
 };
 use sqlx::mysql::MySqlConnectOptions;
 use sqlx::postgres::PgConnectOptions;
@@ -327,6 +327,16 @@ fn task_main(
                     ctx.pb.set_message(format!(
                         "doris http://{}:{}, query {}:{}",
                         c.address, c.http_port, c.address, c.query_port
+                    ));
+                }
+                ServiceConfig::Starrocks(c) => {
+                    let mut service = StarrocksService::new(c.clone());
+                    service.execute(&mut ctx)?;
+                    let mut task = risedev::StarrocksReadyCheckTask::new(c.clone());
+                    task.execute(&mut ctx)?;
+                    ctx.pb.set_message(format!(
+                        "starrocks http://{}:{}, query {}",
+                        c.address, c.http_port, c.query_port
                     ));
                 }
                 ServiceConfig::MySql(c) => {
