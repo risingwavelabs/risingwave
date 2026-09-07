@@ -21,19 +21,24 @@ use std::ops::Bound::{Excluded, Unbounded};
 use std::sync::atomic::AtomicU32;
 
 use risingwave_common::catalog::TableId;
-use risingwave_common::id::JobId;
+use risingwave_common::id::{JobId, SinkId};
 use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntGauge};
-use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::epoch::{Epoch, EpochPair};
 use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_meta_model::{WorkerId, streaming_job};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::PbBackfillType;
 use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_pb::id::{ActorId, FragmentId};
+use risingwave_pb::id::{ActorId, FragmentId, IcebergCompactionTaskId};
+use risingwave_pb::stream_plan::IcebergPkIndexCompactionContext;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
+use risingwave_pb::stream_plan::iceberg_pk_index_compaction_context::{Phase, ResolverTaskInput};
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 
-use self::render::{RenderedResolver, partition_resolver};
+use self::render::{
+    CompactionTransition, IcebergV3FragmentPartition, RenderedResolver,
+    build_compaction_transitions, partition_resolver,
+};
 use super::{
     BatchRefreshRenderResult, CreatingStreamingJobControl, IndependentCheckpointJob,
     IndependentCheckpointJobControl, IndependentCheckpointJobStatus, IndependentJobControl,
@@ -42,7 +47,8 @@ use super::{
 };
 use crate::MetaResult;
 use crate::barrier::command::{
-    PostCollectCommand, ThrottleConfigMap, UpstreamTableLogEpochs, extract_throttle_config,
+    IcebergPkIndexCompactionOverwrite, PostCollectCommand, ThrottleConfigMap,
+    UpstreamTableLogEpochs, extract_throttle_config,
 };
 use crate::barrier::context::CreateIndependentStreamingJobCommandInfo;
 use crate::barrier::info::BarrierInfo;
@@ -52,11 +58,12 @@ use crate::barrier::partial_graph::{
 };
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::rpc::{ControlStreamManager, to_partial_graph_id};
-use crate::barrier::{BackfillProgress, BarrierKind, FragmentBackfillProgress};
+use crate::barrier::{BackfillProgress, BarrierKind, FragmentBackfillProgress, TracedEpoch};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::controller::scale::LoadedFragment;
-use crate::model::FragmentDownstreamRelation;
-use crate::notification::NotifierStarter;
+use crate::manager::iceberg_pk_index_sink::CompactionOverwrite;
+use crate::model::{FragmentDownstreamRelation, StreamActor};
+use crate::notification::{CollectionNotifier, NotifierStarter};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::ExtendedFragmentBackfillOrder;
 
@@ -117,13 +124,48 @@ enum IcebergV3InputPhase {
 #[derive(Debug)]
 enum IcebergV3JobStatus {
     Running(IcebergV3Input),
+    Compacting {
+        input: IcebergV3Input,
+        apply: CompactionApply,
+    },
+}
+
+#[derive(Debug)]
+struct CompactionApply {
+    notifier: CollectionNotifier,
+    phase: CompactionApplyPhase,
+}
+
+#[derive(Debug)]
+enum CompactionApplyPhase {
+    /// B1 is in flight. Its acknowledgement injects B2 and transfers to
+    /// `EndCompletion`.
+    BeginAck {
+        task_id: IcebergCompactionTaskId,
+        begin_epoch: u64,
+        end_barrier: BarrierInfo,
+        /// Actors from the normal-input, resolver, and long-running partitions.
+        node_actors: HashMap<WorkerId, HashSet<ActorId>>,
+        end_transition: CompactionTransition,
+        overwrite: CompactionOverwrite,
+    },
+    /// B2 is in flight and the state machine still owns the overwrite. Starting B2 completion
+    /// moves the overwrite into `CompleteBarrierTask` and transfers to `EndAck`.
+    EndCompletion {
+        end_epoch: u64,
+        overwrite: CompactionOverwrite,
+    },
+    /// B2 and its overwrite are being committed by `CompleteBarrierTask`.
+    EndAck { end_epoch: u64 },
 }
 
 #[derive(Debug)]
 pub(crate) struct IcebergV3RenderResult {
     active: BatchRefreshRenderResult,
+    active_stream_actors: HashMap<FragmentId, Vec<StreamActor>>,
     active_downstreams: FragmentDownstreamRelation,
     resolver: RenderedResolver,
+    partition: IcebergV3FragmentPartition,
 }
 
 impl IcebergV3RenderResult {
@@ -152,10 +194,14 @@ pub(crate) struct IcebergV3JobCheckpointControl {
     node_actors: HashMap<WorkerId, HashSet<ActorId>>,
     max_pending_barrier_num: usize,
     upstream_lag: risingwave_common::metrics::LabelGuardedIntGauge,
-    /// Active graph relations retained for switching the normal input partition during compaction.
-    #[allow(dead_code)]
+    /// Current actor definitions for the normal-input and long-running partitions. Scaling must
+    /// update these together with `fragment_infos`.
+    active_stream_actors: HashMap<FragmentId, Vec<StreamActor>>,
+    /// Fragment-level relations of the active graph. Actor-level transition edges are derived from
+    /// these relations for each compaction command.
     active_downstreams: FragmentDownstreamRelation,
     resolver: RenderedResolver,
+    partition: IcebergV3FragmentPartition,
 }
 
 impl IcebergV3JobCheckpointControl {
@@ -180,7 +226,8 @@ impl IcebergV3JobCheckpointControl {
             streaming_job_model,
         )?;
         let mut active_downstreams = downstreams.clone();
-        let (active, resolver) = partition_resolver(rendered, &mut active_downstreams)?;
+        let (active, resolver, partition) = partition_resolver(rendered, &mut active_downstreams)?;
+        let active_stream_actors = active.stream_actors.clone();
         let active = active.build_job_info(
             &active_downstreams,
             partial_graph_id,
@@ -188,8 +235,10 @@ impl IcebergV3JobCheckpointControl {
         )?;
         Ok(IcebergV3RenderResult {
             active,
+            active_stream_actors,
             active_downstreams,
             resolver,
+            partition,
         })
     }
 
@@ -216,8 +265,10 @@ impl IcebergV3JobCheckpointControl {
                     node_actors,
                     actors_to_create,
                 },
+            active_stream_actors,
             active_downstreams,
             resolver,
+            partition,
         } = render_result;
         let (snapshot, initial_barrier_info) =
             SnapshotPhaseControl::for_new_job(snapshot_epoch, &fragment_infos, &info, version_stat);
@@ -255,8 +306,10 @@ impl IcebergV3JobCheckpointControl {
                 .with_guarded_label_values(&[&format!("{}", job_id)]),
             node_actors,
             max_pending_barrier_num,
+            active_stream_actors,
             active_downstreams,
             resolver,
+            partition,
         };
 
         let mut graph_adder = partial_graph_manager.add_partial_graph(
@@ -384,8 +437,10 @@ impl IcebergV3JobCheckpointControl {
                     node_actors,
                     actors_to_create,
                 },
+            active_stream_actors,
             active_downstreams,
             resolver,
+            partition,
         } = render_result;
 
         let (status, first_barrier_info) = if committed_epoch < snapshot_epoch {
@@ -431,8 +486,10 @@ impl IcebergV3JobCheckpointControl {
             upstream_lag: GLOBAL_META_METRICS
                 .snapshot_backfill_lag
                 .with_guarded_label_values(&[&format!("{}", job_id)]),
+            active_stream_actors,
             active_downstreams,
             resolver,
+            partition,
         })
     }
 
@@ -445,7 +502,15 @@ impl IcebergV3JobCheckpointControl {
             IcebergV3JobStatus::Running(IcebergV3Input {
                 phase: IcebergV3InputPhase::Snapshot(snapshot),
                 ..
-            }) => {
+            })
+            | IcebergV3JobStatus::Compacting {
+                input:
+                    IcebergV3Input {
+                        phase: IcebergV3InputPhase::Snapshot(snapshot),
+                        ..
+                    },
+                ..
+            } => {
                 let progress = if snapshot.create_mview_tracker.is_finished() {
                     "Snapshot finished".to_owned()
                 } else {
@@ -462,7 +527,15 @@ impl IcebergV3JobCheckpointControl {
             IcebergV3JobStatus::Running(IcebergV3Input {
                 phase: IcebergV3InputPhase::LogStore { .. },
                 ..
-            }) => None,
+            })
+            | IcebergV3JobStatus::Compacting {
+                input:
+                    IcebergV3Input {
+                        phase: IcebergV3InputPhase::LogStore { .. },
+                        ..
+                    },
+                ..
+            } => None,
         }
     }
 
@@ -471,13 +544,29 @@ impl IcebergV3JobCheckpointControl {
             IcebergV3JobStatus::Running(IcebergV3Input {
                 phase: IcebergV3InputPhase::Snapshot(snapshot),
                 ..
-            }) => snapshot
+            })
+            | IcebergV3JobStatus::Compacting {
+                input:
+                    IcebergV3Input {
+                        phase: IcebergV3InputPhase::Snapshot(snapshot),
+                        ..
+                    },
+                ..
+            } => snapshot
                 .create_mview_tracker
                 .collect_fragment_progress(&self.fragment_infos, true),
             IcebergV3JobStatus::Running(IcebergV3Input {
                 phase: IcebergV3InputPhase::LogStore { .. },
                 ..
-            }) => vec![],
+            })
+            | IcebergV3JobStatus::Compacting {
+                input:
+                    IcebergV3Input {
+                        phase: IcebergV3InputPhase::LogStore { .. },
+                        ..
+                    },
+                ..
+            } => vec![],
         }
     }
 
@@ -498,27 +587,27 @@ impl IcebergV3JobCheckpointControl {
             Option<&mut NotifierStarter>,
         )>,
     ) -> MetaResult<()> {
-        let (mut mutation, mut notifier) = mutation
-            .map(|(mutation, notifier)| (Some(mutation), notifier))
-            .unwrap_or_default();
-        let progress_epoch = self
-            .control
-            .max_committed_epoch
-            .map_or(self.control.info.snapshot_epoch, |committed_epoch| {
-                max(committed_epoch, self.control.info.snapshot_epoch)
-            });
-        self.upstream_lag.set(
-            barrier_info
-                .prev_epoch
-                .value()
-                .0
-                .saturating_sub(progress_epoch) as _,
-        );
-        let available = self.max_pending_barrier_num.saturating_sub(
-            partial_graph_manager.pending_barrier_num(self.control.info.partial_graph_id),
-        );
         match &mut self.status {
             IcebergV3JobStatus::Running(input) => {
+                let (mut mutation, mut notifier) = mutation
+                    .map(|(mutation, notifier)| (Some(mutation), notifier))
+                    .unwrap_or_default();
+                let progress_epoch = self
+                    .control
+                    .max_committed_epoch
+                    .map_or(self.control.info.snapshot_epoch, |committed_epoch| {
+                        max(committed_epoch, self.control.info.snapshot_epoch)
+                    });
+                self.upstream_lag.set(
+                    barrier_info
+                        .prev_epoch
+                        .value()
+                        .0
+                        .saturating_sub(progress_epoch) as _,
+                );
+                let available = self.max_pending_barrier_num.saturating_sub(
+                    partial_graph_manager.pending_barrier_num(self.control.info.partial_graph_id),
+                );
                 input
                     .pending_upstream_barriers
                     .push_back(barrier_info.clone());
@@ -561,6 +650,15 @@ impl IcebergV3JobCheckpointControl {
                     )?;
                 }
             }
+            IcebergV3JobStatus::Compacting { input, .. } => {
+                assert!(
+                    mutation.is_none(),
+                    "active Iceberg compaction must not receive a second mutation"
+                );
+                input
+                    .pending_upstream_barriers
+                    .push_back(barrier_info.clone());
+            }
         }
         Ok(())
     }
@@ -569,28 +667,38 @@ impl IcebergV3JobCheckpointControl {
         &mut self,
         throttle_config: &mut ThrottleConfigMap,
     ) -> Option<risingwave_pb::stream_plan::barrier_mutation::Mutation> {
-        extract_throttle_config(throttle_config, |fragment_id, stream_node| {
+        let mutation = extract_throttle_config(throttle_config, |fragment_id, stream_node| {
             if let Some(fragment_info) = self.fragment_infos.get_mut(&fragment_id) {
                 fragment_info.nodes = stream_node.clone();
                 true
             } else {
                 false
             }
-        })
+        });
+        match &self.status {
+            IcebergV3JobStatus::Running(_) => mutation,
+            // The normal input is stopped while compacting. Retain the updated plan so actors
+            // restarted by the End barrier use it, but do not inject a throttle mutation now.
+            IcebergV3JobStatus::Compacting { .. } => None,
+        }
     }
 
     pub(crate) fn collect(&mut self, collected_barrier: CollectedBarrier<'_>) -> bool {
-        match &mut self.status {
-            IcebergV3JobStatus::Running(input) => {
+        let (input, can_finish_snapshot) = match &mut self.status {
+            IcebergV3JobStatus::Running(input) => (input, true),
+            IcebergV3JobStatus::Compacting { input, .. } => (input, false),
+        };
+        match &mut input.phase {
+            IcebergV3InputPhase::Snapshot(snapshot) => {
                 let progress = collected_barrier
                     .resps
                     .values()
                     .flat_map(|response| &response.create_mview_progress);
-                let snapshot_finished = match &mut input.phase {
-                    IcebergV3InputPhase::Snapshot(snapshot) => snapshot.apply_progress(progress),
-                    IcebergV3InputPhase::LogStore { .. } => false,
-                };
-                if snapshot_finished {
+                let snapshot_finished = snapshot.apply_progress(progress);
+                // B1 may contain tail progress produced before the normal-input actors stop. No
+                // backfill actor runs after B1, so a compacting job records that progress but
+                // defers the Snapshot -> LogStore transition until normal execution resumes.
+                if can_finish_snapshot && snapshot_finished {
                     let IcebergV3InputPhase::Snapshot(mut snapshot) = replace(
                         &mut input.phase,
                         IcebergV3InputPhase::LogStore { tracking_job: None },
@@ -605,10 +713,157 @@ impl IcebergV3JobCheckpointControl {
                     };
                 }
             }
+            IcebergV3InputPhase::LogStore { .. } => {}
         }
         // Ordinary snapshot jobs force a checkpoint to merge into the database graph. Iceberg V3
         // remains independent after catch-up, so its normal checkpoint cadence is sufficient.
         false
+    }
+
+    pub(crate) fn start_apply_compaction(
+        &mut self,
+        partial_graph_manager: &mut PartialGraphManager,
+        upstream_barrier: &BarrierInfo,
+        task_id: IcebergCompactionTaskId,
+        overwrite: IcebergPkIndexCompactionOverwrite,
+        notifier: &mut NotifierStarter,
+    ) -> MetaResult<()> {
+        let output_data_file_paths = output_file_paths(&overwrite.output_result.data_files)?;
+        let (begin_barrier, end_barrier) = self.next_compaction_barriers(upstream_barrier)?;
+        let transitions = build_compaction_transitions(
+            &self.fragment_infos,
+            &self.active_stream_actors,
+            &self.active_downstreams,
+            &self.resolver,
+            &self.partition,
+            self.control.info.partial_graph_id,
+            partial_graph_manager.control_stream_manager(),
+        )?;
+        let sink_id = SinkId::new(self.control.info.job_id.as_raw_id());
+        let resolver_task_input = ResolverTaskInput {
+            output_data_file_paths,
+            input_data_file_paths: overwrite.input_file_paths.clone(),
+            read_snapshot_id: overwrite.read_snapshot_id,
+        };
+        let compaction_overwrite = CompactionOverwrite {
+            sink_id,
+            epoch: end_barrier.prev_epoch(),
+            schema_id: overwrite.output_result.schema_id,
+            partition_spec_id: overwrite.output_result.partition_spec_id,
+            output_files: overwrite.output_result.data_files,
+            input_file_paths: overwrite.input_file_paths,
+            read_snapshot_id: overwrite.read_snapshot_id,
+        };
+        let mut mutation = transitions.begin_compaction.mutation;
+        mutation.iceberg_pk_index_compaction = Some(IcebergPkIndexCompactionContext {
+            sink_id,
+            task_id,
+            phase: Phase::Begin as i32,
+            resolver_task_input: Some(resolver_task_input),
+        });
+        partial_graph_manager.inject_barrier(
+            self.control.info.partial_graph_id,
+            Some(Mutation::Update(mutation)),
+            &transitions.node_actors,
+            self.control.info.state_table_ids.iter().copied(),
+            transitions.node_actors.keys().copied(),
+            Some(transitions.begin_compaction.actors_to_create),
+            PartialGraphBarrierInfo::new(
+                PostCollectCommand::barrier(),
+                begin_barrier.clone(),
+                None,
+                self.control.info.state_table_ids.clone(),
+            ),
+        )?;
+
+        // This empty Running value is only an ownership placeholder while moving `input`
+        // into Compacting. It is replaced before the method returns and is never observed.
+        let input = match std::mem::replace(
+            &mut self.status,
+            IcebergV3JobStatus::Running(IcebergV3Input {
+                phase: IcebergV3InputPhase::LogStore { tracking_job: None },
+                pending_upstream_barriers: VecDeque::new(),
+            }),
+        ) {
+            IcebergV3JobStatus::Running(input) => input,
+            IcebergV3JobStatus::Compacting { .. } => {
+                unreachable!("compacting status was rejected before barrier injection")
+            }
+        };
+        self.status = IcebergV3JobStatus::Compacting {
+            input,
+            apply: CompactionApply {
+                notifier: notifier.add_notify(),
+                phase: CompactionApplyPhase::BeginAck {
+                    task_id,
+                    begin_epoch: begin_barrier.prev_epoch(),
+                    end_barrier,
+                    node_actors: transitions.node_actors,
+                    end_transition: transitions.end_compaction,
+                    overwrite: compaction_overwrite,
+                },
+            },
+        };
+        Ok(())
+    }
+
+    fn next_compaction_barriers(
+        &mut self,
+        upstream_barrier: &BarrierInfo,
+    ) -> MetaResult<(BarrierInfo, BarrierInfo)> {
+        match &mut self.status {
+            IcebergV3JobStatus::Running(input) => {
+                let IcebergV3Input {
+                    phase,
+                    pending_upstream_barriers,
+                } = input;
+                match phase {
+                    IcebergV3InputPhase::Snapshot(snapshot) => {
+                        pending_upstream_barriers.push_back(upstream_barrier.clone());
+                        let begin = snapshot.next_fake_barrier(&BarrierKind::Checkpoint(vec![]));
+                        let end = snapshot.next_fake_barrier(&BarrierKind::Checkpoint(vec![]));
+                        Ok((begin, end))
+                    }
+                    IcebergV3InputPhase::LogStore { .. } => {
+                        let BarrierKind::Checkpoint(checkpoint_epochs) = &upstream_barrier.kind
+                        else {
+                            return Err(anyhow::anyhow!(
+                                "Iceberg pk-index compaction requires a checkpoint command barrier"
+                            )
+                            .into());
+                        };
+                        let prev_epoch = upstream_barrier.prev_epoch.value();
+                        let curr_epoch = upstream_barrier.curr_epoch.value();
+                        let synthetic = Epoch(prev_epoch.0 + 1);
+                        if synthetic >= curr_epoch {
+                            return Err(anyhow::anyhow!(
+                                "cannot allocate synthetic compaction epoch between {} and {}",
+                                prev_epoch.0,
+                                curr_epoch.0
+                            )
+                            .into());
+                        }
+                        Ok((
+                            BarrierInfo {
+                                prev_epoch: TracedEpoch::new(prev_epoch),
+                                curr_epoch: TracedEpoch::new(synthetic),
+                                kind: BarrierKind::Checkpoint(checkpoint_epochs.clone()),
+                            },
+                            BarrierInfo {
+                                prev_epoch: TracedEpoch::new(synthetic),
+                                curr_epoch: TracedEpoch::new(curr_epoch),
+                                kind: BarrierKind::Checkpoint(vec![synthetic.0]),
+                            },
+                        ))
+                    }
+                }
+            }
+            IcebergV3JobStatus::Compacting { .. } => Err(anyhow::anyhow!(
+                "Iceberg V3 job {} is already applying compaction",
+                self.control.info.job_id
+            )
+            .into()),
+        }
     }
 
     #[expect(clippy::type_complexity)]
@@ -621,33 +876,81 @@ impl IcebergV3JobCheckpointControl {
         HashMap<WorkerId, BarrierCompleteResponse>,
         PartialGraphBarrierInfo,
         Option<TrackingJob>,
+        Option<CompactionOverwrite>,
     )> {
         let epoch_end_bound = min_upstream_inflight_barrier
             .map(Excluded)
             .unwrap_or(Unbounded);
-        partial_graph_manager
-            .start_completing(
-                self.control.info.partial_graph_id,
-                epoch_end_bound,
-                |_non_checkpoint_epoch, _, _| {},
-            )
-            .map(|(epoch, responses, info)| {
-                let tracking_job = match &mut self.status {
-                    IcebergV3JobStatus::Running(IcebergV3Input {
+        let (epoch, responses, info) = partial_graph_manager.start_completing(
+            self.control.info.partial_graph_id,
+            epoch_end_bound,
+            |_non_checkpoint_epoch, _, _| {},
+        )?;
+
+        let tracking_job = match &mut self.status {
+            IcebergV3JobStatus::Running(IcebergV3Input {
+                phase: IcebergV3InputPhase::LogStore { tracking_job },
+                ..
+            })
+            | IcebergV3JobStatus::Compacting {
+                input:
+                    IcebergV3Input {
                         phase: IcebergV3InputPhase::LogStore { tracking_job },
                         ..
-                    }) if epoch == self.control.info.snapshot_epoch => tracking_job.take(),
-                    _ => None,
-                };
-                (epoch, responses, info, tracking_job)
-            })
+                    },
+                ..
+            } if epoch == self.control.info.snapshot_epoch => tracking_job.take(),
+            _ => None,
+        };
+
+        let overwrite = match &mut self.status {
+            IcebergV3JobStatus::Running(_) => None,
+            IcebergV3JobStatus::Compacting {
+                apply: CompactionApply { phase, .. },
+                ..
+            } => match phase {
+                CompactionApplyPhase::BeginAck { begin_epoch, .. } => {
+                    if epoch <= *begin_epoch {
+                        None
+                    } else {
+                        unreachable!(
+                            "collected epoch {epoch} passed unacknowledged compaction Begin epoch {begin_epoch}"
+                        )
+                    }
+                }
+                CompactionApplyPhase::EndCompletion { end_epoch, .. } => {
+                    let end_epoch = *end_epoch;
+                    match epoch.cmp(&end_epoch) {
+                        std::cmp::Ordering::Less => None,
+                        std::cmp::Ordering::Equal => {
+                            let CompactionApplyPhase::EndCompletion { overwrite, .. } =
+                                std::mem::replace(
+                                    phase,
+                                    CompactionApplyPhase::EndAck { end_epoch },
+                                )
+                            else {
+                                unreachable!()
+                            };
+                            Some(overwrite)
+                        }
+                        std::cmp::Ordering::Greater => unreachable!(
+                            "collected epoch {epoch} passed compaction End epoch {end_epoch}"
+                        ),
+                    }
+                }
+                CompactionApplyPhase::EndAck { end_epoch } => unreachable!(
+                    "started another completion while compaction End epoch {end_epoch} is committing"
+                ),
+            },
+        };
+        Some((epoch, responses, info, tracking_job, overwrite))
     }
 
     pub(crate) fn ack_completed(
         &mut self,
         partial_graph_manager: &mut PartialGraphManager,
         completed_epoch: u64,
-    ) {
+    ) -> MetaResult<()> {
         match &mut self.status {
             IcebergV3JobStatus::Running(input) => {
                 partial_graph_manager
@@ -663,8 +966,171 @@ impl IcebergV3JobCheckpointControl {
                     );
                 }
             }
+            IcebergV3JobStatus::Compacting {
+                apply:
+                    CompactionApply {
+                        phase: CompactionApplyPhase::BeginAck { begin_epoch, .. },
+                        ..
+                    },
+                ..
+            } if completed_epoch < *begin_epoch => {
+                partial_graph_manager
+                    .ack_completed(self.control.info.partial_graph_id, completed_epoch);
+                self.control.ack_completed(completed_epoch);
+            }
+            IcebergV3JobStatus::Compacting {
+                apply:
+                    CompactionApply {
+                        phase:
+                            CompactionApplyPhase::BeginAck {
+                                task_id,
+                                begin_epoch,
+                                end_barrier,
+                                node_actors,
+                                end_transition,
+                                ..
+                            },
+                        ..
+                    },
+                ..
+            } if completed_epoch == *begin_epoch => {
+                partial_graph_manager
+                    .ack_completed(self.control.info.partial_graph_id, completed_epoch);
+                self.control.ack_completed(completed_epoch);
+
+                let end_epoch = end_barrier.prev_epoch();
+                let sink_id = SinkId::new(self.control.info.job_id.as_raw_id());
+                let mut mutation = end_transition.mutation.clone();
+                mutation.iceberg_pk_index_compaction = Some(IcebergPkIndexCompactionContext {
+                    sink_id,
+                    task_id: *task_id,
+                    phase: Phase::End as i32,
+                    resolver_task_input: None,
+                });
+                partial_graph_manager.inject_barrier(
+                    self.control.info.partial_graph_id,
+                    Some(Mutation::Update(mutation)),
+                    node_actors,
+                    self.control.info.state_table_ids.iter().copied(),
+                    node_actors.keys().copied(),
+                    Some(end_transition.actors_to_create.clone()),
+                    PartialGraphBarrierInfo::new(
+                        PostCollectCommand::barrier(),
+                        end_barrier.clone(),
+                        None,
+                        self.control.info.state_table_ids.clone(),
+                    ),
+                )?;
+
+                // B2 injection succeeded. Temporarily install an empty Running state to move the
+                // overwrite into the next explicit compaction phase.
+                let IcebergV3JobStatus::Compacting { input, apply } = std::mem::replace(
+                    &mut self.status,
+                    IcebergV3JobStatus::Running(IcebergV3Input {
+                        phase: IcebergV3InputPhase::LogStore { tracking_job: None },
+                        pending_upstream_barriers: VecDeque::new(),
+                    }),
+                ) else {
+                    unreachable!()
+                };
+                let CompactionApplyPhase::BeginAck { overwrite, .. } = apply.phase else {
+                    unreachable!()
+                };
+                self.status = IcebergV3JobStatus::Compacting {
+                    input,
+                    apply: CompactionApply {
+                        notifier: apply.notifier,
+                        phase: CompactionApplyPhase::EndCompletion {
+                            end_epoch,
+                            overwrite,
+                        },
+                    },
+                };
+            }
+            IcebergV3JobStatus::Compacting {
+                apply:
+                    CompactionApply {
+                        phase: CompactionApplyPhase::BeginAck { begin_epoch, .. },
+                        ..
+                    },
+                ..
+            } => unreachable!(
+                "acknowledged epoch {completed_epoch} after compaction Begin epoch {begin_epoch}"
+            ),
+            IcebergV3JobStatus::Compacting {
+                apply:
+                    CompactionApply {
+                        phase: CompactionApplyPhase::EndCompletion { end_epoch, .. },
+                        ..
+                    },
+                ..
+            } => unreachable!(
+                "acknowledged epoch {completed_epoch} before compaction End epoch {end_epoch} entered the completion task"
+            ),
+            IcebergV3JobStatus::Compacting {
+                apply:
+                    CompactionApply {
+                        phase: CompactionApplyPhase::EndAck { end_epoch },
+                        ..
+                    },
+                ..
+            } if completed_epoch < *end_epoch => {
+                partial_graph_manager
+                    .ack_completed(self.control.info.partial_graph_id, completed_epoch);
+                self.control.ack_completed(completed_epoch);
+            }
+            IcebergV3JobStatus::Compacting {
+                apply:
+                    CompactionApply {
+                        phase: CompactionApplyPhase::EndAck { end_epoch },
+                        ..
+                    },
+                ..
+            } if completed_epoch == *end_epoch => {
+                partial_graph_manager
+                    .ack_completed(self.control.info.partial_graph_id, completed_epoch);
+                self.control.ack_completed(completed_epoch);
+                let IcebergV3JobStatus::Compacting { input, apply } = std::mem::replace(
+                    &mut self.status,
+                    IcebergV3JobStatus::Running(IcebergV3Input {
+                        phase: IcebergV3InputPhase::LogStore { tracking_job: None },
+                        pending_upstream_barriers: VecDeque::new(),
+                    }),
+                ) else {
+                    unreachable!()
+                };
+                self.status = IcebergV3JobStatus::Running(input);
+                apply.notifier.notify_collected();
+            }
+            IcebergV3JobStatus::Compacting {
+                apply:
+                    CompactionApply {
+                        phase: CompactionApplyPhase::EndAck { end_epoch },
+                        ..
+                    },
+                ..
+            } => unreachable!(
+                "acknowledged epoch {completed_epoch} after compaction End epoch {end_epoch}"
+            ),
         }
+        Ok(())
     }
+}
+
+fn output_file_paths(files: &[iceberg::spec::SerializedDataFile]) -> MetaResult<Vec<String>> {
+    files
+        .iter()
+        .map(|file| {
+            let value = serde_json::to_value(file).map_err(anyhow::Error::from)?;
+            value
+                .get("file_path")
+                .and_then(|path| path.as_str())
+                .map(str::to_owned)
+                .ok_or_else(|| {
+                    anyhow::anyhow!("compaction output file is missing file_path").into()
+                })
+        })
+        .collect()
 }
 
 pub(crate) fn is_iceberg_v3_fragment_nodes<'a>(
