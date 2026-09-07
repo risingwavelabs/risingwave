@@ -39,7 +39,7 @@ pub(crate) use creating_job::CreatingStreamingJobControl;
 
 use crate::MetaResult;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
-use crate::barrier::command::CreateStreamingJobCommandInfo;
+use crate::barrier::command::{CreateStreamingJobCommandInfo, ThrottleConfigMap};
 use crate::barrier::context::CreateIndependentStreamingJobCommandInfo;
 use crate::barrier::info::BarrierInfo;
 use crate::barrier::notifier::{CollectionNotifier, NotifierStarter};
@@ -386,6 +386,32 @@ impl IndependentCheckpointJob {
         match self {
             Self::CreatingStreamingJob(j) => j.pinned_upstream_tables(),
             Self::BatchRefresh(j) => j.pinned_upstream_tables(),
+        }
+    }
+
+    pub(crate) fn pre_apply_throttle(
+        &mut self,
+        config: &mut ThrottleConfigMap,
+    ) -> Option<Mutation> {
+        match self {
+            Self::CreatingStreamingJob(job) => job.pre_apply_throttle(config),
+            Self::BatchRefresh(job) => job.pre_apply_throttle(config),
+        }
+    }
+
+    pub(crate) fn on_new_upstream_barrier(
+        &mut self,
+        partial_graph_manager: &mut PartialGraphManager,
+        barrier_info: &BarrierInfo,
+        mutation: Option<(Mutation, Option<&mut NotifierStarter>)>,
+    ) -> MetaResult<()> {
+        match self {
+            Self::CreatingStreamingJob(job) => {
+                job.on_new_upstream_barrier(partial_graph_manager, barrier_info, mutation)
+            }
+            Self::BatchRefresh(job) => {
+                job.on_new_upstream_barrier(partial_graph_manager, barrier_info, mutation)
+            }
         }
     }
 }

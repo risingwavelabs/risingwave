@@ -1790,35 +1790,16 @@ impl DatabaseCheckpointControl {
             let Some(job) = job.running_mut() else {
                 continue;
             };
-            match job {
-                IndependentCheckpointJob::CreatingStreamingJob(creating_job) => {
-                    if finished_snapshot_backfill_jobs.contains(job_id) {
-                        continue;
-                    }
-                    let throttle_mutation = throttle_config.as_mut().and_then(|config| {
-                        creating_job
-                            .pre_apply_throttle(config)
-                            .map(|mutation| (mutation, notifier.as_mut()))
-                    });
-                    creating_job.on_new_upstream_barrier(
-                        partial_graph_manager,
-                        &barrier_info,
-                        throttle_mutation,
-                    )?;
-                }
-                IndependentCheckpointJob::BatchRefresh(batch_refresh_job) => {
-                    let throttle_mutation = throttle_config.as_mut().and_then(|config| {
-                        batch_refresh_job
-                            .pre_apply_throttle(config)
-                            .map(|mutation| (mutation, notifier.as_mut()))
-                    });
-                    batch_refresh_job.on_new_upstream_barrier(
-                        partial_graph_manager,
-                        &barrier_info,
-                        throttle_mutation,
-                    )?;
-                }
+            if finished_snapshot_backfill_jobs.contains(job_id)
+                && matches!(job, IndependentCheckpointJob::CreatingStreamingJob(_))
+            {
+                continue;
             }
+            let throttle_mutation = throttle_config.as_mut().and_then(|config| {
+                job.pre_apply_throttle(config)
+                    .map(|mutation| (mutation, notifier.as_mut()))
+            });
+            job.on_new_upstream_barrier(partial_graph_manager, &barrier_info, throttle_mutation)?;
         }
 
         let database_notifier = if notify_database_graph {
