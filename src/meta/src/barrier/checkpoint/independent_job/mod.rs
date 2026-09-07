@@ -24,7 +24,10 @@ use risingwave_pb::id::{ActorId, FragmentId, PartialGraphId};
 use risingwave_pb::source::ConnectorSplits;
 use risingwave_pb::stream_plan::barrier::PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
-use risingwave_pb::stream_plan::{AddMutation, PbSubscriptionUpstreamInfo};
+use risingwave_pb::stream_plan::{
+    AddMutation, PbSubscriptionUpstreamInfo, StartFragmentBackfillMutation,
+};
+use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 
 pub(crate) mod batch_refresh_job;
 pub(crate) mod creating_job;
@@ -128,6 +131,52 @@ impl SnapshotPhaseControl {
         );
         assert!(snapshot.pending_non_checkpoint_barriers.is_empty());
         (snapshot, initial_barrier_info)
+    }
+
+    pub(crate) fn apply_progress<'a>(
+        &mut self,
+        progress: impl IntoIterator<Item = &'a CreateMviewProgress>,
+    ) -> bool {
+        for progress in progress {
+            self.create_mview_tracker
+                .apply_progress(progress, &self.version_stats);
+        }
+        self.create_mview_tracker.is_finished()
+    }
+
+    pub(crate) fn take_start_backfill_mutation(&mut self) -> Option<Mutation> {
+        let fragment_ids = self
+            .create_mview_tracker
+            .take_pending_backfill_nodes()
+            .collect::<Vec<_>>();
+        (!fragment_ids.is_empty()).then_some(Mutation::StartFragmentBackfill(
+            StartFragmentBackfillMutation { fragment_ids },
+        ))
+    }
+
+    pub(crate) fn next_fake_barrier(&mut self, upstream_kind: &BarrierKind) -> BarrierInfo {
+        let kind = match upstream_kind {
+            BarrierKind::Barrier => PbBarrierKind::Barrier,
+            BarrierKind::Checkpoint(_) => PbBarrierKind::Checkpoint,
+            BarrierKind::Initial => unreachable!("upstream new epoch should not be initial"),
+        };
+        new_fake_barrier(
+            &mut self.prev_epoch_fake_physical_time,
+            &mut self.pending_non_checkpoint_barriers,
+            kind,
+        )
+    }
+
+    pub(crate) fn finish_snapshot_barrier(&mut self) -> BarrierInfo {
+        self.pending_non_checkpoint_barriers
+            .push(self.snapshot_epoch);
+        BarrierInfo {
+            curr_epoch: TracedEpoch::new(Epoch(self.snapshot_epoch)),
+            prev_epoch: TracedEpoch::new(Epoch::from_physical_time(
+                self.prev_epoch_fake_physical_time,
+            )),
+            kind: BarrierKind::Checkpoint(take(&mut self.pending_non_checkpoint_barriers)),
+        }
     }
 }
 

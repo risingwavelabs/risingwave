@@ -14,27 +14,24 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
-use std::mem::{replace, take};
+use std::mem::replace;
 use std::time::Duration;
 
-use itertools::Itertools;
 use risingwave_common::hash::ActorId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::id::{FragmentId, PartialGraphId};
-use risingwave_pb::stream_plan::StartFragmentBackfillMutation;
-use risingwave_pb::stream_plan::barrier::PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_service::barrier_complete_response::{
     CreateMviewProgress, PbCreateMviewProgress,
 };
 use tracing::warn;
 
+use crate::barrier::BarrierInfo;
 use crate::barrier::checkpoint::independent_job::SnapshotPhaseControl;
 use crate::barrier::checkpoint::independent_job::creating_job::CreatingJobInfo;
 use crate::barrier::command::{ThrottleConfigMap, extract_throttle_config};
 use crate::barrier::partial_graph::PartialGraphManager;
 use crate::barrier::progress::TrackingJob;
-use crate::barrier::{BarrierInfo, BarrierKind, TracedEpoch};
 use crate::controller::fragment::InflightFragmentInfo;
 
 #[derive(Debug)]
@@ -140,28 +137,11 @@ impl CreatingStreamingJobStatus {
                 ref mut pending_upstream_barriers,
                 ..
             } => {
-                for progress in create_mview_progress {
-                    snapshot
-                        .create_mview_tracker
-                        .apply_progress(progress, &snapshot.version_stats);
-                }
-                if snapshot.create_mview_tracker.is_finished() {
-                    snapshot
-                        .pending_non_checkpoint_barriers
-                        .push(snapshot.snapshot_epoch);
-
-                    let prev_epoch =
-                        Epoch::from_physical_time(snapshot.prev_epoch_fake_physical_time);
-                    let pending_barriers: VecDeque<_> = [BarrierInfo {
-                        curr_epoch: TracedEpoch::new(Epoch(snapshot.snapshot_epoch)),
-                        prev_epoch: TracedEpoch::new(prev_epoch),
-                        kind: BarrierKind::Checkpoint(take(
-                            &mut snapshot.pending_non_checkpoint_barriers,
-                        )),
-                    }]
-                    .into_iter()
-                    .chain(pending_upstream_barriers.drain(..))
-                    .collect();
+                if snapshot.apply_progress(create_mview_progress) {
+                    let pending_barriers: VecDeque<_> = [snapshot.finish_snapshot_barrier()]
+                        .into_iter()
+                        .chain(pending_upstream_barriers.drain(..))
+                        .collect();
 
                     let CreatingStreamingJobStatus::ConsumingSnapshot {
                         snapshot,
@@ -254,21 +234,7 @@ impl CreatingStreamingJobStatus {
                 snapshot,
                 ..
             } => {
-                let mutation = mutation.or_else(|| {
-                    let pending_backfill_nodes = snapshot
-                        .create_mview_tracker
-                        .take_pending_backfill_nodes()
-                        .collect_vec();
-                    if pending_backfill_nodes.is_empty() {
-                        None
-                    } else {
-                        Some(Mutation::StartFragmentBackfill(
-                            StartFragmentBackfillMutation {
-                                fragment_ids: pending_backfill_nodes,
-                            },
-                        ))
-                    }
-                });
+                let mutation = mutation.or_else(|| snapshot.take_start_backfill_mutation());
                 let barrier_num_to_inject = resolve_initial_barrier_num_to_inject();
                 pending_upstream_barriers.push(barrier_info.clone());
                 // Mutation barriers must be forwarded even when the partial graph has reached the
@@ -276,20 +242,7 @@ impl CreatingStreamingJobStatus {
                 if barrier_num_to_inject == 0 && mutation.is_none() {
                     return vec![];
                 }
-                vec![(
-                    CreatingStreamingJobStatus::new_fake_barrier(
-                        &mut snapshot.prev_epoch_fake_physical_time,
-                        &mut snapshot.pending_non_checkpoint_barriers,
-                        match barrier_info.kind {
-                            BarrierKind::Barrier => PbBarrierKind::Barrier,
-                            BarrierKind::Checkpoint(_) => PbBarrierKind::Checkpoint,
-                            BarrierKind::Initial => {
-                                unreachable!("upstream new epoch should not be initial")
-                            }
-                        },
-                    ),
-                    mutation,
-                )]
+                vec![(snapshot.next_fake_barrier(&barrier_info.kind), mutation)]
             }
             CreatingStreamingJobStatus::ConsumingLogStore {
                 pending_barriers, ..
@@ -311,18 +264,6 @@ impl CreatingStreamingJobStatus {
                 unreachable!()
             }
         }
-    }
-
-    pub(super) fn new_fake_barrier(
-        prev_epoch_fake_physical_time: &mut u64,
-        pending_non_checkpoint_barriers: &mut Vec<u64>,
-        kind: PbBarrierKind,
-    ) -> BarrierInfo {
-        super::super::new_fake_barrier(
-            prev_epoch_fake_physical_time,
-            pending_non_checkpoint_barriers,
-            kind,
-        )
     }
 
     pub(super) fn fragment_infos(&self) -> Option<&HashMap<FragmentId, InflightFragmentInfo>> {
@@ -379,6 +320,7 @@ mod tests {
     use risingwave_pb::stream_plan::PbStreamNode;
 
     use super::*;
+    use crate::barrier::{BarrierKind, TracedEpoch};
 
     fn barrier(prev_epoch: u64, curr_epoch: u64) -> BarrierInfo {
         BarrierInfo {

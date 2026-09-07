@@ -37,9 +37,8 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::PbBackfillType;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::{ActorId, FragmentId, PartialGraphId};
-use risingwave_pb::stream_plan::barrier::PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
-use risingwave_pb::stream_plan::{AddMutation, StartFragmentBackfillMutation, StopMutation};
+use risingwave_pb::stream_plan::{AddMutation, StopMutation};
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::{debug, info};
 
@@ -743,18 +742,9 @@ impl BatchRefreshJobCheckpointControl {
                 unreachable!()
             };
 
-            let tracking_job = snapshot.create_mview_tracker.into_tracking_job();
-
             // Inject final checkpoint at snapshot epoch.
-            snapshot
-                .pending_non_checkpoint_barriers
-                .push(snapshot.snapshot_epoch);
-            let prev_epoch = Epoch::from_physical_time(snapshot.prev_epoch_fake_physical_time);
-            let final_checkpoint = BarrierInfo {
-                curr_epoch: TracedEpoch::new(Epoch(snapshot.snapshot_epoch)),
-                prev_epoch: TracedEpoch::new(prev_epoch),
-                kind: BarrierKind::Checkpoint(take(&mut snapshot.pending_non_checkpoint_barriers)),
-            };
+            let final_checkpoint = snapshot.finish_snapshot_barrier();
+            let tracking_job = snapshot.create_mview_tracker.into_tracking_job();
 
             // Inject stop barrier with u64::MAX as curr_epoch and empty nodes_to_sync_table.
             let stop_barrier = BarrierInfo {
@@ -812,32 +802,8 @@ impl BatchRefreshJobCheckpointControl {
             };
 
             // Forward a fake barrier to the partial graph.
-            let mutation = mutation.or_else(|| {
-                let pending_backfill_nodes = snapshot
-                    .create_mview_tracker
-                    .take_pending_backfill_nodes()
-                    .collect_vec();
-                if pending_backfill_nodes.is_empty() {
-                    None
-                } else {
-                    Some(Mutation::StartFragmentBackfill(
-                        StartFragmentBackfillMutation {
-                            fragment_ids: pending_backfill_nodes,
-                        },
-                    ))
-                }
-            });
-            let barrier_to_inject = super::new_fake_barrier(
-                &mut snapshot.prev_epoch_fake_physical_time,
-                &mut snapshot.pending_non_checkpoint_barriers,
-                match barrier_info.kind {
-                    BarrierKind::Barrier => PbBarrierKind::Barrier,
-                    BarrierKind::Checkpoint(_) => PbBarrierKind::Checkpoint,
-                    BarrierKind::Initial => {
-                        unreachable!("upstream new epoch should not be initial")
-                    }
-                },
-            );
+            let mutation = mutation.or_else(|| snapshot.take_start_backfill_mutation());
+            let barrier_to_inject = snapshot.next_fake_barrier(&barrier_info.kind);
             Self::inject_barrier(
                 self.control.info.partial_graph_id,
                 partial_graph_manager,
@@ -856,18 +822,12 @@ impl BatchRefreshJobCheckpointControl {
 
     pub(crate) fn collect(&mut self, collected_barrier: CollectedBarrier<'_>) -> bool {
         match &mut self.status {
-            BatchRefreshJobStatus::ConsumingSnapshot { snapshot, .. } => {
-                for progress in collected_barrier
+            BatchRefreshJobStatus::ConsumingSnapshot { snapshot, .. } => snapshot.apply_progress(
+                collected_barrier
                     .resps
                     .values()
-                    .flat_map(|resp| &resp.create_mview_progress)
-                {
-                    snapshot
-                        .create_mview_tracker
-                        .apply_progress(progress, &snapshot.version_stats);
-                }
-                snapshot.create_mview_tracker.is_finished()
-            }
+                    .flat_map(|resp| &resp.create_mview_progress),
+            ),
             BatchRefreshJobStatus::InitializingBatchRefresh { .. }
             | BatchRefreshJobStatus::ConsumingLogStore { .. } => {
                 // All barriers are pre-injected; no progress tracking needed.
