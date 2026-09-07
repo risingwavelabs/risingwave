@@ -454,7 +454,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         match self.completing_task.wait_completing_task().await {
             Ok(Some(output)) => self
                 .checkpoint_control
-                .ack_completed(&mut self.partial_graph_manager, output),
+                .ack_completed(&mut self.partial_graph_manager, output)?,
             Ok(None) => {}
             Err(err) => {
                 error!(
@@ -608,7 +608,12 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 ) => {
                     match complete_result {
                         Ok(output) => {
-                            self.checkpoint_control.ack_completed(&mut self.partial_graph_manager, output);
+                            if let Err(e) = self
+                                .checkpoint_control
+                                .ack_completed(&mut self.partial_graph_manager, output)
+                            {
+                                self.failure_recovery(e).await;
+                            }
                         }
                         Err(e) => {
                             self.failure_recovery(e).await;
@@ -878,13 +883,18 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         );
                     }
                     Ok(Ok(hummock_version_stats)) => {
-                        self.checkpoint_control.ack_completed(
+                        if let Err(err) = self.checkpoint_control.ack_completed(
                             &mut self.partial_graph_manager,
                             BarrierCompleteOutput {
                                 epochs_to_ack,
                                 hummock_version_stats,
                             },
-                        );
+                        ) {
+                            warn!(
+                                err = %err.as_report(),
+                                "failed to inject pending snapshot-backfill barriers during recovery"
+                            );
+                        }
                     }
                 }
             }

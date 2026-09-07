@@ -918,6 +918,30 @@ impl CreatingStreamingJobControl {
         Ok(())
     }
 
+    fn inject_pending_barriers(
+        &mut self,
+        partial_graph_manager: &mut PartialGraphManager,
+    ) -> MetaResult<()> {
+        let barrier_num_to_inject = self
+            .max_pending_barrier_num
+            .saturating_sub(partial_graph_manager.pending_barrier_num(self.partial_graph_id));
+        for barrier_info in self.status.drain_pending_barriers(barrier_num_to_inject) {
+            Self::inject_barrier(
+                self.partial_graph_id,
+                partial_graph_manager,
+                &self.node_actors,
+                &self.state_table_ids,
+                false,
+                barrier_info,
+                None,
+                None,
+                None,
+                None,
+            )?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn pre_apply_throttle(
         &mut self,
         config: &mut ThrottleConfigMap,
@@ -1025,7 +1049,7 @@ impl CreatingStreamingJobControl {
                     assert!(!info.post_collect_command.should_checkpoint());
                     if epoch == finish_at_epoch {
                         // TODO: can early remove partial graph here
-                        self.ack_completed(partial_graph_manager, epoch);
+                        self.ack_partial_graph_completed(partial_graph_manager, epoch);
                         true
                     } else {
                         false
@@ -1037,7 +1061,7 @@ impl CreatingStreamingJobControl {
             })
     }
 
-    pub(super) fn ack_completed(
+    fn ack_partial_graph_completed(
         &mut self,
         partial_graph_manager: &mut PartialGraphManager,
         completed_epoch: u64,
@@ -1061,6 +1085,18 @@ impl CreatingStreamingJobControl {
                 unreachable!()
             }
         }
+    }
+
+    pub(super) fn ack_completed(
+        &mut self,
+        partial_graph_manager: &mut PartialGraphManager,
+        completed_epoch: u64,
+    ) -> MetaResult<()> {
+        self.ack_partial_graph_completed(partial_graph_manager, completed_epoch);
+        // A completed checkpoint frees capacity in the partial graph. Continue injecting the
+        // mirrored barriers here because the upstream may already be blocked by backpressure and
+        // therefore cannot deliver another barrier to trigger the drain.
+        self.inject_pending_barriers(partial_graph_manager)
     }
 
     pub(crate) fn fragment_infos(&self) -> Option<&HashMap<FragmentId, InflightFragmentInfo>> {

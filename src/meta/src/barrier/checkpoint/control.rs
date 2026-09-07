@@ -152,7 +152,7 @@ impl CheckpointControl {
         &mut self,
         partial_graph_manager: &mut PartialGraphManager,
         output: BarrierCompleteOutput,
-    ) {
+    ) -> MetaResult<()> {
         self.hummock_version_stats = output.hummock_version_stats;
         for (database_id, (command_prev_epoch, independent_job_epochs)) in output.epochs_to_ack {
             self.databases
@@ -163,8 +163,9 @@ impl CheckpointControl {
                     partial_graph_manager,
                     command_prev_epoch,
                     independent_job_epochs,
-                );
+                )?;
         }
+        Ok(())
     }
 
     pub(crate) fn next_complete_barrier_task(
@@ -1129,7 +1130,7 @@ impl DatabaseCheckpointControl {
         partial_graph_manager: &mut PartialGraphManager,
         command_prev_epoch: Option<u64>,
         independent_job_epochs: Vec<(JobId, u64)>,
-    ) {
+    ) -> MetaResult<()> {
         {
             if let Some(epoch) = self.completing_barrier.take() {
                 assert_eq!(command_prev_epoch, Some(epoch.prev));
@@ -1147,12 +1148,13 @@ impl DatabaseCheckpointControl {
             };
             for (job_id, epoch) in independent_job_epochs {
                 if let Some(job) = self.independent_checkpoint_job_controls.get_mut(&job_id) {
-                    job.ack_completed(partial_graph_manager, epoch);
+                    job.ack_completed(partial_graph_manager, epoch)?;
                 }
                 // If the job is not found, it was dropped and already removed
                 // by `on_partial_graph_reset` while the completing task was running.
             }
         }
+        Ok(())
     }
 
     fn handle_refresh_table_info(

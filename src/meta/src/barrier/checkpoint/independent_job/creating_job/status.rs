@@ -305,16 +305,30 @@ impl CreatingStreamingJobStatus {
                 // Throttle has no effect on the snapshot executor after it starts consuming the
                 // log store. The updated fragment plan is kept for the actors created on merge,
                 // so the mutation does not need to be forwarded in this phase.
-                drain_pending_barriers(
-                    pending_barriers,
-                    barrier_info.clone(),
-                    resolve_initial_barrier_num_to_inject(),
-                )
-                .into_iter()
-                .map(|barrier_info| (barrier_info, None))
-                .collect()
+                pending_barriers.push_back(barrier_info.clone());
+                drain_pending_barriers(pending_barriers, resolve_initial_barrier_num_to_inject())
+                    .into_iter()
+                    .map(|barrier_info| (barrier_info, None))
+                    .collect()
             }
             CreatingStreamingJobStatus::Finishing { .. }
+            | CreatingStreamingJobStatus::Resetting(..) => vec![],
+            CreatingStreamingJobStatus::PlaceHolder => {
+                unreachable!()
+            }
+        }
+    }
+
+    pub(super) fn drain_pending_barriers(
+        &mut self,
+        barrier_num_to_inject: usize,
+    ) -> Vec<BarrierInfo> {
+        match self {
+            CreatingStreamingJobStatus::ConsumingLogStore {
+                pending_barriers, ..
+            } => drain_pending_barriers(pending_barriers, barrier_num_to_inject),
+            CreatingStreamingJobStatus::ConsumingSnapshot { .. }
+            | CreatingStreamingJobStatus::Finishing(..)
             | CreatingStreamingJobStatus::Resetting(..) => vec![],
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
@@ -377,10 +391,8 @@ impl CreatingStreamingJobStatus {
 
 fn drain_pending_barriers(
     pending_barriers: &mut VecDeque<BarrierInfo>,
-    new_upstream_barrier: BarrierInfo,
     barrier_num_to_inject: usize,
 ) -> Vec<BarrierInfo> {
-    pending_barriers.push_back(new_upstream_barrier);
     let barrier_count = pending_barriers.len().min(barrier_num_to_inject);
     pending_barriers.drain(..barrier_count).collect()
 }
@@ -410,28 +422,32 @@ mod tests {
     fn test_drain_pending_barriers_with_available_capacity() {
         let mut pending_barriers = VecDeque::from([barrier(1, 2), barrier(2, 3), barrier(3, 4)]);
 
-        let injected = drain_pending_barriers(&mut pending_barriers, barrier(4, 5), 0);
+        pending_barriers.push_back(barrier(4, 5));
+        let injected = drain_pending_barriers(&mut pending_barriers, 0);
         assert!(injected.is_empty());
         assert_eq!(
             epochs(pending_barriers.make_contiguous()),
             vec![(1, 2), (2, 3), (3, 4), (4, 5)]
         );
 
-        let injected = drain_pending_barriers(&mut pending_barriers, barrier(5, 6), 2);
+        pending_barriers.push_back(barrier(5, 6));
+        let injected = drain_pending_barriers(&mut pending_barriers, 2);
         assert_eq!(epochs(&injected), vec![(1, 2), (2, 3)]);
         assert_eq!(
             epochs(pending_barriers.make_contiguous()),
             vec![(3, 4), (4, 5), (5, 6)]
         );
 
-        let injected = drain_pending_barriers(&mut pending_barriers, barrier(6, 7), 2);
+        pending_barriers.push_back(barrier(6, 7));
+        let injected = drain_pending_barriers(&mut pending_barriers, 2);
         assert_eq!(epochs(&injected), vec![(3, 4), (4, 5)]);
         assert_eq!(
             epochs(pending_barriers.make_contiguous()),
             vec![(5, 6), (6, 7)]
         );
 
-        let injected = drain_pending_barriers(&mut pending_barriers, barrier(7, 8), 2);
+        pending_barriers.push_back(barrier(7, 8));
+        let injected = drain_pending_barriers(&mut pending_barriers, 2);
         assert_eq!(epochs(&injected), vec![(5, 6), (6, 7)]);
         assert_eq!(epochs(pending_barriers.make_contiguous()), vec![(7, 8)]);
     }
@@ -440,10 +456,21 @@ mod tests {
     fn test_drain_pending_barriers_without_backlog() {
         let mut pending_barriers = VecDeque::new();
 
-        let injected = drain_pending_barriers(&mut pending_barriers, barrier(1, 2), 100);
+        pending_barriers.push_back(barrier(1, 2));
+        let injected = drain_pending_barriers(&mut pending_barriers, 100);
 
         assert_eq!(epochs(&injected), vec![(1, 2)]);
         assert!(pending_barriers.is_empty());
+    }
+
+    #[test]
+    fn test_drain_pending_barriers_after_capacity_freed() {
+        let mut pending_barriers = VecDeque::from([barrier(1, 2), barrier(2, 3), barrier(3, 4)]);
+
+        let injected = drain_pending_barriers(&mut pending_barriers, 2);
+
+        assert_eq!(epochs(&injected), vec![(1, 2), (2, 3)]);
+        assert_eq!(epochs(pending_barriers.make_contiguous()), vec![(3, 4)]);
     }
 
     #[tokio::test]

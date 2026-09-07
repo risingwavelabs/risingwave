@@ -118,10 +118,13 @@ impl IndependentCheckpointJobControl {
         &mut self,
         partial_graph_manager: &mut PartialGraphManager,
         epoch: u64,
-    ) {
+    ) -> crate::MetaResult<()> {
         match self {
             Self::CreatingStreamingJob(j) => j.ack_completed(partial_graph_manager, epoch),
-            Self::BatchRefresh(j) => j.ack_completed(partial_graph_manager, epoch),
+            Self::BatchRefresh(j) => {
+                j.ack_completed(partial_graph_manager, epoch);
+                Ok(())
+            }
         }
     }
 
