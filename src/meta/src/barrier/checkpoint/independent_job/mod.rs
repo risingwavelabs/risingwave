@@ -403,6 +403,7 @@ impl IndependentCheckpointJob {
         match self {
             Self::CreatingStreamingJob(job) => job.pre_apply_throttle(config),
             Self::BatchRefresh(job) => job.pre_apply_throttle(config),
+            Self::IcebergV3(job) => job.pre_apply_throttle(config),
         }
     }
 
@@ -417,6 +418,9 @@ impl IndependentCheckpointJob {
                 job.on_new_upstream_barrier(partial_graph_manager, barrier_info, mutation)
             }
             Self::BatchRefresh(job) => {
+                job.on_new_upstream_barrier(partial_graph_manager, barrier_info, mutation)
+            }
+            Self::IcebergV3(job) => {
                 job.on_new_upstream_barrier(partial_graph_manager, barrier_info, mutation)
             }
         }

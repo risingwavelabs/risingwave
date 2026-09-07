@@ -23,14 +23,11 @@ use std::sync::atomic::AtomicU32;
 
 use risingwave_common::catalog::TableId;
 use risingwave_common::id::JobId;
-use risingwave_common::util::epoch::Epoch;
 use risingwave_meta_model::{WorkerId, streaming_job};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::PbBackfillType;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::{ActorId, FragmentId};
-use risingwave_pb::stream_plan::StartFragmentBackfillMutation;
-use risingwave_pb::stream_plan::barrier::PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
@@ -54,7 +51,7 @@ use crate::barrier::partial_graph::{
     CollectedBarrier, PartialGraphBarrierInfo, PartialGraphManager, PartialGraphRecoverer,
 };
 use crate::barrier::rpc::to_partial_graph_id;
-use crate::barrier::{BackfillProgress, BarrierKind, FragmentBackfillProgress, TracedEpoch};
+use crate::barrier::{BackfillProgress, BarrierKind, FragmentBackfillProgress};
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::controller::scale::LoadedFragment;
 use crate::model::FragmentDownstreamRelation;
@@ -84,27 +81,11 @@ impl IcebergV3InputPhase {
                 snapshot,
                 pending_upstream_barriers,
             } => {
-                for progress in progress {
-                    snapshot
-                        .create_mview_tracker
-                        .apply_progress(progress, &snapshot.version_stats);
-                }
-                if !snapshot.create_mview_tracker.is_finished() {
+                if !snapshot.apply_progress(progress) {
                     return false;
                 }
 
-                snapshot
-                    .pending_non_checkpoint_barriers
-                    .push(snapshot.snapshot_epoch);
-                pending_upstream_barriers.push_front(BarrierInfo {
-                    curr_epoch: TracedEpoch::new(Epoch(snapshot.snapshot_epoch)),
-                    prev_epoch: TracedEpoch::new(Epoch::from_physical_time(
-                        snapshot.prev_epoch_fake_physical_time,
-                    )),
-                    kind: BarrierKind::Checkpoint(take(
-                        &mut snapshot.pending_non_checkpoint_barriers,
-                    )),
-                });
+                pending_upstream_barriers.push_front(snapshot.finish_snapshot_barrier());
                 let pending_upstream_barriers = take(pending_upstream_barriers);
                 *self = Self::LogStore {
                     pending_upstream_barriers,
@@ -513,29 +494,11 @@ impl IcebergV3JobCheckpointControl {
                 pending_upstream_barriers,
             } => {
                 pending_upstream_barriers.push_back(barrier_info.clone());
-                mutation = mutation.or_else(|| {
-                    let fragment_ids = snapshot
-                        .create_mview_tracker
-                        .take_pending_backfill_nodes()
-                        .collect::<Vec<_>>();
-                    (!fragment_ids.is_empty()).then_some(Mutation::StartFragmentBackfill(
-                        StartFragmentBackfillMutation { fragment_ids },
-                    ))
-                });
+                mutation = mutation.or_else(|| snapshot.take_start_backfill_mutation());
                 if available == 0 && mutation.is_none() {
                     vec![]
                 } else {
-                    vec![super::new_fake_barrier(
-                        &mut snapshot.prev_epoch_fake_physical_time,
-                        &mut snapshot.pending_non_checkpoint_barriers,
-                        match barrier_info.kind {
-                            BarrierKind::Barrier => PbBarrierKind::Barrier,
-                            BarrierKind::Checkpoint(_) => PbBarrierKind::Checkpoint,
-                            BarrierKind::Initial => {
-                                unreachable!("upstream new epoch should not be initial")
-                            }
-                        },
-                    )]
+                    vec![snapshot.next_fake_barrier(&barrier_info.kind)]
                 }
             }
             IcebergV3InputPhase::LogStore {
