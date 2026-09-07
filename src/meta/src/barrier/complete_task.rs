@@ -266,33 +266,40 @@ impl CompletingTask {
     ) -> impl Future<Output = MetaResult<BarrierCompleteOutput>> + 'a {
         // If there is no completing barrier, try to start completing the earliest barrier if
         // it has been collected.
-        if let CompletingTask::None = self
-            && let Some(task) = checkpoint_control
+        let mut start_error = None;
+        if let CompletingTask::None = self {
+            match checkpoint_control
                 .next_complete_barrier_task(periodic_barriers, partial_graph_manager)
-        {
             {
-                let epochs_to_ack = task.epochs_to_ack();
-                let context = context.clone();
-                let await_tree_reg = env.await_tree_reg().clone();
-                let env = env.clone();
+                Ok(Some(task)) => {
+                    let epochs_to_ack = task.epochs_to_ack();
+                    let context = context.clone();
+                    let await_tree_reg = env.await_tree_reg().clone();
+                    let env = env.clone();
 
-                let fut = async move { task.complete_barrier(&*context, env).await };
-                let fut = await_tree_reg
-                    .register_derived_root("Barrier Completion Task")
-                    .instrument(fut);
-                let join_handle = tokio::spawn(fut);
+                    let fut = async move { task.complete_barrier(&*context, env).await };
+                    let fut = await_tree_reg
+                        .register_derived_root("Barrier Completion Task")
+                        .instrument(fut);
+                    let join_handle = tokio::spawn(fut);
 
-                *self = CompletingTask::Completing {
-                    epochs_to_ack,
-                    join_handle,
-                };
+                    *self = CompletingTask::Completing {
+                        epochs_to_ack,
+                        join_handle,
+                    };
+                }
+                Ok(None) => {}
+                Err(error) => start_error = Some(error),
             }
         }
 
         async move {
+            if let Some(error) = start_error {
+                return Err(error);
+            }
             if !matches!(self, CompletingTask::Completing { .. }) {
                 return pending().await;
-            };
+            }
             self.next_completed_barrier_inner().await
         }
     }
