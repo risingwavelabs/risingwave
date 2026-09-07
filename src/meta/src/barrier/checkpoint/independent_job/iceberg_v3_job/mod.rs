@@ -12,7 +12,6 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-mod barrier_control;
 mod render;
 
 use std::cmp::max;
@@ -23,6 +22,9 @@ use std::sync::atomic::AtomicU32;
 
 use risingwave_common::catalog::TableId;
 use risingwave_common::id::JobId;
+use risingwave_common::metrics::{LabelGuardedHistogram, LabelGuardedIntGauge};
+use risingwave_common::util::epoch::EpochPair;
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_meta_model::{WorkerId, streaming_job};
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::ddl_service::PbBackfillType;
@@ -30,9 +32,7 @@ use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::{ActorId, FragmentId};
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_service::BarrierCompleteResponse;
-use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 
-use self::barrier_control::IcebergV3BarrierStats;
 use self::render::{RenderedResolver, partition_resolver};
 use super::{
     BatchRefreshRenderResult, CreatingStreamingJobControl, IndependentCheckpointJob,
@@ -49,6 +49,7 @@ use crate::barrier::info::BarrierInfo;
 use crate::barrier::notifier::NotifierStarter;
 use crate::barrier::partial_graph::{
     CollectedBarrier, PartialGraphBarrierInfo, PartialGraphManager, PartialGraphRecoverer,
+    PartialGraphStat,
 };
 use crate::barrier::rpc::to_partial_graph_id;
 use crate::barrier::{BackfillProgress, BarrierKind, FragmentBackfillProgress};
@@ -57,6 +58,46 @@ use crate::controller::scale::LoadedFragment;
 use crate::model::FragmentDownstreamRelation;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::ExtendedFragmentBackfillOrder;
+
+struct IcebergV3BarrierStats {
+    consuming_snapshot_barrier_latency: LabelGuardedHistogram,
+    consuming_log_store_barrier_latency: LabelGuardedHistogram,
+    inflight_barrier_num: LabelGuardedIntGauge,
+    snapshot_epoch: u64,
+}
+
+impl IcebergV3BarrierStats {
+    fn new(job_id: JobId, snapshot_epoch: u64) -> Self {
+        let table_id_str = format!("{}", job_id);
+        Self {
+            snapshot_epoch,
+            consuming_snapshot_barrier_latency: GLOBAL_META_METRICS
+                .snapshot_backfill_barrier_latency
+                .with_guarded_label_values(&[table_id_str.as_str(), "consuming_snapshot"]),
+            consuming_log_store_barrier_latency: GLOBAL_META_METRICS
+                .snapshot_backfill_barrier_latency
+                .with_guarded_label_values(&[table_id_str.as_str(), "consuming_log_store"]),
+            inflight_barrier_num: GLOBAL_META_METRICS
+                .snapshot_backfill_inflight_barrier_num
+                .with_guarded_label_values(&[&table_id_str]),
+        }
+    }
+}
+
+impl PartialGraphStat for IcebergV3BarrierStats {
+    fn observe_barrier_latency(&self, epoch: EpochPair, barrier_latency_secs: f64) {
+        let barrier_latency_metrics = if epoch.prev < self.snapshot_epoch {
+            &self.consuming_snapshot_barrier_latency
+        } else {
+            &self.consuming_log_store_barrier_latency
+        };
+        barrier_latency_metrics.observe(barrier_latency_secs);
+    }
+
+    fn observe_barrier_num(&self, inflight_barrier_num: usize, _collected_barrier_num: usize) {
+        self.inflight_barrier_num.set(inflight_barrier_num as _);
+    }
+}
 
 #[derive(Debug)]
 enum IcebergV3InputPhase {
@@ -69,32 +110,6 @@ enum IcebergV3InputPhase {
         /// Original upstream barriers waiting to be consumed from the log store.
         pending_upstream_barriers: VecDeque<BarrierInfo>,
     },
-}
-
-impl IcebergV3InputPhase {
-    fn update_progress<'a>(
-        &mut self,
-        progress: impl IntoIterator<Item = &'a CreateMviewProgress>,
-    ) -> bool {
-        match self {
-            Self::Snapshot {
-                snapshot,
-                pending_upstream_barriers,
-            } => {
-                if !snapshot.apply_progress(progress) {
-                    return false;
-                }
-
-                pending_upstream_barriers.push_front(snapshot.finish_snapshot_barrier());
-                let pending_upstream_barriers = take(pending_upstream_barriers);
-                *self = Self::LogStore {
-                    pending_upstream_barriers,
-                };
-                true
-            }
-            Self::LogStore { .. } => false,
-        }
-    }
 }
 
 #[derive(Debug)]
@@ -409,10 +424,6 @@ impl IcebergV3JobCheckpointControl {
         })
     }
 
-    pub(crate) fn can_drop_independently(&self) -> bool {
-        true
-    }
-
     pub(crate) fn pinned_upstream_tables(&self) -> &HashSet<TableId> {
         &self.control.info.snapshot_backfill_upstream_tables
     }
@@ -454,12 +465,6 @@ impl IcebergV3JobCheckpointControl {
         &self.resolver.fragment_info
     }
 
-    fn input_phase_mut(&mut self) -> &mut IcebergV3InputPhase {
-        match &mut self.status {
-            IcebergV3JobStatus::Running(input_phase) => input_phase,
-        }
-    }
-
     pub(crate) fn on_new_upstream_barrier(
         &mut self,
         partial_graph_manager: &mut PartialGraphManager,
@@ -488,47 +493,51 @@ impl IcebergV3JobCheckpointControl {
         let available = self.max_pending_barrier_num.saturating_sub(
             partial_graph_manager.pending_barrier_num(self.control.info.partial_graph_id),
         );
-        let barriers_to_inject = match self.input_phase_mut() {
-            IcebergV3InputPhase::Snapshot {
-                snapshot,
-                pending_upstream_barriers,
-            } => {
-                pending_upstream_barriers.push_back(barrier_info.clone());
-                mutation = mutation.or_else(|| snapshot.take_start_backfill_mutation());
-                if available == 0 && mutation.is_none() {
-                    vec![]
-                } else {
-                    vec![snapshot.next_fake_barrier(&barrier_info.kind)]
+        match &mut self.status {
+            IcebergV3JobStatus::Running(input_phase) => {
+                let barriers_to_inject = match input_phase {
+                    IcebergV3InputPhase::Snapshot {
+                        snapshot,
+                        pending_upstream_barriers,
+                    } => {
+                        pending_upstream_barriers.push_back(barrier_info.clone());
+                        mutation = mutation.or_else(|| snapshot.take_start_backfill_mutation());
+                        if available == 0 && mutation.is_none() {
+                            vec![]
+                        } else {
+                            vec![snapshot.next_fake_barrier(&barrier_info.kind)]
+                        }
+                    }
+                    IcebergV3InputPhase::LogStore {
+                        pending_upstream_barriers,
+                    } => {
+                        pending_upstream_barriers.push_back(barrier_info.clone());
+                        let barrier_num_to_inject = available.max(usize::from(mutation.is_some()));
+                        pending_upstream_barriers
+                            .drain(..barrier_num_to_inject.min(pending_upstream_barriers.len()))
+                            .collect()
+                    }
+                };
+
+                for barrier_to_inject in barriers_to_inject {
+                    let barrier_mutation = mutation.take();
+                    let barrier_notifier = notifier.take();
+                    partial_graph_manager.inject_barrier(
+                        self.control.info.partial_graph_id,
+                        barrier_mutation,
+                        &self.node_actors,
+                        self.control.info.state_table_ids.iter().copied(),
+                        self.node_actors.keys().copied(),
+                        None,
+                        PartialGraphBarrierInfo::new(
+                            PostCollectCommand::barrier(),
+                            barrier_to_inject,
+                            barrier_notifier,
+                            self.control.info.state_table_ids.clone(),
+                        ),
+                    )?;
                 }
             }
-            IcebergV3InputPhase::LogStore {
-                pending_upstream_barriers,
-            } => {
-                pending_upstream_barriers.push_back(barrier_info.clone());
-                let barrier_num_to_inject = available.max(usize::from(mutation.is_some()));
-                pending_upstream_barriers
-                    .drain(..barrier_num_to_inject.min(pending_upstream_barriers.len()))
-                    .collect()
-            }
-        };
-
-        for barrier_to_inject in barriers_to_inject {
-            let barrier_mutation = mutation.take();
-            let barrier_notifier = notifier.take();
-            partial_graph_manager.inject_barrier(
-                self.control.info.partial_graph_id,
-                barrier_mutation,
-                &self.node_actors,
-                self.control.info.state_table_ids.iter().copied(),
-                self.node_actors.keys().copied(),
-                None,
-                PartialGraphBarrierInfo::new(
-                    PostCollectCommand::barrier(),
-                    barrier_to_inject,
-                    barrier_notifier,
-                    self.control.info.state_table_ids.clone(),
-                ),
-            )?;
         }
         Ok(())
     }
@@ -548,11 +557,25 @@ impl IcebergV3JobCheckpointControl {
     }
 
     pub(crate) fn collect(&mut self, collected_barrier: CollectedBarrier<'_>) -> bool {
-        let progress = collected_barrier
-            .resps
-            .values()
-            .flat_map(|response| &response.create_mview_progress);
-        self.input_phase_mut().update_progress(progress);
+        match &mut self.status {
+            IcebergV3JobStatus::Running(input_phase) => {
+                let progress = collected_barrier
+                    .resps
+                    .values()
+                    .flat_map(|response| &response.create_mview_progress);
+                if let IcebergV3InputPhase::Snapshot {
+                    snapshot,
+                    pending_upstream_barriers,
+                } = input_phase
+                    && snapshot.apply_progress(progress)
+                {
+                    pending_upstream_barriers.push_front(snapshot.finish_snapshot_barrier());
+                    *input_phase = IcebergV3InputPhase::LogStore {
+                        pending_upstream_barriers: take(pending_upstream_barriers),
+                    };
+                }
+            }
+        }
         // Ordinary snapshot jobs force a checkpoint to merge into the database graph. Iceberg V3
         // remains independent after catch-up, so its normal checkpoint cadence is sufficient.
         false
@@ -595,15 +618,22 @@ impl IcebergV3JobCheckpointControl {
     }
 }
 
-fn contains_writer(node: &risingwave_pb::stream_plan::PbStreamNode) -> bool {
-    matches!(
-        node.node_body,
-        Some(risingwave_pb::stream_plan::stream_node::NodeBody::IcebergWithPkIndexWriter(_))
-    ) || node.input.iter().any(contains_writer)
-}
-
 pub(crate) fn is_iceberg_v3_fragment_nodes<'a>(
     nodes: impl IntoIterator<Item = &'a risingwave_pb::stream_plan::PbStreamNode>,
 ) -> bool {
-    nodes.into_iter().any(contains_writer)
+    nodes.into_iter().any(|root| {
+        let mut found = false;
+        visit_stream_node_cont(root, |node| {
+            if matches!(
+                node.node_body,
+                Some(
+                    risingwave_pb::stream_plan::stream_node::NodeBody::IcebergWithPkIndexWriter(_)
+                )
+            ) {
+                found = true;
+            }
+            !found
+        });
+        found
+    })
 }

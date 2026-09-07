@@ -384,7 +384,7 @@ impl IndependentCheckpointJob {
         match self {
             Self::CreatingStreamingJob(j) => j.can_drop_independently(),
             Self::BatchRefresh(_) => true,
-            Self::IcebergV3(j) => j.can_drop_independently(),
+            Self::IcebergV3(_) => true,
         }
     }
 

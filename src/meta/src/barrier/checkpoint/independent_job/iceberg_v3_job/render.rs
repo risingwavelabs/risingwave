@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use risingwave_common::util::stream_graph_visitor::visit_stream_node_cont;
 use risingwave_pb::stream_plan::PbStreamNode;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 
@@ -132,13 +133,24 @@ pub(super) fn partition_resolver(
 }
 
 fn find_writer_node(node: &PbStreamNode) -> Option<&PbStreamNode> {
-    if matches!(node.node_body, Some(NodeBody::IcebergWithPkIndexWriter(_))) {
-        return Some(node);
-    }
-    node.input.iter().find_map(find_writer_node)
+    let mut found = None;
+    visit_stream_node_cont(node, |node| {
+        if found.is_none() && matches!(node.node_body, Some(NodeBody::IcebergWithPkIndexWriter(_)))
+        {
+            found = Some(node);
+        }
+        found.is_none()
+    });
+    found
 }
 
 fn contains_resolver(node: &PbStreamNode) -> bool {
-    matches!(node.node_body, Some(NodeBody::CompactionResolver(_)))
-        || node.input.iter().any(contains_resolver)
+    let mut found = false;
+    visit_stream_node_cont(node, |node| {
+        if matches!(node.node_body, Some(NodeBody::CompactionResolver(_))) {
+            found = true;
+        }
+        !found
+    });
+    found
 }
