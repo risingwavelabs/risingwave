@@ -171,7 +171,7 @@ impl CheckpointControl {
         &mut self,
         periodic_barriers: &mut PeriodicBarriers,
         partial_graph_manager: &mut PartialGraphManager,
-    ) -> Option<CompleteBarrierTask> {
+    ) -> MetaResult<Option<CompleteBarrierTask>> {
         let mut task = None;
         for database in self.databases.values_mut() {
             let Some(database) = database.running_state_mut() else {
@@ -182,9 +182,9 @@ impl CheckpointControl {
                 partial_graph_manager,
                 &mut task,
                 &self.hummock_version_stats,
-            );
+            )?;
         }
-        task
+        Ok(task)
     }
 
     pub(crate) fn barrier_collected(
@@ -336,7 +336,8 @@ impl CheckpointControl {
                     | Command::LoadFinish { .. }
                     | Command::ResetSource { .. }
                     | Command::ResumeBackfill { .. }
-                    | Command::InjectSourceOffsets { .. } => {
+                    | Command::InjectSourceOffsets { .. }
+                    | Command::ApplyIcebergPkIndexCompaction { .. } => {
                         if cfg!(debug_assertions) {
                             panic!(
                                 "new database graph info can only be created for normal creating streaming job, but get command: {} {:?}",
@@ -997,7 +998,7 @@ impl DatabaseCheckpointControl {
         partial_graph_manager: &mut PartialGraphManager,
         task: &mut Option<CompleteBarrierTask>,
         hummock_version_stats: &HummockVersionStats,
-    ) {
+    ) -> MetaResult<()> {
         // `Vec::new` is a const fn, and do not have memory allocation, and therefore is lightweight enough
         let mut independent_jobs_task = vec![];
         let mut finished_jobs = Vec::new();
@@ -1019,7 +1020,7 @@ impl DatabaseCheckpointControl {
                             finished_jobs.push((*job_id, epoch, resps));
                             continue;
                         };
-                        independent_jobs_task.push((*job_id, epoch, resps, info));
+                        independent_jobs_task.push((*job_id, epoch, resps, info, None));
                     }
                 }
                 IndependentCheckpointJob::BatchRefresh(batch_refresh_job) => {
@@ -1031,12 +1032,12 @@ impl DatabaseCheckpointControl {
                             let task = task.get_or_insert_default();
                             task.finished_jobs.push(tracking_job);
                         }
-                        independent_jobs_task.push((*job_id, epoch, resps, info));
+                        independent_jobs_task.push((*job_id, epoch, resps, info, None));
                     }
                 }
                 IndependentCheckpointJob::IcebergV3(iceberg_job) => {
-                    if let Some((epoch, resps, info, is_finish_epoch)) = iceberg_job
-                        .start_completing(partial_graph_manager, min_upstream_inflight_barrier)
+                    if let Some((epoch, resps, info, is_finish_epoch, compaction)) = iceberg_job
+                        .start_completing(partial_graph_manager, min_upstream_inflight_barrier)?
                     {
                         assert!(!is_finish_epoch, "Iceberg V3 jobs remain independent");
                         independent_jobs_task.push((
@@ -1044,6 +1045,7 @@ impl DatabaseCheckpointControl {
                             epoch,
                             resps.into_values().collect_vec(),
                             info,
+                            compaction,
                         ));
                     }
                 }
@@ -1143,13 +1145,18 @@ impl DatabaseCheckpointControl {
         }
         if !independent_jobs_task.is_empty() {
             let task = task.get_or_insert_default();
-            for (job_id, epoch, resps, info) in independent_jobs_task {
+            for (job_id, epoch, resps, info, compaction) in independent_jobs_task {
                 collect_independent_job_commit_epoch_info(task, epoch, resps, &info);
+                if let Some(compaction) = compaction {
+                    task.iceberg_pk_index_pre_commit_metadata
+                        .push(compaction.into());
+                }
                 task.epoch_infos
                     .try_insert(to_partial_graph_id(self.database_id, Some(job_id)), info)
                     .expect("non duplicate");
             }
         }
+        Ok(())
     }
 
     fn ack_completed(
