@@ -334,6 +334,9 @@ pub struct PubsubConfig {
     pub port: u16,
     pub address: String,
 
+    // `--data-dir` only preserves runtime config such as `env.yaml`; it does not
+    // persist topics, subscriptions, or messages across emulator restarts.
+    // https://github.com/risingwavelabs/risingwave/pull/26697#discussion_r3957685142
     pub persist_data: bool,
 }
 
