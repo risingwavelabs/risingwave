@@ -445,6 +445,11 @@ impl SstableStore {
             )));
         }
         let pinned_sst = self.pinned_sst(object_id);
+        let pin_cache_desired = self
+            .pin_cache
+            .get()
+            .is_some_and(|pin_cache| pin_cache.is_desired(object_id));
+        let pin_cache_candidate = pin_cache_desired || pinned_sst.is_some();
         if pinned_sst.is_none()
             && let Some(entry) = self
                 .block_cache
@@ -455,6 +460,9 @@ impl SstableStore {
                 .await
                 .map_err(HummockError::foyer_error)?
         {
+            if pin_cache_candidate {
+                stats.pin_cache_data_block_total += 1;
+            }
             stats.cache_data_block_total += 1;
             if entry.source() == foyer::Source::Outer {
                 stats.cache_data_block_miss += 1;
@@ -490,7 +498,11 @@ impl SstableStore {
             end_index = min_hit_index;
         }
         stats.cache_data_prefetch_count += 1;
-        stats.cache_data_prefetch_block_count += (end_index - block_index) as u64;
+        let prefetch_block_count = (end_index - block_index) as u64;
+        stats.cache_data_prefetch_block_count += prefetch_block_count;
+        if pin_cache_candidate {
+            stats.pin_cache_data_block_total += prefetch_block_count;
+        }
         let end_offset = start_offset
             + sst.meta.block_metas[block_index..end_index]
                 .iter()
@@ -586,6 +598,9 @@ impl SstableStore {
             blocks.push_back(holder);
             offset = end;
         }
+        if pinned_sst.is_some() {
+            stats.pin_cache_data_block_hit += prefetch_block_count;
+        }
         Ok(Box::new(PrefetchBlockStream::new(
             blocks,
             block_index,
@@ -599,6 +614,17 @@ impl SstableStore {
         block_index: usize,
         policy: CachePolicy,
     ) -> HummockResult<BlockResponse> {
+        self.get_block_response_with_pin_cache_hit(sst, block_index, policy)
+            .await
+            .map(|(response, _)| response)
+    }
+
+    async fn get_block_response_with_pin_cache_hit(
+        &self,
+        sst: &Sstable,
+        block_index: usize,
+        policy: CachePolicy,
+    ) -> HummockResult<(BlockResponse, bool)> {
         let object_id = sst.id;
         let (range, uncompressed_capacity) = sst.calculate_block_info(block_index);
         if let Some(pinned_sst) = self.pinned_sst(object_id) {
@@ -610,9 +636,10 @@ impl SstableStore {
                 .and_then(|data| Block::decode(data, uncompressed_capacity));
             match result {
                 Ok(block) => {
-                    return Ok(BlockResponse::Block(BlockHolder::from_owned_block(
-                        Box::new(block),
-                    )));
+                    return Ok((
+                        BlockResponse::Block(BlockHolder::from_owned_block(Box::new(block))),
+                        true,
+                    ));
                 }
                 Err(error) => {
                     pinned_sst.invalidate();
@@ -627,6 +654,7 @@ impl SstableStore {
 
         self.get_block_response_from_foyer(sst, block_index, policy)
             .await
+            .map(|response| (response, false))
     }
 
     async fn get_block_response_from_foyer(
@@ -721,8 +749,20 @@ impl SstableStore {
         policy: CachePolicy,
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<BlockHolder> {
-        let block_response = self.get_block_response(sst, block_index, policy).await?;
+        let pin_cache_desired = self
+            .pin_cache
+            .get()
+            .is_some_and(|pin_cache| pin_cache.is_desired(sst.id));
+        let (block_response, pin_cache_hit) = self
+            .get_block_response_with_pin_cache_hit(sst, block_index, policy)
+            .await?;
         let block_holder = block_response.wait().await?;
+        if pin_cache_desired || pin_cache_hit {
+            stats.pin_cache_data_block_total += 1;
+        }
+        if pin_cache_hit {
+            stats.pin_cache_data_block_hit += 1;
+        }
         stats.cache_data_block_total += 1;
         if let BlockEntry::HybridCache(entry) = block_holder.entry()
             && entry.source() == foyer::Source::Outer
@@ -1294,6 +1334,33 @@ mod tests {
             .pin_sst(sstable_store.store(), remote_path.clone(), info.object_id)
             .await
             .unwrap();
+
+        let mut pin_get_stats = StoreLocalStatistic::default();
+        sstable_store
+            .get(&sst, 0, CachePolicy::NotFill, &mut pin_get_stats)
+            .await
+            .unwrap();
+        assert_eq!(pin_get_stats.pin_cache_data_block_total, 1);
+        assert_eq!(pin_get_stats.pin_cache_data_block_hit, 1);
+
+        let mut pin_prefetch_stats = StoreLocalStatistic::default();
+        let mut pin_stream = sstable_store
+            .prefetch_blocks(
+                &sst,
+                0,
+                sst.block_count(),
+                CachePolicy::NotFill,
+                &mut pin_prefetch_stats,
+            )
+            .await
+            .unwrap();
+        assert!(pin_stream.next_block().await.unwrap().is_some());
+        assert!(pin_prefetch_stats.pin_cache_data_block_total > 0);
+        assert_eq!(
+            pin_prefetch_stats.pin_cache_data_block_hit,
+            pin_prefetch_stats.pin_cache_data_block_total
+        );
+
         let mut local_objects = local_store.list("", None, None).await.unwrap();
         let local_path = local_objects.next().await.unwrap().unwrap().key;
         if corrupt {
@@ -1312,5 +1379,7 @@ mod tests {
             .unwrap();
         assert!(stream.next_block().await.unwrap().is_some());
         assert!(pin_cache.get(info.object_id).is_none());
+        assert!(stats.pin_cache_data_block_total > 0);
+        assert_eq!(stats.pin_cache_data_block_hit, 0);
     }
 }
