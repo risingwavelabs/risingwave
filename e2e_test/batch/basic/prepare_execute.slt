@@ -1,0 +1,48 @@
+# Simple-query-mode PREPARE / EXECUTE / DEALLOCATE.
+# https://github.com/risingwavelabs/risingwave/issues/21777
+
+statement ok
+create table t21777 (v1 int, v2 varchar);
+
+statement ok
+insert into t21777 values (1, 'a'), (2, 'b'), (3, 'c');
+
+statement ok
+flush;
+
+statement ok
+prepare p21777 (int) as select v1, v2 from t21777 where v1 = $1;
+
+query IT
+execute p21777(2);
+----
+2 b
+
+statement error does not exist
+execute nonexistent_stmt21777;
+
+statement error already exists
+prepare p21777 (int) as select v1, v2 from t21777 where v1 = $1;
+
+statement ok
+deallocate p21777;
+
+statement error does not exist
+execute p21777(1);
+
+statement ok
+prepare p21777_multi (int, varchar) as select v1, v2 from t21777 where v1 = $1 and v2 = $2;
+
+query IT
+execute p21777_multi(3, 'c');
+----
+3 c
+
+statement ok
+deallocate all;
+
+statement error does not exist
+execute p21777_multi(1, 'a');
+
+statement ok
+drop table t21777;

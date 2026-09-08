@@ -310,6 +310,22 @@ pub async fn handle(
 ) -> Result<RwPgResponse> {
     session.clear_cancel_query_flag();
     let _guard = session.txn_begin_implicit();
+    Box::pin(dispatch_statement(session, stmt, sql, formats)).await
+}
+
+/// Dispatches a single statement to its handler, assuming an (implicit or explicit)
+/// transaction is already in progress on `session`.
+///
+/// This is split out from [`handle`] so that a handler which needs to recursively dispatch
+/// another statement on the same session -- e.g. `EXECUTE` re-dispatching the prepared
+/// statement it names -- can do so without trying to begin a second implicit transaction,
+/// which would panic. Such callers should invoke this function directly rather than [`handle`].
+pub(crate) async fn dispatch_statement(
+    session: Arc<SessionImpl>,
+    stmt: Statement,
+    sql: Arc<str>,
+    formats: Vec<Format>,
+) -> Result<RwPgResponse> {
     let handler_args = HandlerArgs::new(session, &stmt, sql)?;
 
     check_ban_ddl_for_iceberg_engine_table(handler_args.session.clone(), &stmt)?;
@@ -1676,9 +1692,12 @@ pub async fn handle(
             name,
             data_types,
             statement,
-        } => prepared_statement::handle_prepare(name, data_types, statement),
+        } => prepared_statement::handle_prepare(handler_args, name, data_types, statement),
         Statement::Deallocate { name, prepare } => {
-            prepared_statement::handle_deallocate(name, prepare)
+            prepared_statement::handle_deallocate(handler_args, name, prepare)
+        }
+        Statement::Execute { name, parameters } => {
+            prepared_statement::handle_execute(handler_args, name, parameters).await
         }
         Statement::Vacuum { object_name, full } => {
             vacuum::handle_vacuum(handler_args, object_name, full).await
