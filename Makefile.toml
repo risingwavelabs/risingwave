@@ -41,6 +41,7 @@ env_scripts = [
   is_udf_enabled = get_env ENABLE_UDF
   is_datafusion_enabled = get_env ENABLE_DATAFUSION
   is_default_features_disabled = get_env DISABLE_DEFAULT_FEATURES
+  is_lancedb_sink_disabled = get_env DISABLE_LANCEDB_SINK
 
   if ${is_sanitizer_enabled}
     set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS "--timings -Zbuild-std --target ${CARGO_MAKE_RUST_TARGET_TRIPLE}"
@@ -72,6 +73,15 @@ env_scripts = [
 
   if ${is_default_features_disabled}
     set_env RISINGWAVE_FEATURE_FLAGS "${flags} --no-default-features"
+  else
+    if ${is_lancedb_sink_disabled}
+      # Cargo cannot subtract a feature from the default bundle. Disable defaults,
+      # then restore rw-static-link and all connectors except LanceDB.
+      # These linking features control different dependencies: rw-static-link enables
+      # static libz/lzma/sasl2, while rw-dynamic-link enables dynamic zstd.
+      # They can coexist in dev builds, so keep rw-static-link to preserve the defaults.
+      set_env RISINGWAVE_FEATURE_FLAGS "${flags} --no-default-features --features rw-static-link,all-connectors-without-lancedb"
+    end
   end
 
   if ${is_hummock_trace}
