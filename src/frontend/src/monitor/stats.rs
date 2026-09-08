@@ -35,6 +35,8 @@ use crate::session::SessionMapRef;
 pub struct FrontendMetrics {
     pub query_counter_local_execution: GenericCounter<AtomicU64>,
     pub latency_local_execution: Histogram,
+    /// Single-relation serving latency for local-execution queries.
+    pub latency_local_execution_per_relation: HistogramVec,
     #[cfg(feature = "datafusion")]
     pub datafusion: DataFusionMetrics,
     pub active_sessions: IntGauge,
@@ -60,6 +62,15 @@ impl FrontendMetrics {
         );
         let latency_local_execution = register_histogram_with_registry!(opts, registry).unwrap();
 
+        let latency_local_execution_per_relation = register_histogram_vec_with_registry!(
+            "frontend_latency_local_execution_per_relation",
+            "Per-relation latency of single-relation serving queries in local execution mode.",
+            &["relation_id"],
+            exponential_buckets(0.01, 2.0, 23).unwrap(),
+            registry
+        )
+        .unwrap();
+
         #[cfg(feature = "datafusion")]
         let datafusion = DataFusionMetrics::new(registry);
 
@@ -83,6 +94,7 @@ impl FrontendMetrics {
         Self {
             query_counter_local_execution,
             latency_local_execution,
+            latency_local_execution_per_relation,
             #[cfg(feature = "datafusion")]
             datafusion,
             active_sessions,
