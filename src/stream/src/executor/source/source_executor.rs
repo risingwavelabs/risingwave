@@ -1340,8 +1340,8 @@ impl<S: StateStore> WaitCheckpointWorker<S> {
 #[cfg(test)]
 mod tests {
     use maplit::{btreemap, convert_args, hashmap};
-    use prometheus::core::Collector;
     use prometheus::Registry;
+    use prometheus::core::Collector;
     use risingwave_common::array::{Array, BytesArray};
     use risingwave_common::catalog::{ColumnId, Field};
     use risingwave_common::config::MetricLevel;
