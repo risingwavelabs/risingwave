@@ -603,6 +603,7 @@ impl HummockVersionCommon<SstableInfo> {
                                 level_idx,
                                 l0_sub_level_id,
                                 inserted_table_infos,
+                                vnode_partition_count,
                                 ..
                             } = level_delta;
                             {
@@ -611,13 +612,25 @@ impl HummockVersionCommon<SstableInfo> {
                                     "we should only add to L0 when we commit an epoch."
                                 );
                                 if !inserted_table_infos.is_empty() {
+                                    let level_type = if *vnode_partition_count > 0
+                                        && can_concat(inserted_table_infos)
+                                    {
+                                        PbLevelType::Nonoverlapping
+                                    } else {
+                                        PbLevelType::Overlapping
+                                    };
                                     insert_new_sub_level(
                                         &mut levels.l0,
                                         *l0_sub_level_id,
-                                        PbLevelType::Overlapping,
+                                        level_type,
                                         inserted_table_infos.clone(),
                                         None,
                                     );
+                                    if *vnode_partition_count > 0
+                                        && let Some(level) = levels.l0.sub_levels.last_mut()
+                                    {
+                                        level.vnode_partition_count = *vnode_partition_count;
+                                    }
                                 }
                             }
                         } else {
