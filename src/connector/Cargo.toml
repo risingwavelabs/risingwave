@@ -139,7 +139,10 @@ rdkafka = { workspace = true, features = [
     "ssl",
     "gssapi",
     "zstd",
+    # Keep both: `curl` enables librdkafka's OIDC client, while `curl-static`
+    # avoids adding a system libcurl dependency to release binaries.
     "curl",
+    "curl-static",
 ] }
 redis = { workspace = true, features = [
     "aio",
