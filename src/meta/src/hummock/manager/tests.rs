@@ -3222,6 +3222,15 @@ async fn test_old_version_dropped_table_sst_does_not_make_new_compaction_fail() 
         .sum();
     group.l0.sub_levels = dirty_l0_sub_levels;
 
+    // Keep this as a physical compaction test after small L0 SSTs become eligible for trivial
+    // move. An overlapping base SST prevents Meta from consuming every L0 SST as metadata-only
+    // moves before the test can inspect a compactor task.
+    let base_sst = gen_sstable_info(14, vec![live_table_id.as_raw_id()], test_epoch(1));
+    let base_level = group.levels.last_mut().unwrap();
+    base_level.total_file_size = base_sst.sst_size;
+    base_level.uncompressed_file_size = base_sst.uncompressed_file_size;
+    base_level.table_infos = vec![base_sst];
+
     // Simulate the upgrade path:
     // 1. an old version wrote SST metadata containing table ids [live, dropped];
     // 2. the old version dropped one table, but the checkpoint still had stale SST table ids;

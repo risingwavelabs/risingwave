@@ -20,17 +20,18 @@
 use std::sync::Arc;
 
 use risingwave_hummock_sdk::HummockCompactionTaskId;
-use risingwave_hummock_sdk::level::Levels;
+use risingwave_hummock_sdk::level::{Levels, OverlappingLevel};
 use risingwave_pb::hummock::compact_task::PbTaskType;
 use risingwave_pb::hummock::{CompactionConfig, LevelType};
 
+use super::single_table_compaction::{SingleTableCompactionGroup, SingleTableL0PickerType};
 use super::{
     CompactionSelector, LevelCompactionPicker, TierCompactionPicker, create_compaction_task,
 };
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::picker::{
-    CompactionPicker, CompactionTaskValidator, IntraCompactionPicker, LocalPickerStatistic,
-    MinOverlappingPicker,
+    CompactionPicker, CompactionTaskValidator, IntraCompactionPicker, L0PickerMode,
+    LocalPickerStatistic, MinOverlappingPicker,
 };
 use crate::hummock::compaction::selector::CompactionSelectorContext;
 use crate::hummock::compaction::{
@@ -60,12 +61,57 @@ impl std::fmt::Display for PickerType {
     }
 }
 
+impl PickerType {
+    fn sort_rank(&self) -> u8 {
+        match self {
+            PickerType::Tier => 0,
+            PickerType::ToBase => 1,
+            PickerType::Intra => 2,
+            PickerType::BottomLevel => 3,
+        }
+    }
+}
+
 #[derive(Default, Debug)]
 pub struct PickerInfo {
     pub score: u64,
     pub select_level: usize,
     pub target_level: usize,
     pub picker_type: PickerType,
+    input: PickerInput,
+}
+
+#[derive(Default, Debug)]
+enum PickerInput {
+    #[default]
+    Global,
+    SingleTablePartition {
+        partition_score: u64,
+        l0: Arc<OverlappingLevel>,
+        min_l0_level_count: usize,
+    },
+}
+
+impl PickerInput {
+    fn partition_score(&self) -> u64 {
+        match self {
+            Self::Global => 0,
+            Self::SingleTablePartition {
+                partition_score, ..
+            } => *partition_score,
+        }
+    }
+
+    fn picker_mode(&self) -> L0PickerMode {
+        match self {
+            Self::Global => L0PickerMode::Legacy,
+            Self::SingleTablePartition {
+                min_l0_level_count, ..
+            } => L0PickerMode::SingleTablePartition {
+                min_l0_level_count: *min_l0_level_count,
+            },
+        }
+    }
 }
 
 #[derive(Default, Debug)]
@@ -109,17 +155,32 @@ impl DynamicLevelSelectorCore {
         overlap_strategy: Arc<dyn OverlapStrategy>,
         compaction_task_validator: Arc<CompactionTaskValidator>,
     ) -> Box<dyn CompactionPicker> {
+        let picker_mode = picker_info.input.picker_mode();
+        let compaction_task_validator = if picker_mode.is_single_table_partition() {
+            Arc::new(CompactionTaskValidator::unused())
+        } else {
+            compaction_task_validator
+        };
         match picker_info.picker_type {
             PickerType::Tier => Box::new(TierCompactionPicker::new_with_validator(
                 self.config.clone(),
                 compaction_task_validator,
             )),
-            PickerType::ToBase => Box::new(LevelCompactionPicker::new_with_validator(
+            PickerType::ToBase => Box::new(LevelCompactionPicker::new_with_mode(
                 picker_info.target_level,
                 self.config.clone(),
                 compaction_task_validator,
                 self.developer_config.clone(),
+                picker_mode,
             )),
+            PickerType::Intra if picker_mode.is_single_table_partition() => {
+                Box::new(IntraCompactionPicker::new_with_mode(
+                    self.config.clone(),
+                    compaction_task_validator,
+                    self.developer_config.clone(),
+                    picker_mode,
+                ))
+            }
             PickerType::Intra => Box::new(IntraCompactionPicker::new_with_validator(
                 self.config.clone(),
                 compaction_task_validator,
@@ -204,6 +265,15 @@ impl DynamicLevelSelectorCore {
         levels: &Levels,
         handlers: &[LevelHandler],
     ) -> SelectContext {
+        self.get_priority_levels_with_single_table_strategy(levels, handlers, None)
+    }
+
+    fn get_priority_levels_with_single_table_strategy(
+        &self,
+        levels: &Levels,
+        handlers: &[LevelHandler],
+        single_table_compaction_group: Option<SingleTableCompactionGroup>,
+    ) -> SelectContext {
         let mut ctx = self.calculate_level_base_size(levels);
 
         let l0_file_count = levels
@@ -255,64 +325,34 @@ impl DynamicLevelSelectorCore {
                     select_level: 0,
                     target_level: 0,
                     picker_type: PickerType::Tier,
+                    input: PickerInput::Global,
                 })
             }
 
-            // The read query at the non-overlapping level only selects ssts that match the query
-            // range at each level, so the number of levels is the most important factor affecting
-            // the read performance. At the same time, the size factor is also added to the score
-            // calculation rule to avoid unbalanced compact task due to large size.
-            let total_size = levels
-                .l0
-                .sub_levels
-                .iter()
-                .filter(|level| {
-                    level.vnode_partition_count == self.config.split_weight_by_vnode
-                        && level.level_type == LevelType::Nonoverlapping
-                })
-                .map(|level| level.total_file_size)
-                .sum::<u64>()
-                .saturating_sub(handlers[0].pending_output_file_size(ctx.base_level as u32));
-            let base_level_size = levels.get_level(ctx.base_level).total_file_size;
-            let base_level_sst_count = levels.get_level(ctx.base_level).table_infos.len() as u64;
-
-            // size limit
-            let non_overlapping_size_score = total_size * SCORE_BASE
-                / std::cmp::max(self.config.max_bytes_for_level_base, base_level_size);
-            // level count limit
-            let non_overlapping_level_count = levels
-                .l0
-                .sub_levels
-                .iter()
-                .filter(|level| level.level_type == LevelType::Nonoverlapping)
-                .count() as u64;
-            let non_overlapping_level_score = non_overlapping_level_count * SCORE_BASE
-                / std::cmp::max(
-                    base_level_sst_count / 16,
-                    self.config.level0_sub_level_compact_level_count as u64,
-                );
-
-            let non_overlapping_score =
-                std::cmp::max(non_overlapping_size_score, non_overlapping_level_score);
-
-            // Reduce the level num of l0 non-overlapping sub_level
-            if non_overlapping_size_score > SCORE_BASE {
-                ctx.score_levels.push(PickerInfo {
-                    score: non_overlapping_score + 1,
-                    select_level: 0,
-                    target_level: ctx.base_level,
-                    picker_type: PickerType::ToBase,
-                });
-            }
-
-            if non_overlapping_level_score > SCORE_BASE {
-                // FIXME: more accurate score calculation algorithm will be introduced (#11903)
-                ctx.score_levels.push(PickerInfo {
-                    score: non_overlapping_score,
-                    select_level: 0,
-                    target_level: 0,
-                    picker_type: PickerType::Intra,
-                });
+            let single_table_candidates = single_table_compaction_group.and_then(|group| {
+                group.build_l0_candidates(&self.config, &levels.l0, &handlers[0])
+            });
+            if let Some(candidates) = single_table_candidates {
+                ctx.score_levels
+                    .extend(candidates.into_iter().map(|candidate| PickerInfo {
+                        score: candidate.score,
+                        select_level: 0,
+                        target_level: match candidate.picker_type {
+                            SingleTableL0PickerType::ToBase => ctx.base_level,
+                            SingleTableL0PickerType::Intra => 0,
+                        },
+                        picker_type: match candidate.picker_type {
+                            SingleTableL0PickerType::ToBase => PickerType::ToBase,
+                            SingleTableL0PickerType::Intra => PickerType::Intra,
+                        },
+                        input: PickerInput::SingleTablePartition {
+                            partition_score: candidate.partition_score,
+                            l0: candidate.l0,
+                            min_l0_level_count: candidate.min_l0_level_count,
+                        },
+                    }));
+            } else {
+                self.add_legacy_l0_candidates(levels, handlers, &mut ctx);
             }
         }
 
@@ -335,6 +375,7 @@ impl DynamicLevelSelectorCore {
                     select_level: level_idx,
                     target_level: level_idx + 1,
                     picker_type: PickerType::BottomLevel,
+                    input: PickerInput::Global,
                 }
             });
         }
@@ -344,8 +385,67 @@ impl DynamicLevelSelectorCore {
             b.score
                 .cmp(&a.score)
                 .then_with(|| a.target_level.cmp(&b.target_level))
+                .then_with(|| a.picker_type.sort_rank().cmp(&b.picker_type.sort_rank()))
+                .then_with(|| b.input.partition_score().cmp(&a.input.partition_score()))
         });
         ctx
+    }
+
+    fn add_legacy_l0_candidates(
+        &self,
+        levels: &Levels,
+        handlers: &[LevelHandler],
+        ctx: &mut SelectContext,
+    ) {
+        // Keep this path equivalent to the original dynamic-level selector. It is used by every
+        // non-single-table compaction group and while a single-table group still contains SSTs
+        // that cannot be represented by the fixed vnode partition layout.
+        let total_size = levels
+            .l0
+            .sub_levels
+            .iter()
+            .filter(|level| {
+                level.vnode_partition_count == self.config.split_weight_by_vnode
+                    && level.level_type == LevelType::Nonoverlapping
+            })
+            .map(|level| level.total_file_size)
+            .sum::<u64>()
+            .saturating_sub(handlers[0].pending_output_file_size(ctx.base_level as u32));
+        let base_level_size = levels.get_level(ctx.base_level).total_file_size;
+        let base_level_sst_count = levels.get_level(ctx.base_level).table_infos.len() as u64;
+        let size_score = total_size * SCORE_BASE
+            / std::cmp::max(self.config.max_bytes_for_level_base, base_level_size);
+        let non_overlapping_level_count = levels
+            .l0
+            .sub_levels
+            .iter()
+            .filter(|level| level.level_type == LevelType::Nonoverlapping)
+            .count() as u64;
+        let level_score = non_overlapping_level_count * SCORE_BASE
+            / std::cmp::max(
+                base_level_sst_count / 16,
+                self.config.level0_sub_level_compact_level_count as u64,
+            );
+        let score = std::cmp::max(size_score, level_score);
+
+        if size_score > SCORE_BASE {
+            ctx.score_levels.push(PickerInfo {
+                score: score + 1,
+                select_level: 0,
+                target_level: ctx.base_level,
+                picker_type: PickerType::ToBase,
+                input: PickerInput::Global,
+            });
+        }
+        if level_score > SCORE_BASE {
+            ctx.score_levels.push(PickerInfo {
+                score,
+                select_level: 0,
+                target_level: 0,
+                picker_type: PickerType::Intra,
+                input: PickerInput::Global,
+            });
+        }
     }
 
     /// `compact_pending_bytes_needed` calculates the number of compact bytes needed to balance the
@@ -435,6 +535,7 @@ impl CompactionSelector for DynamicLevelSelector {
             selector_stats,
             developer_config,
             in_progress_compactions,
+            single_table_compaction_group,
             ..
         } = context;
         let dynamic_level_core = DynamicLevelSelectorCore::new(
@@ -443,7 +544,11 @@ impl CompactionSelector for DynamicLevelSelector {
         );
         let overlap_strategy =
             create_overlap_strategy(compaction_group.compaction_config.compaction_mode());
-        let ctx = dynamic_level_core.get_priority_levels(levels, level_handlers);
+        let ctx = dynamic_level_core.get_priority_levels_with_single_table_strategy(
+            levels,
+            level_handlers,
+            single_table_compaction_group,
+        );
         // TODO: Determine which rule to enable by write limit
         let compaction_task_validator = Arc::new(CompactionTaskValidator::new(
             compaction_group.compaction_config.clone(),
@@ -457,9 +562,20 @@ impl CompactionSelector for DynamicLevelSelector {
                 overlap_strategy.clone(),
                 compaction_task_validator.clone(),
             );
+            let single_table_levels;
+            let picker_levels = match &picker_info.input {
+                PickerInput::Global => levels,
+                PickerInput::SingleTablePartition { l0, .. } => {
+                    single_table_levels = Levels {
+                        l0: l0.as_ref().clone(),
+                        ..levels.clone()
+                    };
+                    &single_table_levels
+                }
+            };
 
             let mut stats = LocalPickerStatistic::default();
-            if let Some(ret) = picker.pick_compaction(levels, level_handlers, &mut stats) {
+            if let Some(ret) = picker.pick_compaction(picker_levels, level_handlers, &mut stats) {
                 if !ret.skip_target_range_conflict_check
                     && in_progress_compactions.has_conflict_with_input(&ret)
                 {
@@ -509,8 +625,8 @@ pub mod tests {
     use risingwave_hummock_sdk::compact_task::{CompactTask, CompactTaskAssignment};
     use risingwave_hummock_sdk::level::{InputLevel, Levels};
     use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
-    use risingwave_pb::hummock::LevelType;
     use risingwave_pb::hummock::compaction_config::CompactionMode;
+    use risingwave_pb::hummock::{CompactionConfig, LevelType};
 
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::in_progress_compaction::InProgressCompactionView;
@@ -520,7 +636,7 @@ pub mod tests {
     };
     use crate::hummock::compaction::selector::{
         CompactionSelector, CompactionSelectorContext, DynamicLevelSelector,
-        DynamicLevelSelectorCore, LocalSelectorStatistic,
+        DynamicLevelSelectorCore, LocalSelectorStatistic, SingleTableCompactionGroup,
     };
     use crate::hummock::compaction::{CompactionDeveloperConfig, CompactionTask};
     use crate::hummock::level_handler::LevelHandler;
@@ -535,6 +651,7 @@ pub mod tests {
         level_handlers: &mut [LevelHandler],
         selector_stats: &mut LocalSelectorStatistic,
         in_progress_compactions: &InProgressCompactionView,
+        single_table_compaction_group: Option<SingleTableCompactionGroup>,
     ) -> Option<CompactionTask> {
         selector.pick_compaction(
             task_id,
@@ -542,6 +659,7 @@ pub mod tests {
                 group,
                 levels,
                 member_table_ids: &BTreeSet::new(),
+                single_table_compaction_group,
                 level_handlers,
                 selector_stats,
                 table_id_to_options: &HashMap::default(),
@@ -551,6 +669,60 @@ pub mod tests {
                 in_progress_compactions,
             },
         )
+    }
+
+    #[test]
+    fn test_legacy_depth_pressure_uses_intra_without_size_pressure() {
+        let config = CompactionConfig {
+            split_weight_by_vnode: 8,
+            ..CompactionConfigBuilder::new()
+                .max_level(1)
+                .max_bytes_for_level_base(1024)
+                .level0_sub_level_compact_level_count(3)
+                .sst_allowed_trivial_move_min_size(Some(u64::MAX))
+                .build()
+        };
+        let group = CompactionGroup::new(1, config.clone());
+        let levels = Levels {
+            levels: vec![generate_level(1, vec![])],
+            l0: generate_l0_nonoverlapping_sublevels(
+                (1..=4).map(|id| generate_table(id, 1, 0, 10, id)).collect(),
+            ),
+            ..Default::default()
+        };
+        assert!(levels.l0.total_file_size < config.max_bytes_for_level_base);
+        let mut handlers = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        let core = DynamicLevelSelectorCore::new(
+            Arc::new(config),
+            Arc::new(CompactionDeveloperConfig::default()),
+        );
+        let priorities = core.get_priority_levels(&levels, &handlers);
+        assert!(
+            !priorities
+                .score_levels
+                .iter()
+                .any(|p| matches!(p.picker_type, super::PickerType::ToBase))
+        );
+        assert!(
+            priorities
+                .score_levels
+                .iter()
+                .any(|p| matches!(p.picker_type, super::PickerType::Intra))
+        );
+        let mut selector = DynamicLevelSelector::default();
+        let task = pick_compaction_with_in_progress(
+            &mut selector,
+            1,
+            &group,
+            &levels,
+            &mut handlers,
+            &mut LocalSelectorStatistic::default(),
+            &InProgressCompactionView::default(),
+            None,
+        )
+        .unwrap();
+        assert_eq!(task.input.target_level, 0);
+        assert_compaction_task(&task, &handlers);
     }
 
     #[test]
@@ -834,6 +1006,7 @@ pub mod tests {
             &mut levels_handlers,
             &mut local_stats,
             &empty_in_progress,
+            None,
         )
         .unwrap();
         assert_eq!(compaction.input.target_level, 4);
@@ -857,6 +1030,7 @@ pub mod tests {
                 &mut levels_handlers,
                 &mut local_stats,
                 &in_progress,
+                None,
             )
             .is_none()
         );
