@@ -34,6 +34,10 @@ udf = ["risingwave_expr_impl/udf"]
 fips = ["workspace-config/fips"]
 all-connectors = [
     "risingwave_connector/all-sinks",
+    "all-connectors-without-lancedb",
+]
+all-connectors-without-lancedb = [
+    "risingwave_connector/all-sinks-without-lancedb",
     "risingwave_connector/all-sources",
     "risingwave_compute/all-sources",
     "risingwave_frontend/all-sources",

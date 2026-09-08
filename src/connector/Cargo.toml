@@ -13,13 +13,13 @@ ignored = []
 [features]
 default = []
 test = []
-all-sinks = [
+all-sinks = ["all-sinks-without-lancedb", "sink-lancedb"]
+all-sinks-without-lancedb = [
     "sink-bigquery",
     "sink-deltalake",
     "sink-google_pubsub",
     "sink-clickhouse",
     "sink-doris",
-    "sink-lancedb",
     "sink-starrocks",
 ]
 all-sources = ["source-adbc_snowflake"]
