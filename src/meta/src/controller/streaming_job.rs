@@ -1928,6 +1928,7 @@ impl CatalogController {
     ) -> MetaResult<NotificationVersion> {
         let inner = self.inner.write().await;
         let txn = inner.db.begin().await?;
+        let original_job_id = streaming_job.id();
 
         let (objects, delete_notification_objs, old_fragment_ids, new_fragment_ids) =
             Self::finish_replace_streaming_job_inner(
@@ -1942,6 +1943,8 @@ impl CatalogController {
             .await?;
 
         txn.commit().await?;
+        self.notify_hummock_table_cache_refill_policy_if_explicit(&inner, original_job_id)
+            .await?;
 
         // Notify serving module: delete old fragment mappings, upsert new ones.
         let notification_manager = self.env.notification_manager();

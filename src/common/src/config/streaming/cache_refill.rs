@@ -31,6 +31,10 @@ pub enum CacheRefillPolicy {
     Serving,
     /// Enable cache refill optimized for both streaming and serving workloads for this table.
     Both,
+    /// Cache the complete SST objects containing this table in the local pin cache.
+    ///
+    /// This is an effective table policy and is not accepted as a streaming-job config value.
+    Pinned,
 }
 
 impl FromStr for CacheRefillPolicy {
@@ -57,6 +61,7 @@ impl CacheRefillPolicy {
             Self::Streaming => PbCacheRefillPolicy::Streaming,
             Self::Serving => PbCacheRefillPolicy::Serving,
             Self::Both => PbCacheRefillPolicy::Both,
+            Self::Pinned => PbCacheRefillPolicy::Pinned,
         }
     }
 
@@ -68,6 +73,7 @@ impl CacheRefillPolicy {
             PbCacheRefillPolicy::Streaming => Some(Self::Streaming),
             PbCacheRefillPolicy::Serving => Some(Self::Serving),
             PbCacheRefillPolicy::Both => Some(Self::Both),
+            PbCacheRefillPolicy::Pinned => Some(Self::Pinned),
         }
     }
 
@@ -83,6 +89,10 @@ impl CacheRefillPolicy {
 
     pub fn is_serving_scoped(self) -> bool {
         matches!(self, Self::Serving | Self::Both)
+    }
+
+    pub fn is_pinned(self) -> bool {
+        matches!(self, Self::Pinned)
     }
 }
 
@@ -115,6 +125,7 @@ mod tests {
             assert_eq!(policy.is_unscoped_enabled(), unscoped);
             assert_eq!(policy.is_streaming_scoped(), streaming);
             assert_eq!(policy.is_serving_scoped(), serving);
+            assert!(!policy.is_pinned());
         }
 
         assert_eq!(
@@ -122,5 +133,14 @@ mod tests {
             None
         );
         assert!("unknown".parse::<CacheRefillPolicy>().is_err());
+        assert!("pinned".parse::<CacheRefillPolicy>().is_err());
+        assert_eq!(
+            CacheRefillPolicy::from_protobuf(PbCacheRefillPolicy::Pinned),
+            Some(CacheRefillPolicy::Pinned)
+        );
+        assert!(!CacheRefillPolicy::Pinned.is_unscoped_enabled());
+        assert!(!CacheRefillPolicy::Pinned.is_streaming_scoped());
+        assert!(!CacheRefillPolicy::Pinned.is_serving_scoped());
+        assert!(CacheRefillPolicy::Pinned.is_pinned());
     }
 }

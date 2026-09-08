@@ -747,6 +747,8 @@ message TableCacheRefillPolicies {
       SERVING = 4;
       /// Enable cache refill optimized for both streaming and serving workloads for this table.
       BOTH = 5;
+      /// Cache complete SST objects containing this table in the local pin cache.
+      PINNED = 6;
     }
   }
 }

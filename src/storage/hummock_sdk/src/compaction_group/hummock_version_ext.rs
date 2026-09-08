@@ -51,7 +51,7 @@ use crate::{
 pub struct SstDeltaInfo {
     pub insert_sst_level: u32,
     pub insert_sst_infos: Vec<SstableInfo>,
-    pub delete_sst_object_ids: Vec<HummockSstableObjectId>,
+    pub delete_sst_infos: Vec<SstableInfo>,
 }
 
 pub type BranchedSstInfo = HashMap<CompactionGroupId, Vec<HummockSstableId>>;
@@ -396,13 +396,37 @@ impl HummockVersionCommon<SstableInfo> {
     pub fn build_sst_delta_infos(
         &self,
         version_delta: &HummockVersionDeltaCommon<SstableInfo>,
-    ) -> Vec<SstDeltaInfo> {
+    ) -> (Vec<SstDeltaInfo>, bool) {
         let mut infos = vec![];
+
+        let state_table_membership_changed = !version_delta.removed_table_ids.is_empty()
+            || version_delta
+                .state_table_info_delta
+                .iter()
+                .any(|(table_id, info)| {
+                    self.state_table_info
+                        .info()
+                        .get(table_id)
+                        .is_none_or(|previous| {
+                            previous.compaction_group_id != info.compaction_group_id
+                        })
+                });
+        let compaction_group_structure_changed =
+            version_delta.group_deltas.values().any(|deltas| {
+                deltas.group_deltas.iter().any(|delta| {
+                    !matches!(
+                        delta,
+                        GroupDelta::IntraLevel(_) | GroupDelta::NewL0SubLevel(_)
+                    )
+                })
+            });
+        let requires_membership_rebuild =
+            state_table_membership_changed || compaction_group_structure_changed;
 
         // Skip trivial move delta for refiller
         // The trivial move task only changes the position of the sst in the lsm, it does not modify the object information corresponding to the sst, and does not need to re-execute the refill.
         if version_delta.trivial_move {
-            return infos;
+            return (infos, requires_membership_rebuild);
         }
 
         for (group_id, group_deltas) in &version_delta.group_deltas {
@@ -463,7 +487,7 @@ impl HummockVersionCommon<SstableInfo> {
             for l0_sub_level in &group.level0().sub_levels {
                 for sst_info in &l0_sub_level.table_infos {
                     if removed_l0_ssts.remove(&sst_info.sst_id) {
-                        info.delete_sst_object_ids.push(sst_info.object_id);
+                        info.delete_sst_infos.push(sst_info.clone());
                     }
                 }
             }
@@ -471,7 +495,7 @@ impl HummockVersionCommon<SstableInfo> {
                 if let Some(mut removed_level_ssts) = removed_ssts.remove(&level.level_idx) {
                     for sst_info in &level.table_infos {
                         if removed_level_ssts.remove(&sst_info.sst_id) {
-                            info.delete_sst_object_ids.push(sst_info.object_id);
+                            info.delete_sst_infos.push(sst_info.clone());
                         }
                     }
                     if !removed_level_ssts.is_empty() {
@@ -497,7 +521,7 @@ impl HummockVersionCommon<SstableInfo> {
             infos.push(info);
         }
 
-        infos
+        (infos, requires_membership_rebuild)
     }
 
     pub fn apply_version_delta(
@@ -3297,5 +3321,59 @@ mod tests {
         assert_eq!(cg.levels[0].table_infos.len(), 1);
         assert_eq!(10, cg.levels[0].table_infos[0].sst_id);
         assert_eq!(cg.levels[0].total_file_size, 500);
+    }
+
+    #[test]
+    fn test_sst_delta_info_preserves_removed_sst_and_flags_membership_rebuild() {
+        let removed = make_sst(1, vec![100], 100);
+        let version = HummockVersion {
+            levels: HashMap::from([(
+                1.into(),
+                Levels {
+                    group_id: 1.into(),
+                    levels: vec![Level {
+                        level_idx: 1,
+                        table_infos: vec![removed.clone()],
+                        ..Default::default()
+                    }],
+                    ..Default::default()
+                },
+            )]),
+            ..Default::default()
+        };
+        let delta = HummockVersionDelta {
+            group_deltas: HashMap::from([(
+                1.into(),
+                GroupDeltas {
+                    group_deltas: vec![GroupDelta::IntraLevel(IntraLevelDelta::new(
+                        1,
+                        0,
+                        HashSet::from([removed.sst_id]),
+                        vec![make_sst(2, vec![100], 100)],
+                        0,
+                        0,
+                    ))],
+                },
+            )]),
+            ..Default::default()
+        };
+
+        let (infos, rebuild) = version.build_sst_delta_infos(&delta);
+        assert!(!rebuild);
+        assert_eq!(infos.len(), 1);
+        assert_eq!(infos[0].delete_sst_infos, vec![removed]);
+
+        let structural_delta = HummockVersionDelta {
+            group_deltas: HashMap::from([(
+                1.into(),
+                GroupDeltas {
+                    group_deltas: vec![GroupDelta::PruneTableIdsFromSsts(HashSet::from([
+                        TableId::new(100),
+                    ]))],
+                },
+            )]),
+            ..Default::default()
+        };
+        assert!(version.build_sst_delta_infos(&structural_delta).1);
     }
 }

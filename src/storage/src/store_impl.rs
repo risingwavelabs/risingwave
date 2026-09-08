@@ -14,6 +14,7 @@
 
 use std::collections::HashSet;
 use std::fmt::Debug;
+use std::path::Path;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
@@ -40,6 +41,7 @@ use crate::error::StorageResult;
 use crate::hummock::all::AllRecentFilter;
 use crate::hummock::hummock_meta_client::MonitoredHummockMetaClient;
 use crate::hummock::none::NoneRecentFilter;
+use crate::hummock::pin_cache::PinCache;
 use crate::hummock::sharded::ShardedRecentFilter;
 use crate::hummock::simple::SimpleRecentFilter;
 use crate::hummock::{
@@ -966,6 +968,31 @@ impl StateStoreImpl {
                     vector_meta_cache,
                     vector_block_cache,
                 }));
+                if !opts.pin_cache_dir.is_empty() {
+                    let pin_cache_root = Path::new(&opts.pin_cache_dir).join("pinned_ssts");
+                    tokio::fs::create_dir_all(&pin_cache_root)
+                        .await
+                        .map_err(|error| {
+                            HummockError::other(format!(
+                                "failed to create pin cache directory {}: {error}",
+                                pin_cache_root.display()
+                            ))
+                        })?;
+                    let pin_cache_url = format!("fs://{}", pin_cache_root.display());
+                    let mut pin_cache_object_store_config = opts.object_store_config.clone();
+                    pin_cache_object_store_config.set_atomic_write_dir();
+                    let pin_cache_store = build_remote_object_store(
+                        &pin_cache_url,
+                        object_store_metrics.clone(),
+                        "Hummock Pin Cache",
+                        Arc::new(pin_cache_object_store_config),
+                    )
+                    .await;
+                    sstable_store.set_pin_cache(PinCache::new(
+                        Arc::new(pin_cache_store),
+                        (opts.pin_cache_capacity_mb as u64).saturating_mul(1 << 20),
+                    ));
+                }
                 let notification_client =
                     RpcNotificationClient::new(hummock_meta_client.get_inner().clone());
                 let compaction_catalog_manager_ref =

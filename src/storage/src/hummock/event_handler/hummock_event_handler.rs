@@ -55,11 +55,18 @@ use crate::hummock::event_handler::{
 };
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::local_version::recent_versions::RecentVersions;
+use crate::hummock::pin_cache_refill::PinCacheMembershipUpdate;
 use crate::hummock::store::version::{HummockReadVersion, StagingSstableInfo, VersionUpdate};
 use crate::hummock::{HummockResult, MemoryLimiter, ObjectIdManager, SstableStoreRef};
 use crate::mem_table::ImmutableMemtable;
 use crate::monitor::HummockStateStoreMetrics;
 use crate::opts::StorageOpts;
+
+struct ResolvedVersionUpdate {
+    new_pinned_version: PinnedVersion,
+    sst_delta_infos: Vec<SstDeltaInfo>,
+    pin_cache_membership_update: PinCacheMembershipUpdate,
+}
 
 #[derive(Clone)]
 pub(crate) struct BufferTracker {
@@ -502,7 +509,13 @@ impl HummockEventHandler {
             spawn_upload_task,
             buffer_tracker,
         );
-        let refiller = CacheRefiller::new(role, refill_config, sstable_store, spawn_refill_task);
+        let refiller = CacheRefiller::new(
+            role,
+            refill_config,
+            sstable_store,
+            spawn_refill_task,
+            recent_versions.latest_version().clone(),
+        );
 
         Self {
             hummock_event_tx,
@@ -719,42 +732,57 @@ impl HummockEventHandler {
             .cloned()
             .unwrap_or_else(|| self.uploader.hummock_version().clone());
 
-        let mut sst_delta_infos = vec![];
-        if let Some(new_pinned_version) = Self::resolve_version_update_info(
-            &pinned_version,
-            version_payload,
-            Some(&mut sst_delta_infos),
-        ) {
-            self.refiller
-                .start_cache_refill(sst_delta_infos, pinned_version, new_pinned_version);
+        if let Some(ResolvedVersionUpdate {
+            new_pinned_version,
+            sst_delta_infos,
+            pin_cache_membership_update,
+        }) = Self::resolve_version_update_info(&pinned_version, version_payload)
+        {
+            self.refiller.start_cache_refill(
+                sst_delta_infos,
+                pinned_version,
+                new_pinned_version,
+                pin_cache_membership_update,
+            );
         }
     }
 
     fn resolve_version_update_info(
         pinned_version: &PinnedVersion,
         version_payload: HummockVersionUpdate,
-        mut sst_delta_infos: Option<&mut Vec<SstDeltaInfo>>,
-    ) -> Option<PinnedVersion> {
+    ) -> Option<ResolvedVersionUpdate> {
         match version_payload {
             HummockVersionUpdate::VersionDeltas(version_deltas) => {
                 let mut version_to_apply = (**pinned_version).clone();
-                {
-                    for version_delta in version_deltas {
-                        assert_eq!(version_to_apply.id, version_delta.prev_id);
-                        if let Some(sst_delta_infos) = &mut sst_delta_infos {
-                            sst_delta_infos
-                                .extend(version_to_apply.build_sst_delta_infos(&version_delta));
-                        }
-
-                        version_to_apply.apply_version_delta(&version_delta);
-                    }
+                let mut sst_delta_infos = Vec::new();
+                let mut requires_membership_rebuild = false;
+                for version_delta in version_deltas {
+                    assert_eq!(version_to_apply.id, version_delta.prev_id);
+                    let (delta_infos, rebuild) =
+                        version_to_apply.build_sst_delta_infos(&version_delta);
+                    sst_delta_infos.extend(delta_infos);
+                    requires_membership_rebuild |= rebuild;
+                    version_to_apply.apply_version_delta(&version_delta);
                 }
-
-                pinned_version.new_with_local_version(version_to_apply)
+                pinned_version
+                    .new_with_local_version(version_to_apply)
+                    .map(|new_pinned_version| ResolvedVersionUpdate {
+                        new_pinned_version,
+                        sst_delta_infos,
+                        pin_cache_membership_update: if requires_membership_rebuild {
+                            PinCacheMembershipUpdate::Rebuild
+                        } else {
+                            PinCacheMembershipUpdate::Delta
+                        },
+                    })
             }
-            HummockVersionUpdate::PinnedVersion(version) => {
-                pinned_version.new_pin_version(*version)
-            }
+            HummockVersionUpdate::PinnedVersion(version) => pinned_version
+                .new_pin_version(*version)
+                .map(|new_pinned_version| ResolvedVersionUpdate {
+                    new_pinned_version,
+                    sst_delta_infos: Vec::new(),
+                    pin_cache_membership_update: PinCacheMembershipUpdate::Rebuild,
+                }),
         }
     }
 
@@ -1174,6 +1202,7 @@ mod tests {
             CacheRefillConfig::from_storage_opts(&storage_opt),
             mock_sstable_store().await,
             CacheRefiller::default_spawn_refill_task(),
+            PinnedVersion::new(HummockVersion::default(), unbounded_channel().0),
         );
 
         HummockEventHandler::apply_table_refill_runtime_config(
@@ -1186,7 +1215,7 @@ mod tests {
                     }],
                     internal_table_policies: vec![PbTableCacheRefillPolicy {
                         table_id: internal_table_id.as_raw_id(),
-                        policy: PbCacheRefillPolicy::Both as i32,
+                        policy: PbCacheRefillPolicy::Pinned as i32,
                     }],
                 }),
                 serving_table_vnode_mappings: Some(PbServingTableVnodeMappings {
@@ -1203,7 +1232,7 @@ mod tests {
             snapshot.policies,
             HashMap::from([
                 (old_table_id, CacheRefillPolicy::Serving),
-                (internal_table_id, CacheRefillPolicy::Both),
+                (internal_table_id, CacheRefillPolicy::Pinned),
             ])
         );
         assert_eq!(
@@ -1228,7 +1257,7 @@ mod tests {
             snapshot.policies,
             HashMap::from([
                 (old_table_id, CacheRefillPolicy::Serving),
-                (internal_table_id, CacheRefillPolicy::Both),
+                (internal_table_id, CacheRefillPolicy::Pinned),
             ])
         );
         assert_eq!(
