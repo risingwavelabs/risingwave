@@ -32,7 +32,6 @@ use tracing::warn;
 
 use crate::barrier::checkpoint::independent_job::creating_job::CreatingJobInfo;
 use crate::barrier::command::{ThrottleConfigMap, extract_throttle_config};
-use crate::barrier::notifier::CollectionNotifier;
 use crate::barrier::partial_graph::PartialGraphManager;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
 use crate::barrier::{BarrierInfo, BarrierKind, TracedEpoch};
@@ -132,7 +131,6 @@ pub(super) enum CreatingStreamingJobStatus {
     /// will be finished when all previously injected barriers have been collected
     /// Store the `prev_epoch` that will finish at.
     Finishing(u64, TrackingJob),
-    Resetting(Vec<CollectionNotifier>),
     PlaceHolder,
 }
 
@@ -202,8 +200,7 @@ impl CreatingStreamingJobStatus {
             } => {
                 log_store_progress_tracker.update(create_mview_progress);
             }
-            CreatingStreamingJobStatus::Finishing(..)
-            | CreatingStreamingJobStatus::Resetting(..) => {}
+            CreatingStreamingJobStatus::Finishing(..) => {}
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
             }
@@ -233,9 +230,6 @@ impl CreatingStreamingJobStatus {
             }
             CreatingStreamingJobStatus::Finishing { .. } => {
                 unreachable!("should not start consuming upstream for a job again")
-            }
-            CreatingStreamingJobStatus::Resetting(..) => {
-                unreachable!("unlikely to start consume upstream when resetting")
             }
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
@@ -314,8 +308,7 @@ impl CreatingStreamingJobStatus {
                 .map(|barrier_info| (barrier_info, None))
                 .collect()
             }
-            CreatingStreamingJobStatus::Finishing { .. }
-            | CreatingStreamingJobStatus::Resetting(..) => vec![],
+            CreatingStreamingJobStatus::Finishing { .. } => vec![],
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
             }
@@ -340,8 +333,7 @@ impl CreatingStreamingJobStatus {
             | CreatingStreamingJobStatus::ConsumingLogStore { info, .. } => {
                 Some(&info.fragment_infos)
             }
-            CreatingStreamingJobStatus::Finishing(..)
-            | CreatingStreamingJobStatus::Resetting(..) => None,
+            CreatingStreamingJobStatus::Finishing(..) => None,
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
             }
@@ -357,8 +349,7 @@ impl CreatingStreamingJobStatus {
             | CreatingStreamingJobStatus::ConsumingLogStore { info, .. } => {
                 &mut info.fragment_infos
             }
-            CreatingStreamingJobStatus::Finishing(..)
-            | CreatingStreamingJobStatus::Resetting(..) => return None,
+            CreatingStreamingJobStatus::Finishing(..) => return None,
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
             }
@@ -444,23 +435,6 @@ mod tests {
 
         assert_eq!(epochs(&injected), vec![(1, 2)]);
         assert!(pending_barriers.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_resetting_skips_barrier_capacity_lookup() {
-        let mut status = CreatingStreamingJobStatus::Resetting(vec![]);
-        let partial_graph_manager =
-            PartialGraphManager::uninitialized(crate::manager::MetaSrvEnv::for_test().await);
-
-        let injected = status.on_new_upstream_epoch(
-            &partial_graph_manager,
-            PartialGraphId::new(1),
-            10,
-            &barrier(1, 2),
-            None,
-        );
-
-        assert!(injected.is_empty());
     }
 
     #[test]
