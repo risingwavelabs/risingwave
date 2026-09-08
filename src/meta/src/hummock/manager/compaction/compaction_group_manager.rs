@@ -327,7 +327,7 @@ impl HummockManager {
         }
         let mut group_changes: HashMap<CompactionGroupId, UnregisterGroupChange> = HashMap::new();
         // Remove member tables
-        for table_id in table_ids.into_iter().unique() {
+        for table_id in table_ids.iter().copied().unique() {
             let version = new_version_delta.latest_version();
             let Some(info) = version.state_table_info.info().get(&table_id) else {
                 continue;
@@ -394,6 +394,11 @@ impl HummockManager {
             version.latest_version(),
         )));
         commit_multi_var!(self.meta_store_ref(), version, compaction_groups_txn)?;
+
+        let mut vnode_count_cache = self.table_id_to_vnode_count.write();
+        for table_id in table_ids {
+            vnode_count_cache.remove(&table_id);
+        }
 
         // No need to handle DeltaType::GroupDestroy during time travel.
         Ok(())

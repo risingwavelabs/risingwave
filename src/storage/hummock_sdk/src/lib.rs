@@ -48,6 +48,7 @@ pub mod version;
 pub use frontend_version::{FrontendHummockVersion, FrontendHummockVersionDelta};
 mod frontend_version;
 pub mod vector_index;
+pub mod vnode_partition;
 
 pub use compact::*;
 use risingwave_common::catalog::TableId;
