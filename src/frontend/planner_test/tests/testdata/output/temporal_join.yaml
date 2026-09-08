@@ -100,6 +100,22 @@
   stream_error: |-
     Not supported: exist dangling temporal scan
     HINT: please check your temporal join syntax e.g. consider removing the right outer join if it is being used.
+- name: Temporal join with an unsupported join type
+  sql: |
+    create table stream(id1 int, a1 int, b1 int);
+    create table version(id2 int, a2 int, b2 int, primary key (id2));
+    select id1, a1, id2, a2 from stream full join version FOR SYSTEM_TIME AS OF PROCTIME() on id1 = id2;
+  stream_error: |-
+    Not supported: temporal join with FullOuter join type
+    HINT: Temporal join only supports inner join and left outer join
+- name: Temporal join with a semi join type
+  sql: |
+    create table stream(id1 int, a1 int, b1 int);
+    create table version(id2 int, a2 int, b2 int, primary key (id2));
+    select id1, a1 from stream where id1 in (select id2 from version FOR SYSTEM_TIME AS OF PROCTIME());
+  stream_error: |-
+    Not supported: temporal join with LeftSemi join type
+    HINT: Temporal join only supports inner join and left outer join
 - name: multi-way temporal join with the same key
   sql: |
     create table stream(k int, a1 int, b1 int);
