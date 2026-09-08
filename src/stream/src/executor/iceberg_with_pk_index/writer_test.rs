@@ -577,21 +577,20 @@ async fn test_writer_executor_accepts_equivalent_unordered_update_mutations() {
 }
 
 #[tokio::test]
-async fn test_writer_executor_compaction_rejects_stray_switch_to_input_in_normal() {
+async fn test_writer_executor_compaction_rejects_stray_end_in_normal() {
     let mut harness = WriterTestHarness::new().await;
     harness.init().await;
     harness.push_compaction_seal(2, 7);
 
     let err = harness.executor.next().await.unwrap().unwrap_err();
     assert!(
-        err.to_string()
-            .contains("unexpected switch-to-input in Normal mode"),
+        err.to_string().contains("unexpected End in Normal mode"),
         "unexpected error: {err}"
     );
 }
 
 #[tokio::test]
-async fn test_writer_executor_compaction_allows_other_sink_switch_to_input_in_normal() {
+async fn test_writer_executor_compaction_allows_other_sink_end_in_normal() {
     let mut harness = WriterTestHarness::new().await;
     harness.init().await;
 

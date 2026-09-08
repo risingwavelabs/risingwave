@@ -174,8 +174,6 @@ impl BuildingFragment {
             }
             NodeBody::CompactionResolver(resolver_node) => {
                 resolver_node.sink_id = job_id.as_sink_id();
-
-                has_job = true;
             }
             NodeBody::Dml(dml_node) => {
                 dml_node.table_id = job_id.as_mv_table_id();
