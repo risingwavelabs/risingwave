@@ -236,6 +236,7 @@ impl PostgresExternalTableReader {
         rw_schema: Schema,
         pk_indices: Vec<usize>,
         schema_table_name: SchemaTableName,
+        table_id: u32,
     ) -> ConnectorResult<Self> {
         tracing::info!(
             ?rw_schema,
@@ -243,7 +244,16 @@ impl PostgresExternalTableReader {
             "create postgres external table reader"
         );
         // No TCP keepalive for CDC source
-        let client = create_pg_client(&config.pg_connection_config()?, None).await?;
+        let application_name = format!(
+            "risingwave-postgres-source-reader-{}-{}.{}",
+            table_id, schema_table_name.schema_name, schema_table_name.table_name
+        );
+        let client = create_pg_client(
+            &config.pg_connection_config()?,
+            None,
+            Some(&application_name),
+        )
+        .await?;
 
         // Discover user-defined composite columns and arrays of composites.
         // tokio-postgres cannot decode composite values natively, so for these
@@ -1241,6 +1251,7 @@ mod tests {
             rw_schema,
             vec![0, 1],
             schema_table_name.clone(),
+            233,
         )
         .await
         .unwrap();
