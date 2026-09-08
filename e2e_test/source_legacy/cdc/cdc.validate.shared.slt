@@ -169,6 +169,12 @@ create table pg_unsafe_topic_name (
  id INT PRIMARY KEY
 ) from pg_validate_src table 'public."foo""bar"';
 
+# Dots inside quoted identifiers are indistinguishable from topic component delimiters.
+statement error delimiter between Debezium topic-name components
+create table pg_ambiguous_topic_name (
+ id INT PRIMARY KEY
+) from pg_validate_src table 'public."foo.bar"';
+
 # NOT NULL constraint not supported on CDC tables
 statement error CDC table with NOT NULL constraint is not supported
 create table shipments (
