@@ -13,14 +13,16 @@
 // limitations under the License.
 
 use std::cell::RefCell;
+use std::collections::HashSet;
 use std::sync::Arc;
 
 use itertools::Itertools;
 use risingwave_common::config::meta::default::compaction_config;
 use risingwave_hummock_sdk::level::{InputLevel, Level, Levels, OverlappingLevel};
+use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_pb::hummock::{CompactionConfig, LevelType};
 
-use super::non_overlap_sub_level_picker::NonOverlapSubLevelPicker;
+use super::non_overlap_sub_level_picker::{NonOverlapSubLevelPicker, SubLevelSstables};
 use super::{
     CompactionInput, CompactionPicker, CompactionTaskValidator, L0PickerMode, LocalPickerStatistic,
     ValidationRuleType,
@@ -185,24 +187,34 @@ impl LevelCompactionPicker {
         stats: &mut LocalPickerStatistic,
     ) -> Option<CompactionInput> {
         let overlap_strategy = create_overlap_strategy(self.config.compaction_mode());
-        let min_compaction_bytes = self.config.sub_level_max_compaction_bytes;
+        // Partition admission is based on runnable stack depth. Reusing the legacy sub-level byte
+        // target here only changes candidate ordering (unexpected plans are still returned), and
+        // couples ToBase selection to an Intra/Tier sizing knob.
+        let min_compaction_bytes = if self.mode.is_single_table_partition() {
+            0
+        } else {
+            self.config.sub_level_max_compaction_bytes
+        };
         let min_expected_level_count = self.mode.min_l0_level_count();
+        let max_l0_compaction_bytes = std::cmp::max(
+            self.config.max_bytes_for_level_base,
+            self.config.max_compaction_bytes / 2,
+        );
+        let max_l0_level_count =
+            self.config
+                .max_l0_compact_level_count
+                .unwrap_or(compaction_config::max_l0_compact_level_count()) as usize;
         let non_overlap_sub_level_picker = NonOverlapSubLevelPicker::new(
             min_compaction_bytes,
             // divide by 2 because we need to select files of base level and it need use the other
             // half quota.
-            std::cmp::max(
-                self.config.max_bytes_for_level_base,
-                self.config.max_compaction_bytes / 2,
-            ),
+            max_l0_compaction_bytes,
             min_expected_level_count,
             // The maximum number of sub_level compact level per task
             self.config.level0_max_compact_file_number,
             overlap_strategy.clone(),
             self.developer_config.enable_check_task_level_overlap,
-            self.config
-                .max_l0_compact_level_count
-                .unwrap_or(compaction_config::max_l0_compact_level_count()) as usize,
+            max_l0_level_count,
             self.config
                 .enable_optimize_l0_interval_selection
                 .unwrap_or(compaction_config::enable_optimize_l0_interval_selection()),
@@ -288,6 +300,42 @@ impl LevelCompactionPicker {
             return None;
         }
 
+        if self.mode.is_single_table_partition() {
+            let mut candidates = std::mem::take(&mut input_levels);
+            let (mut selected, target_level_size, target_level_ssts) = candidates.remove(0);
+            if !target_level_ssts.is_empty() {
+                for (candidate, _, _) in candidates {
+                    let Some(merged) = Self::merge_partition_l0_inputs(
+                        candidate_levels,
+                        &selected,
+                        &candidate,
+                        max_l0_compaction_bytes,
+                        self.config.level0_max_compact_file_number,
+                        max_l0_level_count,
+                    ) else {
+                        continue;
+                    };
+                    if merged.total_file_size.saturating_add(target_level_size)
+                        > self.config.max_compaction_bytes
+                    {
+                        continue;
+                    }
+
+                    let merged_l0_ssts = merged
+                        .sstable_infos
+                        .iter()
+                        .flat_map(|(_, ssts)| ssts.iter().cloned())
+                        .collect_vec();
+                    let merged_target_ssts = overlap_strategy
+                        .check_base_level_overlap(&merged_l0_ssts, &target_level.table_infos);
+                    if Self::same_sst_ids(&merged_target_ssts, &target_level_ssts) {
+                        selected = merged;
+                    }
+                }
+            }
+            input_levels.push((selected, target_level_size, target_level_ssts));
+        }
+
         for (input, target_file_size, target_level_files) in input_levels {
             let mut select_level_inputs = input
                 .sstable_infos
@@ -345,6 +393,69 @@ impl LevelCompactionPicker {
             return Some(result);
         }
         None
+    }
+
+    /// Combine independently valid L0 overlap closures within one fixed vnode partition. The
+    /// caller must still verify that the combined key range does not pull in another Base SST.
+    fn merge_partition_l0_inputs(
+        candidate_levels: &[Level],
+        selected: &SubLevelSstables,
+        candidate: &SubLevelSstables,
+        max_compaction_bytes: u64,
+        max_file_count: u64,
+        max_level_count: usize,
+    ) -> Option<SubLevelSstables> {
+        let mut selected_ids = HashSet::new();
+        selected_ids.extend(
+            selected
+                .sstable_infos
+                .iter()
+                .flat_map(|(_, ssts)| ssts.iter().map(|sst| sst.sst_id)),
+        );
+        let old_file_count = selected_ids.len();
+        selected_ids.extend(
+            candidate
+                .sstable_infos
+                .iter()
+                .flat_map(|(_, ssts)| ssts.iter().map(|sst| sst.sst_id)),
+        );
+        if selected_ids.len() == old_file_count {
+            return None;
+        }
+
+        let mut merged = SubLevelSstables::default();
+        for level in candidate_levels {
+            let ssts = level
+                .table_infos
+                .iter()
+                .filter(|sst| selected_ids.contains(&sst.sst_id))
+                .cloned()
+                .collect_vec();
+            if ssts.is_empty() {
+                continue;
+            }
+            merged.total_file_count += ssts.len();
+            merged.total_file_size += ssts.iter().map(|sst| sst.sst_size).sum::<u64>();
+            merged.sstable_infos.push((level.sub_level_id, ssts));
+        }
+
+        if merged.total_file_count != selected_ids.len()
+            || merged.total_file_size > max_compaction_bytes
+            || merged.total_file_count as u64 > max_file_count
+            || merged.sstable_infos.len() > max_level_count
+        {
+            return None;
+        }
+        merged.expected = selected.expected;
+        Some(merged)
+    }
+
+    fn same_sst_ids(left: &[SstableInfo], right: &[SstableInfo]) -> bool {
+        left.len() == right.len()
+            && left
+                .iter()
+                .zip(right)
+                .all(|(left, right)| left.sst_id == right.sst_id)
     }
 }
 
@@ -873,6 +984,166 @@ pub mod tests {
                 .is_none()
         );
         assert!(stats.skip_by_count_limit > 0);
+    }
+
+    fn free_growth_test_levels(base_tables: Vec<SstableInfo>) -> Levels {
+        Levels {
+            levels: vec![generate_level(1, base_tables)],
+            l0: generate_l0_nonoverlapping_multi_sublevels(vec![
+                vec![
+                    generate_table(1, 1, 10, 20, 1),
+                    generate_table(2, 1, 60, 70, 1),
+                ],
+                vec![
+                    generate_table(3, 1, 10, 20, 2),
+                    generate_table(4, 1, 60, 70, 2),
+                ],
+            ]),
+            ..Default::default()
+        }
+    }
+
+    fn free_growth_test_picker(mode: L0PickerMode) -> LevelCompactionPicker {
+        let config = Arc::new(
+            CompactionConfigBuilder::new()
+                .max_compaction_bytes(10_000)
+                .sub_level_max_compaction_bytes(1)
+                .max_bytes_for_level_base(1_000)
+                .level0_sub_level_compact_level_count(2)
+                .build(),
+        );
+        LevelCompactionPicker::new_with_mode(
+            1,
+            config,
+            Arc::new(CompactionTaskValidator::unused()),
+            Arc::new(CompactionDeveloperConfig {
+                enable_trivial_move: false,
+                ..Default::default()
+            }),
+            mode,
+        )
+    }
+
+    fn l0_input_count(input: &CompactionInput) -> usize {
+        input
+            .input_levels
+            .iter()
+            .filter(|level| level.level_idx == 0)
+            .map(|level| level.table_infos.len())
+            .sum()
+    }
+
+    #[test]
+    fn partition_to_base_grows_l0_without_new_target() {
+        let levels = free_growth_test_levels(vec![generate_table(100, 1, 0, 100, 0)]);
+        let handlers = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        let mut picker = free_growth_test_picker(L0PickerMode::SingleTablePartition {
+            min_l0_level_count: 2,
+        });
+
+        let input = picker
+            .pick_compaction(&levels, &handlers, &mut LocalPickerStatistic::default())
+            .unwrap();
+
+        assert_eq!(l0_input_count(&input), 4);
+        assert_eq!(input.input_levels.last().unwrap().table_infos.len(), 1);
+        assert_eq!(
+            input.input_levels.last().unwrap().table_infos[0].sst_id,
+            100
+        );
+    }
+
+    #[test]
+    fn partition_to_base_does_not_grow_across_new_target() {
+        let levels = free_growth_test_levels(vec![
+            generate_table(100, 1, 0, 40, 0),
+            generate_table(101, 1, 50, 100, 0),
+        ]);
+        let handlers = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        let mut picker = free_growth_test_picker(L0PickerMode::SingleTablePartition {
+            min_l0_level_count: 2,
+        });
+
+        let input = picker
+            .pick_compaction(&levels, &handlers, &mut LocalPickerStatistic::default())
+            .unwrap();
+
+        assert_eq!(l0_input_count(&input), 2);
+        assert_eq!(input.input_levels.last().unwrap().table_infos.len(), 1);
+    }
+
+    #[test]
+    fn legacy_to_base_does_not_use_partition_free_growth() {
+        let levels = free_growth_test_levels(vec![generate_table(100, 1, 0, 100, 0)]);
+        let handlers = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        let mut picker = free_growth_test_picker(L0PickerMode::Legacy);
+
+        let input = picker
+            .pick_compaction(&levels, &handlers, &mut LocalPickerStatistic::default())
+            .unwrap();
+
+        assert_eq!(l0_input_count(&input), 2);
+    }
+
+    #[test]
+    fn partition_to_base_order_is_independent_of_legacy_sub_level_bytes() {
+        let levels = Levels {
+            levels: vec![generate_level(
+                1,
+                vec![
+                    generate_table(100, 1, 0, 99, 0),
+                    generate_table(101, 1, 200, 209, 0),
+                ],
+            )],
+            l0: generate_l0_nonoverlapping_multi_sublevels(vec![
+                vec![
+                    generate_table(1, 1, 0, 99, 1),
+                    generate_table(2, 1, 200, 209, 1),
+                ],
+                vec![
+                    generate_table(3, 1, 0, 99, 2),
+                    generate_table(4, 1, 200, 209, 2),
+                ],
+                vec![generate_table(5, 1, 200, 209, 3)],
+            ]),
+            ..Default::default()
+        };
+        let handlers = vec![LevelHandler::new(0), LevelHandler::new(1)];
+
+        for sub_level_bytes in [128, 512] {
+            let config = Arc::new(
+                CompactionConfigBuilder::new()
+                    .max_compaction_bytes(10_000)
+                    .sub_level_max_compaction_bytes(sub_level_bytes)
+                    .max_bytes_for_level_base(1_000)
+                    .level0_sub_level_compact_level_count(2)
+                    .build(),
+            );
+            let mut picker = LevelCompactionPicker::new_with_mode(
+                1,
+                config,
+                Arc::new(CompactionTaskValidator::unused()),
+                Arc::new(CompactionDeveloperConfig {
+                    enable_trivial_move: false,
+                    ..Default::default()
+                }),
+                L0PickerMode::SingleTablePartition {
+                    min_l0_level_count: 2,
+                },
+            );
+
+            let input = picker
+                .pick_compaction(&levels, &handlers, &mut LocalPickerStatistic::default())
+                .unwrap();
+            let selected_ids = input
+                .input_levels
+                .iter()
+                .filter(|level| level.level_idx == 0)
+                .flat_map(|level| level.table_infos.iter())
+                .map(|sst| sst.sst_id.as_raw_id())
+                .collect_vec();
+            assert_eq!(selected_ids, vec![5, 4, 2]);
+        }
     }
 
     #[test]
