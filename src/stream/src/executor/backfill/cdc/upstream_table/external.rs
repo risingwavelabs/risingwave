@@ -125,6 +125,7 @@ impl ExternalStorageTable {
                     schema_name: self.schema_name.clone(),
                     table_name: self.table_name.clone(),
                 },
+                self.table_id.as_raw_id(),
             )
             .await
     }

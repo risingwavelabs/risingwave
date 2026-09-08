@@ -117,7 +117,12 @@ fn tcp_keepalive_from_config(config: &PostgresConfig) -> Option<TcpKeepaliveConf
 
 async fn ensure_no_foreign_key(config: &PostgresConfig) -> Result<()> {
     let pg_conn = config.pg_connection_config();
-    let client = create_pg_client(&pg_conn, tcp_keepalive_from_config(config)).await?;
+    let client = create_pg_client(
+        &pg_conn,
+        tcp_keepalive_from_config(config),
+        Some("risingwave-postgres-sink-validator"),
+    )
+    .await?;
 
     ensure_no_foreign_key_with_client(&client, &config.schema, &config.table).await
 }
@@ -329,12 +334,13 @@ impl Sink for PostgresSink {
         Ok(())
     }
 
-    async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+    async fn new_log_sinker(&self, writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         PostgresSinkWriter::new(
             self.config.clone(),
             self.schema.clone(),
             self.pk_indices.clone(),
             self.is_append_only,
+            &writer_param,
         )
         .await
     }
@@ -470,11 +476,16 @@ impl PostgresSinkWriter {
         schema: Schema,
         pk_indices: Vec<usize>,
         is_append_only: bool,
+        writer_param: &SinkWriterParam,
     ) -> Result<Self> {
         let tcp_keepalive = tcp_keepalive_from_config(&config);
 
         let pg_conn = config.pg_connection_config();
-        let client = create_pg_client(&pg_conn, tcp_keepalive).await?;
+        let application_name = format!(
+            "risingwave-postgres-sink-{}-{}",
+            writer_param.sink_id, writer_param.actor_id
+        );
+        let client = create_pg_client(&pg_conn, tcp_keepalive, Some(&application_name)).await?;
 
         ensure_no_foreign_key_with_client(&client, &config.schema, &config.table).await?;
 

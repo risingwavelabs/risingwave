@@ -244,7 +244,8 @@ impl<T: CdcSourceTypeTrait> DebeziumSplitEnumerator<T> {
             .ok_or_else(|| anyhow::anyhow!("missing `slot.name` in CDC properties"))?;
 
         // No TCP keepalive for CDC enumerator
-        let client = create_pg_client(&pg_conn, None)
+        let application_name = format!("risingwave-postgres-source-enumerator-{}", self.source_id);
+        let client = create_pg_client(&pg_conn, None, Some(&application_name))
             .await
             .context("failed to create the PostgreSQL client")?;
 
