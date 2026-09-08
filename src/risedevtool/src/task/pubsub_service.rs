@@ -41,7 +41,7 @@ impl DockerServiceConfig for PubsubConfig {
     }
 
     fn ports(&self) -> Vec<(String, String)> {
-        vec![(self.port.to_string(), "8900".to_owned())]
+        vec![(format!("{}:{}", self.address, self.port), "8900".to_owned())]
     }
 }
 

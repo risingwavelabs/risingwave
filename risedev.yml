@@ -1805,7 +1805,7 @@ template:
 
     user-managed: false
 
-    image: "gcr.io/google.com/cloudsdktool/google-cloud-cli:475.0.0-emulators"
+    image: "gcr.io/google.com/cloudsdktool/google-cloud-cli:583.0.0-emulators"
 
     address: "127.0.0.1"
 
