@@ -41,8 +41,10 @@ pub mod StaticCompactionGroupId {
 
 /// The split will follow the following rules:
 /// 1. Ssts with `split_key` will be split into two separate ssts and their `key_range` will be changed `sst_1`: [`sst.key_range.right`, `split_key`) `sst_2`: [`split_key`, `sst.key_range.right`].
-/// 2. Currently only `vnode` 0 and `vnode` max is supported.
-/// 3. Due to the above rule, `vnode` max will be rewritten as `table_id` + 1, vnode 0
+/// 2. Compaction-group membership can only be split at table boundaries (`vnode` 0 or max).
+/// 3. A single-table SST can additionally be split at an internal vnode boundary while remaining
+///    in the same compaction group.
+/// 4. For compaction-group splits, `vnode` max will be rewritten as `table_id` + 1, vnode 0.
 pub mod group_split {
     use std::cmp::Ordering;
     use std::collections::BTreeSet;
@@ -136,6 +138,62 @@ pub mod group_split {
         left_size: u64,
         right_size: u64,
     ) -> (Option<SstableInfo>, Option<SstableInfo>) {
+        let (table_ids_l, table_ids_r) =
+            split_table_ids_with_split_key(&origin_sst_info.table_ids, split_key.clone());
+        split_sst_inner(
+            origin_sst_info,
+            new_sst_id,
+            split_key,
+            left_size,
+            right_size,
+            table_ids_l,
+            table_ids_r,
+        )
+    }
+
+    /// Split a single-table SST at an internal vnode boundary without changing group membership.
+    /// The table id remains present in both logical SSTs because both ranges belong to the same
+    /// state table and compaction group.
+    pub fn split_sst_at_vnode_boundary(
+        origin_sst_info: SstableInfo,
+        new_sst_id: &mut HummockSstableId,
+        split_key: Bytes,
+        left_size: u64,
+        right_size: u64,
+    ) -> (Option<SstableInfo>, Option<SstableInfo>) {
+        let split_user_key = FullKey::decode(&split_key).user_key;
+        assert_ne!(
+            0,
+            split_user_key.get_vnode_id(),
+            "vnode partition boundary must be inside a table"
+        );
+        assert_eq!(
+            origin_sst_info.table_ids.as_slice(),
+            &[split_user_key.table_id],
+            "vnode partition splitting only supports a single-table SST"
+        );
+
+        let table_ids = origin_sst_info.table_ids.clone();
+        split_sst_inner(
+            origin_sst_info,
+            new_sst_id,
+            split_key,
+            left_size,
+            right_size,
+            table_ids.clone(),
+            table_ids,
+        )
+    }
+
+    fn split_sst_inner(
+        origin_sst_info: SstableInfo,
+        new_sst_id: &mut HummockSstableId,
+        split_key: Bytes,
+        left_size: u64,
+        right_size: u64,
+        table_ids_l: Vec<TableId>,
+        table_ids_r: Vec<TableId>,
+    ) -> (Option<SstableInfo>, Option<SstableInfo>) {
         let mut origin_sst_info = origin_sst_info.get_inner();
         let mut branch_table_info = origin_sst_info.clone();
         branch_table_info.sst_id = *new_sst_id;
@@ -152,16 +210,13 @@ pub mod group_split {
             };
 
             let r = KeyRange {
-                left: split_key.clone(),
+                left: split_key,
                 right: key_range.right.clone(),
                 right_exclusive: key_range.right_exclusive,
             };
 
             (l, r)
         };
-        let (table_ids_l, table_ids_r) =
-            split_table_ids_with_split_key(&origin_sst_info.table_ids, split_key);
-
         // rebuild the key_range and size and sstable file size
         {
             // origin_sst_info

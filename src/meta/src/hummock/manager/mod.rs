@@ -194,6 +194,9 @@ pub struct HummockManager {
     /// In-memory cache of prefetched compaction task ids to reduce per-task DB round-trips.
     prefetched_compaction_task_ids: PrefetchedSequence,
     table_id_to_table_option: parking_lot::RwLock<HashMap<TableId, TableOption>>,
+    /// Table vnode counts are immutable after creation. Cache them for commit-time splitting and
+    /// transient partition-aware L0 scoring without persisting derived compaction state.
+    table_id_to_vnode_count: parking_lot::RwLock<HashMap<TableId, usize>>,
 }
 
 pub type HummockManagerRef = Arc<HummockManager>;
@@ -388,6 +391,7 @@ impl HummockManager {
             gc_manager,
             prefetched_compaction_task_ids: PrefetchedSequence::new(),
             table_id_to_table_option: RwLock::new(HashMap::new()),
+            table_id_to_vnode_count: RwLock::new(HashMap::new()),
         };
         let instance = Arc::new(instance);
         let version_stat_metrics = instance.metrics.clone();
