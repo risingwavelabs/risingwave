@@ -1304,11 +1304,11 @@ impl DatabaseCheckpointControl {
 
         if !matches!(&command, Some(Command::CreateStreamingJob { .. }))
             && self.database_info.is_empty()
+            && self
+                .independent_checkpoint_job_controls
+                .values()
+                .all(|job| job.running().is_none())
         {
-            assert!(
-                self.independent_checkpoint_job_controls.is_empty(),
-                "should not have snapshot backfill job when there is no normal job in database"
-            );
             // Drop the guard to remove the metric series of this database.
             self.last_committed_barrier_time = None;
             // skip the command when there is nothing to do with the barrier

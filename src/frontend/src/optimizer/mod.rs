@@ -1274,7 +1274,7 @@ impl LogicalPlanRoot {
                 )
                 .into());
             }
-            if target_table.is_some() || is_iceberg_engine_internal {
+            if target_table.is_some() {
                 return Err(ErrorCode::InvalidInputSyntax(
                     "Iceberg sinks with `enable_pk_index = 'true'` cannot bypass snapshot backfill"
                         .to_owned(),
