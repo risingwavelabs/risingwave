@@ -78,6 +78,7 @@ pub struct PickerInfo {
     pub select_level: usize,
     pub target_level: usize,
     pub picker_type: PickerType,
+    eligible: bool,
     input: PickerInput,
 }
 
@@ -124,6 +125,49 @@ pub struct SelectContext {
     // level, which equals to `base_level -= 1;`.
     pub base_level: usize,
     pub score_levels: Vec<PickerInfo>,
+}
+
+fn effective_level_size(levels: &Levels, handlers: &[LevelHandler], level: usize) -> u64 {
+    let target_level = level as u32;
+    let incoming_size = handlers
+        .iter()
+        .enumerate()
+        .filter(|(source_level, _)| *source_level != level)
+        .fold(0u64, |size, (_, handler)| {
+            size.saturating_add(handler.pending_output_file_size(target_level))
+        });
+    let outgoing_size = handlers[level]
+        .pending_file_size()
+        .saturating_sub(handlers[level].pending_output_file_size(target_level));
+
+    levels
+        .get_level(level)
+        .total_file_size
+        .saturating_sub(outgoing_size)
+        .saturating_add(incoming_size)
+}
+
+fn fill_score(level_size: u64, level_target_size: u64) -> u64 {
+    let score =
+        (level_size as u128) * (SCORE_BASE as u128) / (std::cmp::max(1, level_target_size) as u128);
+    std::cmp::min(score, u64::MAX as u128) as u64
+}
+
+/// Scale a source-level fill score by the fill of its output level.
+///
+/// The 1% floor matches Pebble's protection against an unbounded priority when the output level is
+/// empty. Admission remains separate: L0 must pass this adjusted score, while positive levels only
+/// need their own fill score to exceed the configured target.
+pub(super) fn adjust_score_for_output_level(
+    source_score: u64,
+    output_level_size: u64,
+    output_level_target_size: u64,
+) -> u64 {
+    let output_target = std::cmp::max(1, output_level_target_size);
+    let min_output_size = std::cmp::max(1, output_target / SCORE_BASE);
+    let denominator = std::cmp::max(min_output_size, output_level_size);
+    let score = (source_score as u128) * (output_target as u128) / (denominator as u128);
+    std::cmp::min(score, u64::MAX as u128) as u64
 }
 
 pub struct DynamicLevelSelectorCore {
@@ -325,12 +369,19 @@ impl DynamicLevelSelectorCore {
                     select_level: 0,
                     target_level: 0,
                     picker_type: PickerType::Tier,
+                    eligible: true,
                     input: PickerInput::Global,
                 })
             }
 
             let single_table_candidates = single_table_compaction_group.and_then(|group| {
-                group.build_l0_candidates(&self.config, &levels.l0, &handlers[0])
+                group.build_l0_candidates(
+                    &self.config,
+                    &levels.l0,
+                    &handlers[0],
+                    effective_level_size(levels, handlers, ctx.base_level),
+                    ctx.level_max_bytes[ctx.base_level],
+                )
             });
             if let Some(candidates) = single_table_candidates {
                 ctx.score_levels
@@ -345,6 +396,7 @@ impl DynamicLevelSelectorCore {
                             SingleTableL0PickerType::ToBase => PickerType::ToBase,
                             SingleTableL0PickerType::Intra => PickerType::Intra,
                         },
+                        eligible: true,
                         input: PickerInput::SingleTablePartition {
                             partition_score: candidate.partition_score,
                             l0: candidate.l0,
@@ -364,17 +416,36 @@ impl DynamicLevelSelectorCore {
             }
             let output_file_size =
                 handlers[level_idx].pending_output_file_size(level.level_idx + 1);
-            let total_size = level.total_file_size.saturating_sub(output_file_size);
-            if total_size == 0 {
+            let legacy_level_size = level.total_file_size.saturating_sub(output_file_size);
+            let use_inter_level_score = single_table_compaction_group.is_some();
+            let level_size = if use_inter_level_score {
+                effective_level_size(levels, handlers, level_idx)
+            } else {
+                legacy_level_size
+            };
+            if level_size == 0 {
                 continue;
             }
 
+            let raw_score = fill_score(level_size, ctx.level_max_bytes[level_idx]);
+            let eligible = raw_score > SCORE_BASE;
+            let score = if use_inter_level_score && eligible {
+                let output_level = level_idx + 1;
+                adjust_score_for_output_level(
+                    raw_score,
+                    effective_level_size(levels, handlers, output_level),
+                    ctx.level_max_bytes[output_level],
+                )
+            } else {
+                raw_score
+            };
             ctx.score_levels.push({
                 PickerInfo {
-                    score: total_size * SCORE_BASE / ctx.level_max_bytes[level_idx],
+                    score,
                     select_level: level_idx,
                     target_level: level_idx + 1,
                     picker_type: PickerType::BottomLevel,
+                    eligible,
                     input: PickerInput::Global,
                 }
             });
@@ -434,6 +505,7 @@ impl DynamicLevelSelectorCore {
                 select_level: 0,
                 target_level: ctx.base_level,
                 picker_type: PickerType::ToBase,
+                eligible: true,
                 input: PickerInput::Global,
             });
         }
@@ -443,6 +515,7 @@ impl DynamicLevelSelectorCore {
                 select_level: 0,
                 target_level: 0,
                 picker_type: PickerType::Intra,
+                eligible: true,
                 input: PickerInput::Global,
             });
         }
@@ -554,8 +627,8 @@ impl CompactionSelector for DynamicLevelSelector {
             compaction_group.compaction_config.clone(),
         ));
         for picker_info in &ctx.score_levels {
-            if picker_info.score <= SCORE_BASE {
-                return None;
+            if !picker_info.eligible {
+                continue;
             }
             let mut picker = dynamic_level_core.create_compaction_picker(
                 picker_info,
@@ -620,6 +693,7 @@ pub mod tests {
     use std::sync::Arc;
 
     use itertools::Itertools;
+    use risingwave_common::catalog::TableId;
     use risingwave_common::constants::hummock::CompactionFilterFlag;
     use risingwave_hummock_sdk::HummockCompactionTaskId;
     use risingwave_hummock_sdk::compact_task::{CompactTask, CompactTaskAssignment};
@@ -669,6 +743,116 @@ pub mod tests {
                 in_progress_compactions,
             },
         )
+    }
+
+    #[test]
+    fn effective_level_size_accounts_for_pending_flow() {
+        let base_sst = generate_table(1, 1, 0, 99, 1);
+        let incoming_l0_sst = generate_table(2, 1, 0, 19, 2);
+        let levels = Levels {
+            levels: vec![generate_level(1, vec![base_sst.clone()])],
+            ..Default::default()
+        };
+        let mut handlers = vec![LevelHandler::new(0), LevelHandler::new(1)];
+
+        assert_eq!(super::effective_level_size(&levels, &handlers, 1), 100);
+
+        handlers[1].add_pending_task(1, 2, [&base_sst]);
+        handlers[0].add_pending_task(2, 1, [&incoming_l0_sst]);
+        assert_eq!(super::effective_level_size(&levels, &handlers, 1), 20);
+    }
+
+    #[test]
+    fn inter_level_score_uses_output_fill() {
+        assert_eq!(super::fill_score(200, 100), 200);
+        assert_eq!(super::adjust_score_for_output_level(200, 400, 100), 50);
+        assert_eq!(super::adjust_score_for_output_level(200, 50, 100), 400);
+        assert_eq!(super::adjust_score_for_output_level(200, 0, 100), 20_000);
+    }
+
+    #[test]
+    fn single_table_strategy_adjusts_positive_level_priority_only() {
+        let config = CompactionConfig {
+            split_weight_by_vnode: 8,
+            ..CompactionConfigBuilder::new()
+                .max_bytes_for_level_base(100)
+                .max_bytes_for_level_multiplier(10)
+                .max_level(3)
+                .build()
+        };
+        let core = DynamicLevelSelectorCore::new(
+            Arc::new(config),
+            Arc::new(CompactionDeveloperConfig::default()),
+        );
+        let levels = Levels {
+            levels: vec![
+                generate_level(1, generate_tables(1..2, 0..100, 1, 200)),
+                generate_level(2, generate_tables(2..3, 0..100, 1, 4_000)),
+                generate_level(3, generate_tables(3..4, 0..100, 1, 10_000)),
+            ],
+            ..Default::default()
+        };
+        let handlers = (0..=3).map(LevelHandler::new).collect_vec();
+
+        let legacy = core.get_priority_levels(&levels, &handlers);
+        let legacy_l1 = legacy
+            .score_levels
+            .iter()
+            .find(|candidate| candidate.select_level == 1)
+            .unwrap();
+        assert_eq!(legacy_l1.score, 200);
+        assert!(legacy_l1.eligible);
+
+        let partition = core.get_priority_levels_with_single_table_strategy(
+            &levels,
+            &handlers,
+            Some(SingleTableCompactionGroup::new(TableId::new(1), 256)),
+        );
+        let partition_l1 = partition
+            .score_levels
+            .iter()
+            .find(|candidate| candidate.select_level == 1)
+            .unwrap();
+        assert_eq!(partition_l1.score, 50);
+        // Positive levels stay eligible based on their own fill even when a fuller output level
+        // lowers their scheduling priority below 1.0.
+        assert!(partition_l1.eligible);
+    }
+
+    #[test]
+    fn adjusted_positive_level_below_one_remains_runnable() {
+        let config = CompactionConfig {
+            split_weight_by_vnode: 8,
+            ..CompactionConfigBuilder::new()
+                .max_bytes_for_level_base(100)
+                .max_bytes_for_level_multiplier(10)
+                .max_level(2)
+                .build()
+        };
+        let group = CompactionGroup::new(1, config);
+        let levels = Levels {
+            levels: vec![
+                generate_level(1, generate_tables(1..2, 0..100, 1, 200)),
+                generate_level(2, generate_tables(2..3, 0..100, 1, 4_000)),
+            ],
+            ..Default::default()
+        };
+        let mut handlers = (0..=2).map(LevelHandler::new).collect_vec();
+        let mut selector = DynamicLevelSelector::default();
+        let task = pick_compaction_with_in_progress(
+            &mut selector,
+            1,
+            &group,
+            &levels,
+            &mut handlers,
+            &mut LocalSelectorStatistic::default(),
+            &InProgressCompactionView::default(),
+            Some(SingleTableCompactionGroup::new(TableId::new(1), 256)),
+        )
+        .unwrap();
+
+        assert_eq!(task.input.input_levels[0].level_idx, 1);
+        assert_eq!(task.input.target_level, 2);
     }
 
     #[test]

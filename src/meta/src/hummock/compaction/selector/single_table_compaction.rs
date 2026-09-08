@@ -18,7 +18,7 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::level::OverlappingLevel;
 use risingwave_pb::hummock::CompactionConfig;
 
-use super::level_selector::SCORE_BASE;
+use super::level_selector::{SCORE_BASE, adjust_score_for_output_level};
 use crate::hummock::compaction::vnode_partition::L0VnodePartitionView;
 use crate::hummock::level_handler::LevelHandler;
 
@@ -51,6 +51,8 @@ impl SingleTableCompactionGroup {
         config: &CompactionConfig,
         l0: &OverlappingLevel,
         l0_handler: &LevelHandler,
+        effective_base_level_size: u64,
+        base_level_target_size: u64,
     ) -> Option<Vec<SingleTableL0Candidate>> {
         let partition_view = L0VnodePartitionView::build(
             self.table_id,
@@ -71,9 +73,18 @@ impl SingleTableCompactionGroup {
             })
             .collect::<Vec<_>>();
 
-        let Some(global_l0_score) = partitions.iter().map(|partition| partition.score).max() else {
+        let Some(raw_global_l0_score) = partitions.iter().map(|partition| partition.score).max()
+        else {
             return Some(vec![]);
         };
+        let global_l0_score = adjust_score_for_output_level(
+            raw_global_l0_score,
+            effective_base_level_size,
+            base_level_target_size,
+        );
+        if global_l0_score <= SCORE_BASE {
+            return Some(vec![]);
+        }
 
         let mut candidates = Vec::with_capacity(partitions.len() * 2);
         for partition in &partitions {
@@ -232,7 +243,39 @@ mod tests {
                 .collect(),
         );
         let candidates = SingleTableCompactionGroup::new(TableId::new(1), 256)
-            .build_l0_candidates(&config, &l0, &LevelHandler::new(0))
+            .build_l0_candidates(&config, &l0, &LevelHandler::new(0), 0, u64::MAX)
+            .unwrap();
+        assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn base_pressure_controls_partition_l0_admission() {
+        let config = CompactionConfig {
+            split_weight_by_vnode: 8,
+            ..CompactionConfigBuilder::new()
+                .level0_sub_level_compact_level_count(2)
+                .build()
+        };
+        let l0 = two_partition_l0(4, 0);
+        let group = SingleTableCompactionGroup::new(TableId::new(1), 256);
+
+        // Raw depth score is 2.0. A healthy Base keeps the score unchanged.
+        let candidates = group
+            .build_l0_candidates(&config, &l0, &LevelHandler::new(0), 100, 100)
+            .unwrap();
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].score, 201);
+
+        // An underfilled Base raises L0 priority relative to lower-level work.
+        let candidates = group
+            .build_l0_candidates(&config, &l0, &LevelHandler::new(0), 50, 100)
+            .unwrap();
+        assert_eq!(candidates[0].score, 401);
+
+        // Once Base grows beyond 2x its target, the adjusted score no longer passes the strict
+        // admission threshold, so neither ToBase nor its Intra fallback is scheduled.
+        let candidates = group
+            .build_l0_candidates(&config, &l0, &LevelHandler::new(0), 201, 100)
             .unwrap();
         assert!(candidates.is_empty());
     }
