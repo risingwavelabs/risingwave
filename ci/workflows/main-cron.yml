@@ -52,7 +52,7 @@ steps:
       build.env("CI_STEPS") !~ /(^|,)disable-build(,|$$)/
     plugins:
       - docker-compose#v5.5.0: *docker-compose
-    timeout_in_minutes: 20
+    timeout_in_minutes: 25
     retry: *auto-retry
 
   - label: "build other components"
