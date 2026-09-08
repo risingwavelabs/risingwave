@@ -1020,6 +1020,8 @@ fn derive_with_options_for_cdc_table(
                         source_database_name
                     ).into());
                 }
+                reject_debezium_topic_name_rewrite("MySQL", "database", db_name)?;
+                reject_debezium_topic_name_rewrite("MySQL", "table", table_name)?;
                 with_options.insert(DATABASE_NAME_KEY.into(), db_name.into());
                 with_options.insert(TABLE_NAME_KEY.into(), table_name.into());
                 // Return original external_table_name unchanged for MySQL
@@ -1028,6 +1030,8 @@ fn derive_with_options_for_cdc_table(
             POSTGRES_CDC_CONNECTOR => {
                 let (schema_name, table_name) =
                     parse_postgres_cdc_external_table_name(&external_table_name)?;
+                reject_debezium_topic_name_rewrite("Postgres", "schema", &schema_name)?;
+                reject_debezium_topic_name_rewrite("Postgres", "table", &table_name)?;
 
                 // insert 'schema.name' into connect properties
                 with_options.insert(SCHEMA_NAME_KEY.into(), schema_name);
@@ -1089,6 +1093,8 @@ fn derive_with_options_for_cdc_table(
                         ).into());
                     }
                 };
+                reject_debezium_topic_name_rewrite("SQL Server", "schema", schema_name)?;
+                reject_debezium_topic_name_rewrite("SQL Server", "table", table_name)?;
 
                 // Insert schema and table names into connector properties
                 with_options.insert(SCHEMA_NAME_KEY.into(), schema_name.into());
@@ -1108,6 +1114,31 @@ fn derive_with_options_for_cdc_table(
         };
     }
     unreachable!("All valid CDC connectors should have returned by now")
+}
+
+/// Reject identifiers that Debezium cannot preserve in its topic name.
+///
+/// RisingWave currently derives the CDC routing key from that topic. Debezium replaces every
+/// character outside `[A-Za-z0-9._-]` with `_`, which is lossy and can make the runtime routing
+/// key differ from the table name stored in the catalog.
+fn reject_debezium_topic_name_rewrite(
+    connector: &str,
+    component_kind: &str,
+    component: &str,
+) -> Result<()> {
+    if let Some(invalid_char) = component
+        .chars()
+        .find(|c| !c.is_ascii_alphanumeric() && !matches!(*c, '.' | '_' | '-'))
+    {
+        return Err(ErrorCode::InvalidInputSyntax(format!(
+            "the {connector} CDC {component_kind} name `{component}` contains character \
+             {invalid_char:?}, which Debezium replaces with `_` in topic names; RisingWave \
+             cannot reliably route CDC events for this table"
+        ))
+        .into());
+    }
+
+    Ok(())
 }
 
 /// Parse the schema/table name from the CDC `TABLE` clause.
@@ -2982,6 +3013,90 @@ mod tests {
                 parse_postgres_cdc_external_table_name(input).is_err(),
                 "input should be rejected: {input}"
             );
+        }
+    }
+
+    fn cdc_source_options(connector: &str, database_name: &str) -> WithOptionsSecResolved {
+        WithOptionsSecResolved::without_secrets(BTreeMap::from([
+            (UPSTREAM_SOURCE_KEY.to_owned(), connector.to_owned()),
+            ("database.name".to_owned(), database_name.to_owned()),
+        ]))
+    }
+
+    #[test]
+    fn test_reject_cdc_table_names_rewritten_in_debezium_topics() {
+        use risingwave_connector::source::cdc::{
+            MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, SQL_SERVER_CDC_CONNECTOR,
+        };
+
+        let cases = [
+            (
+                cdc_source_options(MYSQL_CDC_CONNECTOR, "safe_db"),
+                "safe_db.foo\"bar",
+                "MySQL CDC table name `foo\"bar` contains character '\"'",
+            ),
+            (
+                cdc_source_options(MYSQL_CDC_CONNECTOR, "unsafe db"),
+                "unsafe db.orders",
+                "MySQL CDC database name `unsafe db` contains character ' '",
+            ),
+            (
+                cdc_source_options(POSTGRES_CDC_CONNECTOR, "postgres"),
+                "public.\"foo\"\"bar\"",
+                "Postgres CDC table name `foo\"bar` contains character '\"'",
+            ),
+            (
+                cdc_source_options(POSTGRES_CDC_CONNECTOR, "postgres"),
+                "\"unsafe schema\".orders",
+                "Postgres CDC schema name `unsafe schema` contains character ' '",
+            ),
+            (
+                cdc_source_options(SQL_SERVER_CDC_CONNECTOR, "mydb"),
+                "dbo.foo'bar",
+                "SQL Server CDC table name `foo'bar` contains character '\\''",
+            ),
+        ];
+
+        for (source_options, external_table_name, expected_error) in cases {
+            let error =
+                derive_with_options_for_cdc_table(&source_options, external_table_name.to_owned())
+                    .unwrap_err();
+            let error = error.to_string();
+            assert!(
+                error.contains(expected_error),
+                "unexpected error for {external_table_name}: {error}"
+            );
+            assert!(error.contains("which Debezium replaces with `_` in topic names"));
+        }
+    }
+
+    #[test]
+    fn test_allow_cdc_table_names_preserved_in_debezium_topics() {
+        use risingwave_connector::source::cdc::{
+            MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, SQL_SERVER_CDC_CONNECTOR,
+        };
+
+        for (source_options, external_table_name, expected_normalized_name) in [
+            (
+                cdc_source_options(MYSQL_CDC_CONNECTOR, "safe_db"),
+                "safe_db.orders-v2",
+                "safe_db.orders-v2",
+            ),
+            (
+                cdc_source_options(POSTGRES_CDC_CONNECTOR, "postgres"),
+                "public.\"MixedCase\"",
+                "public.\"MixedCase\"",
+            ),
+            (
+                cdc_source_options(SQL_SERVER_CDC_CONNECTOR, "mydb"),
+                "mydb.dbo.orders_v2",
+                "dbo.orders_v2",
+            ),
+        ] {
+            let (_, normalized_name) =
+                derive_with_options_for_cdc_table(&source_options, external_table_name.to_owned())
+                    .unwrap();
+            assert_eq!(normalized_name, expected_normalized_name);
         }
     }
 
