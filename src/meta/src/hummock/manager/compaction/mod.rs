@@ -29,6 +29,7 @@ use rand::rng as thread_rng;
 use rand::seq::SliceRandom;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::meta::default::compaction_config;
+use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_hummock_sdk::compact_task::{CompactTask, CompactTaskAssignment, ReportTask};
 use risingwave_hummock_sdk::compaction_group::StateTableId;
@@ -62,8 +63,8 @@ use crate::hummock::compaction::in_progress_compaction::InProgressCompactionView
 use crate::hummock::compaction::selector::level_selector::PickerInfo;
 use crate::hummock::compaction::selector::{
     DynamicLevelSelector, DynamicLevelSelectorCore, LocalSelectorStatistic, ManualCompactionOption,
-    ManualCompactionSelector, SpaceReclaimCompactionSelector, TombstoneCompactionSelector,
-    TtlCompactionSelector, VnodeWatermarkCompactionSelector,
+    ManualCompactionSelector, SingleTableCompactionGroup, SpaceReclaimCompactionSelector,
+    TombstoneCompactionSelector, TtlCompactionSelector, VnodeWatermarkCompactionSelector,
 };
 use crate::hummock::compaction::{
     CompactStatus, CompactionDeveloperConfig, CompactionSelector,
@@ -345,6 +346,83 @@ impl HummockManager {
             .await
     }
 
+    async fn prefetch_compaction_table_vnode_counts(
+        &self,
+        compaction_groups: &[CompactionGroupId],
+    ) {
+        let single_table_groups = {
+            let versioning = self
+                .versioning
+                .read_with_process_name("prefetch_compaction_table_vnode_counts")
+                .await;
+            compaction_groups
+                .iter()
+                .filter_map(|group_id| {
+                    let members = versioning
+                        .current_version
+                        .state_table_info
+                        .compaction_group_member_table_ids(*group_id);
+                    (members.len() == 1)
+                        .then(|| (*group_id, *members.iter().next().expect("len==1")))
+                })
+                .collect_vec()
+        };
+
+        let missing_groups = {
+            let cache = self.table_id_to_vnode_count.read();
+            single_table_groups
+                .into_iter()
+                .filter(|(_, table_id)| !cache.contains_key(table_id))
+                .collect_vec()
+        };
+        if missing_groups.is_empty() {
+            return;
+        }
+
+        let missing_table_ids = {
+            let config_manager = self
+                .compaction_group_manager
+                .read_with_process_name("prefetch_compaction_table_vnode_counts")
+                .await;
+            missing_groups
+                .into_iter()
+                .filter_map(|(group_id, table_id)| {
+                    config_manager
+                        .try_get_compaction_group_config(group_id)
+                        .is_some_and(|group| group.compaction_config.split_weight_by_vnode > 1)
+                        .then_some(table_id)
+                })
+                .collect_vec()
+        };
+        if missing_table_ids.is_empty() {
+            return;
+        }
+
+        match self
+            .metadata_manager
+            .get_table_catalog_by_ids(&missing_table_ids)
+            .await
+        {
+            Ok(tables) => {
+                let mut cache = self.table_id_to_vnode_count.write();
+                for table in tables {
+                    // A creating table may still carry the catalog placeholder `Some(0)`.
+                    if table.maybe_vnode_count == Some(0) {
+                        continue;
+                    }
+                    cache.insert(table.id, table.vnode_count());
+                }
+            }
+            Err(error) => {
+                warn!(
+                    error = %error.as_report(),
+                    ?missing_table_ids,
+                    "Failed to prefetch table vnode counts for compaction",
+                );
+            }
+        }
+    }
+
     pub async fn get_compact_tasks_impl(
         &self,
         compaction_groups: Vec<CompactionGroupId>,
@@ -352,6 +430,13 @@ impl HummockManager {
         selector: &mut dyn CompactionSelector,
     ) -> Result<(Vec<CompactTask>, Vec<CompactionGroupId>)> {
         let deterministic_mode = self.env.opts.compaction_deterministic_test;
+
+        // Do catalog I/O before taking the compaction/versioning write locks. Membership is
+        // revalidated below before a cached vnode count is passed to the selector.
+        if selector.task_type() == TaskType::Dynamic {
+            self.prefetch_compaction_table_vnode_counts(&compaction_groups)
+                .await;
+        }
 
         let mut compaction_guard = self
             .compaction
@@ -479,6 +564,18 @@ impl HummockManager {
                 compact_task_assignment.tree_ref().values(),
                 compaction_group_id,
             );
+            let single_table_compaction_group =
+                if group_config.compaction_config.split_weight_by_vnode > 1
+                    && let [table_id] = member_table_ids.as_slice()
+                {
+                    self.table_id_to_vnode_count
+                        .read()
+                        .get(table_id)
+                        .copied()
+                        .map(|vnode_count| SingleTableCompactionGroup::new(*table_id, vnode_count))
+                } else {
+                    None
+                };
 
             while let Some(picked_task) = compact_status.get_compact_task(
                 version
@@ -488,6 +585,7 @@ impl HummockManager {
                     .latest_version()
                     .state_table_info
                     .compaction_group_member_table_ids(compaction_group_id),
+                single_table_compaction_group,
                 task_id as HummockCompactionTaskId,
                 &group_config,
                 &mut stats,

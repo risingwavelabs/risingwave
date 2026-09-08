@@ -46,6 +46,30 @@ pub use vnode_watermark_picker::VnodeWatermarkCompactionPicker;
 
 use crate::hummock::level_handler::LevelHandler;
 
+#[derive(Clone, Copy, Debug, Default)]
+pub(crate) enum L0PickerMode {
+    #[default]
+    Legacy,
+    SingleTablePartition {
+        min_l0_level_count: usize,
+    },
+}
+
+impl L0PickerMode {
+    pub(crate) fn is_single_table_partition(self) -> bool {
+        matches!(self, Self::SingleTablePartition { .. })
+    }
+
+    pub(crate) fn min_l0_level_count(self) -> usize {
+        match self {
+            Self::Legacy => 1,
+            Self::SingleTablePartition { min_l0_level_count } => {
+                std::cmp::max(1, min_l0_level_count)
+            }
+        }
+    }
+}
+
 #[derive(Default, Debug)]
 pub struct LocalPickerStatistic {
     pub skip_by_write_amp_limit: u64,

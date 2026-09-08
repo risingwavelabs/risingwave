@@ -20,6 +20,7 @@
 mod emergency_selector;
 pub(crate) mod level_selector;
 mod manual_selector;
+mod single_table_compaction;
 mod space_reclaim_selector;
 mod tombstone_compaction_selector;
 mod ttl_selector;
@@ -37,6 +38,7 @@ use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId};
 use risingwave_pb::hummock::compact_task;
+pub use single_table_compaction::SingleTableCompactionGroup;
 pub use space_reclaim_selector::SpaceReclaimCompactionSelector;
 pub use tombstone_compaction_selector::TombstoneCompactionSelector;
 pub use ttl_selector::TtlCompactionSelector;
@@ -56,6 +58,7 @@ pub struct CompactionSelectorContext<'a> {
     pub group: &'a CompactionGroup,
     pub levels: &'a Levels,
     pub member_table_ids: &'a BTreeSet<TableId>,
+    pub single_table_compaction_group: Option<SingleTableCompactionGroup>,
     pub level_handlers: &'a mut [LevelHandler],
     pub selector_stats: &'a mut LocalSelectorStatistic,
     pub table_id_to_options: &'a HashMap<TableId, TableOption>,

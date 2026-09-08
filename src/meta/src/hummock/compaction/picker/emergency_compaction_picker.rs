@@ -114,3 +114,37 @@ impl EmergencyCompactionPicker {
         tier_compaction_picker.pick_compaction(levels, level_handlers, stats)
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
+    use crate::hummock::compaction::selector::tests::{
+        generate_l0_nonoverlapping_sublevels, generate_level, generate_table,
+    };
+
+    #[test]
+    fn test_legacy_unpartitioned_levels_use_whole_level_in_emergency() {
+        let config = Arc::new(CompactionConfig {
+            split_weight_by_vnode: 8,
+            ..CompactionConfigBuilder::new().build()
+        });
+        let picker = EmergencyCompactionPicker::new(
+            1,
+            config,
+            Arc::new(CompactionDeveloperConfig::default()),
+        );
+        let levels = Levels {
+            l0: generate_l0_nonoverlapping_sublevels(
+                (1..=3).map(|id| generate_table(id, 1, 0, 10, id)).collect(),
+            ),
+            levels: vec![generate_level(1, vec![])],
+            ..Default::default()
+        };
+        let handlers = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        let ret = picker
+            .pick_compaction(&levels, &handlers, &mut LocalPickerStatistic::default())
+            .unwrap();
+        assert_eq!(ret.target_level, 0);
+    }
+}
