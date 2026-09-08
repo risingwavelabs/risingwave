@@ -43,6 +43,7 @@ use risingwave_connector::sink::snowflake_redshift::snowflake::SnowflakeV2Sink;
 use risingwave_connector::sink::{
     CONNECTOR_TYPE_KEY, SINK_SNAPSHOT_OPTION, SINK_TYPE_OPTION, SINK_TYPE_UPSERT,
     SINK_USER_FORCE_APPEND_ONLY_OPTION, SINK_USER_IGNORE_DELETE_OPTION, Sink, enforce_secret_sink,
+    sink_is_exactly_once,
 };
 use risingwave_connector::{
     AUTO_SCHEMA_CHANGE_KEY, SINK_CREATE_TABLE_IF_NOT_EXISTS_KEY, SINK_INTERMEDIATE_TABLE_NAME,
@@ -829,16 +830,6 @@ async fn create_sink_or_replace(
     Ok(PgResponse::empty_result(StatementType::CREATE_SINK))
 }
 
-fn sink_replace_requires_exactly_once_state(sink: &SinkCatalog) -> bool {
-    match sink.properties.get("is_exactly_once") {
-        Some(value) => value.eq_ignore_ascii_case("true"),
-        None => sink
-            .properties
-            .get(CONNECTOR_TYPE_KEY)
-            .is_some_and(|connector| connector.eq_ignore_ascii_case(ICEBERG_SINK)),
-    }
-}
-
 fn prepare_replace_sink(
     handle_args: &mut HandlerArgs,
     stmt: &CreateSinkStatement,
@@ -925,7 +916,7 @@ fn prepare_replace_sink(
             )
             .into());
         }
-        if sink_replace_requires_exactly_once_state(sink) {
+        if sink_is_exactly_once(&sink.properties)? {
             return Err(ErrorCode::NotSupported(
                 "REPLACE SINK does not support exactly-once sinks yet".to_owned(),
                 "set is_exactly_once=false or recreate the sink manually".to_owned(),
@@ -1279,6 +1270,24 @@ pub mod tests {
             options.get(SINK_INTERMEDIATE_TABLE_NAME).unwrap(),
             "custom_cdc"
         );
+    }
+
+    #[test]
+    fn test_sink_replace_requires_exactly_once_state_defaults() {
+        let properties = BTreeMap::from([("connector".to_owned(), "iceberg".to_owned())]);
+        assert!(super::sink_is_exactly_once(&properties).unwrap());
+
+        let properties = BTreeMap::from([
+            ("connector".to_owned(), "iceberg".to_owned()),
+            ("is_exactly_once".to_owned(), "false".to_owned()),
+        ]);
+        assert!(!super::sink_is_exactly_once(&properties).unwrap());
+
+        let properties = BTreeMap::from([
+            ("connector".to_owned(), "jdbc".to_owned()),
+            ("is_exactly_once".to_owned(), "true".to_owned()),
+        ]);
+        assert!(!super::sink_is_exactly_once(&properties).unwrap());
     }
 
     #[tokio::test]
