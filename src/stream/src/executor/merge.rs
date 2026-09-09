@@ -62,6 +62,59 @@ impl MergeExecutorInput {
         }
     }
 
+    #[expect(clippy::too_many_arguments)]
+    pub(crate) async fn from_merge_update(
+        update: &MergeUpdate,
+        barrier: &Barrier,
+        actor_context: ActorContextRef,
+        upstream_fragment_id: UpstreamFragmentId,
+        local_barrier_manager: LocalBarrierManager,
+        executor_stats: Arc<StreamingMetrics>,
+        info: ExecutorInfo,
+        chunk_size: usize,
+    ) -> StreamExecutorResult<Self> {
+        assert!(
+            update.removed_upstream_actor_id.is_empty(),
+            "an initially empty snapshot backfill input has no upstream actors to remove"
+        );
+        assert!(
+            !update.added_upstream_actors.is_empty(),
+            "snapshot backfill handoff must add upstream actors"
+        );
+        let upstream_fragment_id = update
+            .new_upstream_fragment_id
+            .unwrap_or(upstream_fragment_id);
+        let build_input_ctx = Arc::new(BuildInputContext::new(
+            actor_context.id,
+            local_barrier_manager.clone(),
+            executor_stats.clone(),
+            actor_context.fragment_id,
+            actor_context.config.clone(),
+        ));
+        let inputs = build_input_ctx
+            .build_new_inputs(
+                barrier.clone(),
+                upstream_fragment_id,
+                update.added_upstream_actors.clone(),
+            )
+            .await?;
+        let upstream = MergeExecutorUpstream::Merge(MergeExecutor::new_merge_upstream(
+            inputs,
+            &executor_stats,
+            &actor_context,
+            chunk_size,
+            info.schema.clone(),
+        ));
+        Ok(Self::new(
+            upstream,
+            actor_context,
+            upstream_fragment_id,
+            local_barrier_manager,
+            executor_stats,
+            info,
+        ))
+    }
+
     pub(crate) fn into_executor(self, barrier_rx: mpsc::UnboundedReceiver<Barrier>) -> Executor {
         let fragment_id = self.actor_context.fragment_id;
         let executor = match self.upstream {

@@ -134,7 +134,7 @@ impl StreamActorManager {
             local_barrier_manager.clone(),
             self.streaming_metrics.clone(),
             actor_context.clone(),
-            upstream_info,
+            upstream_info.clone(),
             upstream_merge,
             chunk_size,
         )
@@ -177,6 +177,9 @@ impl StreamActorManager {
             upstream_table,
             state_table,
             upstream,
+            upstream_info,
+            upstream_merge.get_upstream_fragment_id(),
+            local_barrier_manager.clone(),
             node.pk_scan_range.as_ref(),
             output_indices,
             stream_key,

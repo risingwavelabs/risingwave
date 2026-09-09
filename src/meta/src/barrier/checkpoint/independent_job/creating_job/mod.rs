@@ -332,7 +332,8 @@ impl CreatingStreamingJobControl {
                 info,
                 ..
             } => create_mview_tracker.collect_fragment_progress(&info.fragment_infos, true),
-            CreatingStreamingJobStatus::ConsumingLogStore { info, .. } => {
+            CreatingStreamingJobStatus::ConsumingLogStore { info, .. }
+            | CreatingStreamingJobStatus::ConsumingUpstream { info, .. } => {
                 collect_done_fragments(self.job_id, &info.fragment_infos)
             }
             CreatingStreamingJobStatus::Finishing(_, _)
@@ -795,6 +796,7 @@ impl CreatingStreamingJobControl {
             CreatingStreamingJobStatus::ConsumingLogStore {
                 pending_barriers, ..
             } => format!("LogStore [pending barriers: {}]", pending_barriers.len()),
+            CreatingStreamingJobStatus::ConsumingUpstream { .. } => "Upstream".to_owned(),
             CreatingStreamingJobStatus::Finishing(finish_epoch, ..) => {
                 let committed_epoch = self.max_committed_epoch.expect("should have committed");
                 let lag = Duration::from_millis(
@@ -855,15 +857,27 @@ impl CreatingStreamingJobControl {
 
     pub(crate) fn start_consume_upstream(
         &mut self,
+        barrier_info: &BarrierInfo,
+    ) -> &CreatingJobInfo {
+        info!(
+            job_id = %self.job_id,
+            prev_epoch = barrier_info.prev_epoch(),
+            "start consuming upstream"
+        );
+        self.status.start_consume_upstream(barrier_info)
+    }
+
+    pub(crate) fn start_finishing(
+        &mut self,
         partial_graph_manager: &mut PartialGraphManager,
         barrier_info: &BarrierInfo,
     ) -> MetaResult<CreatingJobInfo> {
         info!(
             job_id = %self.job_id,
             prev_epoch = barrier_info.prev_epoch(),
-            "start consuming upstream"
+            "start merging into database graph"
         );
-        let info = self.status.start_consume_upstream(barrier_info);
+        let info = self.status.start_finishing(barrier_info);
         Self::inject_barrier(
             self.partial_graph_id,
             partial_graph_manager,
@@ -948,10 +962,11 @@ impl CreatingStreamingJobControl {
                 .values()
                 .flat_map(|resp| &resp.create_mview_progress),
         );
-        self.is_ready_to_merge() && pending_barrier_num <= self.max_lagged_barrier_num
+        (self.is_ready_to_consume_upstream() || self.is_consuming_upstream())
+            && pending_barrier_num <= self.max_lagged_barrier_num
     }
 
-    fn is_ready_to_merge(&self) -> bool {
+    fn is_ready_to_consume_upstream(&self) -> bool {
         if let CreatingStreamingJobStatus::ConsumingLogStore {
             pending_barriers, ..
         } = &self.status
@@ -962,11 +977,27 @@ impl CreatingStreamingJobControl {
         }
     }
 
+    fn is_consuming_upstream(&self) -> bool {
+        matches!(
+            &self.status,
+            CreatingStreamingJobStatus::ConsumingUpstream { .. }
+        )
+    }
+
+    pub(crate) fn should_start_consume_upstream(
+        &self,
+        partial_graph_manager: &PartialGraphManager,
+    ) -> bool {
+        self.is_ready_to_consume_upstream()
+            && partial_graph_manager.pending_barrier_num(self.partial_graph_id)
+                <= self.max_lagged_barrier_num
+    }
+
     pub(crate) fn should_merge_to_upstream(
         &self,
         partial_graph_manager: &PartialGraphManager,
     ) -> bool {
-        if !self.is_ready_to_merge() {
+        if !self.is_consuming_upstream() {
             return false;
         }
 
@@ -1002,7 +1033,8 @@ impl CreatingStreamingJobControl {
                 (Some(*finish_at_epoch), epoch_end_bound)
             }
             CreatingStreamingJobStatus::ConsumingSnapshot { .. }
-            | CreatingStreamingJobStatus::ConsumingLogStore { .. } => (
+            | CreatingStreamingJobStatus::ConsumingLogStore { .. }
+            | CreatingStreamingJobStatus::ConsumingUpstream { .. } => (
                 None,
                 min_upstream_inflight_epoch
                     .map(Excluded)
@@ -1047,6 +1079,7 @@ impl CreatingStreamingJobControl {
         match &self.status {
             CreatingStreamingJobStatus::ConsumingSnapshot { .. }
             | CreatingStreamingJobStatus::ConsumingLogStore { .. }
+            | CreatingStreamingJobStatus::ConsumingUpstream { .. }
             | CreatingStreamingJobStatus::Finishing(_, _) => {
                 partial_graph_manager.ack_completed(self.partial_graph_id, completed_epoch);
                 if let Some(prev_max_committed_epoch) =
@@ -1069,6 +1102,7 @@ impl CreatingStreamingJobControl {
         match self.status {
             CreatingStreamingJobStatus::ConsumingSnapshot { .. }
             | CreatingStreamingJobStatus::ConsumingLogStore { .. }
+            | CreatingStreamingJobStatus::ConsumingUpstream { .. }
             | CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!("expect finish")
             }
@@ -1083,7 +1117,8 @@ impl CreatingStreamingJobControl {
     pub(super) fn can_drop_independently(&self) -> bool {
         match &self.status {
             CreatingStreamingJobStatus::ConsumingSnapshot { .. }
-            | CreatingStreamingJobStatus::ConsumingLogStore { .. } => true,
+            | CreatingStreamingJobStatus::ConsumingLogStore { .. }
+            | CreatingStreamingJobStatus::ConsumingUpstream { .. } => true,
             CreatingStreamingJobStatus::Finishing(_, _) => false,
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()

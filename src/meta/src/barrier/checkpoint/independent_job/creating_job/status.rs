@@ -48,11 +48,17 @@ pub(super) enum CreatingStreamingJobStatus {
     },
     /// The creating job is consuming log store.
     ///
-    /// Will transit to `Finishing` on `on_new_upstream_epoch` when `start_consume_upstream` is `true`.
+    /// Will transit to `ConsumingUpstream` after the delayed runtime edge is installed.
     ConsumingLogStore {
         tracking_job: TrackingJob,
         info: CreatingJobInfo,
         pending_barriers: VecDeque<BarrierInfo>,
+    },
+    /// The delayed runtime edge has been installed and the existing actors consume the live
+    /// upstream while remaining in their independent partial graph.
+    ConsumingUpstream {
+        tracking_job: TrackingJob,
+        info: CreatingJobInfo,
     },
     /// All backfill actors have started consuming upstream, and the job
     /// will be finished when all previously injected barriers have been collected
@@ -110,7 +116,8 @@ impl CreatingStreamingJobStatus {
                     };
                 }
             }
-            CreatingStreamingJobStatus::ConsumingLogStore { .. } => {}
+            CreatingStreamingJobStatus::ConsumingLogStore { .. }
+            | CreatingStreamingJobStatus::ConsumingUpstream { .. } => {}
             CreatingStreamingJobStatus::Finishing(..) => {}
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
@@ -118,26 +125,31 @@ impl CreatingStreamingJobStatus {
         }
     }
 
-    pub(super) fn start_consume_upstream(&mut self, barrier_info: &BarrierInfo) -> CreatingJobInfo {
+    pub(super) fn start_consume_upstream(
+        &mut self,
+        barrier_info: &BarrierInfo,
+    ) -> &CreatingJobInfo {
         match self {
             CreatingStreamingJobStatus::ConsumingSnapshot { .. } => {
                 unreachable!(
                     "should not start consuming upstream for a job that are consuming snapshot"
                 )
             }
-            CreatingStreamingJobStatus::ConsumingLogStore { .. } => {
-                let prev_epoch = barrier_info.prev_epoch();
-                {
-                    assert!(barrier_info.kind.is_checkpoint());
-                    let CreatingStreamingJobStatus::ConsumingLogStore {
-                        info, tracking_job, ..
-                    } = replace(self, CreatingStreamingJobStatus::PlaceHolder)
-                    else {
-                        unreachable!()
-                    };
-                    *self = CreatingStreamingJobStatus::Finishing(prev_epoch, tracking_job);
-                    info
-                }
+            CreatingStreamingJobStatus::ConsumingLogStore {
+                pending_barriers, ..
+            } => {
+                assert!(pending_barriers.is_empty());
+                assert!(barrier_info.kind.is_checkpoint());
+                let CreatingStreamingJobStatus::ConsumingLogStore {
+                    info, tracking_job, ..
+                } = replace(self, CreatingStreamingJobStatus::PlaceHolder)
+                else {
+                    unreachable!()
+                };
+                *self = CreatingStreamingJobStatus::ConsumingUpstream { tracking_job, info };
+            }
+            CreatingStreamingJobStatus::ConsumingUpstream { .. } => {
+                unreachable!("should not start consuming upstream for a job again")
             }
             CreatingStreamingJobStatus::Finishing { .. } => {
                 unreachable!("should not start consuming upstream for a job again")
@@ -146,6 +158,20 @@ impl CreatingStreamingJobStatus {
                 unreachable!()
             }
         }
+        let CreatingStreamingJobStatus::ConsumingUpstream { info, .. } = self else {
+            unreachable!("should be consuming upstream")
+        };
+        info
+    }
+
+    pub(super) fn start_finishing(&mut self, barrier_info: &BarrierInfo) -> CreatingJobInfo {
+        let CreatingStreamingJobStatus::ConsumingUpstream { tracking_job, info } =
+            replace(self, CreatingStreamingJobStatus::PlaceHolder)
+        else {
+            unreachable!("should only finish after starting to consume upstream")
+        };
+        *self = CreatingStreamingJobStatus::Finishing(barrier_info.prev_epoch(), tracking_job);
+        info
     }
 
     pub(super) fn on_new_upstream_epoch(
@@ -219,6 +245,9 @@ impl CreatingStreamingJobStatus {
                 .map(|barrier_info| (barrier_info, None))
                 .collect()
             }
+            CreatingStreamingJobStatus::ConsumingUpstream { .. } => {
+                vec![(barrier_info.clone(), mutation)]
+            }
             CreatingStreamingJobStatus::Finishing { .. } => vec![],
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
@@ -241,7 +270,8 @@ impl CreatingStreamingJobStatus {
     pub(super) fn fragment_infos(&self) -> Option<&HashMap<FragmentId, InflightFragmentInfo>> {
         match self {
             CreatingStreamingJobStatus::ConsumingSnapshot { info, .. }
-            | CreatingStreamingJobStatus::ConsumingLogStore { info, .. } => {
+            | CreatingStreamingJobStatus::ConsumingLogStore { info, .. }
+            | CreatingStreamingJobStatus::ConsumingUpstream { info, .. } => {
                 Some(&info.fragment_infos)
             }
             CreatingStreamingJobStatus::Finishing(..) => None,
@@ -257,7 +287,8 @@ impl CreatingStreamingJobStatus {
     ) -> Option<Mutation> {
         let fragment_infos = match self {
             CreatingStreamingJobStatus::ConsumingSnapshot { info, .. }
-            | CreatingStreamingJobStatus::ConsumingLogStore { info, .. } => {
+            | CreatingStreamingJobStatus::ConsumingLogStore { info, .. }
+            | CreatingStreamingJobStatus::ConsumingUpstream { info, .. } => {
                 &mut info.fragment_infos
             }
             CreatingStreamingJobStatus::Finishing(..) => return None,
@@ -397,11 +428,26 @@ mod tests {
         assert!(status.pre_apply_throttle(&mut config).is_some());
         assert!(config.is_empty());
 
-        let info = status.start_consume_upstream(&BarrierInfo {
+        let transition_barrier = BarrierInfo {
             prev_epoch: TracedEpoch::new(Epoch(1)),
             curr_epoch: TracedEpoch::new(Epoch(2)),
             kind: BarrierKind::Checkpoint(vec![1]),
+        };
+        let info = status.start_consume_upstream(&transition_barrier);
+        assert_eq!(info.fragment_infos[&fragment_id].nodes, new_node);
+        assert!(matches!(
+            status,
+            CreatingStreamingJobStatus::ConsumingUpstream { .. }
+        ));
+        let info = status.start_finishing(&BarrierInfo {
+            prev_epoch: TracedEpoch::new(Epoch(2)),
+            curr_epoch: TracedEpoch::new(Epoch(3)),
+            kind: BarrierKind::Checkpoint(vec![2]),
         });
         assert_eq!(info.fragment_infos[&fragment_id].nodes, new_node);
+        assert!(matches!(
+            status,
+            CreatingStreamingJobStatus::Finishing(2, _)
+        ));
     }
 }

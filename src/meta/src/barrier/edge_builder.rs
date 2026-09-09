@@ -19,8 +19,8 @@ use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_pb::common::{ActorInfo, HostAddress};
 use risingwave_pb::id::{PartialGraphId, SubscriberId};
-use risingwave_pb::stream_plan::StreamNode;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
+use risingwave_pb::stream_plan::{Dispatcher as PbDispatcher, StreamNode};
 use tracing::warn;
 
 use crate::barrier::rpc::ControlStreamManager;
@@ -112,6 +112,24 @@ impl FragmentEdgeBuildResult {
         &self.actor_new_no_shuffle
     }
 
+    pub(super) fn take_actor_edges(
+        &mut self,
+        fragment_id: FragmentId,
+        actor_id: ActorId,
+    ) -> (ActorUpstreams, Vec<PbDispatcher>) {
+        let upstreams = self
+            .upstreams
+            .get_mut(&fragment_id)
+            .and_then(|upstreams| upstreams.remove(&actor_id))
+            .unwrap_or_default();
+        let dispatchers = self
+            .dispatchers
+            .get_mut(&fragment_id)
+            .and_then(|dispatchers| dispatchers.remove(&actor_id))
+            .unwrap_or_default();
+        (upstreams, dispatchers)
+    }
+
     pub(super) fn collect_actors_to_create(
         &mut self,
         actors: impl Iterator<
@@ -127,16 +145,7 @@ impl FragmentEdgeBuildResult {
         for (fragment_id, node, actors, subscriber_ids) in actors {
             let subscriber_ids: HashSet<_> = subscriber_ids.into_iter().collect();
             for (actor, worker_id) in actors {
-                let upstreams = self
-                    .upstreams
-                    .get_mut(&fragment_id)
-                    .and_then(|upstreams| upstreams.remove(&actor.actor_id))
-                    .unwrap_or_default();
-                let dispatchers = self
-                    .dispatchers
-                    .get_mut(&fragment_id)
-                    .and_then(|upstreams| upstreams.remove(&actor.actor_id))
-                    .unwrap_or_default();
+                let (upstreams, dispatchers) = self.take_actor_edges(fragment_id, actor.actor_id);
                 actors_to_create
                     .entry(worker_id)
                     .or_default()
@@ -150,9 +159,9 @@ impl FragmentEdgeBuildResult {
     }
 
     pub(super) fn is_empty(&self) -> bool {
-        self.merge_updates
+        self.upstreams
             .values()
-            .all(|updates| updates.is_empty())
+            .all(|upstreams| upstreams.is_empty())
             && self.dispatchers.values().all(|dispatchers| {
                 dispatchers
                     .values()
@@ -424,8 +433,11 @@ mod tests {
         assert!(edges.upstreams.contains_key(&backfill_output_fragment_id));
 
         let mut merge_builder = FragmentEdgeBuilder::new(fragments());
-        merge_builder.add_relations(&relations);
-        let merge_edges = merge_builder.build();
+        merge_builder.add_relations(&HashMap::from([(
+            upstream_fragment_id,
+            vec![relation(backfill_input_fragment_id)],
+        )]));
+        let mut merge_edges = merge_builder.build();
 
         assert!(merge_edges.dispatchers.contains_key(&upstream_fragment_id));
         assert!(
@@ -433,5 +445,13 @@ mod tests {
                 .upstreams
                 .contains_key(&backfill_input_fragment_id)
         );
+        let (actor_upstreams, actor_dispatchers) =
+            merge_edges.take_actor_edges(backfill_input_fragment_id, ActorId::new(102));
+        assert!(actor_dispatchers.is_empty());
+        let upstream_actors = &actor_upstreams[&upstream_fragment_id];
+        assert_eq!(upstream_actors.len(), 1);
+        let upstream_actor = upstream_actors.values().next().unwrap();
+        assert_eq!(upstream_actor.actor_id, ActorId::new(101));
+        assert_eq!(upstream_actor.partial_graph_id, database_graph_id);
     }
 }

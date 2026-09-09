@@ -30,6 +30,9 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::barrier_mutation::{Mutation, PbMutation};
+use risingwave_pb::stream_plan::update_mutation::{
+    DispatcherUpdate as PbDispatcherUpdate, MergeUpdate,
+};
 use risingwave_pb::stream_plan::{
     AddMutation, Dispatchers, PbDropSubscriptionsMutation, PbStartFragmentBackfillMutation,
     PbSubscriptionUpstreamInfo, PbUpdateMutation, PbUpstreamSinkInfo,
@@ -1517,16 +1520,23 @@ impl DatabaseCheckpointControl {
         };
 
         let mut finished_snapshot_backfill_jobs = HashSet::new();
+        let mut started_consuming_upstream_jobs = HashSet::new();
         let mut mutation = match mutation {
             Some(mutation) => Some(mutation),
             None => {
                 let mut finished_snapshot_backfill_job_info = HashMap::new();
+                let mut dispatcher_update = vec![];
+                let mut merge_update = vec![];
+                let mut actor_new_dispatchers: HashMap<ActorId, Dispatchers> = HashMap::new();
+                let mut actor_splits = HashMap::new();
                 if barrier_info.kind.is_checkpoint() {
                     for (&job_id, job) in &mut self.independent_checkpoint_job_controls {
-                        if let Some(IndependentCheckpointJob::CreatingStreamingJob(creating_job)) =
+                        let Some(IndependentCheckpointJob::CreatingStreamingJob(creating_job)) =
                             job.running_mut()
-                            && creating_job.should_merge_to_upstream(partial_graph_manager)
-                        {
+                        else {
+                            continue;
+                        };
+                        if creating_job.should_merge_to_upstream(partial_graph_manager) {
                             // The independent actors will stop on this barrier. Apply throttle to
                             // the in-memory plan used to create the database-graph actors, and let
                             // the database barrier own the collection notification.
@@ -1538,19 +1548,104 @@ impl DatabaseCheckpointControl {
                                 notify_database_graph = true;
                             }
                             let info = creating_job
-                                .start_consume_upstream(partial_graph_manager, &barrier_info)?;
+                                .start_finishing(partial_graph_manager, &barrier_info)?;
                             finished_snapshot_backfill_job_info
                                 .try_insert(job_id, info)
                                 .expect("non-duplicated");
+                        } else if creating_job.should_start_consume_upstream(partial_graph_manager)
+                        {
+                            let has_throttle_mutation =
+                                throttle_config.as_ref().is_some_and(|config| {
+                                    creating_job.fragment_infos().is_some_and(|fragment_infos| {
+                                        config.keys().any(|fragment_id| {
+                                            fragment_infos.contains_key(fragment_id)
+                                        })
+                                    })
+                                });
+                            if has_throttle_mutation {
+                                // A barrier carries only one mutation. Apply throttle now and
+                                // retry the handoff at the next eligible checkpoint.
+                                continue;
+                            }
+                            let info = creating_job.start_consume_upstream(&barrier_info);
+                            let database_partial_graph_id =
+                                to_partial_graph_id(self.database_id, None);
+                            let job_partial_graph_id =
+                                to_partial_graph_id(self.database_id, Some(job_id));
+                            let mut edge_builder = FragmentEdgeBuilder::new(
+                                info.upstream_fragment_downstreams
+                                    .keys()
+                                    .map(|upstream_fragment_id| {
+                                        let fragment =
+                                            self.database_info.fragment(*upstream_fragment_id);
+                                        (
+                                            fragment.fragment_id,
+                                            EdgeBuilderFragmentInfo::from_inflight(
+                                                fragment,
+                                                database_partial_graph_id,
+                                                partial_graph_manager.control_stream_manager(),
+                                            ),
+                                        )
+                                    })
+                                    .chain(info.fragment_infos.values().map(|fragment| {
+                                        (
+                                            fragment.fragment_id,
+                                            EdgeBuilderFragmentInfo::from_inflight(
+                                                fragment,
+                                                job_partial_graph_id,
+                                                partial_graph_manager.control_stream_manager(),
+                                            ),
+                                        )
+                                    })),
+                            );
+                            edge_builder.add_relations(&info.upstream_fragment_downstreams);
+                            let mut edges = edge_builder.build();
+                            for fragment in info.fragment_infos.values() {
+                                for actor_id in fragment.actors.keys().copied() {
+                                    let (upstreams, dispatchers) =
+                                        edges.take_actor_edges(fragment.fragment_id, actor_id);
+                                    assert!(
+                                        dispatchers.is_empty(),
+                                        "creating-job actor should have no new dispatcher during upstream handoff: {dispatchers:?}"
+                                    );
+                                    merge_update.extend(upstreams.into_iter().map(
+                                        |(upstream_fragment_id, upstream_actors)| MergeUpdate {
+                                            actor_id,
+                                            upstream_fragment_id,
+                                            new_upstream_fragment_id: None,
+                                            added_upstream_actors:
+                                                upstream_actors.into_values().collect(),
+                                            removed_upstream_actor_id: vec![],
+                                        },
+                                    ));
+                                }
+                            }
+                            for upstream_fragment_id in info.upstream_fragment_downstreams.keys() {
+                                let new_actor_dispatchers = edges
+                                    .dispatchers
+                                    .remove(upstream_fragment_id)
+                                    .expect("should exist");
+                                for (upstream_actor_id, dispatchers) in new_actor_dispatchers {
+                                    actor_new_dispatchers
+                                        .entry(upstream_actor_id)
+                                        .or_default()
+                                        .dispatchers
+                                        .extend(dispatchers);
+                                }
+                            }
+                            assert!(edges.is_empty(), "remaining edges: {:?}", edges);
+                            started_consuming_upstream_jobs.insert(job_id);
                         }
                     }
                 }
 
-                if !finished_snapshot_backfill_job_info.is_empty() {
-                    let actors_to_create = actors_to_create.get_or_insert_default();
+                if !started_consuming_upstream_jobs.is_empty()
+                    || !finished_snapshot_backfill_job_info.is_empty()
+                {
                     let mut subscriptions_to_drop = vec![];
-                    let mut actor_new_dispatchers: HashMap<ActorId, Dispatchers> = HashMap::new();
-                    let mut actor_splits = HashMap::new();
+                    if !finished_snapshot_backfill_job_info.is_empty() {
+                        actors_to_create.get_or_insert_default();
+                    }
                     for (job_id, info) in finished_snapshot_backfill_job_info {
                         finished_snapshot_backfill_jobs.insert(job_id);
                         subscriptions_to_drop.extend(
@@ -1676,13 +1771,33 @@ impl DatabaseCheckpointControl {
                                 .dispatchers
                                 .remove(upstream_fragment_id)
                                 .expect("should exist");
-                            for (upstream_actor_id, dispatchers) in new_actor_dispatchers {
-                                actor_new_dispatchers
-                                    .entry(upstream_actor_id)
-                                    .or_default()
-                                    .dispatchers
-                                    .extend(dispatchers);
-                            }
+                            dispatcher_update.extend(new_actor_dispatchers.into_iter().flat_map(
+                                |(upstream_actor_id, dispatchers)| {
+                                    dispatchers.into_iter().map(move |dispatcher| {
+                                        PbDispatcherUpdate {
+                                            actor_id: upstream_actor_id,
+                                            dispatcher_id: dispatcher.dispatcher_id,
+                                            hash_mapping: dispatcher.hash_mapping,
+                                            removed_downstream_actor_id: dispatcher
+                                                .downstream_actor_id
+                                                .iter()
+                                                .map(|new_downstream_actor_id| {
+                                                    actor_mapping
+                                                        .iter()
+                                                        .find_map(|(old_actor_id, new_actor_id)| {
+                                                            (new_downstream_actor_id
+                                                                == new_actor_id)
+                                                                .then_some(*old_actor_id)
+                                                        })
+                                                        .expect("should exist")
+                                                })
+                                                .collect(),
+                                            added_downstream_actor_id: dispatcher
+                                                .downstream_actor_id,
+                                        }
+                                    })
+                                },
+                            ));
                         }
                         assert!(edges.is_empty(), "remaining edges: {:?}", edges);
                         for (worker_id, worker_actors) in new_actors_to_create {
@@ -1692,6 +1807,8 @@ impl DatabaseCheckpointControl {
                                 }),
                             );
                             actors_to_create
+                                .as_mut()
+                                .expect("finishing job should create database-graph actors")
                                 .entry(worker_id)
                                 .or_default()
                                 .extend(worker_actors);
@@ -1706,8 +1823,8 @@ impl DatabaseCheckpointControl {
                     }
 
                     Some(PbMutation::Update(PbUpdateMutation {
-                        dispatcher_update: vec![], /* the cross-graph dispatchers did not exist before merging */
-                        merge_update: vec![],      // no upstream update on existing actors
+                        dispatcher_update,
+                        merge_update,
                         actor_vnode_bitmap_update: Default::default(), /* no in place update vnode bitmap happened */
                         dropped_actors: vec![], /* no actors to drop in the partial graph of database */
                         actor_splits,
@@ -1767,15 +1884,24 @@ impl DatabaseCheckpointControl {
                     if finished_snapshot_backfill_jobs.contains(job_id) {
                         continue;
                     }
-                    let throttle_mutation = throttle_config.as_mut().and_then(|config| {
-                        creating_job
-                            .pre_apply_throttle(config)
-                            .map(|mutation| (mutation, notifier.as_mut()))
-                    });
+                    let mutation = if started_consuming_upstream_jobs.contains(job_id) {
+                        Some((
+                            mutation
+                                .clone()
+                                .expect("transition should have an update mutation"),
+                            None,
+                        ))
+                    } else {
+                        throttle_config.as_mut().and_then(|config| {
+                            creating_job
+                                .pre_apply_throttle(config)
+                                .map(|mutation| (mutation, notifier.as_mut()))
+                        })
+                    };
                     creating_job.on_new_upstream_barrier(
                         partial_graph_manager,
                         &barrier_info,
-                        throttle_mutation,
+                        mutation,
                     )?;
                 }
                 IndependentCheckpointJob::BatchRefresh(batch_refresh_job) => {

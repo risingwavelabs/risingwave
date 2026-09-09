@@ -43,13 +43,15 @@ use crate::executor::backfill::snapshot_backfill::vnode_stream::VnodeStream;
 use crate::executor::backfill::utils::{
     UpstreamStreamKeyUpdateNormalizer, create_builder, mapping_message,
 };
+use crate::executor::exchange::input::assert_equal_dispatcher_barrier;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::prelude::{StateTable, StreamExt, try_stream};
 use crate::executor::{
-    ActorContextRef, Barrier, BoxedMessageStream, Execute, MergeExecutorInput, Message, Mutation,
-    StreamExecutorError, StreamExecutorResult, expect_first_barrier,
+    ActorContextRef, Barrier, BoxedMessageStream, Execute, ExecutorInfo, MergeExecutorInput,
+    Message, Mutation, StreamExecutorError, StreamExecutorResult, UpstreamFragmentId,
+    expect_first_barrier,
 };
-use crate::task::CreateMviewProgressReporter;
+use crate::task::{CreateMviewProgressReporter, LocalBarrierManager};
 
 pub struct SnapshotBackfillExecutor<S: StateStore> {
     /// Upstream table
@@ -60,6 +62,9 @@ pub struct SnapshotBackfillExecutor<S: StateStore> {
 
     /// Upstream with the same schema with the upstream table.
     upstream: Option<MergeExecutorInput>,
+    upstream_info: ExecutorInfo,
+    upstream_fragment_id: UpstreamFragmentId,
+    local_barrier_manager: LocalBarrierManager,
 
     /// The column indices need to be forwarded to the downstream from the upstream and table scan.
     output_indices: Vec<usize>,
@@ -101,6 +106,9 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
         upstream_table: BatchTable<S>,
         progress_state_table: StateTable<S>,
         upstream: Option<MergeExecutorInput>,
+        upstream_info: ExecutorInfo,
+        upstream_fragment_id: UpstreamFragmentId,
+        local_barrier_manager: LocalBarrierManager,
         pb_pk_scan_range: Option<&ScanRange>,
         output_indices: Vec<usize>,
         stream_key: Vec<usize>,
@@ -112,9 +120,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
         metrics: Arc<StreamingMetrics>,
         snapshot_epoch: Option<u64>,
     ) -> StreamExecutorResult<Self> {
-        if let Some(upstream) = &upstream {
-            assert_eq!(&upstream.info.schema, upstream_table.schema());
-        }
+        assert_eq!(&upstream_info.schema, upstream_table.schema());
         if upstream_table.pk_in_output_indices().is_none() {
             panic!(
                 "storage table should include all pk columns in output: pk_indices: {:?}, output_indices: {:?}, schema: {:?}",
@@ -141,6 +147,9 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
             upstream_table,
             progress_state_table,
             upstream,
+            upstream_info,
+            upstream_fragment_id,
+            local_barrier_manager,
             output_indices,
             stream_key,
             progress,
@@ -157,7 +166,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         trace!("snapshot backfill executor start");
-        let upstream = if let Some(mut upstream) = self.upstream {
+        let initial_upstream = if let Some(mut upstream) = self.upstream.take() {
             let first_upstream_barrier = expect_first_barrier(&mut upstream).await?;
             trace!(epoch = ?first_upstream_barrier.epoch, "get first upstream barrier");
             Some((first_upstream_barrier, upstream))
@@ -165,7 +174,10 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
             None
         };
         let first_recv_barrier = receive_next_barrier(&mut self.barrier_rx).await?;
-        trace!(epoch = ?first_recv_barrier.epoch, "get first inject barrier");
+        trace!(epoch = ?first_recv_barrier.epoch, "get first injected barrier");
+        if let Some((first_upstream_barrier, _)) = &initial_upstream {
+            assert_equal_dispatcher_barrier(&first_recv_barrier, first_upstream_barrier);
+        }
         let first_recv_barrier_epoch = first_recv_barrier.epoch;
         let initial_backfill_paused =
             first_recv_barrier.is_backfill_pause_on_startup(self.actor_ctx.fragment_id);
@@ -177,7 +189,15 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
         )
         .await?;
 
-        let Some((first_upstream_barrier, upstream)) = upstream else {
+        let (mut barrier_epoch, upstream) = if let Some((_, upstream)) = initial_upstream {
+            if self.snapshot_epoch.is_none() {
+                warn!(
+                    first_recv_epoch = ?first_recv_barrier_epoch,
+                    "snapshot epoch not set for recreated snapshot backfill actor"
+                );
+            }
+            (first_recv_barrier_epoch, upstream)
+        } else {
             let snapshot_epoch = self
                 .snapshot_epoch
                 .ok_or_else(|| anyhow!("no snapshot epoch for independent snapshot backfill"))?;
@@ -225,7 +245,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                     }
                 }
 
-                let recv_barrier = self.barrier_rx.recv().await.expect("should exist");
+                let recv_barrier = receive_next_barrier(&mut self.barrier_rx).await?;
                 let recv_barrier_epoch = recv_barrier.epoch;
                 assert_eq!(snapshot_epoch, recv_barrier_epoch.prev);
                 let post_commit = backfill_state.commit(recv_barrier.epoch).await?;
@@ -258,10 +278,33 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                     "consuming_log_store",
                 ]);
             let mut pending_non_checkpoint_barrier: Vec<EpochPair> = vec![];
-            loop {
+            let upstream = loop {
                 let barrier = receive_next_barrier(&mut self.barrier_rx).await?;
                 assert_eq!(barrier_epoch.curr, barrier.epoch.prev);
                 barrier_epoch = barrier.epoch;
+                let new_upstream = if let Some(update) =
+                    barrier.as_update_merge(self.actor_ctx.id, self.upstream_fragment_id)
+                {
+                    assert!(
+                        barrier.kind.is_checkpoint(),
+                        "the first live-upstream barrier must be a checkpoint"
+                    );
+                    Some(
+                        MergeExecutorInput::from_merge_update(
+                            update,
+                            &barrier,
+                            self.actor_ctx.clone(),
+                            self.upstream_fragment_id,
+                            self.local_barrier_manager.clone(),
+                            self.metrics.clone(),
+                            self.upstream_info.clone(),
+                            self.chunk_size,
+                        )
+                        .await?,
+                    )
+                } else {
+                    None
+                };
                 if barrier.kind.is_checkpoint() {
                     let pending_non_checkpoint_barrier = take(&mut pending_non_checkpoint_barrier);
                     let end_epoch = barrier_epoch.prev;
@@ -310,26 +353,18 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
                     )
                     .into());
                 }
-            }
+                if let Some(upstream) = new_upstream {
+                    break upstream;
+                }
+            };
+            (barrier_epoch, upstream)
         };
 
-        if self.snapshot_epoch.is_none() {
-            warn!(
-                first_upstream_epoch = ?first_upstream_barrier.epoch,
-                first_recv_epoch = ?first_recv_barrier_epoch,
-                "snapshot epoch not set for recreated snapshot backfill actor"
-            );
-        };
-        assert_eq!(first_upstream_barrier.epoch, first_recv_barrier_epoch);
         backfill_state
             .latest_progress()
             .for_each(|(vnode, progress)| {
                 let progress = progress.expect("should not be empty");
-                assert_eq!(
-                    progress.epoch, first_upstream_barrier.epoch.prev,
-                    "vnode: {:?}",
-                    vnode
-                );
+                assert_eq!(progress.epoch, barrier_epoch.prev, "vnode: {:?}", vnode);
                 assert_eq!(
                     progress.progress,
                     EpochBackfillProgress::Consumed,
@@ -341,7 +376,6 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
             table_id = %self.upstream_table.table_id(),
             "skip backfill"
         );
-        let mut barrier_epoch = first_upstream_barrier.epoch;
         let current_stream_key_indices = self
             .stream_key
             .iter()
@@ -667,9 +701,12 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashSet;
+    use std::collections::{HashMap, HashSet};
     use std::sync::Arc;
+    use std::task::Poll;
 
+    use assert_matches::assert_matches;
+    use futures::poll;
     use risingwave_common::array::StreamChunk;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::row::OwnedRow;
@@ -678,6 +715,7 @@ mod tests {
     use risingwave_common::util::epoch::{EpochPair, test_epoch};
     use risingwave_common::util::sort_util::OrderType;
     use risingwave_hummock_test::test_utils::{HummockTestEnv, prepare_hummock_test_env};
+    use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
     use risingwave_rpc_client::HummockMetaClient;
     use risingwave_storage::hummock::HummockStorage;
     use risingwave_storage::table::batch_table::BatchTable;
@@ -691,8 +729,12 @@ mod tests {
     use crate::common::table::test_utils::gen_pbtable_with_value_indices;
     use crate::executor::exchange::input::{Input, LocalInput};
     use crate::executor::exchange::permit::channel_for_test;
-    use crate::executor::{ActorContext, DispatcherMessage, ExecutorInfo, MergeExecutorUpstream};
-    use crate::task::LocalBarrierManager;
+    use crate::executor::{
+        ActorContext, DispatcherMessage, ExecutorInfo, MergeExecutorUpstream, UpdateMutation,
+    };
+    use crate::task::barrier_test_utils::LocalBarrierTestEnv;
+    use crate::task::test_utils::helper_make_local_actor;
+    use crate::task::{LocalBarrierManager, NewOutputRequest};
 
     const SOURCE_TABLE_ID: TableId = TableId::new(0x233);
     const PROGRESS_TABLE_ID: TableId = TableId::new(0x234);
@@ -844,6 +886,15 @@ mod tests {
         progress_state_table(test_env.storage.clone()).await
     }
 
+    fn make_upstream_info() -> ExecutorInfo {
+        ExecutorInfo::for_test(
+            Schema::new(vec![Field::unnamed(DataType::Int64)]),
+            vec![0],
+            "SnapshotBackfillUpstream".to_owned(),
+            0,
+        )
+    }
+
     fn make_upstream_input(
         barrier_manager: LocalBarrierManager,
         actor_ctx: ActorContextRef,
@@ -855,12 +906,7 @@ mod tests {
             1919.into(),
             barrier_manager,
             Arc::new(StreamingMetrics::unused()),
-            ExecutorInfo::for_test(
-                Schema::new(vec![Field::unnamed(DataType::Int64)]),
-                vec![0],
-                "SnapshotBackfillUpstream".to_owned(),
-                0,
-            ),
+            make_upstream_info(),
         )
     }
 
@@ -955,18 +1001,23 @@ mod tests {
         .await;
         start_progress_epochs(&progress_env, 5).await;
 
-        let barrier_manager = LocalBarrierManager::for_test();
-        let progress = CreateMviewProgressReporter::for_test(barrier_manager);
-        let actor_ctx = ActorContext::for_test(1234);
-        let (barrier_tx, barrier_rx) = unbounded_channel();
-        barrier_tx
-            .send(Barrier::new_test_barrier(test_epoch(1)))
-            .unwrap();
+        let barrier_test_env = LocalBarrierTestEnv::for_test().await;
+        let barrier_manager = barrier_test_env.local_barrier_manager.clone();
+        let progress = CreateMviewProgressReporter::for_test(barrier_manager.clone());
+        let actor_id = 1234.into();
+        let actor_ctx = ActorContext::for_test(actor_id);
+        let initial_barrier = Barrier::new_test_barrier(test_epoch(1));
+        barrier_test_env.inject_barrier(&initial_barrier, [actor_id]);
+        barrier_test_env.flush_all_events().await;
+        let barrier_rx = barrier_manager.subscribe_barrier(actor_id);
 
         let mut executor = SnapshotBackfillExecutor::new(
             source_table,
             progress_state_table,
             None,
+            make_upstream_info(),
+            1919.into(),
+            barrier_manager,
             None,
             vec![0],
             vec![0],
@@ -999,9 +1050,9 @@ mod tests {
         );
         expect_pending_with_timeout(&mut executor, "snapshot finish barrier 2").await;
 
-        barrier_tx
-            .send(Barrier::new_test_barrier(test_epoch(2)))
-            .unwrap();
+        let barrier = Barrier::new_test_barrier(test_epoch(2));
+        barrier_test_env.inject_barrier(&barrier, [actor_id]);
+        barrier_test_env.flush_all_events().await;
         assert_eq!(
             expect_barrier_with_timeout(&mut executor, "snapshot progress barrier 2")
                 .await
@@ -1009,9 +1060,9 @@ mod tests {
             Barrier::new_test_barrier(test_epoch(2)).epoch
         );
 
-        barrier_tx
-            .send(Barrier::new_test_barrier(test_epoch(3)))
-            .unwrap();
+        let barrier = Barrier::new_test_barrier(test_epoch(3));
+        barrier_test_env.inject_barrier(&barrier, [actor_id]);
+        barrier_test_env.flush_all_events().await;
         assert_eq!(
             expect_barrier_with_timeout(&mut executor, "snapshot progress barrier 3")
                 .await
@@ -1019,9 +1070,9 @@ mod tests {
             Barrier::new_test_barrier(test_epoch(3)).epoch
         );
 
-        barrier_tx
-            .send(Barrier::new_test_barrier(test_epoch(4)))
-            .unwrap();
+        let barrier = Barrier::new_test_barrier(test_epoch(4));
+        barrier_test_env.inject_barrier(&barrier, [actor_id]);
+        barrier_test_env.flush_all_events().await;
         assert_eq!(
             expect_barrier_with_timeout(&mut executor, "post-snapshot barrier 4")
                 .await
@@ -1029,8 +1080,39 @@ mod tests {
             Barrier::new_test_barrier(test_epoch(4)).epoch
         );
 
-        barrier_tx
-            .send(Barrier::new_test_barrier(test_epoch(5)))
+        let upstream_actor_id = 1001.into();
+        let upstream_fragment_id = 1919.into();
+        let transition_barrier = Barrier::new_test_barrier(test_epoch(5)).with_mutation(
+            Mutation::Update(UpdateMutation {
+                merges: HashMap::from([(
+                    (actor_id, upstream_fragment_id),
+                    MergeUpdate {
+                        actor_id,
+                        upstream_fragment_id,
+                        new_upstream_fragment_id: None,
+                        added_upstream_actors: vec![helper_make_local_actor(upstream_actor_id)],
+                        removed_upstream_actor_id: vec![],
+                    },
+                )]),
+                ..Default::default()
+            }),
+        );
+        barrier_test_env.inject_barrier(&transition_barrier, [actor_id]);
+        barrier_test_env.flush_all_events().await;
+        assert_matches!(poll!(executor.as_mut().next()), Poll::Pending);
+        barrier_test_env.flush_all_events().await;
+        let mut requests = barrier_test_env
+            .take_pending_new_output_requests(upstream_actor_id)
+            .await;
+        assert_eq!(requests.len(), 1);
+        let (downstream_actor_id, request) = requests.pop().unwrap();
+        let NewOutputRequest::Local(upstream_tx) = request else {
+            unreachable!()
+        };
+        assert_eq!(downstream_actor_id, actor_id);
+        upstream_tx
+            .send(DispatcherMessage::Barrier(transition_barrier.clone().into_dispatcher()).into())
+            .await
             .unwrap();
         assert_eq!(
             expect_chunk_with_timeout(&mut executor, "log-store chunk without upstream").await,
@@ -1043,7 +1125,28 @@ mod tests {
             Barrier::new_test_barrier(test_epoch(5)).epoch
         );
 
-        expect_pending_with_timeout(&mut executor, "next local barrier").await;
+        upstream_tx
+            .send(DispatcherMessage::Chunk(StreamChunk::from_pretty(" I\n + 5")).into())
+            .await
+            .unwrap();
+        assert_eq!(
+            expect_chunk_with_timeout(&mut executor, "live upstream chunk after handoff").await,
+            StreamChunk::from_pretty(" I\n + 5")
+        );
+
+        let next_barrier = Barrier::new_test_barrier(test_epoch(6));
+        barrier_test_env.inject_barrier(&next_barrier, [actor_id]);
+        barrier_test_env.flush_all_events().await;
+        upstream_tx
+            .send(DispatcherMessage::Barrier(next_barrier.clone().into_dispatcher()).into())
+            .await
+            .unwrap();
+        assert_eq!(
+            expect_barrier_with_timeout(&mut executor, "next upstream barrier")
+                .await
+                .epoch,
+            next_barrier.epoch
+        );
     }
 
     #[tokio::test]
@@ -1120,10 +1223,13 @@ mod tests {
             source_table,
             progress_state_table,
             Some(make_upstream_input(
-                barrier_manager,
+                barrier_manager.clone(),
                 actor_ctx.clone(),
                 upstream_rx,
             )),
+            make_upstream_info(),
+            1919.into(),
+            barrier_manager,
             None,
             vec![0],
             vec![0],
