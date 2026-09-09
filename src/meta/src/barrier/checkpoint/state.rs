@@ -757,6 +757,7 @@ impl DatabaseCheckpointControl {
                     // 3. Create BatchRefreshJobCheckpointControl. `new()` handles actor
                     //    rendering, the partial-graph initial barrier, and produces the
                     //    database-graph mutation for the main barrier.
+                    let term_id = self.term_id.as_str();
                     let Entry::Vacant(entry) =
                         self.independent_checkpoint_job_controls.entry(job_id)
                     else {
@@ -807,7 +808,7 @@ impl DatabaseCheckpointControl {
                         snapshot_backfill_upstream_tables,
                         snapshot_epoch,
                         hummock_version_stats,
-                        self.term_id(),
+                        term_id,
                         partial_graph_manager,
                         &logical,
                         worker_nodes,
