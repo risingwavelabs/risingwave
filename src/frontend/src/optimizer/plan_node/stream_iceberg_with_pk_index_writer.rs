@@ -30,7 +30,8 @@ use crate::TableCatalog;
 use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::plan_node::utils::{Distill, TableCatalogBuilder, childless_record};
 use crate::optimizer::plan_node::{
-    ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamNode, StreamPlanRef as PlanRef,
+    ExprRewritable, PlanBase, PlanTreeNodeUnary, Stream, StreamExchange, StreamNode,
+    StreamPlanRef as PlanRef,
 };
 use crate::optimizer::property::{
     Distribution, FunctionalDependencySet, MonotonicityMap, WatermarkColumns,
@@ -207,7 +208,14 @@ impl StreamIcebergWithPkIndexWriter {
         // `file_path` and `position`. These are output-schema indices, not data-file indices.
         let resolver_stream_key: Vec<u32> = (0..pk_columns.len() as u32).collect();
 
-        let left_input = self.input.to_stream_prost(state)?;
+        // The writer's normal input must have a fragment boundary so that it is rendered as a
+        // merge and can be disconnected while applying compaction.
+        let left_input = if self.input.as_stream_exchange().is_some() {
+            self.input.to_stream_prost(state)?
+        } else {
+            let exchange: PlanRef = StreamExchange::new_no_shuffle(self.input.clone()).into();
+            exchange.to_stream_prost(state)?
+        };
         let right_dispatcher = match self.distribution() {
             Distribution::Single => DispatcherType::Simple,
             _ => DispatcherType::Hash,
