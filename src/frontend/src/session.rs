@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 use std::io::{Error, ErrorKind};
 use std::iter;
@@ -124,6 +124,7 @@ use crate::meta_client::{FrontendMetaClient, FrontendMetaClientImpl};
 use crate::monitor::{CursorMetrics, FrontendMetrics, GLOBAL_FRONTEND_METRICS};
 use crate::observer::FrontendObserverNode;
 use crate::rpc::{FrontendServiceImpl, MonitorServiceImpl};
+use crate::scheduler::plan_fragmenter::QueryId;
 use crate::scheduler::streaming_manager::{StreamingJobTracker, StreamingJobTrackerRef};
 use crate::scheduler::{
     DistributedQueryMetrics, GLOBAL_DISTRIBUTED_QUERY_METRICS, HummockSnapshotManager,
@@ -744,6 +745,19 @@ impl AuthContext {
         }
     }
 }
+
+/// Distributed query IDs grouped by their owner's cancellation domain.
+#[derive(Default)]
+#[expect(dead_code, reason = "wired into session ownership in the follow-up PR")]
+struct SessionDistributedQueryIds {
+    /// Single-statement queries that can be terminated by `CancelRequest` and cannot resume
+    /// after cancellation. Queries retained by extended-protocol portals are currently also
+    /// classified as ordinary, pending the cancellation-targeting changes in TODO(#26999).
+    ordinary_query_ids: HashSet<QueryId>,
+    /// Queries whose execution is owned by a cursor rather than an individual FETCH.
+    cursor_query_ids: HashSet<QueryId>,
+}
+
 pub struct SessionImpl {
     env: FrontendEnv,
     auth_context: Arc<RwLock<AuthContext>>,
