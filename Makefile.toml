@@ -41,7 +41,7 @@ env_scripts = [
   is_udf_enabled = get_env ENABLE_UDF
   is_datafusion_enabled = get_env ENABLE_DATAFUSION
   is_default_features_disabled = get_env DISABLE_DEFAULT_FEATURES
-  are_heavy_sinks_disabled = get_env DISABLE_HEAVY_SINKS
+  are_heavy_connectors_disabled = get_env DISABLE_HEAVY_CONNECTORS
 
   if ${is_sanitizer_enabled}
     set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS "--timings -Zbuild-std --target ${CARGO_MAKE_RUST_TARGET_TRIPLE}"
@@ -74,9 +74,9 @@ env_scripts = [
   if ${is_default_features_disabled}
     set_env RISINGWAVE_FEATURE_FLAGS "${flags} --no-default-features"
   else
-    if ${are_heavy_sinks_disabled}
+    if ${are_heavy_connectors_disabled}
       # Cargo cannot subtract a feature from the default bundle. Disable defaults,
-      # then restore rw-static-link and all connectors except heavyweight sinks.
+      # then restore rw-static-link and all connectors except heavyweight connectors.
       # These linking features control different dependencies: rw-static-link enables
       # static libz/lzma/sasl2, while rw-dynamic-link enables dynamic zstd.
       # They can coexist in dev builds, so keep rw-static-link to preserve the defaults.
