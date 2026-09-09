@@ -16,6 +16,7 @@ use risingwave_common::id::{ConnectionId, SourceId};
 use risingwave_pb::catalog::connection::Info::ConnectionParams;
 
 use super::RwPgResponse;
+use super::create_source::validate_cdc_heartbeat_interval;
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::error::{ErrorCode, Result};
@@ -37,7 +38,7 @@ pub async fn handle_alter_table_connector_props(
     let user_name = &session.user_name();
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-    let source_id = {
+    let (source_id, connector) = {
         let reader = session.env().catalog_reader().read_guard();
         let (table, schema_name) =
             reader.get_any_table_by_name(db_name, schema_path, &real_table_name)?;
@@ -66,18 +67,19 @@ pub async fn handle_alter_table_connector_props(
             associate_source_id
         );
 
-        associate_source_id
+        (associate_source_id, source_catalog.connector_name())
     };
 
-    handle_alter_source_props_inner(&session, alter_props, source_id).await?;
+    handle_alter_source_props_inner(&session, alter_props, source_id, &connector).await?;
 
     Ok(RwPgResponse::empty_result(StatementType::ALTER_TABLE))
 }
 
-async fn handle_alter_source_props_inner(
+pub(super) async fn handle_alter_source_props_inner(
     session: &SessionImpl,
     alter_props: Vec<SqlOption>,
     source_id: SourceId,
+    connector: &str,
 ) -> Result<()> {
     let meta_client = session.env().meta_client();
     let (resolved_with_options, _, connector_conn_ref) = resolve_connection_ref_and_secret_ref(
@@ -115,16 +117,7 @@ async fn handle_alter_source_props_inner(
         .into());
     }
 
-    // Validate debezium.heartbeat.interval.ms if present: must be a valid integer and not 0
-    if let Some(interval_value) = changed_props.get("debezium.heartbeat.interval.ms")
-        && !interval_value.parse::<i64>().is_ok_and(|v| v != 0)
-    {
-        return Err(ErrorCode::InvalidConfigValue {
-            config_entry: "debezium.heartbeat.interval.ms".to_owned(),
-            config_value: interval_value.to_owned(),
-        }
-        .into());
-    }
+    validate_cdc_heartbeat_interval(connector, &changed_props)?;
 
     meta_client
         .alter_source_connector_props(
@@ -150,7 +143,7 @@ pub async fn handle_alter_source_connector_props(
     let user_name = &session.user_name();
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-    let source_id = {
+    let (source_id, connector) = {
         let reader = session.env().catalog_reader().read_guard();
         let (source, schema_name) =
             reader.get_source_by_name(db_name, schema_path, &real_source_name)?;
@@ -172,10 +165,10 @@ pub async fn handle_alter_source_connector_props(
             &alter_props,
         )?;
 
-        source.id
+        (source.id, source.connector_name())
     };
 
-    handle_alter_source_props_inner(&session, alter_props, source_id).await?;
+    handle_alter_source_props_inner(&session, alter_props, source_id, &connector).await?;
 
     Ok(RwPgResponse::empty_result(StatementType::ALTER_SOURCE))
 }
