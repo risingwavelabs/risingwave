@@ -105,6 +105,19 @@ ALTER SOURCE mysql_orders_table_source RESET;
 statement error SOURCE_RATE_LIMIT is not supported for CDC table sources
 ALTER SOURCE mysql_orders_table_source SET SOURCE_RATE_LIMIT = 100;
 
+# Establish an existing consumer before rotating credentials.
+statement ok
+CREATE MATERIALIZED VIEW orders_before_rotation AS
+SELECT id, payload FROM mysql_orders_table_source;
+
+system ok
+mysql -e "INSERT INTO risedev.mysql_orders_table_source VALUES (10, 'before_rotation');"
+
+query IT retry 10 backoff 1s
+SELECT id, payload FROM orders_before_rotation;
+----
+10 before_rotation
+
 # Rotate the upstream credential after creating the catalog-only table source. New consumers must
 # resolve the shared source's current connector properties instead of using the copied descriptor.
 system ok
@@ -115,6 +128,28 @@ mysql -e "
 
 statement ok
 ALTER SOURCE s_mysql_orders_table_source CONNECTOR WITH (password = 'updated-abcdef');
+
+# Disconnect any surviving sessions for this test's dedicated CDC user. Continued
+# delivery must reauthenticate, rather than reuse a connection with the old password.
+system ok
+python3 e2e_test/source_inline/cdc/mysql/disconnect_table_source_user.py
+
+system ok
+mysql -e "INSERT INTO risedev.mysql_orders_table_source VALUES (11, 'after_rotation');"
+
+query IT rowsort retry 30 backoff 1s
+SELECT id, payload FROM orders_before_rotation;
+----
+10 before_rotation
+11 after_rotation
+
+system ok
+mysql -e "DELETE FROM risedev.mysql_orders_table_source WHERE id IN (10, 11);"
+
+query I retry 10 backoff 1s
+SELECT count(*) FROM orders_before_rotation;
+----
+0
 
 sleep 2s
 
@@ -246,6 +281,9 @@ query IT retry 10 backoff 1s
 SELECT id, payload FROM orders_state_2;
 ----
 3 AFTER_RECOVERY
+
+statement ok
+DROP MATERIALIZED VIEW orders_before_rotation;
 
 statement ok
 DROP MATERIALIZED VIEW orders_changelog;
