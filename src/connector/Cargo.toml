@@ -13,8 +13,9 @@ ignored = []
 [features]
 default = []
 test = []
-all-sinks = ["all-sinks-without-lancedb", "sink-lancedb"]
-all-sinks-without-lancedb = [
+all-sinks = ["all-sinks-lite", "all-sinks-heavy"]
+all-sinks-heavy = ["sink-lancedb"]
+all-sinks-lite = [
     "sink-bigquery",
     "sink-deltalake",
     "sink-google_pubsub",
