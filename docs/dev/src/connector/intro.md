@@ -231,4 +231,21 @@ and [#16514](https://github.com/risingwavelabs/risingwave/pull/16514) (Docker ba
 3. Add environment variables you want to use in the `slt` tests in `src/risedevtool/src/risedev_env.rs`.
 4. Write tests according to the style explained in the previous section.
 
-<!-- That's all?? -->
+### CDC primary-key ordering validation
+
+CDC snapshot/stream merging compares primary keys in RisingWave, so upstream snapshot
+ordering must agree with RisingWave ordering. PostgreSQL, MySQL, and SQL Server readers
+reject known incompatible key types or text collations. Unknown types are not rejected
+solely because ordering equivalence has not been established; existing schema and type
+decoding restrictions still apply.
+
+A CDC table can opt out with `WITH (bypass_pk_order_validation = 'true')` (default:
+`false`). This bypasses primary-key ordering checks, including PostgreSQL's encoding
+and matching-index checks, and logs a warning. It preserves PostgreSQL TEXT/VARCHAR
+`COLLATE pg_catalog."C"` expressions in snapshot queries. Connection, schema, and value
+decoding errors remain errors. The option applies to both serial snapshot readers and
+parallel snapshot split generation/readers.
+
+Bypassing validation does not make incompatible orders equivalent: snapshot/CDC merging
+can produce incorrect results if the upstream key order differs. It also does not make
+previously persisted snapshot positions compatible with a changed ordering contract.

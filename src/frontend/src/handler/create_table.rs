@@ -989,6 +989,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
 /// - For MySQL/Postgres: Returns the original `external_table_name` unchanged.
 fn derive_with_options_for_cdc_table(
     source_with_properties: &WithOptionsSecResolved,
+    table_with_options: &WithOptions,
     external_table_name: String,
 ) -> Result<(WithOptionsSecResolved, String)> {
     use source::cdc::{MYSQL_CDC_CONNECTOR, POSTGRES_CDC_CONNECTOR, SQL_SERVER_CDC_CONNECTOR};
@@ -998,6 +999,14 @@ fn derive_with_options_for_cdc_table(
         .ok_or_else(|| anyhow!("The source with properties does not contain 'database.name'"))?
         .as_str();
     let mut with_options = source_with_properties.clone();
+    if let Some(value) = table_with_options.get("bypass_pk_order_validation") {
+        value
+            .to_ascii_lowercase()
+            .parse::<bool>()
+            .map_err(|_| anyhow!("bypass_pk_order_validation must be true or false"))?;
+        with_options.insert("bypass_pk_order_validation".into(), value.clone());
+    }
+
     if let Some(connector) = source_with_properties.get(UPSTREAM_SOURCE_KEY) {
         match connector.as_str() {
             MYSQL_CDC_CONNECTOR => {
@@ -1424,6 +1433,7 @@ pub(super) async fn handle_create_table_plan(
             let (cdc_with_options, normalized_external_table_name) =
                 derive_with_options_for_cdc_table(
                     &source.with_properties,
+                    &handler_args.with_options,
                     cdc_table.external_table_name.clone(),
                 )?;
 
@@ -2375,6 +2385,7 @@ pub async fn generate_stream_graph_for_replace_table(
             let (cdc_with_options, normalized_external_table_name) =
                 derive_with_options_for_cdc_table(
                     &source.with_properties,
+                    &handler_args.with_options,
                     cdc_table.external_table_name.clone(),
                 )?;
 
@@ -2585,6 +2596,48 @@ mod tests {
 
     use super::*;
     use crate::test_utils::{LocalFrontend, PROTO_FILE_DATA, create_proto_file};
+
+    #[test]
+    fn test_cdc_table_bypass_pk_order_validation_properties() {
+        for (connector, upstream_table) in [
+            ("postgres-cdc", "public.t"),
+            ("mysql-cdc", "db.t"),
+            ("sqlserver-cdc", "dbo.t"),
+        ] {
+            let source = WithOptionsSecResolved::new(
+                BTreeMap::from([
+                    ("connector".into(), connector.into()),
+                    ("database.name".into(), "db".into()),
+                ]),
+                Default::default(),
+            );
+            let (derived, _) = derive_with_options_for_cdc_table(
+                &source,
+                &WithOptions::default(),
+                upstream_table.into(),
+            )
+            .unwrap();
+            assert!(derived.get("bypass_pk_order_validation").is_none());
+            let mut table_options = WithOptions::default();
+            table_options.insert("bypass_pk_order_validation".into(), "true".into());
+            let (mut derived, _) =
+                derive_with_options_for_cdc_table(&source, &table_options, upstream_table.into())
+                    .unwrap();
+            assert_eq!(derived.get("bypass_pk_order_validation").unwrap(), "true");
+            // A table can explicitly override a source-level setting.
+            table_options.insert("bypass_pk_order_validation".into(), "false".into());
+            derived =
+                derive_with_options_for_cdc_table(&derived, &table_options, upstream_table.into())
+                    .unwrap()
+                    .0;
+            assert_eq!(derived.get("bypass_pk_order_validation").unwrap(), "false");
+            table_options.insert("bypass_pk_order_validation".into(), "typo".into());
+            assert!(
+                derive_with_options_for_cdc_table(&source, &table_options, upstream_table.into())
+                    .is_err()
+            );
+        }
+    }
 
     fn test_schema_table_name() -> SchemaTableName {
         SchemaTableName {

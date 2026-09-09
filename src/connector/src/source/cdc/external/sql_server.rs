@@ -332,8 +332,10 @@ impl SqlServerExternalTableReader {
             .iter()
             .map(|index| rw_schema.fields[*index].name.clone())
             .collect_vec();
-        Self::validate_pk_ordering(&mut client, &config.schema, &config.table, &primary_keys)
-            .await?;
+        if !config.bypass_pk_order_validation {
+            Self::validate_pk_ordering(&mut client, &config.schema, &config.table, &primary_keys)
+                .await?;
+        }
 
         let field_names = rw_schema
             .fields
@@ -432,11 +434,8 @@ impl SqlServerExternalTableReader {
         collation_name: Option<&str>,
     ) -> Option<String> {
         if is_user_defined {
-            return Some(
-                "its decoded representation and upstream ordering are not proven identical to \
-                 RisingWave ordering"
-                    .to_owned(),
-            );
+            // User-defined types are not rejected solely because their order is unknown.
+            return None;
         }
         // Accept the space-padding corner case for variable-length keys containing
         // characters below U+0020. Other collation/code-page mismatches remain rejected.
@@ -659,7 +658,7 @@ mod tests {
         );
         assert!(
             SqlServerExternalTableReader::unsupported_pk_ordering_reason("custom_id", true, None,)
-                .is_some()
+                .is_none()
         );
     }
 

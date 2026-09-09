@@ -278,6 +278,11 @@ pub enum ExternalTableReaderImpl {
 pub struct ExternalTableConfig {
     pub connector: String,
 
+    /// Skip CDC primary-key ordering validation, accepting possible snapshot/CDC inconsistencies.
+    /// This does not change snapshot ordering expressions or relax type decoding.
+    #[serde(default, deserialize_with = "crate::deserialize_bool_from_string")]
+    pub bypass_pk_order_validation: bool,
+
     #[serde(rename = "hostname")]
     pub host: String,
     pub port: String,
@@ -320,6 +325,10 @@ impl ExternalTableConfig {
             LocalSecretManager::global().fill_secrets(connect_properties, secret_refs)?;
         let json_value = serde_json::to_value(options_with_secret)?;
         let config = serde_json::from_value::<ExternalTableConfig>(json_value)?;
+        if config.bypass_pk_order_validation {
+            tracing::warn!(connector = %config.connector, table = %config.table,
+                "CDC primary-key ordering validation is bypassed; snapshot/CDC ordering may be inconsistent");
+        }
         Ok(config)
     }
 
@@ -540,3 +549,33 @@ impl ExternalTableImpl {
 }
 
 pub const CDC_TABLE_SPLIT_ID_START: i64 = 1;
+
+#[cfg(test)]
+mod config_tests {
+    use super::ExternalTableConfig;
+
+    #[test]
+    fn test_bypass_pk_order_validation_config() {
+        // Connection properties arrive from persisted CDC table descriptors as strings.
+        let mut properties = serde_json::json!({
+            "connector": "postgres-cdc", "hostname": "localhost", "port": "5432",
+            "username": "user", "password": "", "database.name": "db", "table.name": "t"
+        });
+        assert!(
+            !serde_json::from_value::<ExternalTableConfig>(properties.clone())
+                .unwrap()
+                .bypass_pk_order_validation
+        );
+        for (value, expected) in [("true", true), ("false", false), ("TRUE", true)] {
+            properties["bypass_pk_order_validation"] = value.into();
+            assert_eq!(
+                serde_json::from_value::<ExternalTableConfig>(properties.clone())
+                    .unwrap()
+                    .bypass_pk_order_validation,
+                expected
+            );
+        }
+        properties["bypass_pk_order_validation"] = "typo".into();
+        assert!(serde_json::from_value::<ExternalTableConfig>(properties).is_err());
+    }
+}

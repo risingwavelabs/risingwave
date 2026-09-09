@@ -248,6 +248,7 @@ impl PostgresExternalTableReader {
         client: &tokio_postgres::Client,
         table_name: &SchemaTableName,
         primary_keys: &[String],
+        bypass_pk_order_validation: bool,
     ) -> ConnectorResult<HashSet<String>> {
         if primary_keys.is_empty() {
             return Ok(HashSet::new());
@@ -255,8 +256,9 @@ impl PostgresExternalTableReader {
 
         let column_type_oids = client
             .query(
-                "SELECT a.attname, a.atttypid \
+                "SELECT a.attname, a.atttypid, typ.typtype::text, typ.typcategory::text \
                  FROM pg_attribute a \
+                 JOIN pg_type typ ON typ.oid = a.atttypid \
                  JOIN pg_class tbl ON tbl.oid = a.attrelid \
                  JOIN pg_namespace ns ON ns.oid = tbl.relnamespace \
                  WHERE ns.nspname = $1 AND tbl.relname = $2 \
@@ -265,26 +267,54 @@ impl PostgresExternalTableReader {
             )
             .await?
             .into_iter()
-            .map(|row| (row.get::<_, String>(0), row.get::<_, u32>(1)))
+            .map(|row| {
+                (
+                    row.get::<_, String>(0),
+                    (
+                        row.get::<_, u32>(1),
+                        row.get::<_, String>(2),
+                        row.get::<_, String>(3),
+                    ),
+                )
+            })
             .collect::<HashMap<_, _>>();
 
+        Self::binary_collated_pk_columns(
+            &column_type_oids,
+            table_name,
+            primary_keys,
+            bypass_pk_order_validation,
+        )
+    }
+
+    fn binary_collated_pk_columns(
+        column_types: &HashMap<String, (u32, String, String)>,
+        table_name: &SchemaTableName,
+        primary_keys: &[String],
+        bypass_pk_order_validation: bool,
+    ) -> ConnectorResult<HashSet<String>> {
         let mut binary_collated_columns = HashSet::new();
         for column_name in primary_keys {
-            let type_oid = column_type_oids.get(column_name).ok_or_else(|| {
+            let (type_oid, type_kind, type_category) = column_types.get(column_name).ok_or_else(|| {
                 anyhow::anyhow!(
                     "PostgreSQL system catalog did not return primary-key column `{column_name}` \
                      from table {}",
                     Self::get_normalized_table_name(table_name)
                 )
             })?;
-            let pg_type = Self::resolve_builtin_pk_type(column_name, *type_oid)?;
-            if Self::is_binary_collated_pk_type(&pg_type) {
+            if PgType::from_oid(*type_oid)
+                .is_some_and(|pg_type| Self::is_binary_collated_pk_type(&pg_type))
+            {
                 binary_collated_columns.insert(column_name.clone());
-            } else if let Some(reason) = Self::unsupported_pk_type_reason(&pg_type) {
+            }
+            if !bypass_pk_order_validation
+                && let Some(reason) =
+                    Self::unsupported_pk_type_reason(*type_oid, type_kind, type_category)
+            {
                 return Err(anyhow::anyhow!(
-                    "PostgreSQL CDC primary-key column `{column_name}` has type {}, which is not \
-                     supported because {reason}",
-                    pg_type
+                    "PostgreSQL CDC primary-key column `{column_name}` has type OID {type_oid}, \
+                     which is not supported because {reason}; set bypass_pk_order_validation=true \
+                     to bypass this check"
                 )
                 .into());
             }
@@ -292,46 +322,32 @@ impl PostgresExternalTableReader {
         Ok(binary_collated_columns)
     }
 
-    fn resolve_builtin_pk_type(column_name: &str, type_oid: u32) -> ConnectorResult<PgType> {
-        PgType::from_oid(type_oid).ok_or_else(|| {
-            anyhow::anyhow!(
-                "PostgreSQL CDC primary-key column `{column_name}` has a user-defined, \
-                     domain, or extension type with OID {type_oid}; its decoded representation \
-                     and upstream ordering are not proven identical to RisingWave ordering"
-            )
-            .into()
-        })
-    }
-
     fn is_binary_collated_pk_type(pg_type: &PgType) -> bool {
         matches!(*pg_type, PgType::TEXT | PgType::VARCHAR)
     }
 
-    fn unsupported_pk_type_reason(pg_type: &PgType) -> Option<&'static str> {
-        match *pg_type {
-            PgType::BOOL
-            | PgType::INT2
-            | PgType::INT4
-            | PgType::INT8
-            | PgType::FLOAT4
-            | PgType::FLOAT8
-            | PgType::NUMERIC
-            | PgType::DATE
-            | PgType::TIME
-            | PgType::TIMESTAMP
-            | PgType::TIMESTAMPTZ
-            | PgType::VARCHAR
-            | PgType::TEXT
-            | PgType::BYTEA
-            | PgType::UUID => None,
-            PgType::BPCHAR => Some(
+    /// Reject known ordering mismatches. Unknown types retain their existing decoding behavior.
+    fn unsupported_pk_type_reason(
+        type_oid: u32,
+        type_kind: &str,
+        type_category: &str,
+    ) -> Option<&'static str> {
+        if type_kind == "e" {
+            return Some("enum declaration order does not match decoded string ordering");
+        }
+        if type_category == "A" {
+            return Some(
+                "array dimension/lower-bound ordering is not preserved by the decoded list",
+            );
+        }
+        match PgType::from_oid(type_oid) {
+            Some(PgType::BPCHAR) => Some(
                 "its blank-padding comparison semantics do not match RisingWave VARCHAR ordering",
             ),
-            PgType::INTERVAL => Some("its cross-system ordering is not canonical"),
-            _ => Some(
-                "its decoded representation and upstream ordering are not proven identical to \
-                 RisingWave ordering",
-            ),
+            Some(PgType::JSONB) => {
+                Some("its structural ordering does not match RisingWave JSONB ordering")
+            }
+            _ => None,
         }
     }
 
@@ -472,9 +488,10 @@ impl PostgresExternalTableReader {
             &client,
             &schema_table_name,
             &pk_column_names,
+            config.bypass_pk_order_validation,
         )
         .await?;
-        if !binary_collated_pk_columns.is_empty() {
+        if !config.bypass_pk_order_validation && !binary_collated_pk_columns.is_empty() {
             Self::validate_server_encoding(&client).await?;
             Self::validate_cdc_ordering_index(
                 &client,
@@ -1312,6 +1329,7 @@ mod tests {
             ssl_mode: Default::default(),
             ssl_root_cert: None,
             encrypt: "false".to_owned(),
+            bypass_pk_order_validation: false,
         };
 
         let table = PostgresExternalTable::connect(
@@ -1660,64 +1678,83 @@ mod tests {
     }
 
     #[test]
-    fn test_postgres_pk_type_policy_is_allowlist() {
-        assert!(PostgresExternalTableReader::is_binary_collated_pk_type(
-            &PgType::TEXT
-        ));
-        assert!(PostgresExternalTableReader::is_binary_collated_pk_type(
-            &PgType::VARCHAR
-        ));
-        assert!(!PostgresExternalTableReader::is_binary_collated_pk_type(
-            &PgType::BPCHAR
-        ));
-
-        for pg_type in [
-            &PgType::BOOL,
-            &PgType::INT2,
-            &PgType::INT4,
-            &PgType::INT8,
-            &PgType::FLOAT4,
-            &PgType::FLOAT8,
-            &PgType::NUMERIC,
-            &PgType::DATE,
-            &PgType::TIME,
-            &PgType::TIMESTAMP,
-            &PgType::TIMESTAMPTZ,
-            &PgType::VARCHAR,
-            &PgType::TEXT,
-            &PgType::BYTEA,
-            &PgType::UUID,
-        ] {
-            assert!(
-                PostgresExternalTableReader::unsupported_pk_type_reason(pg_type).is_none(),
-                "{} should be accepted",
-                pg_type
-            );
-        }
-        for pg_type in [
-            &PgType::BPCHAR,
-            &PgType::INTERVAL,
-            &PgType::JSONB,
-            &PgType::INT4_ARRAY,
-            &PgType::TIMETZ,
-            &PgType::MONEY,
-        ] {
-            assert!(
-                PostgresExternalTableReader::unsupported_pk_type_reason(pg_type).is_some(),
-                "{} should be rejected",
-                pg_type
-            );
-        }
-
+    fn test_postgres_bypass_preserves_text_order_and_catalog_checks() {
+        let table = SchemaTableName {
+            schema_name: "public".into(),
+            table_name: "t".into(),
+        };
+        let columns = HashMap::from([
+            (
+                "text_key".into(),
+                (PgType::TEXT.oid(), "b".into(), "S".into()),
+            ),
+            ("enum_key".into(), (u32::MAX, "e".into(), "E".into())),
+            ("unknown_key".into(), (u32::MAX - 1, "b".into(), "U".into())),
+        ]);
+        let keys = vec!["text_key".into(), "enum_key".into(), "unknown_key".into()];
         assert!(
-            PostgresExternalTableReader::resolve_builtin_pk_type("v1", PgType::TEXT.oid()).is_ok()
+            PostgresExternalTableReader::binary_collated_pk_columns(&columns, &table, &keys, false)
+                .is_err()
         );
-        let error =
-            PostgresExternalTableReader::resolve_builtin_pk_type("v1", u32::MAX).unwrap_err();
+        assert_eq!(
+            PostgresExternalTableReader::binary_collated_pk_columns(&columns, &table, &keys, true)
+                .unwrap(),
+            HashSet::from(["text_key".into()])
+        );
         assert!(
-            error
-                .to_string()
-                .contains("user-defined, domain, or extension")
+            PostgresExternalTableReader::binary_collated_pk_columns(
+                &columns,
+                &table,
+                &["unknown_key".into()],
+                false
+            )
+            .unwrap()
+            .is_empty()
+        );
+        assert!(
+            PostgresExternalTableReader::binary_collated_pk_columns(
+                &columns,
+                &table,
+                &["missing".into()],
+                true
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn test_postgres_pk_type_policy_is_blacklist() {
+        for pg_type in [PgType::TEXT, PgType::VARCHAR] {
+            assert!(PostgresExternalTableReader::is_binary_collated_pk_type(
+                &pg_type
+            ));
+        }
+        for oid in [
+            PgType::INT4.oid(),
+            PgType::TEXT.oid(),
+            PgType::INTERVAL.oid(),
+            PgType::MONEY.oid(),
+            PgType::TIMETZ.oid(),
+            u32::MAX,
+        ] {
+            assert!(
+                PostgresExternalTableReader::unsupported_pk_type_reason(oid, "b", "U").is_none()
+            );
+        }
+        for oid in [PgType::BPCHAR.oid(), PgType::JSONB.oid()] {
+            assert!(
+                PostgresExternalTableReader::unsupported_pk_type_reason(oid, "b", "U").is_some()
+            );
+        }
+        // Catalog metadata catches enums and arrays even when their OID is not built in.
+        assert!(
+            PostgresExternalTableReader::unsupported_pk_type_reason(u32::MAX, "e", "E").is_some()
+        );
+        assert!(
+            PostgresExternalTableReader::unsupported_pk_type_reason(u32::MAX, "b", "A").is_some()
+        );
+        assert!(
+            PostgresExternalTableReader::unsupported_pk_type_reason(u32::MAX, "d", "U").is_none()
         );
     }
 

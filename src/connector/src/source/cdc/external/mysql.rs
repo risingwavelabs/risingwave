@@ -577,7 +577,9 @@ impl MySqlExternalTableReader {
             Self::query_upstream_pk_infos(&pool, &database, &table).await?;
         // Get MySQL version
         let (major_version, minor_version, is_mariadb) = Self::get_mysql_version(&pool).await?;
-        Self::validate_pk_ordering(&upstream_mysql_pk_infos, is_mariadb)?;
+        if !config.bypass_pk_order_validation {
+            Self::validate_pk_ordering(&upstream_mysql_pk_infos, is_mariadb)?;
+        }
         let mysql_version = (major_version, minor_version);
         tracing::info!(
             "MySQL version detected: {}.{} (is_mariadb={})",
@@ -703,9 +705,6 @@ impl MySqlExternalTableReader {
                  decoded strings by UTF-8 bytes"
                     .to_owned(),
             ),
-            ColumnType::Unknown(_) => {
-                Some("its decoded representation and upstream ordering are not proven".to_owned())
-            }
             _ => None,
         }
     }
@@ -963,6 +962,19 @@ mod tests {
     }
 
     #[test]
+    fn test_unknown_mysql_pk_type_is_not_rejected_by_ordering_policy() {
+        assert!(
+            MySqlExternalTableReader::unsupported_pk_ordering_reason(
+                &ColumnType::Unknown("custom_id".into()),
+                None,
+                None,
+                false
+            )
+            .is_none()
+        );
+    }
+
+    #[test]
     fn test_mysql_unsigned_bigint_type_detection() {
         for ty_name in [
             "SERIAL",
@@ -1063,6 +1075,7 @@ mod tests {
             ssl_mode: Default::default(),
             ssl_root_cert: None,
             encrypt: "false".to_owned(),
+            bypass_pk_order_validation: false,
         };
 
         let table = MySqlExternalTable::connect(config).await.unwrap();
