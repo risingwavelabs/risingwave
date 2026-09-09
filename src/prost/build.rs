@@ -811,7 +811,7 @@ for_all_wrapped_id_fields! (
             upstream_source_id: SourceId,
         }
         CompactionResolverNode {
-            compaction_task_id: IcebergCompactionTaskId,
+            sink_id: SinkId,
         }
         DeltaIndexJoinNode {
             left_table_id: TableId,
@@ -1135,6 +1135,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         ".connector_service.ValidateSourceRequest",
         ".connector_service.GetEventStreamRequest",
         ".connector_service.SinkParam",
+        ".stream_plan.CompactionResolverNode",
         ".stream_plan.SinkDesc",
         ".stream_plan.StreamFsFetch",
         ".stream_plan.SourceBackfillNode",
