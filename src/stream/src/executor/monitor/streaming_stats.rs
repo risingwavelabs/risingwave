@@ -89,6 +89,7 @@ pub struct StreamingMetrics {
 
     // Backpressure
     pub actor_output_buffer_blocking_duration_ns: RelabeledGuardedIntCounterVec,
+    pub actor_output_channel_blocking_duration_ns: RelabeledGuardedIntCounterVec,
     actor_input_buffer_blocking_duration_ns: RelabeledGuardedIntCounterVec,
 
     // Streaming Join
@@ -408,6 +409,15 @@ impl StreamingMetrics {
             )
             .unwrap()
             // mask the first label `actor_id` if the level is less verbose than `Debug`
+            .relabel_debug_1(level);
+        let actor_output_channel_blocking_duration_ns =
+            register_guarded_int_counter_vec_with_registry!(
+                "stream_actor_output_channel_blocking_duration_ns",
+                "Total blocking duration (ns) summed over every output channel of the dispatcher",
+                &["actor_id", "fragment_id", "downstream_fragment_id"],
+                registry
+            )
+            .unwrap()
             .relabel_debug_1(level);
 
         let actor_input_buffer_blocking_duration_ns =
@@ -1400,6 +1410,7 @@ impl StreamingMetrics {
             exchange_frag_recv_size,
             merge_barrier_align_duration,
             actor_output_buffer_blocking_duration_ns,
+            actor_output_channel_blocking_duration_ns,
             actor_input_buffer_blocking_duration_ns,
             join_lookup_miss_count,
             join_lookup_total_count,

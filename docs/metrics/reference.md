@@ -548,6 +548,7 @@ yields a ratio in [0, 1] — the fraction of time the actor spent blocked.
 |--------------------------------------------------|---------------------------|------------------------------------------------------|---------|
 | `stream_actor_output_buffer_blocking_duration_ns`| counter | `actor_id`, `fragment_id`, `downstream_fragment_id`  | Cumulative nanoseconds the upstream actor's output buffer was full (downstream couldn't accept). |
 | `stream_actor_input_buffer_blocking_duration_ns` | counter | `actor_id`, `fragment_id`, `upstream_fragment_id`    | Cumulative nanoseconds the downstream actor's input buffer was empty and it was waiting for upstream data. |
+| `stream_actor_output_channel_blocking_duration_ns`| counter | `actor_id`, `fragment_id`, `downstream_fragment_id`  | Same blocking, summed over every output channel of the dispatcher instead of timing the whole dispatch (i.e. the slowest channel). |
 
 The user dashboard computes the output ratio as:
 
@@ -567,6 +568,24 @@ avg(rate(stream_actor_output_buffer_blocking_duration_ns[$__rate_interval]))
 - **~1.0 on a sink-facing fragment**: the sink is the bottleneck, not the
   streaming graph. Check §5.3's `log_store_latest_read_epoch` lag and the
   sink's underlying commit metrics (Phase 3 will cover those in detail).
+
+**Skew or slow downstream?** The buffer counter times the whole dispatch, so
+one full channel and all channels full look the same. Dividing the channel
+counter by it counts how many channels were full at once while blocked:
+
+```promql
+sum(rate(stream_actor_output_channel_blocking_duration_ns[$__rate_interval])) by (fragment_id, downstream_fragment_id)
+  / sum(rate(stream_actor_output_buffer_blocking_duration_ns[$__rate_interval])) by (fragment_id, downstream_fragment_id)
+```
+
+- **≈ 1**: a single downstream actor is the bottleneck — data skew on the
+  distribution key. Salt or change the key; adding parallelism will not help.
+- **Well above 1**: the downstream fragment is slow as a whole; scale it. Under
+  uniform load the value sits around half the downstream parallelism rather
+  than at it, because the momentarily slowest channel rotates.
+- **≈ P on an edge that carries only barriers**: every channel is stalled by
+  the same downstream; that is a convoy caused by another job, not a slow
+  fragment.
 
 The *input* variant is the mirror image: high input blocking on a fragment
 means its upstream isn't producing fast enough — the bottleneck is higher up.
@@ -1183,6 +1202,7 @@ The core tokio runtime metrics are exposed on streaming actors:
 | `stream_actor_current_epoch`       | gauge   | `actor_id`, `fragment_id`    | Current epoch the actor is processing. |
 | `stream_actor_count`               | gauge   | `fragment_id`                | Number of actors currently materialised for the fragment (i.e. parallelism). |
 | `stream_actor_output_buffer_blocking_duration_ns` | counter | `actor_id`, `fragment_id`, `downstream_fragment_id` | Backpressure (covered in §6). |
+| `stream_actor_output_channel_blocking_duration_ns` | counter | `actor_id`, `fragment_id`, `downstream_fragment_id` | Backpressure shape: skew vs. slow downstream (covered in §6). |
 | `stream_actor_input_buffer_blocking_duration_ns`  | counter | `actor_id`, `fragment_id`, `upstream_fragment_id`   | Upstream-starvation mirror (covered in §6). |
 
 Per-actor CPU attribution = `rate(stream_actor_poll_duration[$__rate_interval]) / 1e9`

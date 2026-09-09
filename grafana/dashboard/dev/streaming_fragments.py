@@ -400,6 +400,19 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.timeseries_count(
+                    "Blocked Downstream Channels (Backpressure Shape)",
+                    "Per-channel output blocking time summed over the dispatcher's outputs, divided by the dispatcher's "
+                    "blocking time. Close to 1: a single downstream actor is the bottleneck, usually data skew on the "
+                    "distribution key. Well above 1: the downstream fragment is slow as a whole.",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('stream_actor_output_channel_blocking_duration_ns')}[$__rate_interval])) by (fragment_id, downstream_fragment_id) \
+                                / (sum(rate({metric('stream_actor_output_buffer_blocking_duration_ns')}[$__rate_interval])) by (fragment_id, downstream_fragment_id) > 0)",
+                            "fragment {{fragment_id}}->{{downstream_fragment_id}}",
+                        ),
+                    ],
+                ),
                 panels.timeseries_percentage(
                     "Actor Input Blocking Rate (Upstream Backpressure)",
                     "The rate that an actor is blocked by its upstream.",
