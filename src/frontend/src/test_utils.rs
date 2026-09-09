@@ -1435,7 +1435,7 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         _changed_secret_refs: BTreeMap<String, PbSecretRef>,
         _connector_conn_ref: Option<ConnectionId>,
     ) -> RpcResult<()> {
-        unimplemented!()
+        Ok(())
     }
 
     async fn alter_connection_connector_props(
