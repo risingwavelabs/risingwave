@@ -113,6 +113,7 @@ impl Planner {
                 match as_of {
                     None
                     | Some(AsOf::ProcessTime)
+                    | Some(AsOf::ProcessTimeBroadcast)
                     | Some(AsOf::TimestampNum(_))
                     | Some(AsOf::TimestampString(_))
                     | Some(AsOf::ProcessTimeWithInterval(_)) => {}
@@ -172,7 +173,9 @@ impl Planner {
             | Some(AsOf::VersionNum(_))
             | Some(AsOf::TimestampString(_))
             | Some(AsOf::TimestampNum(_)) => {}
-            Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
+            Some(AsOf::ProcessTime)
+            | Some(AsOf::ProcessTimeBroadcast)
+            | Some(AsOf::ProcessTimeWithInterval(_)) => {
                 bail_not_implemented!("As Of ProcessTime() is not supported yet.")
             }
             Some(AsOf::VersionString(_)) => {
@@ -354,7 +357,9 @@ impl Planner {
                 | Some(AsOf::VersionNum(_))
                 | Some(AsOf::TimestampString(_))
                 | Some(AsOf::TimestampNum(_)) => {}
-                Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
+                Some(AsOf::ProcessTime)
+                | Some(AsOf::ProcessTimeBroadcast)
+                | Some(AsOf::ProcessTimeWithInterval(_)) => {
                     bail_not_implemented!("As Of ProcessTime() is not supported yet.")
                 }
                 Some(AsOf::VersionString(_)) => {

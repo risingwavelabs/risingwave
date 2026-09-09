@@ -1,3 +1,18 @@
+control substitution on
+
+statement ok
+DROP SINK IF EXISTS s6;
+
+statement ok
+DROP MATERIALIZED VIEW IF EXISTS mv6;
+
+statement ok
+DROP TABLE IF EXISTS t6;
+
+# v9 is left out of the sink on purpose: a Decimal256 column the sink does not write must not break it.
+system ok
+clickhouse --multiquery --query="DROP TABLE IF EXISTS demo_test; SET enable_json_type = 1; CREATE TABLE demo_test(v1 Int32, v2 Int64, v3 String, v4 Enum16('A'=1,'B'=2), v5 Decimal64(3), v6 Nullable(String), v7 DateTime64(6), v8 JSON, v9 Decimal(76, 4)) ENGINE = ReplacingMergeTree PRIMARY KEY (v1);"
+
 statement ok
 set sink_decouple = false;
 
@@ -9,13 +24,9 @@ CREATE MATERIALIZED VIEW mv6 AS SELECT * FROM t6;
 
 statement ok
 CREATE SINK s6 AS select mv6.v1 as v1, mv6.v2 as v2, mv6.v3 as v3, mv6.v4 as v4, mv6.v5 as v5, mv6.v6 as v7, mv6.v7 as v8 from mv6 WITH (
-    connector = 'clickhouse',
+    ${RISEDEV_CLICKHOUSE_WITH_OPTIONS_COMMON},
     type = 'append-only',
     force_append_only='true',
-    clickhouse.url = 'http://clickhouse-server:8123',
-    clickhouse.user = 'default',
-    clickhouse.password = 'default',
-    clickhouse.database = 'default',
     clickhouse.table='demo_test',
 );
 
@@ -39,6 +50,9 @@ INSERT INTO t6 VALUES (1, 50, '1-50', 1, 1.1, '2013-01-01 01:01:01+01:00', '{"sd
 statement ok
 FLUSH;
 
+system ok retry 30 backoff 1s
+test "$(clickhouse --query="SELECT count() FROM demo_test WHERE (v1, v2, v3, toString(v4), v5) IN ((1,50,'1-50','A',1.1),(2,2,'2-2','B',2.2),(3,2,'3-2','A',3.3),(5,2,'5-2','B',4.4),(8,2,'8-2','A',0),(13,2,'13-2','B',0),(21,2,'21-2','A',0)) AND isNull(v6) AND v7 = toDateTime64('2013-01-01 00:01:01', 6) AND toString(v8.sd) = '123' AND toString(v8.sda) = '23'")" = 7
+
 statement ok
 DROP SINK s6;
 
@@ -47,3 +61,6 @@ DROP MATERIALIZED VIEW mv6;
 
 statement ok
 DROP TABLE t6;
+
+system ok
+clickhouse --query="DROP TABLE demo_test"

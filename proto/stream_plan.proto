@@ -104,6 +104,7 @@ message UpdateMutation {
   source.CdcTableSnapshotSplitsWithGeneration actor_cdc_table_snapshot_splits = 7;
   map<uint32, SinkSchemaChange> sink_schema_change = 8;
   repeated SubscriptionUpstreamInfo subscriptions_to_drop = 9;
+  optional IcebergPkIndexCompactionContext iceberg_pk_index_compaction = 10;
 }
 
 message SourceChangeSplitMutation {
@@ -182,9 +183,17 @@ message IcebergPkIndexCompactionContext {
     PHASE_END = 2;
   }
 
+  message ResolverTaskInput {
+    repeated string output_data_file_paths = 1;
+    repeated string input_data_file_paths = 2;
+    int64 read_snapshot_id = 3;
+  }
+
   uint32 sink_id = 1;
   uint64 task_id = 2;
   Phase phase = 3;
+  // Required for PHASE_BEGIN and absent for PHASE_END.
+  optional ResolverTaskInput resolver_task_input = 4;
 }
 
 message BarrierMutation {
@@ -247,7 +256,6 @@ message Barrier {
   map<string, string> tracing_context = 2;
   // The kind of the barrier.
   BarrierKind kind = 9;
-  optional IcebergPkIndexCompactionContext iceberg_pk_index_compaction = 10;
 }
 
 message Watermark {
@@ -406,14 +414,24 @@ message IcebergWithPkIndexPositionDeleteMergerNode {
   SinkDesc sink_desc = 1;
 }
 
-// Leaf of a transient pk-index compaction pipeline
+// Leaf of the inactive pk-index compaction pipeline rendered with the sink job.
+//
+// This message existed in release-3.1, but no producer emitted it into a stream graph, so the old
+// fields were never persisted as part of an actor definition.
 message CompactionResolverNode {
-  SinkDesc sink_desc = 1;
-  catalog.Table pk_index_table = 2;
-  repeated string output_data_file_paths = 3;
-  repeated string input_data_file_paths = 4;
-  int64 read_snapshot_id = 5;
-  uint64 compaction_task_id = 6;
+  message PkColumn {
+    // Column position in the Iceberg data-file row.
+    uint32 data_file_index = 1;
+    // Type and identity of the corresponding primary-key column.
+    plan_common.ColumnDesc column_desc = 2;
+  }
+
+  // Placeholder from frontend; replaced with the actual job ID by Meta.
+  uint32 sink_id = 1;
+  map<string, string> properties = 2;
+  map<string, secret.SecretRef> secret_refs = 3;
+  // The order defines the primary-key order in resolver output rows.
+  repeated PkColumn pk_columns = 4;
 }
 
 message ProjectNode {
@@ -726,6 +744,8 @@ message TemporalJoinNode {
   optional catalog.Table memo_table = 9;
   // If it is a nested lool temporal join
   bool is_nested_loop = 10;
+  // Whether lookup-side changes are broadcast to every temporal join actor.
+  bool is_broadcast = 11;
 }
 
 message DynamicFilterNode {
@@ -789,8 +809,10 @@ message MergeNode {
   DispatcherType upstream_dispatcher_type = 3;
   // The schema of input columns. Already deprecated.
   repeated plan_common.Field fields = 4 [deprecated = true];
-  // Allows this merge to start without upstream actors and receive them later through a MergeUpdate.
-  bool allow_no_initial_upstream = 5;
+  // Allows this merge to have no upstream actors, either initially or after a MergeUpdate.
+  // When true, the merge must not use the singleton receiver optimization because a singleton
+  // receiver cannot transition to empty.
+  bool allow_empty_upstream = 5;
 }
 
 // passed from frontend to meta, used by fragmenter to generate `MergeNode`
