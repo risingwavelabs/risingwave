@@ -438,23 +438,25 @@ impl SqlServerExternalTableReader {
                     .to_owned(),
             );
         }
+        // Accept the space-padding corner case for variable-length keys containing
+        // characters below U+0020. Other collation/code-page mismatches remain rejected.
         match type_name.to_ascii_lowercase().as_str() {
-            "varchar" | "nvarchar" | "text" | "ntext" => Some(
-                "SQL Server pads the shorter operand with spaces before character comparisons, \
-                 while RisingWave orders variable-length UTF-8 strings by prefix; their ordering \
-                 is therefore not identical even under a BIN2 collation"
-                    .to_owned(),
-            ),
-            "nchar" if Self::sql_server_unicode_text_order_matches_rw(collation_name) => None,
-            "char" if Self::sql_server_utf8_text_order_matches_rw(collation_name) => None,
-            "char" => Some(format!(
-                "its collation `{}` is not a UTF-8 BIN2 collation and therefore is not proven \
-                 equivalent to RisingWave UTF-8 byte ordering; use a `*_BIN2_UTF8` collation",
+            "nchar" | "nvarchar" | "ntext"
+                if Self::sql_server_unicode_text_order_matches_rw(collation_name) =>
+            {
+                None
+            }
+            "char" | "varchar" | "text"
+                if Self::sql_server_utf8_text_order_matches_rw(collation_name) =>
+            {
+                None
+            }
+            "char" | "varchar" | "text" => Some(format!(
+                "its collation `{}` is not a UTF-8 BIN2 collation; use a `*_BIN2_UTF8` collation",
                 collation_name.unwrap_or("unknown"),
             )),
-            "nchar" => Some(format!(
-                "its collation `{}` is not a BIN2 collation and therefore is not proven \
-                 equivalent to RisingWave Unicode/UTF-8 byte ordering; use a `*_BIN2` collation",
+            "nchar" | "nvarchar" | "ntext" => Some(format!(
+                "its collation `{}` is not a BIN2 collation; use a `*_BIN2` collation",
                 collation_name.unwrap_or("unknown"),
             )),
             "xml" => Some("SQL Server XML ordering is not canonical".to_owned()),
@@ -467,8 +469,7 @@ impl SqlServerExternalTableReader {
         }
     }
 
-    /// For fixed-length Unicode text, SQL Server BIN2 collations compare by code point, which has
-    /// the same lexicographic order as the UTF-8 representation used by RisingWave.
+    /// Require BIN2 Unicode ordering, accepting the space-padding corner case noted above.
     fn sql_server_unicode_text_order_matches_rw(collation_name: Option<&str>) -> bool {
         let Some(collation_name) = collation_name else {
             return false;
@@ -477,8 +478,7 @@ impl SqlServerExternalTableReader {
         collation_name.ends_with("_BIN2") || collation_name.ends_with("_BIN2_UTF8")
     }
 
-    /// Fixed-length non-Unicode SQL Server text follows its code page. Requiring both BIN2 and
-    /// UTF8 makes that byte order identical to RisingWave's UTF-8 order.
+    /// Non-Unicode text additionally requires UTF8 to avoid code-page ordering differences.
     fn sql_server_utf8_text_order_matches_rw(collation_name: Option<&str>) -> bool {
         collation_name.is_some_and(|name| name.to_ascii_uppercase().ends_with("_BIN2_UTF8"))
     }
@@ -624,51 +624,26 @@ mod tests {
 
     #[test]
     fn test_sql_server_text_pk_ordering_checks_collation() {
-        for (type_name, collation_name) in [
-            ("char", "Latin1_General_100_BIN2_UTF8"),
-            ("nchar", "Latin1_General_100_BIN2"),
-            ("nchar", "Latin1_General_100_BIN2_UTF8"),
-        ] {
-            assert!(
-                SqlServerExternalTableReader::unsupported_pk_ordering_reason(
-                    type_name,
-                    false,
-                    Some(collation_name),
-                )
-                .is_none(),
-                "{type_name}/{collation_name}"
-            );
-        }
-        for (type_name, collation_name) in [
-            ("char", Some("Latin1_General_100_BIN2")),
-            ("char", Some("Latin1_General_100_CI_AS_SC_UTF8")),
-            ("nchar", Some("Latin1_General_100_CI_AS_SC")),
-            ("nchar", None),
-        ] {
-            assert!(
-                SqlServerExternalTableReader::unsupported_pk_ordering_reason(
-                    type_name,
-                    false,
-                    collation_name,
-                )
-                .is_some(),
-                "{type_name}/{collation_name:?}"
-            );
-        }
-        for (type_name, collation_name) in [
-            ("varchar", "Latin1_General_100_BIN2_UTF8"),
-            ("nvarchar", "Latin1_General_100_BIN2"),
-            ("nvarchar", "Latin1_General_100_BIN2_UTF8"),
-            ("text", "Latin1_General_100_BIN2_UTF8"),
-            ("ntext", "Latin1_General_100_BIN2"),
-        ] {
-            let reason = SqlServerExternalTableReader::unsupported_pk_ordering_reason(
-                type_name,
-                false,
-                Some(collation_name),
-            )
-            .unwrap();
-            assert!(reason.contains("pads the shorter operand"), "{reason}");
+        for type_name in ["char", "varchar", "text", "nchar", "nvarchar", "ntext"] {
+            let unicode = type_name.starts_with('n');
+            for (collation_name, accepted) in [
+                (Some("Latin1_General_100_BIN2_UTF8"), true),
+                (Some("Latin1_General_100_BIN2"), unicode),
+                (Some("Latin1_General_100_CI_AS_SC_UTF8"), false),
+                (Some("Latin1_General_100_CI_AS_SC"), false),
+                (None, false),
+            ] {
+                assert_eq!(
+                    SqlServerExternalTableReader::unsupported_pk_ordering_reason(
+                        type_name,
+                        false,
+                        collation_name,
+                    )
+                    .is_none(),
+                    accepted,
+                    "{type_name}/{collation_name:?}",
+                );
+            }
         }
         for type_name in ["xml", "uniqueidentifier"] {
             assert!(
@@ -695,7 +670,7 @@ mod tests {
                 "A".to_owned(),
                 (
                     "sys".to_owned(),
-                    "nchar".to_owned(),
+                    "nvarchar".to_owned(),
                     false,
                     Some("Latin1_General_100_BIN2".to_owned()),
                 ),
@@ -704,7 +679,7 @@ mod tests {
                 "a".to_owned(),
                 (
                     "sys".to_owned(),
-                    "nchar".to_owned(),
+                    "nvarchar".to_owned(),
                     false,
                     Some("Latin1_General_100_CI_AS_SC".to_owned()),
                 ),
