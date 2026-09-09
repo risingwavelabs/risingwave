@@ -570,21 +570,30 @@ avg(rate(stream_actor_output_buffer_blocking_duration_ns[$__rate_interval]))
   sink's underlying commit metrics (Phase 3 will cover those in detail).
 
 **Skew or slow downstream?** The buffer counter times the whole dispatch, so
-one full channel and all channels full look the same. Dividing the channel
-counter by it counts how many channels were full at once while blocked:
+one full channel and all channels full look the same. The channel counter adds
+up every channel's wait. Their ratio, normalised by the downstream parallelism,
+is the *backpressure spread*: the wait on every other output channel relative
+to the slowest one, in [0, 1].
 
 ```promql
-sum(rate(stream_actor_output_channel_blocking_duration_ns[$__rate_interval])) by (fragment_id, downstream_fragment_id)
-  / sum(rate(stream_actor_output_buffer_blocking_duration_ns[$__rate_interval])) by (fragment_id, downstream_fragment_id)
+clamp_min(
+    (sum(rate(stream_actor_output_channel_blocking_duration_ns[$__rate_interval])) by (fragment_id, downstream_fragment_id) > 0)
+  / sum(rate(stream_actor_output_buffer_blocking_duration_ns[$__rate_interval])) by (fragment_id, downstream_fragment_id) - 1, 0)
+/ on (downstream_fragment_id) group_left ()
+  (sum by (downstream_fragment_id) (label_replace(stream_actor_count, "downstream_fragment_id", "$1", "fragment_id", "(.*)")) - 1 > 0)
 ```
 
-- **≈ 1**: a single downstream actor is the bottleneck — data skew on the
+**Only read it on edges where the backpressure ratio above is high.** The
+spread describes the shape of the blocking, not its amount: on an edge that
+barely blocks it is noise, and an edge that never blocked has no value at all.
+Edges with a single downstream actor are omitted.
+
+- **≈ 0**: a single downstream actor is the bottleneck — data skew on the
   distribution key. Salt or change the key; adding parallelism will not help.
-- **Well above 1**: the downstream fragment is slow as a whole; scale it. Under
-  uniform load the value sits around half the downstream parallelism rather
-  than at it, because the momentarily slowest channel rotates.
-- **≈ P on an edge that carries only barriers**: every channel is stalled by
-  the same downstream; that is a convoy caused by another job, not a slow
+- **Tens of percent** (≈ 0.4 measured with 8 uniformly busy actors): the
+  downstream fragment is slow as a whole; scale it.
+- **Close to 1 on an edge that carries only barriers**: every channel is
+  stalled by the same downstream; a convoy caused by another job, not a slow
   fragment.
 
 The *input* variant is the mirror image: high input blocking on a fragment
