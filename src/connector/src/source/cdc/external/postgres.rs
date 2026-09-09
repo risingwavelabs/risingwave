@@ -161,6 +161,7 @@ struct PostgresIndexKey {
     collation_schema: Option<String>,
     collation_name: Option<String>,
     descending: bool,
+    nulls_first: bool,
     default_opclass: bool,
 }
 
@@ -381,7 +382,7 @@ impl PostgresExternalTableReader {
             .query(
                 "SELECT idx.indexrelid, a.attname, coll_ns.nspname, coll.collname, \
                         (idx.indoption[key.pos] & 1::smallint) <> 0 AS descending, \
-                        opc.opcdefault \
+                        opc.opcdefault, (idx.indoption[key.pos] & 2::smallint) <> 0 AS nulls_first \
                  FROM pg_index idx \
                  JOIN pg_class tbl ON tbl.oid = idx.indrelid \
                  JOIN pg_namespace ns ON ns.oid = tbl.relnamespace \
@@ -422,6 +423,7 @@ impl PostgresExternalTableReader {
                     collation_name: row.get(3),
                     descending: row.get(4),
                     default_opclass: row.get(5),
+                    nulls_first: row.get(6),
                 });
         }
 
@@ -461,6 +463,8 @@ impl PostgresExternalTableReader {
                 index_key.column_name.as_deref() == Some(primary_key)
                     && index_key.default_opclass
                     && index_key.descending == first_key.descending
+                    // Forward ASC or backward DESC must both yield ASC NULLS LAST.
+                    && index_key.nulls_first == index_key.descending
                     && (!binary_collated_columns.contains(primary_key)
                         || (index_key.collation_schema.as_deref() == Some("pg_catalog")
                             && index_key.collation_name.as_deref() == Some("C")))
@@ -1601,6 +1605,7 @@ mod tests {
                 collation_schema: collation.map(|(schema, _)| schema.to_owned()),
                 collation_name: collation.map(|(_, name)| name.to_owned()),
                 descending,
+                nulls_first: descending,
                 default_opclass,
             }
         }
@@ -1648,6 +1653,19 @@ mod tests {
             &primary_keys,
             &binary_columns,
         ));
+
+        for original in [&compatible, &all_descending] {
+            for position in 0..primary_keys.len() {
+                let mut incompatible_nulls = original.clone();
+                incompatible_nulls[position].nulls_first =
+                    !incompatible_nulls[position].nulls_first;
+                assert!(!PostgresExternalTableReader::index_supports_cdc_ordering(
+                    &incompatible_nulls,
+                    &primary_keys,
+                    &binary_columns,
+                ));
+            }
+        }
 
         let non_default_opclass = vec![
             key(Some("tenant_id"), None, false, true),

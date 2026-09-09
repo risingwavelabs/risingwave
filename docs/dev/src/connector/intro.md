@@ -239,6 +239,12 @@ reject known incompatible key types or text collations. Unknown types are not re
 solely because ordering equivalence has not been established; existing schema and type
 decoding restrictions still apply.
 
+SQL Server alias types are checked using their underlying system type and the column's
+collation. Column names are resolved by SQL Server's catalog collation, so identifier
+case/accent handling agrees with the snapshot query. PostgreSQL matching B-tree indexes
+must provide `ASC NULLS LAST` for every leading primary-key column, either by a forward
+scan of `ASC NULLS LAST` keys or a backward scan of `DESC NULLS FIRST` keys.
+
 A CDC table can opt out with `WITH (bypass_pk_order_validation = 'true')` (default:
 `false`). This bypasses primary-key ordering checks, including PostgreSQL's encoding
 and matching-index checks, and logs a warning. It preserves PostgreSQL TEXT/VARCHAR

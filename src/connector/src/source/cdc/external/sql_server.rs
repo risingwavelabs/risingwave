@@ -357,42 +357,56 @@ impl SqlServerExternalTableReader {
         table: &str,
         primary_keys: &[String],
     ) -> ConnectorResult<()> {
-        let mut query = Query::new(
-            "SELECT col.name, type_schema.name, typ.name, typ.is_user_defined, \
+        let mut column_types = HashMap::new();
+        for primary_key in primary_keys {
+            let mut query = Query::new(
+                "SELECT col.name, COALESCE(base_schema.name, type_schema.name), \
+                    COALESCE(base_typ.name, typ.name), typ.is_assembly_type, \
                     col.collation_name \
              FROM sys.columns col \
              JOIN sys.tables tbl ON tbl.object_id = col.object_id \
              JOIN sys.schemas table_schema ON table_schema.schema_id = tbl.schema_id \
              JOIN sys.types typ ON typ.user_type_id = col.user_type_id \
+             LEFT JOIN sys.types base_typ ON base_typ.user_type_id = typ.system_type_id \
+               AND base_typ.is_user_defined = 0 AND typ.is_assembly_type = 0 \
+             LEFT JOIN sys.schemas base_schema ON base_schema.schema_id = base_typ.schema_id \
              JOIN sys.schemas type_schema ON type_schema.schema_id = typ.schema_id \
-             WHERE table_schema.name = @P1 AND tbl.name = @P2",
-        );
-        query.bind(schema.to_owned());
-        query.bind(table.to_owned());
-        let mut stream = query.query(&mut client.inner_client).await?;
-        let mut column_types = HashMap::new();
-        while let Some(item) = stream.try_next().await? {
-            if let QueryItem::Row(row) = item {
-                let column_name: &str = row
-                    .try_get(0)?
-                    .context("SQL Server system catalog returned a column without a name")?;
-                let type_schema: &str = row
-                    .try_get(1)?
-                    .context("SQL Server system catalog returned a type without a schema")?;
-                let type_name: &str = row
-                    .try_get(2)?
-                    .context("SQL Server system catalog returned a type without a name")?;
-                let is_user_defined: bool = row.try_get(3)?.unwrap_or(false);
-                let collation_name: Option<&str> = row.try_get(4)?;
-                column_types.insert(
-                    column_name.to_owned(),
-                    (
-                        type_schema.to_owned(),
-                        type_name.to_owned(),
-                        is_user_defined,
-                        collation_name.map(str::to_owned),
-                    ),
-                );
+             WHERE table_schema.name = @P1 AND tbl.name = @P2 AND col.name = @P3",
+            );
+            query.bind(schema.to_owned());
+            query.bind(table.to_owned());
+            // Let SQL Server resolve the identifier using its catalog collation, including
+            // case/accent sensitivity. Rust string folding does not implement that contract.
+            query.bind(primary_key.to_owned());
+            let mut stream = query.query(&mut client.inner_client).await?;
+            while let Some(item) = stream.try_next().await? {
+                if let QueryItem::Row(row) = item {
+                    let _column_name: &str = row
+                        .try_get(0)?
+                        .context("SQL Server system catalog returned a column without a name")?;
+                    let type_schema: &str = row
+                        .try_get(1)?
+                        .context("SQL Server system catalog returned a type without a schema")?;
+                    let type_name: &str = row
+                        .try_get(2)?
+                        .context("SQL Server system catalog returned a type without a name")?;
+                    let is_assembly_type: bool = row.try_get(3)?.unwrap_or(false);
+                    let collation_name: Option<&str> = row.try_get(4)?;
+                    if column_types
+                        .insert(
+                            primary_key.to_owned(),
+                            (
+                                type_schema.to_owned(),
+                                type_name.to_owned(),
+                                is_assembly_type,
+                                collation_name.map(str::to_owned),
+                            ),
+                        )
+                        .is_some()
+                    {
+                        return Err(anyhow!("SQL Server catalog returned ambiguous primary-key column `{primary_key}`").into());
+                    }
+                }
             }
         }
 
@@ -406,7 +420,7 @@ impl SqlServerExternalTableReader {
         primary_keys: &[String],
     ) -> ConnectorResult<()> {
         for column_name in primary_keys {
-            let (type_schema, type_name, is_user_defined, collation_name) =
+            let (type_schema, type_name, is_assembly_type, collation_name) =
                 column_types.get(column_name).ok_or_else(|| {
                     anyhow!(
                         "SQL Server system catalog did not return primary-key column \
@@ -415,7 +429,7 @@ impl SqlServerExternalTableReader {
                 })?;
             if let Some(reason) = Self::unsupported_pk_ordering_reason(
                 type_name,
-                *is_user_defined,
+                *is_assembly_type,
                 collation_name.as_deref(),
             ) {
                 return Err(anyhow!(
@@ -430,11 +444,12 @@ impl SqlServerExternalTableReader {
 
     fn unsupported_pk_ordering_reason(
         type_name: &str,
-        is_user_defined: bool,
+        is_assembly_type: bool,
         collation_name: Option<&str>,
     ) -> Option<String> {
-        if is_user_defined {
-            // User-defined types are not rejected solely because their order is unknown.
+        if is_assembly_type {
+            // CLR types are not rejected solely because their order is unknown.
+            // SQL alias types are resolved to their base system type by the catalog query.
             return None;
         }
         // Accept the space-padding corner case for variable-length keys containing
@@ -606,6 +621,129 @@ mod tests {
     use std::collections::HashMap;
 
     use crate::source::cdc::external::SqlServerExternalTableReader;
+
+    /// Run against both CI and CS catalog databases using an ADO connection string.
+    #[tokio::test]
+    #[ignore = "requires SQLSERVER_TEST_CONNECTION_STRING and permission to create schemas/types"]
+    async fn test_sql_server_pk_catalog_aliases_and_identifiers() -> anyhow::Result<()> {
+        use crate::sink::sqlserver::SqlServerClient;
+
+        let config =
+            tiberius::Config::from_ado_string(&std::env::var("SQLSERVER_TEST_CONNECTION_STRING")?)?;
+        let mut client = SqlServerClient::new_with_config(config).await?;
+        let schema = format!(
+            "cdc_order_test_{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)?
+                .as_nanos()
+        );
+        client
+            .inner_client
+            .simple_query(format!("CREATE SCHEMA [{schema}]"))
+            .await?
+            .into_results()
+            .await?;
+        // Create each type in a separate batch before compiling statements that use it.
+        for ddl in [
+            format!("CREATE TYPE [{schema}].[text_key] FROM nvarchar(40) NOT NULL"),
+            format!("CREATE TYPE [{schema}].[integer_key] FROM int NOT NULL"),
+            format!("CREATE TABLE [{schema}].[names] ([Id] int PRIMARY KEY)"),
+            format!(
+                "CREATE TABLE [{schema}].[bad_alias] ([Id] [{schema}].[text_key]
+                COLLATE Latin1_General_100_CI_AS PRIMARY KEY)"
+            ),
+            format!(
+                "CREATE TABLE [{schema}].[good_alias] ([Id] [{schema}].[text_key]
+                COLLATE Latin1_General_100_BIN2 PRIMARY KEY)"
+            ),
+            format!(
+                "CREATE TABLE [{schema}].[numeric_alias] ([Id] [{schema}].[integer_key] PRIMARY KEY)"
+            ),
+        ] {
+            client
+                .inner_client
+                .simple_query(ddl)
+                .await?
+                .into_results()
+                .await?;
+        }
+
+        // Use actual identifier binding as the oracle for either catalog collation.
+        let snapshot_resolves_lowercase = match client
+            .inner_client
+            .simple_query(format!("SELECT TOP (0) [id] FROM [{schema}].[names]"))
+            .await
+        {
+            Ok(stream) => stream.into_results().await.is_ok(),
+            Err(_) => false,
+        };
+        let lowercase = SqlServerExternalTableReader::validate_pk_ordering(
+            &mut client,
+            &schema,
+            "names",
+            &["id".into()],
+        )
+        .await;
+        let exact = SqlServerExternalTableReader::validate_pk_ordering(
+            &mut client,
+            &schema,
+            "names",
+            &["Id".into()],
+        )
+        .await;
+        let missing = SqlServerExternalTableReader::validate_pk_ordering(
+            &mut client,
+            &schema,
+            "names",
+            &["missing".into()],
+        )
+        .await;
+        let bad_alias = SqlServerExternalTableReader::validate_pk_ordering(
+            &mut client,
+            &schema,
+            "bad_alias",
+            &["Id".into()],
+        )
+        .await;
+        let good_alias = SqlServerExternalTableReader::validate_pk_ordering(
+            &mut client,
+            &schema,
+            "good_alias",
+            &["Id".into()],
+        )
+        .await;
+        let numeric_alias = SqlServerExternalTableReader::validate_pk_ordering(
+            &mut client,
+            &schema,
+            "numeric_alias",
+            &["Id".into()],
+        )
+        .await;
+
+        client
+            .inner_client
+            .simple_query(format!(
+                "DROP TABLE [{schema}].[names], [{schema}].[bad_alias],
+                 [{schema}].[good_alias], [{schema}].[numeric_alias];
+             DROP TYPE [{schema}].[text_key]; DROP TYPE [{schema}].[integer_key];
+             DROP SCHEMA [{schema}];"
+            ))
+            .await?
+            .into_results()
+            .await?;
+        assert_eq!(lowercase.is_ok(), snapshot_resolves_lowercase);
+        exact?;
+        assert!(missing.unwrap_err().to_string().contains("did not return"));
+        assert!(
+            bad_alias
+                .unwrap_err()
+                .to_string()
+                .contains("not a BIN2 collation")
+        );
+        good_alias?;
+        numeric_alias?;
+        Ok(())
+    }
 
     #[test]
     fn test_sql_server_filter_expr() {
