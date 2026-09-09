@@ -54,7 +54,7 @@ pub enum WriterInputMode {
         task_id: IcebergCompactionTaskId,
         begin_epoch: EpochPair,
     },
-    DrainingLeft {
+    AligningReplacementInput {
         task_id: IcebergCompactionTaskId,
         barrier: Barrier,
     },
@@ -344,23 +344,7 @@ where
         left: &Barrier,
         right: &Barrier,
     ) -> StreamExecutorResult<()> {
-        let context_matches = match (
-            left.iceberg_pk_index_compaction(),
-            right.iceberg_pk_index_compaction(),
-        ) {
-            (None, None) => true,
-            (Some(left), Some(right)) => {
-                left.sink_id == right.sink_id
-                    && left.task_id == right.task_id
-                    && left.phase == right.phase
-            }
-            _ => false,
-        };
-        if left.epoch != right.epoch
-            || left.kind != right.kind
-            || left.mutation != right.mutation
-            || !context_matches
-        {
+        if left.epoch != right.epoch || left.kind != right.kind || left.mutation != right.mutation {
             bail!(
                 "iceberg pk-index writer {} received mismatched left/right barriers: left={:?}, right={:?}",
                 self.sink_id,
@@ -435,9 +419,10 @@ where
                         yield msg?;
                     }
                 }
-                WriterInputMode::DrainingLeft { task_id, barrier } => {
+                WriterInputMode::AligningReplacementInput { task_id, barrier } => {
                     #[for_await]
-                    for msg in self.execute_draining_left(&mut input, task_id, barrier) {
+                    for msg in self.execute_aligning_replacement_input(&mut input, task_id, barrier)
+                    {
                         yield msg?;
                     }
                 }
@@ -521,21 +506,21 @@ where
                         Phase::End,
                         begin_epoch.curr,
                     )?;
-                    self.mode = WriterInputMode::DrainingLeft { task_id, barrier };
+                    self.mode = WriterInputMode::AligningReplacementInput { task_id, barrier };
                     return Ok(());
                 }
             }
         }
 
         bail!(
-            "iceberg pk-index writer {} right input closed before End for task {}",
+            "iceberg pk-index writer {} resolver input closed before switch-to-input for task {}",
             self.sink_id,
             task_id
         );
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
-    async fn execute_draining_left<'a>(
+    async fn execute_aligning_replacement_input<'a>(
         &'a mut self,
         input: &'a mut BoxedMessageStream,
         task_id: IcebergCompactionTaskId,
@@ -544,15 +529,13 @@ where
         #[for_await]
         for msg in input {
             match msg? {
-                Message::Chunk(chunk) =>
-                {
-                    #[for_await]
-                    for chunk in self.process_chunk(chunk) {
-                        yield Message::Chunk(chunk?.into());
-                    }
-                }
+                Message::Chunk(_) => bail!(
+                    "iceberg pk-index writer {} received a chunk from replacement input before its initial barrier for task {}",
+                    self.sink_id,
+                    task_id
+                ),
                 Message::Watermark(_) => bail!(
-                    "iceberg pk-index writer {} received watermark on left input while draining task {}",
+                    "iceberg pk-index writer {} received watermark from replacement input before its initial barrier for task {}",
                     self.sink_id,
                     task_id
                 ),
@@ -569,7 +552,7 @@ where
         }
 
         bail!(
-            "iceberg pk-index writer {} left input closed before End for task {}",
+            "iceberg pk-index writer {} replacement input closed before its initial barrier for task {}",
             self.sink_id,
             task_id
         );
