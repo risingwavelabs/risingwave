@@ -2870,6 +2870,8 @@ impl CatalogController {
             .ok_or_else(|| {
                 MetaError::catalog_id_not_found(ObjectType::Source.as_str(), source_id)
             })?;
+        ensure_source_props_not_set_by_connection(&txn, &source, &alter_props, &alter_secret_refs)
+            .await?;
         let connector = source.with_properties.0.get_connector().unwrap();
         let is_shared_source = source.is_shared();
 
@@ -3972,6 +3974,41 @@ fn merge_with_options(with_properties: &mut Vec<SqlOption>, altered_options: Vec
             with_properties.push(altered_option);
         }
     }
+}
+
+async fn ensure_source_props_not_set_by_connection(
+    txn: &DatabaseTransaction,
+    source: &source::Model,
+    alter_props: &BTreeMap<String, String>,
+    alter_secret_refs: &BTreeMap<String, PbSecretRef>,
+) -> MetaResult<()> {
+    let Some(connection_id) = source.connection_id else {
+        return Ok(());
+    };
+
+    let connection = Connection::find_by_id(connection_id)
+        .one(txn)
+        .await?
+        .ok_or_else(|| {
+            MetaError::catalog_id_not_found(ObjectType::Connection.as_str(), connection_id)
+        })?;
+    let connection_params = connection.params.to_protobuf();
+
+    if let Some(key) = alter_props
+        .keys()
+        .chain(alter_secret_refs.keys())
+        .find(|key| {
+            connection_params.properties.contains_key(*key)
+                || connection_params.secret_refs.contains_key(*key)
+        })
+    {
+        return Err(MetaError::invalid_parameter(format!(
+            "Cannot alter source connector property `{key}` because it is set by CONNECTION `{}`. Use ALTER CONNECTION instead.",
+            connection.name
+        )));
+    }
+
+    Ok(())
 }
 
 async fn update_sink_fragment_props(
