@@ -1004,8 +1004,9 @@ fn derive_with_options_for_cdc_table(
     if let Some(connector) = source_with_properties.get(UPSTREAM_SOURCE_KEY) {
         match connector.as_str() {
             MYSQL_CDC_CONNECTOR => {
-                // MySQL doesn't allow '.' in database name and table name, so we can split the
-                // external table name by '.' to get the table name
+                // The `TABLE` clause currently uses a flat `database.table` string and treats its
+                // first `.` as the separator. Quoted MySQL identifiers can contain `.`, making
+                // this representation ambiguous. See #27005.
                 let (db_name, table_name) = external_table_name.split_once('.').ok_or_else(|| {
                     anyhow!("The upstream table name must contain database name prefix, e.g. 'database.table'")
                 })?;
