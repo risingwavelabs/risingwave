@@ -92,7 +92,7 @@ macro_rules! for_all_params {
             { backup_storage_url,                       String,                         None,                           true,   "Remote storage url for storing snapshots.", },
             { backup_storage_directory,                 String,                         None,                           true,   "Remote directory for storing snapshots.", },
             { max_concurrent_creating_streaming_jobs,   u32,                            Some(1_u32),                    true,   "Max number of concurrent creating streaming jobs.", },
-            { pause_on_next_bootstrap,                  bool,                           Some(false),                    true,   "Whether to pause all data sources on next bootstrap.", },
+            { pause_on_next_bootstrap,                  bool,                           Some(false),                    true,   "Whether to pause all sources, DMLs and backfills on next bootstrap.", },
             { enable_tracing,                           bool,                           Some(false),                    true,   "Whether to enable distributed tracing.", },
             { use_new_object_prefix_strategy,           bool,                           None,                           false,  "Whether to split object prefix.", },
             { license_key,                              risingwave_license::LicenseKey, Some(Default::default()),       true,   "The license key to activate enterprise features.", },

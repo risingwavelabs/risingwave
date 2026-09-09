@@ -125,7 +125,7 @@ pub(super) enum CreatingStreamingJobStatus {
         tracking_job: TrackingJob,
         info: CreatingJobInfo,
         log_store_progress_tracker: CreateMviewLogStoreProgressTracker,
-        pending_barriers: VecDeque<BarrierInfo>,
+        pending_barriers: VecDeque<(BarrierInfo, Option<Mutation>)>,
     },
     /// All backfill actors have started consuming upstream, and the job
     /// will be finished when all previously injected barriers have been collected
@@ -163,6 +163,7 @@ impl CreatingStreamingJobStatus {
                     }]
                     .into_iter()
                     .chain(pending_upstream_barriers.drain(..))
+                    .map(|barrier_info| (barrier_info, None))
                     .collect();
 
                     let CreatingStreamingJobStatus::ConsumingSnapshot {
@@ -185,7 +186,7 @@ impl CreatingStreamingJobStatus {
                             snapshot_backfill_actors.iter().cloned(),
                             pending_barriers
                                 .back()
-                                .map(|barrier_info| {
+                                .map(|(barrier_info, _)| {
                                     barrier_info.prev_epoch().saturating_sub(snapshot_epoch)
                                 })
                                 .unwrap_or(0),
@@ -296,17 +297,12 @@ impl CreatingStreamingJobStatus {
             CreatingStreamingJobStatus::ConsumingLogStore {
                 pending_barriers, ..
             } => {
-                // Throttle has no effect on the snapshot executor after it starts consuming the
-                // log store. The updated fragment plan is kept for the actors created on merge,
-                // so the mutation does not need to be forwarded in this phase.
+                // Queued with its barrier so it is injected in order once there is capacity.
                 drain_pending_barriers(
                     pending_barriers,
-                    barrier_info.clone(),
+                    (barrier_info.clone(), mutation),
                     resolve_initial_barrier_num_to_inject(),
                 )
-                .into_iter()
-                .map(|barrier_info| (barrier_info, None))
-                .collect()
             }
             CreatingStreamingJobStatus::Finishing { .. } => vec![],
             CreatingStreamingJobStatus::PlaceHolder => {
@@ -367,10 +363,10 @@ impl CreatingStreamingJobStatus {
 }
 
 fn drain_pending_barriers(
-    pending_barriers: &mut VecDeque<BarrierInfo>,
-    new_upstream_barrier: BarrierInfo,
+    pending_barriers: &mut VecDeque<(BarrierInfo, Option<Mutation>)>,
+    new_upstream_barrier: (BarrierInfo, Option<Mutation>),
     barrier_num_to_inject: usize,
-) -> Vec<BarrierInfo> {
+) -> Vec<(BarrierInfo, Option<Mutation>)> {
     pending_barriers.push_back(new_upstream_barrier);
     let barrier_count = pending_barriers.len().min(barrier_num_to_inject);
     pending_barriers.drain(..barrier_count).collect()
@@ -378,7 +374,7 @@ fn drain_pending_barriers(
 
 #[cfg(test)]
 mod tests {
-    use risingwave_pb::stream_plan::PbStreamNode;
+    use risingwave_pb::stream_plan::{PauseMutation, PbStreamNode};
 
     use super::*;
 
@@ -390,39 +386,43 @@ mod tests {
         }
     }
 
-    fn epochs(barriers: &[BarrierInfo]) -> Vec<(u64, u64)> {
+    fn pending(prev_epoch: u64, curr_epoch: u64) -> (BarrierInfo, Option<Mutation>) {
+        (barrier(prev_epoch, curr_epoch), None)
+    }
+
+    fn epochs(barriers: &[(BarrierInfo, Option<Mutation>)]) -> Vec<(u64, u64)> {
         barriers
             .iter()
-            .map(|barrier| (barrier.prev_epoch(), barrier.curr_epoch()))
+            .map(|(barrier, _)| (barrier.prev_epoch(), barrier.curr_epoch()))
             .collect()
     }
 
     #[test]
     fn test_drain_pending_barriers_with_available_capacity() {
-        let mut pending_barriers = VecDeque::from([barrier(1, 2), barrier(2, 3), barrier(3, 4)]);
+        let mut pending_barriers = VecDeque::from([pending(1, 2), pending(2, 3), pending(3, 4)]);
 
-        let injected = drain_pending_barriers(&mut pending_barriers, barrier(4, 5), 0);
+        let injected = drain_pending_barriers(&mut pending_barriers, pending(4, 5), 0);
         assert!(injected.is_empty());
         assert_eq!(
             epochs(pending_barriers.make_contiguous()),
             vec![(1, 2), (2, 3), (3, 4), (4, 5)]
         );
 
-        let injected = drain_pending_barriers(&mut pending_barriers, barrier(5, 6), 2);
+        let injected = drain_pending_barriers(&mut pending_barriers, pending(5, 6), 2);
         assert_eq!(epochs(&injected), vec![(1, 2), (2, 3)]);
         assert_eq!(
             epochs(pending_barriers.make_contiguous()),
             vec![(3, 4), (4, 5), (5, 6)]
         );
 
-        let injected = drain_pending_barriers(&mut pending_barriers, barrier(6, 7), 2);
+        let injected = drain_pending_barriers(&mut pending_barriers, pending(6, 7), 2);
         assert_eq!(epochs(&injected), vec![(3, 4), (4, 5)]);
         assert_eq!(
             epochs(pending_barriers.make_contiguous()),
             vec![(5, 6), (6, 7)]
         );
 
-        let injected = drain_pending_barriers(&mut pending_barriers, barrier(7, 8), 2);
+        let injected = drain_pending_barriers(&mut pending_barriers, pending(7, 8), 2);
         assert_eq!(epochs(&injected), vec![(5, 6), (6, 7)]);
         assert_eq!(epochs(pending_barriers.make_contiguous()), vec![(7, 8)]);
     }
@@ -431,10 +431,31 @@ mod tests {
     fn test_drain_pending_barriers_without_backlog() {
         let mut pending_barriers = VecDeque::new();
 
-        let injected = drain_pending_barriers(&mut pending_barriers, barrier(1, 2), 100);
+        let injected = drain_pending_barriers(&mut pending_barriers, pending(1, 2), 100);
 
         assert_eq!(epochs(&injected), vec![(1, 2)]);
         assert!(pending_barriers.is_empty());
+    }
+
+    #[test]
+    fn test_drain_pending_barriers_keeps_mutation_on_its_barrier() {
+        let mut pending_barriers = VecDeque::from([pending(1, 2)]);
+        let paused = (barrier(2, 3), Some(Mutation::Pause(PauseMutation {})));
+
+        let injected = drain_pending_barriers(&mut pending_barriers, paused, 0);
+        assert!(injected.is_empty());
+
+        let injected = drain_pending_barriers(&mut pending_barriers, pending(3, 4), 1);
+        assert_eq!(epochs(&injected), vec![(1, 2)]);
+        assert!(injected[0].1.is_none());
+
+        let injected = drain_pending_barriers(&mut pending_barriers, pending(4, 5), 1);
+        assert_eq!(epochs(&injected), vec![(2, 3)]);
+        assert!(matches!(injected[0].1, Some(Mutation::Pause(_))));
+        assert_eq!(
+            epochs(pending_barriers.make_contiguous()),
+            vec![(3, 4), (4, 5)]
+        );
     }
 
     #[test]

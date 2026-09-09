@@ -348,9 +348,9 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
 
         if paused {
             warn!(
-                "The cluster will bootstrap with all data sources paused as specified by the system parameter `{}`. \
+                "The cluster will bootstrap with sources, DMLs and backfills paused as specified by the system parameter `{}`. \
                  It will now be reset to `false`. \
-                 To resume the data sources, either restart the cluster again or use `risectl meta resume`.",
+                 To resume them, either restart the cluster again or use `risectl meta resume`.",
                 PAUSE_ON_NEXT_BOOTSTRAP_KEY
             );
             self.env
@@ -1070,9 +1070,9 @@ use crate::barrier::partial_graph::{
 impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
     /// Recovery the whole cluster from the latest epoch.
     ///
-    /// If `paused_reason` is `Some`, all data sources (including connectors and DMLs) will be
-    /// immediately paused after recovery, until the user manually resume them either by restarting
-    /// the cluster or `risectl` command. Used for debugging purpose.
+    /// If `is_paused` is true, every executor that produces data on its own (sources, DMLs and
+    /// backfills) will be immediately paused after recovery, until the user manually resumes them
+    /// either by restarting the cluster or `risectl` command. Used for debugging purpose.
     ///
     /// Returns the new state of the barrier manager after recovery.
     pub async fn recovery(&mut self, is_paused: bool, recovery_reason: RecoveryReason) {
@@ -1317,6 +1317,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     failed_databases,
                     hummock_version_stats,
                     self.env.clone(),
+                    is_paused,
                 );
 
                 let reader = self.env.system_params_reader().await;

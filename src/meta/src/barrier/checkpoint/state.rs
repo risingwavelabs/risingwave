@@ -426,6 +426,21 @@ impl DatabaseCheckpointControl {
         )
     }
 
+    /// Pause and resume apply to every partial graph of the database, while throttle only
+    /// targets the fragments it names.
+    fn independent_job_mutation<'a>(
+        pause_resume_mutation: &Option<PbMutation>,
+        throttle_config: &mut Option<ThrottleConfigMap>,
+        notifier: &'a mut Option<NotifierStarter>,
+        pre_apply_throttle: impl FnOnce(&mut ThrottleConfigMap) -> Option<PbMutation>,
+    ) -> Option<(PbMutation, Option<&'a mut NotifierStarter>)> {
+        let mutation = match pause_resume_mutation {
+            Some(mutation) => Some(mutation.clone()),
+            None => throttle_config.as_mut().and_then(pre_apply_throttle),
+        };
+        mutation.map(|mutation| (mutation, notifier.as_mut()))
+    }
+
     /// Returns the inflight actor infos that have included the newly added actors in the given command. The dropped actors
     /// will be removed from the state after the info get resolved.
     pub(super) fn apply_command(
@@ -539,7 +554,6 @@ impl DatabaseCheckpointControl {
                     &info.database_resource_group,
                 )?;
                 {
-                    assert!(!self.state.is_paused());
                     let (snapshot_epoch, since_timestamp_upstream_log_epochs) =
                         if let Some(since_epoch) = &since_epoch {
                             let (snapshot_epoch, log_epochs) =
@@ -626,6 +640,7 @@ impl DatabaseCheckpointControl {
                         &mut edges,
                         &resolved_split_assignment,
                         &actors,
+                        self.state.is_paused(),
                     )?;
 
                     if let Some(fragment_infos) = job.fragment_infos() {
@@ -679,9 +694,6 @@ impl DatabaseCheckpointControl {
             }) => {
                 notify_database_graph = false;
                 {
-                    if self.state.is_paused() {
-                        bail!("cannot create batch refresh job while database barrier is paused");
-                    }
                     let snapshot_epoch = barrier_info.prev_epoch();
                     let job_id = info.stream_job_fragments.stream_job_id();
                     let database_id = info.streaming_job.database_id();
@@ -800,6 +812,7 @@ impl DatabaseCheckpointControl {
                         &logical,
                         worker_nodes,
                         refresh_interval_sec,
+                        self.state.is_paused(),
                     )?;
 
                     if let Some(fragment_infos) = job.fragment_infos() {
@@ -1788,6 +1801,10 @@ impl DatabaseCheckpointControl {
         }
 
         // Forward barrier to independent job controls
+        let pause_resume_mutation = mutation
+            .as_ref()
+            .filter(|mutation| matches!(mutation, PbMutation::Pause(_) | PbMutation::Resume(_)))
+            .cloned();
         for (job_id, job) in &mut self.independent_checkpoint_job_controls {
             let Some(job) = job.running_mut() else {
                 continue;
@@ -1797,27 +1814,29 @@ impl DatabaseCheckpointControl {
                     if finished_snapshot_backfill_jobs.contains(job_id) {
                         continue;
                     }
-                    let throttle_mutation = throttle_config.as_mut().and_then(|config| {
-                        creating_job
-                            .pre_apply_throttle(config)
-                            .map(|mutation| (mutation, notifier.as_mut()))
-                    });
+                    let job_mutation = Self::independent_job_mutation(
+                        &pause_resume_mutation,
+                        &mut throttle_config,
+                        notifier,
+                        |config| creating_job.pre_apply_throttle(config),
+                    );
                     creating_job.on_new_upstream_barrier(
                         partial_graph_manager,
                         &barrier_info,
-                        throttle_mutation,
+                        job_mutation,
                     )?;
                 }
                 IndependentCheckpointJob::BatchRefresh(batch_refresh_job) => {
-                    let throttle_mutation = throttle_config.as_mut().and_then(|config| {
-                        batch_refresh_job
-                            .pre_apply_throttle(config)
-                            .map(|mutation| (mutation, notifier.as_mut()))
-                    });
+                    let job_mutation = Self::independent_job_mutation(
+                        &pause_resume_mutation,
+                        &mut throttle_config,
+                        notifier,
+                        |config| batch_refresh_job.pre_apply_throttle(config),
+                    );
                     batch_refresh_job.on_new_upstream_barrier(
                         partial_graph_manager,
                         &barrier_info,
-                        throttle_mutation,
+                        job_mutation,
                     )?;
                 }
             }

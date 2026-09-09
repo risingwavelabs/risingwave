@@ -114,6 +114,7 @@ impl CreatingStreamingJobControl {
         edges: &mut FragmentEdgeBuildResult,
         split_assignment: &SplitAssignment,
         actors: &RenderResult,
+        is_paused: bool,
     ) -> MetaResult<&'a mut Self> {
         let info = create_info.info.clone();
         let job_id = info.stream_job_fragments.stream_job_id();
@@ -207,8 +208,7 @@ impl CreatingStreamingJobControl {
             actor_dispatchers: Default::default(),
             added_actors,
             actor_splits,
-            // we assume that when handling snapshot backfill, the cluster must not be paused
-            pause: false,
+            pause: is_paused,
             subscriptions_to_add: Default::default(),
             backfill_nodes_to_pause,
             actor_cdc_table_snapshot_splits: None,
@@ -298,7 +298,10 @@ impl CreatingStreamingJobControl {
                     snapshot_backfill_actors.iter().cloned(),
                     upstream_lag,
                 ),
-                pending_barriers: log_store_barriers_to_inject.into(),
+                pending_barriers: log_store_barriers_to_inject
+                    .into_iter()
+                    .map(|barrier_info| (barrier_info, None))
+                    .collect(),
             };
         } else {
             assert!(pending_non_checkpoint_barriers.is_empty());
@@ -624,8 +627,10 @@ impl CreatingStreamingJobControl {
             committed_epoch,
             upstream_barrier_info,
         )?
-        .into();
-        let mut first_barrier = pending_barriers
+        .into_iter()
+        .map(|barrier_info| (barrier_info, None))
+        .collect();
+        let (mut first_barrier, _) = pending_barriers
             .pop_front()
             .expect("resolved upstream log epochs should not be empty");
         assert!(first_barrier.kind.is_checkpoint());
@@ -638,7 +643,7 @@ impl CreatingStreamingJobControl {
                     InflightStreamingJobInfo::snapshot_backfill_actor_ids(&info.fragment_infos),
                     pending_barriers
                         .back()
-                        .map(|info| info.prev_epoch() - committed_epoch)
+                        .map(|(info, _)| info.prev_epoch() - committed_epoch)
                         .unwrap_or(0),
                 ),
                 pending_barriers,

@@ -116,6 +116,7 @@ impl CheckpointControl {
         failed_databases: HashMap<DatabaseId, HashSet<PartialGraphId>>, /* `database_id` -> set of resetting partial graph ids */
         hummock_version_stats: HummockVersionStats,
         env: MetaSrvEnv,
+        is_paused: bool,
     ) -> Self {
         env.shared_actor_infos()
             .retain_databases(databases.keys().chain(failed_databases.keys()).cloned());
@@ -138,6 +139,7 @@ impl CheckpointControl {
                                 DatabaseRecoveringState::new_resetting(
                                     database_id,
                                     resetting_partial_graphs,
+                                    is_paused,
                                 ),
                             ),
                         )
@@ -1301,24 +1303,6 @@ impl DatabaseCheckpointControl {
             }
             return Ok(());
         };
-
-        if let Some(Command::CreateStreamingJob {
-            job_type:
-                CreateStreamingJobType::SnapshotBackfill { .. }
-                | CreateStreamingJobType::BatchRefresh(_),
-            ..
-        }) = &command
-            && self.state.is_paused()
-        {
-            warn!("cannot create streaming job with snapshot backfill when paused");
-            if let Some(notifier) = notifier_start {
-                notifier.notify_start_failed(
-                    anyhow!("cannot create streaming job with snapshot backfill when paused",)
-                        .into(),
-                );
-            }
-            return Ok(());
-        }
 
         let barrier_info = self.state.next_barrier_info(checkpoint, curr_epoch);
         // Tracing related stuff

@@ -288,14 +288,14 @@ impl Cluster {
         Ok(res)
     }
 
-    /// Pause all data sources in the cluster.
+    /// Pause sources, DMLs and backfills in the cluster.
     #[cfg_or_panic(madsim)]
     pub async fn pause(&mut self) -> Result<()> {
         self.ctl.spawn(start_ctl(["meta", "pause"])).await??;
         Ok(())
     }
 
-    /// Resume all data sources in the cluster.
+    /// Resume sources, DMLs and backfills in the cluster.
     #[cfg_or_panic(madsim)]
     pub async fn resume(&mut self) -> Result<()> {
         self.ctl.spawn(start_ctl(["meta", "resume"])).await??;

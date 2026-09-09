@@ -112,6 +112,7 @@ message SourceChangeSplitMutation {
   map<uint32, source.ConnectorSplits> actor_splits = 2;
 }
 
+// Pause every executor that produces data on its own: sources, DMLs and backfills.
 message PauseMutation {}
 
 message ResumeMutation {}

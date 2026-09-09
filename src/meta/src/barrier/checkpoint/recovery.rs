@@ -82,6 +82,8 @@ pub(crate) struct DatabaseRecoveringState {
     stage: DatabaseRecoveringStage,
     retry_backoff_strategy: RetryBackoffStrategy,
     metrics: DatabaseRecoveryMetrics,
+    /// Paused state to restore when the database is initialized again.
+    is_paused: bool,
 }
 
 pub(super) enum RecoveringStateAction {
@@ -115,6 +117,7 @@ impl DatabaseRecoveringState {
     pub(super) fn new_resetting(
         database_id: DatabaseId,
         resetting_partial_graphs: HashSet<PartialGraphId>,
+        is_paused: bool,
     ) -> Self {
         let mut retry_backoff_strategy = get_retry_backoff_strategy();
         let backoff_future = retry_backoff_strategy.next().unwrap();
@@ -128,6 +131,7 @@ impl DatabaseRecoveringState {
             },
             retry_backoff_strategy,
             metrics,
+            is_paused,
         }
     }
 
@@ -261,6 +265,7 @@ impl DatabaseStatusAction<'_, EnterReset> {
             .expect("should exist");
         match database_status {
             DatabaseCheckpointControlStatus::Running(database) => {
+                let is_paused = database.state.is_paused();
                 let mut resetting_partial_graphs = HashSet::new();
                 let new_reset_partial_graphs: HashSet<_> = database
                     .independent_checkpoint_job_controls
@@ -298,6 +303,7 @@ impl DatabaseStatusAction<'_, EnterReset> {
                         },
                         retry_backoff_strategy: get_retry_backoff_strategy(),
                         metrics,
+                        is_paused,
                     });
             }
             DatabaseCheckpointControlStatus::Recovering(state) => match &mut state.stage {
@@ -416,7 +422,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
                 &mut source_splits,
                 &mut creating_jobs,
                 &mut mv_depended_subscriptions,
-                false,
+                status.is_paused,
                 &self.control.hummock_version_stats,
                 &mut cdc_table_snapshot_splits,
                 batch_refresh,

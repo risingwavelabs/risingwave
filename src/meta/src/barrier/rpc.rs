@@ -26,7 +26,6 @@ use fail::fail_point;
 use futures::future::{BoxFuture, join_all};
 use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
-use risingwave_common::bail;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
 use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::Epoch;
@@ -1070,9 +1069,6 @@ impl PartialGraphRecoverer<'_> {
                 !cdc_table_snapshot_splits.contains_key(&job_id),
                 "snapshot backfill job {job_id} should not have cdc backfill"
             );
-            if is_paused {
-                bail!("should not pause when having snapshot backfill job {job_id}");
-            }
             let job_backfill_orders = job_backfill_orders(job_extra_info, job_id);
             let job_backfill_orders =
                 StreamFragmentGraph::extend_fragment_backfill_ordering_with_locality_backfill(
@@ -1088,7 +1084,7 @@ impl PartialGraphRecoverer<'_> {
                 &database_job_source_splits,
                 Default::default(), // no cdc backfill job for
                 &job_backfill_orders,
-                false,
+                is_paused,
             );
 
             let job = CreatingStreamingJobControl::recover(
@@ -1167,7 +1163,7 @@ impl PartialGraphRecoverer<'_> {
                 &Default::default(), // batch refresh has no source splits
                 Default::default(),
                 &job_backfill_orders,
-                false,
+                is_paused,
             );
 
             let refresh_interval_sec = job_extra_info

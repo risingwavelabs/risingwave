@@ -382,6 +382,7 @@ impl BatchRefreshJobCheckpointControl {
     pub(crate) fn build_initial_partial_graph_mutation(
         render_result: &BatchRefreshRenderResult,
         backfill_ordering: &ExtendedFragmentBackfillOrder,
+        is_paused: bool,
     ) -> Mutation {
         let added_actors: Vec<ActorId> = render_result
             .fragment_infos
@@ -395,7 +396,7 @@ impl BatchRefreshJobCheckpointControl {
             actor_dispatchers: Default::default(),
             added_actors,
             actor_splits: Default::default(),
-            pause: false,
+            pause: is_paused,
             subscriptions_to_add: Default::default(),
             backfill_nodes_to_pause,
             actor_cdc_table_snapshot_splits: None,
@@ -475,6 +476,7 @@ impl BatchRefreshJobCheckpointControl {
         logical: &BatchRefreshLogicalFragments,
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
         batch_refresh_seconds: u64,
+        is_paused: bool,
     ) -> MetaResult<Self> {
         debug!(
             %job_id,
@@ -498,8 +500,11 @@ impl BatchRefreshJobCheckpointControl {
             &create_info.info.streaming_job_model,
             partial_graph_id,
         )?;
-        let initial_partial_graph_mutation =
-            Self::build_initial_partial_graph_mutation(&render_result, backfill_ordering);
+        let initial_partial_graph_mutation = Self::build_initial_partial_graph_mutation(
+            &render_result,
+            backfill_ordering,
+            is_paused,
+        );
 
         let backfill_order_state = BackfillOrderState::new(
             backfill_ordering,
