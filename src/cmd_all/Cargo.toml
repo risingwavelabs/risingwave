@@ -33,11 +33,11 @@ openssl-vendored = ["workspace-config/openssl-vendored"]
 udf = ["risingwave_expr_impl/udf"]
 fips = ["workspace-config/fips"]
 all-connectors = [
-    "risingwave_connector/all-sinks",
-    "all-connectors-without-lancedb",
+    "risingwave_connector/all-sinks-heavy",
+    "all-connectors-lite",
 ]
-all-connectors-without-lancedb = [
-    "risingwave_connector/all-sinks-without-lancedb",
+all-connectors-lite = [
+    "risingwave_connector/all-sinks-lite",
     "risingwave_connector/all-sources",
     "risingwave_compute/all-sources",
     "risingwave_frontend/all-sources",
