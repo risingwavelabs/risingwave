@@ -633,23 +633,34 @@ impl MySqlExternalTableReader {
 
         let rs = conn.query::<mysql_async::Row, _>(sql).await?;
 
-        let mut column_infos = Vec::new();
-        for row in &rs {
-            let column_name: String = row.get(0).unwrap();
-            let column_type: String = row.get(1).unwrap();
-            let column_type =
-                type_name_to_mysql_type(&column_type).unwrap_or(ColumnType::Unknown(column_type));
-            column_infos.push(MySqlPkInfo {
-                column_name,
-                column_type,
-                character_set_name: row.get(2),
-                collation_name: row.get(3),
-            });
-        }
+        let column_infos = rs
+            .into_iter()
+            .map(Self::decode_pk_info)
+            .collect::<ConnectorResult<Vec<_>>>()?;
 
         drop(conn);
 
         Ok(column_infos)
+    }
+
+    fn decode_pk_info(row: mysql_async::Row) -> ConnectorResult<MySqlPkInfo> {
+        // The catalog returns SQL NULL for charset/collation on non-character keys.
+        // Row::get::<String> panics on SQL NULL; its outer Option only means a missing cell.
+        let (column_name, column_type, character_set_name, collation_name): (
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+        ) = mysql_async::from_row_opt(row)
+            .context("failed to decode MySQL primary-key catalog metadata")?;
+        let column_type =
+            type_name_to_mysql_type(&column_type).unwrap_or(ColumnType::Unknown(column_type));
+        Ok(MySqlPkInfo {
+            column_name,
+            column_type,
+            character_set_name,
+            collation_name,
+        })
     }
 
     fn validate_pk_ordering(primary_keys: &[MySqlPkInfo], is_mariadb: bool) -> ConnectorResult<()> {
@@ -1095,6 +1106,68 @@ mod tests {
             expr,
             "(`aa` > :aa) OR ((`aa` = :aa) AND (`bb` > :bb)) OR ((`aa` = :aa) AND (`bb` = :bb) AND (`cc` > :cc))"
         );
+    }
+
+    #[test]
+    fn test_mysql_pk_catalog_nullable_metadata() {
+        use std::sync::Arc;
+
+        use mysql_common::constants::ColumnType as MySqlColumnType;
+        use mysql_common::packets::Column;
+        use mysql_common::row::new_row;
+        use mysql_common::value::Value;
+
+        let decode = |values: Vec<Value>| {
+            let columns = (0..values.len())
+                .map(|_| Column::new(MySqlColumnType::MYSQL_TYPE_VAR_STRING))
+                .collect::<Vec<_>>();
+            MySqlExternalTableReader::decode_pk_info(new_row(values, Arc::from(columns)))
+        };
+        for key_type in [
+            "int",
+            "bigint unsigned",
+            "timestamp",
+            "datetime",
+            "varbinary(16)",
+        ] {
+            let info = decode(vec![
+                Value::from("id"),
+                Value::from(key_type),
+                Value::NULL,
+                Value::NULL,
+            ])
+            .unwrap();
+            assert_eq!(info.column_name, "id");
+            assert!(info.character_set_name.is_none());
+            assert!(info.collation_name.is_none());
+            MySqlExternalTableReader::validate_pk_ordering(&[info], false).unwrap();
+        }
+        for (collation, accepted) in [("utf8mb4_0900_bin", true), ("utf8mb4_0900_ai_ci", false)] {
+            let info = decode(vec![
+                Value::from("id"),
+                Value::from("varchar(40)"),
+                Value::from("utf8mb4"),
+                Value::from(collation),
+            ])
+            .unwrap();
+            assert_eq!(info.character_set_name.as_deref(), Some("utf8mb4"));
+            assert_eq!(info.collation_name.as_deref(), Some(collation));
+            assert_eq!(
+                MySqlExternalTableReader::validate_pk_ordering(&[info], false).is_ok(),
+                accepted
+            );
+        }
+        // Malformed required fields return an error rather than aborting the executor.
+        assert!(
+            decode(vec![
+                Value::NULL,
+                Value::from("int"),
+                Value::NULL,
+                Value::NULL
+            ])
+            .is_err()
+        );
+        assert!(decode(vec![Value::from("id")]).is_err());
     }
 
     #[test]
