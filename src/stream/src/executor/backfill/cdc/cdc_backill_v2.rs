@@ -37,7 +37,7 @@ use crate::executor::backfill::cdc::cdc_backfill::{
 use crate::executor::backfill::cdc::state_v2::ParallelizedCdcBackfillState;
 use crate::executor::backfill::cdc::upstream_table::external::ExternalStorageTable;
 use crate::executor::backfill::cdc::upstream_table::snapshot::{
-    SplitSnapshotReadArgs, SplitSnapshotReadArgsInput, UpstreamTableRead, UpstreamTableReader,
+    SplitSnapshotReadArgs, UpstreamTableRead, UpstreamTableReader,
 };
 use crate::executor::backfill::utils::{
     cmp_pk_unsigned_aware, get_cdc_chunk_last_offset, get_new_pos, mapping_chunk, mapping_message,
@@ -399,7 +399,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                     let mut row_count = restored_state.row_count as u64;
                     let mut split_cdc_offset_low = restored_state.cdc_offset_low;
 
-                    'backfill_loop: loop {
+                    let split_cdc_offset_high = 'backfill_loop: loop {
                         if split_cdc_offset_low.is_none() {
                             static CDC_CONN_SEMAPHORE: tokio::sync::Semaphore =
                                 tokio::sync::Semaphore::const_new(10);
@@ -431,24 +431,23 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
 
                         let attempt_state = {
                             let left_upstream = upstream.by_ref().map(Either::Left);
-                            let read_args =
-                                SplitSnapshotReadArgs::new(SplitSnapshotReadArgsInput {
-                                    current_pos: current_pk_pos.clone(),
-                                    primary_keys: pk_names.clone(),
-                                    left_bound_inclusive: (!is_leftmost_bound(
-                                        &split.left_bound_inclusive,
-                                    ))
-                                    .then(|| split.left_bound_inclusive.clone()),
-                                    right_bound_exclusive: (!is_rightmost_bound(
-                                        &split.right_bound_exclusive,
-                                    ))
-                                    .then(|| split.right_bound_exclusive.clone()),
-                                    split_columns: cdc_table_snapshot_split_column.clone(),
-                                    rate_limit_rps: self.rate_limit_rps,
-                                    additional_columns: additional_columns.clone(),
-                                    schema_table_name: schema_table_name.clone(),
-                                    database_name: external_database_name.clone(),
-                                });
+                            let read_args = SplitSnapshotReadArgs {
+                                current_pos: current_pk_pos.clone(),
+                                primary_keys: pk_names.clone(),
+                                left_bound_inclusive: (!is_leftmost_bound(
+                                    &split.left_bound_inclusive,
+                                ))
+                                .then(|| split.left_bound_inclusive.clone()),
+                                right_bound_exclusive: (!is_rightmost_bound(
+                                    &split.right_bound_exclusive,
+                                ))
+                                .then(|| split.right_bound_exclusive.clone()),
+                                split_columns: cdc_table_snapshot_split_column.clone(),
+                                rate_limit_rps: self.rate_limit_rps,
+                                additional_columns: additional_columns.clone(),
+                                schema_table_name: schema_table_name.clone(),
+                                database_name: external_database_name.clone(),
+                            };
                             let right_snapshot = pin!(
                                 upstream_table_reader
                                     .snapshot_read_table_split(read_args)
@@ -511,11 +510,15 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                                         snapshot_valve.resume();
                                                     }
                                                     Mutation::Throttle(_) => {
+                                                        // TODO(zw): optimization: improve throttle.
+                                                        // 1. Handle rate limit 0. Currently, to resume the process, the actor must be rebuilt.
+                                                        // 2. Apply new rate limit immediately.
                                                         if let Some(entry) = mutation
                                                             .backfill_throttle_config(
                                                                 self.actor_ctx.fragment_id,
                                                             )
                                                         {
+                                                            // The new rate limit will take effect since next split.
                                                             self.rate_limit_rps = entry.rate_limit;
                                                         }
                                                     }
@@ -569,6 +572,18 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                                 continue 'backfill_stream;
                                             }
 
+                                            // TODO(zw): re-enable
+                                            // let chunk_cdc_offset =
+                                            //     get_cdc_chunk_last_offset(&offset_parse_func, &chunk)?;
+                                            // if *self.external_table.table_type()
+                                            //     == ExternalCdcTableType::Postgres
+                                            //     && let Some(cur) = actor_cdc_offset_low.as_ref()
+                                            //     && let Some(chunk_offset) = chunk_cdc_offset
+                                            //     && chunk_offset < *cur
+                                            // {
+                                            //     continue;
+                                            // }
+
                                             // emit chunks belonging to past splits which are processed
                                             let chunk = mapping_chunk(chunk, &self.output_indices);
                                             let (finished_chunk, current_chunk) =
@@ -584,6 +599,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                             }
 
                                             if let Some(current_chunk) = current_chunk {
+                                                // Buffer only rows that overlap the split currently being backfilled.
                                                 upstream_chunk_buffer.push(current_chunk);
                                             }
                                         }
@@ -609,6 +625,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                                     yield Message::Chunk(chunk);
                                                 }
 
+                                                // Limit concurrent CDC connections globally to 10 using a semaphore.
                                                 static CDC_CONN_SEMAPHORE: tokio::sync::Semaphore =
                                                     tokio::sync::Semaphore::const_new(10);
                                                 let _permit =
@@ -652,6 +669,9 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                         };
 
                         match attempt_state {
+                            SnapshotAttemptState::Finished(split_cdc_offset_high) => {
+                                break 'backfill_loop split_cdc_offset_high;
+                            }
                             SnapshotAttemptState::Failed => {
                                 if let Err(error) = upstream_table_reader.disconnect().await {
                                     tracing::warn!(
@@ -796,33 +816,32 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
 
                                 continue 'backfill_loop;
                             }
-                            SnapshotAttemptState::Finished(split_cdc_offset_high) => {
-                                if actor_cdc_offset_high
-                                    .as_ref()
-                                    .is_none_or(|cur| cur < &split_cdc_offset_high)
-                                {
-                                    actor_cdc_offset_high = Some(split_cdc_offset_high.clone());
-                                }
-                                state_impl
-                                    .mutate_state(
-                                        split.split_id,
-                                        current_pk_pos.clone(),
-                                        true,
-                                        row_count,
-                                        split_cdc_offset_low.clone(),
-                                        Some(split_cdc_offset_high),
-                                    )
-                                    .await?;
-
-                                break 'backfill_loop;
-                            }
                             SnapshotAttemptState::Reading => {
                                 unreachable!(
                                     "backfill stream must not end while the snapshot attempt is still reading"
                                 );
                             }
                         }
+                    };
+
+                    if actor_cdc_offset_high
+                        .as_ref()
+                        .is_none_or(|cur| cur < &split_cdc_offset_high)
+                    {
+                        actor_cdc_offset_high = Some(split_cdc_offset_high.clone());
                     }
+
+                    // Mark current split backfill as finished. The state will be persisted by next barrier.
+                    state_impl
+                        .mutate_state(
+                            split.split_id,
+                            current_pk_pos.clone(),
+                            true,
+                            row_count,
+                            split_cdc_offset_low.clone(),
+                            Some(split_cdc_offset_high),
+                        )
+                        .await?;
 
                     extends_current_actor_bound(&mut current_actor_bounds, split);
                     if let Some((_, right_split)) = &mut should_report_actor_backfill_progress {
