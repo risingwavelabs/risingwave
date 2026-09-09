@@ -74,7 +74,7 @@ pub enum Components {
     NoBacktrace,
     Udf,
     NoDefaultFeatures,
-    NoHeavySinks,
+    NoHeavyConnectors,
     Moat,
     DataFusion,
     Adbc,
@@ -101,7 +101,7 @@ impl Components {
             Self::NoBacktrace => "[Runtime] Disable backtrace",
             Self::Udf => "[Build] Enable UDF",
             Self::NoDefaultFeatures => "[Build] Disable default features",
-            Self::NoHeavySinks => "[Build] Disable heavyweight sinks",
+            Self::NoHeavyConnectors => "[Build] Disable heavyweight connectors",
             Self::Moat => "[Component] Enable Moat",
             Self::DataFusion => "[Build] Enable DataFusion",
             Self::Adbc => "[Component] ADBC Snowflake Driver",
@@ -214,9 +214,9 @@ Add --no-default-features to build command.
 Currently, default features are: rw-static-link, all-connectors
 "
             }
-            Self::NoHeavySinks => {
+            Self::NoHeavyConnectors => {
                 "
-Exclude heavyweight sinks, such as LanceDB, to reduce build size.
+Exclude heavyweight connectors, such as LanceDB, to reduce build size.
 Other default connectors remain enabled unless default features are disabled."
             }
             Self::Moat => {
@@ -257,7 +257,7 @@ This will download the ADBC Snowflake driver shared library (.so/.dylib)."
             "DISABLE_BACKTRACE" => Some(Self::NoBacktrace),
             "ENABLE_UDF" => Some(Self::Udf),
             "DISABLE_DEFAULT_FEATURES" => Some(Self::NoDefaultFeatures),
-            "DISABLE_HEAVY_SINKS" => Some(Self::NoHeavySinks),
+            "DISABLE_HEAVY_CONNECTORS" => Some(Self::NoHeavyConnectors),
             "ENABLE_MOAT" => Some(Self::Moat),
             "ENABLE_DATAFUSION" => Some(Self::DataFusion),
             "ENABLE_ADBC" => Some(Self::Adbc),
@@ -285,7 +285,7 @@ This will download the ADBC Snowflake driver shared library (.so/.dylib)."
             Self::NoBacktrace => "DISABLE_BACKTRACE",
             Self::Udf => "ENABLE_UDF",
             Self::NoDefaultFeatures => "DISABLE_DEFAULT_FEATURES",
-            Self::NoHeavySinks => "DISABLE_HEAVY_SINKS",
+            Self::NoHeavyConnectors => "DISABLE_HEAVY_CONNECTORS",
             Self::Moat => "ENABLE_MOAT",
             Self::DataFusion => "ENABLE_DATAFUSION",
             Self::Adbc => "ENABLE_ADBC",
@@ -294,7 +294,7 @@ This will download the ADBC Snowflake driver shared library (.so/.dylib)."
     }
 
     pub fn default_enabled() -> &'static [Self] {
-        &[Self::RustComponents, Self::NoHeavySinks]
+        &[Self::RustComponents, Self::NoHeavyConnectors]
     }
 }
 
