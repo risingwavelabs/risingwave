@@ -83,6 +83,8 @@ impl ExecutorBuilder for NowExecutorBuilder {
             .load()
             .barrier_interval_ms();
         let progress_ratio = params.config.developer.now_progress_ratio;
+        let actor_id = params.actor_context.id;
+        let fragment_id = params.fragment_id;
         let exec = NowExecutor::new(
             params.info.schema.data_types(),
             mode,
@@ -91,6 +93,9 @@ impl ExecutorBuilder for NowExecutorBuilder {
             state_table,
             progress_ratio,
             barrier_interval_ms,
+            Some(&params.executor_stats),
+            actor_id,
+            fragment_id,
         );
         Ok((params.info, exec).into())
     }

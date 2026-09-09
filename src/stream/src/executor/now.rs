@@ -12,8 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use itertools::Itertools;
 use risingwave_common::array::Op;
+use risingwave_common::metrics::LabelGuardedIntGauge;
 use risingwave_common::row;
 use risingwave_common::types::{DefaultOrdered, Interval, Timestamptz, ToDatumRef};
 use risingwave_expr::capture_context;
@@ -25,8 +28,9 @@ use risingwave_expr::expr_context::TIME_ZONE;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
+use crate::executor::monitor::StreamingMetrics;
 use crate::executor::prelude::*;
-use crate::task::ActorEvalErrorReport;
+use crate::task::{ActorEvalErrorReport, FragmentId};
 
 pub struct NowExecutor<S: StateStore> {
     data_types: Vec<DataType>,
@@ -42,6 +46,33 @@ pub struct NowExecutor<S: StateStore> {
     progress_ratio: Option<f32>,
 
     barrier_interval_ms: u32,
+
+    /// Metrics for observing the streaming NOW() clock and its drift from wall time.
+    /// `None` when constructed without a metrics registry (e.g. unit tests).
+    metrics: Option<NowExecutorMetrics>,
+}
+
+struct NowExecutorMetrics {
+    streaming_clock_ms: LabelGuardedIntGauge,
+    wall_clock_drift_ms: LabelGuardedIntGauge,
+}
+
+impl NowExecutorMetrics {
+    fn new(
+        streaming_metrics: &Arc<StreamingMetrics>,
+        actor_id: ActorId,
+        fragment_id: FragmentId,
+    ) -> Self {
+        let labels: [&str; 2] = [&actor_id.to_string(), &fragment_id.to_string()];
+        Self {
+            streaming_clock_ms: streaming_metrics
+                .now_streaming_clock_ms
+                .with_guarded_label_values(&labels),
+            wall_clock_drift_ms: streaming_metrics
+                .now_wall_clock_drift_ms
+                .with_guarded_label_values(&labels),
+        }
+    }
 }
 
 pub enum NowMode {
@@ -64,6 +95,7 @@ enum ModeVars {
 }
 
 impl<S: StateStore> NowExecutor<S> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         data_types: Vec<DataType>,
         mode: NowMode,
@@ -72,7 +104,12 @@ impl<S: StateStore> NowExecutor<S> {
         state_table: StateTable<S>,
         progress_ratio: Option<f32>,
         barrier_interval_ms: u32,
+        streaming_metrics: Option<&Arc<StreamingMetrics>>,
+        actor_id: ActorId,
+        fragment_id: FragmentId,
     ) -> Self {
+        let metrics = streaming_metrics
+            .map(|metrics| NowExecutorMetrics::new(metrics, actor_id, fragment_id));
         Self {
             data_types,
             mode,
@@ -81,6 +118,7 @@ impl<S: StateStore> NowExecutor<S> {
             state_table,
             progress_ratio,
             barrier_interval_ms,
+            metrics,
         }
     }
 
@@ -94,6 +132,7 @@ impl<S: StateStore> NowExecutor<S> {
             mut state_table,
             progress_ratio,
             barrier_interval_ms,
+            metrics,
         } = self;
 
         info!(
@@ -132,6 +171,9 @@ impl<S: StateStore> NowExecutor<S> {
             UnboundedReceiverStream::new(barrier_receiver).ready_chunks(MAX_MERGE_BARRIER_SIZE)
         {
             let mut curr_timestamp_datum: Datum = None;
+            // Wall-clock reference derived from the most recently processed barrier's epoch.
+            // Used to observe how far the streaming NOW() lags real time.
+            let mut last_barrier_wall_ms: Option<i64> = None;
             if barriers.len() > 1 {
                 warn!(
                     "handle multiple barriers at once in now executor: {}",
@@ -141,6 +183,7 @@ impl<S: StateStore> NowExecutor<S> {
             for barrier in barriers {
                 let curr_epoch = barrier.get_curr_epoch();
                 let new_timestamp = curr_epoch.as_timestamptz();
+                last_barrier_wall_ms = Some(new_timestamp.timestamp_millis());
                 let pause_mutation =
                     barrier
                         .mutation
@@ -292,10 +335,24 @@ impl<S: StateStore> NowExecutor<S> {
                 _ => unreachable!(),
             }
 
+            let curr_timestamp_datum = curr_timestamp_datum.unwrap();
+
+            if let Some(metrics) = metrics.as_ref()
+                && let Some(wall_ms) = last_barrier_wall_ms
+                && let ScalarImpl::Timestamptz(ts) = &curr_timestamp_datum
+            {
+                let streaming_now_ms = ts.timestamp_millis();
+                metrics.streaming_clock_ms.set(streaming_now_ms);
+                // Positive drift means the streaming clock is lagging wall time. Saturate on
+                // arithmetic overflow so the gauge is always meaningful.
+                let drift_ms = wall_ms.saturating_sub(streaming_now_ms);
+                metrics.wall_clock_drift_ms.set(drift_ms);
+            }
+
             yield Message::Watermark(Watermark::new(
                 0,
                 DataType::Timestamptz,
-                curr_timestamp_datum.unwrap(),
+                curr_timestamp_datum,
             ));
         }
     }
@@ -963,6 +1020,9 @@ mod tests {
             state_table,
             progress_ratio,
             barrier_interval_ms,
+            None,
+            123,
+            0,
         );
         (sender, now_executor.boxed().execute())
     }

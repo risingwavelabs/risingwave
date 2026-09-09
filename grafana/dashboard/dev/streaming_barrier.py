@@ -97,6 +97,45 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.subheader(
+                    "Temporal Filter NOW()",
+                    "Observability for the per-fragment streaming `NOW()` clock exposed by "
+                    "`NowExecutor`. When `streaming.developer.now_progress_ratio` is set, the "
+                    "streaming clock advances at a bounded rate per barrier, which can trail "
+                    "wall time if the barrier interval changes without a recovery. A steadily "
+                    "growing **Wall-Clock Drift** panel means downstream temporal filters "
+                    "(`col < NOW()`, `col <= NOW()`) will delay eligible rows.",
+                    height=2.5,
+                ),
+                panels.timeseries_ms(
+                    "Temporal Filter NOW() vs Wall Clock Drift",
+                    "Milliseconds by which the streaming `NOW()` value lags the barrier's "
+                    "wall-clock epoch. Zero or near-zero is healthy. A monotonically "
+                    "increasing series indicates the streaming clock is falling behind and "
+                    "the fragment likely needs a RECOVER after a `barrier_interval_ms` change.",
+                    [
+                        panels.target(
+                            f"{metric('stream_now_wall_clock_drift_ms')}",
+                            "drift ms - fragment {{fragment_id}} actor {{actor_id}}",
+                        ),
+                        panels.target(
+                            f"max by (fragment_id) ({metric('stream_now_wall_clock_drift_ms')})",
+                            "max drift ms - fragment {{fragment_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_ms(
+                    "Temporal Filter NOW() Streaming Clock",
+                    "The most recent streaming `NOW()` value emitted by each `NowExecutor`, "
+                    "expressed as milliseconds since the Unix epoch. Compare against the "
+                    "dashboard time to see when a fragment's clock stops advancing.",
+                    [
+                        panels.target(
+                            f"{metric('stream_now_streaming_clock_ms')}",
+                            "streaming NOW() ms - fragment {{fragment_id}} actor {{actor_id}}",
+                        ),
+                    ],
+                ),
             ],
         )
     ]
