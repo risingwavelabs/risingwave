@@ -199,6 +199,14 @@ impl SstableStreamIterator {
         }
 
         self.prune_from_valid_block_iter().await?;
+        // A physical block may contain keys beyond this logical SST's range.
+        if self
+            .block_iter
+            .as_ref()
+            .is_some_and(|iter| self.exceed_key_range_right(iter.key()))
+        {
+            self.block_iter = None;
+        }
         Ok(())
     }
 
@@ -731,6 +739,7 @@ pub(crate) fn filter_block_metas(
 mod tests {
     use std::cmp::Ordering;
     use std::collections::HashSet;
+    use std::sync::Arc;
 
     use risingwave_common::catalog::TableId;
     use risingwave_common::util::epoch::test_epoch;
@@ -740,6 +749,8 @@ mod tests {
 
     use crate::hummock::BlockMeta;
     use crate::hummock::compactor::ConcatSstableIterator;
+    use crate::hummock::compactor::iterator::SstableStreamIterator;
+    use crate::hummock::compactor::task_progress::TaskProgress;
     use crate::hummock::iterator::test_utils::mock_sstable_store;
     use crate::hummock::iterator::{HummockIterator, MergeIterator};
     use crate::hummock::test_utils::{
@@ -747,6 +758,58 @@ mod tests {
         gen_test_sstable_with_table_ids, test_key_of, test_value_of,
     };
     use crate::hummock::value::HummockValue;
+    use crate::monitor::StoreLocalStatistic;
+
+    #[tokio::test]
+    async fn test_stream_iterator_seek_respects_logical_right() {
+        let sstable_store = mock_sstable_store().await;
+        let cases = [
+            (vec![10, 30], 20, true, 30, false),
+            (vec![10, 30], 15, true, 30, false),
+            (vec![10, 20, 30], 20, true, 20, false),
+            (vec![10, 20, 30], 20, false, 20, true),
+        ];
+        for (object_id, (keys, seek, right_exclusive, landing, logical_valid)) in
+            cases.into_iter().enumerate()
+        {
+            let physical = gen_test_sstable_info(
+                default_builder_opt_for_test(),
+                object_id as u64,
+                keys.into_iter()
+                    .map(|i| (test_key_of(i), HummockValue::put(test_value_of(i)))),
+                sstable_store.clone(),
+            )
+            .await;
+            let mut logical = physical.get_inner();
+            logical.sst_id = (100 + object_id as u64).into();
+            logical.key_range.right = test_key_of(20).encode().into();
+            logical.key_range.right_exclusive = right_exclusive;
+
+            // Verify the actual physical landing key first, including seek < right with
+            // no remaining logical key. Both iterators read the same single physical block.
+            for (info, expected_valid) in [(physical, true), (logical.into(), logical_valid)] {
+                let mut stats = StoreLocalStatistic::default();
+                let sstable = sstable_store.sstable(&info, &mut stats).await.unwrap();
+                assert_eq!(sstable.meta.block_metas.len(), 1);
+                let progress = Arc::new(TaskProgress::default());
+                progress.inc_num_pending_read_io();
+                let mut iter = SstableStreamIterator::new(
+                    sstable,
+                    0..1,
+                    info,
+                    &stats,
+                    progress,
+                    sstable_store.clone(),
+                    0,
+                );
+                iter.seek(Some(test_key_of(seek).to_ref())).await.unwrap();
+                assert_eq!(iter.is_valid(), expected_valid, "case {object_id}");
+                if expected_valid {
+                    assert_eq!(iter.key(), test_key_of(landing).to_ref());
+                }
+            }
+        }
+    }
 
     #[tokio::test]
     async fn test_concat_iterator() {
