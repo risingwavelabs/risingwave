@@ -646,6 +646,15 @@ fn sync_resolved_partitions(
     resolved: &mut HashMap<i32, Option<i64>>,
     partitions: &[i32],
 ) -> Vec<i32> {
+    // `partitions` holds distinct ids, so equal length plus full containment means the set is
+    // unchanged, which is the case on almost every tick.
+    let unchanged = resolved.len() == partitions.len()
+        && partitions
+            .iter()
+            .all(|partition| resolved.contains_key(partition));
+    if unchanged {
+        return Vec::new();
+    }
     let current: HashSet<i32> = partitions.iter().copied().collect();
     resolved.retain(|partition, _| current.contains(partition));
     partitions
