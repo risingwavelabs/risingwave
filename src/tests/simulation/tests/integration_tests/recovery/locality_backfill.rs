@@ -29,6 +29,8 @@ const ALTER_RATE_LIMIT_DEFAULT: &str =
     "ALTER MATERIALIZED VIEW mv SET BACKFILL_RATE_LIMIT = DEFAULT;";
 const WAIT: &str = "WAIT;";
 const WAIT_INTERNAL_STATE_SECS: u64 = 60;
+const MV_RATE_LIMITS: &str = "SELECT node_name, rate_limit FROM rw_catalog.rw_rate_limit \
+     JOIN rw_catalog.rw_relations ON table_id = id WHERE name = 'mv' ORDER BY node_name;";
 
 async fn wait_internal_table_name(
     session: &mut Session,
@@ -167,5 +169,79 @@ async fn test_locality_backfill_recovery_internal_tables() -> Result<()> {
     session.run("DROP MATERIALIZED VIEW mv;").await?;
     session.run("DROP TABLE t;").await?;
 
+    Ok(())
+}
+
+async fn drained_rows(session: &mut Session, progress_table: &str) -> Result<u64> {
+    let sum = session
+        .run(&format!(
+            "SELECT coalesce(sum(row_count), 0) FROM {progress_table};"
+        ))
+        .await?;
+    Ok(sum.parse()?)
+}
+
+async fn wait_drain_started(session: &mut Session) -> Result<String> {
+    let progress_table = wait_internal_table_name(
+        session,
+        "%localityproviderprogress%",
+        "for locality provider progress",
+    )
+    .await?;
+    for _ in 0..180 {
+        if drained_rows(session, &progress_table).await? > 0 {
+            return Ok(progress_table);
+        }
+        sleep(Duration::from_secs(1)).await;
+    }
+    bail!("locality backfill did not start draining");
+}
+
+#[tokio::test]
+async fn test_locality_backfill_rate_limit() -> Result<()> {
+    let mut cluster = Cluster::start(Configuration::for_background_ddl()).await?;
+    let mut session = cluster.start_session();
+    session.run(SET_LOCALITY_BACKFILL).await?;
+    session.run(SET_LOCALITY_BACKFILL_ALWAYS).await?;
+    session.run(SET_BACKGROUND_DDL).await?;
+    session.run("SET backfill_rate_limit = 10;").await?;
+    session.run(CREATE_TABLE).await?;
+    session
+        .run("INSERT INTO t SELECT * FROM generate_series(1, 500);")
+        .await?;
+    session.flush().await?;
+    session.run(CREATE_MV).await?;
+    assert_eq!(
+        session.run(MV_RATE_LIMITS).await?,
+        "LOCALITY_PROVIDER 10\nSTREAM_SCAN 10"
+    );
+
+    let progress_table = wait_drain_started(&mut session).await?;
+    session
+        .run("ALTER MATERIALIZED VIEW mv SET BACKFILL_RATE_LIMIT = 0;")
+        .await?;
+    sleep(Duration::from_secs(3)).await;
+    let frozen = drained_rows(&mut session, &progress_table).await?;
+    sleep(Duration::from_secs(10)).await;
+    assert_eq!(
+        drained_rows(&mut session, &progress_table).await?,
+        frozen,
+        "locality backfill drained at rate limit 0"
+    );
+
+    session
+        .run("ALTER MATERIALIZED VIEW mv SET BACKFILL_RATE_LIMIT = 10;")
+        .await?;
+    sleep(Duration::from_secs(5)).await;
+    assert!(
+        drained_rows(&mut session, &progress_table).await? > frozen,
+        "locality backfill did not resume"
+    );
+
+    session.run(ALTER_RATE_LIMIT_DEFAULT).await?;
+    // Fragments without a rate limit are not listed.
+    assert_eq!(session.run(MV_RATE_LIMITS).await?, "");
+    session.run(WAIT).await?;
+    assert_eq!(session.run("SELECT count(*) FROM mv;").await?, "500");
     Ok(())
 }

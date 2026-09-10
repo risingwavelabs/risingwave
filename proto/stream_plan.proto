@@ -1167,6 +1167,8 @@ message LocalityProviderNode {
   optional catalog.Table state_table = 2;
   // Progress table for tracking backfill progress
   optional catalog.Table progress_table = 3;
+  // Rate limit of the drain phase, set by `BACKFILL_RATE_LIMIT`.
+  optional uint32 rate_limit = 4;
 }
 
 message EowcGapFillNode {
