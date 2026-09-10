@@ -9781,6 +9781,7 @@ dependencies = [
  "opendal-http-transport-reqwest",
  "opendal-layer-concurrent-limit",
  "opendal-layer-logging",
+ "opendal-layer-prometheus",
  "opendal-layer-retry",
  "opendal-layer-timeout",
  "opendal-service-azblob",
@@ -9854,6 +9855,28 @@ checksum = "5c75411ab00f77851ff086b686c1e9ca8175ac18c15afa2cb75b9036436cb06c"
 dependencies = [
  "log",
  "opendal-core",
+]
+
+[[package]]
+name = "opendal-layer-observe-metrics-common"
+version = "0.58.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "12dbc31b27ee8e5f658ae6c8514b8276059e5235e2f85138a42e6ed172324876"
+dependencies = [
+ "futures",
+ "http 1.4.0",
+ "opendal-core",
+]
+
+[[package]]
+name = "opendal-layer-prometheus"
+version = "0.58.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c14e6cb0b3ea8d83bef751613b8bf4512678afe8b49c2c96a633515bc0b34d79"
+dependencies = [
+ "opendal-core",
+ "opendal-layer-observe-metrics-common",
+ "prometheus",
 ]
 
 [[package]]
