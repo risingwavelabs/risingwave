@@ -60,7 +60,6 @@ pub enum Components {
     Lakekeeper,
     Hdfs,
     PrometheusAndGrafana,
-    Pubsub,
     Tracing,
     RustComponents,
     UseSystem,
@@ -86,7 +85,6 @@ impl Components {
             Self::Lakekeeper => "[Component] Apache Iceberg: Lakekeeper REST Catalog",
             Self::Hdfs => "[Component] Hummock: Hdfs Backend",
             Self::PrometheusAndGrafana => "[Component] Metrics: Prometheus + Grafana",
-            Self::Pubsub => "[Component] Google Pubsub",
             Self::BuildConnectorNode => "[Build] Build RisingWave Connector (Java)",
             Self::RustComponents => "[Build] Rust components",
             Self::UseSystem => "[Build] Use system RisingWave",
@@ -125,11 +123,6 @@ Required by Hummock state store."
             Self::PrometheusAndGrafana => {
                 "
 Required if you want to view metrics."
-            }
-            Self::Pubsub => {
-                "
-Required if you want to create source from Emulated Google Pub/sub.
-                "
             }
             Self::RustComponents => {
                 "
@@ -236,7 +229,6 @@ This will download the ADBC Snowflake driver shared library (.so/.dylib)."
             "ENABLE_LAKEKEEPER" => Some(Self::Lakekeeper),
             "ENABLE_HDFS" => Some(Self::Hdfs),
             "ENABLE_PROMETHEUS_GRAFANA" => Some(Self::PrometheusAndGrafana),
-            "ENABLE_PUBSUB" => Some(Self::Pubsub),
             "ENABLE_BUILD_RUST" => Some(Self::RustComponents),
             "USE_SYSTEM_RISINGWAVE" => Some(Self::UseSystem),
             "ENABLE_BUILD_DASHBOARD" => Some(Self::Dashboard),
@@ -263,7 +255,6 @@ This will download the ADBC Snowflake driver shared library (.so/.dylib)."
             Self::Lakekeeper => "ENABLE_LAKEKEEPER",
             Self::Hdfs => "ENABLE_HDFS",
             Self::PrometheusAndGrafana => "ENABLE_PROMETHEUS_GRAFANA",
-            Self::Pubsub => "ENABLE_PUBSUB",
             Self::RustComponents => "ENABLE_BUILD_RUST",
             Self::UseSystem => "USE_SYSTEM_RISINGWAVE",
             Self::Dashboard => "ENABLE_BUILD_DASHBOARD",
