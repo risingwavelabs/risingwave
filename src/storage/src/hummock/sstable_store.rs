@@ -24,7 +24,7 @@ use bytes::Bytes;
 use fail::fail_point;
 use foyer::{
     Cache, CacheBuilder, CacheEntry, EventListener, Hint, HybridCache, HybridCacheBuilder,
-    HybridCacheEntry, HybridCacheProperties,
+    HybridCacheEntry, HybridCacheProperties, Location,
 };
 use futures::{FutureExt, StreamExt, future};
 use prost::Message;
@@ -606,7 +606,9 @@ impl SstableStore {
                     sst_id: object_id,
                     block_idx: idx as _,
                 };
-                let properties = HybridCacheProperties::default().with_hint(hint);
+                let properties = HybridCacheProperties::default()
+                    .with_hint(hint)
+                    .with_location(Location::InMem);
                 let entry = if pinned_sst.is_some() {
                     self.block_cache.memory().insert_with_properties(
                         block_index,
@@ -674,7 +676,9 @@ impl SstableStore {
             let result = match policy {
                 CachePolicy::Fill(hint) => {
                     let read_route = pinned_sst.clone();
-                    let properties = HybridCacheProperties::default().with_hint(hint);
+                    let properties = HybridCacheProperties::default()
+                        .with_hint(hint)
+                        .with_location(Location::InMem);
                     self.block_cache
                         .memory()
                         .get_or_fetch(&idx, move || async move {
@@ -1143,13 +1147,19 @@ mod tests {
     use std::sync::Arc;
 
     use bytes::Bytes;
+    use foyer::{
+        BlockEngineConfig, DeviceBuilder, FsDeviceBuilder, HybridCacheBuilder, Location,
+        PsyncIoEngineConfig,
+    };
     use futures::StreamExt;
     use risingwave_hummock_sdk::HummockObjectId;
     use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
     use super::{SstableBlockIndex, SstableStoreRef, SstableWriterOptions};
     use crate::hummock::iterator::HummockIterator;
-    use crate::hummock::iterator::test_utils::{iterator_test_key_of, mock_sstable_store};
+    use crate::hummock::iterator::test_utils::{
+        iterator_test_key_of, mock_sstable_store, mock_sstable_store_with_block_cache,
+    };
     use crate::hummock::pin_cache::PinCache;
     use crate::hummock::sstable::SstableIteratorReadOptions;
     use crate::hummock::test_utils::{
@@ -1263,6 +1273,95 @@ mod tests {
         assert_eq!(
             SstableStore::get_object_id_from_path(&data_path),
             HummockObjectId::Sstable(object_id.into())
+        );
+    }
+
+    #[tokio::test]
+    async fn test_pin_memory_fill_does_not_reach_foyer_disk() {
+        const MB: usize = 1 << 20;
+
+        let cache_dir = tempfile::tempdir().unwrap();
+        let device = FsDeviceBuilder::new(cache_dir.path())
+            .with_capacity(16 * MB)
+            .build()
+            .unwrap();
+        let block_cache = HybridCacheBuilder::new()
+            .with_name("pin-memory-only-test")
+            .memory(MB)
+            .storage()
+            .with_io_engine_config(PsyncIoEngineConfig::new())
+            .with_engine_config(BlockEngineConfig::new(device).with_block_size(MB))
+            .build()
+            .await
+            .unwrap();
+        let sstable_store = mock_sstable_store_with_block_cache(block_cache).await;
+        let (data, meta) = gen_test_sstable_data(
+            default_builder_opt_for_test(),
+            (0..100).map(|x| (iterator_test_key_of(x), get_hummock_value(x))),
+        )
+        .await;
+        let info = put_sst(
+            SST_ID,
+            data,
+            meta,
+            sstable_store.clone(),
+            SstableWriterOptions {
+                capacity_hint: None,
+                tracker: None,
+                policy: CachePolicy::Disable,
+            },
+            vec![0],
+        )
+        .await
+        .unwrap();
+        let mut stats = StoreLocalStatistic::default();
+        let sst = sstable_store.sstable(&info, &mut stats).await.unwrap();
+
+        let local_store = mock_sstable_store().await.store();
+        let pin_cache = PinCache::new(local_store, u64::MAX);
+        sstable_store.set_pin_cache(pin_cache.clone());
+        let remote_path = sstable_store.get_sst_data_path(info.object_id);
+        let remote_size = sstable_store
+            .store()
+            .metadata(&remote_path)
+            .await
+            .unwrap()
+            .total_size as u64;
+        pin_cache.replace_desired_objects(HashMap::from([(info.object_id, remote_size)]));
+        pin_cache
+            .pin_sst(sstable_store.store(), remote_path, info.object_id)
+            .await
+            .unwrap();
+
+        let first_block = SstableBlockIndex {
+            sst_id: info.object_id,
+            block_idx: 0,
+        };
+        sstable_store
+            .get(&sst, 0, CachePolicy::default(), &mut stats)
+            .await
+            .unwrap();
+        assert_eq!(
+            sstable_store
+                .block_cache()
+                .memory()
+                .get(&first_block)
+                .unwrap()
+                .properties()
+                .location(),
+            Location::InMem
+        );
+
+        sstable_store.block_cache().memory().evict_all();
+        sstable_store.block_cache().storage().wait().await;
+        assert!(
+            sstable_store
+                .block_cache()
+                .storage()
+                .load(&first_block)
+                .await
+                .unwrap()
+                .is_miss()
         );
     }
 
@@ -1394,6 +1493,30 @@ mod tests {
             .unwrap()
             .total_size as u64;
         pin_cache.replace_desired_objects(HashMap::from([(info.object_id, remote_size)]));
+        let first_block = SstableBlockIndex {
+            sst_id: info.object_id,
+            block_idx: 0,
+        };
+
+        let mut unpublished_stats = StoreLocalStatistic::default();
+        sstable_store
+            .get(&sst, 0, CachePolicy::default(), &mut unpublished_stats)
+            .await
+            .unwrap();
+        assert_eq!(unpublished_stats.pin_cache_data_block_total, 1);
+        assert_eq!(unpublished_stats.pin_cache_data_block_hit, 0);
+        assert_eq!(
+            sstable_store
+                .block_cache()
+                .memory()
+                .get(&first_block)
+                .unwrap()
+                .properties()
+                .location(),
+            Location::Default
+        );
+        sstable_store.block_cache().memory().clear();
+
         pin_cache
             .pin_sst(sstable_store.store(), remote_path.clone(), info.object_id)
             .await
@@ -1407,6 +1530,16 @@ mod tests {
         assert_eq!(pin_get_stats.pin_cache_data_block_total, 1);
         assert_eq!(pin_get_stats.pin_cache_data_block_hit, 1);
         assert_eq!(pin_get_stats.pin_cache_data_block_memory_hit, 0);
+        assert_eq!(
+            sstable_store
+                .block_cache()
+                .memory()
+                .get(&first_block)
+                .unwrap()
+                .properties()
+                .location(),
+            Location::InMem
+        );
 
         let mut pin_memory_get_stats = StoreLocalStatistic::default();
         sstable_store
@@ -1437,14 +1570,15 @@ mod tests {
             pin_prefetch_stats.pin_cache_data_block_total
         );
         assert_eq!(pin_prefetch_stats.pin_cache_data_block_memory_hit, 0);
-        assert!(
+        assert_eq!(
             sstable_store
                 .block_cache()
                 .memory()
-                .contains(&SstableBlockIndex {
-                    sst_id: info.object_id,
-                    block_idx: 0,
-                })
+                .get(&first_block)
+                .unwrap()
+                .properties()
+                .location(),
+            Location::InMem
         );
 
         sstable_store.block_cache().memory().clear();

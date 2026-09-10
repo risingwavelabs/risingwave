@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use bytes::Bytes;
-use foyer::{CacheBuilder, HybridCacheBuilder};
+use foyer::{CacheBuilder, HybridCache, HybridCacheBuilder};
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::{MetricLevel, ObjectStoreConfig};
@@ -37,8 +37,8 @@ use crate::hummock::test_utils::{
     gen_test_sstable, gen_test_sstable_info, gen_test_sstable_with_range_tombstone,
 };
 use crate::hummock::{
-    HummockValue, RecentFilter, SstableBuilderOptions, SstableIterator, SstableIteratorType,
-    SstableStoreConfig, SstableStoreRef, TableHolder,
+    Block, HummockValue, RecentFilter, SstableBlockIndex, SstableBuilderOptions, SstableIterator,
+    SstableIteratorType, SstableStoreConfig, SstableStoreRef, TableHolder,
 };
 use crate::monitor::{ObjectStoreMetrics, global_hummock_state_store_metrics};
 
@@ -87,15 +87,40 @@ pub async fn mock_sstable_store_with_object_store_and_recent_filter(
     store: ObjectStoreRef,
     recent_filter: Arc<RecentFilter<(HummockSstableObjectId, usize)>>,
 ) -> SstableStoreRef {
-    let path = "test".to_owned();
-    let meta_cache = HybridCacheBuilder::new()
+    let block_cache = HybridCacheBuilder::new()
         .memory(64 << 20)
         .with_shards(2)
         .storage()
         .build()
         .await
         .unwrap();
-    let block_cache = HybridCacheBuilder::new()
+    mock_sstable_store_with_cache(store, recent_filter, block_cache).await
+}
+
+pub async fn mock_sstable_store_with_block_cache(
+    block_cache: HybridCache<SstableBlockIndex, Box<Block>>,
+) -> SstableStoreRef {
+    let store = Arc::new(ObjectStoreImpl::InMem(
+        InMemObjectStore::for_test().monitored(
+            Arc::new(ObjectStoreMetrics::unused()),
+            Arc::new(ObjectStoreConfig::default()),
+        ),
+    ));
+    mock_sstable_store_with_cache(
+        store,
+        Arc::new(NoneRecentFilter::default().into()),
+        block_cache,
+    )
+    .await
+}
+
+async fn mock_sstable_store_with_cache(
+    store: ObjectStoreRef,
+    recent_filter: Arc<RecentFilter<(HummockSstableObjectId, usize)>>,
+    block_cache: HybridCache<SstableBlockIndex, Box<Block>>,
+) -> SstableStoreRef {
+    let path = "test".to_owned();
+    let meta_cache = HybridCacheBuilder::new()
         .memory(64 << 20)
         .with_shards(2)
         .storage()
