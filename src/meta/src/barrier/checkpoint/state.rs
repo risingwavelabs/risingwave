@@ -57,6 +57,7 @@ use crate::barrier::info::{
 use crate::barrier::notifier::NotifierStarter;
 use crate::barrier::partial_graph::{PartialGraphBarrierInfo, PartialGraphManager};
 use crate::barrier::rpc::to_partial_graph_id;
+use crate::barrier::schedule::PeriodicBarriers;
 use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::scale::{
@@ -436,6 +437,7 @@ impl DatabaseCheckpointControl {
         notifier: &mut Option<NotifierStarter>,
         barrier_info: BarrierInfo,
         partial_graph_manager: &mut PartialGraphManager,
+        periodic_barriers: &mut PeriodicBarriers,
         hummock_version_stats: &HummockVersionStats,
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
     ) -> MetaResult<ApplyCommandInfo> {
@@ -1519,6 +1521,21 @@ impl DatabaseCheckpointControl {
             }
         };
 
+        let mut independent_job_throttle_mutations = HashMap::new();
+        if let Some(config) = throttle_config.as_mut() {
+            for (&job_id, job) in &mut self.independent_checkpoint_job_controls {
+                let Some(job) = job.running_mut() else {
+                    continue;
+                };
+                let mutation = job.pre_apply_throttle(config);
+                if let Some(mutation) = mutation {
+                    independent_job_throttle_mutations
+                        .try_insert(job_id, mutation)
+                        .expect("one throttle mutation per independent job");
+                }
+            }
+        }
+
         let mut finished_snapshot_backfill_jobs = HashSet::new();
         let mut started_consuming_upstream_jobs = HashSet::new();
         let mut mutation = match mutation {
@@ -1536,17 +1553,12 @@ impl DatabaseCheckpointControl {
                         else {
                             continue;
                         };
-                        if creating_job.should_merge_to_upstream(partial_graph_manager) {
-                            // The independent actors will stop on this barrier. Apply throttle to
-                            // the in-memory plan used to create the database-graph actors, and let
-                            // the database barrier own the collection notification.
-                            if throttle_config
-                                .as_mut()
-                                .and_then(|config| creating_job.pre_apply_throttle(config))
-                                .is_some()
-                            {
-                                notify_database_graph = true;
-                            }
+                        if independent_job_throttle_mutations.contains_key(&job_id) {
+                            // A barrier carries only one mutation. Apply throttle now and retry
+                            // either lifecycle transition at the next eligible checkpoint.
+                            continue;
+                        }
+                        if creating_job.is_consuming_upstream() {
                             let info = creating_job
                                 .start_finishing(partial_graph_manager, &barrier_info)?;
                             finished_snapshot_backfill_job_info
@@ -1554,19 +1566,6 @@ impl DatabaseCheckpointControl {
                                 .expect("non-duplicated");
                         } else if creating_job.should_start_consume_upstream(partial_graph_manager)
                         {
-                            let has_throttle_mutation =
-                                throttle_config.as_ref().is_some_and(|config| {
-                                    creating_job.fragment_infos().is_some_and(|fragment_infos| {
-                                        config.keys().any(|fragment_id| {
-                                            fragment_infos.contains_key(fragment_id)
-                                        })
-                                    })
-                                });
-                            if has_throttle_mutation {
-                                // A barrier carries only one mutation. Apply throttle now and
-                                // retry the handoff at the next eligible checkpoint.
-                                continue;
-                            }
                             let info = creating_job.start_consume_upstream(&barrier_info);
                             let database_partial_graph_id =
                                 to_partial_graph_id(self.database_id, None);
@@ -1643,10 +1642,8 @@ impl DatabaseCheckpointControl {
                     || !finished_snapshot_backfill_job_info.is_empty()
                 {
                     let mut subscriptions_to_drop = vec![];
-                    if !finished_snapshot_backfill_job_info.is_empty() {
-                        actors_to_create.get_or_insert_default();
-                    }
                     for (job_id, info) in finished_snapshot_backfill_job_info {
+                        let actors_to_create = actors_to_create.get_or_insert_default();
                         finished_snapshot_backfill_jobs.insert(job_id);
                         subscriptions_to_drop.extend(
                             info.snapshot_backfill_upstream_tables.iter().map(
@@ -1766,39 +1763,45 @@ impl DatabaseCheckpointControl {
                                 )
                             }),
                         );
-                        for upstream_fragment_id in info.upstream_fragment_downstreams.keys() {
-                            let new_actor_dispatchers = edges
-                                .dispatchers
-                                .remove(upstream_fragment_id)
-                                .expect("should exist");
-                            dispatcher_update.extend(new_actor_dispatchers.into_iter().flat_map(
-                                |(upstream_actor_id, dispatchers)| {
-                                    dispatchers.into_iter().map(move |dispatcher| {
-                                        PbDispatcherUpdate {
-                                            actor_id: upstream_actor_id,
-                                            dispatcher_id: dispatcher.dispatcher_id,
-                                            hash_mapping: dispatcher.hash_mapping,
-                                            removed_downstream_actor_id: dispatcher
-                                                .downstream_actor_id
-                                                .iter()
-                                                .map(|new_downstream_actor_id| {
-                                                    actor_mapping
+                        dispatcher_update.extend(
+                            info.upstream_fragment_downstreams.keys().flat_map(
+                                |upstream_fragment_id| {
+                                    let new_actor_dispatchers = edges
+                                        .dispatchers
+                                        .remove(upstream_fragment_id)
+                                        .expect("should exist");
+                                    new_actor_dispatchers.into_iter().flat_map(
+                                        |(upstream_actor_id, dispatchers)| {
+                                            dispatchers.into_iter().map(move |dispatcher| {
+                                                PbDispatcherUpdate {
+                                                    actor_id: upstream_actor_id,
+                                                    dispatcher_id: dispatcher.dispatcher_id,
+                                                    hash_mapping: dispatcher.hash_mapping,
+                                                    removed_downstream_actor_id: dispatcher
+                                                        .downstream_actor_id
                                                         .iter()
-                                                        .find_map(|(old_actor_id, new_actor_id)| {
-                                                            (new_downstream_actor_id
-                                                                == new_actor_id)
-                                                                .then_some(*old_actor_id)
+                                                        .map(|new_downstream_actor_id| {
+                                                            actor_mapping
+                                                            .iter()
+                                                            .find_map(
+                                                                |(old_actor_id, new_actor_id)| {
+                                                                    (new_downstream_actor_id
+                                                                        == new_actor_id)
+                                                                        .then_some(*old_actor_id)
+                                                                },
+                                                            )
+                                                            .expect("should exist")
                                                         })
-                                                        .expect("should exist")
-                                                })
-                                                .collect(),
-                                            added_downstream_actor_id: dispatcher
-                                                .downstream_actor_id,
-                                        }
-                                    })
+                                                        .collect(),
+                                                    added_downstream_actor_id: dispatcher
+                                                        .downstream_actor_id,
+                                                }
+                                            })
+                                        },
+                                    )
                                 },
-                            ));
-                        }
+                            ),
+                        );
                         assert!(edges.is_empty(), "remaining edges: {:?}", edges);
                         for (worker_id, worker_actors) in new_actors_to_create {
                             node_actors.entry(worker_id).or_default().extend(
@@ -1807,8 +1810,6 @@ impl DatabaseCheckpointControl {
                                 }),
                             );
                             actors_to_create
-                                .as_mut()
-                                .expect("finishing job should create database-graph actors")
                                 .entry(worker_id)
                                 .or_default()
                                 .extend(worker_actors);
@@ -1882,9 +1883,11 @@ impl DatabaseCheckpointControl {
             match job {
                 IndependentCheckpointJob::CreatingStreamingJob(creating_job) => {
                     if finished_snapshot_backfill_jobs.contains(job_id) {
+                        debug_assert!(!independent_job_throttle_mutations.contains_key(job_id));
                         continue;
                     }
                     let mutation = if started_consuming_upstream_jobs.contains(job_id) {
+                        debug_assert!(!independent_job_throttle_mutations.contains_key(job_id));
                         Some((
                             mutation
                                 .clone()
@@ -1892,11 +1895,9 @@ impl DatabaseCheckpointControl {
                             None,
                         ))
                     } else {
-                        throttle_config.as_mut().and_then(|config| {
-                            creating_job
-                                .pre_apply_throttle(config)
-                                .map(|mutation| (mutation, notifier.as_mut()))
-                        })
+                        independent_job_throttle_mutations
+                            .remove(job_id)
+                            .map(|mutation| (mutation, notifier.as_mut()))
                     };
                     creating_job.on_new_upstream_barrier(
                         partial_graph_manager,
@@ -1905,11 +1906,9 @@ impl DatabaseCheckpointControl {
                     )?;
                 }
                 IndependentCheckpointJob::BatchRefresh(batch_refresh_job) => {
-                    let throttle_mutation = throttle_config.as_mut().and_then(|config| {
-                        batch_refresh_job
-                            .pre_apply_throttle(config)
-                            .map(|mutation| (mutation, notifier.as_mut()))
-                    });
+                    let throttle_mutation = independent_job_throttle_mutations
+                        .remove(job_id)
+                        .map(|mutation| (mutation, notifier.as_mut()));
                     batch_refresh_job.on_new_upstream_barrier(
                         partial_graph_manager,
                         &barrier_info,
@@ -1918,6 +1917,7 @@ impl DatabaseCheckpointControl {
                 }
             }
         }
+        debug_assert!(independent_job_throttle_mutations.is_empty());
 
         let database_notifier = if notify_database_graph {
             notifier.as_mut()
@@ -1943,6 +1943,10 @@ impl DatabaseCheckpointControl {
         // dispatched successfully. Periodic barriers do not have a notifier.
         if let Some(notifier) = notifier.take() {
             notifier.started();
+        }
+
+        if !started_consuming_upstream_jobs.is_empty() {
+            periodic_barriers.force_checkpoint_in_next_barrier(self.database_id);
         }
 
         Ok(ApplyCommandInfo {

@@ -962,8 +962,7 @@ impl CreatingStreamingJobControl {
                 .values()
                 .flat_map(|resp| &resp.create_mview_progress),
         );
-        (self.is_ready_to_consume_upstream() || self.is_consuming_upstream())
-            && pending_barrier_num <= self.max_lagged_barrier_num
+        self.is_ready_to_consume_upstream() && pending_barrier_num <= self.max_lagged_barrier_num
     }
 
     fn is_ready_to_consume_upstream(&self) -> bool {
@@ -977,7 +976,7 @@ impl CreatingStreamingJobControl {
         }
     }
 
-    fn is_consuming_upstream(&self) -> bool {
+    pub(crate) fn is_consuming_upstream(&self) -> bool {
         matches!(
             &self.status,
             CreatingStreamingJobStatus::ConsumingUpstream { .. }
@@ -988,21 +987,12 @@ impl CreatingStreamingJobControl {
         &self,
         partial_graph_manager: &PartialGraphManager,
     ) -> bool {
-        self.is_ready_to_consume_upstream()
-            && partial_graph_manager.pending_barrier_num(self.partial_graph_id)
-                <= self.max_lagged_barrier_num
-    }
-
-    pub(crate) fn should_merge_to_upstream(
-        &self,
-        partial_graph_manager: &PartialGraphManager,
-    ) -> bool {
-        if !self.is_consuming_upstream() {
+        if !self.is_ready_to_consume_upstream() {
             return false;
         }
 
-        // A job that is ready to merge has finished initialization and is not resetting, so its
-        // partial graph must be running.
+        // A job that is ready to consume upstream has finished initialization and is not resetting,
+        // so its partial graph must be running.
         partial_graph_manager.pending_barrier_num(self.partial_graph_id)
             <= self.max_lagged_barrier_num
     }

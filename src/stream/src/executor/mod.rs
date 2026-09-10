@@ -571,8 +571,12 @@ impl Barrier {
         match mutation {
             // Add is for mv, index and sink creation.
             Mutation::Add(AddMutation { adds, .. }) => adds.get(&upstream_actor_id).is_some(),
-            Mutation::Update(_)
-            | Mutation::Stop(_)
+            // Snapshot backfill installs its delayed upstream dispatcher with an update mutation.
+            Mutation::Update(UpdateMutation {
+                actor_new_dispatchers,
+                ..
+            }) => actor_new_dispatchers.contains_key(&upstream_actor_id),
+            Mutation::Stop(_)
             | Mutation::Pause
             | Mutation::Resume
             | Mutation::SourceChangeSplit(_)
@@ -750,6 +754,44 @@ impl Barrier {
                 },
             )
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::util::epoch::test_epoch;
+
+    use super::*;
+
+    #[test]
+    fn test_has_more_downstream_fragments_for_new_dispatcher() {
+        let actor_id = ActorId::new(1);
+        let other_actor_id = ActorId::new(2);
+
+        let add_barrier =
+            Barrier::new_test_barrier(test_epoch(1)).with_mutation(Mutation::Add(AddMutation {
+                adds: HashMap::from([(actor_id, vec![PbDispatcher::default()])]),
+                ..Default::default()
+            }));
+        assert!(add_barrier.has_more_downstream_fragments(actor_id));
+        assert!(!add_barrier.has_more_downstream_fragments(other_actor_id));
+
+        let update_barrier = Barrier::new_test_barrier(test_epoch(2)).with_mutation(
+            Mutation::Update(UpdateMutation {
+                actor_new_dispatchers: HashMap::from([(actor_id, vec![PbDispatcher::default()])]),
+                ..Default::default()
+            }),
+        );
+        assert!(update_barrier.has_more_downstream_fragments(actor_id));
+        assert!(!update_barrier.has_more_downstream_fragments(other_actor_id));
+
+        let dispatcher_update_barrier = Barrier::new_test_barrier(test_epoch(3)).with_mutation(
+            Mutation::Update(UpdateMutation {
+                dispatchers: HashMap::from([(actor_id, vec![DispatcherUpdate::default()])]),
+                ..Default::default()
+            }),
+        );
+        assert!(!dispatcher_update_barrier.has_more_downstream_fragments(actor_id));
     }
 }
 
