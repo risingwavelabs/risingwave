@@ -251,6 +251,12 @@ public class SourceValidateHandler {
                 ensurePropNotBlank(props, DbzConnectorConfig.ORACLE_SCHEMA_NAME);
                 if (DbzConnectorConfig.isHeartbeatEnabled(props)) {
                     ensurePropNotBlank(props, DbzConnectorConfig.ORACLE_HEARTBEAT_TABLE_NAME);
+                } else if (props.containsKey(DbzConnectorConfig.ORACLE_HEARTBEAT_TABLE_NAME)) {
+                    throw ValidatorUtils.invalidArgument(
+                            String.format(
+                                    "'%s' requires a positive '%s'",
+                                    DbzConnectorConfig.ORACLE_HEARTBEAT_TABLE_NAME,
+                                    DbzConnectorConfig.HEARTBEAT_INTERVAL_KEY));
                 }
                 if (props.containsKey(DbzConnectorConfig.HEARTBEAT_ACTION_QUERY_KEY)) {
                     throw ValidatorUtils.invalidArgument(

@@ -430,7 +430,8 @@ public class DbzConnectorConfig {
     }
 
     public static boolean isHeartbeatEnabled(Map<String, String> userProps) {
-        return userProps.containsKey(HEARTBEAT_INTERVAL_KEY);
+        var interval = userProps.get(HEARTBEAT_INTERVAL_KEY);
+        return interval != null && Integer.parseInt(interval) > 0;
     }
 
     private static Optional<String> inferMongoDatabaseList(String collectionList) {

@@ -133,7 +133,9 @@ pub(crate) fn validate_cdc_heartbeat_interval(
 ) -> Result<()> {
     let heartbeat_required = match connector {
         POSTGRES_CDC_CONNECTOR | CITUS_CDC_CONNECTOR => true,
-        MYSQL_CDC_CONNECTOR | SQL_SERVER_CDC_CONNECTOR | MONGODB_CDC_CONNECTOR
+        MYSQL_CDC_CONNECTOR
+        | SQL_SERVER_CDC_CONNECTOR
+        | MONGODB_CDC_CONNECTOR
         | ORACLE_CDC_CONNECTOR => false,
         _ => return Ok(()),
     };
@@ -340,6 +342,7 @@ mod tests {
             MONGODB_CDC_CONNECTOR,
             POSTGRES_CDC_CONNECTOR,
             CITUS_CDC_CONNECTOR,
+            ORACLE_CDC_CONNECTOR,
         ] {
             let mut props = BTreeMap::new();
             assert!(validate_cdc_heartbeat_interval(connector, &props).is_ok());
@@ -429,6 +432,7 @@ mod tests {
             MONGODB_CDC_CONNECTOR,
             SQL_SERVER_CDC_CONNECTOR,
             CITUS_CDC_CONNECTOR,
+            ORACLE_CDC_CONNECTOR,
         ] {
             for value in HEARTBEAT_INTERVAL_CASES {
                 let mut props = BTreeMap::new();
