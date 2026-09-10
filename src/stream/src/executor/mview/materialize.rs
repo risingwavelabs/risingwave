@@ -698,6 +698,9 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     for row in &rows_to_delete {
                         self.state_table.delete(row);
                     }
+                    if let Some(cache) = &mut self.materialize_cache {
+                        cache.invalidate_rows(&rows_to_delete, &self.state_table);
+                    }
                     if !rows_to_delete.is_empty() {
                         let to_delete_chunk = StreamChunk::from_rows(
                             &rows_to_delete
