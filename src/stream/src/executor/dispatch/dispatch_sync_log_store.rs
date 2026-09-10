@@ -432,10 +432,7 @@ impl<S: StateStore> StreamConsumer for SyncLogStoreDispatchExecutor<S> {
                                         clean_state = false;
                                         log_store_config.metrics.unclean_state.inc();
                                     } else {
-                                        SyncedKvLogStoreExecutor::<S>::apply_pause_resume_mutation(
-                                            &barrier,
-                                            &mut pause_stream,
-                                        );
+                                        barrier.apply_pause_resume(&mut pause_stream);
                                         let write_state_post_write_barrier =
                                             SyncedKvLogStoreExecutor::<S>::write_barrier(
                                                 actor_id,

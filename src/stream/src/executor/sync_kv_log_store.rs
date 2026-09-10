@@ -644,20 +644,6 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
         }
     }
 
-    pub(crate) fn apply_pause_resume_mutation(barrier: &Barrier, pause_stream: &mut bool) {
-        if let Some(mutation) = barrier.mutation.as_deref() {
-            match mutation {
-                Mutation::Pause => {
-                    *pause_stream = true;
-                }
-                Mutation::Resume => {
-                    *pause_stream = false;
-                }
-                _ => {}
-            }
-        }
-    }
-
     pub(crate) fn process_upstream_chunk(
         seq_id: SeqId,
         stream: BoxedMessageStream,
@@ -839,7 +825,7 @@ impl<S: StateStore> SyncedKvLogStoreExecutor<S> {
                                     clean_state = false;
                                     self.logstore_context.metrics.unclean_state.inc();
                                 } else {
-                                    Self::apply_pause_resume_mutation(&barrier, &mut pause_stream);
+                                    barrier.apply_pause_resume(&mut pause_stream);
                                     let write_state_post_write_barrier = Self::write_barrier(
                                         self.actor_context.id,
                                         &mut write_state,

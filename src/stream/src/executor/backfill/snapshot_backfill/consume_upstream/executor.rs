@@ -117,6 +117,7 @@ impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
             .check_initial_vnode_bitmap(self.progress_state_table.vnodes())?;
         let first_barrier = receive_next_barrier(&mut self.barrier_rx).await?;
         let first_barrier_epoch = first_barrier.epoch;
+        let mut paused = first_barrier.is_pause_on_startup();
         yield Message::Barrier(first_barrier);
         let mut progress_state = BackfillState::new(
             self.progress_state_table,
@@ -145,7 +146,7 @@ impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
             loop {
                 let barrier = {
                     loop {
-                        if self.rate_limiter.rate_limit().is_paused() {
+                        if paused || self.rate_limiter.rate_limit().is_paused() {
                             break receive_next_barrier(&mut self.barrier_rx).await?;
                         }
                         let future1 = receive_next_barrier(&mut self.barrier_rx);
@@ -160,7 +161,7 @@ impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
                                 break barrier;
                             }
                             Either::Right(Ok(chunk)) => {
-                                assert!(!self.rate_limiter.rate_limit().is_paused());
+                                assert!(!paused && !self.rate_limiter.rate_limit().is_paused());
                                 self.rate_limiter.wait(chunk.cardinality() as _).await;
                                 yield Message::Chunk(chunk);
                             }
@@ -170,6 +171,7 @@ impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
                         }
                     }
                 };
+                barrier.apply_pause_resume(&mut paused);
 
                 if let Some(chunk) = stream.consume_builder() {
                     self.rate_limiter.wait(chunk.cardinality() as _).await;

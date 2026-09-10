@@ -596,6 +596,15 @@ impl Barrier {
         }
     }
 
+    /// Updates `paused` on a `Pause` or `Resume` mutation and leaves it untouched otherwise.
+    pub fn apply_pause_resume(&self, paused: &mut bool) {
+        match self.mutation.as_deref() {
+            Some(Mutation::Pause) => *paused = true,
+            Some(Mutation::Resume) => *paused = false,
+            _ => {}
+        }
+    }
+
     pub fn is_backfill_pause_on_startup(&self, backfill_fragment_id: FragmentId) -> bool {
         match self.mutation.as_deref() {
             Some(Mutation::Add(AddMutation {

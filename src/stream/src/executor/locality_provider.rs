@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use futures::future::{Either as FutureEither, select};
+use futures::future::{Either as FutureEither, pending, select};
 use futures::{StreamExt, TryStreamExt, pin_mut};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -439,6 +439,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
         // Wait for first barrier to initialize
         let first_barrier = expect_first_barrier(&mut upstream).await?;
         let first_epoch = first_barrier.epoch;
+        let mut paused = first_barrier.is_pause_on_startup();
 
         // Propagate the first barrier
         yield Message::Barrier(first_barrier);
@@ -482,6 +483,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                     }
                     Message::Barrier(barrier) => {
                         let epoch = barrier.epoch;
+                        barrier.apply_pause_resume(&mut paused);
 
                         // Check for StartFragmentBackfill mutation
                         if let Some(mutation) = barrier.mutation.as_deref() {
@@ -579,13 +581,22 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                 let barrier = loop {
                     let upstream_next = upstream.next();
                     let mut snapshot_stream_ref = snapshot_stream.as_mut();
-                    let snapshot_next = snapshot_stream_ref.next();
+                    // Only the upstream is polled while paused, so no snapshot row is produced.
+                    let snapshot_paused = paused;
+                    let snapshot_next = async move {
+                        if snapshot_paused {
+                            pending().await
+                        } else {
+                            snapshot_stream_ref.next().await
+                        }
+                    };
                     pin_mut!(upstream_next);
                     pin_mut!(snapshot_next);
 
                     match select(upstream_next, snapshot_next).await {
                         FutureEither::Left((msg, _)) => match msg.transpose()? {
                             Some(Message::Barrier(barrier)) => {
+                                barrier.apply_pause_resume(&mut paused);
                                 // Process the barrier after draining the snapshot builders.
                                 break barrier;
                             }
