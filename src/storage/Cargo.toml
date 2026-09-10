@@ -115,6 +115,11 @@ name = "bench_compactor"
 harness = false
 
 [[bench]]
+name = "bench_sstable_builder"
+harness = false
+required-features = ["test"]
+
+[[bench]]
 name = "bench_multi_builder"
 harness = false
 
