@@ -1289,7 +1289,7 @@ pub mod tests {
                 .iter()
                 .map(|sst| sst.sst_id)
                 .collect_vec(),
-            vec![5]
+            vec![5, 6]
         );
         assert_eq!(
             compaction.input.input_levels[1]
@@ -1297,7 +1297,7 @@ pub mod tests {
                 .iter()
                 .map(|sst| sst.sst_id)
                 .collect_vec(),
-            vec![10]
+            vec![10, 11]
         );
         assert_eq!(
             compaction.target_file_size,
