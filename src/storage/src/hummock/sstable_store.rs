@@ -606,14 +606,12 @@ impl SstableStore {
                     sst_id: object_id,
                     block_idx: idx as _,
                 };
-                let properties = HybridCacheProperties::default()
-                    .with_hint(hint)
-                    .with_location(Location::InMem);
+                let properties = HybridCacheProperties::default().with_hint(hint);
                 let entry = if pinned_sst.is_some() {
                     self.block_cache.memory().insert_with_properties(
                         block_index,
                         Box::new(block),
-                        properties,
+                        properties.with_location(Location::InMem),
                     )
                 } else {
                     self.block_cache.insert_with_properties(
@@ -1277,7 +1275,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_pin_memory_fill_does_not_reach_foyer_disk() {
+    async fn test_memory_fill_respects_pin_route() {
         const MB: usize = 1 << 20;
 
         let cache_dir = tempfile::tempdir().unwrap();
@@ -1362,6 +1360,45 @@ mod tests {
                 .await
                 .unwrap()
                 .is_miss()
+        );
+
+        pin_cache.replace_desired_objects(HashMap::new());
+        assert!(sstable_store.pinned_sst(info.object_id).is_none());
+        let mut prefetch_stats = StoreLocalStatistic::default();
+        let foyer_stream = sstable_store
+            .prefetch_blocks(
+                &sst,
+                0,
+                sst.block_count(),
+                CachePolicy::default(),
+                &mut prefetch_stats,
+            )
+            .await
+            .unwrap();
+        assert!(prefetch_stats.cache_data_prefetch_count > 0);
+        assert_eq!(
+            sstable_store
+                .block_cache()
+                .memory()
+                .get(&first_block)
+                .unwrap()
+                .properties()
+                .location(),
+            Location::Default
+        );
+
+        drop(foyer_stream);
+        sstable_store.block_cache().memory().evict_all();
+        sstable_store.block_cache().storage().wait().await;
+        assert!(
+            sstable_store
+                .block_cache()
+                .storage()
+                .load(&first_block)
+                .await
+                .unwrap()
+                .entry()
+                .is_some()
         );
     }
 
