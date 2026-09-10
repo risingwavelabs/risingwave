@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, LazyLock, Weak};
 use std::time::Duration;
 
@@ -70,6 +70,13 @@ pub struct KafkaSplitEnumerator {
     topic: String,
     client: Arc<KafkaConsumer>,
     start_offset: KafkaEnumeratorOffset,
+    /// Start offsets already resolved from a `Timestamp` start offset, keyed by partition.
+    ///
+    /// The timestamp is fixed for the lifetime of the enumerator, and `offsets_for_times` is
+    /// expensive for the broker when the timestamp is older than the local log retention (it has
+    /// to consult tiered storage), so each partition is resolved only on the tick that first
+    /// observes it.
+    resolved_start_offsets: HashMap<i32, Option<i64>>,
 
     // maybe used in the future for batch processing
     stop_offset: KafkaEnumeratorOffset,
@@ -224,6 +231,7 @@ impl SplitEnumerator for KafkaSplitEnumerator {
             topic,
             client: client.unwrap(),
             start_offset: scan_start_offset,
+            resolved_start_offsets: HashMap::new(),
             stop_offset: KafkaEnumeratorOffset::None,
             sync_call_timeout: properties.common.sync_call_timeout,
             high_watermark_metrics: HashMap::new(),
@@ -473,7 +481,7 @@ impl KafkaSplitEnumerator {
     }
 
     async fn fetch_start_offset(
-        &self,
+        &mut self,
         partitions: &[i32],
         watermarks: &HashMap<i32, (i64, i64)>,
     ) -> KafkaResult<HashMap<i32, Option<i64>>> {
@@ -492,8 +500,15 @@ impl KafkaSplitEnumerator {
                 Ok(map)
             }
             KafkaEnumeratorOffset::Timestamp(time) => {
-                self.fetch_offset_for_time(partitions, time, watermarks)
-                    .await
+                let unresolved =
+                    sync_resolved_partitions(&mut self.resolved_start_offsets, partitions);
+                if !unresolved.is_empty() {
+                    let resolved = self
+                        .fetch_offset_for_time(&unresolved, time, watermarks)
+                        .await?;
+                    self.resolved_start_offsets.extend(resolved);
+                }
+                Ok(self.resolved_start_offsets.clone())
             }
             KafkaEnumeratorOffset::None => partitions
                 .iter()
@@ -622,5 +637,45 @@ impl KafkaSplitEnumerator {
             .iter()
             .map(|partition| partition.id())
             .collect())
+    }
+}
+
+/// Drops cached start offsets of partitions that are no longer present and returns the
+/// partitions whose start offset still has to be resolved.
+fn sync_resolved_partitions(
+    resolved: &mut HashMap<i32, Option<i64>>,
+    partitions: &[i32],
+) -> Vec<i32> {
+    let current: HashSet<i32> = partitions.iter().copied().collect();
+    resolved.retain(|partition, _| current.contains(partition));
+    partitions
+        .iter()
+        .copied()
+        .filter(|partition| !resolved.contains_key(partition))
+        .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sync_resolved_partitions() {
+        let mut resolved = HashMap::new();
+
+        // First tick: every partition needs resolving.
+        assert_eq!(sync_resolved_partitions(&mut resolved, &[0, 1]), vec![0, 1]);
+        resolved.extend([(0, Some(10)), (1, Some(20))]);
+
+        // Stable partition set: nothing to resolve, cache untouched.
+        assert!(sync_resolved_partitions(&mut resolved, &[0, 1]).is_empty());
+        assert_eq!(resolved, HashMap::from([(0, Some(10)), (1, Some(20))]));
+
+        // New partition: only the new one needs resolving.
+        assert_eq!(sync_resolved_partitions(&mut resolved, &[0, 1, 2]), vec![2]);
+
+        // Removed partition: its cached entry is dropped; nothing else to resolve.
+        assert!(sync_resolved_partitions(&mut resolved, &[1]).is_empty());
+        assert_eq!(resolved, HashMap::from([(1, Some(20))]));
     }
 }
