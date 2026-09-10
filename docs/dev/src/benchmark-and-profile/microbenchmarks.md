@@ -11,9 +11,6 @@ For instance to run `json_parser` micro benchmark:
 cargo bench json_parser
 ```
 
-For CPU-only block, SST and XOR filter builder measurements and encoding compatibility checks,
-see [SST builder microbenchmarks](sstable-builder.md).
-
 ## Generating Flamegraph for Micro Benchmarks
 
 > Note: Flamegraph generation depends on `perf`. You will need a linux box to run it.
