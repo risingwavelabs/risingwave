@@ -1,0 +1,20 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+# The managed container always listens on 9042, regardless of the published port.
+if [[ -n "${CASSANDRA_CONTAINER:-}" ]]; then
+  exec docker exec -i "${CASSANDRA_CONTAINER}" cqlsh \
+    --connect-timeout=5 --request-timeout=20 "$@" 127.0.0.1 9042
+fi
+
+if [[ -n "${CASSANDRA_CQLSH:-}" ]]; then
+  cqlsh="${CASSANDRA_CQLSH}"
+elif [[ -n "${CASSANDRA_DIR:-}" ]]; then
+  cqlsh="${CASSANDRA_DIR}/bin/cqlsh"
+else
+  cqlsh=cqlsh
+fi
+
+exec "$cqlsh" --connect-timeout=5 --request-timeout=20 "$@" \
+  "${CQLSH_HOST:?CQLSH_HOST is required for an external Cassandra service}" "${CQLSH_PORT:-9042}"
