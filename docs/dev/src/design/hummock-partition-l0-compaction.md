@@ -63,6 +63,12 @@ non-overlapping prefix. It chooses one seed sub-level using the existing heurist
 range closures, and checks their depth and Base pending inputs. It does not enumerate every SST or
 every intermediate closure. Maximum point-overlap depth is telemetry only.
 
+Ordinary partition ToBase attempts a depth-qualified normal task before falling back to a Base
+trivial move. A normal result with one non-overlapping source level and no Base inputs retains the
+existing metadata-only move behavior. Legacy remains move-first; shallow partition candidates
+remain move-only. A returned normal task that fails the outer output-conflict check does not cause
+another search or a move fallback within that partition.
+
 The partition path may proceed past a fully pending oldest sub-level when a disjoint runnable stack
 exists. Pending SSTs remain in the view and must still pass the existing closure checks. Legacy
 retains its oldest-sub-level early return.

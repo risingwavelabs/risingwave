@@ -84,6 +84,26 @@ impl LevelCompactionPicker {
             return None;
         }
 
+        // Prefer a depth-qualified batch over moving a small part of its oldest sub-level.
+        // A failed normal pick still gets the existing move fallback; legacy remains move-first.
+        let normal_first = matches!(self.mode, L0PickerMode::SingleTablePartition { .. });
+        if normal_first
+            && let Some(ret) = self.pick_multi_level_to_base(
+                l0,
+                levels.get_level(self.target_level),
+                self.config.split_weight_by_vnode,
+                level_handlers,
+                stats,
+                &has_output_conflict,
+            )
+        {
+            // The manager already recognizes one non-overlapping source level plus an empty
+            // target as a metadata-only move. Keep the observation aligned with that task shape.
+            stats.is_trivial_move =
+                ret.input_levels.len() == 2 && ret.input_levels[1].table_infos.is_empty();
+            return Some(ret);
+        }
+
         if let Some(mut ret) = self.pick_base_trivial_move(
             l0,
             levels.get_level(self.target_level),
@@ -95,7 +115,9 @@ impl LevelCompactionPicker {
             return Some(ret);
         }
 
-        if self.mode.is_trivial_move_only() {
+        // Ordinary partition ToBase already attempted its normal pick above. Shallow partitions
+        // are move-only and must not fall through to a rewrite.
+        if normal_first || self.mode.is_trivial_move_only() {
             return None;
         }
 
@@ -489,6 +511,129 @@ pub mod tests {
     }
 
     #[test]
+    fn test_partition_prefers_batch_while_legacy_and_shallow_prefer_move() {
+        let config = Arc::new(CompactionConfigBuilder::new().build());
+        // The oldest SST can move into a Base gap, but the newer SSTs overlap it and Base.
+        let levels = Levels {
+            l0: generate_l0_nonoverlapping_multi_sublevels(vec![
+                vec![generate_table(1, 1, 0, 10, 1)],
+                vec![generate_table(2, 1, 0, 100, 2)],
+                vec![generate_table(3, 1, 0, 100, 3)],
+            ]),
+            levels: vec![generate_level(1, vec![generate_table(10, 1, 50, 100, 0)])],
+            ..Default::default()
+        };
+        let handlers = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        for mode in [
+            L0PickerMode::SingleTablePartition {
+                min_l0_level_count: 3,
+            },
+            L0PickerMode::Legacy,
+            L0PickerMode::SingleTablePartitionTrivialMove,
+        ] {
+            let mut picker = LevelCompactionPicker::new_with_mode(
+                1,
+                config.clone(),
+                Arc::new(CompactionTaskValidator::unused()),
+                Arc::new(CompactionDeveloperConfig::default()),
+                mode,
+            );
+            let mut stats = LocalPickerStatistic::default();
+            let ret = picker
+                .pick_compaction(&levels, &handlers, &mut stats)
+                .unwrap();
+            if matches!(mode, L0PickerMode::SingleTablePartition { .. }) {
+                assert_eq!(ret.input_levels.len(), 4);
+                let mut source_ids = ret.input_levels[..3]
+                    .iter()
+                    .flat_map(|level| level.table_infos.iter().map(|sst| sst.sst_id))
+                    .collect_vec();
+                source_ids.sort();
+                assert_eq!(source_ids, vec![1u64, 2, 3]);
+                assert_eq!(ret.input_levels[3].table_infos[0].sst_id, 10);
+                assert!(!stats.is_trivial_move);
+            } else {
+                assert_eq!(ret.input_levels.len(), 2);
+                assert_eq!(ret.input_levels[0].table_infos[0].sst_id, 1);
+                assert!(ret.input_levels[1].table_infos.is_empty());
+                assert_eq!(stats.is_trivial_move, mode.is_single_table_partition());
+            }
+        }
+    }
+
+    #[test]
+    fn test_partition_falls_back_to_move_when_batch_base_is_pending() {
+        let config = Arc::new(CompactionConfigBuilder::new().build());
+        let levels = Levels {
+            l0: generate_l0_nonoverlapping_multi_sublevels(vec![
+                vec![generate_table(1, 1, 0, 10, 1)],
+                vec![generate_table(2, 1, 0, 100, 2)],
+                vec![generate_table(3, 1, 0, 100, 3)],
+            ]),
+            levels: vec![generate_level(1, vec![generate_table(10, 1, 50, 100, 0)])],
+            ..Default::default()
+        };
+        let mut handlers = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        handlers[1].add_pending_task(100, 2, &levels.levels[0].table_infos);
+        let mut picker = LevelCompactionPicker::new_with_mode(
+            1,
+            config,
+            Arc::new(CompactionTaskValidator::unused()),
+            Arc::new(CompactionDeveloperConfig::default()),
+            L0PickerMode::SingleTablePartition {
+                min_l0_level_count: 3,
+            },
+        );
+        let mut stats = LocalPickerStatistic::default();
+        let ret = picker
+            .pick_compaction(&levels, &handlers, &mut stats)
+            .unwrap();
+        assert_eq!(ret.input_levels.len(), 2);
+        assert_eq!(ret.input_levels[0].table_infos[0].sst_id, 1);
+        assert!(ret.input_levels[1].table_infos.is_empty());
+        assert!(stats.skip_by_pending_files > 0);
+        assert!(stats.is_trivial_move);
+    }
+
+    #[test]
+    fn test_partition_normal_pick_marks_natural_move() {
+        let config = Arc::new(CompactionConfigBuilder::new().build());
+        let levels = Levels {
+            l0: generate_l0_nonoverlapping_multi_sublevels(vec![vec![generate_table(
+                1, 1, 0, 10, 1,
+            )]]),
+            levels: vec![generate_level(1, vec![])],
+            ..Default::default()
+        };
+        let mut picker = LevelCompactionPicker::new_with_mode(
+            1,
+            config,
+            Arc::new(CompactionTaskValidator::unused()),
+            Arc::new(CompactionDeveloperConfig::default()),
+            L0PickerMode::SingleTablePartition {
+                min_l0_level_count: 1,
+            },
+        );
+        let mut stats = LocalPickerStatistic::default();
+        let ret = picker
+            .pick_compaction(
+                &levels,
+                &[LevelHandler::new(0), LevelHandler::new(1)],
+                &mut stats,
+            )
+            .unwrap();
+        assert_eq!(ret.input_levels.len(), 2);
+        assert!(ret.input_levels[1].table_infos.is_empty());
+        // Only the normal pick records the initial L0 size; this was not a move fallback.
+        assert_eq!(
+            stats.partition_l0_growth.initial_l0_size,
+            ret.select_input_size
+        );
+        assert!(stats.partition_l0_growth.initial_l0_size > 0);
+        assert!(stats.is_trivial_move);
+    }
+
+    #[test]
     fn test_small_trivial_moves_ignore_legacy_min_size_and_count_all_files() {
         let config = Arc::new(CompactionConfig {
             split_weight_by_vnode: 8,
@@ -502,9 +647,7 @@ pub mod tests {
             config,
             Arc::new(CompactionTaskValidator::unused()),
             Arc::new(CompactionDeveloperConfig::default()),
-            L0PickerMode::SingleTablePartition {
-                min_l0_level_count: 1,
-            },
+            L0PickerMode::SingleTablePartitionTrivialMove,
         );
         let levels = Levels {
             l0: generate_l0_nonoverlapping_multi_sublevels(vec![vec![
