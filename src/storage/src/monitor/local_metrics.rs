@@ -43,6 +43,7 @@ pub struct StoreLocalStatistic {
     pub cache_data_block_miss: u64,
     pub cache_data_block_total: u64,
     pub pin_cache_data_block_hit: u64,
+    pub pin_cache_data_block_memory_hit: u64,
     pub pin_cache_data_block_total: u64,
     pub cache_meta_block_miss: u64,
     pub cache_meta_block_total: u64,
@@ -213,6 +214,7 @@ impl StoreLocalStatistic {
         self.cache_data_block_miss != 0
             || self.cache_data_block_total != 0
             || self.pin_cache_data_block_hit != 0
+            || self.pin_cache_data_block_memory_hit != 0
             || self.pin_cache_data_block_total != 0
             || self.cache_meta_block_miss != 0
             || self.cache_meta_block_total != 0
@@ -244,6 +246,7 @@ struct LocalStoreMetrics {
     cache_data_block_total: LabelGuardedLocalIntCounter,
     cache_data_block_miss: LabelGuardedLocalIntCounter,
     pin_cache_data_block_hit: LabelGuardedLocalIntCounter,
+    pin_cache_data_block_memory_hit: LabelGuardedLocalIntCounter,
     pin_cache_data_block_total: LabelGuardedLocalIntCounter,
     cache_meta_block_total: LabelGuardedLocalIntCounter,
     cache_meta_block_miss: LabelGuardedLocalIntCounter,
@@ -290,6 +293,11 @@ impl LocalStoreMetrics {
         let pin_cache_data_block_hit = metrics
             .sst_store_block_request_counts
             .with_guarded_label_values(&[table_id_label, "pin_data_hit"])
+            .local();
+
+        let pin_cache_data_block_memory_hit = metrics
+            .sst_store_block_request_counts
+            .with_guarded_label_values(&[table_id_label, "pin_data_memory_hit"])
             .local();
 
         let pin_cache_data_block_total = metrics
@@ -398,6 +406,7 @@ impl LocalStoreMetrics {
             cache_data_block_total,
             cache_data_block_miss,
             pin_cache_data_block_hit,
+            pin_cache_data_block_memory_hit,
             pin_cache_data_block_total,
             cache_meta_block_total,
             cache_meta_block_miss,
@@ -503,6 +512,7 @@ add_local_metrics_count!(
     cache_data_block_total,
     cache_data_block_miss,
     pin_cache_data_block_hit,
+    pin_cache_data_block_memory_hit,
     pin_cache_data_block_total,
     cache_meta_block_total,
     cache_meta_block_miss,

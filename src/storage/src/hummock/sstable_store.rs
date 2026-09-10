@@ -169,6 +169,12 @@ impl Default for CachePolicy {
     }
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum PinCacheBlockSource {
+    Memory,
+    Local,
+}
+
 impl From<TracedCachePolicy> for CachePolicy {
     fn from(policy: TracedCachePolicy) -> Self {
         match policy {
@@ -450,21 +456,33 @@ impl SstableStore {
             .get()
             .is_some_and(|pin_cache| pin_cache.is_desired(object_id));
         let pin_cache_candidate = pin_cache_desired || pinned_sst.is_some();
-        if pinned_sst.is_none()
-            && let Some(entry) = self
-                .block_cache
-                .get(&SstableBlockIndex {
-                    sst_id: object_id,
-                    block_idx: block_index as _,
-                })
+        let first_block = SstableBlockIndex {
+            sst_id: object_id,
+            block_idx: block_index as _,
+        };
+        let cached_entry = if pinned_sst.is_some() {
+            match policy {
+                CachePolicy::Disable => None,
+                CachePolicy::Fill(_) | CachePolicy::NotFill => {
+                    self.block_cache.memory().get(&first_block)
+                }
+            }
+        } else {
+            self.block_cache
+                .get(&first_block)
                 .await
                 .map_err(HummockError::foyer_error)?
-        {
-            if pin_cache_candidate {
+        };
+        if let Some(entry) = cached_entry {
+            if pinned_sst.is_some() {
+                stats.pin_cache_data_block_total += 1;
+                stats.pin_cache_data_block_hit += 1;
+                stats.pin_cache_data_block_memory_hit += 1;
+            } else if pin_cache_candidate {
                 stats.pin_cache_data_block_total += 1;
             }
             stats.cache_data_block_total += 1;
-            if entry.source() == foyer::Source::Outer {
+            if pinned_sst.is_none() && entry.source() == foyer::Source::Outer {
                 stats.cache_data_block_miss += 1;
             }
             let block = BlockHolder::from_hybrid_cache_entry(entry);
@@ -479,17 +497,21 @@ impl SstableStore {
         let start_offset = sst.meta.block_metas[block_index].offset as usize;
         let mut min_hit_index = end_index;
         let mut hit_count = 0;
-        if pinned_sst.is_none() {
-            for idx in block_index..end_index {
-                if self.block_cache.contains(&SstableBlockIndex {
-                    sst_id: object_id,
-                    block_idx: idx as _,
-                }) {
-                    if min_hit_index > idx && idx > block_index {
-                        min_hit_index = idx;
-                    }
-                    hit_count += 1;
+        for idx in block_index..end_index {
+            let block = SstableBlockIndex {
+                sst_id: object_id,
+                block_idx: idx as _,
+            };
+            let contains = if pinned_sst.is_some() {
+                policy != CachePolicy::Disable && self.block_cache.memory().contains(&block)
+            } else {
+                self.block_cache.contains(&block)
+            };
+            if contains {
+                if min_hit_index > idx && idx > block_index {
+                    min_hit_index = idx;
                 }
+                hit_count += 1;
             }
         }
 
@@ -578,18 +600,26 @@ impl SstableStore {
                     return Err(error);
                 }
             };
-            let holder = if pinned_sst.is_none()
-                && let CachePolicy::Fill(hint) = policy
-            {
+            let holder = if let CachePolicy::Fill(hint) = policy {
                 let hint = if idx == block_index { hint } else { Hint::Low };
-                let entry = self.block_cache.insert_with_properties(
-                    SstableBlockIndex {
-                        sst_id: object_id,
-                        block_idx: idx as _,
-                    },
-                    Box::new(block),
-                    HybridCacheProperties::default().with_hint(hint),
-                );
+                let block_index = SstableBlockIndex {
+                    sst_id: object_id,
+                    block_idx: idx as _,
+                };
+                let properties = HybridCacheProperties::default().with_hint(hint);
+                let entry = if pinned_sst.is_some() {
+                    self.block_cache.memory().insert_with_properties(
+                        block_index,
+                        Box::new(block),
+                        properties,
+                    )
+                } else {
+                    self.block_cache.insert_with_properties(
+                        block_index,
+                        Box::new(block),
+                        properties,
+                    )
+                };
                 BlockHolder::from_hybrid_cache_entry(entry)
             } else {
                 BlockHolder::from_owned_block(Box::new(block))
@@ -624,21 +654,55 @@ impl SstableStore {
         sst: &Sstable,
         block_index: usize,
         policy: CachePolicy,
-    ) -> HummockResult<(BlockResponse, bool)> {
+    ) -> HummockResult<(BlockResponse, Option<PinCacheBlockSource>)> {
         let object_id = sst.id;
         let (range, uncompressed_capacity) = sst.calculate_block_info(block_index);
         if let Some(pinned_sst) = self.pinned_sst(object_id) {
-            let result = pinned_sst
-                .read(range.clone())
-                .instrument_await("get_pinned_block_response".verbose())
-                .await
-                .map_err(HummockError::from)
-                .and_then(|data| Block::decode(data, uncompressed_capacity));
+            let idx = SstableBlockIndex {
+                sst_id: object_id,
+                block_idx: block_index as _,
+            };
+            if policy != CachePolicy::Disable
+                && let Some(entry) = self.block_cache.memory().get(&idx)
+            {
+                return Ok((
+                    BlockResponse::Block(BlockHolder::from_hybrid_cache_entry(entry)),
+                    Some(PinCacheBlockSource::Memory),
+                ));
+            }
+
+            let result = match policy {
+                CachePolicy::Fill(hint) => {
+                    let read_route = pinned_sst.clone();
+                    let properties = HybridCacheProperties::default().with_hint(hint);
+                    self.block_cache
+                        .memory()
+                        .get_or_fetch(&idx, move || async move {
+                            let data = read_route
+                                .read(range)
+                                .instrument_await("get_pinned_block_response".verbose())
+                                .await
+                                .map_err(HummockError::from)?;
+                            let block = Box::new(Block::decode(data, uncompressed_capacity)?);
+                            Ok::<_, anyhow::Error>((block, properties))
+                        })
+                        .await
+                        .map(BlockHolder::from_hybrid_cache_entry)
+                        .map_err(HummockError::foyer_error)
+                }
+                CachePolicy::NotFill | CachePolicy::Disable => pinned_sst
+                    .read(range)
+                    .instrument_await("get_pinned_block_response".verbose())
+                    .await
+                    .map_err(HummockError::from)
+                    .and_then(|data| Block::decode(data, uncompressed_capacity))
+                    .map(|block| BlockHolder::from_owned_block(Box::new(block))),
+            };
             match result {
                 Ok(block) => {
                     return Ok((
-                        BlockResponse::Block(BlockHolder::from_owned_block(Box::new(block))),
-                        true,
+                        BlockResponse::Block(block),
+                        Some(PinCacheBlockSource::Local),
                     ));
                 }
                 Err(error) => {
@@ -654,7 +718,7 @@ impl SstableStore {
 
         self.get_block_response_from_foyer(sst, block_index, policy)
             .await
-            .map(|response| (response, false))
+            .map(|response| (response, None))
     }
 
     async fn get_block_response_from_foyer(
@@ -753,18 +817,22 @@ impl SstableStore {
             .pin_cache
             .get()
             .is_some_and(|pin_cache| pin_cache.is_desired(sst.id));
-        let (block_response, pin_cache_hit) = self
+        let (block_response, pin_cache_source) = self
             .get_block_response_with_pin_cache_hit(sst, block_index, policy)
             .await?;
         let block_holder = block_response.wait().await?;
-        if pin_cache_desired || pin_cache_hit {
+        if pin_cache_desired || pin_cache_source.is_some() {
             stats.pin_cache_data_block_total += 1;
         }
-        if pin_cache_hit {
+        if pin_cache_source.is_some() {
             stats.pin_cache_data_block_hit += 1;
         }
+        if pin_cache_source == Some(PinCacheBlockSource::Memory) {
+            stats.pin_cache_data_block_memory_hit += 1;
+        }
         stats.cache_data_block_total += 1;
-        if let BlockEntry::HybridCache(entry) = block_holder.entry()
+        if pin_cache_source.is_none()
+            && let BlockEntry::HybridCache(entry) = block_holder.entry()
             && entry.source() == foyer::Source::Outer
         {
             stats.cache_data_block_miss += 1;
@@ -1079,7 +1147,7 @@ mod tests {
     use risingwave_hummock_sdk::HummockObjectId;
     use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
-    use super::{SstableStoreRef, SstableWriterOptions};
+    use super::{SstableBlockIndex, SstableStoreRef, SstableWriterOptions};
     use crate::hummock::iterator::HummockIterator;
     use crate::hummock::iterator::test_utils::{iterator_test_key_of, mock_sstable_store};
     use crate::hummock::pin_cache::PinCache;
@@ -1314,10 +1382,6 @@ mod tests {
         .unwrap();
         let mut stats = StoreLocalStatistic::default();
         let sst = sstable_store.sstable(&info, &mut stats).await.unwrap();
-        sstable_store
-            .get(&sst, 0, CachePolicy::default(), &mut stats)
-            .await
-            .unwrap();
 
         let local_store = mock_sstable_store().await.store();
         let pin_cache = PinCache::new(local_store.clone(), u64::MAX);
@@ -1337,11 +1401,23 @@ mod tests {
 
         let mut pin_get_stats = StoreLocalStatistic::default();
         sstable_store
-            .get(&sst, 0, CachePolicy::NotFill, &mut pin_get_stats)
+            .get(&sst, 0, CachePolicy::default(), &mut pin_get_stats)
             .await
             .unwrap();
         assert_eq!(pin_get_stats.pin_cache_data_block_total, 1);
         assert_eq!(pin_get_stats.pin_cache_data_block_hit, 1);
+        assert_eq!(pin_get_stats.pin_cache_data_block_memory_hit, 0);
+
+        let mut pin_memory_get_stats = StoreLocalStatistic::default();
+        sstable_store
+            .get(&sst, 0, CachePolicy::NotFill, &mut pin_memory_get_stats)
+            .await
+            .unwrap();
+        assert_eq!(pin_memory_get_stats.pin_cache_data_block_total, 1);
+        assert_eq!(pin_memory_get_stats.pin_cache_data_block_hit, 1);
+        assert_eq!(pin_memory_get_stats.pin_cache_data_block_memory_hit, 1);
+
+        sstable_store.block_cache().memory().clear();
 
         let mut pin_prefetch_stats = StoreLocalStatistic::default();
         let mut pin_stream = sstable_store
@@ -1349,7 +1425,7 @@ mod tests {
                 &sst,
                 0,
                 sst.block_count(),
-                CachePolicy::NotFill,
+                CachePolicy::default(),
                 &mut pin_prefetch_stats,
             )
             .await
@@ -1360,6 +1436,18 @@ mod tests {
             pin_prefetch_stats.pin_cache_data_block_hit,
             pin_prefetch_stats.pin_cache_data_block_total
         );
+        assert_eq!(pin_prefetch_stats.pin_cache_data_block_memory_hit, 0);
+        assert!(
+            sstable_store
+                .block_cache()
+                .memory()
+                .contains(&SstableBlockIndex {
+                    sst_id: info.object_id,
+                    block_idx: 0,
+                })
+        );
+
+        sstable_store.block_cache().memory().clear();
 
         let mut local_objects = local_store.list("", None, None).await.unwrap();
         let local_path = local_objects.next().await.unwrap().unwrap().key;
@@ -1371,8 +1459,6 @@ mod tests {
         } else {
             local_store.delete(&local_path).await.unwrap();
         }
-        sstable_store.store().delete(&remote_path).await.unwrap();
-
         let mut stream = sstable_store
             .prefetch_blocks(&sst, 0, sst.block_count(), CachePolicy::NotFill, &mut stats)
             .await
