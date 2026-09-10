@@ -311,6 +311,14 @@ fn task_main(
                     ctx.pb
                         .set_message(format!("redis {}:{}", c.address, c.port));
                 }
+                ServiceConfig::Cassandra(c) => {
+                    let mut service = CassandraService::new(c.clone());
+                    service.execute(&mut ctx)?;
+                    let mut task = risedev::CassandraReadyCheckTask::new(c.clone());
+                    task.execute(&mut ctx)?;
+                    ctx.pb
+                        .set_message(format!("cassandra {}:{}", c.address, c.port));
+                }
                 ServiceConfig::ClickHouse(c) => {
                     let mut service = ClickHouseService::new(c.clone());
                     service.execute(&mut ctx)?;
