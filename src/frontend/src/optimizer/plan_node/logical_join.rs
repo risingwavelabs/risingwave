@@ -1324,7 +1324,18 @@ impl LogicalJoin {
 
         let left = self.left().to_stream(ctx)?;
         let left = if is_broadcast {
-            left.enforce_concrete_distribution()
+            // Always shuffle the LHS by its stream key. The point of a broadcast temporal join is
+            // to make the join fragment independent: without an exchange here, the join would be
+            // fused into the upstream fragment whenever the LHS already declares a concrete
+            // distribution (e.g. a source with `HashShard(_row_id)` or a table scan with
+            // `UpstreamHashShard`), which ties the join parallelism to the upstream and inherits
+            // its key skew. One extra hash exchange buys an independently scalable join fragment
+            // and evenly spread rows. A singleton LHS cannot be sharded, so keep it as is.
+            match left.distribution() {
+                Distribution::Single => left,
+                _ => RequiredDist::shard_by_key(left.schema().len(), left.expect_stream_key())
+                    .stream_enforce(left),
+            }
         } else {
             // Enforce a shuffle for the temporal join LHS to let the scheduler be able to schedule
             // the join fragment together with the RHS with a `no_shuffle` exchange.
