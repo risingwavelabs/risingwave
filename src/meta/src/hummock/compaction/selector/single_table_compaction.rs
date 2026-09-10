@@ -107,7 +107,7 @@ impl SingleTableCompactionGroup {
             effective_base_level_size.effective,
             base_level_target_size,
         );
-        if global_l0_score <= SCORE_BASE {
+        if global_l0_score < SCORE_BASE {
             return Some(vec![]);
         }
 
@@ -352,7 +352,24 @@ mod tests {
             .unwrap();
         assert_eq!(candidates[0].score, 401);
 
-        // Once Base grows beyond 2x its target, the adjusted score no longer passes the strict
+        // An adjusted score exactly at the admission threshold remains eligible.
+        let candidates = group
+            .build_l0_candidates(
+                &config,
+                &l0,
+                &LevelHandler::new(0),
+                EffectiveLevelSize {
+                    current: 200,
+                    effective: 200,
+                    ..Default::default()
+                },
+                100,
+            )
+            .unwrap();
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].score, 101);
+
+        // Once Base grows beyond 2x its target, the adjusted score no longer passes the
         // admission threshold, so neither ToBase nor its Intra fallback is scheduled.
         let candidates = group
             .build_l0_candidates(
