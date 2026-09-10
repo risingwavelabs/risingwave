@@ -38,8 +38,13 @@ apt-get install -y python3.11-venv
 python3.11 -m venv cqlsh_env
 source cqlsh_env/bin/activate
 
+# Keep cqlsh on this virtualenv's Python when the SLT helpers are added to PATH.
+export CQLSH_PYTHON="${VIRTUAL_ENV}/bin/python3.11"
 export CQLSH_HOST=cassandra-server
 export CQLSH_PORT=9042
+export CASSANDRA_DATACENTER=datacenter1
+export RISEDEV_CASSANDRA_WITH_OPTIONS_COMMON="connector='cassandra',cassandra.url='${CQLSH_HOST}:${CQLSH_PORT}',cassandra.datacenter='${CASSANDRA_DATACENTER}'"
+export PATH="${PWD}/e2e_test/commands:${PATH}"
 
 echo "--- testing sinks"
 sqllogictest -p 4566 -d dev './e2e_test/sink/cassandra_sink.slt'
