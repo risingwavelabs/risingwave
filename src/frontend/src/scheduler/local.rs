@@ -63,6 +63,7 @@ pub struct LocalQueryExecution {
     session: Arc<SessionImpl>,
     worker_node_manager: WorkerNodeSelector,
     timeout: Option<Duration>,
+    shutdown_rx: Option<ShutdownToken>,
 }
 
 impl LocalQueryExecution {
@@ -72,6 +73,7 @@ impl LocalQueryExecution {
         support_barrier_read: bool,
         session: Arc<SessionImpl>,
         timeout: Option<Duration>,
+        shutdown_rx: Option<ShutdownToken>,
     ) -> Self {
         let worker_node_manager =
             WorkerNodeSelector::new(front_env.worker_node_manager_ref(), support_barrier_read);
@@ -82,11 +84,14 @@ impl LocalQueryExecution {
             session,
             worker_node_manager,
             timeout,
+            shutdown_rx,
         }
     }
 
     fn shutdown_rx(&self) -> ShutdownToken {
-        self.session.reset_cancel_query_flag()
+        self.shutdown_rx
+            .clone()
+            .unwrap_or_else(|| self.session.reset_cancel_query_flag())
     }
 
     #[try_stream(ok = DataChunk, error = RwError)]
@@ -691,5 +696,105 @@ impl LocalQueryExecution {
             }
             Ok(workers)
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_sqlparser::parser::Parser;
+
+    use super::*;
+    use crate::OptimizerContext;
+    use crate::handler::HandlerArgs;
+    use crate::handler::query::{
+        gen_batch_plan_by_statement, gen_batch_plan_fragmenter, local_execute,
+    };
+
+    async fn start_local_query(
+        session: Arc<SessionImpl>,
+        shutdown_rx: Option<ShutdownToken>,
+    ) -> LocalQueryStream {
+        session
+            .set_config("visibility_mode", "all".to_owned())
+            .unwrap();
+        session
+            .set_config("query_mode", "local".to_owned())
+            .unwrap();
+        // More rows than the output channel can buffer keeps execution active until cancellation.
+        let sql = "SELECT * FROM generate_series(1, 1000000)";
+        let stmt = Parser::parse_sql(sql).unwrap().pop().unwrap();
+        let args = HandlerArgs::new(session.clone(), &stmt, sql.into()).unwrap();
+        let context = OptimizerContext::from_handler_args(args);
+        let plan = gen_batch_plan_by_statement(&session, context.into(), stmt)
+            .unwrap()
+            .unwrap_rw()
+            .unwrap();
+        let query = gen_batch_plan_fragmenter(&session, plan)
+            .unwrap()
+            .plan_fragmenter
+            .generate_complete_query()
+            .await
+            .unwrap();
+        let mut stream = local_execute(session, query, false, shutdown_rx)
+            .await
+            .unwrap();
+        let first_chunk = tokio::time::timeout(Duration::from_secs(5), stream.next())
+            .await
+            .expect("the local executor must produce its first chunk")
+            .unwrap()
+            .unwrap();
+        assert!(first_chunk.cardinality() > 0);
+        stream
+    }
+
+    async fn expect_error_then_eof(mut stream: LocalQueryStream) -> BoxedError {
+        tokio::time::timeout(Duration::from_secs(5), async {
+            // Drain chunks already buffered before cancellation until the executor reports it.
+            while let Some(result) = stream.next().await {
+                if let Err(error) = result {
+                    assert!(stream.next().await.is_none());
+                    return error;
+                }
+            }
+            panic!("the executor must report cancellation, not successful completion");
+        })
+        .await
+        .expect("the local executor must report cancellation")
+    }
+
+    /// Verifies that local cursor execution observes its explicitly supplied shutdown token,
+    /// reporting a cancellation error followed by EOF when that token is cancelled.
+    #[tokio::test]
+    async fn test_local_execution_uses_supplied_shutdown_token() {
+        let session = Arc::new(SessionImpl::mock());
+        let _txn = session.txn_begin_implicit();
+        let ordinary_shutdown = session.reset_cancel_query_flag();
+        let (shutdown_tx, shutdown_rx) = ShutdownToken::new();
+        let stream = start_local_query(session.clone(), Some(shutdown_rx.clone())).await;
+
+        session.cancel_current_query();
+
+        assert!(ordinary_shutdown.is_cancelled());
+        assert!(!shutdown_rx.is_cancelled());
+        shutdown_tx.cancel();
+        let error = expect_error_then_eof(stream).await;
+        assert!(matches!(
+            error.downcast_ref::<SchedulerError>(),
+            Some(SchedulerError::QueryCancelled(_))
+        ));
+    }
+
+    /// Verifies that ordinary local execution uses the session's shutdown token when none is
+    /// supplied. Calling `cancel_current_query` produces a cancellation error followed by EOF.
+    #[tokio::test]
+    async fn test_local_execution_uses_session_shutdown_token() {
+        let session = Arc::new(SessionImpl::mock());
+        let _txn = session.txn_begin_implicit();
+        let stream = start_local_query(session.clone(), None).await;
+
+        session.cancel_current_query();
+
+        let error = expect_error_then_eof(stream).await;
+        assert!(error.to_string().contains("cancelled"), "{error}");
     }
 }
