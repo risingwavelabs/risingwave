@@ -450,10 +450,6 @@ impl GlobalBarrierWorkerContextImpl {
             )
             .await?;
         }
-        self.metadata_manager
-            .reset_all_refresh_jobs_to_idle()
-            .await?;
-
         // unregister cleaned sources.
         self.source_manager
             .apply_source_change(SourceChange::DropSource {
@@ -891,6 +887,7 @@ impl GlobalBarrierWorkerContextImpl {
                         .catalog_controller
                         .cleanup_dropped_tables()
                         .await;
+                    self.refresh_manager.clear_trackers(None).await;
 
                     let active_streaming_nodes =
                         ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone())
@@ -1115,8 +1112,7 @@ impl GlobalBarrierWorkerContextImpl {
             reload_cdc_table_snapshot_splits(&self.env.meta_store_ref().conn, Some(database_id))
                 .await?;
 
-        self.refresh_manager
-            .remove_trackers_by_database(database_id);
+        self.refresh_manager.clear_trackers(Some(database_id)).await;
 
         Ok(DatabaseRuntimeInfoSnapshot {
             recovery_context,

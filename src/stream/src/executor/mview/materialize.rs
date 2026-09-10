@@ -30,13 +30,12 @@ use risingwave_common::row::{OwnedRow, RowExt};
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::ColumnOrder;
 use risingwave_common::util::value_encoding::BasicSerde;
-use risingwave_hummock_sdk::HummockReadEpoch;
 use risingwave_pb::catalog::Table;
 use risingwave_pb::catalog::table::Engine;
 use risingwave_pb::id::{SourceId, SubscriberId};
 use risingwave_pb::stream_plan::SubscriptionUpstreamInfo;
 use risingwave_storage::row_serde::value_serde::{ValueRowSerde, ValueRowSerdeNew};
-use risingwave_storage::store::{PrefetchOptions, TryWaitEpochOptions};
+use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::KeyedRow;
 
 use crate::common::change_buffer::output_kind as cb_kind;
@@ -44,12 +43,13 @@ use crate::common::metrics::MetricsInfo;
 use crate::common::table::state_table::{
     StateTableBuilder, StateTableInner, StateTableOpConsistencyLevel,
 };
+use crate::consistency::consistency_panic;
 use crate::executor::error::ErrorKind;
 use crate::executor::monitor::MaterializeMetrics;
 use crate::executor::mview::RefreshProgressTable;
 use crate::executor::mview::cache::MaterializeCache;
 use crate::executor::prelude::*;
-use crate::executor::{BarrierInner, BarrierMutationType, EpochPair};
+use crate::executor::{BarrierInner, BarrierMutationType};
 use crate::task::LocalBarrierManager;
 
 #[derive(Debug, Clone)]
@@ -61,9 +61,7 @@ pub enum MaterializeStreamState<M> {
         barrier: BarrierInner<M>,
         expect_next_state: Box<MaterializeStreamState<M>>,
     },
-    RefreshEnd {
-        on_complete_epoch: EpochPair,
-    },
+    RefreshEnd,
 }
 
 /// `MaterializeExecutor` materializes changes in stream into a materialized view on storage.
@@ -140,11 +138,17 @@ pub struct RefreshableMaterializeArgs<S: StateStore, SD: ValueRowSerde> {
     ///
     /// The staging table is PK-only.
     ///
-    /// After `LoadFinish`, we will do a `DELETE FROM main_table WHERE pk NOT IN (SELECT pk FROM staging_table)`, and then purge the staging table.
+    /// After `LoadFinish`, we will do a `DELETE FROM main_table WHERE pk NOT IN (SELECT pk FROM staging_table)`.
+    /// Once every materialize actor of the table has reported the merge finished, meta truncates the staging table.
     pub staging_table: StateTableInner<S, SD>,
 
-    /// Progress table for tracking refresh state per `VNode` for fault tolerance
+    /// Per-vnode merge progress of the current cycle. Within a cycle the merge resumes from it after
+    /// every barrier; it is also persisted so that a future meta-driven resume can survive recovery.
     pub progress_table: RefreshProgressTable<S>,
+
+    /// `prev` epoch of the current cycle's `RefreshStart` barrier. The previous cycle's staging
+    /// truncation is committed before it, so the merge waits for it to be visible locally.
+    pub refresh_start_prev_epoch: Option<u64>,
 
     /// Table ID for this refreshable materialized view
     pub table_id: TableId,
@@ -188,6 +192,7 @@ impl<S: StateStore, SD: ValueRowSerde> RefreshableMaterializeArgs<S, SD> {
             is_refreshing: false,
             staging_table,
             progress_table,
+            refresh_start_prev_epoch: None,
             table_id,
         }
     }
@@ -379,67 +384,19 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
         // default to normal ingestion
         let mut inner_state =
             Box::new(MaterializeStreamState::<BarrierMutationType>::NormalIngestion);
-        // Initialize staging table for refreshable materialized views
         if let Some(ref mut refresh_args) = self.refresh_args {
             refresh_args.staging_table.init_epoch(first_epoch).await?;
-
-            // Initialize progress table and load existing progress for recovery
             refresh_args.progress_table.recover(first_epoch).await?;
 
-            // Check if refresh is already in progress (recovery scenario)
+            // A refresh interrupted by recovery is not resumed here: the staging table may be
+            // only partially loaded. Meta abandons the cycle and runs it again.
             let progress_stats = refresh_args.progress_table.get_progress_stats();
             if progress_stats.total_vnodes > 0 && !progress_stats.is_complete() {
-                refresh_args.is_refreshing = true;
                 tracing::info!(
-                    total_vnodes = progress_stats.total_vnodes,
+                    table_id = %refresh_args.table_id,
                     completed_vnodes = progress_stats.completed_vnodes,
-                    "Recovered refresh in progress, resuming refresh operation"
-                );
-
-                // Since stage info is no longer stored in progress table,
-                // we need to determine recovery state differently.
-                // For now, assume all incomplete VNodes need to continue merging
-                let incomplete_vnodes: Vec<_> = refresh_args
-                    .progress_table
-                    .get_all_progress()
-                    .iter()
-                    .filter(|(_, entry)| !entry.is_completed)
-                    .map(|(&vnode, _)| vnode)
-                    .collect();
-
-                if !incomplete_vnodes.is_empty() {
-                    // Some VNodes are incomplete, need to resume refresh operation
-                    tracing::info!(
-                        incomplete_vnodes = incomplete_vnodes.len(),
-                        "Recovery detected incomplete VNodes, resuming refresh operation"
-                    );
-                    // Since stage tracking is now in memory, we'll determine the appropriate
-                    // stage based on the executor's internal state machine
-                } else {
-                    // This should not happen if is_complete() returned false, but handle it gracefully
-                    tracing::warn!("Unexpected recovery state: no incomplete VNodes found");
-                }
-            }
-        }
-
-        // Determine initial execution stage (for recovery scenarios)
-        if let Some(ref refresh_args) = self.refresh_args
-            && refresh_args.is_refreshing
-        {
-            // Recovery logic: Check if there are incomplete vnodes from previous run
-            let incomplete_vnodes: Vec<_> = refresh_args
-                .progress_table
-                .get_all_progress()
-                .iter()
-                .filter(|(_, entry)| !entry.is_completed)
-                .map(|(&vnode, _)| vnode)
-                .collect();
-            if !incomplete_vnodes.is_empty() {
-                // Resume from merge stage since some VNodes were left incomplete
-                *inner_state = MaterializeStreamState::<_>::MergingData;
-                tracing::info!(
-                    incomplete_vnodes = incomplete_vnodes.len(),
-                    "Recovery: Resuming refresh from merge stage due to incomplete VNodes"
+                    total_vnodes = progress_stats.total_vnodes,
+                    "found progress of a refresh interrupted by recovery"
                 );
             }
         }
@@ -757,53 +714,30 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                 continue 'main_loop;
                             }
                             Message::Barrier(barrier) => {
-                                let staging_table_id = refresh_args.staging_table.table_id();
-                                let epoch = barrier.epoch;
                                 self.local_barrier_manager.report_refresh_finished(
-                                    epoch,
+                                    barrier.epoch,
                                     self.actor_context.id,
                                     refresh_args.table_id,
-                                    staging_table_id,
                                 );
-                                tracing::debug!(table_id = %refresh_args.table_id, "on_load_finish: Reported staging table truncation and diff applied");
+                                tracing::debug!(table_id = %refresh_args.table_id, "on_load_finish: reported refresh finished");
 
                                 *inner_state = MaterializeStreamState::CommitAndYieldBarrier {
                                     barrier,
-                                    expect_next_state: Box::new(
-                                        MaterializeStreamState::RefreshEnd {
-                                            on_complete_epoch: epoch,
-                                        },
-                                    ),
+                                    expect_next_state: Box::new(MaterializeStreamState::RefreshEnd),
                                 };
                                 continue 'main_loop;
                             }
                         }
                     }
                 }
-                MaterializeStreamState::RefreshEnd { on_complete_epoch } => {
+                MaterializeStreamState::RefreshEnd => {
                     let Some(refresh_args) = self.refresh_args.as_mut() else {
                         panic!(
                             "MaterializeExecutor entered RefreshEnd state without refresh_args configured"
                         );
                     };
-                    let staging_table_id = refresh_args.staging_table.table_id();
-
-                    // Wait for staging table truncation to complete
-                    let staging_store = refresh_args.staging_table.state_store().clone();
-                    staging_store
-                        .try_wait_epoch(
-                            HummockReadEpoch::Committed(on_complete_epoch.prev),
-                            TryWaitEpochOptions {
-                                table_id: staging_table_id,
-                            },
-                        )
-                        .await?;
-
                     tracing::info!(table_id = %refresh_args.table_id, "RefreshEnd: Refresh completed");
-
-                    if let Some(ref mut refresh_args) = self.refresh_args {
-                        refresh_args.is_refreshing = false;
-                    }
+                    refresh_args.is_refreshing = false;
                     *inner_state = MaterializeStreamState::NormalIngestion;
                     continue 'main_loop;
                 }
@@ -811,17 +745,21 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     barrier,
                     mut expect_next_state,
                 } => {
+                    let mut wait_staging_visible = None;
                     if let Some(ref mut refresh_args) = self.refresh_args {
                         match barrier.mutation.as_deref() {
                             Some(Mutation::RefreshStart {
                                 table_id: refresh_table_id,
                                 associated_source_id: _,
                             }) if *refresh_table_id == refresh_args.table_id => {
-                                debug_assert!(
-                                    !refresh_args.is_refreshing,
-                                    "cannot start refresh twice"
-                                );
+                                if refresh_args.is_refreshing {
+                                    consistency_panic!(
+                                        table_id = %refresh_table_id,
+                                        "RefreshStart received while a refresh is in progress"
+                                    );
+                                }
                                 refresh_args.is_refreshing = true;
+                                refresh_args.refresh_start_prev_epoch = Some(barrier.epoch.prev);
                                 tracing::info!(table_id = %refresh_table_id, "RefreshStart barrier received");
 
                                 // Initialize progress tracking for all VNodes
@@ -844,11 +782,22 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                                 };
 
                                 if *load_finish_source_id == associated_source_id {
-                                    tracing::info!(
-                                        %load_finish_source_id,
-                                        "LoadFinish received, starting data replacement"
-                                    );
-                                    *expect_next_state = MaterializeStreamState::<_>::MergingData;
+                                    if !refresh_args.is_refreshing {
+                                        // Merging now would run against an empty staging table.
+                                        consistency_panic!(
+                                            table_id = %refresh_args.table_id,
+                                            "LoadFinish received without a refresh in progress"
+                                        );
+                                    } else {
+                                        tracing::info!(
+                                            %load_finish_source_id,
+                                            "LoadFinish received, starting data replacement"
+                                        );
+                                        *expect_next_state =
+                                            MaterializeStreamState::<_>::MergingData;
+                                        wait_staging_visible =
+                                            refresh_args.refresh_start_prev_epoch;
+                                    }
                                 }
                             }
                             _ => {}
@@ -884,8 +833,6 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                     // Commit staging table for refreshable materialized views
                     let refresh_post_commit = if let Some(ref mut refresh_args) = self.refresh_args
                     {
-                        // Commit progress table for fault tolerance
-
                         Some((
                             refresh_args.staging_table.commit(barrier.epoch).await?,
                             refresh_args.progress_table.commit(barrier.epoch).await?,
@@ -917,6 +864,17 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
                             .await?;
                     }
 
+                    if let (Some(epoch), Some(refresh_args)) =
+                        (wait_staging_visible, self.refresh_args.as_ref())
+                    {
+                        // The previous cycle's truncation of the staging table must be visible
+                        // locally before the merge reads it.
+                        refresh_args
+                            .staging_table
+                            .try_wait_committed_epoch(epoch)
+                            .await?;
+                    }
+
                     self.metrics
                         .materialize_current_epoch
                         .set(b_epoch.curr as i64);
@@ -940,15 +898,11 @@ impl<S: StateStore, SD: ValueRowSerde> MaterializeExecutor<S, SD> {
     ) {
         for vnode in main_table.vnodes().clone().iter_vnodes() {
             let mut processed_rows = 0;
-            // Check if this VNode has already been completed (for fault tolerance)
+            // The merge is rebuilt after every barrier and resumes from the recorded position.
             let pk_range: (Bound<OwnedRow>, Bound<OwnedRow>) =
                 if let Some(current_entry) = progress_table.get_progress(vnode) {
-                    // Skip already completed VNodes during recovery
                     if current_entry.is_completed {
-                        tracing::debug!(
-                            vnode = vnode.to_index(),
-                            "Skipping already completed VNode during recovery"
-                        );
+                        tracing::debug!(vnode = vnode.to_index(), "vnode already merged");
                         continue;
                     }
                     processed_rows += current_entry.processed_rows;

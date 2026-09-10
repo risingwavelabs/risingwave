@@ -42,6 +42,7 @@ use risingwave_connector::source::{
     ConnectorProperties, SourceEnumeratorContext, UPSTREAM_SOURCE_KEY,
 };
 use risingwave_meta_model::object::ObjectType;
+use risingwave_meta_model::refresh_job::RefreshState;
 use risingwave_meta_model::{
     ConnectionId, DatabaseId, DispatcherType, FragmentId, FunctionId, IndexId, JobStatus, ObjectId,
     SchemaId, SecretId, SinkId, SourceId, StreamingParallelism, SubscriptionId, UserId, ViewId,
@@ -1594,6 +1595,19 @@ impl DdlController {
         let job_id = streaming_job.id();
 
         let _reschedule_job_lock = self.stream_manager.reschedule_lock_read_guard().await;
+        if let StreamingJob::Table(_, table, _) = &streaming_job
+            && self
+                .metadata_manager
+                .catalog_controller
+                .get_refresh_job_state(table.id)
+                .await?
+                .is_some_and(|state| state != RefreshState::Idle)
+        {
+            bail!(
+                "Cannot alter table {} because it is being refreshed",
+                table.name
+            );
+        }
         let ctx = StreamContext::from_protobuf(fragment_graph.get_ctx().unwrap());
 
         // Ensure the max parallelism unchanged before replacing table.

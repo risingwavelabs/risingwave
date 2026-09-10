@@ -26,6 +26,7 @@ use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::{DatabaseId, PartialGraphId};
 use risingwave_pb::stream_service::barrier_complete_response::{
     PbIcebergPkIndexSinkMetadata, PbListFinishedSource, PbLoadFinishedSource,
+    PbRefreshFinishedActor,
 };
 use tokio::task::JoinHandle;
 
@@ -69,8 +70,8 @@ pub(super) struct CompleteBarrierTask {
     pub(super) list_finished_source_ids: Vec<PbListFinishedSource>,
     /// Source load completion events that need `LoadFinish` commands
     pub(super) load_finished_source_ids: Vec<PbLoadFinishedSource>,
-    /// Table IDs that have finished materialize refresh and need completion signaling
-    pub(super) refresh_finished_table_job_ids: Vec<JobId>,
+    /// Materialize actors that have finished their part of a table refresh
+    pub(super) refresh_finished_actors: Vec<PbRefreshFinishedActor>,
     /// Iceberg pk-index sink reports collected during this barrier
     pub(super) iceberg_pk_index_sink_metadata: Vec<PbIcebergPkIndexSinkMetadata>,
 }
@@ -152,10 +153,9 @@ impl CompleteBarrierTask {
                     .await?;
             }
 
-            // Handle refresh finished table IDs for materialized view refresh completion
-            if !self.refresh_finished_table_job_ids.is_empty() {
+            if !self.refresh_finished_actors.is_empty() {
                 context
-                    .handle_refresh_finished_table_ids(self.refresh_finished_table_job_ids.clone())
+                    .handle_refresh_finished_actors(self.refresh_finished_actors.clone())
                     .await?;
             }
 

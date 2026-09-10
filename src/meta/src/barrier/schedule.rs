@@ -14,6 +14,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::future::Future;
 use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
@@ -271,6 +272,27 @@ impl BarrierScheduler {
         let ret = self.run_multiple_commands(database_id, vec![command]).await;
         tracing::trace!("run_command finished");
         ret
+    }
+
+    /// Schedule a command and return a future that resolves once it is collected.
+    pub fn schedule_command(
+        &self,
+        database_id: DatabaseId,
+        command: Command,
+    ) -> MetaResult<impl Future<Output = MetaResult<()>> + use<>> {
+        tracing::trace!("schedule_command: {:?}", command);
+        let (notifier, started_rx) = Notifier::new();
+        self.push(database_id, vec![(command, notifier)])?;
+        Ok(async move {
+            let collect_rxs = started_rx
+                .instrument_await("wait_injected")
+                .await
+                .ok()
+                .context("failed to inject barrier")??;
+            wait_collection(collect_rxs)
+                .instrument_await("wait_collected")
+                .await
+        })
     }
 
     /// Schedule a command without waiting for it to be executed.
@@ -896,9 +918,11 @@ mod tests {
             unimplemented!()
         }
 
-        async fn handle_refresh_finished_table_ids(
+        async fn handle_refresh_finished_actors(
             &self,
-            _refresh_finished_table_ids: Vec<JobId>,
+            _refresh_finished_actors: Vec<
+                risingwave_pb::stream_service::barrier_complete_response::PbRefreshFinishedActor,
+            >,
         ) -> MetaResult<()> {
             unimplemented!()
         }

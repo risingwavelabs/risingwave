@@ -1483,6 +1483,27 @@ impl DatabaseCheckpointControl {
                 self.apply_simple_command(mutation, "LoadFinish")
             }
 
+            Some(Command::FinishRefresh {
+                table_id,
+                staging_table_id,
+                trigger_time,
+                aborted,
+            }) => {
+                let (table_ids, node_actors) = self.collect_base_info();
+                (
+                    None,
+                    table_ids,
+                    None,
+                    node_actors,
+                    PostCollectCommand::FinishRefresh {
+                        table_id,
+                        staging_table_id,
+                        trigger_time,
+                        aborted,
+                    },
+                )
+            }
+
             Some(Command::ResetSource { source_id }) => {
                 let mutation = Some(Command::reset_source_to_mutation(source_id));
                 self.apply_simple_command(mutation, "ResetSource")

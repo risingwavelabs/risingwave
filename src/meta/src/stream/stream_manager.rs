@@ -25,6 +25,7 @@ use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::id::{JobId, SinkId};
 use risingwave_connector::source::CdcTableSnapshotSplitRaw;
 use risingwave_meta_model::prelude::Fragment as FragmentModel;
+use risingwave_meta_model::refresh_job::RefreshState;
 use risingwave_meta_model::{StreamingParallelism, WorkerId, fragment, streaming_job};
 use risingwave_pb::catalog::{CreateType, PbSink, PbTable, Subscription};
 use risingwave_pb::ddl_service::streaming_job_resource_type;
@@ -937,6 +938,19 @@ impl GlobalStreamManager {
                     job_id,
                 );
             }
+        }
+
+        if self
+            .metadata_manager
+            .catalog_controller
+            .get_refresh_job_state(job_id.as_mv_table_id())
+            .await?
+            .is_some_and(|state| state != RefreshState::Idle)
+        {
+            bail!(
+                "Cannot alter the job {} because its table is being refreshed",
+                job_id,
+            );
         }
 
         let commands = self

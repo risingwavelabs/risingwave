@@ -64,7 +64,6 @@ pub(super) enum LocalBarrierEvent {
         epoch: EpochPair,
         actor_id: ActorId,
         table_id: TableId,
-        staging_table_id: TableId,
     },
     RegisterBarrierSender {
         actor_id: ActorId,
@@ -225,18 +224,11 @@ impl LocalBarrierManager {
         });
     }
 
-    pub fn report_refresh_finished(
-        &self,
-        epoch: EpochPair,
-        actor_id: ActorId,
-        table_id: TableId,
-        staging_table_id: TableId,
-    ) {
+    pub fn report_refresh_finished(&self, epoch: EpochPair, actor_id: ActorId, table_id: TableId) {
         self.send_event(LocalBarrierEvent::RefreshFinished {
             epoch,
             actor_id,
             table_id,
-            staging_table_id,
         });
     }
 

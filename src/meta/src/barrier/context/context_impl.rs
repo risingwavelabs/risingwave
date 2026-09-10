@@ -30,6 +30,7 @@ use risingwave_pb::meta::PbTableRefillRuntimeConfig;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::stream_service::barrier_complete_response::{
     PbIcebergPkIndexSinkMetadata, PbListFinishedSource, PbLoadFinishedSource,
+    PbRefreshFinishedActor,
 };
 use risingwave_rpc_client::StreamingControlHandle;
 use thiserror_ext::AsReport;
@@ -183,6 +184,8 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         if is_global {
             self.set_status(BarrierManagerStatus::Running);
         }
+        // The scheduler finishes the refresh cycles abandoned by the recovery.
+        self.refresh_manager.notify_scheduler();
     }
 
     async fn resolve_log_store_epoch<'a>(
@@ -414,16 +417,22 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         Ok(())
     }
 
-    async fn handle_refresh_finished_table_ids(
+    async fn handle_refresh_finished_actors(
         &self,
-        refresh_finished_table_job_ids: Vec<JobId>,
+        refresh_finished: Vec<PbRefreshFinishedActor>,
     ) -> MetaResult<()> {
-        for job_id in refresh_finished_table_job_ids {
-            let table_id = job_id.as_mv_table_id();
-
-            self.refresh_manager.mark_refresh_complete(table_id).await?;
+        let mut finished_actors: HashMap<TableId, HashSet<ActorId>> = HashMap::new();
+        for report in refresh_finished {
+            finished_actors
+                .entry(report.table_id)
+                .or_default()
+                .insert(report.reporter_actor_id);
         }
 
+        for (table_id, actors) in finished_actors {
+            self.refresh_manager
+                .mark_mview_stage_finished(table_id, &actors)?;
+        }
         Ok(())
     }
 
@@ -751,6 +760,17 @@ impl PostCollectCommand {
             }
 
             PostCollectCommand::DropStreamingJobs => {}
+            PostCollectCommand::FinishRefresh {
+                table_id,
+                trigger_time,
+                aborted,
+                ..
+            } => {
+                barrier_manager_context
+                    .refresh_manager
+                    .complete_refresh(table_id, trigger_time, aborted)
+                    .await?;
+            }
             PostCollectCommand::ConnectorPropsChange(obj_id_map_props) => {
                 // todo: we dont know the type of the object id, it can be a source or a sink. Should carry more info in the barrier command.
                 barrier_manager_context

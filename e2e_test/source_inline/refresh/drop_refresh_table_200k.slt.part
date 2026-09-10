@@ -1,0 +1,5 @@
+statement ok
+DROP TABLE refresh_200k_t CASCADE;
+
+system ok
+rm -rf ./e2e_test/source_inline/refresh/refresh_200k_tmp
