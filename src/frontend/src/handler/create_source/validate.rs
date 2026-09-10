@@ -342,6 +342,7 @@ mod tests {
             MONGODB_CDC_CONNECTOR,
             POSTGRES_CDC_CONNECTOR,
             CITUS_CDC_CONNECTOR,
+            ORACLE_CDC_CONNECTOR,
         ] {
             let mut props = BTreeMap::new();
             assert!(validate_cdc_heartbeat_interval(connector, &props).is_ok());
@@ -434,6 +435,7 @@ mod tests {
             MONGODB_CDC_CONNECTOR,
             SQL_SERVER_CDC_CONNECTOR,
             CITUS_CDC_CONNECTOR,
+            ORACLE_CDC_CONNECTOR,
         ] {
             for value in HEARTBEAT_INTERVAL_CASES {
                 let mut props = BTreeMap::new();

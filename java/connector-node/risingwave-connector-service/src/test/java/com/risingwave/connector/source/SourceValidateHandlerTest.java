@@ -45,7 +45,8 @@ public class SourceValidateHandlerTest {
             SourceType.SQL_SERVER,
             SourceType.MONGODB,
             SourceType.POSTGRES,
-            SourceType.CITUS
+            SourceType.CITUS,
+            SourceType.ORACLE
         };
     }
 

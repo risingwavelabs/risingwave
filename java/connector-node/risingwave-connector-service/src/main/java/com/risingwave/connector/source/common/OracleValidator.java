@@ -232,7 +232,7 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
         }
     }
 
-    private void validateHeartbeatTable(OracleHeartbeatTable heartbeatTable) {
+    void validateHeartbeatTable(OracleHeartbeatTable heartbeatTable) {
         try {
             switchToPdb();
             validateTableExists(
@@ -334,9 +334,9 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
         var updateGrantees =
                 querySingleColumn(
                         "SELECT GRANTEE FROM ALL_TAB_PRIVS "
-                                + "WHERE OWNER = ? AND TABLE_NAME = ? AND PRIVILEGE = 'UPDATE' "
+                                + "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND PRIVILEGE = 'UPDATE' "
                                 + "UNION SELECT GRANTEE FROM ALL_COL_PRIVS "
-                                + "WHERE OWNER = ? AND TABLE_NAME = ? AND COLUMN_NAME = ? "
+                                + "WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ? AND COLUMN_NAME = ? "
                                 + "AND PRIVILEGE = 'UPDATE'",
                         heartbeatTable.owner(),
                         heartbeatTable.table(),
@@ -363,6 +363,8 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
             Set<String> sessionPrivileges,
             Set<String> sessionRoles,
             Set<String> updateGrantees) {
+        // In Oracle, each user owns a schema with the same name. The table owner can update
+        // its tables without an explicit UPDATE grant, so it need not appear in updateGrantees.
         if (owner.equalsIgnoreCase(sessionUser)
                 || sessionPrivileges.contains("UPDATE ANY TABLE")
                 || updateGrantees.contains(sessionUser.toUpperCase(Locale.ROOT))
@@ -373,10 +375,26 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
     }
 
     private void validateTableSupplementalLogging() throws SQLException {
+        // ALL logging can cover every PDB in the container database (CDB), or just one PDB.
+        // validateTable() has switched this connection to the target PDB. Check both the CDB-wide
+        // flag (V$DATABASE) and this PDB's flag (DBA_SUPPLEMENTAL_LOGGING): a CDB-wide NO does not
+        // rule out PDB-only ALL logging. If either is YES, the table is already covered and does
+        // not need its own ALL log group.
+        var databaseLogging =
+                querySingleColumn(
+                        "SELECT SUPPLEMENTAL_LOG_DATA_ALL FROM V$DATABASE "
+                                + "UNION ALL SELECT ALL_COLUMN FROM DBA_SUPPLEMENTAL_LOGGING");
+        if (databaseLogging.contains("YES")) {
+            return;
+        }
+
+        // PK-only and user-defined groups do not guarantee all-column before images. Require
+        // Oracle's unconditional ALL group rather than accepting an arbitrary log group.
         try (var stmt =
                 jdbcConnection.prepareStatement(
                         "SELECT COUNT(*) FROM ALL_LOG_GROUPS "
-                                + "WHERE OWNER = ? AND TABLE_NAME = ?")) {
+                                + "WHERE OWNER = ? AND TABLE_NAME = ? "
+                                + "AND LOG_GROUP_TYPE = 'ALL COLUMN LOGGING' AND ALWAYS = 'ALWAYS'")) {
             stmt.setString(1, schemaName);
             stmt.setString(2, tableName);
             try (var result = stmt.executeQuery()) {
@@ -384,7 +402,9 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
                 if (result.getInt(1) == 0) {
                     throw ValidatorUtils.failedPrecondition(
                             String.format(
-                                    "Oracle supplemental logging must be enabled on table '%s.%s'",
+                                    "Oracle all-column supplemental logging must be enabled on table "
+                                            + "'%s.%s' with ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS, "
+                                            + "or at the database/PDB level",
                                     schemaName, tableName));
                 }
             }
