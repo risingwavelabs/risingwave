@@ -1582,6 +1582,60 @@ mod tests {
     }
 
     #[test]
+    fn test_route_cdc_chunk_preserves_deletes_from_later_splits() {
+        use risingwave_common::array::StreamChunkTestExt;
+
+        let bound = |value: i64| OwnedRow::new(vec![Some(value.into())]);
+        let splits = [(100, 200), (200, 300), (300, 400)]
+            .into_iter()
+            .enumerate()
+            .map(|(idx, (left, right))| CdcTableSnapshotSplit {
+                split_id: idx as i64,
+                left_bound_inclusive: bound(left),
+                right_bound_exclusive: bound(right),
+            })
+            .collect_vec();
+        let states = [
+            CdcStateRecord {
+                current_pk_pos: Some(bound(150)),
+                ..Default::default()
+            },
+            CdcStateRecord {
+                is_finished: true,
+                ..Default::default()
+            },
+            CdcStateRecord {
+                current_pk_pos: Some(bound(350)),
+                ..Default::default()
+            },
+        ];
+
+        // Both rows were emitted before scale-in. Their deletes must be forwarded
+        // while the earlier split is active; later snapshots cannot remove them.
+        // chunk       expected     split         status         cursor
+        // - 220 22    forwarded    [200, 300)    finished       None
+        // - 320 32    forwarded    [300, 400)    unfinished     350
+        let deletes = StreamChunk::from_pretty(
+            "  I I
+             - 220 22
+             - 320 32",
+        );
+        let (forwarded_chunk, buffered_chunk) = route_cdc_chunk(
+            deletes.clone(),
+            &splits,
+            &states,
+            0,
+            0,
+            &[0],
+            &[OrderType::ascending()],
+            &[false],
+        );
+
+        assert_eq!(forwarded_chunk, Some(deletes));
+        assert!(buffered_chunk.is_none());
+    }
+
+    #[test]
     fn test_route_cdc_chunk_with_mixed_split_progress() {
         use risingwave_common::array::StreamChunkTestExt;
 
