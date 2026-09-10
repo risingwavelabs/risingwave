@@ -147,8 +147,9 @@ impl StreamTemporalJoin {
     /// Return the memo-table catalog.
     ///
     /// The memo prefix is `join_key + left_stream_key`. A regular temporal join is distributed by
-    /// the lookup key, while a broadcast temporal join preserves the left input distribution and
-    /// maps that distribution key to its copy in the `left_stream_key` part of the prefix.
+    /// the lookup key, while a broadcast temporal join shuffles the left input by its stream key
+    /// (or keeps it singleton) and maps that distribution key to its copy in the
+    /// `left_stream_key` part of the prefix.
     ///
     /// Write pattern:
     ///   for each left input row (with insert op), persist the matched right row followed by the
