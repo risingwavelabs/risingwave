@@ -23,6 +23,14 @@ use super::level_selector::{EffectiveLevelSize, SCORE_BASE, adjust_score_for_out
 use crate::hummock::compaction::vnode_partition::L0VnodePartitionView;
 use crate::hummock::level_handler::LevelHandler;
 
+const GLOBAL_L0_DEPTH_SCORE_MULTIPLIER: u64 = 2;
+
+fn global_l0_depth_score(depth: u64, threshold: u64) -> u64 {
+    let score = (depth as u128) * (GLOBAL_L0_DEPTH_SCORE_MULTIPLIER as u128) * (SCORE_BASE as u128)
+        / (std::cmp::max(1, threshold) as u128);
+    std::cmp::min(score, u64::MAX as u128) as u64
+}
+
 /// The immutable table metadata required by the partition-aware L0 strategy.
 ///
 /// The manager only constructs this value for a compaction group containing exactly one table.
@@ -92,16 +100,26 @@ impl SingleTableCompactionGroup {
             })
             .collect::<Vec<_>>();
 
-        let Some(raw_global_l0_score) = partitions.iter().map(|partition| partition.score).max()
+        let Some(max_partition_depth) = partitions
+            .iter()
+            .map(|partition| partition.info.partition_depth)
+            .max()
         else {
             return Some(vec![]);
         };
         // At least one partition must independently exceed the configured depth threshold.
         // Output-level pressure only orders an already-eligible L0; it must not make a shallow L0
         // eligible by itself.
-        if raw_global_l0_score <= SCORE_BASE {
+        if partitions
+            .iter()
+            .all(|partition| partition.score <= SCORE_BASE)
+        {
             return Some(vec![]);
         }
+        // Match Pebble's L0 depth-pressure scale without changing the partition-local batching
+        // threshold. Compute from depth directly so integer rounding happens only once.
+        let raw_global_l0_score =
+            global_l0_depth_score(max_partition_depth, min_l0_level_count as u64);
         let global_l0_score = adjust_score_for_output_level(
             raw_global_l0_score,
             effective_base_level_size.effective,
@@ -319,7 +337,7 @@ mod tests {
         let l0 = two_partition_l0(4, 0);
         let group = SingleTableCompactionGroup::new(TableId::new(1), 256);
 
-        // Raw depth score is 2.0. A healthy Base keeps the score unchanged.
+        // Local depth score is 2.0. The global depth-pressure multiplier raises it to 4.0.
         let candidates = group
             .build_l0_candidates(
                 &config,
@@ -334,7 +352,7 @@ mod tests {
             )
             .unwrap();
         assert_eq!(candidates.len(), 2);
-        assert_eq!(candidates[0].score, 201);
+        assert_eq!(candidates[0].score, 401);
 
         // An underfilled Base raises L0 priority relative to lower-level work.
         let candidates = group
@@ -350,7 +368,7 @@ mod tests {
                 100,
             )
             .unwrap();
-        assert_eq!(candidates[0].score, 401);
+        assert_eq!(candidates[0].score, 801);
 
         // An adjusted score exactly at the admission threshold remains eligible.
         let candidates = group
@@ -359,8 +377,8 @@ mod tests {
                 &l0,
                 &LevelHandler::new(0),
                 EffectiveLevelSize {
-                    current: 200,
-                    effective: 200,
+                    current: 400,
+                    effective: 400,
                     ..Default::default()
                 },
                 100,
@@ -369,7 +387,7 @@ mod tests {
         assert_eq!(candidates.len(), 2);
         assert_eq!(candidates[0].score, 101);
 
-        // Once Base grows beyond 2x its target, the adjusted score no longer passes the
+        // Once Base grows beyond 4x its target, the adjusted score no longer passes the
         // admission threshold, so neither ToBase nor its Intra fallback is scheduled.
         let candidates = group
             .build_l0_candidates(
@@ -377,14 +395,83 @@ mod tests {
                 &l0,
                 &LevelHandler::new(0),
                 EffectiveLevelSize {
-                    current: 201,
-                    effective: 201,
+                    current: 401,
+                    effective: 401,
                     ..Default::default()
                 },
                 100,
             )
             .unwrap();
         assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn global_depth_pressure_does_not_change_local_batching_threshold() {
+        let config = CompactionConfig {
+            split_weight_by_vnode: 8,
+            ..CompactionConfigBuilder::new()
+                .level0_sub_level_compact_level_count(16)
+                .build()
+        };
+        let group = SingleTableCompactionGroup::new(TableId::new(1), 256);
+
+        // D=32 gives global raw score 4.0. A Base at 4x target lowers it to exactly 1.0,
+        // while the selected task still has the original 16-level minimum.
+        let candidates = group
+            .build_l0_candidates(
+                &config,
+                &two_partition_l0(32, 0),
+                &LevelHandler::new(0),
+                EffectiveLevelSize {
+                    current: 400,
+                    effective: 400,
+                    ..Default::default()
+                },
+                100,
+            )
+            .unwrap();
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].info.partition_score, 200);
+        assert_eq!(candidates[0].info.raw_global_l0_score, 400);
+        assert_eq!(candidates[0].info.adjusted_global_l0_score, 100);
+        assert_eq!(candidates[0].score, 101);
+        assert_eq!(candidates[0].min_l0_level_count, 16);
+
+        // The global multiplier must not make a partition at the local batching threshold
+        // eligible for an ordinary ToBase or Intra task.
+        let candidates = group
+            .build_l0_candidates(
+                &config,
+                &two_partition_l0(16, 0),
+                &LevelHandler::new(0),
+                EffectiveLevelSize {
+                    current: 100,
+                    effective: 100,
+                    ..Default::default()
+                },
+                100,
+            )
+            .unwrap();
+        assert!(candidates.is_empty());
+
+        // Compute from depth before rounding: 2 * 18 / 16 = 2.25. With Base at 2.25x target,
+        // the adjusted score is exactly 1.0 and remains eligible.
+        let candidates = group
+            .build_l0_candidates(
+                &config,
+                &two_partition_l0(18, 0),
+                &LevelHandler::new(0),
+                EffectiveLevelSize {
+                    current: 225,
+                    effective: 225,
+                    ..Default::default()
+                },
+                100,
+            )
+            .unwrap();
+        assert_eq!(candidates[0].info.partition_score, 112);
+        assert_eq!(candidates[0].info.raw_global_l0_score, 225);
+        assert_eq!(candidates[0].info.adjusted_global_l0_score, 100);
     }
 
     #[test]
