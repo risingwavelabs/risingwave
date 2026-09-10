@@ -34,7 +34,7 @@ use crate::executor::backfill::cdc::cdc_backfill::{
     build_reader_and_poll_upstream, create_table_reader_with_retry,
     get_cdc_json_parse_handling_from_properties, transform_upstream,
 };
-use crate::executor::backfill::cdc::state_v2::ParallelizedCdcBackfillState;
+use crate::executor::backfill::cdc::state_v2::{CdcStateRecord, ParallelizedCdcBackfillState};
 use crate::executor::backfill::cdc::upstream_table::external::ExternalStorageTable;
 use crate::executor::backfill::cdc::upstream_table::snapshot::{
     SplitSnapshotReadArgs, UpstreamTableRead, UpstreamTableReader,
@@ -232,50 +232,45 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
             let mut current_actor_bounds = None;
             let mut actor_cdc_offset_high: Option<CdcOffset> = None;
             let mut actor_cdc_offset_low: Option<CdcOffset> = None;
-            // Find next split that need backfill.
-            let mut next_unfinished_split = None;
+            let mut split_states = Vec::with_capacity(actor_snapshot_splits.len());
 
-            for (idx, split) in actor_snapshot_splits.iter().enumerate() {
+            for split in &actor_snapshot_splits {
                 let state = state_impl.restore_state(split.split_id).await?;
-
-                if !state.is_finished {
-                    next_unfinished_split = Some((idx, state));
-                    break;
-                }
-
                 extends_current_actor_bound(&mut current_actor_bounds, split);
 
-                if let Some(cdc_offset) = state.cdc_offset_low
-                    && actor_cdc_offset_low
-                        .as_ref()
-                        .is_none_or(|current| current > &cdc_offset)
-                {
-                    actor_cdc_offset_low = Some(cdc_offset);
+                if state.is_finished {
+                    if let Some(cdc_offset) = state.cdc_offset_low.as_ref()
+                        && actor_cdc_offset_low
+                            .as_ref()
+                            .is_none_or(|current| current > cdc_offset)
+                    {
+                        actor_cdc_offset_low = Some(cdc_offset.clone());
+                    }
+
+                    if let Some(cdc_offset) = state.cdc_offset_high.as_ref()
+                        && actor_cdc_offset_high
+                            .as_ref()
+                            .is_none_or(|current| current < cdc_offset)
+                    {
+                        actor_cdc_offset_high = Some(cdc_offset.clone());
+                    }
                 }
 
-                if let Some(cdc_offset) = state.cdc_offset_high
-                    && actor_cdc_offset_high
-                        .as_ref()
-                        .is_none_or(|current| current < &cdc_offset)
-                {
-                    actor_cdc_offset_high = Some(cdc_offset);
-                }
+                split_states.push(state);
             }
 
-            let mut should_report_actor_backfill_progress = None;
+            let next_unfinished_split = split_states.iter().position(|state| !state.is_finished);
+            let finished_prefix_len = next_unfinished_split.unwrap_or(actor_snapshot_splits.len());
+            let mut should_report_actor_backfill_progress = (finished_prefix_len > 0).then(|| {
+                (
+                    actor_snapshot_splits[0].split_id,
+                    actor_snapshot_splits[finished_prefix_len - 1].split_id,
+                )
+            });
 
-            if let Some((next_split_idx, _)) = next_unfinished_split.as_ref() {
-                for split in actor_snapshot_splits.iter().skip(*next_split_idx) {
-                    // Initialize state so that overall progress can be measured.
-                    state_impl.init_state_if_absent(split.split_id).await?;
-                }
-
-                if *next_split_idx > 0 {
-                    should_report_actor_backfill_progress = Some((
-                        actor_snapshot_splits[0].split_id,
-                        actor_snapshot_splits[*next_split_idx - 1].split_id,
-                    ));
-                }
+            for split in &actor_snapshot_splits {
+                // Initialize state so that overall progress can be measured.
+                state_impl.init_state_if_absent(split.split_id).await?;
             }
 
             let offset_parse_func = self.external_table.table_type().get_cdc_offset_parser()?;
@@ -284,7 +279,8 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
             // A reader is only needed while at least one assigned snapshot split is unfinished.
             // Once all splits are complete, the executor only forwards the table-filtered CDC
             // stream and must not depend on the upstream snapshot table still existing.
-            if let Some((next_split_idx, next_split_state)) = next_unfinished_split {
+            if let Some(next_split_idx) = next_unfinished_split {
+                let next_split_state = &split_states[next_split_idx];
                 let external_table = self.external_table.clone();
                 let actor_id = self.actor_ctx.id;
                 let fragment_id = self.actor_ctx.fragment_id;
@@ -295,12 +291,6 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                 ));
 
                 let next_split = &actor_snapshot_splits[next_split_idx];
-                let finished_split_bounds = current_actor_bounds.clone();
-                let current_split_bounds = Some((
-                    next_split.left_bound_inclusive.clone(),
-                    next_split.right_bound_exclusive.clone(),
-                ));
-
                 let table_reader = loop {
                     match build_reader_and_poll_upstream(&mut upstream, &mut future).await? {
                         Either::Left(msg) => {
@@ -343,20 +333,23 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                         }
                                     }
                                     Message::Chunk(chunk) => {
-                                        let (finished_chunk, current_chunk) =
-                                            split_finished_and_current_chunk(
-                                                chunk,
-                                                &finished_split_bounds,
-                                                &current_split_bounds,
-                                                snapshot_split_column_in_output_index,
-                                            );
+                                        let (forwarded_chunk, buffered_chunk) = route_cdc_chunk(
+                                            chunk,
+                                            &actor_snapshot_splits,
+                                            &split_states,
+                                            next_split_idx,
+                                            snapshot_split_column_in_output_index,
+                                            &pk_in_output_indices,
+                                            &pk_order,
+                                            &pk_needs_unsigned_i64_compare,
+                                        );
 
-                                        if let Some(finished_chunk) = finished_chunk {
-                                            yield Message::Chunk(finished_chunk);
+                                        if let Some(forwarded_chunk) = forwarded_chunk {
+                                            yield Message::Chunk(forwarded_chunk);
                                         }
 
-                                        if let Some(current_chunk) = current_chunk {
-                                            upstream_chunk_buffer.push(current_chunk);
+                                        if let Some(buffered_chunk) = buffered_chunk {
+                                            upstream_chunk_buffer.push(buffered_chunk);
                                         }
                                     }
                                     Message::Watermark(_) => {
@@ -381,7 +374,20 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                     UpstreamTableReader::new(self.external_table.clone(), table_reader);
 
                 // Backfill snapshot splits sequentially.
-                for split in actor_snapshot_splits.iter().skip(next_split_idx) {
+                for (split_idx, (split, restored_state)) in actor_snapshot_splits
+                    .iter()
+                    .zip_eq_fast(split_states.iter())
+                    .enumerate()
+                    .skip(next_split_idx)
+                {
+                    if restored_state.is_finished {
+                        extend_backfill_progress(
+                            &mut should_report_actor_backfill_progress,
+                            split.split_id,
+                        );
+
+                        continue;
+                    }
                     tracing::info!(
                         %table_id,
                         upstream_table_name,
@@ -389,15 +395,9 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                         is_snapshot_paused,
                         "start cdc backfill split"
                     );
-                    let finished_split_bounds = current_actor_bounds.clone();
-                    let current_split_bounds = Some((
-                        split.left_bound_inclusive.clone(),
-                        split.right_bound_exclusive.clone(),
-                    ));
-                    let restored_state = state_impl.restore_state(split.split_id).await?;
-                    let mut current_pk_pos = restored_state.current_pk_pos;
+                    let mut current_pk_pos = restored_state.current_pk_pos.clone();
                     let mut row_count = restored_state.row_count as u64;
-                    let mut split_cdc_offset_low = restored_state.cdc_offset_low;
+                    let mut split_cdc_offset_low = restored_state.cdc_offset_low.clone();
 
                     let split_cdc_offset_high = 'backfill_loop: loop {
                         if split_cdc_offset_low.is_none() {
@@ -586,21 +586,24 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
 
                                             // emit chunks belonging to past splits which are processed
                                             let chunk = mapping_chunk(chunk, &self.output_indices);
-                                            let (finished_chunk, current_chunk) =
-                                                split_finished_and_current_chunk(
-                                                    chunk,
-                                                    &finished_split_bounds,
-                                                    &current_split_bounds,
-                                                    snapshot_split_column_in_output_index,
-                                                );
+                                            let (forwarded_chunk, buffered_chunk) = route_cdc_chunk(
+                                                chunk,
+                                                &actor_snapshot_splits,
+                                                &split_states,
+                                                split_idx,
+                                                snapshot_split_column_in_output_index,
+                                                &pk_in_output_indices,
+                                                &pk_order,
+                                                &pk_needs_unsigned_i64_compare,
+                                            );
 
-                                            if let Some(finished_chunk) = finished_chunk {
-                                                yield Message::Chunk(finished_chunk);
+                                            if let Some(forwarded_chunk) = forwarded_chunk {
+                                                yield Message::Chunk(forwarded_chunk);
                                             }
 
-                                            if let Some(current_chunk) = current_chunk {
+                                            if let Some(buffered_chunk) = buffered_chunk {
                                                 // Buffer only rows that overlap the split currently being backfilled.
-                                                upstream_chunk_buffer.push(current_chunk);
+                                                upstream_chunk_buffer.push(buffered_chunk);
                                             }
                                         }
                                         Message::Watermark(_) => {
@@ -775,20 +778,28 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                                         yield Message::Barrier(barrier);
                                                     }
                                                     Message::Chunk(chunk) => {
-                                                        let (finished_chunk, current_chunk) =
-                                                        split_finished_and_current_chunk(
-                                                            chunk,
-                                                            &finished_split_bounds,
-                                                            &current_split_bounds,
-                                                            snapshot_split_column_in_output_index,
-                                                        );
-                                                        if let Some(finished_chunk) = finished_chunk
+                                                        let (forwarded_chunk, buffered_chunk) =
+                                                            route_cdc_chunk(
+                                                                chunk,
+                                                                &actor_snapshot_splits,
+                                                                &split_states,
+                                                                split_idx,
+                                                                snapshot_split_column_in_output_index,
+                                                                &pk_in_output_indices,
+                                                                &pk_order,
+                                                                &pk_needs_unsigned_i64_compare,
+                                                            );
+
+                                                        if let Some(forwarded_chunk) =
+                                                            forwarded_chunk
                                                         {
-                                                            yield Message::Chunk(finished_chunk);
+                                                            yield Message::Chunk(forwarded_chunk);
                                                         }
-                                                        if let Some(current_chunk) = current_chunk {
+
+                                                        if let Some(buffered_chunk) = buffered_chunk
+                                                        {
                                                             upstream_chunk_buffer
-                                                                .push(current_chunk);
+                                                                .push(buffered_chunk);
                                                         }
                                                     }
                                                     Message::Watermark(_) => {}
@@ -843,19 +854,10 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                         )
                         .await?;
 
-                    extends_current_actor_bound(&mut current_actor_bounds, split);
-                    if let Some((_, right_split)) = &mut should_report_actor_backfill_progress {
-                        assert!(
-                            *right_split < split.split_id,
-                            "{} {}",
-                            *right_split,
-                            split.split_id
-                        );
-                        *right_split = split.split_id;
-                    } else {
-                        should_report_actor_backfill_progress =
-                            Some((split.split_id, split.split_id));
-                    }
+                    extend_backfill_progress(
+                        &mut should_report_actor_backfill_progress,
+                        split.split_id,
+                    );
                 }
 
                 upstream_table_reader.disconnect().await?;
@@ -1026,31 +1028,108 @@ fn partition_current_split_buffer(
     (emitted_chunks, retained_chunks)
 }
 
-/// Split a CDC chunk into rows belonging to already-finished snapshot splits and rows
-/// belonging to the snapshot split currently being processed.
-///
-/// Finished-split rows can be emitted immediately. Current-split rows must be buffered
-/// until the snapshot cursor reaches them. Rows outside both ranges are omitted.
-///
-/// For example, with finished bounds `[0, 100)`, current bounds `[100, 200)`, and CDC rows with
-/// split keys `[50, 120, 180, 250]`, this returns `[50]` as the finished chunk and `[120, 180]`
-/// as the current chunk. The row with split key `250` is omitted.
-fn split_finished_and_current_chunk(
+/// Route CDC using every assigned split's progress. The active split retains its existing
+/// buffering behavior. Other splits forward changes to already-snapshotted rows, while their
+/// unread suffixes are left for a future snapshot. Assignment bounds are sorted and consecutive.
+#[expect(clippy::too_many_arguments)]
+fn route_cdc_chunk(
     chunk: StreamChunk,
-    finished_split_bounds: &Option<(OwnedRow, OwnedRow)>,
-    current_split_bounds: &Option<(OwnedRow, OwnedRow)>,
+    splits: &[CdcTableSnapshotSplit],
+    states: &[CdcStateRecord],
+    current_split_idx: usize,
     snapshot_split_column_index: usize,
+    pk_indices: &[usize],
+    pk_order: &[OrderType],
+    pk_needs_unsigned_i64_compare: &[bool],
 ) -> (Option<StreamChunk>, Option<StreamChunk>) {
-    let finished_chunk = filter_stream_chunk(
-        chunk.clone(),
-        finished_split_bounds,
-        snapshot_split_column_index,
-    )
-    .map(StreamChunk::compact_vis);
-    let current_chunk =
-        filter_stream_chunk(chunk, current_split_bounds, snapshot_split_column_index)
-            .map(StreamChunk::compact_vis);
-    (finished_chunk, current_chunk)
+    let mut forwarded = BitmapBuilder::zeroed(chunk.capacity());
+    let mut buffered = BitmapBuilder::zeroed(chunk.capacity());
+
+    for (_, row) in chunk.rows() {
+        let split_key = row.datum_at(snapshot_split_column_index);
+
+        // binary search to find split containing row
+        // find split where key < right bound
+        let split_idx = splits.partition_point(|split| {
+            !is_rightmost_bound(&split.right_bound_exclusive)
+                && cmp_datum(
+                    split.right_bound_exclusive.datum_at(0),
+                    split_key,
+                    OrderType::ascending_nulls_first(),
+                )
+                .is_le()
+        });
+
+        let Some(split) = splits.get(split_idx) else {
+            // key is outside of assigned split ranges
+            continue;
+        };
+
+        // skip if key < left bound
+        if !is_leftmost_bound(&split.left_bound_inclusive)
+            && cmp_datum(
+                split_key,
+                split.left_bound_inclusive.datum_at(0),
+                OrderType::ascending_nulls_first(),
+            )
+            .is_lt()
+        {
+            continue;
+        }
+
+        // buffer rows in active split
+        if split_idx == current_split_idx {
+            buffered.set(row.index(), true);
+            continue;
+        }
+
+        let state = &states[split_idx];
+        // splits before active split must be finished,
+        // since we start processing from the first unfinished split
+        //
+        // splits after active split can be finished
+        // in some cases of scaling in
+        let is_finished = split_idx < current_split_idx || state.is_finished;
+        let is_before_cursor = state.current_pk_pos.as_ref().is_some_and(|cursor| {
+            cmp_pk_unsigned_aware(
+                row.project(pk_indices).iter(),
+                cursor.iter(),
+                pk_order,
+                pk_needs_unsigned_i64_compare,
+            )
+            .is_le()
+        });
+
+        if is_finished || is_before_cursor {
+            forwarded.set(row.index(), true);
+        }
+
+        // Otherwise leave both bits unset. This row belongs to an unread suffix
+        // of a later split, whose future snapshot will cover it.
+    }
+
+    let forwarded = forwarded.finish();
+    let forwarded_chunk = forwarded
+        .any()
+        .then(|| chunk.clone_with_vis(forwarded).compact_vis());
+
+    let buffered = buffered.finish();
+    let buffered_chunk = buffered
+        .any()
+        .then(|| chunk.clone_with_vis(buffered).compact_vis());
+
+    (forwarded_chunk, buffered_chunk)
+}
+
+// Report only a contiguous completed range as the sequential scan advances,
+// including previously finished splits that it skips.
+fn extend_backfill_progress(progress: &mut Option<(i64, i64)>, split_id: i64) {
+    if let Some((_, right)) = progress {
+        assert!(*right < split_id);
+        *right = split_id;
+    } else {
+        *progress = Some((split_id, split_id));
+    }
 }
 
 /// Keep rows whose snapshot split-column value falls within `bound`'s half-open range
@@ -1120,10 +1199,12 @@ fn filter_stream_chunk(
         .then_some(StreamChunk::with_visibility(ops, columns, visibility))
 }
 
+// has no left bound, e.g. [-inf, N)
 fn is_leftmost_bound(row: &OwnedRow) -> bool {
     row.iter().all(|d| d.is_none())
 }
 
+// has no right bound, e.g. [N, inf)
 fn is_rightmost_bound(row: &OwnedRow) -> bool {
     row.iter().all(|d| d.is_none())
 }
@@ -1443,7 +1524,7 @@ mod tests {
     }
 
     #[test]
-    fn test_split_finished_and_current_chunk() {
+    fn test_route_cdc_chunk() {
         use risingwave_common::array::StreamChunkTestExt;
 
         let chunk = StreamChunk::from_pretty(
@@ -1452,35 +1533,172 @@ mod tests {
              + 6 10
              + 199 40",
         );
-        let finished_split_bounds = Some((
-            OwnedRow::new(vec![Some(ScalarImpl::Int64(1))]),
-            OwnedRow::new(vec![Some(ScalarImpl::Int64(6))]),
-        ));
-        let current_split_bounds = Some((
-            OwnedRow::new(vec![Some(ScalarImpl::Int64(6))]),
-            OwnedRow::new(vec![Some(ScalarImpl::Int64(100))]),
-        ));
+        let splits = [(1_i64, 6_i64), (6, 100)]
+            .into_iter()
+            .enumerate()
+            .map(|(idx, (left, right))| {
+                let bound = |value: i64| OwnedRow::new(vec![Some(value.into())]);
 
-        let (finished_chunk, current_chunk) = split_finished_and_current_chunk(
+                CdcTableSnapshotSplit {
+                    split_id: idx as i64,
+                    left_bound_inclusive: bound(left),
+                    right_bound_exclusive: bound(right),
+                }
+            })
+            .collect_vec();
+        let states = [
+            CdcStateRecord {
+                is_finished: true,
+                ..Default::default()
+            },
+            CdcStateRecord::default(),
+        ];
+
+        let (forwarded_chunk, buffered_chunk) = route_cdc_chunk(
             chunk,
-            &finished_split_bounds,
-            &current_split_bounds,
+            &splits,
+            &states,
+            1,
             0,
+            &[0],
+            &[OrderType::ascending()],
+            &[false],
         );
 
         assert_eq!(
-            finished_chunk.unwrap(),
+            forwarded_chunk.unwrap(),
             StreamChunk::from_pretty(
                 "  I I
                  + 1 11",
             )
         );
         assert_eq!(
-            current_chunk.unwrap(),
+            buffered_chunk.unwrap(),
             StreamChunk::from_pretty(
                 "  I I
                  + 6 10",
             )
+        );
+    }
+
+    #[test]
+    fn test_route_cdc_chunk_with_mixed_split_progress() {
+        use risingwave_common::array::StreamChunkTestExt;
+
+        let bound = |value: i64| OwnedRow::new(vec![Some(value.into())]);
+        let splits = [(1, 100), (100, 200), (200, 300), (300, 400)]
+            .into_iter()
+            .enumerate()
+            .map(|(idx, (left, right))| CdcTableSnapshotSplit {
+                split_id: idx as i64,
+                left_bound_inclusive: bound(left),
+                right_bound_exclusive: bound(right),
+            })
+            .collect_vec();
+
+        // After scale-in:
+        // [finished, active with cursor 150, unfinished with cursor 250, not started]
+        let states = [
+            CdcStateRecord {
+                is_finished: true,
+                ..Default::default()
+            },
+            CdcStateRecord {
+                current_pk_pos: Some(bound(150)),
+                ..Default::default()
+            },
+            CdcStateRecord {
+                current_pk_pos: Some(bound(250)),
+                ..Default::default()
+            },
+            CdcStateRecord::default(),
+        ];
+
+        // splits: [1, 100), [100, 200), [200, 300), [300, 400)
+        // status: finished, active,     unfinished, not started
+        // cursor: None,     150,        250,        N/A
+        //
+        // chunk       expected     split         status         cursor
+        // + 0   0     dropped      before        N/A            N/A
+        // + 1   1     forwarded    [1, 100)      finished       None
+        // + 100 10    buffered     [100, 200)    active         150
+        // - 150 15    buffered     [100, 200)    active         150
+        // + 151 17    buffered     [100, 200)    active         150
+        // + 200 20    forwarded    [200, 300)    unfinished     250
+        // + 251 25    dropped      [200, 300)    unfinished     250
+        // + 300 30    dropped      [300, 400)    not started    None
+        // + 400 40    dropped      after         N/A            N/A
+        let chunk = StreamChunk::from_pretty(
+            "  I I
+             + 0 0
+             + 1 1
+             + 100 10
+             - 150 15
+             + 151 17
+             + 200 20
+             + 251 25
+             + 300 30
+             + 400 40",
+        );
+        let (forwarded_chunk, buffered_chunk) = route_cdc_chunk(
+            chunk,
+            &splits,
+            &states,
+            1,
+            0,
+            &[0],
+            &[OrderType::ascending()],
+            &[false],
+        );
+
+        // Forward the finished split and already-snapshotted rows of the unfinished split.
+        assert_eq!(
+            forwarded_chunk.unwrap(),
+            StreamChunk::from_pretty(
+                "  I I
+             + 1 1
+             + 200 20",
+            )
+        );
+
+        let buffered_chunk = buffered_chunk.unwrap();
+
+        // Routing buffers the entire active split, including rows at/before its cursor.
+        assert_eq!(
+            buffered_chunk,
+            StreamChunk::from_pretty(
+                "  I I
+             + 100 10
+             - 150 15
+             + 151 17",
+            )
+        );
+
+        // At a barrier, rows through the cursor are emitted and only its unread suffix
+        // stays buffered. The row at PK 150 is included in the emitted rows.
+        let (emitted, retained) = partition_current_split_buffer(
+            vec![buffered_chunk],
+            states[1].current_pk_pos.as_ref(),
+            &[0],
+            &[OrderType::ascending()],
+            &[false],
+        );
+
+        assert_eq!(
+            emitted,
+            vec![StreamChunk::from_pretty(
+                "  I I
+             + 100 10
+             - 150 15",
+            )]
+        );
+
+        assert_eq!(
+            retained,
+            vec![StreamChunk::from_pretty(
+                "  I I
+             + 151 17",
+            )]
         );
     }
 }
