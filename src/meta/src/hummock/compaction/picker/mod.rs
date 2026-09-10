@@ -53,20 +53,19 @@ pub(crate) enum L0PickerMode {
     SingleTablePartition {
         min_l0_level_count: usize,
     },
+    SingleTablePartitionTrivialMove,
 }
 
 impl L0PickerMode {
     pub(crate) fn is_single_table_partition(self) -> bool {
-        matches!(self, Self::SingleTablePartition { .. })
+        matches!(
+            self,
+            Self::SingleTablePartition { .. } | Self::SingleTablePartitionTrivialMove
+        )
     }
 
-    pub(crate) fn min_l0_level_count(self) -> usize {
-        match self {
-            Self::Legacy => 1,
-            Self::SingleTablePartition { min_l0_level_count } => {
-                std::cmp::max(1, min_l0_level_count)
-            }
-        }
+    pub(crate) fn is_trivial_move_only(self) -> bool {
+        matches!(self, Self::SingleTablePartitionTrivialMove)
     }
 }
 
@@ -76,6 +75,37 @@ pub struct LocalPickerStatistic {
     pub skip_by_count_limit: u64,
     pub skip_by_pending_files: u64,
     pub skip_by_overlapping: u64,
+    pub is_trivial_move: bool,
+    pub partition_l0_growth: PartitionL0GrowthStatistic,
+}
+
+#[derive(Clone, Copy, Default, Debug)]
+pub struct PartitionL0GrowthStatistic {
+    pub initial_l0_size: u64,
+    pub outcomes: [u64; 7],
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(crate) enum PartitionL0GrowthOutcome {
+    Accepted,
+    NoNewSst,
+    BaseSetChange,
+    Bytes,
+    Files,
+    Levels,
+    OutputConflict,
+}
+
+impl PartitionL0GrowthOutcome {
+    pub(crate) const LABELS: [&'static str; 7] = [
+        "growth-accepted",
+        "growth-no-new-sst",
+        "growth-base-set-change",
+        "growth-bytes",
+        "growth-files",
+        "growth-levels",
+        "growth-output-conflict",
+    ];
 }
 
 #[derive(Default, Debug)]

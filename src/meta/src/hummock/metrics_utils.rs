@@ -798,6 +798,26 @@ fn remove_compact_task_metrics(metrics: &MetaMetrics, group_label: &str) {
         COMPACTION_GROUP_LABEL_NAME,
         group_label,
     );
+    remove_metric_series_with_label(
+        &metrics.partition_l0_compaction_total,
+        COMPACTION_GROUP_LABEL_NAME,
+        group_label,
+    );
+    remove_metric_series_with_label(
+        &metrics.partition_l0_compaction_bytes,
+        COMPACTION_GROUP_LABEL_NAME,
+        group_label,
+    );
+    remove_metric_series_with_label(
+        &metrics.partition_l0_compaction_count,
+        COMPACTION_GROUP_LABEL_NAME,
+        group_label,
+    );
+    remove_metric_series_with_label(
+        &metrics.partition_l0_compaction_score,
+        COMPACTION_GROUP_LABEL_NAME,
+        group_label,
+    );
 }
 
 pub fn trigger_compact_tasks_stat(

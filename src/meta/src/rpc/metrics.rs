@@ -193,6 +193,10 @@ pub struct MetaMetrics {
     pub compact_task_size: HistogramVec,
     pub compact_task_file_count: HistogramVec,
     pub compact_task_batch_count: HistogramVec,
+    pub partition_l0_compaction_total: IntCounterVec,
+    pub partition_l0_compaction_bytes: HistogramVec,
+    pub partition_l0_compaction_count: HistogramVec,
+    pub partition_l0_compaction_score: HistogramVec,
     pub split_compaction_group_count: IntCounterVec,
     pub state_table_count: IntGaugeVec,
     pub branched_sst_count: IntGaugeVec,
@@ -871,6 +875,35 @@ impl MetaMetrics {
         let compact_task_batch_count =
             register_histogram_vec_with_registry!(opts, &["type"], registry).unwrap();
 
+        let partition_l0_compaction_total = register_int_counter_vec_with_registry!(
+            "storage_partition_l0_compaction_total",
+            "Number of partition-aware L0 picker observations.",
+            &["group", "picker", "outcome"],
+            registry
+        )
+        .unwrap();
+        let opts = histogram_opts!(
+            "storage_partition_l0_compaction_bytes",
+            "Range-local bytes observed by the partition-aware L0 picker.",
+            exponential_buckets(1048576.0, 2.0, 16).unwrap()
+        );
+        let partition_l0_compaction_bytes =
+            register_histogram_vec_with_registry!(opts, &["group", "kind"], registry).unwrap();
+        let opts = histogram_opts!(
+            "storage_partition_l0_compaction_count",
+            "Counts observed by the partition-aware L0 picker.",
+            exponential_buckets(1.0, 2.0, 12).unwrap()
+        );
+        let partition_l0_compaction_count =
+            register_histogram_vec_with_registry!(opts, &["group", "kind"], registry).unwrap();
+        let opts = histogram_opts!(
+            "storage_partition_l0_compaction_score",
+            "Scores multiplied by 100 as observed by the partition-aware L0 picker.",
+            exponential_buckets(25.0, 2.0, 16).unwrap()
+        );
+        let partition_l0_compaction_score =
+            register_histogram_vec_with_registry!(opts, &["group", "kind"], registry).unwrap();
+
         let table_write_throughput = register_int_counter_vec_with_registry!(
             "storage_commit_write_throughput",
             "The number of compactions from one level to another level that have been skipped.",
@@ -1076,6 +1109,10 @@ impl MetaMetrics {
             compact_task_size,
             compact_task_file_count,
             compact_task_batch_count,
+            partition_l0_compaction_total,
+            partition_l0_compaction_bytes,
+            partition_l0_compaction_count,
+            partition_l0_compaction_score,
             compact_task_trivial_move_sst_count,
             table_write_throughput,
             split_compaction_group_count,

@@ -26,7 +26,8 @@ use risingwave_pb::hummock::{CompactionConfig, LevelType};
 
 use super::single_table_compaction::{SingleTableCompactionGroup, SingleTableL0PickerType};
 use super::{
-    CompactionSelector, LevelCompactionPicker, TierCompactionPicker, create_compaction_task,
+    CompactionSelector, LevelCompactionPicker, PartitionL0CandidateInfo,
+    PartitionL0CompactionObservation, TierCompactionPicker, create_compaction_task,
 };
 use crate::hummock::compaction::overlap_strategy::OverlapStrategy;
 use crate::hummock::compaction::picker::{
@@ -46,6 +47,7 @@ pub enum PickerType {
     Tier,
     Intra,
     ToBase,
+    TrivialMove,
     #[default]
     BottomLevel,
 }
@@ -56,18 +58,30 @@ impl std::fmt::Display for PickerType {
             PickerType::Tier => "Tier",
             PickerType::Intra => "Intra",
             PickerType::ToBase => "ToBase",
+            PickerType::TrivialMove => "TrivialMove",
             PickerType::BottomLevel => "BottomLevel",
         })
     }
 }
 
 impl PickerType {
+    fn label(&self) -> &'static str {
+        match self {
+            PickerType::Tier => "tier",
+            PickerType::Intra => "intra",
+            PickerType::ToBase => "to-base",
+            PickerType::TrivialMove => "trivial-move",
+            PickerType::BottomLevel => "bottom-level",
+        }
+    }
+
     fn sort_rank(&self) -> u8 {
         match self {
             PickerType::Tier => 0,
             PickerType::ToBase => 1,
-            PickerType::Intra => 2,
-            PickerType::BottomLevel => 3,
+            PickerType::TrivialMove => 2,
+            PickerType::Intra => 3,
+            PickerType::BottomLevel => 4,
         }
     }
 }
@@ -87,7 +101,7 @@ enum PickerInput {
     #[default]
     Global,
     SingleTablePartition {
-        partition_score: u64,
+        candidate: PartitionL0CandidateInfo,
         l0: Arc<OverlappingLevel>,
         min_l0_level_count: usize,
     },
@@ -97,15 +111,16 @@ impl PickerInput {
     fn partition_score(&self) -> u64 {
         match self {
             Self::Global => 0,
-            Self::SingleTablePartition {
-                partition_score, ..
-            } => *partition_score,
+            Self::SingleTablePartition { candidate, .. } => candidate.partition_score,
         }
     }
 
-    fn picker_mode(&self) -> L0PickerMode {
+    fn picker_mode(&self, picker_type: &PickerType) -> L0PickerMode {
         match self {
             Self::Global => L0PickerMode::Legacy,
+            Self::SingleTablePartition { .. } if matches!(picker_type, PickerType::TrivialMove) => {
+                L0PickerMode::SingleTablePartitionTrivialMove
+            }
             Self::SingleTablePartition {
                 min_l0_level_count, ..
             } => L0PickerMode::SingleTablePartition {
@@ -113,6 +128,108 @@ impl PickerInput {
             },
         }
     }
+
+    fn partition_observation(
+        &self,
+        picker_type: &PickerType,
+        outcome: &'static str,
+        input: Option<&crate::hummock::compaction::picker::CompactionInput>,
+        stats: &LocalPickerStatistic,
+    ) -> Option<PartitionL0CompactionObservation> {
+        let Self::SingleTablePartition {
+            candidate,
+            min_l0_level_count,
+            ..
+        } = self
+        else {
+            return None;
+        };
+
+        let selected_l0_level_count = input
+            .map(|input| {
+                input
+                    .input_levels
+                    .iter()
+                    .filter(|level| level.level_idx == 0)
+                    .count() as u64
+            })
+            .unwrap_or_default();
+        let selected_l0_sst_ref_count = input
+            .map(|input| {
+                input
+                    .input_levels
+                    .iter()
+                    .filter(|level| level.level_idx == 0)
+                    .map(|level| level.table_infos.len() as u64)
+                    .sum()
+            })
+            .unwrap_or_default();
+        let target_sst_ref_count = input
+            .map(|input| {
+                input
+                    .input_levels
+                    .iter()
+                    .filter(|level| level.level_idx != 0)
+                    .map(|level| level.table_infos.len() as u64)
+                    .sum()
+            })
+            .unwrap_or_default();
+
+        let picker = if stats.is_trivial_move {
+            "trivial-move"
+        } else {
+            picker_type.label()
+        };
+        let selected_l0_referenced_object_size = input
+            .map(|input| {
+                input
+                    .input_levels
+                    .iter()
+                    .filter(|level| level.level_idx == 0)
+                    .flat_map(|level| &level.table_infos)
+                    .map(|sst| sst.file_size)
+                    .sum()
+            })
+            .unwrap_or_default();
+        let target_referenced_object_size = input
+            .map(|input| {
+                input
+                    .input_levels
+                    .iter()
+                    .filter(|level| level.level_idx != 0)
+                    .flat_map(|level| &level.table_infos)
+                    .map(|sst| sst.file_size)
+                    .sum()
+            })
+            .unwrap_or_default();
+
+        Some(PartitionL0CompactionObservation {
+            candidate: *candidate,
+            picker,
+            outcome,
+            min_seed_depth: *min_l0_level_count as u64,
+            selected_l0_level_count,
+            selected_l0_sst_ref_count,
+            selected_l0_size: input
+                .map(|input| input.select_input_size)
+                .unwrap_or_default(),
+            selected_l0_referenced_object_size,
+            target_sst_ref_count,
+            target_size: input
+                .map(|input| input.target_input_size)
+                .unwrap_or_default(),
+            target_referenced_object_size,
+            growth: stats.partition_l0_growth,
+        })
+    }
+}
+
+#[derive(Clone, Copy, Debug, Default)]
+pub(super) struct EffectiveLevelSize {
+    pub(super) current: u64,
+    pub(super) incoming: u64,
+    pub(super) outgoing: u64,
+    pub(super) effective: u64,
 }
 
 #[derive(Default, Debug)]
@@ -127,7 +244,11 @@ pub struct SelectContext {
     pub score_levels: Vec<PickerInfo>,
 }
 
-fn effective_level_size(levels: &Levels, handlers: &[LevelHandler], level: usize) -> u64 {
+fn effective_level_size_info(
+    levels: &Levels,
+    handlers: &[LevelHandler],
+    level: usize,
+) -> EffectiveLevelSize {
     let target_level = level as u32;
     let incoming_size = handlers
         .iter()
@@ -140,11 +261,19 @@ fn effective_level_size(levels: &Levels, handlers: &[LevelHandler], level: usize
         .pending_file_size()
         .saturating_sub(handlers[level].pending_output_file_size(target_level));
 
-    levels
-        .get_level(level)
-        .total_file_size
-        .saturating_sub(outgoing_size)
-        .saturating_add(incoming_size)
+    let current = levels.get_level(level).total_file_size;
+    EffectiveLevelSize {
+        current,
+        incoming: incoming_size,
+        outgoing: outgoing_size,
+        effective: current
+            .saturating_sub(outgoing_size)
+            .saturating_add(incoming_size),
+    }
+}
+
+fn effective_level_size(levels: &Levels, handlers: &[LevelHandler], level: usize) -> u64 {
+    effective_level_size_info(levels, handlers, level).effective
 }
 
 fn fill_score(level_size: u64, level_target_size: u64) -> u64 {
@@ -199,7 +328,7 @@ impl DynamicLevelSelectorCore {
         overlap_strategy: Arc<dyn OverlapStrategy>,
         compaction_task_validator: Arc<CompactionTaskValidator>,
     ) -> Box<dyn CompactionPicker> {
-        let picker_mode = picker_info.input.picker_mode();
+        let picker_mode = picker_info.input.picker_mode(&picker_info.picker_type);
         let compaction_task_validator = if picker_mode.is_single_table_partition() {
             Arc::new(CompactionTaskValidator::unused())
         } else {
@@ -210,13 +339,15 @@ impl DynamicLevelSelectorCore {
                 self.config.clone(),
                 compaction_task_validator,
             )),
-            PickerType::ToBase => Box::new(LevelCompactionPicker::new_with_mode(
-                picker_info.target_level,
-                self.config.clone(),
-                compaction_task_validator,
-                self.developer_config.clone(),
-                picker_mode,
-            )),
+            PickerType::ToBase | PickerType::TrivialMove => {
+                Box::new(LevelCompactionPicker::new_with_mode(
+                    picker_info.target_level,
+                    self.config.clone(),
+                    compaction_task_validator,
+                    self.developer_config.clone(),
+                    picker_mode,
+                ))
+            }
             PickerType::Intra if picker_mode.is_single_table_partition() => {
                 Box::new(IntraCompactionPicker::new_with_mode(
                     self.config.clone(),
@@ -379,7 +510,7 @@ impl DynamicLevelSelectorCore {
                     &self.config,
                     &levels.l0,
                     &handlers[0],
-                    effective_level_size(levels, handlers, ctx.base_level),
+                    effective_level_size_info(levels, handlers, ctx.base_level),
                     ctx.level_max_bytes[ctx.base_level],
                 )
             });
@@ -389,16 +520,18 @@ impl DynamicLevelSelectorCore {
                         score: candidate.score,
                         select_level: 0,
                         target_level: match candidate.picker_type {
-                            SingleTableL0PickerType::ToBase => ctx.base_level,
+                            SingleTableL0PickerType::ToBase
+                            | SingleTableL0PickerType::TrivialMove => ctx.base_level,
                             SingleTableL0PickerType::Intra => 0,
                         },
                         picker_type: match candidate.picker_type {
                             SingleTableL0PickerType::ToBase => PickerType::ToBase,
+                            SingleTableL0PickerType::TrivialMove => PickerType::TrivialMove,
                             SingleTableL0PickerType::Intra => PickerType::Intra,
                         },
                         eligible: true,
                         input: PickerInput::SingleTablePartition {
-                            partition_score: candidate.partition_score,
+                            candidate: candidate.info,
                             l0: candidate.l0,
                             min_l0_level_count: candidate.min_l0_level_count,
                         },
@@ -627,14 +760,25 @@ impl CompactionSelector for DynamicLevelSelector {
             compaction_group.compaction_config.clone(),
         ));
         for picker_info in &ctx.score_levels {
+            if !matches!(
+                picker_info.picker_type,
+                PickerType::ToBase | PickerType::TrivialMove
+            ) {
+                continue;
+            }
+            if let Some(observation) = picker_info.input.partition_observation(
+                &picker_info.picker_type,
+                "candidate",
+                None,
+                &LocalPickerStatistic::default(),
+            ) {
+                selector_stats.record_partition_l0(observation);
+            }
+        }
+        for picker_info in &ctx.score_levels {
             if !picker_info.eligible {
                 continue;
             }
-            let mut picker = dynamic_level_core.create_compaction_picker(
-                picker_info,
-                overlap_strategy.clone(),
-                compaction_task_validator.clone(),
-            );
             let single_table_levels;
             let picker_levels = match &picker_info.input {
                 PickerInput::Global => levels,
@@ -648,31 +792,83 @@ impl CompactionSelector for DynamicLevelSelector {
             };
 
             let mut stats = LocalPickerStatistic::default();
-            if let Some(ret) = picker.pick_compaction(picker_levels, level_handlers, &mut stats) {
-                if !ret.skip_target_range_conflict_check
-                    && in_progress_compactions.has_conflict_with_input(&ret)
-                {
-                    stats.skip_by_overlapping += 1;
-                    selector_stats.skip_picker.push((
-                        picker_info.select_level,
-                        picker_info.target_level,
-                        stats,
-                    ));
-                    continue;
+            let ret = if matches!(picker_info.input, PickerInput::SingleTablePartition { .. })
+                && matches!(picker_info.picker_type, PickerType::ToBase)
+            {
+                // Only partition ToBase growth needs to test a wider output before replacing
+                // its accepted seed. Legacy/Intra retain the common picker interface and route.
+                LevelCompactionPicker::new_with_mode(
+                    picker_info.target_level,
+                    dynamic_level_core.config.clone(),
+                    Arc::new(CompactionTaskValidator::unused()),
+                    dynamic_level_core.developer_config.clone(),
+                    picker_info.input.picker_mode(&picker_info.picker_type),
+                )
+                .pick_compaction_with_output_conflict_check(
+                    picker_levels,
+                    level_handlers,
+                    &mut stats,
+                    |input| in_progress_compactions.has_conflict_with_input(input),
+                )
+            } else {
+                dynamic_level_core
+                    .create_compaction_picker(
+                        picker_info,
+                        overlap_strategy.clone(),
+                        compaction_task_validator.clone(),
+                    )
+                    .pick_compaction(picker_levels, level_handlers, &mut stats)
+            };
+            let Some(ret) = ret else {
+                if let Some(observation) = picker_info.input.partition_observation(
+                    &picker_info.picker_type,
+                    "picker-empty",
+                    None,
+                    &stats,
+                ) {
+                    selector_stats.record_partition_l0(observation);
                 }
-
-                ret.add_pending_task(task_id, level_handlers);
-                return Some(create_compaction_task(
-                    dynamic_level_core.get_config(),
-                    ret,
-                    ctx.base_level,
-                    self.task_type(),
+                selector_stats.skip_picker.push((
+                    picker_info.select_level,
+                    picker_info.target_level,
+                    stats,
                 ));
+                continue;
+            };
+            if !ret.skip_target_range_conflict_check
+                && in_progress_compactions.has_conflict_with_input(&ret)
+            {
+                stats.skip_by_overlapping += 1;
+                if let Some(observation) = picker_info.input.partition_observation(
+                    &picker_info.picker_type,
+                    "range-conflict",
+                    Some(&ret),
+                    &stats,
+                ) {
+                    selector_stats.record_partition_l0(observation);
+                }
+                selector_stats.skip_picker.push((
+                    picker_info.select_level,
+                    picker_info.target_level,
+                    stats,
+                ));
+                continue;
             }
-            selector_stats.skip_picker.push((
-                picker_info.select_level,
-                picker_info.target_level,
-                stats,
+
+            if let Some(observation) = picker_info.input.partition_observation(
+                &picker_info.picker_type,
+                "selected",
+                Some(&ret),
+                &stats,
+            ) {
+                selector_stats.record_partition_l0(observation);
+            }
+            ret.add_pending_task(task_id, level_handlers);
+            return Some(create_compaction_task(
+                dynamic_level_core.get_config(),
+                ret,
+                ctx.base_level,
+                self.task_type(),
             ));
         }
         None

@@ -18,7 +18,8 @@ use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::level::OverlappingLevel;
 use risingwave_pb::hummock::CompactionConfig;
 
-use super::level_selector::{SCORE_BASE, adjust_score_for_output_level};
+use super::PartitionL0CandidateInfo;
+use super::level_selector::{EffectiveLevelSize, SCORE_BASE, adjust_score_for_output_level};
 use crate::hummock::compaction::vnode_partition::L0VnodePartitionView;
 use crate::hummock::level_handler::LevelHandler;
 
@@ -45,13 +46,13 @@ impl SingleTableCompactionGroup {
     ///
     /// `None` means that the current L0 cannot be represented by the fixed vnode layout and the
     /// caller must use the legacy global L0 strategy. `Some([])` means the partition strategy is
-    /// active but no partition has reached the configured depth threshold.
+    /// active but the global L0 pressure has not reached the configured depth threshold.
     pub(super) fn build_l0_candidates(
         self,
         config: &CompactionConfig,
         l0: &OverlappingLevel,
         l0_handler: &LevelHandler,
-        effective_base_level_size: u64,
+        effective_base_level_size: EffectiveLevelSize,
         base_level_target_size: u64,
     ) -> Option<Vec<SingleTableL0Candidate>> {
         let partition_view = L0VnodePartitionView::build(
@@ -64,12 +65,30 @@ impl SingleTableCompactionGroup {
         let min_l0_level_count = config.level0_sub_level_compact_level_count as usize;
         let partitions = partition_view
             .into_partitions(min_l0_level_count as u64, SCORE_BASE)
-            .filter(|(score, partition_l0)| {
-                *score > SCORE_BASE && !partition_l0.sub_levels.is_empty()
-            })
-            .map(|(score, partition_l0)| SingleTableL0Partition {
+            .filter(|(_, partition)| !partition.l0.sub_levels.is_empty())
+            .map(|(score, partition)| SingleTableL0Partition {
                 score,
-                l0: Arc::new(partition_l0),
+                info: PartitionL0CandidateInfo {
+                    partition_index: partition.index,
+                    partition_depth: partition.depth,
+                    max_overlap_depth: partition.max_overlap_depth,
+                    total_sst_ref_count: partition.total_sst_ref_count,
+                    total_object_count: partition.total_object_count,
+                    runnable_sst_ref_count: partition.runnable_sst_ref_count,
+                    runnable_object_count: partition.runnable_object_count,
+                    total_file_size: partition.l0.total_file_size,
+                    runnable_file_size: partition.runnable_file_size,
+                    total_referenced_object_size: partition.total_referenced_object_size,
+                    runnable_referenced_object_size: partition.runnable_referenced_object_size,
+                    partition_score: score,
+                    base_current_size: effective_base_level_size.current,
+                    base_incoming_size: effective_base_level_size.incoming,
+                    base_outgoing_size: effective_base_level_size.outgoing,
+                    base_effective_size: effective_base_level_size.effective,
+                    base_target_size: base_level_target_size,
+                    ..Default::default()
+                },
+                l0: Arc::new(partition.l0),
             })
             .collect::<Vec<_>>();
 
@@ -77,9 +96,15 @@ impl SingleTableCompactionGroup {
         else {
             return Some(vec![]);
         };
+        // At least one partition must independently exceed the configured depth threshold.
+        // Output-level pressure only orders an already-eligible L0; it must not make a shallow L0
+        // eligible by itself.
+        if raw_global_l0_score <= SCORE_BASE {
+            return Some(vec![]);
+        }
         let global_l0_score = adjust_score_for_output_level(
             raw_global_l0_score,
-            effective_base_level_size,
+            effective_base_level_size.effective,
             base_level_target_size,
         );
         if global_l0_score <= SCORE_BASE {
@@ -87,22 +112,49 @@ impl SingleTableCompactionGroup {
         }
 
         let mut candidates = Vec::with_capacity(partitions.len() * 2);
-        for partition in &partitions {
+        for partition in partitions
+            .iter()
+            .filter(|partition| partition.score > SCORE_BASE)
+        {
+            let mut info = partition.info;
+            info.raw_global_l0_score = raw_global_l0_score;
+            info.adjusted_global_l0_score = global_l0_score;
             candidates.push(SingleTableL0Candidate {
                 score: global_l0_score.saturating_add(1),
-                partition_score: partition.score,
+                info,
                 picker_type: SingleTableL0PickerType::ToBase,
                 l0: partition.l0.clone(),
                 min_l0_level_count,
             });
         }
-        for partition in partitions {
+        for partition in partitions
+            .iter()
+            .filter(|partition| partition.score <= SCORE_BASE)
+        {
+            let mut info = partition.info;
+            info.raw_global_l0_score = raw_global_l0_score;
+            info.adjusted_global_l0_score = global_l0_score;
+            candidates.push(SingleTableL0Candidate {
+                score: global_l0_score.saturating_add(1),
+                info,
+                picker_type: SingleTableL0PickerType::TrivialMove,
+                l0: partition.l0.clone(),
+                min_l0_level_count: 1,
+            });
+        }
+        for partition in partitions
+            .into_iter()
+            .filter(|partition| partition.score > SCORE_BASE)
+        {
+            let mut info = partition.info;
+            info.raw_global_l0_score = raw_global_l0_score;
+            info.adjusted_global_l0_score = global_l0_score;
             candidates.push(SingleTableL0Candidate {
                 score: global_l0_score,
-                partition_score: partition.score,
+                info,
                 picker_type: SingleTableL0PickerType::Intra,
                 l0: partition.l0,
-                min_l0_level_count: 1,
+                min_l0_level_count,
             });
         }
         Some(candidates)
@@ -111,19 +163,21 @@ impl SingleTableCompactionGroup {
 
 struct SingleTableL0Partition {
     score: u64,
+    info: PartitionL0CandidateInfo,
     l0: Arc<OverlappingLevel>,
 }
 
 #[derive(Clone, Copy, Debug)]
 pub(super) enum SingleTableL0PickerType {
     ToBase,
+    TrivialMove,
     Intra,
 }
 
 #[derive(Debug)]
 pub(super) struct SingleTableL0Candidate {
     pub(super) score: u64,
-    pub(super) partition_score: u64,
+    pub(super) info: PartitionL0CandidateInfo,
     pub(super) picker_type: SingleTableL0PickerType,
     pub(super) l0: Arc<OverlappingLevel>,
     pub(super) min_l0_level_count: usize,
@@ -243,7 +297,13 @@ mod tests {
                 .collect(),
         );
         let candidates = SingleTableCompactionGroup::new(TableId::new(1), 256)
-            .build_l0_candidates(&config, &l0, &LevelHandler::new(0), 0, u64::MAX)
+            .build_l0_candidates(
+                &config,
+                &l0,
+                &LevelHandler::new(0),
+                EffectiveLevelSize::default(),
+                u64::MAX,
+            )
             .unwrap();
         assert!(candidates.is_empty());
     }
@@ -261,23 +321,109 @@ mod tests {
 
         // Raw depth score is 2.0. A healthy Base keeps the score unchanged.
         let candidates = group
-            .build_l0_candidates(&config, &l0, &LevelHandler::new(0), 100, 100)
+            .build_l0_candidates(
+                &config,
+                &l0,
+                &LevelHandler::new(0),
+                EffectiveLevelSize {
+                    current: 100,
+                    effective: 100,
+                    ..Default::default()
+                },
+                100,
+            )
             .unwrap();
         assert_eq!(candidates.len(), 2);
         assert_eq!(candidates[0].score, 201);
 
         // An underfilled Base raises L0 priority relative to lower-level work.
         let candidates = group
-            .build_l0_candidates(&config, &l0, &LevelHandler::new(0), 50, 100)
+            .build_l0_candidates(
+                &config,
+                &l0,
+                &LevelHandler::new(0),
+                EffectiveLevelSize {
+                    current: 50,
+                    effective: 50,
+                    ..Default::default()
+                },
+                100,
+            )
             .unwrap();
         assert_eq!(candidates[0].score, 401);
 
         // Once Base grows beyond 2x its target, the adjusted score no longer passes the strict
         // admission threshold, so neither ToBase nor its Intra fallback is scheduled.
         let candidates = group
-            .build_l0_candidates(&config, &l0, &LevelHandler::new(0), 201, 100)
+            .build_l0_candidates(
+                &config,
+                &l0,
+                &LevelHandler::new(0),
+                EffectiveLevelSize {
+                    current: 201,
+                    effective: 201,
+                    ..Default::default()
+                },
+                100,
+            )
             .unwrap();
         assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn global_admission_limits_shallow_partitions_to_trivial_move() {
+        let config = CompactionConfig {
+            split_weight_by_vnode: 8,
+            ..CompactionConfigBuilder::new()
+                .level0_sub_level_compact_level_count(3)
+                .build()
+        };
+        let l0 = two_partition_l0(4, 2);
+        let candidates = SingleTableCompactionGroup::new(TableId::new(1), 256)
+            .build_l0_candidates(
+                &config,
+                &l0,
+                &LevelHandler::new(0),
+                EffectiveLevelSize {
+                    current: 100,
+                    effective: 100,
+                    ..Default::default()
+                },
+                100,
+            )
+            .unwrap();
+
+        let to_base = candidates
+            .iter()
+            .filter(|candidate| matches!(candidate.picker_type, SingleTableL0PickerType::ToBase))
+            .collect_vec();
+        assert_eq!(to_base.len(), 1);
+        assert!(
+            to_base
+                .iter()
+                .all(|candidate| candidate.min_l0_level_count == 3)
+        );
+
+        let trivial_move = candidates
+            .iter()
+            .filter(|candidate| {
+                matches!(candidate.picker_type, SingleTableL0PickerType::TrivialMove)
+            })
+            .collect_vec();
+        assert_eq!(trivial_move.len(), 1);
+        assert_eq!(trivial_move[0].min_l0_level_count, 1);
+        assert!(to_base[0].info.partition_score > trivial_move[0].info.partition_score);
+
+        let intra = candidates
+            .iter()
+            .filter(|candidate| matches!(candidate.picker_type, SingleTableL0PickerType::Intra))
+            .collect_vec();
+        assert_eq!(intra.len(), 1);
+        assert_eq!(
+            intra[0].info.partition_score,
+            to_base[0].info.partition_score
+        );
+        assert_eq!(intra[0].min_l0_level_count, 3);
     }
 
     #[test]
@@ -329,6 +475,49 @@ mod tests {
             .collect_vec();
         assert!(!selected_l0_ids.is_empty());
         assert!(selected_l0_ids.iter().all(|sst_id| *sst_id > 100));
+    }
+
+    #[test]
+    fn blocked_deep_to_base_does_not_rewrite_shallow_partition() {
+        let config = CompactionConfig {
+            split_weight_by_vnode: 8,
+            ..CompactionConfigBuilder::new()
+                .max_level(1)
+                .max_bytes_for_level_base(1024)
+                .level0_sub_level_compact_level_count(2)
+                .build()
+        };
+        let group = CompactionGroup::new(1, config);
+        let levels = Levels {
+            levels: vec![generate_level(
+                1,
+                vec![vnode_sst(1000, 0, 32), vnode_sst(1001, 32, 64)],
+            )],
+            l0: two_partition_l0(3, 1),
+            ..Default::default()
+        };
+        let mut handlers = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        handlers[1].add_pending_task(100, 1, [&levels.levels[0].table_infos[0]]);
+
+        let task = pick_compaction(
+            1,
+            &group,
+            &levels,
+            &mut handlers,
+            &InProgressCompactionView::default(),
+        )
+        .unwrap();
+        let selected_l0_ids = task
+            .input
+            .input_levels
+            .iter()
+            .filter(|level| level.level_idx == 0)
+            .flat_map(|level| level.table_infos.iter())
+            .map(|sst| sst.sst_id.as_raw_id())
+            .collect_vec();
+        assert_eq!(task.input.target_level, 0);
+        assert!(!selected_l0_ids.is_empty());
+        assert!(selected_l0_ids.iter().all(|sst_id| *sst_id < 100));
     }
 
     #[test]
