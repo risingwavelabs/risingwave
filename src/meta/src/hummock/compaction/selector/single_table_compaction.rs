@@ -1,0 +1,703 @@
+// Copyright 2026 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use std::sync::Arc;
+
+use risingwave_common::catalog::TableId;
+use risingwave_hummock_sdk::level::OverlappingLevel;
+use risingwave_pb::hummock::CompactionConfig;
+
+use super::PartitionL0CandidateInfo;
+use super::level_selector::{EffectiveLevelSize, SCORE_BASE, adjust_score_for_output_level};
+use crate::hummock::compaction::vnode_partition::L0VnodePartitionView;
+use crate::hummock::level_handler::LevelHandler;
+
+const GLOBAL_L0_DEPTH_SCORE_MULTIPLIER: u64 = 2;
+
+fn global_l0_depth_score(depth: u64, threshold: u64) -> u64 {
+    let score = (depth as u128) * (GLOBAL_L0_DEPTH_SCORE_MULTIPLIER as u128) * (SCORE_BASE as u128)
+        / (std::cmp::max(1, threshold) as u128);
+    std::cmp::min(score, u64::MAX as u128) as u64
+}
+
+/// The immutable table metadata required by the partition-aware L0 strategy.
+///
+/// The manager only constructs this value for a compaction group containing exactly one table.
+/// Keeping it as a distinct type prevents the generic selector from inferring single-table
+/// eligibility from partial inputs.
+#[derive(Clone, Copy, Debug)]
+pub struct SingleTableCompactionGroup {
+    table_id: TableId,
+    vnode_count: usize,
+}
+
+impl SingleTableCompactionGroup {
+    pub(crate) fn new(table_id: TableId, vnode_count: usize) -> Self {
+        Self {
+            table_id,
+            vnode_count,
+        }
+    }
+
+    /// Build partition-local candidates from the current L0 and pending state.
+    ///
+    /// `None` means that the current L0 cannot be represented by the fixed vnode layout and the
+    /// caller must use the legacy global L0 strategy. `Some([])` means the partition strategy is
+    /// active but the global L0 pressure has not reached the configured depth threshold.
+    pub(super) fn build_l0_candidates(
+        self,
+        config: &CompactionConfig,
+        l0: &OverlappingLevel,
+        l0_handler: &LevelHandler,
+        effective_base_level_size: EffectiveLevelSize,
+        base_level_target_size: u64,
+    ) -> Option<Vec<SingleTableL0Candidate>> {
+        let partition_view = L0VnodePartitionView::build(
+            self.table_id,
+            self.vnode_count,
+            config.split_weight_by_vnode as usize,
+            l0,
+            l0_handler,
+        )?;
+        let min_l0_level_count = config.level0_sub_level_compact_level_count as usize;
+        let partitions = partition_view
+            .into_partitions(min_l0_level_count as u64, SCORE_BASE)
+            .filter(|(_, partition)| !partition.l0.sub_levels.is_empty())
+            .map(|(score, partition)| SingleTableL0Partition {
+                score,
+                info: PartitionL0CandidateInfo {
+                    partition_index: partition.index,
+                    partition_depth: partition.depth,
+                    max_overlap_depth: partition.max_overlap_depth,
+                    total_sst_ref_count: partition.total_sst_ref_count,
+                    total_object_count: partition.total_object_count,
+                    runnable_sst_ref_count: partition.runnable_sst_ref_count,
+                    runnable_object_count: partition.runnable_object_count,
+                    total_file_size: partition.l0.total_file_size,
+                    runnable_file_size: partition.runnable_file_size,
+                    total_referenced_object_size: partition.total_referenced_object_size,
+                    runnable_referenced_object_size: partition.runnable_referenced_object_size,
+                    partition_score: score,
+                    base_current_size: effective_base_level_size.current,
+                    base_incoming_size: effective_base_level_size.incoming,
+                    base_outgoing_size: effective_base_level_size.outgoing,
+                    base_effective_size: effective_base_level_size.effective,
+                    base_target_size: base_level_target_size,
+                    ..Default::default()
+                },
+                l0: Arc::new(partition.l0),
+            })
+            .collect::<Vec<_>>();
+
+        let Some(max_partition_depth) = partitions
+            .iter()
+            .map(|partition| partition.info.partition_depth)
+            .max()
+        else {
+            return Some(vec![]);
+        };
+        // At least one partition must independently exceed the configured depth threshold.
+        // Output-level pressure only orders an already-eligible L0; it must not make a shallow L0
+        // eligible by itself.
+        if partitions
+            .iter()
+            .all(|partition| partition.score <= SCORE_BASE)
+        {
+            return Some(vec![]);
+        }
+        // Match Pebble's L0 depth-pressure scale without changing the partition-local batching
+        // threshold. Compute from depth directly so integer rounding happens only once.
+        let raw_global_l0_score =
+            global_l0_depth_score(max_partition_depth, min_l0_level_count as u64);
+        let global_l0_score = adjust_score_for_output_level(
+            raw_global_l0_score,
+            effective_base_level_size.effective,
+            base_level_target_size,
+        );
+        if global_l0_score < SCORE_BASE {
+            return Some(vec![]);
+        }
+
+        let mut candidates = Vec::with_capacity(partitions.len() * 2);
+        for partition in partitions
+            .iter()
+            .filter(|partition| partition.score > SCORE_BASE)
+        {
+            let mut info = partition.info;
+            info.raw_global_l0_score = raw_global_l0_score;
+            info.adjusted_global_l0_score = global_l0_score;
+            candidates.push(SingleTableL0Candidate {
+                score: global_l0_score.saturating_add(1),
+                info,
+                picker_type: SingleTableL0PickerType::ToBase,
+                l0: partition.l0.clone(),
+                min_l0_level_count,
+            });
+        }
+        for partition in partitions
+            .iter()
+            .filter(|partition| partition.score <= SCORE_BASE)
+        {
+            let mut info = partition.info;
+            info.raw_global_l0_score = raw_global_l0_score;
+            info.adjusted_global_l0_score = global_l0_score;
+            candidates.push(SingleTableL0Candidate {
+                score: global_l0_score.saturating_add(1),
+                info,
+                picker_type: SingleTableL0PickerType::TrivialMove,
+                l0: partition.l0.clone(),
+                min_l0_level_count: 1,
+            });
+        }
+        for partition in partitions
+            .into_iter()
+            .filter(|partition| partition.score > SCORE_BASE)
+        {
+            let mut info = partition.info;
+            info.raw_global_l0_score = raw_global_l0_score;
+            info.adjusted_global_l0_score = global_l0_score;
+            candidates.push(SingleTableL0Candidate {
+                score: global_l0_score,
+                info,
+                picker_type: SingleTableL0PickerType::Intra,
+                l0: partition.l0,
+                min_l0_level_count,
+            });
+        }
+        Some(candidates)
+    }
+}
+
+struct SingleTableL0Partition {
+    score: u64,
+    info: PartitionL0CandidateInfo,
+    l0: Arc<OverlappingLevel>,
+}
+
+#[derive(Clone, Copy, Debug)]
+pub(super) enum SingleTableL0PickerType {
+    ToBase,
+    TrivialMove,
+    Intra,
+}
+
+#[derive(Debug)]
+pub(super) struct SingleTableL0Candidate {
+    pub(super) score: u64,
+    pub(super) info: PartitionL0CandidateInfo,
+    pub(super) picker_type: SingleTableL0PickerType,
+    pub(super) l0: Arc<OverlappingLevel>,
+    pub(super) min_l0_level_count: usize,
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::{BTreeSet, HashMap};
+    use std::sync::Arc;
+
+    use bytes::Bytes;
+    use itertools::Itertools;
+    use risingwave_common::hash::VirtualNode;
+    use risingwave_hummock_sdk::HummockCompactionTaskId;
+    use risingwave_hummock_sdk::key::{FullKey, TableKey};
+    use risingwave_hummock_sdk::key_range::KeyRange;
+    use risingwave_hummock_sdk::level::{Levels, OverlappingLevel};
+    use risingwave_hummock_sdk::sstable_info::SstableInfo;
+    use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
+    use risingwave_pb::hummock::CompactionConfig;
+
+    use super::*;
+    use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
+    use crate::hummock::compaction::in_progress_compaction::InProgressCompactionView;
+    use crate::hummock::compaction::selector::level_selector::DynamicLevelSelector;
+    use crate::hummock::compaction::selector::tests::{
+        generate_l0_nonoverlapping_multi_sublevels, generate_l0_nonoverlapping_sublevels,
+        generate_level, generate_table,
+    };
+    use crate::hummock::compaction::selector::{
+        CompactionSelector, CompactionSelectorContext, LocalSelectorStatistic,
+    };
+    use crate::hummock::compaction::{CompactionDeveloperConfig, CompactionTask};
+    use crate::hummock::level_handler::LevelHandler;
+    use crate::hummock::model::CompactionGroup;
+
+    fn vnode_key(vnode: usize) -> Bytes {
+        FullKey::new(
+            TableId::new(1),
+            TableKey(VirtualNode::from_index(vnode).to_be_bytes().to_vec()),
+            u64::MAX,
+        )
+        .encode()
+        .into()
+    }
+
+    fn vnode_sst(id: u64, left_vnode: usize, right_vnode: usize) -> SstableInfo {
+        let mut sst = generate_table(id, 1, 0, 1, id);
+        let mut inner = sst.get_inner();
+        inner.key_range = KeyRange {
+            left: vnode_key(left_vnode),
+            right: vnode_key(right_vnode),
+            right_exclusive: true,
+        };
+        sst.set_inner(inner);
+        sst
+    }
+
+    fn two_partition_l0(first_depth: usize, second_depth: usize) -> OverlappingLevel {
+        generate_l0_nonoverlapping_multi_sublevels(
+            (0..std::cmp::max(first_depth, second_depth))
+                .map(|level| {
+                    let mut ssts = vec![];
+                    if level < first_depth {
+                        ssts.push(vnode_sst(level as u64 + 1, 0, 32));
+                    }
+                    if level < second_depth {
+                        ssts.push(vnode_sst(level as u64 + 101, 32, 64));
+                    }
+                    ssts
+                })
+                .collect(),
+        )
+    }
+
+    fn pick_compaction(
+        task_id: HummockCompactionTaskId,
+        group: &CompactionGroup,
+        levels: &Levels,
+        level_handlers: &mut [LevelHandler],
+        in_progress_compactions: &InProgressCompactionView,
+    ) -> Option<CompactionTask> {
+        DynamicLevelSelector::default().pick_compaction(
+            task_id,
+            CompactionSelectorContext {
+                group,
+                levels,
+                member_table_ids: &BTreeSet::from([TableId::new(1)]),
+                single_table_compaction_group: Some(SingleTableCompactionGroup::new(
+                    TableId::new(1),
+                    256,
+                )),
+                level_handlers,
+                selector_stats: &mut LocalSelectorStatistic::default(),
+                table_id_to_options: &HashMap::default(),
+                developer_config: Arc::new(CompactionDeveloperConfig::default()),
+                table_watermarks: &HashMap::default(),
+                state_table_info: &HummockVersionStateTableInfo::empty(),
+                in_progress_compactions,
+            },
+        )
+    }
+
+    #[test]
+    fn local_depth_does_not_sum_across_partitions() {
+        let config = CompactionConfig {
+            split_weight_by_vnode: 8,
+            ..CompactionConfigBuilder::new()
+                .level0_sub_level_compact_level_count(3)
+                .build()
+        };
+        let l0 = generate_l0_nonoverlapping_sublevels(
+            (0..8)
+                .map(|partition| {
+                    vnode_sst(partition as u64 + 1, partition * 32, (partition + 1) * 32)
+                })
+                .collect(),
+        );
+        let candidates = SingleTableCompactionGroup::new(TableId::new(1), 256)
+            .build_l0_candidates(
+                &config,
+                &l0,
+                &LevelHandler::new(0),
+                EffectiveLevelSize::default(),
+                u64::MAX,
+            )
+            .unwrap();
+        assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn base_pressure_controls_partition_l0_admission() {
+        let config = CompactionConfig {
+            split_weight_by_vnode: 8,
+            ..CompactionConfigBuilder::new()
+                .level0_sub_level_compact_level_count(2)
+                .build()
+        };
+        let l0 = two_partition_l0(4, 0);
+        let group = SingleTableCompactionGroup::new(TableId::new(1), 256);
+
+        // Local depth score is 2.0. The global depth-pressure multiplier raises it to 4.0.
+        let candidates = group
+            .build_l0_candidates(
+                &config,
+                &l0,
+                &LevelHandler::new(0),
+                EffectiveLevelSize {
+                    current: 100,
+                    effective: 100,
+                    ..Default::default()
+                },
+                100,
+            )
+            .unwrap();
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].score, 401);
+
+        // An underfilled Base raises L0 priority relative to lower-level work.
+        let candidates = group
+            .build_l0_candidates(
+                &config,
+                &l0,
+                &LevelHandler::new(0),
+                EffectiveLevelSize {
+                    current: 50,
+                    effective: 50,
+                    ..Default::default()
+                },
+                100,
+            )
+            .unwrap();
+        assert_eq!(candidates[0].score, 801);
+
+        // An adjusted score exactly at the admission threshold remains eligible.
+        let candidates = group
+            .build_l0_candidates(
+                &config,
+                &l0,
+                &LevelHandler::new(0),
+                EffectiveLevelSize {
+                    current: 400,
+                    effective: 400,
+                    ..Default::default()
+                },
+                100,
+            )
+            .unwrap();
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].score, 101);
+
+        // Once Base grows beyond 4x its target, the adjusted score no longer passes the
+        // admission threshold, so neither ToBase nor its Intra fallback is scheduled.
+        let candidates = group
+            .build_l0_candidates(
+                &config,
+                &l0,
+                &LevelHandler::new(0),
+                EffectiveLevelSize {
+                    current: 401,
+                    effective: 401,
+                    ..Default::default()
+                },
+                100,
+            )
+            .unwrap();
+        assert!(candidates.is_empty());
+    }
+
+    #[test]
+    fn global_depth_pressure_does_not_change_local_batching_threshold() {
+        let config = CompactionConfig {
+            split_weight_by_vnode: 8,
+            ..CompactionConfigBuilder::new()
+                .level0_sub_level_compact_level_count(16)
+                .build()
+        };
+        let group = SingleTableCompactionGroup::new(TableId::new(1), 256);
+
+        // D=32 gives global raw score 4.0. A Base at 4x target lowers it to exactly 1.0,
+        // while the selected task still has the original 16-level minimum.
+        let candidates = group
+            .build_l0_candidates(
+                &config,
+                &two_partition_l0(32, 0),
+                &LevelHandler::new(0),
+                EffectiveLevelSize {
+                    current: 400,
+                    effective: 400,
+                    ..Default::default()
+                },
+                100,
+            )
+            .unwrap();
+        assert_eq!(candidates.len(), 2);
+        assert_eq!(candidates[0].info.partition_score, 200);
+        assert_eq!(candidates[0].info.raw_global_l0_score, 400);
+        assert_eq!(candidates[0].info.adjusted_global_l0_score, 100);
+        assert_eq!(candidates[0].score, 101);
+        assert_eq!(candidates[0].min_l0_level_count, 16);
+
+        // The global multiplier must not make a partition at the local batching threshold
+        // eligible for an ordinary ToBase or Intra task.
+        let candidates = group
+            .build_l0_candidates(
+                &config,
+                &two_partition_l0(16, 0),
+                &LevelHandler::new(0),
+                EffectiveLevelSize {
+                    current: 100,
+                    effective: 100,
+                    ..Default::default()
+                },
+                100,
+            )
+            .unwrap();
+        assert!(candidates.is_empty());
+
+        // Compute from depth before rounding: 2 * 18 / 16 = 2.25. With Base at 2.25x target,
+        // the adjusted score is exactly 1.0 and remains eligible.
+        let candidates = group
+            .build_l0_candidates(
+                &config,
+                &two_partition_l0(18, 0),
+                &LevelHandler::new(0),
+                EffectiveLevelSize {
+                    current: 225,
+                    effective: 225,
+                    ..Default::default()
+                },
+                100,
+            )
+            .unwrap();
+        assert_eq!(candidates[0].info.partition_score, 112);
+        assert_eq!(candidates[0].info.raw_global_l0_score, 225);
+        assert_eq!(candidates[0].info.adjusted_global_l0_score, 100);
+    }
+
+    #[test]
+    fn global_admission_limits_shallow_partitions_to_trivial_move() {
+        let config = CompactionConfig {
+            split_weight_by_vnode: 8,
+            ..CompactionConfigBuilder::new()
+                .level0_sub_level_compact_level_count(3)
+                .build()
+        };
+        let l0 = two_partition_l0(4, 2);
+        let candidates = SingleTableCompactionGroup::new(TableId::new(1), 256)
+            .build_l0_candidates(
+                &config,
+                &l0,
+                &LevelHandler::new(0),
+                EffectiveLevelSize {
+                    current: 100,
+                    effective: 100,
+                    ..Default::default()
+                },
+                100,
+            )
+            .unwrap();
+
+        let to_base = candidates
+            .iter()
+            .filter(|candidate| matches!(candidate.picker_type, SingleTableL0PickerType::ToBase))
+            .collect_vec();
+        assert_eq!(to_base.len(), 1);
+        assert!(
+            to_base
+                .iter()
+                .all(|candidate| candidate.min_l0_level_count == 3)
+        );
+
+        let trivial_move = candidates
+            .iter()
+            .filter(|candidate| {
+                matches!(candidate.picker_type, SingleTableL0PickerType::TrivialMove)
+            })
+            .collect_vec();
+        assert_eq!(trivial_move.len(), 1);
+        assert_eq!(trivial_move[0].min_l0_level_count, 1);
+        assert!(to_base[0].info.partition_score > trivial_move[0].info.partition_score);
+
+        let intra = candidates
+            .iter()
+            .filter(|candidate| matches!(candidate.picker_type, SingleTableL0PickerType::Intra))
+            .collect_vec();
+        assert_eq!(intra.len(), 1);
+        assert_eq!(
+            intra[0].info.partition_score,
+            to_base[0].info.partition_score
+        );
+        assert_eq!(intra[0].min_l0_level_count, 3);
+    }
+
+    #[test]
+    fn pending_partition_does_not_block_another_partition() {
+        let config = CompactionConfig {
+            split_weight_by_vnode: 8,
+            ..CompactionConfigBuilder::new()
+                .max_level(1)
+                .max_bytes_for_level_base(1024)
+                .level0_sub_level_compact_level_count(2)
+                .build()
+        };
+        let group = CompactionGroup::new(1, config);
+        let levels = Levels {
+            levels: vec![generate_level(1, vec![])],
+            l0: generate_l0_nonoverlapping_multi_sublevels(
+                (1..=3)
+                    .map(|id| vec![vnode_sst(id, 0, 32), vnode_sst(id + 100, 32, 64)])
+                    .collect(),
+            ),
+            ..Default::default()
+        };
+        let mut handlers = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        handlers[0].add_pending_task(
+            100,
+            0,
+            levels
+                .l0
+                .sub_levels
+                .iter()
+                .map(|level| &level.table_infos[0]),
+        );
+
+        let task = pick_compaction(
+            1,
+            &group,
+            &levels,
+            &mut handlers,
+            &InProgressCompactionView::default(),
+        )
+        .unwrap();
+        let selected_l0_ids = task
+            .input
+            .input_levels
+            .iter()
+            .filter(|level| level.level_idx == 0)
+            .flat_map(|level| level.table_infos.iter())
+            .map(|sst| sst.sst_id.as_raw_id())
+            .collect_vec();
+        assert!(!selected_l0_ids.is_empty());
+        assert!(selected_l0_ids.iter().all(|sst_id| *sst_id > 100));
+    }
+
+    #[test]
+    fn blocked_deep_to_base_does_not_rewrite_shallow_partition() {
+        let config = CompactionConfig {
+            split_weight_by_vnode: 8,
+            ..CompactionConfigBuilder::new()
+                .max_level(1)
+                .max_bytes_for_level_base(1024)
+                .level0_sub_level_compact_level_count(2)
+                .build()
+        };
+        let group = CompactionGroup::new(1, config);
+        let levels = Levels {
+            levels: vec![generate_level(
+                1,
+                vec![vnode_sst(1000, 0, 32), vnode_sst(1001, 32, 64)],
+            )],
+            l0: two_partition_l0(3, 1),
+            ..Default::default()
+        };
+        let mut handlers = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        handlers[1].add_pending_task(100, 1, [&levels.levels[0].table_infos[0]]);
+
+        let task = pick_compaction(
+            1,
+            &group,
+            &levels,
+            &mut handlers,
+            &InProgressCompactionView::default(),
+        )
+        .unwrap();
+        let selected_l0_ids = task
+            .input
+            .input_levels
+            .iter()
+            .filter(|level| level.level_idx == 0)
+            .flat_map(|level| level.table_infos.iter())
+            .map(|sst| sst.sst_id.as_raw_id())
+            .collect_vec();
+        assert_eq!(task.input.target_level, 0);
+        assert!(!selected_l0_ids.is_empty());
+        assert!(selected_l0_ids.iter().all(|sst_id| *sst_id < 100));
+    }
+
+    #[test]
+    fn to_base_prefers_the_deeper_partition() {
+        let config = CompactionConfig {
+            split_weight_by_vnode: 8,
+            ..CompactionConfigBuilder::new()
+                .max_level(1)
+                .max_bytes_for_level_base(1024)
+                .level0_sub_level_compact_level_count(2)
+                .build()
+        };
+        let group = CompactionGroup::new(1, config);
+        let levels = Levels {
+            levels: vec![generate_level(1, vec![])],
+            l0: two_partition_l0(4, 2),
+            ..Default::default()
+        };
+        let mut handlers = vec![LevelHandler::new(0), LevelHandler::new(1)];
+
+        let task = pick_compaction(
+            1,
+            &group,
+            &levels,
+            &mut handlers,
+            &InProgressCompactionView::default(),
+        )
+        .unwrap();
+        assert_eq!(task.input.target_level, 1);
+        assert!(
+            task.input
+                .input_levels
+                .iter()
+                .filter(|level| level.level_idx == 0)
+                .flat_map(|level| level.table_infos.iter())
+                .all(|sst| sst.sst_id.as_raw_id() < 100)
+        );
+    }
+
+    #[test]
+    fn intra_is_used_only_after_partition_to_base_is_blocked() {
+        let config = CompactionConfig {
+            split_weight_by_vnode: 8,
+            ..CompactionConfigBuilder::new()
+                .max_level(1)
+                .max_bytes_for_level_base(1024)
+                .level0_sub_level_compact_level_count(2)
+                .build()
+        };
+        let group = CompactionGroup::new(1, config);
+        let levels = Levels {
+            levels: vec![generate_level(
+                1,
+                vec![vnode_sst(1000, 0, 32), vnode_sst(1001, 32, 64)],
+            )],
+            l0: two_partition_l0(4, 2),
+            ..Default::default()
+        };
+        let mut handlers = vec![LevelHandler::new(0), LevelHandler::new(1)];
+        handlers[1].add_pending_task(100, 1, &levels.levels[0].table_infos);
+
+        let task = pick_compaction(
+            1,
+            &group,
+            &levels,
+            &mut handlers,
+            &InProgressCompactionView::default(),
+        )
+        .unwrap();
+        assert_eq!(task.input.target_level, 0);
+        assert!(
+            task.input
+                .input_levels
+                .iter()
+                .flat_map(|level| level.table_infos.iter())
+                .all(|sst| sst.sst_id.as_raw_id() < 100)
+        );
+    }
+}

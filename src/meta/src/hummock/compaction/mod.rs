@@ -17,6 +17,7 @@
 pub mod compaction_config;
 pub(crate) mod in_progress_compaction;
 mod overlap_strategy;
+pub(crate) mod vnode_partition;
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::compact_task::CompactTask;
 use risingwave_hummock_sdk::level::Levels;
@@ -39,7 +40,7 @@ use risingwave_pb::hummock::compaction_config::CompactionMode;
 use risingwave_pb::hummock::{CompactionConfig, PbSstableFilterLayout, PbSstableFilterType};
 pub use selector::{CompactionSelector, CompactionSelectorContext};
 
-use self::selector::{EmergencySelector, LocalSelectorStatistic};
+use self::selector::{EmergencySelector, LocalSelectorStatistic, SingleTableCompactionGroup};
 use super::GroupStateValidator;
 use crate::MetaOpts;
 use crate::hummock::compaction::in_progress_compaction::InProgressCompactionView;
@@ -104,6 +105,7 @@ impl CompactStatus {
         &mut self,
         levels: &Levels,
         member_table_ids: &BTreeSet<TableId>,
+        single_table_compaction_group: Option<SingleTableCompactionGroup>,
         task_id: HummockCompactionTaskId,
         group: &CompactionGroup,
         stats: &mut LocalSelectorStatistic,
@@ -118,6 +120,7 @@ impl CompactStatus {
             group,
             levels,
             member_table_ids,
+            single_table_compaction_group,
             level_handlers: &mut self.level_handlers,
             selector_stats: stats,
             table_id_to_options,
@@ -144,6 +147,7 @@ impl CompactStatus {
                         group,
                         levels,
                         member_table_ids,
+                        single_table_compaction_group,
                         level_handlers: &mut self.level_handlers,
                         selector_stats: stats,
                         table_id_to_options,

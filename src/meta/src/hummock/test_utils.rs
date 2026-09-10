@@ -424,6 +424,7 @@ pub fn compaction_selector_context<'a>(
         group,
         levels,
         member_table_ids,
+        single_table_compaction_group: None,
         level_handlers,
         selector_stats,
         table_id_to_options,

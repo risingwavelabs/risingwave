@@ -20,6 +20,8 @@
 mod emergency_selector;
 pub(crate) mod level_selector;
 mod manual_selector;
+mod partition_l0_observability;
+mod single_table_compaction;
 mod space_reclaim_selector;
 mod tombstone_compaction_selector;
 mod ttl_selector;
@@ -31,12 +33,16 @@ use std::sync::Arc;
 pub use emergency_selector::EmergencySelector;
 pub use level_selector::{DynamicLevelSelector, DynamicLevelSelectorCore};
 pub use manual_selector::{ManualCompactionOption, ManualCompactionSelector};
+use partition_l0_observability::{
+    PartitionL0CandidateInfo, PartitionL0CompactionObservation, report_partition_l0_observations,
+};
 use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_hummock_sdk::level::Levels;
 use risingwave_hummock_sdk::table_watermark::TableWatermarks;
 use risingwave_hummock_sdk::version::HummockVersionStateTableInfo;
 use risingwave_hummock_sdk::{CompactionGroupId, HummockCompactionTaskId};
 use risingwave_pb::hummock::compact_task;
+pub use single_table_compaction::SingleTableCompactionGroup;
 pub use space_reclaim_selector::SpaceReclaimCompactionSelector;
 pub use tombstone_compaction_selector::TombstoneCompactionSelector;
 pub use ttl_selector::TtlCompactionSelector;
@@ -56,6 +62,7 @@ pub struct CompactionSelectorContext<'a> {
     pub group: &'a CompactionGroup,
     pub levels: &'a Levels,
     pub member_table_ids: &'a BTreeSet<TableId>,
+    pub single_table_compaction_group: Option<SingleTableCompactionGroup>,
     pub level_handlers: &'a mut [LevelHandler],
     pub selector_stats: &'a mut LocalSelectorStatistic,
     pub table_id_to_options: &'a HashMap<TableId, TableOption>,
@@ -86,9 +93,14 @@ pub fn default_compaction_selector() -> Box<dyn CompactionSelector> {
 #[derive(Default)]
 pub struct LocalSelectorStatistic {
     skip_picker: Vec<(usize, usize, LocalPickerStatistic)>,
+    partition_l0: Vec<PartitionL0CompactionObservation>,
 }
 
 impl LocalSelectorStatistic {
+    fn record_partition_l0(&mut self, observation: PartitionL0CompactionObservation) {
+        self.partition_l0.push(observation);
+    }
+
     pub fn report_to_metrics(&self, group_id: CompactionGroupId, metrics: &MetaMetrics) {
         for (start_level, target_level, stats) in &self.skip_picker {
             let level_label = format!("cg{}-{}-to-{}", group_id, start_level, target_level);
@@ -121,6 +133,8 @@ impl LocalSelectorStatistic {
                 .with_label_values(&[level_label.as_str(), "picker"])
                 .inc();
         }
+
+        report_partition_l0_observations(group_id, metrics, &self.partition_l0);
     }
 }
 
