@@ -355,7 +355,12 @@ impl HummockManager {
         self.gc_manager
             .add_may_delete_object_ids(may_delete_object_ids.into_iter());
 
-        if !self.env.opts.compaction_deterministic_test && !table_stats_change.is_empty() {
+        if !self.env.opts.compaction_deterministic_test {
+            // A successful empty checkpoint observes zero throughput. Tables whose commits
+            // are paused are absent from tables_to_commit and receive no synthetic samples.
+            for &table_id in tables_to_commit.keys() {
+                table_stats_change.entry(table_id).or_default();
+            }
             self.collect_table_write_throughput(table_stats_change)
                 .await;
         }
@@ -385,8 +390,12 @@ impl HummockManager {
         for (table_id, stat) in table_stats {
             let throughput = ((stat.total_value_size + stat.total_key_size) as f64
                 / checkpoint_secs as f64) as u64;
-            table_throughput_statistic_manager
-                .add_table_throughput_with_ts(table_id, throughput, timestamp);
+            table_throughput_statistic_manager.add_table_throughput_with_ts(
+                table_id,
+                throughput,
+                timestamp,
+                checkpoint_secs as i64,
+            );
         }
     }
 

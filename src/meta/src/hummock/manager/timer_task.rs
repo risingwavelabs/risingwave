@@ -754,7 +754,24 @@ impl HummockManager {
                 )
                 .await
             {
-                Ok(_) => candidate += 1,
+                Ok(_) => {
+                    // The survivor now contains every previously merged candidate. Refresh its
+                    // size, members and config before checking the next pair.
+                    let survivor = group.group_id;
+                    if let Some(current) = self
+                        .calculate_compaction_group_statistic()
+                        .await
+                        .into_iter()
+                        .find(|g| g.group_id == survivor)
+                    {
+                        group_infos[base] = current;
+                        candidate += 1;
+                    } else {
+                        // Concurrent deletion or a manual merge removed the survivor.
+                        base = candidate + 1;
+                        candidate = base + 1;
+                    }
+                }
                 Err(e) => {
                     tracing::debug!(
                         error = %e.as_report(),

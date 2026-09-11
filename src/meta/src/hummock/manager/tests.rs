@@ -3358,7 +3358,13 @@ async fn test_try_merge_compaction_group_error_propagation() {
         .unwrap();
     let mv_stat = group_infos.iter().find(|g| g.group_id == mv_id).unwrap();
 
-    let throughput_manager = TableWriteThroughputStatisticManager::new(100);
+    let mut throughput_manager = TableWriteThroughputStatisticManager::new(240);
+    let now = chrono::Utc::now().timestamp();
+    for age in (0..240).rev() {
+        for table in [100, 200, 201, 202] {
+            throughput_manager.add_table_throughput_with_ts(table.into(), 0, now - age, 1);
+        }
+    }
     let created_tables: HashSet<TableId> =
         HashSet::from_iter(vec![100.into(), 200.into(), 201.into(), 202.into()]);
 
@@ -3796,6 +3802,11 @@ async fn test_schedule_group_split_does_not_normalize_overlap_when_enabled() {
         .await
         .unwrap();
 
+    // Replace the empty-commit observation with the synthetic hot history for this test.
+    hummock_manager
+        .table_write_throughput_statistic_manager
+        .write()
+        .remove_table(200.into());
     hummock_manager
         .table_write_throughput_statistic_manager
         .write()
@@ -3803,6 +3814,7 @@ async fn test_schedule_group_split_does_not_normalize_overlap_when_enabled() {
             200.into(),
             opts.table_high_write_throughput_threshold + 1,
             chrono::Utc::now().timestamp(),
+            1,
         );
 
     assert_eq!(
@@ -4270,5 +4282,248 @@ async fn test_time_travel_vacuum_pins_snapshot_epoch() {
             .map(|object_id| object_id.as_raw().as_raw_id())
             .collect_vec(),
         vec![10]
+    );
+}
+
+#[tokio::test]
+async fn test_split_multiple_hot_tables_uses_current_parent() {
+    let (_, manager, _, _) = setup_compute_env(80).await;
+    manager
+        .register_table_ids_for_test(&[
+            (100, 2.into()),
+            (101, 2.into()),
+            (102, 2.into()),
+            (103, 2.into()),
+        ])
+        .await
+        .unwrap();
+    let mut stats = TableWriteThroughputStatisticManager::new(240);
+    for table in [100, 101, 102] {
+        stats.add_table_throughput_with_ts(
+            table.into(),
+            u64::MAX / 2,
+            chrono::Utc::now().timestamp(),
+            1,
+        );
+    }
+    let group = manager
+        .calculate_compaction_group_statistic()
+        .await
+        .into_iter()
+        .find(|g| g.group_id == 2)
+        .unwrap();
+    manager.try_split_compaction_group(&stats, group).await;
+    let version = manager.get_current_version().await;
+    for table in [100, 101, 102, 103] {
+        let group = version.state_table_info.info()
+            [&risingwave_common::catalog::TableId::new(table)]
+            .compaction_group_id;
+        assert_eq!(
+            version
+                .state_table_info
+                .compaction_group_member_table_ids(group)
+                .len(),
+            1,
+            "table {table} was retried against a stale parent"
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_merge_batch_uses_accumulated_size() {
+    use risingwave_meta_model::{
+        CreateType, JobStatus, StreamingParallelism, object, streaming_job,
+    };
+    use sea_orm::{ActiveModelTrait, Set};
+    let (env, manager, _, _) = setup_compute_env(80).await;
+    let conn = &env.meta_store_ref().conn;
+    for table in [100, 101, 102] {
+        object::ActiveModel {
+            oid: Set(table.into()),
+            obj_type: Set(object::ObjectType::Table),
+            owner_id: Set(1.into()),
+            initialized_at: Set(chrono::Utc::now().naive_utc()),
+            created_at: Set(chrono::Utc::now().naive_utc()),
+            ..Default::default()
+        }
+        .insert(conn)
+        .await
+        .unwrap();
+        streaming_job::ActiveModel {
+            job_id: Set(table.into()),
+            job_status: Set(JobStatus::Created),
+            create_type: Set(CreateType::Foreground),
+            parallelism: Set(StreamingParallelism::Adaptive),
+            max_parallelism: Set(1),
+            is_serverless_backfill: Set(false),
+            ..Default::default()
+        }
+        .insert(conn)
+        .await
+        .unwrap();
+        manager
+            .register_table_ids_for_test(&[(table, 2.into())])
+            .await
+            .unwrap();
+    }
+    manager
+        .move_state_tables_to_dedicated_compaction_group(2.into(), &[100.into()], None)
+        .await
+        .unwrap();
+    let parent = get_compaction_group_id_by_table_id(manager.clone(), 101).await;
+    manager
+        .move_state_tables_to_dedicated_compaction_group(parent, &[101.into()], None)
+        .await
+        .unwrap();
+    let groups = manager.calculate_compaction_group_statistic().await;
+    assert_eq!(
+        groups
+            .iter()
+            .filter(|g| !g.table_statistic.is_empty())
+            .count(),
+        3
+    );
+    let limit = (groups[0].compaction_group_config.max_estimated_group_size() as f64
+        * env.opts.split_group_size_ratio) as u64;
+    {
+        let mut versioning = manager.versioning.write().await;
+        let now = chrono::Utc::now().timestamp();
+        let mut stats = manager.table_write_throughput_statistic_manager.write();
+        for table in [100, 101, 102] {
+            versioning.version_stats.table_stats.insert(
+                table.into(),
+                risingwave_pb::hummock::TableStats {
+                    total_value_size: (limit * 4 / 10) as i64,
+                    ..Default::default()
+                },
+            );
+            for age in (0..240).rev() {
+                stats.add_table_throughput_with_ts(table.into(), 0, now - age, 1);
+            }
+        }
+    }
+    manager.schedule_group_merge_for_test().await;
+    let groups = manager.calculate_compaction_group_statistic().await;
+    let nonempty = groups
+        .iter()
+        .filter(|g| !g.table_statistic.is_empty())
+        .collect_vec();
+    assert_eq!(
+        nonempty.len(),
+        2,
+        "40 + 40 may merge, but adding the third 40 exceeds the limit"
+    );
+    assert!(nonempty.iter().all(|g| g.group_size <= limit));
+    assert!(nonempty.iter().any(|g| g.table_statistic.len() == 2));
+}
+
+#[tokio::test]
+async fn test_empty_commits_record_idle_table_observations() {
+    let (_, manager, _, worker_id) = setup_compute_env(80).await;
+    manager
+        .register_table_ids_for_test(&[(100, 2.into()), (101, 2.into())])
+        .await
+        .unwrap();
+    let client = MockHummockMetaClient::new(manager.clone(), worker_id as _);
+    client
+        .commit_epoch(test_epoch(30), SyncResult::default())
+        .await
+        .unwrap();
+    let stats = manager.table_write_throughput_statistic_manager.read();
+    for table in [100, 101] {
+        let samples = stats
+            .get_table_throughput_descending(table.into(), 240)
+            .collect_vec();
+        assert_eq!(samples.len(), 1, "successful idle commits are observations");
+        assert_eq!(samples[0].throughput, 0);
+    }
+}
+
+#[tokio::test]
+async fn test_partial_commits_do_not_observe_paused_tables() {
+    let (_, manager, _, _) = setup_compute_env(80).await;
+    manager
+        .register_table_ids_for_test(&[(100, 2.into()), (101, 2.into())])
+        .await
+        .unwrap();
+    manager
+        .commit_epoch(super::commit_epoch::CommitEpochInfo {
+            tables_to_commit: HashMap::from([(100.into(), test_epoch(30))]),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    let stats = manager.table_write_throughput_statistic_manager.read();
+    assert_eq!(
+        stats
+            .get_table_throughput_descending(100.into(), 240)
+            .count(),
+        1
+    );
+    assert_eq!(
+        stats
+            .get_table_throughput_descending(101.into(), 240)
+            .count(),
+        0
+    );
+}
+
+#[tokio::test]
+async fn test_huge_split_refreshes_children_after_hot_table_split() {
+    let (env, manager, _, _) = setup_compute_env(80).await;
+    manager
+        .register_table_ids_for_test(&[
+            (100, 2.into()),
+            (101, 2.into()),
+            (102, 2.into()),
+            (103, 2.into()),
+        ])
+        .await
+        .unwrap();
+    let group = manager
+        .calculate_compaction_group_statistic()
+        .await
+        .into_iter()
+        .find(|g| g.group_id == 2)
+        .unwrap();
+    let limit = (group.compaction_group_config.max_estimated_group_size() as f64
+        * env.opts.split_group_size_ratio) as u64;
+    {
+        let mut versioning = manager.versioning.write().await;
+        for table in [100, 101, 102, 103] {
+            versioning.version_stats.table_stats.insert(
+                table.into(),
+                risingwave_pb::hummock::TableStats {
+                    total_value_size: (limit * 4 / 10) as i64,
+                    ..Default::default()
+                },
+            );
+        }
+    }
+    let mut stats = TableWriteThroughputStatisticManager::new(240);
+    stats.add_table_throughput_with_ts(100.into(), u64::MAX / 2, chrono::Utc::now().timestamp(), 1);
+    let group = manager
+        .calculate_compaction_group_statistic()
+        .await
+        .into_iter()
+        .find(|g| g.group_id == 2)
+        .unwrap();
+    manager.try_split_compaction_group(&stats, group).await;
+    let groups = manager.calculate_compaction_group_statistic().await;
+    let nonempty = groups
+        .iter()
+        .filter(|g| !g.table_statistic.is_empty())
+        .collect_vec();
+    assert_eq!(
+        nonempty.len(),
+        3,
+        "the remaining 120%-sized child must be split in this round"
+    );
+    assert!(nonempty.iter().all(|g| g.group_size <= limit));
+    assert!(
+        nonempty
+            .iter()
+            .any(|g| g.table_statistic.keys().copied().collect_vec()
+                == vec![TableId::new(101), TableId::new(102)])
     );
 }
