@@ -895,33 +895,39 @@ fn route_cdc_chunk(
     for (_, row) in chunk.rows() {
         let split_key = row.datum_at(snapshot_split_column_index);
 
-        // Find the first split whose exclusive right bound is greater than the row's split key.
-        let split_idx = splits.partition_point(|split| {
-            !is_rightmost_bound(&split.right_bound_exclusive)
+        let Ok(split_idx) = splits.binary_search_by(|split| {
+            let right_bound_le_key = !is_rightmost_bound(&split.right_bound_exclusive)
                 && cmp_datum(
                     split.right_bound_exclusive.datum_at(0),
                     split_key,
                     OrderType::ascending_nulls_first(),
                 )
-                .is_le()
-        });
+                .is_le();
 
-        let Some(split) = splits.get(split_idx) else {
-            // key is outside of assigned split ranges
+            let left_bound_gt_key = !is_leftmost_bound(&split.left_bound_inclusive)
+                && cmp_datum(
+                    split.left_bound_inclusive.datum_at(0),
+                    split_key,
+                    OrderType::ascending_nulls_first(),
+                )
+                .is_gt();
+
+            if right_bound_le_key {
+                // The split is entirely before the key, so search to the right.
+                std::cmp::Ordering::Less
+            } else if left_bound_gt_key {
+                // The split is entirely after the key, so search to the left.
+                std::cmp::Ordering::Greater
+            } else {
+                // The split contains the key: left <= key < right.
+                std::cmp::Ordering::Equal
+            }
+        }) else {
+            // The key is outside the assigned split ranges or lies in a gap.
             continue;
         };
 
-        // Ignore keys in a gap before the candidate split's inclusive left bound.
-        if !is_leftmost_bound(&split.left_bound_inclusive)
-            && cmp_datum(
-                split_key,
-                split.left_bound_inclusive.datum_at(0),
-                OrderType::ascending_nulls_first(),
-            )
-            .is_lt()
-        {
-            continue;
-        }
+        let split = &splits[split_idx];
 
         // Buffer rows in the active split for replay after any later snapshot output.
         if split_idx == current_split_idx {
