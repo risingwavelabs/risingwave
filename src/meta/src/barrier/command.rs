@@ -18,13 +18,13 @@ use std::fmt::{Display, Formatter};
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{DatabaseId, TableId};
-use risingwave_common::hash::{ActorMapping, VnodeCountCompat};
+use risingwave_common::hash::VnodeCountCompat;
 use risingwave_common::id::{JobId, SinkId, SourceId};
 use risingwave_common::must_match;
 use risingwave_connector::source::{CdcTableSnapshotSplitRaw, SplitImpl};
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
-use risingwave_meta_model::{DispatcherType, WorkerId, fragment_relation, streaming_job};
+use risingwave_meta_model::{WorkerId, fragment_relation, streaming_job};
 use risingwave_pb::catalog::CreateType;
 use risingwave_pb::common::PbActorInfo;
 use risingwave_pb::hummock::vector_index_delta::PbVectorIndexInit;
@@ -39,13 +39,12 @@ use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::connector_props_change_mutation::ConnectorPropsInfo;
 use risingwave_pb::stream_plan::sink_schema_change::Op as PbSinkSchemaChangeOp;
 use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
-use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    AddMutation, ConnectorPropsChangeMutation, Dispatcher, DropSubscriptionsMutation,
-    ListFinishMutation, LoadFinishMutation, PauseMutation, PbSinkAddColumnsOp, PbSinkDropColumnsOp,
-    PbSinkSchemaChange, PbStreamNode, PbUpstreamSinkInfo, ResumeMutation,
-    SourceChangeSplitMutation, StartFragmentBackfillMutation, StopMutation,
-    SubscriptionUpstreamInfo, ThrottleMutation, UpdateMutation,
+    AddMutation, ConnectorPropsChangeMutation, DropSubscriptionsMutation, ListFinishMutation,
+    LoadFinishMutation, PauseMutation, PbSinkAddColumnsOp, PbSinkDropColumnsOp, PbSinkSchemaChange,
+    PbStreamNode, PbUpstreamSinkInfo, ResumeMutation, SourceChangeSplitMutation,
+    StartFragmentBackfillMutation, StopMutation, SubscriptionUpstreamInfo, ThrottleMutation,
+    UpdateMutation,
 };
 use risingwave_pb::stream_service::BarrierCompleteResponse;
 use tracing::warn;
@@ -63,9 +62,8 @@ use crate::controller::utils::StreamingJobExtraInfo;
 use crate::hummock::NewTableFragmentInfo;
 use crate::manager::{StreamingJob, StreamingJobType};
 use crate::model::{
-    ActorId, ActorUpstreams, DispatcherId, FragmentDownstreamRelation, FragmentId,
-    FragmentReplaceUpstream, StreamActor, StreamActorWithDispatchers, StreamJobActorsToCreate,
-    StreamJobFragments, StreamJobFragmentsToCreate, SubscriptionId,
+    ActorId, FragmentDownstreamRelation, FragmentId, FragmentReplaceUpstream, StreamActor,
+    StreamJobActorsToCreate, StreamJobFragments, StreamJobFragmentsToCreate, SubscriptionId,
 };
 use crate::stream::{
     AutoRefreshSchemaSinkContext, ConnectorPropsChange, ExtendedFragmentBackfillOrder,
@@ -101,31 +99,19 @@ pub struct Reschedule {
     /// Vnode bitmap updates for some actors in this fragment.
     pub vnode_bitmap_updates: HashMap<ActorId, Bitmap>,
 
-    /// The upstream fragments of this fragment, and the dispatchers that should be updated.
-    pub upstream_fragment_dispatcher_ids: Vec<(FragmentId, DispatcherId)>,
-    /// New hash mapping of the upstream dispatcher to be updated.
-    ///
-    /// This field exists only when there's upstream fragment and the current fragment is
-    /// hash-sharded.
-    pub upstream_dispatcher_mapping: Option<ActorMapping>,
-
-    /// The downstream fragments of this fragment.
-    pub downstream_fragment_ids: Vec<FragmentId>,
-
     /// Reassigned splits for source actors.
     /// It becomes the `actor_splits` in [`UpdateMutation`].
     /// `Source` and `SourceBackfill` are handled together here.
     pub actor_splits: HashMap<ActorId, Vec<SplitImpl>>,
 
-    pub newly_created_actors: HashMap<ActorId, (StreamActorWithDispatchers, WorkerId)>,
+    pub newly_created_actors: HashMap<ActorId, (StreamActor, WorkerId)>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct ReschedulePlan {
     pub reschedules: HashMap<FragmentId, Reschedule>,
-    /// Should contain the actor ids in upstream and downstream fragments referenced by
-    /// `reschedules`.
-    pub fragment_actors: HashMap<FragmentId, HashSet<ActorId>>,
+    pub affected_fragment_ids: HashSet<FragmentId>,
+    pub(crate) edges: FragmentEdgeBuildResult,
 }
 
 /// Preloaded context for rescheduling, built outside the barrier worker.
@@ -133,9 +119,8 @@ pub struct ReschedulePlan {
 pub struct RescheduleContext {
     pub loaded: LoadedFragmentContext,
     pub job_extra_info: HashMap<JobId, StreamingJobExtraInfo>,
-    pub upstream_fragments: HashMap<FragmentId, HashMap<FragmentId, DispatcherType>>,
-    pub downstream_fragments: HashMap<FragmentId, HashMap<FragmentId, DispatcherType>>,
-    pub downstream_relations: HashMap<(FragmentId, FragmentId), fragment_relation::Model>,
+    /// Full relation models for both incoming and outgoing edges of the loaded fragments.
+    pub fragment_relations: HashMap<(FragmentId, FragmentId), fragment_relation::Model>,
 }
 
 impl RescheduleContext {
@@ -143,9 +128,7 @@ impl RescheduleContext {
         Self {
             loaded: LoadedFragmentContext::default(),
             job_extra_info: HashMap::new(),
-            upstream_fragments: HashMap::new(),
-            downstream_fragments: HashMap::new(),
-            downstream_relations: HashMap::new(),
+            fragment_relations: HashMap::new(),
         }
     }
 
@@ -171,36 +154,20 @@ impl RescheduleContext {
             .map(|(job_id, info)| (*job_id, info.clone()))
             .collect();
 
-        let upstream_fragments = self
-            .upstream_fragments
+        let fragment_relations = self
+            .fragment_relations
             .iter()
-            .filter(|(fragment_id, _)| fragment_ids.contains(*fragment_id))
-            .map(|(fragment_id, upstreams)| (*fragment_id, upstreams.clone()))
-            .collect();
-
-        let downstream_fragments = self
-            .downstream_fragments
-            .iter()
-            .filter(|(fragment_id, _)| fragment_ids.contains(*fragment_id))
-            .map(|(fragment_id, downstreams)| (*fragment_id, downstreams.clone()))
-            .collect();
-
-        let downstream_relations = self
-            .downstream_relations
-            .iter()
-            // Ownership of this map is source-fragment based. We keep all downstream edges for
-            // selected sources because the target side can still be referenced during dispatcher
-            // reconstruction even if that target fragment is not being rescheduled.
-            .filter(|((source_fragment_id, _), _)| fragment_ids.contains(source_fragment_id))
+            .filter(|((source_fragment_id, target_fragment_id), _)| {
+                fragment_ids.contains(source_fragment_id)
+                    || fragment_ids.contains(target_fragment_id)
+            })
             .map(|(key, relation)| (*key, relation.clone()))
             .collect();
 
         Some(Self {
             loaded,
             job_extra_info,
-            upstream_fragments,
-            downstream_fragments,
-            downstream_relations,
+            fragment_relations,
         })
     }
 
@@ -210,9 +177,7 @@ impl RescheduleContext {
         let Self {
             loaded,
             job_extra_info,
-            upstream_fragments,
-            downstream_fragments,
-            downstream_relations,
+            fragment_relations,
         } = self;
 
         let mut contexts: HashMap<_, _> = loaded
@@ -224,9 +189,7 @@ impl RescheduleContext {
                     Self {
                         loaded,
                         job_extra_info: HashMap::new(),
-                        upstream_fragments: HashMap::new(),
-                        downstream_fragments: HashMap::new(),
-                        downstream_relations: HashMap::new(),
+                        fragment_relations: HashMap::new(),
                     },
                 )
             })
@@ -262,34 +225,16 @@ impl RescheduleContext {
             }
         }
 
-        for (fragment_id, upstreams) in upstream_fragments {
-            if let Some(database_id) = fragment_databases.get(&fragment_id).copied() {
+        for ((source_fragment_id, target_fragment_id), relation) in fragment_relations {
+            if let Some(database_id) = fragment_databases
+                .get(&source_fragment_id)
+                .or_else(|| fragment_databases.get(&target_fragment_id))
+                .copied()
+            {
                 contexts
                     .get_mut(&database_id)
-                    .expect("database context should exist for fragment")
-                    .upstream_fragments
-                    .insert(fragment_id, upstreams);
-            }
-        }
-
-        for (fragment_id, downstreams) in downstream_fragments {
-            if let Some(database_id) = fragment_databases.get(&fragment_id).copied() {
-                contexts
-                    .get_mut(&database_id)
-                    .expect("database context should exist for fragment")
-                    .downstream_fragments
-                    .insert(fragment_id, downstreams);
-            }
-        }
-
-        for ((source_fragment_id, target_fragment_id), relation) in downstream_relations {
-            // Route by source fragment ownership. A target may be outside of current reschedule
-            // set, but this edge still belongs to the source-side command.
-            if let Some(database_id) = fragment_databases.get(&source_fragment_id).copied() {
-                contexts
-                    .get_mut(&database_id)
-                    .expect("database context should exist for relation source")
-                    .downstream_relations
+                    .expect("database context should exist for a relation endpoint")
+                    .fragment_relations
                     .insert((source_fragment_id, target_fragment_id), relation);
             }
         }
@@ -1132,131 +1077,11 @@ impl Command {
     /// Build the `Update` mutation for `RescheduleIntent`.
     pub(super) fn reschedule_to_mutation(
         reschedules: &HashMap<FragmentId, Reschedule>,
-        fragment_actors: &HashMap<FragmentId, HashSet<ActorId>>,
-        control_stream_manager: &ControlStreamManager,
+        edges: FragmentEdgeBuildResult,
         database_info: &mut InflightDatabaseInfo,
     ) -> MetaResult<Option<Mutation>> {
         {
             {
-                let database_id = database_info.database_id;
-                let mut dispatcher_update = HashMap::new();
-                for reschedule in reschedules.values() {
-                    for &(upstream_fragment_id, dispatcher_id) in
-                        &reschedule.upstream_fragment_dispatcher_ids
-                    {
-                        // Find the actors of the upstream fragment.
-                        let upstream_actor_ids = fragment_actors
-                            .get(&upstream_fragment_id)
-                            .expect("should contain");
-
-                        let upstream_reschedule = reschedules.get(&upstream_fragment_id);
-
-                        // Record updates for all actors.
-                        for &actor_id in upstream_actor_ids {
-                            let added_downstream_actor_id = if upstream_reschedule
-                                .map(|reschedule| !reschedule.removed_actors.contains(&actor_id))
-                                .unwrap_or(true)
-                            {
-                                reschedule
-                                    .added_actors
-                                    .values()
-                                    .flatten()
-                                    .cloned()
-                                    .collect()
-                            } else {
-                                Default::default()
-                            };
-                            // Index with the dispatcher id to check duplicates.
-                            dispatcher_update
-                                .try_insert(
-                                    (actor_id, dispatcher_id),
-                                    DispatcherUpdate {
-                                        actor_id,
-                                        dispatcher_id,
-                                        hash_mapping: reschedule
-                                            .upstream_dispatcher_mapping
-                                            .as_ref()
-                                            .map(|m| m.to_protobuf()),
-                                        added_downstream_actor_id,
-                                        removed_downstream_actor_id: reschedule
-                                            .removed_actors
-                                            .iter()
-                                            .cloned()
-                                            .collect(),
-                                    },
-                                )
-                                .unwrap();
-                        }
-                    }
-                }
-                let dispatcher_update = dispatcher_update.into_values().collect();
-
-                let mut merge_update = HashMap::new();
-                for (&fragment_id, reschedule) in reschedules {
-                    for &downstream_fragment_id in &reschedule.downstream_fragment_ids {
-                        // Find the actors of the downstream fragment.
-                        let downstream_actor_ids = fragment_actors
-                            .get(&downstream_fragment_id)
-                            .expect("should contain");
-
-                        // Downstream removed actors should be skipped
-                        // Newly created actors of the current fragment will not dispatch Update
-                        // barriers to them
-                        let downstream_removed_actors: HashSet<_> = reschedules
-                            .get(&downstream_fragment_id)
-                            .map(|downstream_reschedule| {
-                                downstream_reschedule
-                                    .removed_actors
-                                    .iter()
-                                    .copied()
-                                    .collect()
-                            })
-                            .unwrap_or_default();
-
-                        // Record updates for all actors.
-                        for &actor_id in downstream_actor_ids {
-                            if downstream_removed_actors.contains(&actor_id) {
-                                continue;
-                            }
-
-                            // Index with the fragment id to check duplicates.
-                            merge_update
-                                .try_insert(
-                                    (actor_id, fragment_id),
-                                    MergeUpdate {
-                                        actor_id,
-                                        upstream_fragment_id: fragment_id,
-                                        new_upstream_fragment_id: None,
-                                        added_upstream_actors: reschedule
-                                            .added_actors
-                                            .iter()
-                                            .flat_map(|(worker_id, actors)| {
-                                                let host =
-                                                    control_stream_manager.host_addr(*worker_id);
-                                                actors.iter().map(move |&actor_id| PbActorInfo {
-                                                    actor_id,
-                                                    host: Some(host.clone()),
-                                                    // we assume that we only scale the partial graph of database
-                                                    partial_graph_id: to_partial_graph_id(
-                                                        database_id,
-                                                        None,
-                                                    ),
-                                                })
-                                            })
-                                            .collect(),
-                                        removed_upstream_actor_id: reschedule
-                                            .removed_actors
-                                            .iter()
-                                            .cloned()
-                                            .collect(),
-                                    },
-                                )
-                                .unwrap();
-                        }
-                    }
-                }
-                let merge_update = merge_update.into_values().collect();
-
                 let mut actor_vnode_bitmap_update = HashMap::new();
                 for reschedule in reschedules.values() {
                     // Record updates for all actors in this fragment.
@@ -1290,22 +1115,22 @@ impl Command {
                     }
                 }
 
-                // we don't create dispatchers in reschedule scenario
-                let actor_new_dispatchers = HashMap::new();
-                let mutation = Mutation::Update(UpdateMutation {
-                    dispatcher_update,
-                    merge_update,
+                let mut update = UpdateMutation {
+                    dispatcher_update: Default::default(),
+                    merge_update: Default::default(),
                     actor_vnode_bitmap_update,
                     dropped_actors,
                     actor_splits,
-                    actor_new_dispatchers,
+                    actor_new_dispatchers: Default::default(),
                     actor_cdc_table_snapshot_splits: Some(PbCdcTableSnapshotSplitsWithGeneration {
                         splits: actor_cdc_table_snapshot_splits,
                     }),
                     sink_schema_change: Default::default(),
                     subscriptions_to_drop: vec![],
                     iceberg_pk_index_compaction: None,
-                });
+                };
+                edges.apply_to_update_mutation(&mut update);
+                let mutation = Mutation::Update(update);
                 tracing::debug!("update mutation: {mutation:?}");
                 Ok(Some(mutation))
             }
@@ -1483,50 +1308,24 @@ impl Command {
     /// Collect actors to create for `RescheduleIntent`.
     pub(super) fn reschedule_actors_to_create(
         reschedules: &HashMap<FragmentId, Reschedule>,
-        fragment_actors: &HashMap<FragmentId, HashSet<ActorId>>,
+        edges: &mut FragmentEdgeBuildResult,
         database_info: &InflightDatabaseInfo,
-        control_stream_manager: &ControlStreamManager,
     ) -> StreamJobActorsToCreate {
         {
             {
-                let mut actor_upstreams = Self::collect_database_partial_graph_actor_upstreams(
-                    reschedules.iter().map(|(fragment_id, reschedule)| {
+                edges.collect_actors_to_create(reschedules.iter().map(
+                    |(fragment_id, reschedule)| {
                         (
                             *fragment_id,
-                            reschedule.newly_created_actors.values().map(
-                                |((actor, dispatchers), _)| {
-                                    (actor.actor_id, dispatchers.as_slice())
-                                },
-                            ),
+                            &database_info.fragment(*fragment_id).nodes,
+                            reschedule
+                                .newly_created_actors
+                                .values()
+                                .map(|(actor, worker_id)| (actor, *worker_id)),
+                            database_info.fragment_subscribers(*fragment_id),
                         )
-                    }),
-                    Some((reschedules, fragment_actors)),
-                    database_info,
-                    control_stream_manager,
-                );
-                let mut map: HashMap<WorkerId, HashMap<_, (_, Vec<_>, _)>> = HashMap::new();
-                for (fragment_id, (actor, dispatchers), worker_id) in
-                    reschedules.iter().flat_map(|(fragment_id, reschedule)| {
-                        reschedule
-                            .newly_created_actors
-                            .values()
-                            .map(|(actors, status)| (*fragment_id, actors, status))
-                    })
-                {
-                    let upstreams = actor_upstreams.remove(&actor.actor_id).unwrap_or_default();
-                    map.entry(*worker_id)
-                        .or_default()
-                        .entry(fragment_id)
-                        .or_insert_with(|| {
-                            let node = database_info.fragment(fragment_id).nodes.clone();
-                            let subscribers =
-                                database_info.fragment_subscribers(fragment_id).collect();
-                            (node, vec![], subscribers)
-                        })
-                        .1
-                        .push((actor.clone(), upstreams, dispatchers.clone()));
-                }
-                map
+                    },
+                ))
             }
         }
     }
@@ -1636,102 +1435,6 @@ impl Command {
         };
         edges.apply_to_update_mutation(&mut mutation);
         Mutation::Update(mutation)
-    }
-}
-
-impl Command {
-    #[expect(clippy::type_complexity)]
-    pub(super) fn collect_database_partial_graph_actor_upstreams(
-        actor_dispatchers: impl Iterator<
-            Item = (FragmentId, impl Iterator<Item = (ActorId, &[Dispatcher])>),
-        >,
-        reschedule_dispatcher_update: Option<(
-            &HashMap<FragmentId, Reschedule>,
-            &HashMap<FragmentId, HashSet<ActorId>>,
-        )>,
-        database_info: &InflightDatabaseInfo,
-        control_stream_manager: &ControlStreamManager,
-    ) -> HashMap<ActorId, ActorUpstreams> {
-        let mut actor_upstreams: HashMap<ActorId, ActorUpstreams> = HashMap::new();
-        for (upstream_fragment_id, upstream_actors) in actor_dispatchers {
-            let upstream_fragment = database_info.fragment(upstream_fragment_id);
-            for (upstream_actor_id, dispatchers) in upstream_actors {
-                let upstream_actor_location =
-                    upstream_fragment.actors[&upstream_actor_id].worker_id;
-                let upstream_actor_host = control_stream_manager.host_addr(upstream_actor_location);
-                for downstream_actor_id in dispatchers
-                    .iter()
-                    .flat_map(|dispatcher| dispatcher.downstream_actor_id.iter())
-                {
-                    actor_upstreams
-                        .entry(*downstream_actor_id)
-                        .or_default()
-                        .entry(upstream_fragment_id)
-                        .or_default()
-                        .insert(
-                            upstream_actor_id,
-                            PbActorInfo {
-                                actor_id: upstream_actor_id,
-                                host: Some(upstream_actor_host.clone()),
-                                partial_graph_id: to_partial_graph_id(
-                                    database_info.database_id,
-                                    None,
-                                ),
-                            },
-                        );
-                }
-            }
-        }
-        if let Some((reschedules, fragment_actors)) = reschedule_dispatcher_update {
-            for reschedule in reschedules.values() {
-                for (upstream_fragment_id, _) in &reschedule.upstream_fragment_dispatcher_ids {
-                    let upstream_fragment = database_info.fragment(*upstream_fragment_id);
-                    let upstream_reschedule = reschedules.get(upstream_fragment_id);
-                    for upstream_actor_id in fragment_actors
-                        .get(upstream_fragment_id)
-                        .expect("should exist")
-                    {
-                        let upstream_actor_location =
-                            upstream_fragment.actors[upstream_actor_id].worker_id;
-                        let upstream_actor_host =
-                            control_stream_manager.host_addr(upstream_actor_location);
-                        if let Some(upstream_reschedule) = upstream_reschedule
-                            && upstream_reschedule
-                                .removed_actors
-                                .contains(upstream_actor_id)
-                        {
-                            continue;
-                        }
-                        for (_, downstream_actor_id) in
-                            reschedule
-                                .added_actors
-                                .iter()
-                                .flat_map(|(worker_id, actors)| {
-                                    actors.iter().map(|actor| (*worker_id, *actor))
-                                })
-                        {
-                            actor_upstreams
-                                .entry(downstream_actor_id)
-                                .or_default()
-                                .entry(*upstream_fragment_id)
-                                .or_default()
-                                .insert(
-                                    *upstream_actor_id,
-                                    PbActorInfo {
-                                        actor_id: *upstream_actor_id,
-                                        host: Some(upstream_actor_host.clone()),
-                                        partial_graph_id: to_partial_graph_id(
-                                            database_info.database_id,
-                                            None,
-                                        ),
-                                    },
-                                );
-                        }
-                    }
-                }
-            }
-        }
-        actor_upstreams
     }
 }
 

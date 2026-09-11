@@ -312,7 +312,12 @@ fn build_reschedule_from_context(
     // Materialization only replaces preview actor ids with real ids. Worker
     // placement, vnode ownership, and split assignment remain unchanged.
     let rendered = materialize_actor_assignments(actor_id_counter, previewed);
-    let mut commands = build_reschedule_commands(rendered.fragments, context, all_prev_fragments)?;
+    let mut commands = build_reschedule_commands(
+        rendered.fragments,
+        context,
+        all_prev_fragments,
+        &worker_nodes,
+    )?;
     Ok(commands.remove(&database_id))
 }
 
