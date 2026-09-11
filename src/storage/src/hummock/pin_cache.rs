@@ -141,6 +141,21 @@ pub(crate) struct PinCache {
     recovery_notify: Notify,
     gc: Arc<PinCacheGc>,
     next_path_id: AtomicU64,
+    #[cfg(test)]
+    refill_gate: Mutex<Option<Arc<Semaphore>>>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum PinCacheRefillOutcome {
+    Published,
+    Skipped,
+    CapacityRejected,
+    Obsolete,
+}
+
+enum PinCacheDownloadStart {
+    Download(PinCacheDownloadGuard),
+    Complete(PinCacheRefillOutcome),
 }
 
 struct PinCacheDownloadGuard {
@@ -154,7 +169,10 @@ struct PinCacheDownloadGuard {
 }
 
 impl PinCacheDownloadGuard {
-    async fn write(mut self, mut reader: MonitoredStreamingReader) -> ObjectResult<()> {
+    async fn write(
+        mut self,
+        mut reader: MonitoredStreamingReader,
+    ) -> ObjectResult<PinCacheRefillOutcome> {
         // Set this before opening the writer: cancellation can occur during its creation too.
         self.may_have_temporary_file = true;
         let mut writer = self
@@ -186,11 +204,14 @@ impl PinCacheDownloadGuard {
                 "pinned SST size does not match its version metadata",
             ));
         }
-        self.publish();
-        Ok(())
+        Ok(if self.publish() {
+            PinCacheRefillOutcome::Published
+        } else {
+            PinCacheRefillOutcome::Obsolete
+        })
     }
 
-    fn publish(mut self) {
+    fn publish(mut self) -> bool {
         let mut state = self.pin_cache.state.write();
         if state
             .inflight
@@ -206,6 +227,7 @@ impl PinCacheDownloadGuard {
             state.published.insert(self.object_id, self.entry.clone());
             self.published = true;
         }
+        self.published
     }
 }
 
@@ -297,6 +319,8 @@ impl PinCache {
             recovery_notify: Notify::new(),
             gc,
             next_path_id: AtomicU64::new(rand::random()),
+            #[cfg(test)]
+            refill_gate: Mutex::new(None),
         });
         let recovery = pin_cache.clone();
         tokio::spawn(async move { recovery.recover_local_files().await });
@@ -524,7 +548,7 @@ impl PinCache {
     fn start_download(
         self: &Arc<Self>,
         object_id: HummockSstableObjectId,
-    ) -> ObjectResult<Option<PinCacheDownloadGuard>> {
+    ) -> ObjectResult<PinCacheDownloadStart> {
         let mut state = self.state.write();
         if state.recovery_state == RecoveryState::Failed {
             return Err(ObjectError::internal(
@@ -537,10 +561,14 @@ impl PinCache {
             .and_then(|desired| desired.get(&object_id))
             .copied()
         else {
-            return Ok(None);
+            return Ok(PinCacheDownloadStart::Complete(
+                PinCacheRefillOutcome::Skipped,
+            ));
         };
         if state.published.contains_key(&object_id) || state.inflight.contains_key(&object_id) {
-            return Ok(None);
+            return Ok(PinCacheDownloadStart::Complete(
+                PinCacheRefillOutcome::Skipped,
+            ));
         }
         let entry = Arc::new(PinCacheEntry {
             path: self.new_object_path(object_id),
@@ -554,10 +582,12 @@ impl PinCache {
                 capacity = self.gc.capacity,
                 "skipping pin cache refill because local capacity is exhausted"
             );
-            return Ok(None);
+            return Ok(PinCacheDownloadStart::Complete(
+                PinCacheRefillOutcome::CapacityRejected,
+            ));
         }
         state.inflight.insert(object_id, entry.clone());
-        Ok(Some(PinCacheDownloadGuard {
+        Ok(PinCacheDownloadStart::Download(PinCacheDownloadGuard {
             pin_cache: self.clone(),
             object_id,
             entry,
@@ -571,13 +601,28 @@ impl PinCache {
         remote_store: ObjectStoreRef,
         remote_path: String,
         object_id: HummockSstableObjectId,
-    ) -> ObjectResult<()> {
+    ) -> ObjectResult<PinCacheRefillOutcome> {
         self.wait_for_recovery().await;
-        let Some(download) = self.start_download(object_id)? else {
-            return Ok(());
+        #[cfg(test)]
+        let refill_gate = { self.refill_gate.lock().clone() };
+        #[cfg(test)]
+        if let Some(gate) = refill_gate {
+            gate.acquire()
+                .await
+                .expect("test refill gate must stay open")
+                .forget();
+        }
+        let download = match self.start_download(object_id)? {
+            PinCacheDownloadStart::Download(download) => download,
+            PinCacheDownloadStart::Complete(outcome) => return Ok(outcome),
         };
         let reader = remote_store.streaming_read(&remote_path, ..).await?;
         download.write(reader).await
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_refill_gate_for_test(&self, gate: Arc<Semaphore>) {
+        *self.refill_gate.lock() = Some(gate);
     }
 }
 
@@ -596,7 +641,10 @@ mod tests {
         ObjectStoreRef, build_remote_object_store,
     };
 
-    use super::{PinCache, RecoveryState};
+    use super::{
+        PinCache, PinCacheDownloadGuard, PinCacheDownloadStart, PinCacheRefillOutcome,
+        RecoveryState,
+    };
     use crate::monitor::ObjectStoreMetrics;
 
     fn in_memory_object_store() -> ObjectStoreRef {
@@ -635,6 +683,28 @@ mod tests {
         })
         .await
         .unwrap();
+    }
+
+    fn start_download(
+        pin_cache: &Arc<PinCache>,
+        object_id: HummockSstableObjectId,
+    ) -> PinCacheDownloadGuard {
+        match pin_cache.start_download(object_id).unwrap() {
+            PinCacheDownloadStart::Download(download) => download,
+            PinCacheDownloadStart::Complete(outcome) => {
+                panic!("expected download, got {outcome:?}")
+            }
+        }
+    }
+
+    fn completed_download_outcome(
+        pin_cache: &Arc<PinCache>,
+        object_id: HummockSstableObjectId,
+    ) -> PinCacheRefillOutcome {
+        match pin_cache.start_download(object_id).unwrap() {
+            PinCacheDownloadStart::Download(_) => panic!("expected download to be skipped"),
+            PinCacheDownloadStart::Complete(outcome) => outcome,
+        }
     }
 
     #[test]
@@ -743,13 +813,16 @@ mod tests {
         let object_id = HummockSstableObjectId::from(1001);
         pin_cache.replace_desired_objects(HashMap::from([(object_id, 8)]));
 
-        let download = pin_cache.start_download(object_id).unwrap().unwrap();
+        let download = start_download(&pin_cache, object_id);
         assert!(pin_cache.get(object_id).is_none());
-        assert!(pin_cache.start_download(object_id).unwrap().is_none());
+        assert_eq!(
+            completed_download_outcome(&pin_cache, object_id),
+            PinCacheRefillOutcome::Skipped
+        );
         drop(download);
         assert!(pin_cache.state.read().inflight.is_empty());
 
-        let retry = pin_cache.start_download(object_id).unwrap().unwrap();
+        let retry = start_download(&pin_cache, object_id);
         pin_cache
             .store
             .upload(&retry.entry.path, Bytes::from_static(b"complete"))
@@ -758,7 +831,10 @@ mod tests {
         retry.publish();
         assert!(pin_cache.state.read().inflight.is_empty());
         assert!(pin_cache.get(object_id).is_some());
-        assert!(pin_cache.start_download(object_id).unwrap().is_none());
+        assert_eq!(
+            completed_download_outcome(&pin_cache, object_id),
+            PinCacheRefillOutcome::Skipped
+        );
     }
 
     #[tokio::test]
@@ -768,7 +844,7 @@ mod tests {
             let object_id = HummockSstableObjectId::from(1001);
             let desired = HashMap::from([(object_id, 11)]);
             pin_cache.replace_desired_objects(desired.clone());
-            let old = pin_cache.start_download(object_id).unwrap().unwrap();
+            let old = start_download(&pin_cache, object_id);
 
             if revoke_by_unpin {
                 pin_cache.replace_desired_objects(HashMap::new());
@@ -776,7 +852,7 @@ mod tests {
                 pin_cache.replace_desired_objects(HashMap::from([(object_id, 12)]));
             }
             pin_cache.replace_desired_objects(desired);
-            let replacement = pin_cache.start_download(object_id).unwrap().unwrap();
+            let replacement = start_download(&pin_cache, object_id);
             assert_ne!(old.entry.path, replacement.entry.path);
 
             old.publish();
@@ -833,7 +909,7 @@ mod tests {
             let object_id = HummockSstableObjectId::from(1001);
             pin_cache.replace_desired_objects([(object_id, 8)]);
             pin_cache.wait_for_recovery().await;
-            let download = pin_cache.start_download(object_id).unwrap().unwrap();
+            let download = start_download(&pin_cache, object_id);
             let final_path = download.entry.path.clone();
             let (started_tx, started_rx) = tokio::sync::oneshot::channel();
             let (fail_tx, fail_rx) = tokio::sync::oneshot::channel();
@@ -895,7 +971,10 @@ mod tests {
                     .is_object_not_found_error()
             );
             assert_eq!(pin_cache.gc.state.lock().accounted_bytes, 8);
-            assert!(pin_cache.start_download(object_id).unwrap().is_none());
+            assert_eq!(
+                completed_download_outcome(&pin_cache, object_id),
+                PinCacheRefillOutcome::CapacityRejected
+            );
             // Unpin must not release the reservation for the backend-owned temporary file either.
             pin_cache.replace_desired_objects([]);
             assert_eq!(pin_cache.gc.state.lock().accounted_bytes, 8);

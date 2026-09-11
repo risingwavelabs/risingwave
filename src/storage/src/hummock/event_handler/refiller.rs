@@ -46,9 +46,7 @@ use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 
 use crate::hummock::local_version::pinned_version::PinnedVersion;
-use crate::hummock::pin_cache_refill::{
-    PinCacheMembershipUpdate, PinCacheRefillController, refill_pin_cache_objects,
-};
+use crate::hummock::pin_cache_refill::{PinCacheMembershipUpdate, PinCacheRefillController};
 use crate::hummock::{
     Block, HummockError, HummockResult, RecentFilterTrait, Sstable, SstableBlockIndex,
     SstableStoreRef, TableHolder,
@@ -260,7 +258,6 @@ struct Item {
 
 pub(crate) struct CacheRefillPlan {
     deltas: Vec<SstDeltaInfo>,
-    pin_cache_refill_object_ids: HashSet<HummockSstableObjectId>,
 }
 
 pub(crate) type SpawnRefillTask = Arc<
@@ -520,10 +517,7 @@ impl CacheRefiller {
             });
         }
         let context = self.new_cache_refill_context(&deltas);
-        let plan = CacheRefillPlan {
-            deltas,
-            pin_cache_refill_object_ids,
-        };
+        let plan = CacheRefillPlan { deltas };
         let handle = (self.spawn_refill_task)(
             plan,
             context,
@@ -941,15 +935,7 @@ struct CacheRefillTask {
 
 impl CacheRefillTask {
     async fn run(self) {
-        let CacheRefillPlan {
-            deltas,
-            pin_cache_refill_object_ids,
-        } = self.plan;
-        let pin_refill = refill_pin_cache_objects(
-            self.context.sstable_store.clone(),
-            self.context.concurrency.clone(),
-            pin_cache_refill_object_ids,
-        );
+        let CacheRefillPlan { deltas } = self.plan;
         let tasks = deltas
             .iter()
             .map(|delta| {
@@ -982,9 +968,7 @@ impl CacheRefillTask {
             })
             .collect_vec();
         let block_refill = join_all(tasks);
-        let future = async { futures::join!(pin_refill, block_refill) };
-
-        let _ = tokio::time::timeout(self.context.config.timeout, future).await;
+        let _ = tokio::time::timeout(self.context.config.timeout, block_refill).await;
     }
 
     async fn meta_cache_refill(
@@ -1179,7 +1163,7 @@ mod tests {
     use risingwave_pb::hummock::{
         LevelType as PbLevelType, PbHummockVersion, PbLevel, PbOverlappingLevel, PbStateTableInfo,
     };
-    use risingwave_pb::id::TableId;
+    use risingwave_pb::id::{CompactionGroupId, TableId};
     use tokio::sync::mpsc::unbounded_channel;
 
     use super::{
@@ -1245,40 +1229,65 @@ mod tests {
 
     #[allow(deprecated)]
     fn pinned_version_with_sst(table_id: TableId, sst: &SstableInfo) -> PinnedVersion {
-        let compaction_group_id = StaticCompactionGroupId::NewCompactionGroup;
-        let level = PbLevel {
-            level_idx: 0,
-            level_type: PbLevelType::Overlapping as i32,
-            table_infos: vec![sst.clone().into()],
-            total_file_size: sst.file_size,
-            sub_level_id: 1,
-            uncompressed_file_size: sst.uncompressed_file_size,
-            vnode_partition_count: 0,
-        };
-        let version = HummockVersion::from_rpc_protobuf(&PbHummockVersion {
-            id: 1.into(),
-            levels: HashMap::from([(
+        pinned_version_with_ssts(&[table_id], std::slice::from_ref(sst))
+    }
+
+    #[allow(deprecated)]
+    fn pinned_version_with_ssts(table_ids: &[TableId], ssts: &[SstableInfo]) -> PinnedVersion {
+        pinned_version_with_groups(&[(
+            StaticCompactionGroupId::NewCompactionGroup,
+            table_ids,
+            ssts,
+        )])
+    }
+
+    #[allow(deprecated)]
+    fn pinned_version_with_groups(
+        groups: &[(CompactionGroupId, &[TableId], &[SstableInfo])],
+    ) -> PinnedVersion {
+        let mut levels = HashMap::new();
+        let mut state_table_info = HashMap::new();
+        for &(compaction_group_id, table_ids, ssts) in groups {
+            let total_file_size = ssts.iter().map(|sst| sst.file_size).sum();
+            let uncompressed_file_size = ssts.iter().map(|sst| sst.uncompressed_file_size).sum();
+            let level = PbLevel {
+                level_idx: 0,
+                level_type: PbLevelType::Overlapping as i32,
+                table_infos: ssts.iter().cloned().map(Into::into).collect(),
+                total_file_size,
+                sub_level_id: 1,
+                uncompressed_file_size,
+                vnode_partition_count: 0,
+            };
+            levels.insert(
                 compaction_group_id,
                 PbLevels {
                     levels: vec![],
                     l0: Some(PbOverlappingLevel {
                         sub_levels: vec![level],
-                        total_file_size: sst.file_size,
-                        uncompressed_file_size: sst.uncompressed_file_size,
+                        total_file_size,
+                        uncompressed_file_size,
                     }),
                     group_id: compaction_group_id,
                     parent_group_id: compaction_group_id,
                     member_table_ids: vec![],
                     compaction_group_version_id: 0,
                 },
-            )]),
-            state_table_info: HashMap::from([(
-                table_id,
-                PbStateTableInfo {
-                    committed_epoch: 0,
-                    compaction_group_id,
-                },
-            )]),
+            );
+            state_table_info.extend(table_ids.iter().map(|&table_id| {
+                (
+                    table_id,
+                    PbStateTableInfo {
+                        committed_epoch: 0,
+                        compaction_group_id,
+                    },
+                )
+            }));
+        }
+        let version = HummockVersion::from_rpc_protobuf(&PbHummockVersion {
+            id: 1.into(),
+            levels,
+            state_table_info,
             ..Default::default()
         });
         PinnedVersion::new(version, unbounded_channel().0)
@@ -1631,7 +1640,13 @@ mod tests {
         );
 
         assert_eq!(refiller.next_events().await.len(), 1);
-        assert!(pin_cache.get(sst_info.object_id).is_some());
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while pin_cache.get(sst_info.object_id).is_none() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
 
         sstable_store.clear_block_cache().await.unwrap();
         sstable_store
@@ -1669,6 +1684,55 @@ mod tests {
                 .await
                 .is_err()
         );
+    }
+
+    #[tokio::test]
+    async fn test_pin_cache_download_does_not_block_version_refill_event() {
+        let table_id = TableId::from(233);
+        let sstable_store = mock_sstable_store().await;
+        let (_, sst_info) =
+            gen_test_sst_with_object_id(table_id, sstable_store.clone(), 1001).await;
+        let pin_cache = pin_cache_for_test();
+        let pin_download_gate = Arc::new(tokio::sync::Semaphore::new(0));
+        pin_cache.set_refill_gate_for_test(pin_download_gate.clone());
+        sstable_store.set_pin_cache(pin_cache.clone());
+
+        let mut refiller = CacheRefiller::new(
+            Role::Streaming,
+            test_refill_config(CacheRefillPolicy::Disabled),
+            sstable_store,
+            CacheRefiller::default_spawn_refill_task(),
+            pinned_version_for_test(),
+        );
+        refiller.replace_table_cache_refill_policies(HashMap::from([(
+            table_id,
+            CacheRefillPolicy::Pinned,
+        )]));
+        refiller.start_cache_refill(
+            vec![SstDeltaInfo {
+                insert_sst_infos: vec![sst_info.clone()],
+                insert_sst_level: 0,
+                ..Default::default()
+            }],
+            pinned_version_for_test(),
+            pinned_version_with_sst(table_id, &sst_info),
+            PinCacheMembershipUpdate::Delta,
+        );
+
+        let events = tokio::time::timeout(Duration::from_secs(1), refiller.next_events())
+            .await
+            .expect("version refill event must not wait for Pin Cache download");
+        assert_eq!(events.len(), 1);
+        assert!(pin_cache.get(sst_info.object_id).is_none());
+
+        pin_download_gate.add_permits(1);
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while pin_cache.get(sst_info.object_id).is_none() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("Pin Cache download should continue after the version event");
     }
 
     #[tokio::test]
@@ -1799,6 +1863,136 @@ mod tests {
             PinCacheMembershipUpdate::Delta,
         );
         assert!(!pin_cache.is_desired(sst_info.object_id));
+    }
+
+    #[tokio::test]
+    async fn test_pin_cache_keeps_split_object_until_last_logical_reference() {
+        let table_a = TableId::from(233);
+        let table_b = TableId::from(234);
+        let object_id = HummockSstableObjectId::from(1001);
+        let branch = |sst_id, table_id| {
+            SstableInfo::from(SstableInfoInner {
+                object_id,
+                sst_id,
+                file_size: 8,
+                table_ids: vec![table_id],
+                ..Default::default()
+            })
+        };
+        let branch_a = branch(1001.into(), table_a);
+        let branch_b = branch(1002.into(), table_b);
+        let both =
+            pinned_version_with_ssts(&[table_a, table_b], &[branch_a.clone(), branch_b.clone()]);
+        let only_b = pinned_version_with_ssts(&[table_a, table_b], std::slice::from_ref(&branch_b));
+
+        let sstable_store = mock_sstable_store().await;
+        let pin_cache = pin_cache_for_test();
+        sstable_store.set_pin_cache(pin_cache.clone());
+        let mut refiller = CacheRefiller::new(
+            Role::Streaming,
+            test_refill_config(CacheRefillPolicy::Disabled),
+            sstable_store,
+            CacheRefiller::default_spawn_refill_task(),
+            both.clone(),
+        );
+        refiller.replace_table_cache_refill_policies(HashMap::from([
+            (table_a, CacheRefillPolicy::Pinned),
+            (table_b, CacheRefillPolicy::Pinned),
+        ]));
+        assert!(pin_cache.is_desired(object_id));
+
+        refiller.start_cache_refill(
+            vec![SstDeltaInfo {
+                delete_sst_infos: vec![branch_a],
+                ..Default::default()
+            }],
+            both,
+            only_b.clone(),
+            PinCacheMembershipUpdate::Delta,
+        );
+        assert_eq!(refiller.next_events().await.len(), 1);
+        assert!(pin_cache.is_desired(object_id));
+
+        refiller.start_cache_refill(
+            vec![SstDeltaInfo {
+                delete_sst_infos: vec![branch_b],
+                ..Default::default()
+            }],
+            only_b,
+            pinned_version_for_test(),
+            PinCacheMembershipUpdate::Delta,
+        );
+        assert_eq!(refiller.next_events().await.len(), 1);
+        assert!(!pin_cache.is_desired(object_id));
+    }
+
+    #[tokio::test]
+    async fn test_pin_cache_rebuild_counts_split_object_across_compaction_groups() {
+        let table_a = TableId::from(233);
+        let table_b = TableId::from(234);
+        let object_id = HummockSstableObjectId::from(1001);
+        let branch = |sst_id, table_id| {
+            SstableInfo::from(SstableInfoInner {
+                object_id,
+                sst_id,
+                file_size: 8,
+                table_ids: vec![table_id],
+                ..Default::default()
+            })
+        };
+        let branch_a = branch(1001.into(), table_a);
+        let branch_b = branch(1002.into(), table_b);
+        let both = pinned_version_with_groups(&[
+            (
+                StaticCompactionGroupId::StateDefault,
+                &[table_a],
+                std::slice::from_ref(&branch_a),
+            ),
+            (
+                StaticCompactionGroupId::MaterializedView,
+                &[table_b],
+                std::slice::from_ref(&branch_b),
+            ),
+        ]);
+        let only_b = pinned_version_with_groups(&[(
+            StaticCompactionGroupId::MaterializedView,
+            &[table_b],
+            std::slice::from_ref(&branch_b),
+        )]);
+
+        let sstable_store = mock_sstable_store().await;
+        let pin_cache = pin_cache_for_test();
+        sstable_store.set_pin_cache(pin_cache.clone());
+        let mut refiller = CacheRefiller::new(
+            Role::Streaming,
+            test_refill_config(CacheRefillPolicy::Disabled),
+            sstable_store,
+            CacheRefiller::default_spawn_refill_task(),
+            both.clone(),
+        );
+        refiller.replace_table_cache_refill_policies(HashMap::from([
+            (table_a, CacheRefillPolicy::Pinned),
+            (table_b, CacheRefillPolicy::Pinned),
+        ]));
+        assert!(pin_cache.is_desired(object_id));
+
+        refiller.start_cache_refill(
+            vec![],
+            both,
+            only_b.clone(),
+            PinCacheMembershipUpdate::Rebuild,
+        );
+        assert_eq!(refiller.next_events().await.len(), 1);
+        assert!(pin_cache.is_desired(object_id));
+
+        refiller.start_cache_refill(
+            vec![],
+            only_b,
+            pinned_version_for_test(),
+            PinCacheMembershipUpdate::Rebuild,
+        );
+        assert_eq!(refiller.next_events().await.len(), 1);
+        assert!(!pin_cache.is_desired(object_id));
     }
 
     #[tokio::test]
