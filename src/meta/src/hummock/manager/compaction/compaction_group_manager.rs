@@ -354,6 +354,7 @@ impl HummockManager {
             new_version_delta.removed_table_ids.insert(table_id);
         }
 
+        let mut removed_groups = vec![];
         for (group_id, change) in group_changes {
             if change.remaining_member_count == 0 && group_id > StaticCompactionGroupId::End {
                 let max_level = new_version_delta
@@ -368,8 +369,7 @@ impl HummockManager {
                     .group_deltas
                     .push(GroupDelta::GroupDestroy(PbGroupDestroy {}));
                 remove_compaction_group_metrics(&self.metrics, group_id, max_level);
-                // clean up compaction schedule state for the removed group
-                self.compaction_state.remove_compaction_group(group_id);
+                removed_groups.push(group_id);
             } else {
                 new_version_delta
                     .group_deltas
@@ -394,6 +394,10 @@ impl HummockManager {
             version.latest_version(),
         )));
         commit_multi_var!(self.meta_store_ref(), version, compaction_groups_txn)?;
+
+        for group_id in removed_groups {
+            self.compaction_state.remove_compaction_group(group_id);
+        }
 
         // No need to handle DeltaType::GroupDestroy during time travel.
         Ok(())

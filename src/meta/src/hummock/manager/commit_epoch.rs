@@ -343,22 +343,21 @@ impl HummockManager {
             .values()
             .flat_map(|l| l.get_object_ids())
             .collect::<HashSet<_>>();
+        // Publish candidates while the committed groups are protected from deletion.
+        if !self.env.opts.compaction_deterministic_test {
+            for id in &modified_compaction_groups {
+                self.try_send_compaction_request(*id, compact_task::TaskType::Dynamic);
+            }
+        }
         drop(versioning_guard);
         let may_delete_object_ids =
             &table_change_log_object_ids_before_commit - &table_change_log_object_ids_after_commit;
         self.gc_manager
             .add_may_delete_object_ids(may_delete_object_ids.into_iter());
 
-        // Don't trigger compactions if we enable deterministic compaction
-        if !self.env.opts.compaction_deterministic_test {
-            // commit_epoch may contains SSTs from any compaction group
-            for id in &modified_compaction_groups {
-                self.try_send_compaction_request(*id, compact_task::TaskType::Dynamic);
-            }
-            if !table_stats_change.is_empty() {
-                self.collect_table_write_throughput(table_stats_change)
-                    .await;
-            }
+        if !self.env.opts.compaction_deterministic_test && !table_stats_change.is_empty() {
+            self.collect_table_write_throughput(table_stats_change)
+                .await;
         }
         if !modified_compaction_groups.is_empty() {
             self.try_update_write_limits(&modified_compaction_groups)

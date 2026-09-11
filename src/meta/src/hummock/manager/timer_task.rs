@@ -700,7 +700,11 @@ impl HummockManager {
     }
 
     async fn on_handle_trigger_multi_group(&self, task_type: compact_task::TaskType) {
-        for cg_id in self.compaction_group_ids().await {
+        let versioning = self
+            .versioning
+            .read_with_process_name("on_handle_trigger_multi_group")
+            .await;
+        for &cg_id in versioning.current_version.levels.keys() {
             self.compaction_state.try_sched_compaction(
                 cg_id,
                 task_type,
