@@ -1304,14 +1304,11 @@ mod tests {
         // This poll creates reader 1 and starts the snapshot, consuming its injected error. The
         // executor then keeps polling the CDC upstream until a barrier provides a safe recovery
         // boundary.
-        let timeout = tokio::time::timeout(Duration::from_millis(50), executor.next());
-        tokio::pin!(timeout);
-        assert!(futures::poll!(&mut timeout).is_pending());
-        #[cfg(madsim)]
-        tokio::time::advance(Duration::from_millis(50));
-        #[cfg(not(madsim))]
-        tokio::time::advance(Duration::from_millis(50)).await;
-        assert!(timeout.await.is_err());
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), executor.next())
+                .await
+                .is_err()
+        );
         assert_eq!(external_table_for_assertion.mock_reader_create_count(), 1);
 
         curr_epoch.inc_epoch();
