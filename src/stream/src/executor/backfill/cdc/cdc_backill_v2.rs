@@ -938,8 +938,6 @@ fn route_cdc_chunk(
             continue;
         };
 
-        let split = &splits[split_idx];
-
         // Buffer rows in the active split for replay after any later snapshot output.
         if split_idx == current_split_idx {
             buffered.set(row.index(), true);
