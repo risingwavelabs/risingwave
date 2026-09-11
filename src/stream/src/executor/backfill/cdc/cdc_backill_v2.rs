@@ -369,10 +369,14 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                         is_snapshot_paused,
                         "start cdc backfill split"
                     );
-                    let mut row_count = restored_state.row_count as u64;
+                    let mut durable_row_count = restored_state.row_count as u64;
                     let mut split_cdc_offset_low = restored_state.cdc_offset_low.clone();
 
                     let split_cdc_offset_high = 'backfill_loop: loop {
+                        // A rebuilt reader restarts this split from its lower bound, so count each
+                        // snapshot attempt independently instead of accumulating duplicate reads.
+                        let mut attempt_row_count = 0_u64;
+
                         if split_cdc_offset_low.is_none() {
                             static CDC_CONN_SEMAPHORE: tokio::sync::Semaphore =
                                 tokio::sync::Semaphore::const_new(10);
@@ -430,11 +434,14 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                                 yield Message::Chunk(chunk.clone());
                                             }
 
+                                            durable_row_count =
+                                                durable_row_count.max(attempt_row_count);
+
                                             state_impl
                                                 .mutate_state(
                                                     split.split_id,
                                                     false,
-                                                    row_count,
+                                                    durable_row_count,
                                                     split_cdc_offset_low.clone(),
                                                     None,
                                                 )
@@ -570,6 +577,10 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                                     yield Message::Chunk(chunk);
                                                 }
 
+                                                // This attempt scanned the whole split, so its count
+                                                // is exact even if earlier attempts read duplicate rows.
+                                                durable_row_count = attempt_row_count;
+
                                                 // Limit concurrent CDC connections globally to 10 using a semaphore.
                                                 static CDC_CONN_SEMAPHORE: tokio::sync::Semaphore =
                                                     tokio::sync::Semaphore::const_new(10);
@@ -587,7 +598,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                                 break 'backfill_stream;
                                             }
                                             Ok(Some(chunk)) => {
-                                                row_count = row_count
+                                                attempt_row_count = attempt_row_count
                                                     .saturating_add(chunk.cardinality() as u64);
 
                                                 yield Message::Chunk(mapping_chunk(
@@ -644,7 +655,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                                     .mutate_state(
                                                         split.split_id,
                                                         false,
-                                                        row_count,
+                                                        durable_row_count,
                                                         split_cdc_offset_low.clone(),
                                                         None,
                                                     )
@@ -754,7 +765,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                         .mutate_state(
                             split.split_id,
                             true,
-                            row_count,
+                            durable_row_count,
                             split_cdc_offset_low.clone(),
                             Some(split_cdc_offset_high),
                         )
@@ -1204,7 +1215,7 @@ mod tests {
         .await
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_rebuilds_reader_after_snapshot_error() {
         let (mut tx, source) = MockSource::channel();
 
@@ -1295,11 +1306,11 @@ mod tests {
         // This poll creates reader 1 and starts the snapshot, consuming its injected error. The
         // executor then keeps polling the CDC upstream until a barrier provides a safe recovery
         // boundary.
-        assert!(
-            tokio::time::timeout(Duration::from_millis(50), executor.next())
-                .await
-                .is_err()
-        );
+        let timeout = tokio::time::timeout(Duration::from_millis(50), executor.next());
+        tokio::pin!(timeout);
+        assert!(futures::poll!(&mut timeout).is_pending());
+        tokio::time::advance(Duration::from_millis(50)).await;
+        assert!(timeout.await.is_err());
         assert_eq!(external_table_for_assertion.mock_reader_create_count(), 1);
 
         curr_epoch.inc_epoch();
