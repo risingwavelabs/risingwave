@@ -992,7 +992,7 @@ impl Command {
         job_type: &CreateStreamingJobType,
         dropped_actors: impl IntoIterator<Item = ActorId>,
         is_currently_paused: bool,
-        edges: &mut FragmentEdgeBuildResult,
+        edges: FragmentEdgeBuildResult,
         control_stream_manager: &ControlStreamManager,
         actor_cdc_table_snapshot_splits: Option<HashMap<ActorId, PbCdcTableSnapshotSplits>>,
         split_assignment: &SplitAssignment,
@@ -1003,7 +1003,6 @@ impl Command {
             {
                 let CreateStreamingJobCommandInfo {
                     stream_job_fragments,
-                    upstream_fragment_downstreams,
                     fragment_backfill_ordering,
                     streaming_job,
                     ..
@@ -1090,15 +1089,8 @@ impl Command {
                 let actor_cdc_table_snapshot_splits = actor_cdc_table_snapshot_splits
                     .map(|splits| PbCdcTableSnapshotSplitsWithGeneration { splits });
 
-                let add_mutation = AddMutation {
-                    actor_dispatchers: edges
-                        .dispatchers
-                        .extract_if(|fragment_id, _| {
-                            upstream_fragment_downstreams.contains_key(fragment_id)
-                        })
-                        .flat_map(|(_, fragment_dispatchers)| fragment_dispatchers.into_iter())
-                        .map(|(actor_id, dispatchers)| (actor_id, Dispatchers { dispatchers }))
-                        .collect(),
+                let mut add_mutation = AddMutation {
+                    actor_dispatchers: Default::default(),
                     added_actors,
                     actor_splits,
                     // If the cluster is already paused, the new actors should be paused too.
@@ -1113,6 +1105,7 @@ impl Command {
                         .map(|old_sink_id| vec![old_sink_id])
                         .unwrap_or_default(),
                 };
+                edges.apply_to_add_mutation(&mut add_mutation);
 
                 Ok(Mutation::Add(add_mutation))
             }
@@ -1123,27 +1116,15 @@ impl Command {
     pub(super) fn replace_stream_job_to_mutation(
         ReplaceStreamJobPlan {
             old_fragments,
-            replace_upstream,
-            upstream_fragment_downstreams,
             auto_refresh_schema_sinks,
             ..
         }: &ReplaceStreamJobPlan,
-        edges: &mut FragmentEdgeBuildResult,
+        edges: FragmentEdgeBuildResult,
         database_info: &mut InflightDatabaseInfo,
         split_assignment: &SplitAssignment,
-    ) -> MetaResult<Option<Mutation>> {
+    ) -> MetaResult<Mutation> {
         {
             {
-                let merge_updates = edges
-                    .merge_updates
-                    .extract_if(|fragment_id, _| replace_upstream.contains_key(fragment_id))
-                    .collect();
-                let dispatchers = edges
-                    .dispatchers
-                    .extract_if(|fragment_id, _| {
-                        upstream_fragment_downstreams.contains_key(fragment_id)
-                    })
-                    .collect();
                 let actor_cdc_table_snapshot_splits = database_info
                     .assign_cdc_backfill_splits(old_fragments.stream_job_id)?
                     .map(|splits| PbCdcTableSnapshotSplitsWithGeneration { splits });
@@ -1159,8 +1140,7 @@ impl Command {
                         .flat_map(|fragment_id| {
                             database_info.fragment(fragment_id).actors.keys().copied()
                         }),
-                    merge_updates,
-                    dispatchers,
+                    edges,
                     split_assignment,
                     actor_cdc_table_snapshot_splits,
                     auto_refresh_schema_sinks.as_ref(),
@@ -1627,27 +1607,18 @@ impl Command {
 
     fn generate_update_mutation_for_replace_table(
         dropped_actors: impl IntoIterator<Item = ActorId>,
-        merge_updates: HashMap<FragmentId, Vec<MergeUpdate>>,
-        dispatchers: FragmentActorDispatchers,
+        edges: FragmentEdgeBuildResult,
         split_assignment: &SplitAssignment,
         cdc_table_snapshot_split_assignment: Option<PbCdcTableSnapshotSplitsWithGeneration>,
         auto_refresh_schema_sinks: Option<&Vec<AutoRefreshSchemaSinkContext>>,
-    ) -> Option<Mutation> {
+    ) -> Mutation {
         let dropped_actors = dropped_actors.into_iter().collect();
-
-        let actor_new_dispatchers = dispatchers
-            .into_values()
-            .flatten()
-            .map(|(actor_id, dispatchers)| (actor_id, Dispatchers { dispatchers }))
-            .collect();
 
         let actor_splits = split_assignment
             .values()
             .flat_map(build_actor_connector_splits)
             .collect();
-        Some(Mutation::Update(UpdateMutation {
-            actor_new_dispatchers,
-            merge_update: merge_updates.into_values().flatten().collect(),
+        let mut mutation = UpdateMutation {
             dropped_actors,
             actor_splits,
             actor_cdc_table_snapshot_splits: cdc_table_snapshot_split_assignment,
@@ -1682,7 +1653,9 @@ impl Command {
                 })
                 .collect(),
             ..Default::default()
-        }))
+        };
+        edges.apply_to_update_mutation(&mut mutation);
+        Mutation::Update(mutation)
     }
 }
 
