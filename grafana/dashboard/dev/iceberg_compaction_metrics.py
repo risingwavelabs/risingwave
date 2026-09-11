@@ -92,6 +92,68 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
+                panels.subheader("OpenDAL FileIO"),
+                panels.timeseries_ops(
+                    "Iceberg OpenDAL Operation Completion Rate",
+                    "completed OpenDAL layer operations per second; chunked reads can be recorded per chunk rather than per high-level FileIO call",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('opendal_operation_duration_seconds_count')}[$__rate_interval])) by (scheme, operation)",
+                            "{{scheme}} {{operation}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Iceberg Object Store Successful Response Rate",
+                    "underlying successful HTTP responses per second; connection failures and HTTP error responses are shown in the FileIO Error Rate panel",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('opendal_http_request_duration_seconds_count')}[$__rate_interval])) by (scheme, operation, service_operation)",
+                            "{{scheme}} {{service_operation}} ({{operation}})",
+                        ),
+                    ],
+                ),
+                panels.timeseries_bytes_per_sec(
+                    "Iceberg FileIO Throughput",
+                    "bytes processed by OpenDAL read, write, and copy operations per second",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('opendal_operation_bytes_sum')}[$__rate_interval])) by (scheme, operation)",
+                            "{{scheme}} {{operation}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_latency(
+                    "Iceberg FileIO Operation Duration",
+                    "OpenDAL layer operation duration in seconds; chunked reads are measured per chunk",
+                    [
+                        *quantile(
+                            lambda quantile, legend: panels.target(
+                                f"histogram_quantile({quantile}, sum(rate({metric('opendal_operation_duration_seconds_bucket')}[$__rate_interval])) by (le, scheme, operation))",
+                                "{{scheme}} {{operation}}" + f" p{legend}",
+                            ),
+                            [50, 99, "max"],
+                        ),
+                    ],
+                ),
+                panels.timeseries_ops(
+                    "Iceberg FileIO Error Rate",
+                    "OpenDAL layer failures and underlying HTTP connection or status errors per second",
+                    [
+                        panels.target(
+                            f"sum(rate({metric('opendal_operation_errors_total')}[$__rate_interval])) by (scheme, operation, error)",
+                            "operation {{scheme}} {{operation}} {{error}}",
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('opendal_http_connection_errors_total')}[$__rate_interval])) by (scheme, operation, service_operation)",
+                            "connection {{scheme}} {{service_operation}} ({{operation}})",
+                        ),
+                        panels.target(
+                            f"sum(rate({metric('opendal_http_status_errors_total')}[$__rate_interval])) by (scheme, operation, service_operation, status_code)",
+                            "status {{scheme}} {{service_operation}} {{status_code}} ({{operation}})",
+                        ),
+                    ],
+                ),
                 panels.subheader("DataFusion"),
                 panels.timeseries_count(
                     "Iceberg Compaction Execution Error Count",
