@@ -53,6 +53,18 @@ async def produce_message(stream_name: str, subject: str):
     await nc.close()
 
 
+async def produce_message_with_headers(stream_name: str, subject: str):
+    nc = NATS()
+    await nc.connect(servers=[NATS_SERVER])
+    js = nc.jetstream()
+    for i in range(100):
+        payload = {"i": i}
+        headers = {"foo": "bar", "hop": str(i)}
+        await js.publish(subject, str.encode(json.dumps(payload)), headers=headers)
+
+    await nc.close()
+
+
 async def consume_message(_stream_name: str, subject: str):
     nc = NATS()
     await nc.connect(servers=[NATS_SERVER])
@@ -128,6 +140,13 @@ if __name__ == "__main__":
             asyncio.run(create_stream(stream_name, subject))
         elif command == "produce_stream":
             asyncio.run(produce_message(stream_name, subject))
+    elif command == "produce_stream_with_headers":
+        if len(sys.argv) != 4:
+            print("Error: Both stream name and subject are required")
+            sys.exit(1)
+        stream_name = sys.argv[2]
+        subject = sys.argv[3]
+        asyncio.run(produce_message_with_headers(stream_name, subject))
     elif command == "validate_state":
         if len(sys.argv) != 4:
             print("Error: Both table name and expected count are required")
@@ -144,5 +163,5 @@ if __name__ == "__main__":
         asyncio.run(ensure_all_ack(stream_name, consumer_name))
     else:
         print(f"Unknown command: {command}")
-        print("Supported commands: create_stream, produce_stream, validate_state, ensure_all_ack")
+        print("Supported commands: create_stream, produce_stream, produce_stream_with_headers, validate_state, ensure_all_ack")
         sys.exit(1)
