@@ -33,9 +33,7 @@ use risingwave_storage::store::PrefetchOptions;
 use risingwave_storage::table::ChangeLogRow;
 use risingwave_storage::table::batch_table::{BatchTable, PkScanRange};
 use tokio::select;
-use tokio::sync::mpsc::UnboundedReceiver;
 
-use crate::executor::backfill::snapshot_backfill::receive_next_barrier;
 use crate::executor::backfill::snapshot_backfill::state::{
     BackfillState, EpochBackfillProgress, VnodeBackfillProgress,
 };
@@ -43,15 +41,13 @@ use crate::executor::backfill::snapshot_backfill::vnode_stream::VnodeStream;
 use crate::executor::backfill::utils::{
     UpstreamStreamKeyUpdateNormalizer, create_builder, mapping_message,
 };
-use crate::executor::exchange::input::assert_equal_dispatcher_barrier;
 use crate::executor::monitor::StreamingMetrics;
 use crate::executor::prelude::{StateTable, StreamExt, try_stream};
 use crate::executor::{
-    ActorContextRef, Barrier, BoxedMessageStream, Execute, ExecutorInfo, MergeExecutorInput,
-    Message, Mutation, StreamExecutorError, StreamExecutorResult, UpstreamFragmentId,
-    expect_first_barrier,
+    ActorContextRef, Barrier, BoxedMessageStream, Execute, Executor, MergeExecutorInput, Message,
+    Mutation, StreamExecutorError, StreamExecutorResult, UpstreamFragmentId, expect_first_barrier,
 };
-use crate::task::{CreateMviewProgressReporter, LocalBarrierManager};
+use crate::task::CreateMviewProgressReporter;
 
 pub struct SnapshotBackfillExecutor<S: StateStore> {
     /// Upstream table
@@ -61,10 +57,9 @@ pub struct SnapshotBackfillExecutor<S: StateStore> {
     progress_state_table: StateTable<S>,
 
     /// Upstream with the same schema with the upstream table.
-    upstream: Option<MergeExecutorInput>,
-    upstream_info: ExecutorInfo,
+    upstream: Executor,
+    initial_upstream_is_empty: bool,
     upstream_fragment_id: UpstreamFragmentId,
-    local_barrier_manager: LocalBarrierManager,
 
     /// The column indices need to be forwarded to the downstream from the upstream and table scan.
     output_indices: Vec<usize>,
@@ -76,8 +71,6 @@ pub struct SnapshotBackfillExecutor<S: StateStore> {
 
     chunk_size: usize,
     rate_limiter: MonitoredRateLimiter,
-
-    barrier_rx: UnboundedReceiver<Barrier>,
 
     actor_ctx: ActorContextRef,
     metrics: Arc<StreamingMetrics>,
@@ -105,10 +98,7 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
     pub(crate) fn new(
         upstream_table: BatchTable<S>,
         progress_state_table: StateTable<S>,
-        upstream: Option<MergeExecutorInput>,
-        upstream_info: ExecutorInfo,
-        upstream_fragment_id: UpstreamFragmentId,
-        local_barrier_manager: LocalBarrierManager,
+        upstream: MergeExecutorInput,
         pb_pk_scan_range: Option<&ScanRange>,
         output_indices: Vec<usize>,
         stream_key: Vec<usize>,
@@ -116,11 +106,13 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
         progress: CreateMviewProgressReporter,
         chunk_size: usize,
         rate_limit: RateLimit,
-        barrier_rx: UnboundedReceiver<Barrier>,
         metrics: Arc<StreamingMetrics>,
         snapshot_epoch: Option<u64>,
     ) -> StreamExecutorResult<Self> {
-        assert_eq!(&upstream_info.schema, upstream_table.schema());
+        assert_eq!(&upstream.info.schema, upstream_table.schema());
+        let initial_upstream_is_empty = upstream.is_empty();
+        let upstream_fragment_id = upstream.upstream_fragment_id();
+        let upstream = upstream.into_executor();
         if upstream_table.pk_in_output_indices().is_none() {
             panic!(
                 "storage table should include all pk columns in output: pk_indices: {:?}, output_indices: {:?}, schema: {:?}",
@@ -147,15 +139,13 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
             upstream_table,
             progress_state_table,
             upstream,
-            upstream_info,
+            initial_upstream_is_empty,
             upstream_fragment_id,
-            local_barrier_manager,
             output_indices,
             stream_key,
             progress,
             chunk_size,
             rate_limiter,
-            barrier_rx,
             actor_ctx,
             metrics,
             snapshot_epoch,
@@ -166,18 +156,40 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
         trace!("snapshot backfill executor start");
-        let initial_upstream = if let Some(mut upstream) = self.upstream.take() {
-            let first_upstream_barrier = expect_first_barrier(&mut upstream).await?;
-            trace!(epoch = ?first_upstream_barrier.epoch, "get first upstream barrier");
-            Some((first_upstream_barrier, upstream))
-        } else {
-            None
-        };
-        let first_recv_barrier = receive_next_barrier(&mut self.barrier_rx).await?;
-        trace!(epoch = ?first_recv_barrier.epoch, "get first injected barrier");
-        if let Some((first_upstream_barrier, _)) = &initial_upstream {
-            assert_equal_dispatcher_barrier(&first_recv_barrier, first_upstream_barrier);
-        }
+        let current_stream_key_indices = self
+            .stream_key
+            .iter()
+            .map(|idx| self.output_indices[*idx])
+            .collect();
+        let update_normalizer = UpstreamStreamKeyUpdateNormalizer::new(
+            &self.upstream.info().stream_key,
+            current_stream_key_indices,
+        );
+        let mut upstream = self.upstream.execute();
+        let first_recv_barrier = expect_first_barrier(&mut upstream).await?;
+        trace!(epoch = ?first_recv_barrier.epoch, "get first barrier");
+        let should_snapshot_backfill: Option<u64> =
+            if let Some(snapshot_epoch) = self.snapshot_epoch {
+                if self.initial_upstream_is_empty {
+                    Some(snapshot_epoch)
+                } else {
+                    None
+                }
+            } else {
+                // when snapshot epoch is not set, the StreamNode must be created previously and has finished the backfill
+                if cfg!(debug_assertions) {
+                    panic!(
+                        "snapshot epoch not set. first_recv_epoch: {:?}",
+                        first_recv_barrier.epoch
+                    );
+                } else {
+                    if self.initial_upstream_is_empty {
+                        Err(anyhow!("no upstream while snapshot epoch not set"))?;
+                    }
+                    warn!(first_recv_epoch = ?first_recv_barrier.epoch, "snapshot epoch not set");
+                    None
+                }
+            };
         let first_recv_barrier_epoch = first_recv_barrier.epoch;
         let initial_backfill_paused =
             first_recv_barrier.is_backfill_pause_on_startup(self.actor_ctx.fragment_id);
@@ -189,203 +201,190 @@ impl<S: StateStore> SnapshotBackfillExecutor<S> {
         )
         .await?;
 
-        let (mut barrier_epoch, upstream) = if let Some((_, upstream)) = initial_upstream {
-            if self.snapshot_epoch.is_none() {
-                warn!(
-                    first_recv_epoch = ?first_recv_barrier_epoch,
-                    "snapshot epoch not set for recreated snapshot backfill actor"
-                );
-            }
-            (first_recv_barrier_epoch, upstream)
-        } else {
-            let snapshot_epoch = self
-                .snapshot_epoch
-                .ok_or_else(|| anyhow!("no snapshot epoch for independent snapshot backfill"))?;
-            let table_id_str = format!("{}", self.upstream_table.table_id());
-            let actor_id_str = format!("{}", self.actor_ctx.id);
+        let mut barrier_epoch = {
+            if let Some(snapshot_epoch) = should_snapshot_backfill {
+                let table_id_str = format!("{}", self.upstream_table.table_id());
+                let actor_id_str = format!("{}", self.actor_ctx.id);
 
-            // Phase 1: consume upstream snapshot
-            let mut barrier_epoch = if first_recv_barrier_epoch.prev < snapshot_epoch {
-                trace!(
-                    table_id = %self.upstream_table.table_id(),
-                    snapshot_epoch,
-                    barrier_epoch = ?first_recv_barrier_epoch,
-                    "start consuming snapshot"
-                );
-                {
-                    let consuming_snapshot_row_count = self
-                        .metrics
-                        .snapshot_backfill_consume_row_count
-                        .with_guarded_label_values(&[
-                            table_id_str.as_str(),
-                            actor_id_str.as_str(),
-                            "consuming_snapshot",
-                        ]);
-                    let snapshot_stream = make_consume_snapshot_stream(
-                        &self.upstream_table,
+                // Phase 1: consume upstream snapshot
+                let mut barrier_epoch = if first_recv_barrier_epoch.prev < snapshot_epoch {
+                    trace!(
+                        table_id = %self.upstream_table.table_id(),
                         snapshot_epoch,
-                        self.chunk_size,
-                        &self.rate_limiter,
-                        &mut self.barrier_rx,
-                        &mut self.progress,
-                        &mut backfill_state,
-                        first_recv_barrier_epoch,
-                        initial_backfill_paused,
-                        &self.actor_ctx,
-                        &self.pk_scan_range,
+                        barrier_epoch = ?first_recv_barrier_epoch,
+                        "start consuming snapshot"
                     );
+                    {
+                        let consuming_snapshot_row_count = self
+                            .metrics
+                            .snapshot_backfill_consume_row_count
+                            .with_guarded_label_values(&[
+                                table_id_str.as_str(),
+                                actor_id_str.as_str(),
+                                "consuming_snapshot",
+                            ]);
+                        let snapshot_stream = make_consume_snapshot_stream(
+                            &self.upstream_table,
+                            snapshot_epoch,
+                            self.chunk_size,
+                            &self.rate_limiter,
+                            &mut upstream,
+                            &mut self.progress,
+                            &mut backfill_state,
+                            first_recv_barrier_epoch,
+                            initial_backfill_paused,
+                            &self.actor_ctx,
+                            &self.pk_scan_range,
+                        );
 
-                    pin_mut!(snapshot_stream);
+                        pin_mut!(snapshot_stream);
 
-                    while let Some(message) = snapshot_stream.try_next().await? {
-                        if let Message::Chunk(chunk) = &message {
-                            consuming_snapshot_row_count.inc_by(chunk.cardinality() as _);
+                        while let Some(message) = snapshot_stream.try_next().await? {
+                            if let Message::Chunk(chunk) = &message {
+                                consuming_snapshot_row_count.inc_by(chunk.cardinality() as _);
+                            }
+                            yield message;
                         }
-                        yield message;
                     }
-                }
 
-                let recv_barrier = receive_next_barrier(&mut self.barrier_rx).await?;
-                let recv_barrier_epoch = recv_barrier.epoch;
-                assert_eq!(snapshot_epoch, recv_barrier_epoch.prev);
-                let post_commit = backfill_state.commit(recv_barrier.epoch).await?;
-                yield Message::Barrier(recv_barrier);
-                post_commit.post_yield_barrier(None).await?;
-                recv_barrier_epoch
-            } else {
-                trace!(
-                    table_id = %self.upstream_table.table_id(),
-                    snapshot_epoch,
-                    barrier_epoch = ?first_recv_barrier_epoch,
-                    "skip consuming snapshot"
-                );
-                first_recv_barrier_epoch
-            };
-
-            // Phase 2: consume upstream log store
-            trace!(
-                ?barrier_epoch,
-                table_id = %self.upstream_table.table_id(),
-                "start consuming log store"
-            );
-
-            let consuming_log_store_row_count = self
-                .metrics
-                .snapshot_backfill_consume_row_count
-                .with_guarded_label_values(&[
-                    table_id_str.as_str(),
-                    actor_id_str.as_str(),
-                    "consuming_log_store",
-                ]);
-            let mut pending_non_checkpoint_barrier: Vec<EpochPair> = vec![];
-            let upstream = loop {
-                let barrier = receive_next_barrier(&mut self.barrier_rx).await?;
-                assert_eq!(barrier_epoch.curr, barrier.epoch.prev);
-                barrier_epoch = barrier.epoch;
-                let new_upstream = if let Some(update) =
-                    barrier.as_update_merge(self.actor_ctx.id, self.upstream_fragment_id)
-                {
-                    assert!(
-                        barrier.kind.is_checkpoint(),
-                        "the first live-upstream barrier must be a checkpoint"
+                    let recv_barrier = receive_next_upstream_barrier(&mut upstream).await?;
+                    let recv_barrier_epoch = recv_barrier.epoch;
+                    assert_eq!(snapshot_epoch, recv_barrier_epoch.prev);
+                    let post_commit = backfill_state.commit(recv_barrier.epoch).await?;
+                    yield Message::Barrier(recv_barrier);
+                    post_commit.post_yield_barrier(None).await?;
+                    recv_barrier_epoch
+                } else {
+                    trace!(
+                        table_id = %self.upstream_table.table_id(),
+                        snapshot_epoch,
+                        barrier_epoch = ?first_recv_barrier_epoch,
+                        "skip consuming snapshot"
                     );
-                    Some(
-                        MergeExecutorInput::from_merge_update(
-                            update,
-                            &barrier,
-                            self.actor_ctx.clone(),
-                            self.upstream_fragment_id,
-                            self.local_barrier_manager.clone(),
-                            self.metrics.clone(),
-                            self.upstream_info.clone(),
+                    first_recv_barrier_epoch
+                };
+
+                // Phase 2: consume upstream log store
+                trace!(
+                    ?barrier_epoch,
+                    table_id = %self.upstream_table.table_id(),
+                    "start consuming log store"
+                );
+
+                let consuming_log_store_row_count = self
+                    .metrics
+                    .snapshot_backfill_consume_row_count
+                    .with_guarded_label_values(&[
+                        table_id_str.as_str(),
+                        actor_id_str.as_str(),
+                        "consuming_log_store",
+                    ]);
+                let mut pending_non_checkpoint_barrier: Vec<EpochPair> = vec![];
+                loop {
+                    let barrier = receive_next_upstream_barrier(&mut upstream).await?;
+                    assert_eq!(barrier_epoch.curr, barrier.epoch.prev);
+                    barrier_epoch = barrier.epoch;
+                    if barrier.kind.is_checkpoint() {
+                        let pending_non_checkpoint_barrier =
+                            take(&mut pending_non_checkpoint_barrier);
+                        let end_epoch = barrier_epoch.prev;
+                        let start_epoch = pending_non_checkpoint_barrier
+                            .first()
+                            .map(|epoch| epoch.prev)
+                            .unwrap_or(end_epoch);
+                        trace!(?barrier_epoch, kind = ?barrier.kind, ?pending_non_checkpoint_barrier, "start consume epoch change log");
+                        let mut stream = make_log_stream(
+                            &self.upstream_table,
+                            start_epoch,
+                            end_epoch,
+                            None,
                             self.chunk_size,
                         )
-                        .await?,
-                    )
-                } else {
-                    None
-                };
-                if barrier.kind.is_checkpoint() {
-                    let pending_non_checkpoint_barrier = take(&mut pending_non_checkpoint_barrier);
-                    let end_epoch = barrier_epoch.prev;
-                    let start_epoch = pending_non_checkpoint_barrier
-                        .first()
-                        .map(|epoch| epoch.prev)
-                        .unwrap_or(end_epoch);
-                    trace!(?barrier_epoch, kind = ?barrier.kind, ?pending_non_checkpoint_barrier, "start consume epoch change log");
-                    let mut stream = make_log_stream(
-                        &self.upstream_table,
-                        start_epoch,
-                        end_epoch,
-                        None,
-                        self.chunk_size,
-                    )
-                    .await?;
-                    while let Some(chunk) = stream.try_next().await? {
-                        trace!(
-                            ?barrier_epoch,
-                            size = chunk.cardinality(),
-                            "consume change log yield chunk",
-                        );
-                        consuming_log_store_row_count.inc_by(chunk.cardinality() as _);
-                        yield Message::Chunk(chunk);
+                        .await?;
+                        while let Some(chunk) = stream.try_next().await? {
+                            trace!(
+                                ?barrier_epoch,
+                                size = chunk.cardinality(),
+                                "consume change log yield chunk",
+                            );
+                            consuming_log_store_row_count.inc_by(chunk.cardinality() as _);
+                            yield Message::Chunk(chunk);
+                        }
+
+                        trace!(?barrier_epoch, "after consume change log");
+
+                        stream
+                            .for_vnode_pk_progress(|vnode, row_count, progress| {
+                                assert_eq!(progress, None);
+                                backfill_state.finish_epoch(vnode, barrier.epoch.prev, row_count);
+                            })
+                            .await?;
+                    } else {
+                        pending_non_checkpoint_barrier.push(barrier.epoch);
                     }
 
-                    trace!(?barrier_epoch, "after consume change log");
-
-                    stream
-                        .for_vnode_pk_progress(|vnode, row_count, progress| {
-                            assert_eq!(progress, None);
-                            backfill_state.finish_epoch(vnode, barrier.epoch.prev, row_count);
-                        })
-                        .await?;
-                } else {
-                    pending_non_checkpoint_barrier.push(barrier.epoch);
+                    // The merge executor applies this update before forwarding the barrier, so the
+                    // same stream starts yielding live upstream messages after this barrier.
+                    let start_consuming_upstream = if barrier
+                        .as_update_merge(self.actor_ctx.id, self.upstream_fragment_id)
+                        .is_some()
+                    {
+                        assert!(
+                            barrier.kind.is_checkpoint(),
+                            "the first live-upstream barrier must be a checkpoint"
+                        );
+                        true
+                    } else {
+                        false
+                    };
+                    let post_commit = backfill_state.commit(barrier.epoch).await?;
+                    let update_vnode_bitmap = barrier.as_update_vnode_bitmap(self.actor_ctx.id);
+                    yield Message::Barrier(barrier);
+                    post_commit.post_yield_barrier(None).await?;
+                    if update_vnode_bitmap.is_some() {
+                        return Err(anyhow!(
+                            "should not update vnode bitmap during consuming log store"
+                        )
+                        .into());
+                    }
+                    if start_consuming_upstream {
+                        break;
+                    }
                 }
-
-                let post_commit = backfill_state.commit(barrier.epoch).await?;
-                let update_vnode_bitmap = barrier.as_update_vnode_bitmap(self.actor_ctx.id);
-                yield Message::Barrier(barrier);
-                post_commit.post_yield_barrier(None).await?;
-                if update_vnode_bitmap.is_some() {
-                    return Err(anyhow!(
-                        "should not update vnode bitmap during consuming log store"
-                    )
-                    .into());
-                }
-                if let Some(upstream) = new_upstream {
-                    break upstream;
-                }
-            };
-            (barrier_epoch, upstream)
-        };
-
-        backfill_state
-            .latest_progress()
-            .for_each(|(vnode, progress)| {
-                let progress = progress.expect("should not be empty");
-                assert_eq!(progress.epoch, barrier_epoch.prev, "vnode: {:?}", vnode);
-                assert_eq!(
-                    progress.progress,
-                    EpochBackfillProgress::Consumed,
-                    "vnode: {:?}",
-                    vnode
+                trace!(
+                    ?barrier_epoch,
+                    table_id = %self.upstream_table.table_id(),
+                    "finish consuming log store"
                 );
-            });
-        trace!(
-            table_id = %self.upstream_table.table_id(),
-            "skip backfill"
-        );
-        let current_stream_key_indices = self
-            .stream_key
-            .iter()
-            .map(|idx| self.output_indices[*idx])
-            .collect();
-        let update_normalizer = UpstreamStreamKeyUpdateNormalizer::new(
-            &upstream.info.stream_key,
-            current_stream_key_indices,
-        );
-        let mut upstream = upstream.into_executor(self.barrier_rx).execute();
+                barrier_epoch
+            } else {
+                backfill_state
+                    .latest_progress()
+                    .for_each(|(vnode, progress)| {
+                        let progress = progress.expect("should not be empty");
+                        // TODO(#26984): A synthetic Iceberg compaction epoch may be committed
+                        // without its barrier being forwarded to this independent graph. On actor
+                        // restart, the persisted consumed epoch may therefore be older than
+                        // `first_recv_barrier_epoch.prev`.
+                        assert_eq!(
+                            progress.epoch, first_recv_barrier_epoch.prev,
+                            "vnode: {:?}",
+                            vnode
+                        );
+                        assert_eq!(
+                            progress.progress,
+                            EpochBackfillProgress::Consumed,
+                            "vnode: {:?}",
+                            vnode
+                        );
+                    });
+                trace!(
+                    table_id = %self.upstream_table.table_id(),
+                    "skip backfill"
+                );
+                first_recv_barrier_epoch
+            }
+        };
         let mut epoch_row_count = 0;
         // Phase 3: consume upstream
         while let Some(msg) = upstream.try_next().await? {
@@ -455,6 +454,22 @@ impl<S: StateStore> Execute for SnapshotBackfillExecutor<S> {
                 })
             })
             .boxed()
+    }
+}
+
+async fn receive_next_upstream_barrier(
+    upstream: &mut BoxedMessageStream,
+) -> StreamExecutorResult<Barrier> {
+    let message = upstream
+        .try_next()
+        .await?
+        .ok_or_else(|| anyhow!("end of snapshot backfill merge input"))?;
+    match message {
+        Message::Barrier(barrier) => Ok(barrier),
+        message => Err(anyhow!(
+            "expected barrier from empty snapshot backfill merge input, got {message:?}"
+        )
+        .into()),
     }
 }
 
@@ -549,7 +564,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
     snapshot_epoch: u64,
     chunk_size: usize,
     rate_limiter: &'a MonitoredRateLimiter,
-    barrier_rx: &'a mut UnboundedReceiver<Barrier>,
+    upstream: &'a mut BoxedMessageStream,
     progress: &'a mut CreateMviewProgressReporter,
     backfill_state: &'a mut BackfillState<S>,
     first_recv_barrier_epoch: EpochPair,
@@ -572,7 +587,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
     .await?;
 
     async fn select_barrier_and_snapshot_stream(
-        barrier_rx: &mut UnboundedReceiver<Barrier>,
+        upstream: &mut BoxedMessageStream,
         snapshot_stream: &mut (impl Stream<Item = StreamExecutorResult<StreamChunk>> + Unpin),
         throttle_snapshot_stream: bool,
         backfill_paused: bool,
@@ -580,7 +595,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
         select! {
             biased;
 
-            result = receive_next_barrier(barrier_rx) => {
+            result = receive_next_upstream_barrier(upstream) => {
                 Ok(Either::Left(result?))
             },
             result = snapshot_stream.try_next(), if !throttle_snapshot_stream && !backfill_paused => {
@@ -593,7 +608,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
     loop {
         let throttle_snapshot_stream = matches!(rate_limiter.rate_limit(), RateLimit::Pause);
         match select_barrier_and_snapshot_stream(
-            barrier_rx,
+            upstream,
             &mut snapshot_stream,
             throttle_snapshot_stream,
             backfill_paused,
@@ -668,7 +683,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
     }
 
     // finish consuming upstream snapshot, report finish
-    let barrier_to_report_finish = receive_next_barrier(barrier_rx).await?;
+    let barrier_to_report_finish = receive_next_upstream_barrier(upstream).await?;
     assert_eq!(barrier_to_report_finish.epoch.prev, barrier_epoch.curr);
     barrier_epoch = barrier_to_report_finish.epoch;
     snapshot_stream
@@ -686,7 +701,7 @@ async fn make_consume_snapshot_stream<'a, S: StateStore>(
 
     // keep receiving remaining barriers until receiving a barrier with epoch as snapshot_epoch
     loop {
-        let barrier = receive_next_barrier(barrier_rx).await?;
+        let barrier = receive_next_upstream_barrier(upstream).await?;
         assert_eq!(barrier.epoch.prev, barrier_epoch.curr);
         barrier_epoch = barrier.epoch;
         let post_commit = backfill_state.commit(barrier.epoch).await?;
@@ -719,7 +734,6 @@ mod tests {
     use risingwave_rpc_client::HummockMetaClient;
     use risingwave_storage::hummock::HummockStorage;
     use risingwave_storage::table::batch_table::BatchTable;
-    use tokio::sync::mpsc::unbounded_channel;
     use tokio::time::{Duration, timeout};
 
     use super::*;
@@ -730,7 +744,8 @@ mod tests {
     use crate::executor::exchange::input::{Input, LocalInput};
     use crate::executor::exchange::permit::channel_for_test;
     use crate::executor::{
-        ActorContext, DispatcherMessage, ExecutorInfo, MergeExecutorUpstream, UpdateMutation,
+        ActorContext, DispatcherMessage, ExecutorInfo, MergeExecutor, MergeExecutorInput,
+        MergeExecutorUpstream, UpdateMutation,
     };
     use crate::task::barrier_test_utils::LocalBarrierTestEnv;
     use crate::task::test_utils::helper_make_local_actor;
@@ -898,14 +913,24 @@ mod tests {
     fn make_upstream_input(
         barrier_manager: LocalBarrierManager,
         actor_ctx: ActorContextRef,
-        rx: crate::executor::exchange::permit::Receiver,
+        rx: Option<crate::executor::exchange::permit::Receiver>,
     ) -> MergeExecutorInput {
+        let metrics = Arc::new(StreamingMetrics::unused());
+        let upstream = MergeExecutor::new_merge_upstream(
+            rx.into_iter()
+                .map(|rx| LocalInput::new(rx, 1001.into()).boxed_input())
+                .collect(),
+            &metrics,
+            &actor_ctx,
+            1024,
+            make_upstream_info().schema,
+        );
         MergeExecutorInput::new(
-            MergeExecutorUpstream::Singleton(LocalInput::new(rx, 1001.into()).boxed_input()),
+            MergeExecutorUpstream::Merge(upstream),
             actor_ctx,
             1919.into(),
             barrier_manager,
-            Arc::new(StreamingMetrics::unused()),
+            metrics,
             make_upstream_info(),
         )
     }
@@ -1009,15 +1034,12 @@ mod tests {
         let initial_barrier = Barrier::new_test_barrier(test_epoch(1));
         barrier_test_env.inject_barrier(&initial_barrier, [actor_id]);
         barrier_test_env.flush_all_events().await;
-        let barrier_rx = barrier_manager.subscribe_barrier(actor_id);
+        let upstream = make_upstream_input(barrier_manager.clone(), actor_ctx.clone(), None);
 
         let mut executor = SnapshotBackfillExecutor::new(
             source_table,
             progress_state_table,
-            None,
-            make_upstream_info(),
-            1919.into(),
-            barrier_manager,
+            upstream,
             None,
             vec![0],
             vec![0],
@@ -1025,7 +1047,6 @@ mod tests {
             progress,
             1024,
             RateLimit::Disabled,
-            barrier_rx,
             Arc::new(StreamingMetrics::unused()),
             Some(test_epoch(3)),
         )
@@ -1207,29 +1228,29 @@ mod tests {
         )
         .await;
 
-        let barrier_manager = LocalBarrierManager::for_test();
+        let barrier_test_env = LocalBarrierTestEnv::for_test().await;
+        let barrier_manager = barrier_test_env.local_barrier_manager.clone();
         let progress = CreateMviewProgressReporter::for_test(barrier_manager.clone());
-        let actor_ctx = ActorContext::for_test(1235);
-        let (barrier_tx, barrier_rx) = unbounded_channel();
+        let actor_id = 1235.into();
+        let actor_ctx = ActorContext::for_test(actor_id);
         let (upstream_tx, upstream_rx) = channel_for_test();
 
         upstream_tx
             .send(DispatcherMessage::Barrier(initial_barrier.clone().into_dispatcher()).into())
             .await
             .unwrap();
-        barrier_tx.send(initial_barrier.clone()).unwrap();
+        barrier_test_env.inject_barrier(&initial_barrier, [actor_id]);
+        barrier_test_env.flush_all_events().await;
+        let upstream = make_upstream_input(
+            barrier_manager.clone(),
+            actor_ctx.clone(),
+            Some(upstream_rx),
+        );
 
         let mut executor = SnapshotBackfillExecutor::new(
             source_table,
             progress_state_table,
-            Some(make_upstream_input(
-                barrier_manager.clone(),
-                actor_ctx.clone(),
-                upstream_rx,
-            )),
-            make_upstream_info(),
-            1919.into(),
-            barrier_manager,
+            upstream,
             None,
             vec![0],
             vec![0],
@@ -1237,7 +1258,6 @@ mod tests {
             progress,
             1024,
             RateLimit::Disabled,
-            barrier_rx,
             Arc::new(StreamingMetrics::unused()),
             Some(test_epoch(3)),
         )
@@ -1261,7 +1281,8 @@ mod tests {
             .send(DispatcherMessage::Barrier(next_barrier.clone().into_dispatcher()).into())
             .await
             .unwrap();
-        barrier_tx.send(next_barrier.clone()).unwrap();
+        barrier_test_env.inject_barrier(&next_barrier, [actor_id]);
+        barrier_test_env.flush_all_events().await;
 
         assert_eq!(
             expect_chunk_with_timeout(&mut executor, "live upstream chunk after handoff").await,
