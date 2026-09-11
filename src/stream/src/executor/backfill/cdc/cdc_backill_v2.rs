@@ -1307,6 +1307,9 @@ mod tests {
         let timeout = tokio::time::timeout(Duration::from_millis(50), executor.next());
         tokio::pin!(timeout);
         assert!(futures::poll!(&mut timeout).is_pending());
+        #[cfg(madsim)]
+        tokio::time::advance(Duration::from_millis(50));
+        #[cfg(not(madsim))]
         tokio::time::advance(Duration::from_millis(50)).await;
         assert!(timeout.await.is_err());
         assert_eq!(external_table_for_assertion.mock_reader_create_count(), 1);
