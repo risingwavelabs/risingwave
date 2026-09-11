@@ -194,14 +194,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             .inc_by(upstream_processed_row_count);
     }
 
-    fn map_startup_chunk(
-        chunk: StreamChunk,
-        is_recovery: bool,
-        output_indices: &[usize],
-    ) -> Option<StreamChunk> {
-        is_recovery.then(|| mapping_chunk(chunk, output_indices))
-    }
-
     fn consume_upstream_chunk_buffer(
         offset_parse_func: &risingwave_connector::source::cdc::external::CdcOffsetParseFunc,
         upstream_chunk_buffer: &mut Vec<StreamChunk>,
@@ -387,8 +379,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             // we now try to create the table reader with retry.
             //
             // A fresh backfill can ignore CDC events here because its snapshot starts from the
-            // beginning. During recovery, emit all CDC events and let the downstream materialize
-            // executor reconcile PK conflicts with the resumed snapshot and subsequent CDC events.
+            // beginning. Recovery must preserve events for the already-scanned prefix, using
+            // the reader's offset parser and unsigned PK comparison metadata to filter them.
             let is_recovery = current_pk_pos.is_some();
             let mut table_reader: Option<ExternalTableReaderImpl> = None;
             let external_table = self.external_table.clone();
@@ -409,6 +401,12 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 .await
                 .expect("Retry create cdc table reader until success.")
             });
+            if is_recovery {
+                // Leave upstream chunks and barriers pending until we can filter them safely.
+                // Emitting an unscanned key here is unsafe: normal backfill can discard a later
+                // delete before the snapshot reaches that key, leaving a stale row downstream.
+                table_reader = Some(future.as_mut().await);
+            }
             loop {
                 if let Some(msg) =
                     build_reader_and_poll_upstream(&mut upstream, &mut table_reader, &mut future)
@@ -416,17 +414,11 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 {
                     match msg {
                         Message::Barrier(barrier) => {
-                            // Commit after all preceding recovery chunks have been emitted.
                             state_impl.commit_state(barrier.epoch).await?;
                             yield Message::Barrier(barrier);
                         }
-                        Message::Chunk(chunk) => {
-                            if let Some(chunk) =
-                                Self::map_startup_chunk(chunk, is_recovery, &self.output_indices)
-                            {
-                                Self::report_metrics(&self.metrics, 0, chunk.cardinality() as u64);
-                                yield Message::Chunk(chunk);
-                            }
+                        Message::Chunk(_) => {
+                            // Only fresh backfills consume upstream before the reader is ready.
                         }
                         Message::Watermark(_) => {
                             // ignore watermark
@@ -525,12 +517,31 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                         break;
                     }
                     Message::Chunk(chunk) => {
-                        last_binlog_offset = get_cdc_chunk_last_offset(&offset_parse_func, &chunk)?;
-                        if let Some(chunk) =
-                            Self::map_startup_chunk(chunk, is_recovery, &self.output_indices)
-                        {
+                        let chunk_offset = get_cdc_chunk_last_offset(&offset_parse_func, &chunk)?;
+                        if let Some(current_pos) = current_pk_pos.as_ref() {
+                            let chunk = mapping_chunk(
+                                mark_cdc_chunk(
+                                    &offset_parse_func,
+                                    chunk,
+                                    current_pos,
+                                    &pk_indices,
+                                    &pk_order,
+                                    &pk_needs_unsigned_i64_compare,
+                                    last_binlog_offset.clone(),
+                                )?,
+                                &self.output_indices,
+                            );
                             Self::report_metrics(&self.metrics, 0, chunk.cardinality() as u64);
-                            yield Message::Chunk(chunk);
+                            if chunk.cardinality() > 0 {
+                                yield Message::Chunk(chunk);
+                            }
+                        }
+                        if let Some(chunk_offset) = chunk_offset
+                            && last_binlog_offset
+                                .as_ref()
+                                .is_none_or(|last| *last < chunk_offset)
+                        {
+                            last_binlog_offset = Some(chunk_offset);
                         }
                     }
                     Message::Watermark(_) => {
@@ -1127,7 +1138,7 @@ mod tests {
     use std::collections::BTreeMap;
     use std::str::FromStr;
 
-    use futures::{StreamExt, pin_mut, stream};
+    use futures::{StreamExt, pin_mut};
     use risingwave_common::array::{Array, DataChunk, Op, StreamChunk};
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
     use risingwave_common::row::{OwnedRow, Row};
@@ -1139,12 +1150,11 @@ mod tests {
     use risingwave_connector::source::cdc::external::mock_external_table::MockExternalTableReader;
     use risingwave_connector::source::cdc::external::mysql::MySqlOffset;
     use risingwave_connector::source::cdc::external::{
-        CdcOffset, ExternalCdcTableType, ExternalTableConfig, ExternalTableReaderImpl,
-        SchemaTableName,
+        CdcOffset, ExternalCdcTableType, ExternalTableConfig, SchemaTableName,
     };
     use risingwave_storage::memory::MemoryStateStore;
 
-    use super::{PkCompareInfo, build_reader_and_poll_upstream};
+    use super::PkCompareInfo;
     use crate::common::table::test_utils::gen_pbtable;
     use crate::executor::backfill::cdc::cdc_backfill::transform_upstream;
     use crate::executor::backfill::cdc::state::CdcBackfillState;
@@ -1583,65 +1593,35 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn test_recovery_yields_all_chunks_while_creating_reader() {
-        let chunk = StreamChunk::from_rows(
-            &[
-                (
-                    Op::Insert,
-                    OwnedRow::new(vec![
-                        Some(ScalarImpl::Int64(4)),
-                        Some(ScalarImpl::Float64(44.04.into())),
-                        Some(ScalarImpl::Utf8("offset-1".into())),
-                    ]),
-                ),
-                (
-                    Op::Delete,
-                    OwnedRow::new(vec![
-                        Some(ScalarImpl::Int64(5)),
-                        Some(ScalarImpl::Float64(55.05.into())),
-                        Some(ScalarImpl::Utf8("offset-3".into())),
-                    ]),
-                ),
-            ],
-            &[DataType::Int64, DataType::Float64, DataType::Varchar],
-        );
-        let fresh_chunk = chunk.clone();
-        let mut upstream = stream::iter([Ok(Message::Chunk(chunk))]);
-        let mut table_reader: Option<ExternalTableReaderImpl> = None;
-        let mut reader_future = Box::pin(std::future::pending::<ExternalTableReaderImpl>());
+    #[tokio::test(start_paused = true)]
+    async fn test_recovery_waits_for_reader_before_consuming_upstream() {
+        let (mut tx, mut executor, _) = create_recovering_cdc_backfill().await;
+        // Reader creation will keep retrying, while recovery has a saved PK position.
+        executor.external_table = ExternalStorageTable::for_test_undefined();
+        let executor = executor.execute_inner();
+        pin_mut!(executor);
 
-        let Message::Chunk(chunk) =
-            build_reader_and_poll_upstream(&mut upstream, &mut table_reader, &mut reader_future)
+        tx.send_barrier(Barrier::new_test_barrier(test_epoch(3)));
+        assert!(matches!(
+            executor.next().await.unwrap().unwrap(),
+            Message::Barrier(_)
+        ));
+        tx.push_chunk(create_raw_cdc_chunk(&[(
+            r#"{ "payload": { "before": null, "after": { "id": 4, "price": 44.04 }, "op": "c" } }"#,
+            r#"{"sourcePartition":{},"sourceOffset":{"file":"1.binlog","pos":3},"isHeartbeat":false}"#,
+        )]));
+        tx.send_barrier(Barrier::new_test_barrier(test_epoch(4)));
+
+        // Neither the chunk nor its checkpoint may pass before filtering metadata is ready.
+        assert!(
+            tokio::time::timeout(std::time::Duration::from_secs(1), executor.next())
                 .await
-                .unwrap()
-                .unwrap()
-        else {
-            panic!("expected the upstream chunk while the reader is pending");
-        };
-        assert!(table_reader.is_none());
-        let chunk =
-            CdcBackfillExecutor::<MemoryStateStore>::map_startup_chunk(chunk, true, &[0, 1])
-                .unwrap();
-        let rows = chunk
-            .rows()
-            .map(|(op, row)| (op, row.to_owned_row()))
-            .collect::<Vec<_>>();
-        assert_eq!(rows.len(), 2);
-        assert_eq!(rows[0].0, Op::Insert);
-        assert_eq!(rows[0].1[0], Some(ScalarImpl::Int64(4)));
-        assert_eq!(rows[1].0, Op::Delete);
-        assert_eq!(rows[1].1[0], Some(ScalarImpl::Int64(5)));
-        assert!(CdcBackfillExecutor::<MemoryStateStore>::map_startup_chunk(
-            fresh_chunk,
-            false,
-            &[0, 1],
-        )
-        .is_none());
+                .is_err()
+        );
     }
 
     #[tokio::test]
-    async fn test_recovery_yields_all_updates_before_backfill_barrier() {
+    async fn test_recovery_filters_updates_before_backfill_barrier() {
         let (mut tx, executor, memory_state_store) = create_recovering_cdc_backfill().await;
         let executor = executor.execute_inner();
         pin_mut!(executor);
@@ -1671,16 +1651,130 @@ mod tests {
             .rows()
             .map(|(op, row)| (op, row.to_owned_row()))
             .collect::<Vec<_>>();
-        assert_eq!(rows.len(), 2);
+        assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].0, Op::Insert);
         assert_eq!(rows[0].1[0], Some(ScalarImpl::Int64(1)));
-        assert_eq!(rows[1].0, Op::Insert);
-        assert_eq!(rows[1].1[0], Some(ScalarImpl::Int64(6)));
         assert!(matches!(
             executor.next().await.unwrap().unwrap(),
             Message::Barrier(_)
         ));
         assert_recovery_offset(memory_state_store, 2, test_epoch(4)).await;
+    }
+
+    #[tokio::test]
+    async fn test_recovery_preserves_scanned_inserts_and_deletes() {
+        let (mut tx, executor, _) = create_recovering_cdc_backfill().await;
+        let executor = executor.execute_inner();
+        pin_mut!(executor);
+
+        tx.send_barrier(Barrier::new_test_barrier(test_epoch(3)));
+        assert!(matches!(
+            executor.next().await.unwrap().unwrap(),
+            Message::Barrier(_)
+        ));
+        // This replayed event predates the saved offset and must not lower the offset filter.
+        tx.push_chunk(create_raw_cdc_chunk(&[(
+            r#"{ "payload": { "before": null, "after": { "id": 3, "price": 30.01 }, "op": "c" } }"#,
+            r#"{"sourcePartition":{},"sourceOffset":{"file":"1.binlog","pos":1},"isHeartbeat":false}"#,
+        )]));
+        tx.push_chunk(create_raw_cdc_chunk(&[
+            (
+                r#"{ "payload": { "before": null, "after": { "id": 3, "price": 31.01 }, "op": "c" } }"#,
+                r#"{"sourcePartition":{},"sourceOffset":{"file":"1.binlog","pos":1},"isHeartbeat":false}"#,
+            ),
+            (
+                r#"{ "payload": { "before": null, "after": { "id": 4, "price": 44.04 }, "op": "c" } }"#,
+                r#"{"sourcePartition":{},"sourceOffset":{"file":"1.binlog","pos":2},"isHeartbeat":false}"#,
+            ),
+            (
+                r#"{ "payload": { "before": { "id": 5, "price": 55.05 }, "after": null, "op": "d" } }"#,
+                r#"{"sourcePartition":{},"sourceOffset":{"file":"1.binlog","pos":3},"isHeartbeat":false}"#,
+            ),
+        ]));
+        tx.send_barrier(Barrier::new_test_barrier(test_epoch(4)));
+
+        let Message::Chunk(chunk) = executor.next().await.unwrap().unwrap() else {
+            panic!("expected the scanned-prefix changes before the barrier");
+        };
+        let rows = chunk
+            .rows()
+            .map(|(op, row)| (op, row.to_owned_row()))
+            .collect::<Vec<_>>();
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].0, Op::Insert);
+        assert_eq!(rows[0].1[0], Some(ScalarImpl::Int64(4)));
+        assert_eq!(rows[1].0, Op::Delete);
+        assert_eq!(rows[1].1[0], Some(ScalarImpl::Int64(5)));
+        assert!(matches!(
+            executor.next().await.unwrap().unwrap(),
+            Message::Barrier(_)
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_recovery_does_not_leave_deleted_unscanned_row() {
+        let (mut tx, mut executor, memory_state_store) = create_recovering_cdc_backfill().await;
+        executor.options.snapshot_barrier_interval = 1;
+        let executor = executor.execute_inner();
+        pin_mut!(executor);
+
+        tx.send_barrier(Barrier::new_test_barrier(test_epoch(3)));
+        assert!(matches!(
+            executor.next().await.unwrap().unwrap(),
+            Message::Barrier(_)
+        ));
+
+        // Recover at PK 5, then receive an insert for an unscanned key during startup.
+        tx.push_chunk(create_raw_cdc_chunk(&[(
+            r#"{ "payload": { "before": null, "after": { "id": 100, "price": 100.01 }, "op": "c" } }"#,
+            r#"{"sourcePartition":{},"sourceOffset":{"file":"1.binlog","pos":3},"isHeartbeat":false}"#,
+        )]));
+        tx.send_barrier(Barrier::new_test_barrier(test_epoch(4)));
+
+        // Normal backfill receives its delete before the snapshot reaches PK 100.
+        // The snapshot refresh at barrier 5 scans up to PK 8 and filters out the delete.
+        tx.push_chunk(create_raw_cdc_chunk(&[(
+            r#"{ "payload": { "before": { "id": 100, "price": 100.01 }, "after": null, "op": "d" } }"#,
+            r#"{"sourcePartition":{},"sourceOffset":{"file":"1.binlog","pos":4},"isHeartbeat":false}"#,
+        )]));
+        tx.send_barrier(Barrier::new_test_barrier(test_epoch(5)));
+        // The next snapshot is empty, so backfill completes at barrier 6.
+        tx.send_barrier(Barrier::new_test_barrier(test_epoch(6)));
+
+        let mut materialized = BTreeMap::new();
+        loop {
+            match executor.next().await.unwrap().unwrap() {
+                Message::Chunk(chunk) => {
+                    for (op, row) in chunk.rows() {
+                        let pk = row.datum_at(0).unwrap().into_int64();
+                        match op {
+                            Op::Insert => {
+                                materialized.insert(pk, row.to_owned_row());
+                            }
+                            Op::Delete => {
+                                materialized.remove(&pk);
+                            }
+                            _ => unreachable!("CDC updates are converted to inserts"),
+                        }
+                    }
+                }
+                Message::Barrier(barrier) if barrier.epoch.curr == test_epoch(6) => break,
+                Message::Barrier(_) => {}
+                Message::Watermark(_) => panic!("unexpected watermark during backfill"),
+            }
+        }
+
+        assert!(!materialized.contains_key(&100));
+        let mut restored_state = CdcBackfillState::new(
+            TableId::new(1234),
+            create_cdc_state_table(memory_state_store).await,
+            5,
+        );
+        restored_state
+            .init_epoch(Barrier::new_test_barrier(test_epoch(6)).epoch)
+            .await
+            .unwrap();
+        assert!(restored_state.restore_state().await.unwrap().is_finished);
     }
 
     #[test]
