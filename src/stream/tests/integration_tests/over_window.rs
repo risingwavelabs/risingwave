@@ -18,6 +18,7 @@ use std::sync::atomic::Ordering;
 use futures::TryStreamExt;
 use risingwave_common::config::streaming::OverWindowCachePolicy;
 use risingwave_common::row::{OwnedRow, Row};
+use risingwave_common::types::ScalarImpl;
 use risingwave_common::util::epoch::{EpochPair, test_epoch};
 use risingwave_expr::aggregate::{AggArgs, PbAggKind};
 use risingwave_expr::window_function::{
@@ -1013,4 +1014,80 @@ async fn test_over_window_state_cleaning_inner(cache_policy: OverWindowCachePoli
         state_order_keys(store.clone(), &calls).await,
         vec![60, 70, 80]
     );
+}
+
+/// Watermarks on the partition key column are always forwarded. Watermarks on the order key
+/// column are forwarded only if no window frame extends to following rows. Other watermarks are
+/// dropped.
+#[tokio::test]
+async fn test_over_window_watermark_forwarding() {
+    let lag = WindowFuncCall {
+        kind: WindowFuncKind::Aggregate(PbAggKind::FirstValue.into()),
+        return_type: DataType::Int32,
+        args: AggArgs::from_iter([(DataType::Int32, 3)]),
+        ignore_nulls: false,
+        frame: Frame::rows(FrameBound::Preceding(1), FrameBound::Preceding(1)),
+    };
+    let lead = WindowFuncCall {
+        kind: WindowFuncKind::Aggregate(PbAggKind::FirstValue.into()),
+        return_type: DataType::Int32,
+        args: AggArgs::from_iter([(DataType::Int32, 3)]),
+        ignore_nulls: false,
+        frame: Frame::rows(FrameBound::Following(1), FrameBound::Following(1)),
+    };
+
+    // `lag` only: the frame has no following rows, so watermarks on both the order key column
+    // and the partition key column are forwarded.
+    {
+        let (mut tx, mut stream) =
+            create_executor(vec![lag.clone()], MemoryStateStore::new()).await;
+        tx.push_barrier(test_epoch(1), false);
+        stream.expect_barrier().await;
+
+        // Changes caused by chunks before the watermark are emitted before the watermark.
+        tx.push_chunk(StreamChunk::from_pretty(
+            " I  T  I   i
+            + 10 p1 100 10
+            + 20 p1 101 11",
+        ));
+        tx.push_int64_watermark(0, 15);
+        assert_eq!(
+            stream.expect_chunk().await,
+            StreamChunk::from_pretty(
+                " I  T  I   i  i
+                + 10 p1 100 10 .
+                + 20 p1 101 11 10",
+            )
+        );
+        let watermark = stream.expect_watermark().await;
+        assert_eq!(watermark.col_idx, 0);
+        assert_eq!(watermark.val, ScalarImpl::Int64(15));
+
+        tx.push_watermark(1, DataType::Varchar, "p1".into());
+        let watermark = stream.expect_watermark().await;
+        assert_eq!(watermark.col_idx, 1);
+        assert_eq!(watermark.val, ScalarImpl::from("p1"));
+
+        // Watermarks on other columns are dropped.
+        tx.push_watermark(3, DataType::Int32, 42i32.into());
+        tx.push_barrier(test_epoch(2), false);
+        stream.expect_barrier().await;
+    }
+
+    // `lag` + `lead`: the `lead` frame has following rows, so only watermarks on the partition
+    // key column are forwarded.
+    {
+        let (mut tx, mut stream) = create_executor(vec![lag, lead], MemoryStateStore::new()).await;
+        tx.push_barrier(test_epoch(1), false);
+        stream.expect_barrier().await;
+
+        tx.push_int64_watermark(0, 15);
+        tx.push_watermark(1, DataType::Varchar, "p1".into());
+        let watermark = stream.expect_watermark().await;
+        assert_eq!(watermark.col_idx, 1);
+        assert_eq!(watermark.val, ScalarImpl::from("p1"));
+
+        tx.push_barrier(test_epoch(2), false);
+        stream.expect_barrier().await;
+    }
 }
