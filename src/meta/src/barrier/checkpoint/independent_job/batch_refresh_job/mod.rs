@@ -375,7 +375,8 @@ impl BatchRefreshJobCheckpointControl {
         )?;
 
         // Step 4: Build edges (internal-only, no upstream).
-        let mut builder = FragmentEdgeBuilder::new(fragment_infos.values().map(|f| {
+        let mut builder = FragmentEdgeBuilder::empty();
+        builder.add_new_fragments(fragment_infos.values().map(|f| {
             (
                 f.fragment_id,
                 EdgeBuilderFragmentInfo::from_inflight_with_worker_nodes(
@@ -385,6 +386,7 @@ impl BatchRefreshJobCheckpointControl {
                 ),
             )
         }));
+        let mut builder = builder.finish_fragments();
         builder.add_relations(downstreams);
         let mut edges = builder.build();
 
