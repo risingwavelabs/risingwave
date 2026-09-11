@@ -77,15 +77,14 @@ pub struct CdcTableDesc {
 }
 
 impl CdcTableDesc {
-    #[allow(deprecated)]
     pub fn to_protobuf(&self) -> ExternalTableDesc {
         assert_eq!(self.pk.len(), self.pk_comparisons.len());
         ExternalTableDesc {
             table_id: self.table_id,
             source_id: self.source_id,
             columns: self.columns.iter().map(Into::into).collect(),
-            legacy_pk: self.pk.iter().map(|column| column.to_protobuf()).collect(),
-            pk: Some(PbCdcKeyOrdering {
+            pk: self.pk.iter().map(|column| column.to_protobuf()).collect(),
+            pk_ordering: Some(PbCdcKeyOrdering {
                 columns: self
                     .pk
                     .iter()
@@ -117,7 +116,6 @@ mod tests {
     use crate::util::sort_util::OrderType;
 
     #[test]
-    #[allow(deprecated)]
     fn test_cdc_key_comparisons_are_persisted_with_pk_indices() {
         let table_desc = CdcTableDesc {
             table_id: TableId::new(1),
@@ -135,11 +133,11 @@ mod tests {
         };
 
         let protobuf = table_desc.to_protobuf();
-        assert_eq!(protobuf.legacy_pk.len(), 2);
-        assert_eq!(protobuf.legacy_pk[0].column_index, 3);
-        assert_eq!(protobuf.legacy_pk[1].column_index, 1);
+        assert_eq!(protobuf.pk.len(), 2);
+        assert_eq!(protobuf.pk[0].column_index, 3);
+        assert_eq!(protobuf.pk[1].column_index, 1);
 
-        let pk_columns = protobuf.pk.unwrap().columns;
+        let pk_columns = protobuf.pk_ordering.unwrap().columns;
         assert_eq!(pk_columns.len(), 2);
         assert_eq!(pk_columns[0].pk_col_idx, 3);
         assert_eq!(

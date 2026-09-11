@@ -77,15 +77,14 @@ pub(crate) async fn try_init_parallel_cdc_table_snapshot_splits(
         })
         .map(Into::into)
         .collect();
-    let table_pk_indices = if let Some(pk) = &table_desc.pk {
+    let table_pk_indices = if let Some(pk) = &table_desc.pk_ordering {
         pk.columns
             .iter()
             .map(|column| column.pk_col_idx as usize)
             .collect_vec()
     } else {
-        #[allow(deprecated)]
         table_desc
-            .legacy_pk
+            .pk
             .iter()
             .map(|column| column.column_index as usize)
             .collect_vec()

@@ -57,7 +57,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
 
         let properties = table_desc.connect_properties.clone();
         let (table_pk_order_types, table_pk_comparisons, table_pk_indices) =
-            if let Some(table_pk) = &table_desc.pk {
+            if let Some(table_pk) = &table_desc.pk_ordering {
                 let order_types = table_pk
                     .columns
                     .iter()
@@ -75,14 +75,14 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
                     .collect_vec();
                 (order_types, comparisons, indices)
             } else {
-                #[allow(deprecated)]
-                let legacy_pk = &table_desc.legacy_pk;
-                let order_types = legacy_pk
+                let order_types = table_desc
+                    .pk
                     .iter()
                     .map(|column| OrderType::from_protobuf(column.get_order_type().unwrap()))
                     .collect_vec();
-                let comparisons = vec![CdcKeyComparison::Native; legacy_pk.len()];
-                let indices = legacy_pk
+                let comparisons = vec![CdcKeyComparison::Native; table_desc.pk.len()];
+                let indices = table_desc
+                    .pk
                     .iter()
                     .map(|column| column.column_index as usize)
                     .collect_vec();
