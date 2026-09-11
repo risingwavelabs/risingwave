@@ -121,18 +121,34 @@ message VectorIndexReaderDesc {
   uint32 hnsw_ef_search = 7;
 }
 
+message CdcKeyOrdering {
+  enum Comparison {
+    COMPARISON_UNSPECIFIED = 0;
+    COMPARISON_NATIVE = 1;
+    COMPARISON_UNSIGNED_INT64 = 2;
+  }
+
+  message Column {
+    uint32 pk_col_idx = 1;
+    Comparison comparison = 2;
+  }
+
+  repeated Column columns = 1;
+}
+
 // Represents a table in external database for CDC scenario
 message ExternalTableDesc {
   uint32 table_id = 1;
   repeated ColumnDesc columns = 2;
-  // TODO: may refactor primary key representations
-  repeated common.ColumnOrder pk = 3;
+  // Kept so old workers and persisted stream graphs can read the primary-key columns.
+  repeated common.ColumnOrder legacy_pk = 3 [deprecated = true];
   string table_name = 4;
   repeated uint32 stream_key = 5;
   map<string, string> connect_properties = 6;
   // upstream cdc source job id
   uint32 source_id = 7;
   map<string, secret.SecretRef> secret_refs = 8;
+  CdcKeyOrdering pk = 9;
 }
 
 enum JoinType {

@@ -23,7 +23,7 @@ use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::bail;
 use risingwave_common::bitmap::BitmapBuilder;
-use risingwave_common::catalog::ColumnDesc;
+use risingwave_common::catalog::{CdcKeyComparison, ColumnDesc};
 use risingwave_common::row::RowExt;
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::parser::{
@@ -293,6 +293,12 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         // The indices to primary key columns
         let pk_indices = self.external_table.pk_indices().to_vec();
         let pk_order = self.external_table.pk_order_types().to_vec();
+        let pk_needs_unsigned_i64_compare = self
+            .external_table
+            .pk_comparisons()
+            .iter()
+            .map(|comparison| *comparison == CdcKeyComparison::UnsignedInt64)
+            .collect_vec();
 
         let table_id = self.external_table.table_id();
         let upstream_table_name = self.external_table.qualified_table_name();
@@ -445,20 +451,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
             let offset_parse_func = upstream_table_reader.reader.get_cdc_offset_parser();
             let mut consumed_binlog_offset: Option<CdcOffset> = None;
-
-            // Whether each pk column needs unsigned `i64` comparison. Frontend up-casts narrower
-            // unsigned integers, while unsigned float/double/decimal keep their native comparison
-            // semantics; only `BIGINT UNSIGNED` can overflow into a negative `i64` in RisingWave.
-            let pk_needs_unsigned_i64_compare = {
-                let schema = self.external_table.schema();
-                let pk_names: Vec<String> = pk_indices
-                    .iter()
-                    .map(|&i| schema.fields[i].name.clone())
-                    .collect();
-                upstream_table_reader
-                    .reader
-                    .pk_column_unsigned_i64_compare_flags(&pk_names)?
-            };
 
             tracing::info!(
                 %table_id,
@@ -1134,7 +1126,9 @@ mod tests {
 
     use futures::{StreamExt, pin_mut};
     use risingwave_common::array::{Array, DataChunk, Op, StreamChunk};
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+    use risingwave_common::catalog::{
+        CdcKeyComparison, ColumnDesc, ColumnId, Field, Schema, TableId,
+    };
     use risingwave_common::row::{OwnedRow, Row};
     use risingwave_common::types::{DataType, Datum, JsonbVal, ScalarImpl};
     use risingwave_common::util::epoch::test_epoch;
@@ -1341,6 +1335,7 @@ mod tests {
             ExternalCdcTableType::Undefined,
             Schema::new(vec![Field::with_name(DataType::Int64, "id")]),
             vec![OrderType::ascending()],
+            vec![CdcKeyComparison::Native],
             vec![0],
         );
         let schema = Schema::new(vec![
@@ -1541,6 +1536,7 @@ mod tests {
                 Field::with_name(DataType::Float64, "price"),
             ]),
             vec![OrderType::ascending()],
+            vec![CdcKeyComparison::Native],
             vec![0],
         );
         let output_columns = vec![
@@ -2207,6 +2203,7 @@ mod tests {
                 Field::with_name(DataType::Float64, "price"),
             ]),
             vec![OrderType::ascending()],
+            vec![CdcKeyComparison::Native],
             vec![0],
         );
         let output_columns = vec![

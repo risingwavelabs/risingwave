@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use risingwave_common::catalog::{Schema, TableId};
+use risingwave_common::catalog::{CdcKeyComparison, Schema, TableId};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::error::ConnectorResult;
 use risingwave_connector::source::cdc::external::{
@@ -44,6 +44,8 @@ pub struct ExternalStorageTable {
 
     pk_order_types: Vec<OrderType>,
 
+    pk_comparisons: Vec<CdcKeyComparison>,
+
     /// Indices of primary key.
     /// Note that the index is based on the all columns of the table.
     pk_indices: Vec<usize>,
@@ -62,8 +64,11 @@ impl ExternalStorageTable {
         table_type: ExternalCdcTableType,
         schema: Schema,
         pk_order_types: Vec<OrderType>,
+        pk_comparisons: Vec<CdcKeyComparison>,
         pk_indices: Vec<usize>,
     ) -> Self {
+        assert_eq!(pk_order_types.len(), pk_comparisons.len());
+        assert_eq!(pk_order_types.len(), pk_indices.len());
         Self {
             table_id,
             table_name,
@@ -73,6 +78,7 @@ impl ExternalStorageTable {
             table_type,
             schema,
             pk_order_types,
+            pk_comparisons,
             pk_indices,
         }
     }
@@ -88,6 +94,7 @@ impl ExternalStorageTable {
             table_type: ExternalCdcTableType::Undefined,
             schema: Schema::empty().to_owned(),
             pk_order_types: vec![],
+            pk_comparisons: vec![],
             pk_indices: vec![],
         }
     }
@@ -98,6 +105,10 @@ impl ExternalStorageTable {
 
     pub fn pk_order_types(&self) -> &[OrderType] {
         &self.pk_order_types
+    }
+
+    pub fn pk_comparisons(&self) -> &[CdcKeyComparison] {
+        &self.pk_comparisons
     }
 
     pub fn schema(&self) -> &Schema {

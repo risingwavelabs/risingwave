@@ -28,9 +28,9 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use prost::Message as _;
 use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::{
-    CdcTableDesc, ColumnCatalog, ColumnDesc, ConflictBehavior, DEFAULT_SCHEMA_NAME, Engine,
-    ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX, RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME,
-    TableId,
+    CdcKeyComparison, CdcTableDesc, ColumnCatalog, ColumnDesc, ConflictBehavior,
+    DEFAULT_SCHEMA_NAME, Engine, ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX,
+    RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME, TableId,
 };
 use risingwave_common::config::MetaBackend;
 use risingwave_common::global_jvm::Jvm;
@@ -836,6 +836,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     source_watermarks: Vec<SourceWatermark>,
     mut columns: Vec<ColumnCatalog>,
     pk_names: Vec<String>,
+    pk_comparisons: Vec<CdcKeyComparison>,
     cdc_with_options: WithOptionsSecResolved,
     mut col_id_gen: ColumnIdGenerator,
     on_conflict: Option<OnConflict>,
@@ -914,6 +915,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         source_id: source.id, // id of cdc source streaming job
         external_table_name: external_table_name.clone(),
         pk: table_pk,
+        pk_comparisons,
         columns: non_generated_column_descs,
         stream_key: pk_column_indices,
         connect_properties: options,
@@ -1430,7 +1432,7 @@ pub(super) async fn handle_create_table_plan(
                     cdc_table.external_table_name.clone(),
                 )?;
 
-            let (columns, pk_names) = match wildcard_idx {
+            let (columns, pk_names, pk_comparisons) = match wildcard_idx {
                 Some(_) => bind_cdc_table_schema_externally(cdc_with_options.clone()).await?,
                 None => {
                     for column_def in &column_defs {
@@ -1449,12 +1451,13 @@ pub(super) async fn handle_create_table_plan(
 
                     let (columns, pk_names) =
                         bind_cdc_table_schema(&column_defs, &constraints, false)?;
-                    // read default value definition from external db
-                    let (options, secret_refs) = cdc_with_options.clone().into_parts();
-                    let _config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
-                        .context("failed to extract external table config")?;
+                    let pk_comparisons = Box::pin(bind_cdc_pk_comparisons_externally(
+                        cdc_with_options.clone(),
+                        &pk_names,
+                    ))
+                    .await?;
 
-                    (columns, pk_names)
+                    (columns, pk_names, pk_comparisons)
                 }
             };
 
@@ -1475,6 +1478,7 @@ pub(super) async fn handle_create_table_plan(
                 source_watermarks,
                 columns,
                 pk_names,
+                pk_comparisons,
                 cdc_with_options,
                 col_id_gen,
                 on_conflict,
@@ -1621,7 +1625,7 @@ fn sanity_check_for_table_on_cdc_source(
 /// Derive schema for cdc table when create a new Table or alter an existing Table
 async fn bind_cdc_table_schema_externally(
     cdc_with_options: WithOptionsSecResolved,
-) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
+) -> Result<(Vec<ColumnCatalog>, Vec<String>, Vec<CdcKeyComparison>)> {
     // read cdc table schema from external db or parsing the schema from SQL definitions
     let (options, secret_refs) = cdc_with_options.into_parts();
     let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
@@ -1631,6 +1635,8 @@ async fn bind_cdc_table_schema_externally(
         .await
         .context("failed to auto derive table schema")?;
 
+    let pk_names = table.pk_names().clone();
+    let pk_comparisons = table.pk_column_comparisons(&pk_names)?;
     Ok((
         table
             .column_descs()
@@ -1641,8 +1647,21 @@ async fn bind_cdc_table_schema_externally(
                 is_hidden: false,
             })
             .collect(),
-        table.pk_names().clone(),
+        pk_names,
+        pk_comparisons,
     ))
+}
+
+async fn bind_cdc_pk_comparisons_externally(
+    cdc_with_options: WithOptionsSecResolved,
+    pk_names: &[String],
+) -> Result<Vec<CdcKeyComparison>> {
+    // Replacement plans also use this path, so a successful schema change persists the current
+    // upstream comparison semantics in the new stream graph.
+    let (options, secret_refs) = cdc_with_options.into_parts();
+    let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
+        .context("failed to extract external table config")?;
+    Ok(ExternalTableImpl::discover_pk_column_comparisons(&config, pk_names).await?)
 }
 
 /// Derive schema for cdc table when create a new Table or alter an existing Table
@@ -1699,7 +1718,7 @@ pub async fn handle_create_table(
     }
 
     let (graph, source, hummock_table, job_type, shared_source_id) = {
-        let (plan, source, table, job_type, shared_source_id) = handle_create_table_plan(
+        let (plan, source, table, job_type, shared_source_id) = Box::pin(handle_create_table_plan(
             handler_args.clone(),
             ExplainOptions::default(),
             format_encode,
@@ -1715,7 +1734,7 @@ pub async fn handle_create_table(
             include_column_options,
             webhook_info,
             engine,
-        )
+        ))
         .await?;
         tracing::trace!("table_plan: {:?}", plan.explain_to_string());
 
@@ -2386,6 +2405,11 @@ pub async fn generate_stream_graph_for_replace_table(
                 )?;
 
             let (column_catalogs, pk_names) = bind_cdc_table_schema(&columns, &constraints, true)?;
+            let pk_comparisons = Box::pin(bind_cdc_pk_comparisons_externally(
+                cdc_with_options.clone(),
+                &pk_names,
+            ))
+            .await?;
 
             // CDC-table branch only: see the comment at the symmetric call site in
             // `handle_create_table_plan`. Plain (non-CDC) tables don't hit this check.
@@ -2401,6 +2425,7 @@ pub async fn generate_stream_graph_for_replace_table(
                 source_watermarks,
                 column_catalogs,
                 pk_names,
+                pk_comparisons,
                 cdc_with_options,
                 col_id_gen,
                 on_conflict,

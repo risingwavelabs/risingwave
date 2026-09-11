@@ -24,7 +24,9 @@ use mysql_async::prelude::*;
 use mysql_common::params::Params;
 use mysql_common::value::Value;
 use risingwave_common::bail;
-use risingwave_common::catalog::{CDC_OFFSET_COLUMN_NAME, ColumnDesc, ColumnId, Field, Schema};
+use risingwave_common::catalog::{
+    CDC_OFFSET_COLUMN_NAME, CdcKeyComparison, ColumnDesc, ColumnId, Field, Schema,
+};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, Datum, Decimal, F32, ScalarImpl};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -126,6 +128,7 @@ impl MySqlOffset {
 pub struct MySqlExternalTable {
     column_descs: Vec<ColumnDesc>,
     pk_names: Vec<String>,
+    pk_comparisons: Vec<CdcKeyComparison>,
 }
 
 impl MySqlExternalTable {
@@ -158,6 +161,24 @@ impl MySqlExternalTable {
             .discover_columns(schema.clone(), table.clone(), &system_info)
             .await?;
         let indexes = schema_discovery.discover_indexes(schema, table).await?;
+        let pk_names = primary_key_names(&indexes)
+            .ok_or_else(|| anyhow!("MySQL table doesn't define the primary key"))?;
+        let pk_comparisons = pk_names
+            .iter()
+            .map(|pk_name| {
+                let column = columns
+                    .iter()
+                    .find(|column| column.name.eq_ignore_ascii_case(pk_name))
+                    .ok_or_else(|| {
+                        anyhow!("primary key column `{pk_name}` not found in upstream MySQL schema")
+                    })?;
+                Ok(if mysql_type_is_unsigned_bigint(&column.col_type) {
+                    CdcKeyComparison::UnsignedInt64
+                } else {
+                    CdcKeyComparison::Native
+                })
+            })
+            .collect::<ConnectorResult<Vec<_>>>()?;
         let mut column_descs = vec![];
         for col in columns {
             let data_type = mysql_type_to_rw_type(&col.col_type)?;
@@ -189,11 +210,10 @@ impl MySqlExternalTable {
             column_descs.push(column_desc);
         }
 
-        let pk_names = primary_key_names(&indexes)
-            .ok_or_else(|| anyhow!("MySQL table doesn't define the primary key"))?;
         Ok(Self {
             column_descs,
             pk_names,
+            pk_comparisons,
         })
     }
 
@@ -203,6 +223,66 @@ impl MySqlExternalTable {
 
     pub fn pk_names(&self) -> &Vec<String> {
         &self.pk_names
+    }
+
+    pub fn pk_column_comparisons(
+        &self,
+        pk_names: &[String],
+    ) -> ConnectorResult<Vec<CdcKeyComparison>> {
+        pk_names
+            .iter()
+            .map(|pk_name| {
+                self.pk_names
+                    .iter()
+                    .position(|name| name.eq_ignore_ascii_case(pk_name))
+                    .map(|idx| self.pk_comparisons[idx])
+                    .ok_or_else(|| {
+                        anyhow!("primary key column `{pk_name}` not found in upstream MySQL schema")
+                            .into()
+                    })
+            })
+            .collect()
+    }
+
+    pub async fn discover_pk_column_comparisons(
+        config: &ExternalTableConfig,
+        pk_names: &[String],
+    ) -> ConnectorResult<Vec<CdcKeyComparison>> {
+        let pool = build_mysql_connection_pool(
+            &config.host,
+            config.port.parse::<u16>().unwrap(),
+            &config.username,
+            &config.password,
+            &config.database,
+            config.ssl_mode.clone(),
+        );
+        let pk_infos = MySqlExternalTableReader::query_upstream_pk_infos(
+            &pool,
+            &config.database,
+            &config.table,
+        )
+        .await?;
+        pool.disconnect().await?;
+
+        pk_names
+            .iter()
+            .map(|pk_name| {
+                pk_infos
+                    .iter()
+                    .find(|(name, _)| name.eq_ignore_ascii_case(pk_name))
+                    .map(|(_, col_type)| {
+                        if mysql_type_is_unsigned_bigint(col_type) {
+                            CdcKeyComparison::UnsignedInt64
+                        } else {
+                            CdcKeyComparison::Native
+                        }
+                    })
+                    .ok_or_else(|| {
+                        anyhow!("primary key column `{pk_name}` not found in upstream MySQL schema")
+                            .into()
+                    })
+            })
+            .collect()
     }
 }
 
@@ -665,17 +745,6 @@ impl MySqlExternalTableReader {
             })
     }
 
-    /// For each given primary key column (by name), whether it needs unsigned `i64` comparison.
-    pub(crate) fn pk_column_unsigned_i64_compare_flags(
-        &self,
-        pk_names: &[String],
-    ) -> ConnectorResult<Vec<bool>> {
-        pk_names
-            .iter()
-            .map(|name| self.needs_unsigned_i64_compare(name))
-            .collect()
-    }
-
     /// Convert negative i64 to unsigned u64 based on column type
     fn convert_negative_to_unsigned(&self, negative_val: i64) -> u64 {
         negative_val as u64
@@ -857,7 +926,7 @@ mod tests {
     use futures::pin_mut;
     use futures_async_stream::for_await;
     use maplit::{convert_args, hashmap};
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
+    use risingwave_common::catalog::{CdcKeyComparison, ColumnDesc, ColumnId, Field, Schema};
     use risingwave_common::types::DataType;
     use sea_schema::mysql::def::{ColumnType, IndexInfo, IndexOrder, IndexPart, IndexType};
 
@@ -901,6 +970,22 @@ mod tests {
                 "typeid".to_owned(),
                 "clientid".to_owned(),
             ])
+        );
+    }
+
+    #[test]
+    fn test_pk_column_comparisons_follow_requested_order() {
+        let table = MySqlExternalTable {
+            column_descs: vec![],
+            pk_names: vec!["signed_id".to_owned(), "unsigned_id".to_owned()],
+            pk_comparisons: vec![CdcKeyComparison::Native, CdcKeyComparison::UnsignedInt64],
+        };
+
+        assert_eq!(
+            table
+                .pk_column_comparisons(&["UNSIGNED_ID".to_owned(), "SIGNED_ID".to_owned(),])
+                .unwrap(),
+            vec![CdcKeyComparison::UnsignedInt64, CdcKeyComparison::Native,]
         );
     }
 

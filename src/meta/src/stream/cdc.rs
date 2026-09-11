@@ -77,11 +77,19 @@ pub(crate) async fn try_init_parallel_cdc_table_snapshot_splits(
         })
         .map(Into::into)
         .collect();
-    let table_pk_indices = table_desc
-        .pk
-        .iter()
-        .map(|k| k.column_index as usize)
-        .collect_vec();
+    let table_pk_indices = if let Some(pk) = &table_desc.pk {
+        pk.columns
+            .iter()
+            .map(|column| column.pk_col_idx as usize)
+            .collect_vec()
+    } else {
+        #[allow(deprecated)]
+        table_desc
+            .legacy_pk
+            .iter()
+            .map(|column| column.column_index as usize)
+            .collect_vec()
+    };
     let table_config = ExternalTableConfig::try_from_btreemap(
         table_desc.connect_properties.clone(),
         table_desc.secret_refs.clone(),
