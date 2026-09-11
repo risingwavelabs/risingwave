@@ -1,5 +1,5 @@
-# A table cannot be rescheduled while it is being refreshed; the alter goes through once the
-# cycle ends.
+# A table cannot be rescheduled or replaced while it is being refreshed; both go through once the
+# cycle ends, and the next cycle runs on the new actors.
 
 include ./refresh_table_200k.slt.part
 
@@ -8,6 +8,9 @@ REFRESH TABLE refresh_200k_t;
 
 statement error is being refreshed
 ALTER TABLE refresh_200k_t SET PARALLELISM = 1;
+
+statement error is being refreshed
+ALTER TABLE refresh_200k_t ADD COLUMN extra int;
 
 query T retry 12 backoff 5s
 SELECT s.current_status
@@ -20,6 +23,9 @@ IDLE
 
 statement ok
 ALTER TABLE refresh_200k_t SET PARALLELISM = 1;
+
+statement ok
+ALTER TABLE refresh_200k_t ADD COLUMN extra int;
 
 statement ok retry 3 backoff 5s
 REFRESH TABLE refresh_200k_t;
@@ -37,6 +43,12 @@ query II
 SELECT count(*), sum(cnt) FROM refresh_200k_mv;
 ----
 97 200000
+
+
+query I
+SELECT count(*) FROM refresh_200k_t WHERE extra IS NULL;
+----
+200000
 
 
 include ./drop_refresh_table_200k.slt.part

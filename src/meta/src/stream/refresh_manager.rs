@@ -58,7 +58,8 @@ pub enum RefreshStage {
 }
 
 enum RefreshEvent {
-    /// The sender holds the reschedule read lock until the reply arrives.
+    /// The sender holds the reschedule write lock until the reply arrives, so a cycle never
+    /// starts while a job is being rescheduled or replaced.
     Begin {
         table_id: TableId,
         /// Validated against the table's source when given.
@@ -168,7 +169,7 @@ impl GlobalRefreshManager {
         associated_source_id: Option<SourceId>,
         reason: TriggerReason,
     ) -> MetaResult<Collected> {
-        let _reschedule_guard = self.scale_controller.reschedule_lock.read().await;
+        let _reschedule_guard = self.scale_controller.reschedule_lock.write().await;
         self.request(|reply| RefreshEvent::Begin {
             table_id,
             associated_source_id,
