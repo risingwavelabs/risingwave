@@ -193,6 +193,26 @@ impl HummockManager {
         group_2: CompactionGroupId,
         created_tables: Option<HashSet<TableId>>,
     ) -> Result<()> {
+        // Catalog access can wait for DDL or the database. Do it before taking Hummock write
+        // locks, then conservatively check this snapshot against the current group members.
+        let created_tables = if let Some(created_tables) = created_tables {
+            #[expect(clippy::assertions_on_constants)]
+            {
+                assert!(cfg!(debug_assertions));
+            }
+            created_tables
+        } else {
+            match self.metadata_manager.get_created_table_ids().await {
+                Ok(created_tables) => HashSet::from_iter(created_tables),
+                Err(err) => {
+                    tracing::warn!(error = %err.as_report(), "failed to fetch created table ids");
+                    return Err(Error::CompactionGroup(format!(
+                        "merge group_1 {} group_2 {} failed to fetch created table ids",
+                        group_1, group_2
+                    )));
+                }
+            }
+        };
         let compaction_guard = self
             .compaction
             .write_with_process_name("merge_compaction_group_impl")
@@ -211,7 +231,7 @@ impl HummockManager {
             return Err(Error::CompactionGroup(format!("invalid group {}", group_2)));
         }
 
-        let state_table_info = versioning.current_version.state_table_info.clone();
+        let state_table_info = &versioning.current_version.state_table_info;
         let mut member_table_ids_1 = state_table_info
             .compaction_group_member_table_ids(group_1)
             .iter()
@@ -242,26 +262,6 @@ impl HummockManager {
         debug_assert!(!member_table_ids_2.is_empty());
         assert!(member_table_ids_1.is_sorted());
         assert!(member_table_ids_2.is_sorted());
-
-        let created_tables = if let Some(created_tables) = created_tables {
-            // if the created_tables is provided, use it directly, most for test
-            #[expect(clippy::assertions_on_constants)]
-            {
-                assert!(cfg!(debug_assertions));
-            }
-            created_tables
-        } else {
-            match self.metadata_manager.get_created_table_ids().await {
-                Ok(created_tables) => HashSet::from_iter(created_tables),
-                Err(err) => {
-                    tracing::warn!(error = %err.as_report(), "failed to fetch created table ids");
-                    return Err(Error::CompactionGroup(format!(
-                        "merge group_1 {} group_2 {} failed to fetch created table ids",
-                        group_1, group_2
-                    )));
-                }
-            }
-        };
 
         fn contains_creating_table(
             table_ids: &Vec<TableId>,

@@ -4286,6 +4286,37 @@ async fn test_time_travel_vacuum_pins_snapshot_epoch() {
 }
 
 #[tokio::test]
+#[cfg(not(madsim))]
+async fn test_merge_catalog_wait_does_not_hold_hummock_write_locks() {
+    let (_, manager, _, _) = setup_compute_env(80).await;
+    manager
+        .register_table_ids_for_test(&[(100, 2.into()), (101, 3.into())])
+        .await
+        .unwrap();
+    let _catalog = manager
+        .metadata_manager
+        .catalog_controller
+        .get_inner_write_guard()
+        .await;
+    let merge = tokio::task::unconstrained(manager.merge_compaction_group(2.into(), 3.into()));
+    tokio::pin!(merge);
+    assert!(futures::poll!(merge.as_mut()).is_pending());
+
+    let versioning = tokio::task::unconstrained(manager.versioning.write());
+    tokio::pin!(versioning);
+    assert!(
+        futures::poll!(versioning.as_mut()).is_ready(),
+        "waiting for catalog must not prevent a version commit"
+    );
+    let compaction = tokio::task::unconstrained(manager.compaction.write());
+    tokio::pin!(compaction);
+    assert!(
+        futures::poll!(compaction.as_mut()).is_ready(),
+        "waiting for catalog must not prevent compaction progress"
+    );
+}
+
+#[tokio::test]
 async fn test_split_multiple_hot_tables_uses_current_parent() {
     let (_, manager, _, _) = setup_compute_env(80).await;
     manager
