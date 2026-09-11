@@ -27,13 +27,16 @@ fn to_variant(input: Option<ScalarRefImpl<'_>>, ctx: &Context) -> Result<Variant
 
 #[function(
     "variant_get(variant, varchar) -> variant",
-    prebuild = "VariantPath::parse($1).map_err(variant_get_error)?"
+    prebuild = "PrebuiltVariantPath::parse($1)"
 )]
-fn variant_get(value: VariantRef<'_>, path: &VariantPath) -> Result<Option<VariantVal>> {
-    value.access_path_parsed(path).map_err(variant_get_error)
+fn variant_get(value: VariantRef<'_>, path: &PrebuiltVariantPath) -> Result<Option<VariantVal>> {
+    let path = path.0.as_ref().map_err(variant_get_error)?;
+    value
+        .access_path_parsed(path)
+        .map_err(|e| variant_get_error(&e))
 }
 
-fn variant_get_error(e: anyhow::Error) -> ExprError {
+fn variant_get_error(e: &anyhow::Error) -> ExprError {
     ExprError::InvalidParam {
         name: "variant_get",
         reason: e.to_report_string().into(),
@@ -41,21 +44,22 @@ fn variant_get_error(e: anyhow::Error) -> ExprError {
 }
 
 #[derive(Debug)]
-struct TryVariantPath(Option<VariantPath>);
+struct PrebuiltVariantPath(anyhow::Result<VariantPath>);
 
-impl TryVariantPath {
+impl PrebuiltVariantPath {
     fn parse(path: &str) -> Self {
-        Self(VariantPath::parse(path).ok())
+        Self(VariantPath::parse(path))
     }
 }
 
 #[function(
     "try_variant_get(variant, varchar) -> variant",
-    prebuild = "TryVariantPath::parse($1)"
+    prebuild = "PrebuiltVariantPath::parse($1)"
 )]
-fn try_variant_get(value: VariantRef<'_>, path: &TryVariantPath) -> Option<VariantVal> {
+fn try_variant_get(value: VariantRef<'_>, path: &PrebuiltVariantPath) -> Option<VariantVal> {
     path.0
         .as_ref()
+        .ok()
         .and_then(|path| value.access_path_parsed(path).ok().flatten())
 }
 
