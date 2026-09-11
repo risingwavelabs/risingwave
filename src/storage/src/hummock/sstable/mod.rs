@@ -512,8 +512,9 @@ impl SstableMeta {
 #[derive(Default)]
 pub struct SstableIteratorReadOptions {
     pub cache_policy: CachePolicy,
-    /// The table being read by the state-store request. When present, SST iterators can avoid
-    /// blocks for other tables that are colocated in the same physical SST.
+    /// The table being read by the state-store request. When present in the SST's table IDs,
+    /// SST iterators can avoid blocks for other tables colocated in the same physical SST.
+    /// Otherwise, they use the SST's full table ID range.
     pub read_table_id: Option<TableId>,
     /// The only hard upper bound of this scan. It limits the iterator's block window.
     pub scan_end_user_key: Option<Bound<UserKey<KeyPayloadType>>>,

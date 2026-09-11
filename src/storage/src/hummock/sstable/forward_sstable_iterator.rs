@@ -77,17 +77,12 @@ impl SstableIterator {
             sstable_info_ref.sst_id,
             sstable_info_ref.object_id,
         );
-        let read_table_id_range = if let Some(read_table_id) = options.read_table_id {
-            assert!(
-                sstable_info_ref
-                    .table_ids
-                    .binary_search(&read_table_id)
-                    .is_ok(),
-                "read table id {} not found in SST {} table_ids {:?}",
-                read_table_id,
-                sstable_info_ref.sst_id,
-                sstable_info_ref.table_ids
-            );
+        let read_table_id_range = if let Some(read_table_id) = options.read_table_id
+            && sstable_info_ref
+                .table_ids
+                .binary_search(&read_table_id)
+                .is_ok()
+        {
             (read_table_id, read_table_id)
         } else {
             (
@@ -775,6 +770,28 @@ mod tests {
         while sstable_iter.is_valid() {
             assert_eq!(sstable_iter.key().user_key.table_id, TableId::new(2));
             sstable_iter.next().await.unwrap();
+        }
+
+        for missing_table_id in [0, 4] {
+            let options = Arc::new(SstableIteratorReadOptions {
+                read_table_id: Some(TableId::new(missing_table_id)),
+                ..Default::default()
+            });
+            let mut sstable_iter = SstableIterator::create(
+                sstable.clone(),
+                sstable_store.clone(),
+                options,
+                &sstable_info,
+            );
+            sstable_iter.rewind().await.unwrap();
+            for table_id in 1..=3 {
+                for idx in 0..8 {
+                    assert!(sstable_iter.is_valid());
+                    assert_eq!(sstable_iter.key(), test_key(table_id, idx).to_ref());
+                    sstable_iter.next().await.unwrap();
+                }
+            }
+            assert!(!sstable_iter.is_valid());
         }
 
         let mut table_2_sstable_info = sstable_info.get_inner();
