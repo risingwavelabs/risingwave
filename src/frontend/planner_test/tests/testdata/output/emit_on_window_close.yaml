@@ -408,3 +408,48 @@
 
     Table 4294967294 { columns: [ lag1, lag2, _row_id, b, _rw_timestamp ], primary key: [ $2 ASC, $3 ASC ], value indices: [ 0, 1, 2, 3 ], distribution key: [ 3 ], read pk prefix len hint: 2 }
 
+- id: top n ordered by watermark column in eowc mode
+  sql: |
+    create table t (tm timestamp, foo int, bar int, watermark for tm as tm - interval '5 minutes') append only;
+    select tm, foo from (select * from t order by tm limit 10);
+  eowc_stream_plan: |-
+    StreamMaterialize { columns: [tm, foo, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [t._row_id], pk_conflict: NoCheck, watermark_columns: [tm] }
+    └─StreamEowcSort { sort_column: t.tm }
+      └─StreamTopN [append_only] { order: [t.tm ASC], limit: 10, offset: 0, output_watermarks: [[t.tm]] }
+        └─StreamExchange { dist: Single }
+          └─StreamTableScan { table: t, columns: [t.tm, t.foo, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- id: top n ordered by watermark column desc cannot run in eowc mode
+  sql: |
+    create table t (tm timestamp, foo int, bar int, watermark for tm as tm - interval '5 minutes') append only;
+    select tm, foo from (select * from t order by tm desc limit 10);
+  eowc_stream_error: |-
+    Not supported: The query cannot be executed in Emit-On-Window-Close mode.
+    HINT: Try define a watermark column in the source, or avoid aggregation without GROUP BY
+- id: group top n with watermark on the second group key column in eowc mode
+  sql: |
+    create table t (tm timestamp, foo int, bar int, watermark for tm as tm - interval '5 minutes') append only;
+    select foo, window_start, bar from (
+      select *, row_number() over (partition by foo, window_start order by bar) as rn
+      from tumble(t, tm, interval '1 hour')
+    ) where rn <= 1;
+  eowc_stream_plan: |-
+    StreamMaterialize { columns: [foo, window_start, bar], stream_key: [foo, window_start], pk_columns: [foo, window_start], pk_conflict: NoCheck, watermark_columns: [window_start] }
+    └─StreamEowcSort { sort_column: $expr1 }
+      └─StreamProject { exprs: [t.foo, $expr1, t.bar], output_watermarks: [[$expr1]] }
+        └─StreamGroupTopN [append_only] { order: [t.bar ASC], limit: 1, offset: 0, group_key: [t.foo, $expr1], output_watermarks: [[$expr1]] }
+          └─StreamExchange { dist: HashShard(t.foo, $expr1) }
+            └─StreamProject { exprs: [t.foo, t.bar, TumbleStart(t.tm, '01:00:00':Interval) as $expr1, t._row_id], output_watermarks: [[$expr1]] }
+              └─StreamTableScan { table: t, columns: [t.tm, t.foo, t.bar, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- id: group top n ordered by watermark column in eowc mode
+  sql: |
+    create table t (tm timestamp, foo int, bar int, watermark for tm as tm - interval '5 minutes') append only;
+    select foo, tm, bar from (
+      select *, row_number() over (partition by foo order by tm) as rn from t
+    ) where rn <= 1;
+  eowc_stream_plan: |-
+    StreamMaterialize { columns: [foo, tm, bar], stream_key: [foo], pk_columns: [foo], pk_conflict: NoCheck, watermark_columns: [tm] }
+    └─StreamEowcSort { sort_column: t.tm }
+      └─StreamProject { exprs: [t.foo, t.tm, t.bar], output_watermarks: [[t.tm]] }
+        └─StreamGroupTopN [append_only] { order: [t.tm ASC], limit: 1, offset: 0, group_key: [t.foo], output_watermarks: [[t.tm]] }
+          └─StreamExchange { dist: HashShard(t.foo) }
+            └─StreamTableScan { table: t, columns: [t.tm, t.foo, t.bar, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
