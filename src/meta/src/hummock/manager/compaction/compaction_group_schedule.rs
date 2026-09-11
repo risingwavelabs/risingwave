@@ -175,6 +175,7 @@ impl HummockManager {
     ) -> Result<()> {
         self.merge_compaction_group_impl(group_1, group_2, None)
             .await
+            .map(|_| ())
     }
 
     pub async fn merge_compaction_group_for_test(
@@ -185,6 +186,7 @@ impl HummockManager {
     ) -> Result<()> {
         self.merge_compaction_group_impl(group_1, group_2, Some(created_tables))
             .await
+            .map(|_| ())
     }
 
     pub async fn merge_compaction_group_impl(
@@ -192,7 +194,7 @@ impl HummockManager {
         group_1: CompactionGroupId,
         group_2: CompactionGroupId,
         created_tables: Option<HashSet<TableId>>,
-    ) -> Result<()> {
+    ) -> Result<CompactionGroupStatistic> {
         // Catalog access can wait for DDL or the database. Do it before taking Hummock write
         // locks, then conservatively check this snapshot against the current group members.
         let created_tables = if let Some(created_tables) = created_tables {
@@ -420,7 +422,7 @@ impl HummockManager {
             }
         });
 
-        {
+        let (survivor_config, survivor_tables) = {
             let mut compaction_group_manager = self
                 .compaction_group_manager
                 .write_with_process_name("merge_compaction_group_impl")
@@ -461,7 +463,27 @@ impl HummockManager {
             // remove right_group_id
             compaction_groups_txn.remove(right_group_id);
             commit_multi_var!(self.meta_store_ref(), version, compaction_groups_txn)?;
-        }
+            let config = compaction_group_manager
+                .try_get_compaction_group_config(left_group_id)
+                .expect("merged group config should exist");
+            let tables = versioning
+                .current_version
+                .state_table_info
+                .compaction_group_member_table_ids(left_group_id)
+                .iter()
+                .map(|table_id| {
+                    let size = versioning
+                        .version_stats
+                        .table_stats
+                        .get(table_id)
+                        .map(|stats| stats.total_key_size + stats.total_value_size)
+                        .unwrap_or(0)
+                        .max(0) as u64;
+                    (*table_id, size)
+                })
+                .collect_vec();
+            (config, tables)
+        };
 
         // Update candidates only after commit, while versioning still protects group membership.
         self.compaction_state
@@ -509,7 +531,14 @@ impl HummockManager {
             .with_label_values(&[&left_group_id.to_string()])
             .inc();
 
-        Ok(())
+        // This is the actual survivor at the topology commit, including its current members and
+        // config. Build its map after releasing the write locks, without rescanning other groups.
+        Ok(CompactionGroupStatistic {
+            group_id: left_group_id,
+            group_size: survivor_tables.iter().map(|(_, size)| size).sum(),
+            table_statistic: survivor_tables.into_iter().collect(),
+            compaction_group_config: survivor_config,
+        })
     }
 }
 
@@ -1303,26 +1332,36 @@ impl HummockManager {
             return;
         }
         // split high throughput table to dedicated compaction group
+        let mut refresh_groups = false;
         for table_id in group.table_statistic.keys() {
-            self.try_move_high_throughput_table_to_dedicated_cg(
-                table_write_throughput_statistic_manager,
-                *table_id,
-            )
-            .await;
+            refresh_groups |= self
+                .try_move_high_throughput_table_to_dedicated_cg(
+                    table_write_throughput_statistic_manager,
+                    *table_id,
+                )
+                .await;
         }
 
-        // Hot-table splits may have moved the remaining tables into new children. Refresh both
-        // membership and sizes before considering a size-based split of any surviving child.
-        for current in self.calculate_compaction_group_statistic().await {
-            if current
-                .table_statistic
-                .keys()
-                .any(|table| group.table_statistic.contains_key(table))
-                && !current
-                    .compaction_group_config
-                    .compaction_config
-                    .disable_auto_group_scheduling
-                    .unwrap_or(false)
+        let group_max_size = (group.compaction_group_config.max_estimated_group_size() as f64
+            * self.env.opts.split_group_size_ratio) as u64;
+        if !refresh_groups
+            && (group.table_statistic.len() < 2 || group.group_size <= group_max_size)
+        {
+            return;
+        }
+
+        // Refresh only groups that may split. Hot-table attempts can move members even when a
+        // later step fails; size-based plans also need current sizes and config before splitting.
+        let table_ids = group.table_statistic.keys().copied().collect_vec();
+        for current in self
+            .calculate_compaction_group_statistic_for_tables(&table_ids)
+            .await
+        {
+            if !current
+                .compaction_group_config
+                .compaction_config
+                .disable_auto_group_scheduling
+                .unwrap_or(false)
             {
                 self.try_split_huge_compaction_group(current).await;
             }
@@ -1330,11 +1369,12 @@ impl HummockManager {
     }
 
     /// Try to move the high throughput table to a dedicated compaction group.
+    /// Returns whether the caller needs to refresh membership after inspecting a hot table.
     pub async fn try_move_high_throughput_table_to_dedicated_cg(
         &self,
         table_write_throughput_statistic_manager: &TableWriteThroughputStatisticManager,
         table_id: TableId,
-    ) {
+    ) -> bool {
         let mut table_throughput = table_write_throughput_statistic_manager
             .get_table_throughput_descending(
                 table_id,
@@ -1343,7 +1383,7 @@ impl HummockManager {
             .peekable();
 
         if table_throughput.peek().is_none() {
-            return;
+            return false;
         }
 
         let is_high_write_throughput = GroupMergeValidator::is_table_high_write_throughput(
@@ -1356,7 +1396,7 @@ impl HummockManager {
 
         // do not split a table to dedicated compaction group if it is not high write throughput
         if !is_high_write_throughput {
-            return;
+            return false;
         }
 
         let parent_group_id = self
@@ -1375,7 +1415,7 @@ impl HummockManager {
             })
             .await;
         let Some(parent_group_id) = parent_group_id else {
-            return;
+            return true;
         };
 
         let ret = self
@@ -1404,6 +1444,7 @@ impl HummockManager {
                 )
             }
         }
+        true
     }
 
     pub async fn try_split_huge_compaction_group(&self, group: CompactionGroupStatistic) {
@@ -1466,7 +1507,7 @@ impl HummockManager {
         group: &CompactionGroupStatistic,
         next_group: &CompactionGroupStatistic,
         created_tables: &HashSet<TableId>,
-    ) -> Result<()> {
+    ) -> Result<CompactionGroupStatistic> {
         GroupMergeValidator::validate_group_merge(
             group,
             next_group,
@@ -1478,20 +1519,21 @@ impl HummockManager {
         .await?;
 
         let result = self
-            .merge_compaction_group(group.group_id, next_group.group_id)
+            .merge_compaction_group_impl(group.group_id, next_group.group_id, None)
             .await;
 
         match &result {
-            Ok(()) => {
+            Ok(survivor) => {
                 tracing::info!(
-                    "merge group-{} to group-{}",
-                    next_group.group_id,
+                    "merge groups {} and {} into group-{}",
                     group.group_id,
+                    next_group.group_id,
+                    survivor.group_id,
                 );
 
                 self.metrics
                     .merge_compaction_group_count
-                    .with_label_values(&[&group.group_id.to_string()])
+                    .with_label_values(&[&survivor.group_id.to_string()])
                     .inc();
             }
             Err(e) => {
