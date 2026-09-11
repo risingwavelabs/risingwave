@@ -36,6 +36,7 @@ echo "--- Run generic source tests"
 risedev slt './e2e_test/source_inline/fs/posix_fs.slt'
 risedev slt './e2e_test/source_inline/fs/parquet_fixed_size_binary.slt'
 risedev slt './e2e_test/source_inline/refresh/refresh_table.slt'
+risedev slt './e2e_test/source_inline/refresh/refresh_table_delete_readd.slt'
 risedev slt './e2e_test/source_inline/vault/vault_secret_ddl.slt'
 
 echo "--- Run webhook source tests"
