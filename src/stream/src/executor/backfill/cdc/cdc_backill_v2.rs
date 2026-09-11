@@ -302,6 +302,25 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                     .await?;
                                 state_impl.commit_state(barrier.epoch).await?;
 
+                                if let Some(mutation) = barrier.mutation.as_deref() {
+                                    match mutation {
+                                        Mutation::Pause => {
+                                            is_snapshot_paused = true;
+                                        }
+                                        Mutation::Resume => {
+                                            is_snapshot_paused = false;
+                                        }
+                                        Mutation::Throttle(_) => {
+                                            if let Some(entry) = mutation.backfill_throttle_config(
+                                                self.actor_ctx.fragment_id,
+                                            ) {
+                                                self.rate_limit_rps = entry.rate_limit;
+                                            }
+                                        }
+                                        _ => (),
+                                    }
+                                }
+
                                 if is_reset_barrier(&barrier, self.actor_ctx.id) {
                                     upstream_chunk_buffer.clear();
                                     next_reset_barrier = Some(barrier);
