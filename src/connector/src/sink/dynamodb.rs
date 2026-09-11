@@ -40,6 +40,7 @@ use crate::error::ConnectorResult;
 use crate::sink::log_store::DeliveryFutureManagerAddFuture;
 
 pub const DYNAMO_DB_SINK: &str = "dynamodb";
+const MAX_BATCH_WRITE_ITEM_NUMS: usize = 25;
 
 #[serde_as]
 #[derive(Deserialize, Debug, Clone, WithOptions)]
@@ -127,8 +128,21 @@ impl DynamoDbConfig {
     }
 
     fn from_btreemap(values: BTreeMap<String, String>) -> Result<Self> {
-        serde_json::from_value::<DynamoDbConfig>(serde_json::to_value(values).unwrap())
-            .map_err(|e| SinkError::Config(anyhow!(e)))
+        let config =
+            serde_json::from_value::<DynamoDbConfig>(serde_json::to_value(values).unwrap())
+                .map_err(|e| SinkError::Config(anyhow!(e)))?;
+        config.validate_batch_write_options()?;
+        Ok(config)
+    }
+
+    fn validate_batch_write_options(&self) -> Result<()> {
+        if !(1..=MAX_BATCH_WRITE_ITEM_NUMS).contains(&self.max_batch_item_nums) {
+            return Err(SinkError::Config(anyhow!(
+                "`dynamodb.max_batch_item_nums` must be between 1 and {MAX_BATCH_WRITE_ITEM_NUMS}, got {}",
+                self.max_batch_item_nums
+            )));
+        }
+        Ok(())
     }
 }
 
@@ -657,19 +671,26 @@ mod tests {
     }
 
     #[test]
-    fn dynamodb_alter_config_accepts_parseable_numbers() {
+    fn dynamodb_alter_config_validates_batch_write_options() {
         DynamoDbSink::validate_alter_config(&dynamodb_config_options([
-            ("dynamodb.max_batch_item_nums", "0"),
-            ("dynamodb.batch_write_retry_times", "0"),
-            ("dynamodb.batch_write_retry_backoff_ms", "0"),
+            ("dynamodb.max_batch_item_nums", "25"),
+            ("dynamodb.batch_write_retry_times", "5"),
+            ("dynamodb.batch_write_retry_backoff_ms", "200"),
         ]))
         .unwrap();
 
-        DynamoDbSink::validate_alter_config(&dynamodb_config_options([(
-            "dynamodb.max_batch_item_nums",
-            "26",
-        )]))
-        .unwrap();
+        for max_batch_item_nums in ["0", "26"] {
+            let err = DynamoDbSink::validate_alter_config(&dynamodb_config_options([(
+                "dynamodb.max_batch_item_nums",
+                max_batch_item_nums,
+            )]))
+            .unwrap_err();
+            assert!(
+                err.to_string()
+                    .contains("`dynamodb.max_batch_item_nums` must be between 1 and 25"),
+                "unexpected error: {err}"
+            );
+        }
     }
 
     #[test]
