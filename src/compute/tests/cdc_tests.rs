@@ -718,14 +718,16 @@ async fn test_parallelized_cdc_backfill() {
         materialize.next().await.unwrap().unwrap(),
         Message::Chunk(_)
     ));
-    send_and_poll_barrier(&mut curr_epoch, &mut tx, &mut materialize).await;
+    send_and_poll_chunk_then_barrier(&mut curr_epoch, &mut tx, &mut materialize).await;
     assert_mv(
         DataChunk::from_pretty(
             "I F
-            1 11.00
-            2 22.00
-            5 1.0005
-            6 1.0006
+            1 10.01
+            2 22.22
+            3 3.03
+            4 4.04
+            5 5.05
+            6 6.06
             8 1.0008",
         )
         .into(),
@@ -996,8 +998,8 @@ async fn test_parallelized_cdc_backfill_reschedule() {
         materialize.next().await.unwrap().unwrap(),
         Message::Chunk(_)
     ));
-    send_and_poll_barrier(&mut curr_epoch, &mut tx, &mut materialize).await;
-    // Rows in the active split stay buffered until that split is closed.
+    send_and_poll_chunk_then_barrier(&mut curr_epoch, &mut tx, &mut materialize).await;
+    // Rows in the active split are replayed before the barrier and retained until the split closes.
     assert_mv(
         DataChunk::from_pretty(
             "I F
@@ -1008,6 +1010,8 @@ async fn test_parallelized_cdc_backfill_reschedule() {
             5 5.05
             6 10.08
             8 1.0008
+            134 41.7
+            199 40.5
             400 400.1",
         )
         .into(),
@@ -1052,6 +1056,28 @@ async fn send_and_poll_barrier(
 ) {
     curr_epoch.inc_epoch();
     tx.push_barrier(*curr_epoch, false);
+    assert!(matches!(
+        materialize.next().await.unwrap().unwrap(),
+        Message::Barrier(Barrier {
+            epoch,
+            ..
+        }) if epoch.curr == *curr_epoch
+    ));
+}
+
+async fn send_and_poll_chunk_then_barrier(
+    curr_epoch: &mut u64,
+    tx: &mut MessageSender,
+    materialize: &mut BoxedMessageStream,
+) {
+    curr_epoch.inc_epoch();
+    tx.push_barrier(*curr_epoch, false);
+
+    assert!(matches!(
+        materialize.next().await.unwrap().unwrap(),
+        Message::Chunk(_)
+    ));
+
     assert!(matches!(
         materialize.next().await.unwrap().unwrap(),
         Message::Barrier(Barrier {
