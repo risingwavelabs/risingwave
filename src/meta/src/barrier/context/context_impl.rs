@@ -184,7 +184,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         if is_global {
             self.set_status(BarrierManagerStatus::Running);
         }
-        // The scheduler finishes the refresh cycles abandoned by the recovery.
+        // The refresh worker finishes the cycles abandoned by the recovery.
         self.refresh_manager.notify_scheduler();
     }
 
@@ -332,7 +332,8 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         for ((table_id, associated_source_id), actors) in list_finished_info {
             let allow_yield = self
                 .refresh_manager
-                .mark_list_stage_finished(table_id, &actors)?;
+                .mark_list_stage_finished(table_id, &actors)
+                .await?;
 
             if !allow_yield {
                 continue;
@@ -383,7 +384,8 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         for ((table_id, associated_source_id), actors) in load_finished_info {
             let allow_yield = self
                 .refresh_manager
-                .mark_load_stage_finished(table_id, &actors)?;
+                .mark_load_stage_finished(table_id, &actors)
+                .await?;
 
             if !allow_yield {
                 continue;
@@ -431,7 +433,8 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
 
         for (table_id, actors) in finished_actors {
             self.refresh_manager
-                .mark_mview_stage_finished(table_id, &actors)?;
+                .mark_mview_stage_finished(table_id, &actors)
+                .await?;
         }
         Ok(())
     }

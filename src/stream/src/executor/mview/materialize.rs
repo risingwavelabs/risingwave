@@ -142,8 +142,7 @@ pub struct RefreshableMaterializeArgs<S: StateStore, SD: ValueRowSerde> {
     /// Once every materialize actor of the table has reported the merge finished, meta truncates the staging table.
     pub staging_table: StateTableInner<S, SD>,
 
-    /// Per-vnode merge progress of the current cycle. Within a cycle the merge resumes from it after
-    /// every barrier; it is also persisted so that a future meta-driven resume can survive recovery.
+    /// Per-vnode merge progress of the current cycle; the merge resumes from it after every barrier.
     pub progress_table: RefreshProgressTable<S>,
 
     /// `prev` epoch of the current cycle's `RefreshStart` barrier. The previous cycle's staging
