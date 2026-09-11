@@ -381,8 +381,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             // A fresh backfill can ignore CDC events here because its snapshot starts from the
             // beginning. Recovery must preserve events for the already-scanned prefix, using
             // the reader's offset parser and unsigned PK comparison metadata to filter them.
-            let is_recovery = current_pk_pos.is_some();
-            let mut table_reader: Option<ExternalTableReaderImpl> = None;
             let external_table = self.external_table.clone();
             let actor_id = self.actor_ctx.id;
             let fragment_id = self.actor_ctx.fragment_id;
@@ -401,14 +399,14 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 .await
                 .expect("Retry create cdc table reader until success.")
             });
-            if is_recovery {
+            let table_reader = if current_pk_pos.is_some() {
                 // Leave upstream chunks and barriers pending until we can filter them safely.
                 // Emitting an unscanned key here is unsafe: normal backfill can discard a later
                 // delete before the snapshot reaches that key, leaving a stale row downstream.
-                table_reader = Some(future.as_mut().await);
-            }
-            loop {
-                if let Some(msg) =
+                future.as_mut().await
+            } else {
+                let mut table_reader = None;
+                while let Some(msg) =
                     build_reader_and_poll_upstream(&mut upstream, &mut table_reader, &mut future)
                         .await?
                 {
@@ -418,27 +416,23 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                             yield Message::Barrier(barrier);
                         }
                         Message::Chunk(_) => {
-                            // Only fresh backfills consume upstream before the reader is ready.
+                            // The snapshot starts from the beginning and covers these changes.
                         }
                         Message::Watermark(_) => {
                             // ignore watermark
                         }
                     }
-                } else {
-                    assert!(table_reader.is_some(), "table reader must created");
-                    tracing::info!(
-                        %table_id,
-                        upstream_table_name,
-                        "table reader created successfully"
-                    );
-                    break;
                 }
-            }
-
-            let upstream_table_reader = UpstreamTableReader::new(
-                self.external_table.clone(),
-                table_reader.expect("table reader must created"),
+                table_reader.expect("table reader must be created")
+            };
+            tracing::info!(
+                %table_id,
+                upstream_table_name,
+                "table reader created successfully"
             );
+
+            let upstream_table_reader =
+                UpstreamTableReader::new(self.external_table.clone(), table_reader);
 
             if last_binlog_offset.is_none() {
                 // Limit concurrent CDC connections globally to 10 using a semaphore.
