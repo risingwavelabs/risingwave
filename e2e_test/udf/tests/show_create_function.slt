@@ -1,0 +1,45 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE FUNCTION test_sql_func(a int, b int) RETURNS int LANGUAGE sql AS $$ select a + b $$;
+
+statement ok
+CREATE FUNCTION test_sql_func(a float, b float) RETURNS float LANGUAGE sql AS $$ select a + b $$;
+
+
+
+query TT
+SHOW CREATE FUNCTION test_sql_func;
+----
+public.test_sql_func CREATE FUNCTION test_sql_func(a double precision, b double precision) RETURNS double precision LANGUAGE sql AS $$ select a + b $$
+public.test_sql_func CREATE FUNCTION test_sql_func(a integer, b integer) RETURNS integer LANGUAGE sql AS $$ select a + b $$
+
+statement ok
+CREATE FUNCTION test_table_func_single(a int) RETURNS TABLE(x int) LANGUAGE sql AS $$ select a $$;
+
+statement ok
+CREATE FUNCTION test_table_func_multi(a int) RETURNS TABLE(x int, y int) LANGUAGE sql AS $$ select row(a, a)::struct<x int, y int> $$;
+
+query TT
+SHOW CREATE FUNCTION test_table_func_single;
+----
+public.test_table_func_single CREATE FUNCTION test_table_func_single(a integer) RETURNS TABLE (column integer) LANGUAGE sql AS $$ select a $$
+
+query TT
+SHOW CREATE FUNCTION test_table_func_multi;
+----
+public.test_table_func_multi CREATE FUNCTION test_table_func_multi(a integer) RETURNS TABLE (x integer, y integer) LANGUAGE sql AS $$ select row(a, a)::struct<x int, y int> $$
+
+statement ok
+DROP FUNCTION test_sql_func(int, int);
+
+statement ok
+DROP FUNCTION test_sql_func(float, float);
+
+statement ok
+DROP FUNCTION test_table_func_single(int);
+
+statement ok
+DROP FUNCTION test_table_func_multi(int);
+
