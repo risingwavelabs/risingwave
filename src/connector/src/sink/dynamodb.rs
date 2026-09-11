@@ -191,6 +191,11 @@ impl Sink for DynamoDbSink {
         Ok(())
     }
 
+    fn validate_alter_config(config: &BTreeMap<String, String>) -> Result<()> {
+        DynamoDbConfig::from_btreemap(config.clone())?;
+        Ok(())
+    }
+
     async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
         Ok(
             DynamoDbSinkWriter::new(self.config.clone(), self.schema.clone())
@@ -640,6 +645,50 @@ mod tests {
     use aws_sdk_dynamodb::types::{DeleteRequest, KeyType, PutRequest};
 
     use super::*;
+
+    fn dynamodb_config_options(
+        options: impl IntoIterator<Item = (&'static str, &'static str)>,
+    ) -> BTreeMap<String, String> {
+        [("table", "Movies")]
+            .into_iter()
+            .chain(options)
+            .map(|(key, value)| (key.to_owned(), value.to_owned()))
+            .collect()
+    }
+
+    #[test]
+    fn dynamodb_alter_config_accepts_parseable_numbers() {
+        DynamoDbSink::validate_alter_config(&dynamodb_config_options([
+            ("dynamodb.max_batch_item_nums", "0"),
+            ("dynamodb.batch_write_retry_times", "0"),
+            ("dynamodb.batch_write_retry_backoff_ms", "0"),
+        ]))
+        .unwrap();
+
+        DynamoDbSink::validate_alter_config(&dynamodb_config_options([(
+            "dynamodb.max_batch_item_nums",
+            "26",
+        )]))
+        .unwrap();
+    }
+
+    #[test]
+    fn dynamodb_alter_config_rejects_malformed_numbers() {
+        for option in [
+            "dynamodb.max_batch_item_nums",
+            "dynamodb.batch_write_retry_times",
+            "dynamodb.batch_write_retry_backoff_ms",
+        ] {
+            let err = DynamoDbSink::validate_alter_config(&dynamodb_config_options([(
+                option, "invalid",
+            )]))
+            .unwrap_err();
+            assert!(
+                err.to_string().contains("invalid digit found in string"),
+                "unexpected error for {option}: {err}"
+            );
+        }
+    }
 
     fn dynamodb_put_request(
         items: impl IntoIterator<Item = (&'static str, &'static str)>,
