@@ -41,6 +41,7 @@ risedev slt './e2e_test/source_inline/fs/parquet_nested_declared_schema.slt'
 risedev slt './e2e_test/source_inline/fs/parquet_duplicate_field_names.slt'
 risedev slt './e2e_test/source_inline/fs/parquet_nested_smallint.slt'
 risedev slt './e2e_test/source_inline/refresh/refresh_table.slt'
+risedev slt './e2e_test/source_inline/refresh/refresh_table_delete_readd.slt'
 risedev slt './e2e_test/source_inline/vault/vault_secret_ddl.slt'
 
 echo "--- Run webhook source tests"
