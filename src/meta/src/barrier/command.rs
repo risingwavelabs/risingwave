@@ -15,6 +15,7 @@
 use std::collections::{HashMap, HashSet};
 use std::fmt::{Display, Formatter};
 
+use chrono::NaiveDateTime;
 use itertools::Itertools;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{DatabaseId, TableId};
@@ -571,6 +572,14 @@ pub enum Command {
         table_id: TableId,
         associated_source_id: SourceId,
     },
+    /// Truncates the staging table of a refreshed table; the cycle started at `trigger_time` ends
+    /// after the barrier is committed. `aborted` marks a cycle abandoned by a recovery.
+    FinishRefresh {
+        table_id: TableId,
+        staging_table_id: TableId,
+        trigger_time: NaiveDateTime,
+        aborted: bool,
+    },
 
     /// `ResetSource` command generates a barrier to reset CDC source offset to latest.
     /// Used when upstream binlog/oplog has expired.
@@ -672,6 +681,16 @@ impl std::fmt::Display for Command {
                 "LoadFinish: {} (source: {})",
                 table_id, associated_source_id
             ),
+            Command::FinishRefresh {
+                table_id,
+                staging_table_id,
+                trigger_time,
+                aborted,
+            } => write!(
+                f,
+                "FinishRefresh: {} (staging table: {}, cycle: {}, aborted: {})",
+                table_id, staging_table_id, trigger_time, aborted
+            ),
             Command::ResetSource { source_id } => write!(f, "ResetSource: {source_id}"),
             Command::ResumeBackfill { target } => match target {
                 ResumeBackfillTarget::Job(job_id) => {
@@ -736,6 +755,12 @@ pub enum PostCollectCommand {
     ResumeBackfill {
         target: ResumeBackfillTarget,
     },
+    FinishRefresh {
+        table_id: TableId,
+        staging_table_id: TableId,
+        trigger_time: NaiveDateTime,
+        aborted: bool,
+    },
 }
 
 impl PostCollectCommand {
@@ -752,7 +777,8 @@ impl PostCollectCommand {
             | PostCollectCommand::SourceChangeSplit { .. }
             | PostCollectCommand::CreateSubscription { .. }
             | PostCollectCommand::ConnectorPropsChange(_)
-            | PostCollectCommand::ResumeBackfill { .. } => true,
+            | PostCollectCommand::ResumeBackfill { .. }
+            | PostCollectCommand::FinishRefresh { .. } => true,
             PostCollectCommand::Command(_) => false,
         }
     }
@@ -768,6 +794,7 @@ impl PostCollectCommand {
             PostCollectCommand::CreateSubscription { .. } => "CreateSubscription",
             PostCollectCommand::ConnectorPropsChange(_) => "ConnectorPropsChange",
             PostCollectCommand::ResumeBackfill { .. } => "ResumeBackfill",
+            PostCollectCommand::FinishRefresh { .. } => "FinishRefresh",
         }
     }
 }
@@ -849,7 +876,6 @@ impl Command {
             new_table_watermarks,
             old_value_ssts,
             vector_index_adds,
-            truncate_tables,
             iceberg_pk_index_sink_metadata,
         ) = collect_resp_info(resps);
 
@@ -916,7 +942,19 @@ impl Command {
                 )
                 .expect("non-duplicate");
         }
-        info.truncate_tables.extend(truncate_tables);
+        if let PostCollectCommand::FinishRefresh {
+            table_id,
+            staging_table_id,
+            ..
+        } = &barrier_info.post_collect_command
+        {
+            // The table may have been dropped after the command was scheduled.
+            if barrier_info.table_ids_to_commit.contains(staging_table_id) {
+                info.truncate_tables.insert(*staging_table_id);
+            } else {
+                tracing::warn!(%table_id, %staging_table_id, "skip truncating the staging table of a dropped table");
+            }
+        }
         task.iceberg_pk_index_sink_metadata
             .extend(iceberg_pk_index_sink_metadata);
     }

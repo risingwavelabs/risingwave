@@ -1,0 +1,37 @@
+# The refresh left in flight by refresh_table_restart_before.slt is abandoned by the restarted
+# meta and re-run once.
+
+query TB retry 12 backoff 5s
+SELECT s.current_status, s.last_success_time > s.last_trigger_time
+FROM rw_catalog.rw_refresh_table_state s
+JOIN rw_catalog.rw_tables t ON s.table_id = t.id
+WHERE t.name = 'refresh_200k_t';
+----
+IDLE t
+
+
+query I
+SELECT count(*) FROM refresh_200k_t;
+----
+200000
+
+
+query II
+SELECT count(*), sum(cnt) FROM refresh_200k_mv;
+----
+97 200000
+
+
+statement ok retry 3 backoff 5s
+REFRESH TABLE refresh_200k_t;
+
+query T retry 12 backoff 5s
+SELECT s.current_status
+FROM rw_catalog.rw_refresh_table_state s
+JOIN rw_catalog.rw_tables t ON s.table_id = t.id
+WHERE t.name = 'refresh_200k_t';
+----
+IDLE
+
+
+include ./drop_refresh_table_200k.slt.part

@@ -333,6 +333,7 @@ impl CheckpointControl {
                     | Command::Refresh { .. }
                     | Command::ListFinish { .. }
                     | Command::LoadFinish { .. }
+                    | Command::FinishRefresh { .. }
                     | Command::ResetSource { .. }
                     | Command::ResumeBackfill { .. }
                     | Command::InjectSourceOffsets { .. } => {
@@ -1190,18 +1191,13 @@ impl DatabaseCheckpointControl {
             task.load_finished_source_ids.extend(load_finished_info);
         }
 
-        let refresh_finished_table_ids: Vec<JobId> = resps
+        let refresh_finished_actors = resps
             .values()
-            .flat_map(|resp| {
-                resp.refresh_finished_tables
-                    .iter()
-                    .map(|table_id| table_id.as_job_id())
-            })
+            .flat_map(|resp| resp.refresh_finished_actors.clone())
             .collect::<Vec<_>>();
-        if !refresh_finished_table_ids.is_empty() {
+        if !refresh_finished_actors.is_empty() {
             let task = task.get_or_insert_default();
-            task.refresh_finished_table_job_ids
-                .extend(refresh_finished_table_ids);
+            task.refresh_finished_actors.extend(refresh_finished_actors);
         }
     }
 }

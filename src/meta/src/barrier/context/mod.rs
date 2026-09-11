@@ -26,7 +26,7 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::stream_service::barrier_complete_response::{
     IcebergPkIndexSinkMetadata as PbIcebergPkIndexSinkMetadata, PbListFinishedSource,
-    PbLoadFinishedSource,
+    PbLoadFinishedSource, PbRefreshFinishedActor,
 };
 use risingwave_rpc_client::StreamingControlHandle;
 
@@ -151,9 +151,9 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
         load_finished_source_ids: Vec<PbLoadFinishedSource>,
     ) -> impl Future<Output = MetaResult<()>> + Send + '_;
 
-    fn handle_refresh_finished_table_ids(
+    fn handle_refresh_finished_actors(
         &self,
-        refresh_finished_table_job_ids: Vec<JobId>,
+        refresh_finished_actors: Vec<PbRefreshFinishedActor>,
     ) -> impl Future<Output = MetaResult<()>> + Send + '_;
 
     /// Load the trigger context for a batch refresh job: fragment metadata, job model,

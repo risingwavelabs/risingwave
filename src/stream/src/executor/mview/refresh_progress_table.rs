@@ -15,8 +15,9 @@
 //! Refresh Progress Table
 //!
 //! This module implements a persistent table for tracking refresh operation progress.
-//! It stores progress information for each `VirtualNode` during refresh operations,
-//! enabling fault-tolerant refresh operations that can be resumed after interruption.
+//! It stores the merge position of each `VirtualNode` during a refresh cycle. Within a cycle the
+//! merge resumes from it after every barrier; a refresh interrupted by recovery is currently
+//! abandoned by meta rather than resumed from it.
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -33,7 +34,7 @@ use crate::executor::StreamExecutorResult;
 use crate::executor::prelude::StateTable;
 
 /// Schema for the refresh progress table (simplified, following backfill pattern):
-/// - `vnode` (i32): `VirtualNode` identifier
+/// - `vnode` (i16): `VirtualNode` identifier
 /// - `current_pos` (variable): Current processing position (primary key of last processed row)
 /// - `is_completed` (bool): Whether this vnode has completed processing
 /// - `processed_rows` (i64): Number of rows processed so far in this vnode
@@ -261,10 +262,7 @@ impl<S: StateStore> RefreshProgressTable<S> {
         }
 
         // Parse vnode (first field)
-        let vnode = VirtualNode::from_index(match datums[0]? {
-            ScalarRefImpl::Int32(val) => val as usize,
-            _ => return None,
-        });
+        let vnode = VirtualNode::from_datum_ref(datums[0]);
 
         // Parse current_pos (pk_len fields after vnode)
         let current_pos = if pk_len > 0 {
@@ -305,7 +303,7 @@ impl<S: StateStore> RefreshProgressTable<S> {
     /// Get the expected schema for the progress table
     /// Schema: | vnode | `current_pos`... | `is_completed` | `processed_rows` |
     pub fn expected_schema(pk_data_types: &[DataType]) -> Vec<DataType> {
-        let mut schema = vec![DataType::Int32]; // vnode
+        let mut schema = vec![VirtualNode::RW_TYPE]; // vnode
         schema.extend(pk_data_types.iter().cloned()); // current_pos fields
         schema.push(DataType::Boolean); // is_completed
         schema.push(DataType::Int64); // processed_rows

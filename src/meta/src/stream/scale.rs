@@ -55,6 +55,7 @@ use risingwave_common::id::JobId;
 use risingwave_meta_model::DispatcherType;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::prelude::{Fragment, FragmentRelation, StreamingJob};
+use risingwave_meta_model::refresh_job::RefreshState;
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, EntityTrait, IntoActiveModel, QueryFilter, TransactionTrait,
@@ -1282,10 +1283,19 @@ impl GlobalStreamManager {
 
         let creating_streaming_jobs = self.metadata_manager.list_creating_jobs().await?;
 
-        let blocked_jobs = self
+        let mut blocked_jobs = self
             .metadata_manager
             .collect_reschedule_blocked_jobs_for_creating_jobs(&creating_streaming_jobs, true)
             .await?;
+        // A refreshing table is rescheduled once its cycle ends.
+        blocked_jobs.extend(
+            self.metadata_manager
+                .list_refresh_jobs()
+                .await?
+                .into_iter()
+                .filter(|job| job.current_status != RefreshState::Idle)
+                .map(|job| job.table_id.as_job_id()),
+        );
         let has_blocked_jobs = !blocked_jobs.is_empty();
 
         let database_objects: HashMap<risingwave_meta_model::DatabaseId, Vec<JobId>> = self
