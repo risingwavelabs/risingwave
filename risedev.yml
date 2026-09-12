@@ -1329,6 +1329,21 @@ profile:
       - use: compactor
       - use: clickhouse
 
+  local-doris-sink-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+        id: minio-local-doris-sink-test
+      - use: sqlite
+        id: sqlite-local-doris-sink-test
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: doris
+
   local-nats-test:
     config-path: src/config/ci-recovery.toml
     steps:
@@ -1858,24 +1873,23 @@ template:
 
     persist-data: false
 
-  # ClickHouse service backed by Docker.
-  clickhouse:
-    id: clickhouse
+  # Doris service backed by Docker.
+  doris:
+    id: doris
 
     address: "127.0.0.1"
-    http-port: 8123
-    native-port: 9000
+    http-port: 8030
+    query-port: 9030
 
-    user: default
-    password: default
-    database: default
+    user: users
+    password: "123456"
+    database: demo
+    admin-user: root
+    admin-password: ""
 
     user-managed: false
 
-    # Only effective when NOT user managed
-    image: "clickhouse/clickhouse-server:25.5"
-
-    persist-data: false
+    image: "apache/doris:doris-all-in-one-2.1.0"
 
   # MySQL service backed by docker.
   mysql:
