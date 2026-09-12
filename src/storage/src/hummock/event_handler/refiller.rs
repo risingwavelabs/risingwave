@@ -16,7 +16,7 @@ use std::collections::hash_map::HashMap;
 use std::collections::{HashSet, VecDeque};
 use std::future::poll_fn;
 use std::hash::Hash;
-use std::ops::{Bound, Range};
+use std::ops::Range;
 use std::sync::{Arc, LazyLock};
 use std::task::Poll;
 use std::time::{Duration, Instant};
@@ -33,12 +33,10 @@ use prometheus::{
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::config::Role;
 use risingwave_common::config::streaming::CacheRefillPolicy;
-use risingwave_common::hash::VirtualNode;
 use risingwave_common::license::Feature;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
-use risingwave_hummock_sdk::key::{FullKey, vnode_range};
 use risingwave_hummock_sdk::{HummockSstableObjectId, KeyComparator};
 use risingwave_pb::id::TableId;
 use thiserror_ext::AsReport;
@@ -47,8 +45,10 @@ use tokio::task::JoinHandle;
 
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::pin_cache_refill::{
-    PinCacheMembershipUpdate, PinCacheRefillController, refill_pin_cache_objects,
+    PinCacheMembershipUpdate, PinCacheRefillController, PinCacheRefillPlan,
+    refill_pin_cache_objects,
 };
+use crate::hummock::refill_locality::{block_vnode_range, vnode_range_overlaps_bitmap};
 use crate::hummock::{
     Block, HummockError, HummockResult, RecentFilterTrait, Sstable, SstableBlockIndex,
     SstableStoreRef, TableHolder,
@@ -260,7 +260,7 @@ struct Item {
 
 pub(crate) struct CacheRefillPlan {
     deltas: Vec<SstDeltaInfo>,
-    pin_cache_refill_object_ids: HashSet<HummockSstableObjectId>,
+    pin_cache_refill: PinCacheRefillPlan,
 }
 
 pub(crate) type SpawnRefillTask = Arc<
@@ -297,19 +297,6 @@ pub struct TableCacheRefillMonitorSnapshot {
     pub serving_table_vnode_mapping: HashMap<TableId, Bitmap>,
 }
 
-fn vnode_range_overlaps_bitmap(vnode_range: (usize, usize), bitmap: &Bitmap) -> bool {
-    assert!(vnode_range.0 <= vnode_range.1);
-    let start = vnode_range.0.min(bitmap.len());
-    let end = vnode_range.1.min(bitmap.len());
-    if start == end || !bitmap.any() {
-        return false;
-    }
-    if bitmap.all() {
-        return true;
-    }
-    (start..end).any(|vnode| bitmap.is_set(vnode))
-}
-
 impl TableCacheRefillContext {
     fn allows_normal_data_refill_block(&self, sstable: &Sstable, block_index: usize) -> bool {
         if self.policy.is_unscoped_enabled() {
@@ -343,51 +330,6 @@ impl TableCacheRefillContext {
             vnode_range_overlaps_bitmap(vnode_range, bitmap)
         })
     }
-}
-
-fn block_vnode_range(sstable: &Sstable, block_index: usize) -> (usize, usize) {
-    let block_meta = &sstable.meta.block_metas[block_index];
-    let block_smallest_key = FullKey::decode(&block_meta.smallest_key);
-    let table_key_end = match sstable.meta.block_metas.get(block_index + 1) {
-        // A table switch always starts a new block. The next table's smallest key has an
-        // unrelated vnode, so use the current table's terminal range instead.
-        Some(next_block_meta) if next_block_meta.table_id() != block_meta.table_id() => {
-            Bound::Unbounded
-        }
-        // Full-key versions of the same table key may span adjacent blocks. After projecting
-        // away the epoch, the boundary vnode therefore remains part of the current block.
-        Some(next_block_meta) => Bound::Included(
-            FullKey::decode(&next_block_meta.smallest_key)
-                .user_key
-                .table_key,
-        ),
-        // `SstableMeta::largest_key` is the actual last key, unlike the next block's smallest
-        // key above. Keep it inclusive, especially for singleton tables whose key contains only
-        // the vnode prefix.
-        None => Bound::Included(
-            FullKey::decode(&sstable.meta.largest_key)
-                .user_key
-                .table_key,
-        ),
-    };
-
-    let table_key_range = (
-        Bound::Included(block_smallest_key.user_key.table_key),
-        table_key_end,
-    );
-    // Block-meta separators may shorten the table key below the vnode prefix. They are valid
-    // full-key search boundaries but cannot identify a vnode, so fail open instead of panicking
-    // or dropping a block that may belong to this worker.
-    if match &table_key_range.0 {
-        Bound::Included(key) | Bound::Excluded(key) => key.as_ref().len() < VirtualNode::SIZE,
-        Bound::Unbounded => false,
-    } || match &table_key_range.1 {
-        Bound::Included(key) | Bound::Excluded(key) => key.as_ref().len() < VirtualNode::SIZE,
-        Bound::Unbounded => false,
-    } {
-        return (0, VirtualNode::MAX_REPRESENTABLE.to_index() + 1);
-    }
-    vnode_range(&table_key_range)
 }
 
 /// A cache refiller for hummock data.
@@ -467,6 +409,11 @@ impl CacheRefiller {
             new_pinned_version.clone(),
             pin_cache_membership_update,
         );
+        let pin_cache_refill = PinCacheRefillPlan::new(
+            &deltas,
+            &pin_cache_refill_object_ids,
+            self.pin_cache_owned_vnodes(),
+        );
         for delta in &mut deltas {
             delta
                 .insert_sst_infos
@@ -522,7 +469,7 @@ impl CacheRefiller {
         let context = self.new_cache_refill_context(&deltas);
         let plan = CacheRefillPlan {
             deltas,
-            pin_cache_refill_object_ids,
+            pin_cache_refill,
         };
         let handle = (self.spawn_refill_task)(
             plan,
@@ -537,6 +484,34 @@ impl CacheRefiller {
         let item = Item { handle, event };
         self.queue.push_back(item);
         GLOBAL_CACHE_REFILL_METRICS.refill_queue_total.add(1);
+    }
+
+    fn pin_cache_owned_vnodes(&self) -> HashMap<TableId, Bitmap> {
+        let mut owned = HashMap::new();
+        for (&table_id, policy) in &self.table_cache_refill_policies {
+            if !policy.is_pinned() {
+                continue;
+            }
+            for mapping in [
+                self.role
+                    .for_streaming()
+                    .then_some(&self.streaming_table_vnode_mapping),
+                self.role
+                    .for_serving()
+                    .then_some(&self.serving_table_vnode_mapping),
+            ]
+            .into_iter()
+            .flatten()
+            {
+                if let Some(bitmap) = mapping.get(&table_id).filter(|bitmap| bitmap.any()) {
+                    owned
+                        .entry(table_id)
+                        .and_modify(|existing: &mut Bitmap| *existing |= bitmap)
+                        .or_insert_with(|| bitmap.clone());
+                }
+            }
+        }
+        owned
     }
 
     fn new_cache_refill_context(&self, deltas: &[SstDeltaInfo]) -> CacheRefillContext {
@@ -943,12 +918,12 @@ impl CacheRefillTask {
     async fn run(self) {
         let CacheRefillPlan {
             deltas,
-            pin_cache_refill_object_ids,
+            pin_cache_refill,
         } = self.plan;
         let pin_refill = refill_pin_cache_objects(
             self.context.sstable_store.clone(),
             self.context.concurrency.clone(),
-            pin_cache_refill_object_ids,
+            pin_cache_refill,
         );
         let tasks = deltas
             .iter()
@@ -1644,6 +1619,10 @@ mod tests {
             (table_id, CacheRefillPolicy::Pinned),
             (sibling_table_id, CacheRefillPolicy::Pinned),
         ]));
+        refiller.update_streaming_table_vnodes(
+            table_id,
+            Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+        );
         refiller.start_cache_refill(
             vec![SstDeltaInfo {
                 insert_sst_infos: vec![sst_info.clone()],
@@ -2778,6 +2757,59 @@ mod tests {
         let full_range = (0, VirtualNode::MAX_REPRESENTABLE.to_index() + 1);
         assert_eq!(block_vnode_range(&sst, 0), full_range);
         assert_eq!(block_vnode_range(&sst, 1), full_range);
+    }
+
+    #[tokio::test]
+    async fn test_pin_projection_uses_owned_blocks_and_deduplicates_whole_object() {
+        use crate::hummock::pin_cache_refill::PinCacheRefillPlan;
+        let table = TableId::from(233);
+        let store = mock_sstable_store().await;
+        let mut options = default_builder_opt_for_test();
+        options.block_capacity = 1;
+        let (sst, info) = gen_test_sstable_with_table_ids(
+            options,
+            701,
+            [0, 128].into_iter().map(|vnode| {
+                (
+                    FullKey {
+                        user_key: UserKey::for_test(
+                            table,
+                            prefix_slice_with_vnode(VirtualNode::from_index(vnode), b"key"),
+                        ),
+                        epoch_with_gap: EpochWithGap::new_from_epoch(test_epoch(233)),
+                    },
+                    HummockValue::put(Bytes::from_static(b"value")),
+                )
+            }),
+            store,
+            vec![table.as_raw_id()],
+        )
+        .await;
+        let projections = vec![info.clone(), info.clone()];
+        for (vnode, expected) in [(0, true), (128, true), (255, false)] {
+            let ownership = HashMap::from([(
+                table,
+                Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [vnode]),
+            )]);
+            assert_eq!(
+                PinCacheRefillPlan::owns_object(&sst, &projections, &ownership),
+                expected
+            );
+            let plan = PinCacheRefillPlan::new(
+                &[SstDeltaInfo {
+                    insert_sst_infos: projections.clone(),
+                    ..Default::default()
+                }],
+                &[info.object_id].into(),
+                ownership,
+            );
+            assert_eq!(plan.objects.len(), 1, "physical downloads are deduplicated");
+        }
+        assert!(!PinCacheRefillPlan::owns_object(
+            &sst,
+            &projections,
+            &HashMap::new()
+        ));
     }
 
     #[test]

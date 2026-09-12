@@ -44,6 +44,7 @@ pub mod local_version;
 pub mod observer_manager;
 pub(crate) mod pin_cache;
 pub(crate) mod pin_cache_refill;
+pub(crate) mod refill_locality;
 pub mod store;
 pub use store::*;
 mod validator;

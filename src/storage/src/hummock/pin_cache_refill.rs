@@ -16,6 +16,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use futures::future::join_all;
+use risingwave_common::bitmap::Bitmap;
 use risingwave_common::config::streaming::CacheRefillPolicy;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_hummock_sdk::compaction_group::hummock_version_ext::SstDeltaInfo;
@@ -24,8 +25,80 @@ use risingwave_pb::id::TableId;
 use thiserror_ext::AsReport;
 use tokio::sync::Semaphore;
 
-use crate::hummock::SstableStoreRef;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
+use crate::hummock::pin_cache::PinCacheRefillOutcome;
+use crate::hummock::refill_locality::{block_vnode_range, vnode_range_overlaps_bitmap};
+use crate::hummock::{HummockResult, Sstable, SstableStoreRef};
+use crate::monitor::StoreLocalStatistic;
+
+/// Immutable worker-local admission. A matching block admits the complete physical object.
+#[derive(Clone, Default)]
+pub(crate) struct PinCacheRefillPlan {
+    pub objects: HashMap<HummockSstableObjectId, Vec<SstableInfo>>,
+    pub ownership: Arc<HashMap<TableId, Bitmap>>,
+}
+
+impl PinCacheRefillPlan {
+    pub(crate) fn new(
+        deltas: &[SstDeltaInfo],
+        candidates: &HashSet<HummockSstableObjectId>,
+        ownership: HashMap<TableId, Bitmap>,
+    ) -> Self {
+        let mut objects: HashMap<_, Vec<_>> = HashMap::new();
+        for sst in deltas.iter().flat_map(|delta| &delta.insert_sst_infos) {
+            if candidates.contains(&sst.object_id)
+                && sst
+                    .table_ids
+                    .iter()
+                    .any(|table| ownership.contains_key(table))
+            {
+                objects.entry(sst.object_id).or_default().push(sst.clone());
+            }
+        }
+        Self {
+            objects,
+            ownership: Arc::new(ownership),
+        }
+    }
+
+    pub(crate) fn owns_object(
+        sst: &Sstable,
+        projections: &[SstableInfo],
+        ownership: &HashMap<TableId, Bitmap>,
+    ) -> bool {
+        sst.meta
+            .block_metas
+            .iter()
+            .enumerate()
+            .any(|(index, block)| {
+                let table = block.table_id();
+                projections
+                    .iter()
+                    .any(|info| info.table_ids.contains(&table))
+                    && ownership.get(&table).is_some_and(|bitmap| {
+                        vnode_range_overlaps_bitmap(block_vnode_range(sst, index), bitmap)
+                    })
+            })
+    }
+}
+
+async fn refill_pin_cache_object(
+    store: &SstableStoreRef,
+    projections: &[SstableInfo],
+    ownership: &HashMap<TableId, Bitmap>,
+) -> HummockResult<PinCacheRefillOutcome> {
+    let Some(info) = projections.first() else {
+        return Ok(PinCacheRefillOutcome::Obsolete);
+    };
+    let mut stats = StoreLocalStatistic::default();
+    let sst = store.sstable(info, &mut stats).await;
+    stats.discard();
+    let sst = sst?;
+    if !PinCacheRefillPlan::owns_object(&sst, projections, ownership) {
+        return Ok(PinCacheRefillOutcome::Obsolete);
+    }
+    store.pin_sst(info.object_id).await
+}
 
 #[derive(Clone, Copy)]
 pub(crate) enum PinCacheMembershipUpdate {
@@ -222,14 +295,17 @@ impl PinCacheRefillController {
 pub(crate) async fn refill_pin_cache_objects(
     sstable_store: SstableStoreRef,
     concurrency: Arc<Semaphore>,
-    object_ids: HashSet<HummockSstableObjectId>,
+    plan: PinCacheRefillPlan,
 ) {
-    let futures = object_ids.into_iter().map(|object_id| {
+    let futures = plan.objects.into_iter().map(|(object_id, projections)| {
         let sstable_store = sstable_store.clone();
         let concurrency = concurrency.clone();
+        let ownership = plan.ownership.clone();
         async move {
             let _permit = concurrency.acquire().await.unwrap();
-            if let Err(error) = sstable_store.pin_sst(object_id).await {
+            if let Err(error) =
+                refill_pin_cache_object(&sstable_store, &projections, &ownership).await
+            {
                 tracing::warn!(
                     object_id = object_id.as_raw_id(),
                     error = %error.as_report(),
