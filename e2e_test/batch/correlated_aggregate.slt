@@ -1,0 +1,204 @@
+# Scalar aggregates must preserve unmatched outer rows, including through INNER LATERAL.
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE TABLE correlated_aggregate_outer (id int);
+
+statement ok
+CREATE TABLE correlated_aggregate_facts (id int, amount int);
+
+statement ok
+INSERT INTO correlated_aggregate_outer VALUES (1), (1), (2), (3), (NULL);
+
+statement ok
+INSERT INTO correlated_aggregate_facts VALUES (1, 10), (1, 20), (2, 5), (NULL, 100);
+
+query II rowsort
+SELECT s.id, a.total
+FROM correlated_aggregate_outer s,
+LATERAL (
+  SELECT sum(f.amount) AS total FROM correlated_aggregate_facts f WHERE f.id = s.id
+) a;
+----
+1 30
+1 30
+2 5
+3 NULL
+NULL NULL
+
+# The original INNER LATERAL ON must filter matched groups as well as the empty aggregate row.
+query II rowsort
+SELECT s.id, a.total
+FROM correlated_aggregate_outer s
+JOIN LATERAL (
+  SELECT sum(f.amount) AS total FROM correlated_aggregate_facts f WHERE f.id = s.id
+) a ON a.total IS NULL;
+----
+3 NULL
+NULL NULL
+
+query II rowsort
+SELECT s.id, a.total
+FROM correlated_aggregate_outer s
+JOIN LATERAL (
+  SELECT sum(f.amount) AS total FROM correlated_aggregate_facts f WHERE f.id = s.id
+) a ON a.total > 10;
+----
+1 30
+1 30
+
+# A null-rejecting WHERE predicate may still eliminate empty groups.
+query II rowsort
+SELECT s.id, a.total
+FROM correlated_aggregate_outer s,
+LATERAL (
+  SELECT sum(f.amount) AS total FROM correlated_aggregate_facts f WHERE f.id = s.id
+) a
+WHERE a.total > 10;
+----
+1 30
+1 30
+
+# LEFT LATERAL ON retains unmatched rows, unlike the INNER LATERAL cases above.
+query II rowsort
+SELECT s.id, a.total
+FROM correlated_aggregate_outer s
+LEFT JOIN LATERAL (
+  SELECT sum(f.amount) AS total FROM correlated_aggregate_facts f WHERE f.id = s.id
+) a ON a.total > 10;
+----
+1 30
+1 30
+2 NULL
+3 NULL
+NULL NULL
+
+# The same rewrite must preserve streaming empty groups as matches appear and disappear.
+statement ok
+CREATE MATERIALIZED VIEW correlated_aggregate_mv AS
+SELECT s.id, a.total
+FROM correlated_aggregate_outer s,
+LATERAL (
+  SELECT sum(f.amount) AS total FROM correlated_aggregate_facts f WHERE f.id = s.id
+) a;
+
+query II rowsort
+SELECT * FROM correlated_aggregate_mv;
+----
+1 30
+1 30
+2 5
+3 NULL
+NULL NULL
+
+statement ok
+INSERT INTO correlated_aggregate_facts VALUES (3, 7);
+
+query II rowsort
+SELECT * FROM correlated_aggregate_mv;
+----
+1 30
+1 30
+2 5
+3 7
+NULL NULL
+
+statement ok
+DELETE FROM correlated_aggregate_facts WHERE id = 3;
+
+query II rowsort
+SELECT * FROM correlated_aggregate_mv;
+----
+1 30
+1 30
+2 5
+3 NULL
+NULL NULL
+
+statement ok
+DROP MATERIALIZED VIEW correlated_aggregate_mv;
+
+statement ok
+DELETE FROM correlated_aggregate_outer;
+
+statement ok
+DELETE FROM correlated_aggregate_facts;
+
+statement ok
+INSERT INTO correlated_aggregate_outer SELECT id FROM generate_series(1, 80) AS g(id);
+
+statement ok
+INSERT INTO correlated_aggregate_facts SELECT id, 2 FROM generate_series(1, 80) AS g(id);
+
+statement ok
+INSERT INTO correlated_aggregate_facts SELECT id, 3 FROM generate_series(1, 80) AS g(id);
+
+# Every sampled key has sum 5. Assert this invariant without depending on the random keys.
+statement ok
+SET query_mode TO local;
+
+query IIII
+SELECT count(*), count(total), min(total), max(total)
+FROM (
+  SELECT s.id,
+    (SELECT sum(f.amount) FROM correlated_aggregate_facts f WHERE f.id = s.id) AS total
+  FROM (SELECT id FROM correlated_aggregate_outer ORDER BY random() LIMIT 50) s
+) q;
+----
+50 50 5 5
+
+statement ok
+SET query_mode TO distributed;
+
+query IIII
+SELECT count(*), count(total), min(total), max(total)
+FROM (
+  SELECT s.id,
+    (SELECT sum(f.amount) FROM correlated_aggregate_facts f WHERE f.id = s.id) AS total
+  FROM (SELECT id FROM correlated_aggregate_outer ORDER BY random() LIMIT 50) s
+) q;
+----
+50 50 5 5
+
+query IIII
+SELECT count(*), count(total), min(total), max(total)
+FROM (
+  SELECT s.id,
+    (SELECT sum(f.amount) FROM correlated_aggregate_facts f WHERE f.id = s.id) AS total
+  FROM (SELECT id FROM correlated_aggregate_outer LIMIT 50) s
+) q;
+----
+50 50 5 5
+
+# COUNT still needs general decorrelation. Reject repeated random sampling instead of wrong results.
+statement error correlated subquery would evaluate the impure outer expression
+SELECT s.id, (SELECT count(*) FROM correlated_aggregate_facts f WHERE f.id = s.id)
+FROM (SELECT id FROM correlated_aggregate_outer ORDER BY random() LIMIT 50) s;
+
+statement error correlated subquery would evaluate the impure outer expression
+SELECT s.id, (SELECT count(*) FROM correlated_aggregate_facts f WHERE f.id = s.id)
+FROM (SELECT id FROM correlated_aggregate_outer WHERE random() < 0.5 LIMIT 50) s;
+
+statement error correlated subquery would evaluate the impure outer expression
+SELECT s.id, (SELECT count(*) FROM correlated_aggregate_facts f WHERE f.id = s.id)
+FROM correlated_aggregate_outer s WHERE random() < 0.5;
+
+query III
+SELECT count(*), min(n), max(n)
+FROM (
+  SELECT s.id,
+    (SELECT count(*) FROM correlated_aggregate_facts f WHERE f.id = s.id) AS n
+  FROM (SELECT id FROM correlated_aggregate_outer ORDER BY id LIMIT 50) s
+) q;
+----
+50 2 2
+
+statement ok
+SET query_mode TO auto;
+
+statement ok
+DROP TABLE correlated_aggregate_facts;
+
+statement ok
+DROP TABLE correlated_aggregate_outer;
