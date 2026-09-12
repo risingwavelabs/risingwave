@@ -165,7 +165,7 @@ impl FilterBuilder for Xor16FilterBuilder {
     }
 
     fn finish(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) -> Option<Vec<u8>> {
-        self.key_hash_entries.sort();
+        self.key_hash_entries.sort_unstable();
         self.key_hash_entries.dedup();
 
         let _memory_tracker = memory_limiter.as_ref().map(|memory_limit| {
@@ -205,7 +205,7 @@ impl FilterBuilder for Xor8FilterBuilder {
     }
 
     fn finish(&mut self, memory_limiter: Option<Arc<MemoryLimiter>>) -> Option<Vec<u8>> {
-        self.key_hash_entries.sort();
+        self.key_hash_entries.sort_unstable();
         self.key_hash_entries.dedup();
 
         let _memory_tracker = memory_limiter.as_ref().map(|memory_limit| {
