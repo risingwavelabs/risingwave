@@ -18,11 +18,13 @@ use risingwave_common::types::DataType;
 use risingwave_pb::plan_common::JoinType;
 
 use super::prelude::{PlanRef, *};
-use crate::expr::{ExprImpl, ExprType, FunctionCall, InputRef};
+use super::{ApplyResult, FallibleRule};
+use crate::error::ErrorCode;
+use crate::expr::{ExprImpl, ExprType, FunctionCall, ImpureAnalyzer, InputRef};
 use crate::optimizer::plan_node::generic::{Agg, GenericPlanRef};
 use crate::optimizer::plan_node::{
     LogicalApply, LogicalJoin, LogicalProject, LogicalScan, LogicalShare, PlanTreeNodeBinary,
-    PlanTreeNodeUnary,
+    PlanTreeNodeUnary, VisitExprsRecursive,
 };
 use crate::utils::{ColIndexMapping, Condition};
 
@@ -50,11 +52,11 @@ pub struct TranslateApplyRule {
     enable_share_plan: bool,
 }
 
-impl Rule<Logical> for TranslateApplyRule {
-    fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
+impl FallibleRule<Logical> for TranslateApplyRule {
+    fn apply(&self, plan: PlanRef) -> ApplyResult<PlanRef> {
         let apply: &LogicalApply = plan.as_logical_apply()?;
         if apply.translated() {
-            return None;
+            return ApplyResult::NotApplicable;
         }
         let mut left: PlanRef = apply.left();
         let right: PlanRef = apply.right();
@@ -69,14 +71,22 @@ impl Rule<Logical> for TranslateApplyRule {
         // First try to rewrite the left side of the apply.
         // TODO: remove the rewrite and always use the general way to calculate the domain
         //      after we support DAG.
-        let domain: PlanRef = if let Some(rewritten_left) = Self::rewrite(
+        let rewritten_left = Self::rewrite(
             &left,
             correlated_indices.clone(),
             0,
             &mut index_mapping,
             &mut data_types,
             &mut index,
-        ) {
+        )
+        .filter(|plan| {
+            // Rewriting removes Filter nodes, but a Scan can still contain a pushed-down
+            // impure predicate. Such a domain must share the outer evaluation as well.
+            let mut impurity = ImpureAnalyzer::default();
+            plan.visit_exprs_recursive(&mut impurity);
+            impurity.impure_expr_desc().is_none()
+        });
+        let domain: PlanRef = if let Some(rewritten_left) = rewritten_left {
             // This `LogicalProject` is used to make sure that after `LogicalApply`'s left was
             // rewritten, the new index of `correlated_index` is always at its position in
             // `correlated_indices`.
@@ -95,8 +105,27 @@ impl Rule<Logical> for TranslateApplyRule {
             let distinct = Agg::new(vec![], (0..project.schema().len()).collect(), project);
             distinct.into()
         } else {
-            // The left side of the apply is not SPJ. We need to use the general way to calculate
-            // the domain. Distinct + Project + The Left of Apply
+            // The left side cannot be safely rewritten. Use the general way to calculate
+            // the domain: Distinct + Project + The Left of Apply.
+
+            if !self.enable_share_plan {
+                let mut impurity = ImpureAnalyzer::default();
+                left.visit_exprs_recursive(&mut impurity);
+                if let Some(expr) = impurity.impure_expr_desc() {
+                    // Without Share, the domain and the final join evaluate the outer plan
+                    // independently and may produce different correlated keys.
+                    return ApplyResult::Err(
+                        ErrorCode::NotSupported(
+                            format!(
+                                "correlated subquery would evaluate the impure outer expression ({expr}) more than once"
+                            ),
+                            "Store the outer query result in a table before running this correlated subquery."
+                                .into(),
+                        )
+                        .into(),
+                    );
+                }
+            }
 
             // Use Share
             left = if self.enable_share_plan {
@@ -139,7 +168,7 @@ impl Rule<Logical> for TranslateApplyRule {
 
         let new_apply = apply.clone_with_left_right(left, right);
         let new_node = new_apply.translate_apply(domain, eq_predicates);
-        Some(new_node)
+        ApplyResult::Ok(new_node)
     }
 }
 
