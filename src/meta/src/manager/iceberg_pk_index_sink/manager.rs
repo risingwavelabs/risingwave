@@ -20,11 +20,11 @@ use parking_lot::RwLock;
 use risingwave_common::id::PartialGraphId;
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::iceberg::IcebergConfig;
-use risingwave_pb::stream_service::barrier_complete_response::IcebergPkIndexSinkMetadata as PbIcebergPkIndexSinkMetadata;
 use sea_orm::DatabaseConnection;
 use tokio::sync::Mutex;
 use tracing::warn;
 
+use super::IcebergPkIndexPreCommitMetadata;
 use super::committed_epoch::PartialGraphCommittedEpochs;
 use super::coordinator::IcebergPkIndexSinkCoordinator;
 
@@ -98,19 +98,17 @@ impl IcebergPkIndexSinkManager {
         Ok(())
     }
 
-    /// Pre-commit phase for one epoch: persist the merged report under `pending_sink_state` (no iceberg IO).
-    /// The barrier-complete path awaits this BEFORE issuing hummock `commit_epoch`.
-    pub async fn pre_commit_epoch(
+    /// Pre-commit one epoch, with an optional compaction overwrite folded into the same pending row.
+    /// The barrier-complete path awaits this before issuing Hummock `commit_epoch`.
+    pub(crate) async fn pre_commit(
         &self,
-        sink_id: SinkId,
-        prev_epoch: u64,
-        reports: Vec<PbIcebergPkIndexSinkMetadata>,
+        input: IcebergPkIndexPreCommitMetadata,
     ) -> anyhow::Result<()> {
-        let coordinator = self.coordinator(sink_id)?;
+        let coordinator = self.coordinator(input.sink_id)?;
         coordinator
             .lock()
             .await
-            .pre_commit(prev_epoch, reports)
+            .pre_commit(input.prev_epoch, input.reports, input.compaction)
             .await
     }
 

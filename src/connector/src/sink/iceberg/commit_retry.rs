@@ -22,6 +22,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::{Result, anyhow, bail};
+use iceberg::spec::FormatVersion;
 use iceberg::table::Table;
 use iceberg::{Catalog, TableIdent};
 use risingwave_common::util::retry::exponential_backoff;
@@ -76,7 +77,7 @@ impl CommitRetryLogContext {
 
 /// Distinguishes retriable from non-retriable errors inside [`run_with_retry`].
 pub enum CommitError {
-    /// `reload_table` failed (table not found, schema mismatch, partition
+    /// `reload_table` failed (table not found, schema mismatch, partition or requested format
     /// evolution). Non-retriable — the call site's invariants no longer hold.
     ReloadTable(anyhow::Error),
     /// `Transaction::commit` (or its `apply`) failed. Retriable — likely a
@@ -86,18 +87,29 @@ pub enum CommitError {
 
 /// Reload the iceberg table from the catalog and assert that its current
 /// `schema_id` and `default_partition_spec_id` still match the values the
-/// caller computed against. Schema or partition evolution mid-commit is
+/// caller computed against. Schema, partition, or requested format evolution mid-commit is
 /// surfaced as a non-retriable error by the call sites.
 pub async fn reload_table(
     catalog: &dyn Catalog,
     table_ident: &TableIdent,
     schema_id: i32,
     partition_spec_id: i32,
+    format_version: Option<FormatVersion>,
 ) -> Result<Table> {
     let table = catalog
         .load_table(table_ident)
         .await
         .map_err(|e| anyhow!(e).context("reload iceberg table"))?;
+    validate_table_metadata(&table, schema_id, partition_spec_id, format_version)?;
+    Ok(table)
+}
+
+fn validate_table_metadata(
+    table: &Table,
+    schema_id: i32,
+    partition_spec_id: i32,
+    format_version: Option<FormatVersion>,
+) -> Result<()> {
     if table.metadata().current_schema_id() != schema_id {
         bail!(
             "iceberg sink: schema evolution not supported; expect schema id {}, got {}",
@@ -112,12 +124,21 @@ pub async fn reload_table(
             table.metadata().default_partition_spec_id(),
         );
     }
-    Ok(table)
+    if let Some(format_version) = format_version
+        && table.metadata().format_version() != format_version
+    {
+        bail!(
+            "iceberg sink: format evolution not supported; expect format version {}, got {}",
+            format_version,
+            table.metadata().format_version(),
+        );
+    }
+    Ok(())
 }
 
 /// Run a commit-action against the given iceberg table with retry.
 /// 1. Calls `reload_table` before each commit attempt to get the latest metadata
-/// 2. If `reload_table` fails (table not exists/schema/partition mismatch), stops retrying immediately
+/// 2. If `reload_table` fails (table not exists/schema/partition/requested format mismatch), stops retrying immediately
 /// 3. If commit fails, retries with backoff up to `retry_num` times.
 ///
 /// Strategy: exponential backoff 10ms→60s with jitter, up to `retry_num` retries.
@@ -126,6 +147,7 @@ pub async fn run_with_retry<F, Fut, Out>(
     table_ident: TableIdent,
     schema_id: i32,
     partition_spec_id: i32,
+    format_version: Option<FormatVersion>,
     retry_num: usize,
     log_context: CommitRetryLogContext,
     commit_action: F,
@@ -146,10 +168,15 @@ where
             let table_ident = table_ident.clone();
             let commit_action = &commit_action;
             async move {
-                let table =
-                    reload_table(catalog.as_ref(), &table_ident, schema_id, partition_spec_id)
-                        .await
-                        .map_err(CommitError::ReloadTable)?;
+                let table = reload_table(
+                    catalog.as_ref(),
+                    &table_ident,
+                    schema_id,
+                    partition_spec_id,
+                    format_version,
+                )
+                .await
+                .map_err(CommitError::ReloadTable)?;
                 commit_action(table).await
             }
         },
