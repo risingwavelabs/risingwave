@@ -342,18 +342,20 @@ impl SstableStore {
         self.pin_cache.get()
     }
 
-    pub(crate) async fn pin_sst(
+    pub(crate) async fn pin_sst_at_generation(
         &self,
         object_id: HummockSstableObjectId,
+        generation: u64,
     ) -> HummockResult<PinCacheRefillOutcome> {
-        let Some(pin_cache) = self.pin_cache.get() else {
+        let Some(cache) = self.pin_cache.get() else {
             return Ok(PinCacheRefillOutcome::Obsolete);
         };
-        pin_cache
-            .pin_sst(
+        cache
+            .pin_sst_at_generation(
                 self.store.clone(),
                 self.get_sst_data_path(object_id),
                 object_id,
+                generation,
             )
             .await
             .map_err(Into::into)

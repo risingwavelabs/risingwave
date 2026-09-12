@@ -134,6 +134,8 @@ struct PinCacheState {
     recovery_state: RecoveryState,
     received_version: Option<risingwave_hummock_sdk::HummockVersionId>,
     retired: HashMap<HummockSstableObjectId, (u64, risingwave_hummock_sdk::HummockVersionId)>,
+    generations: HashMap<HummockSstableObjectId, u64>,
+    next_generation: u64,
 }
 
 impl PinCacheState {
@@ -355,6 +357,7 @@ impl PinCache {
             removed
                 .into_iter()
                 .filter_map(|id| {
+                    state.generations.remove(&id);
                     state.inflight.remove(&id);
                     state.published.remove(&id)
                 })
@@ -408,6 +411,7 @@ impl PinCache {
 
         let stale_objects = {
             let mut state = self.state.write();
+            state.generations.retain(|id, _| desired.contains_key(id));
             state.desired = Some(desired);
             state.retired.clear();
             let PinCacheState {
@@ -504,6 +508,34 @@ impl PinCache {
             stale
         };
         self.gc.reclaim(stale_objects);
+    }
+
+    pub(crate) fn is_needed(&self, object_id: HummockSstableObjectId) -> bool {
+        self.state.read().needed_size(object_id).is_some()
+    }
+
+    pub(crate) fn refill_generation(&self, object: HummockSstableObjectId) -> Option<u64> {
+        let mut state = self.state.write();
+        state.needed_size(object)?;
+        if let Some(generation) = state.generations.get(&object) {
+            return Some(*generation);
+        }
+        state.next_generation += 1;
+        let generation = state.next_generation;
+        state.generations.insert(object, generation);
+        Some(generation)
+    }
+
+    pub(crate) fn revoke_inflight(&self, object: HummockSstableObjectId) {
+        let mut state = self.state.write();
+        state.inflight.remove(&object);
+        if state.needed_size(object).is_none() {
+            state.generations.remove(&object);
+            return;
+        }
+        state.next_generation += 1;
+        let generation = state.next_generation;
+        state.generations.insert(object, generation);
     }
 
     pub(crate) fn is_desired(&self, object_id: HummockSstableObjectId) -> bool {
@@ -608,11 +640,25 @@ impl PinCache {
         self.gc.reclaim(stale_objects);
     }
 
+    #[cfg(test)]
     fn start_download(
         self: &Arc<Self>,
         object_id: HummockSstableObjectId,
     ) -> ObjectResult<PinCacheDownloadStart> {
+        self.start_download_at_generation(object_id, None)
+    }
+
+    fn start_download_at_generation(
+        self: &Arc<Self>,
+        object_id: HummockSstableObjectId,
+        generation: Option<u64>,
+    ) -> ObjectResult<PinCacheDownloadStart> {
         let mut state = self.state.write();
+        if generation.is_some_and(|expected| state.generations.get(&object_id) != Some(&expected)) {
+            return Ok(PinCacheDownloadStart::Complete(
+                PinCacheRefillOutcome::Obsolete,
+            ));
+        }
         if state.recovery_state == RecoveryState::Failed {
             return Err(ObjectError::internal(
                 "pin cache recovery failed; refusing new local writes",
@@ -664,11 +710,26 @@ impl PinCache {
         *self.refill_gate.lock() = Some(gate);
     }
 
+    #[cfg(test)]
     pub(crate) async fn pin_sst(
         self: &Arc<Self>,
         remote_store: ObjectStoreRef,
         remote_path: String,
         object_id: HummockSstableObjectId,
+    ) -> ObjectResult<PinCacheRefillOutcome> {
+        let Some(generation) = self.refill_generation(object_id) else {
+            return Ok(PinCacheRefillOutcome::Obsolete);
+        };
+        self.pin_sst_at_generation(remote_store, remote_path, object_id, generation)
+            .await
+    }
+
+    pub(crate) async fn pin_sst_at_generation(
+        self: &Arc<Self>,
+        remote_store: ObjectStoreRef,
+        remote_path: String,
+        object_id: HummockSstableObjectId,
+        generation: u64,
     ) -> ObjectResult<PinCacheRefillOutcome> {
         self.wait_for_recovery().await;
         #[cfg(test)]
@@ -680,7 +741,7 @@ impl PinCache {
                 .expect("test refill gate must stay open")
                 .forget();
         }
-        let download = match self.start_download(object_id)? {
+        let download = match self.start_download_at_generation(object_id, Some(generation))? {
             PinCacheDownloadStart::Download(download) => download,
             PinCacheDownloadStart::Complete(outcome) => return Ok(outcome),
         };
@@ -846,6 +907,39 @@ mod tests {
             .await
             .unwrap();
         assert!(pin_cache.get(object_id).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_revoked_generation_cannot_begin_a_late_download() {
+        let cache = PinCache::new(in_memory_object_store(), u64::MAX);
+        let remote = in_memory_object_store();
+        remote
+            .upload("sst", Bytes::from_static(b"complete"))
+            .await
+            .unwrap();
+        let object = HummockSstableObjectId::from(911);
+        cache.replace_desired_objects([(object, 8)]);
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        cache.set_refill_gate_for_test(gate.clone());
+        let generation = cache.refill_generation(object).unwrap();
+        let old_cache = cache.clone();
+        let old_remote = remote.clone();
+        let old = tokio::spawn(async move {
+            old_cache
+                .pin_sst_at_generation(old_remote, "sst".into(), object, generation)
+                .await
+                .unwrap()
+        });
+        tokio::task::yield_now().await;
+        cache.revoke_inflight(object);
+        gate.add_permits(1);
+        assert_eq!(old.await.unwrap(), PinCacheRefillOutcome::Obsolete);
+        assert!(cache.get(object).is_none());
+        gate.add_permits(1);
+        assert_eq!(
+            cache.pin_sst(remote, "sst".into(), object).await.unwrap(),
+            PinCacheRefillOutcome::Published
+        );
     }
 
     #[tokio::test]
@@ -1278,7 +1372,7 @@ mod tests {
             HummockVersion::from(PbHummockVersion::default()),
             tokio::sync::mpsc::unbounded_channel().0,
         );
-        let mut controller = PinCacheRefillController::new(sstable_store, version);
+        let mut controller = PinCacheRefillController::new(sstable_store, version, 1);
         // The first empty policy snapshot must initialize membership, not take the no-op path.
         controller.replace_policies(&HashMap::new());
         tokio::time::timeout(std::time::Duration::from_secs(1), async {

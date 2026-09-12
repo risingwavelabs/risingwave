@@ -47,7 +47,6 @@ use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::local_version::recent_versions::RecentVersions;
 use crate::hummock::pin_cache_refill::{
     PinCacheMembershipUpdate, PinCacheRefillController, PinCacheRefillPlan,
-    refill_pin_cache_objects,
 };
 use crate::hummock::refill_locality::{block_vnode_range, vnode_range_overlaps_bitmap};
 use crate::hummock::{
@@ -381,6 +380,7 @@ impl CacheRefiller {
         let config = Arc::new(config);
         let concurrency = Arc::new(Semaphore::new(config.concurrency));
         let default_policy = config.table_cache_refill_default_policy;
+        let pin_concurrency = config.concurrency;
         let meta_refill_concurrency = if config.meta_refill_concurrency == 0 {
             None
         } else {
@@ -397,6 +397,7 @@ impl CacheRefiller {
             pin_cache_refill: PinCacheRefillController::new(
                 sstable_store.clone(),
                 pin_cache_version,
+                pin_concurrency,
             ),
             sstable_store,
             role,
@@ -432,11 +433,16 @@ impl CacheRefiller {
             new_pinned_version.clone(),
             pin_cache_membership_update,
         );
-        let pin_cache_refill = PinCacheRefillPlan::new(
-            &deltas,
-            &pin_cache_refill_object_ids,
-            self.pin_cache_owned_vnodes(),
-        );
+        let pin_cache_refill = match pin_cache_membership_update {
+            // A full snapshot can arrive after initial ownership. Its existing SSTs belong
+            // to the same release gate, not an independent background bootstrap.
+            PinCacheMembershipUpdate::Rebuild => self.pin_cache_refill.live_objects_plan(),
+            PinCacheMembershipUpdate::Delta => PinCacheRefillPlan::new(
+                &deltas,
+                &pin_cache_refill_object_ids,
+                self.pin_cache_owned_vnodes(),
+            ),
+        };
         for delta in &mut deltas {
             delta
                 .insert_sst_infos
@@ -538,14 +544,31 @@ impl CacheRefiller {
                 }
             }
         }
-        let mut pin_plans = Vec::new();
+        let mut pin_plans: HashMap<HummockSstableObjectId, PinCacheRefillPlan> = HashMap::new();
         let mut foyer_handles = Vec::new();
         let mut events = Vec::new();
         for mut item in items {
             item.pin_plan
                 .objects
                 .retain(|object, _| required_objects.contains(object));
-            pin_plans.push(item.pin_plan);
+            for (object, infos) in item.pin_plan.objects {
+                let plan = pin_plans.entry(object).or_default();
+                let projections = plan.objects.entry(object).or_default();
+                for info in infos {
+                    if !projections
+                        .iter()
+                        .any(|existing| existing.sst_id == info.sst_id)
+                    {
+                        projections.push(info);
+                    }
+                }
+                for (&table, bitmap) in item.pin_plan.ownership.iter() {
+                    Arc::make_mut(&mut plan.ownership)
+                        .entry(table)
+                        .and_modify(|owned| *owned |= bitmap)
+                        .or_insert_with(|| bitmap.clone());
+                }
+            }
             foyer_handles.push((self.spawn_refill_task)(
                 item.plan,
                 item.context,
@@ -554,20 +577,17 @@ impl CacheRefiller {
             ));
             events.push(item.event);
         }
-        let store = self.sstable_store.clone();
-        let concurrency = self.concurrency.clone();
-        // This task owns its uploads even after the version deadline. Dropping a JoinHandle
-        // detaches it; it does not cancel an OpenDAL upload and leak its reserved capacity.
-        let pin_handle = tokio::spawn(async move {
-            let mut ready = true;
-            for plan in pin_plans {
-                ready &= refill_pin_cache_objects(store.clone(), concurrency.clone(), plan).await;
-            }
-            ready
-        });
+        let tickets = pin_plans
+            .into_values()
+            .map(|plan| self.pin_cache_refill.submit(plan))
+            .collect::<Vec<_>>();
         let handle = tokio::spawn(async move {
             match tokio::time::timeout_at(deadline, async move {
-                let pin_ready = pin_handle.await.unwrap_or(false);
+                // The executor owns uploads. Dropping deadline-bound tickets never cancels I/O.
+                let pin_ready = join_all(tickets.into_iter().map(|ticket| ticket.wait()))
+                    .await
+                    .into_iter()
+                    .all(|ready| ready);
                 let foyer_ready = join_all(foyer_handles)
                     .await
                     .into_iter()
@@ -585,9 +605,7 @@ impl CacheRefiller {
     }
 
     pub(crate) fn on_version_applied(&self, version: risingwave_hummock_sdk::HummockVersionId) {
-        if let Some(cache) = self.sstable_store.pin_cache() {
-            cache.release_retired(version);
-        }
+        self.pin_cache_refill.on_version_applied(version);
     }
 
     fn pin_cache_owned_vnodes(&self) -> HashMap<TableId, Bitmap> {
@@ -651,8 +669,10 @@ impl CacheRefiller {
         &mut self,
         policies: HashMap<TableId, CacheRefillPolicy>,
     ) {
-        self.pin_cache_refill.replace_policies(&policies);
+        let initial = self.pin_cache_refill.replace_policies(&policies);
         self.table_cache_refill_policies = policies;
+        self.pin_cache_refill
+            .update_ownership(self.pin_cache_owned_vnodes(), initial);
     }
 
     /// Replaces the complete serving vnode mapping snapshot.
@@ -661,6 +681,8 @@ impl CacheRefiller {
         mapping: HashMap<TableId, Bitmap>,
     ) {
         self.serving_table_vnode_mapping = mapping;
+        self.pin_cache_refill
+            .update_ownership(self.pin_cache_owned_vnodes(), true);
     }
 
     pub(crate) fn update_streaming_table_vnodes(
@@ -674,6 +696,8 @@ impl CacheRefiller {
         } else {
             self.streaming_table_vnode_mapping.remove(&table_id);
         }
+        self.pin_cache_refill
+            .update_ownership(self.pin_cache_owned_vnodes(), true);
     }
 
     fn table_cache_refill_contexts(
@@ -2876,6 +2900,183 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_pin_existing_sst_bootstraps_on_ownership_but_not_set() {
+        let table = TableId::from(233);
+        for cold_worker in [false, true] {
+            let store = mock_sstable_store().await;
+            let (_, info) = gen_test_sst_with_object_id(table, store.clone(), 820).await;
+            let cache = pin_cache_for_test();
+            store.set_pin_cache(cache.clone());
+            let mut refiller = CacheRefiller::new(
+                Role::Streaming,
+                test_refill_config(CacheRefillPolicy::Disabled),
+                store,
+                CacheRefiller::default_spawn_refill_task(),
+                pinned_version_with_sst(table, &info),
+            );
+            if !cold_worker {
+                refiller.replace_table_cache_refill_policies(HashMap::new());
+                refiller.update_streaming_table_vnodes(
+                    table,
+                    Some(Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [0])),
+                );
+            }
+            refiller
+                .replace_table_cache_refill_policies([(table, CacheRefillPolicy::Pinned)].into());
+            if !cold_worker {
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                assert!(cache.get(info.object_id).is_none(), "SET alone is not Warm");
+                refiller.update_streaming_table_vnodes(
+                    table,
+                    Some(Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [128])),
+                );
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                assert!(
+                    cache.get(info.object_id).is_none(),
+                    "non-overlapping owner must not download"
+                );
+            }
+            refiller.update_streaming_table_vnodes(
+                table,
+                Some(Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [0])),
+            );
+            tokio::time::timeout(Duration::from_secs(1), async {
+                while cache.get(info.object_id).is_none() {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            assert!(
+                refiller.active.is_none() && refiller.pending.is_empty(),
+                "ownership does not manufacture version events"
+            );
+            refiller.update_streaming_table_vnodes(
+                table,
+                Some(Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [128])),
+            );
+            tokio::time::timeout(Duration::from_secs(1), async {
+                while cache.get(info.object_id).is_some() {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("losing block ownership must reclaim the former owner's local file");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_pin_full_snapshot_waits_and_late_old_owner_cannot_publish() {
+        let table = TableId::from(233);
+        let store = mock_sstable_store().await;
+        let (_, info) = gen_test_sst_with_object_id(table, store.clone(), 825).await;
+        let cache = pin_cache_for_test();
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        cache.set_refill_gate_for_test(gate.clone());
+        store.set_pin_cache(cache.clone());
+        let mut config = test_refill_config(CacheRefillPolicy::Disabled);
+        config.timeout = Duration::from_secs(1);
+        let mut refiller = CacheRefiller::new(
+            Role::Streaming,
+            config,
+            store,
+            CacheRefiller::default_spawn_refill_task(),
+            pinned_version_for_test(),
+        );
+        refiller.replace_table_cache_refill_policies([(table, CacheRefillPolicy::Pinned)].into());
+        refiller.update_streaming_table_vnodes(
+            table,
+            Some(Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [0])),
+        );
+        refiller.start_cache_refill(
+            vec![],
+            pinned_version_for_test(),
+            pinned_version_with_sst(table, &info),
+            PinCacheMembershipUpdate::Rebuild,
+        );
+        assert!(
+            tokio::time::timeout(Duration::from_millis(20), refiller.next_events())
+                .await
+                .is_err()
+        );
+        refiller.update_streaming_table_vnodes(
+            table,
+            Some(Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [128])),
+        );
+        gate.add_permits(1);
+        assert_eq!(refiller.next_events().await.len(), 1);
+        assert_eq!(
+            refiller.last_outcome,
+            Some(super::RefillBatchOutcome::DegradedError)
+        );
+        tokio::time::sleep(Duration::from_millis(20)).await;
+        assert!(
+            cache.get(info.object_id).is_none(),
+            "late old-owner completion cannot publish"
+        );
+        refiller.update_streaming_table_vnodes(
+            table,
+            Some(Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [0])),
+        );
+        gate.add_permits(1);
+        tokio::time::timeout(Duration::from_secs(1), async {
+            while cache.get(info.object_id).is_none() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_pin_capacity_debt_recovers_without_another_version_delta() {
+        let table = TableId::from(233);
+        let store = mock_sstable_store().await;
+        let (_, blocker) = gen_test_sst_with_object_id(table, store.clone(), 830).await;
+        let (_, target) = gen_test_sst_with_object_id(table, store.clone(), 831).await;
+        let cache = PinCache::new(
+            pin_cache_store_for_test(),
+            blocker.file_size.max(target.file_size),
+        );
+        cache.replace_desired_objects([(blocker.object_id, blocker.file_size)]);
+        cache
+            .pin_sst(
+                store.store(),
+                store.get_sst_data_path(blocker.object_id),
+                blocker.object_id,
+            )
+            .await
+            .unwrap();
+        store.set_pin_cache(cache.clone());
+        let version = pinned_version_with_ssts(&[table], &[blocker.clone(), target.clone()]);
+        let mut refiller = CacheRefiller::new(
+            Role::Streaming,
+            test_refill_config(CacheRefillPolicy::Disabled),
+            store,
+            CacheRefiller::default_spawn_refill_task(),
+            version,
+        );
+        refiller.replace_table_cache_refill_policies([(table, CacheRefillPolicy::Pinned)].into());
+        refiller
+            .update_streaming_table_vnodes(table, Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)));
+        tokio::time::sleep(Duration::from_millis(50)).await;
+        assert!(cache.get(target.object_id).is_none());
+        // Reclaim capacity, but create no new version/ownership trigger for the failed target.
+        cache.get(blocker.object_id).unwrap().invalidate();
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while cache.get(target.object_id).is_none() {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        assert!(
+            cache.get(blocker.object_id).is_none(),
+            "an ordinary local failure is not read-through repair"
+        );
+    }
+
+    #[tokio::test]
     async fn test_pin_version_gate_ready_and_timeout_does_not_cancel_upload() {
         for timeout in [false, true] {
             let table = TableId::from(233);
@@ -2987,6 +3188,85 @@ mod tests {
         );
         assert_eq!(rest[0].pinned_version.id().as_raw_id(), 1);
         assert_eq!(rest[1].pinned_version.id().as_raw_id(), 2);
+    }
+
+    #[tokio::test]
+    async fn test_pin_pending_compacts_only_noncommitted_intermediates() {
+        let table = TableId::from(233);
+        for committed in [false, true] {
+            let store = mock_sstable_store().await;
+            let (_, middle) = gen_test_sst_with_object_id(table, store.clone(), 840).await;
+            let (_, last) = gen_test_sst_with_object_id(table, store.clone(), 841).await;
+            let cache = pin_cache_for_test();
+            store.set_pin_cache(cache.clone());
+            let base = pinned_version_with_ssts(&[table], &[]);
+            let make_version = |info: &SstableInfo| {
+                let mut pb = pinned_version_with_sst(table, info).to_protobuf();
+                pb.state_table_info.get_mut(&table).unwrap().committed_epoch = u64::from(committed);
+                PinnedVersion::new(
+                    HummockVersion::from_rpc_protobuf(&pb),
+                    unbounded_channel().0,
+                )
+            };
+            let middle_version = make_version(&middle);
+            let last_version = make_version(&last);
+            let foyer_gate = Arc::new(tokio::sync::Semaphore::new(0));
+            let worker_gate = foyer_gate.clone();
+            let spawn: SpawnRefillTask = Arc::new(move |_, _, _, _| {
+                let gate = worker_gate.clone();
+                tokio::spawn(async move {
+                    gate.acquire().await.unwrap().forget();
+                })
+            });
+            let mut config = test_refill_config(CacheRefillPolicy::Disabled);
+            config.timeout = Duration::from_secs(1);
+            let mut refiller =
+                CacheRefiller::new(Role::Streaming, config, store, spawn, base.clone());
+            refiller
+                .replace_table_cache_refill_policies([(table, CacheRefillPolicy::Pinned)].into());
+            refiller.update_streaming_table_vnodes(
+                table,
+                Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+            );
+            refiller.start_cache_refill(
+                vec![],
+                base.clone(),
+                base.clone(),
+                PinCacheMembershipUpdate::Delta,
+            );
+            refiller.start_cache_refill(
+                vec![SstDeltaInfo {
+                    insert_sst_infos: vec![middle.clone()],
+                    ..Default::default()
+                }],
+                base,
+                middle_version.clone(),
+                PinCacheMembershipUpdate::Delta,
+            );
+            refiller.start_cache_refill(
+                vec![SstDeltaInfo {
+                    insert_sst_infos: vec![last.clone()],
+                    delete_sst_infos: vec![middle.clone()],
+                    ..Default::default()
+                }],
+                middle_version,
+                last_version,
+                PinCacheMembershipUpdate::Delta,
+            );
+            foyer_gate.add_permits(3);
+            assert_eq!(refiller.next_events().await.len(), 1);
+            assert_eq!(refiller.next_events().await.len(), 2);
+            assert_eq!(
+                refiller.last_outcome,
+                Some(super::RefillBatchOutcome::Ready)
+            );
+            assert!(cache.get(last.object_id).is_some());
+            assert_eq!(
+                cache.get(middle.object_id).is_some(),
+                committed,
+                "only commit-visible intermediates require admission"
+            );
+        }
     }
 
     #[tokio::test]
