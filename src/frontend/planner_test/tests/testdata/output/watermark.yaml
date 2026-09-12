@@ -366,3 +366,73 @@
 
     Table 4294967294 { columns: [ mv1ts1, mv1ts2, mv2ts1, mv2ts2, mv1.t1._row_id, mv2.t2._row_id, _rw_timestamp ], primary key: [ $4 ASC, $5 ASC, $0 ASC ], value indices: [ 0, 1, 2, 3, 4, 5 ], distribution key: [ 0, 4, 5 ], read pk prefix len hint: 3 }
 
+- name: two-phase top n ordered by watermark column
+  sql: |
+    create table t (ts timestamp with time zone, v1 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    select * from (select ts, count(*) as cnt from t group by ts) order by ts limit 10;
+  stream_plan: |-
+    StreamMaterialize { columns: [ts, cnt], stream_key: [ts], pk_columns: [ts], pk_conflict: NoCheck, watermark_columns: [ts] }
+    └─StreamProject { exprs: [t.ts, count], output_watermarks: [[t.ts]] }
+      └─StreamTopN { order: [t.ts ASC], limit: 10, offset: 0, output_watermarks: [[t.ts]] }
+        └─StreamExchange { dist: Single }
+          └─StreamGroupTopN { order: [t.ts ASC], limit: 10, offset: 0, group_key: [_vnode], output_watermarks: [[t.ts]] }
+            └─StreamProject { exprs: [t.ts, count, Vnode(t.ts) as _vnode], output_watermarks: [[t.ts]] }
+              └─StreamHashAgg [append_only] { group_key: [t.ts], aggs: [count], output_watermarks: [[t.ts]] }
+                └─StreamExchange { dist: HashShard(t.ts) }
+                  └─StreamTableScan { table: t, columns: [t.ts, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: top n ordered by watermark column desc
+  sql: |
+    create table t (ts timestamp with time zone, v1 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    select * from (select ts, count(*) as cnt from t group by ts) order by ts desc limit 10;
+  stream_plan: |-
+    StreamMaterialize { columns: [ts, cnt], stream_key: [ts], pk_columns: [ts], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.ts, count] }
+      └─StreamTopN { order: [t.ts DESC], limit: 10, offset: 0 }
+        └─StreamExchange { dist: Single }
+          └─StreamGroupTopN { order: [t.ts DESC], limit: 10, offset: 0, group_key: [_vnode] }
+            └─StreamProject { exprs: [t.ts, count, Vnode(t.ts) as _vnode], output_watermarks: [[t.ts]] }
+              └─StreamHashAgg [append_only] { group_key: [t.ts], aggs: [count], output_watermarks: [[t.ts]] }
+                └─StreamExchange { dist: HashShard(t.ts) }
+                  └─StreamTableScan { table: t, columns: [t.ts, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: top n with watermark column not being the first order by column
+  sql: |
+    create table t (ts timestamp with time zone, v1 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    select * from t order by v1, ts limit 10;
+  stream_plan: |-
+    StreamMaterialize { columns: [ts, v1, t._row_id(hidden)], stream_key: [t._row_id], pk_columns: [v1, ts, t._row_id], pk_conflict: NoCheck }
+    └─StreamTopN [append_only] { order: [t.v1 ASC, t.ts ASC], limit: 10, offset: 0 }
+      └─StreamExchange { dist: Single }
+        └─StreamTableScan { table: t, columns: [t.ts, t.v1, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: group top n with watermark on the second group key column
+  sql: |
+    create table t (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    select * from (select *, row_number() over (partition by v1, ts order by v2) as rn from t) where rn <= 1;
+  stream_plan: |-
+    StreamMaterialize { columns: [ts, v1, v2, rn], stream_key: [v1, ts], pk_columns: [v1, ts], pk_conflict: NoCheck }
+    └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.v1, t.ts ORDER BY t.v2 ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+      └─StreamProject { exprs: [t.ts, t.v1, t.v2], output_watermarks: [[t.ts]] }
+        └─StreamGroupTopN [append_only] { order: [t.v2 ASC], limit: 1, offset: 0, group_key: [t.v1, t.ts], output_watermarks: [[t.ts]] }
+          └─StreamExchange { dist: HashShard(t.ts, t.v1) }
+            └─StreamTableScan { table: t, columns: [t.ts, t.v1, t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: group top n ordered by watermark column
+  sql: |
+    create table t (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    select * from (select *, row_number() over (partition by v1 order by ts) as rn from t) where rn <= 1;
+  stream_plan: |-
+    StreamMaterialize { columns: [ts, v1, v2, rn], stream_key: [v1], pk_columns: [v1], pk_conflict: NoCheck }
+    └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.v1 ORDER BY t.ts ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+      └─StreamProject { exprs: [t.ts, t.v1, t.v2], output_watermarks: [[t.ts]] }
+        └─StreamGroupTopN [append_only] { order: [t.ts ASC], limit: 1, offset: 0, group_key: [t.v1], output_watermarks: [[t.ts]] }
+          └─StreamExchange { dist: HashShard(t.v1) }
+            └─StreamTableScan { table: t, columns: [t.ts, t.v1, t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+- name: group top n ordered by watermark column desc
+  sql: |
+    create table t (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
+    select * from (select *, row_number() over (partition by v1 order by ts desc) as rn from t) where rn <= 1;
+  stream_plan: |-
+    StreamMaterialize { columns: [ts, v1, v2, rn], stream_key: [v1], pk_columns: [v1], pk_conflict: NoCheck }
+    └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.v1 ORDER BY t.ts DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+      └─StreamProject { exprs: [t.ts, t.v1, t.v2] }
+        └─StreamGroupTopN [append_only] { order: [t.ts DESC], limit: 1, offset: 0, group_key: [t.v1] }
+          └─StreamExchange { dist: HashShard(t.v1) }
+            └─StreamTableScan { table: t, columns: [t.ts, t.v1, t.v2, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }

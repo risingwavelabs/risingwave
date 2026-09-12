@@ -298,6 +298,26 @@ impl fmt::Debug for ColumnOrder {
     }
 }
 
+/// Returns the index of the first `ORDER BY` column of a streaming TopN operator if watermarks on
+/// that column can be forwarded by the operator, i.e. when the column is ordered `ASC NULLS LAST`.
+///
+/// A watermark `wm` on a column promises that no row with the column value `< wm` will ever arrive
+/// again. To forward it, the operator must guarantee that it will never emit any change (insertion,
+/// deletion or update) to rows with the column value `< wm` afterwards. A row arriving at a TopN
+/// operator can only change its own output and the output of rows ordered *after* it, by evicting
+/// them from or restoring them into the top N. When the first `ORDER BY` column is ordered
+/// `ASC NULLS LAST`, all such rows are not smaller than the arriving row in that column, which is
+/// `>= wm` (or NULL, treated as the largest) by the watermark guarantee. With `DESC` or
+/// `ASC NULLS FIRST` ordering, an arriving row may evict rows with values `< wm` instead, so
+/// watermarks on the column must be dropped.
+///
+/// The rule is shared by the optimizer and the executors so that they stay in sync.
+pub fn topn_watermark_forwardable_order_key(order_by: &[ColumnOrder]) -> Option<usize> {
+    let first = order_by.first()?;
+    (first.order_type.is_ascending() && first.order_type.nulls_are_largest())
+        .then_some(first.column_index)
+}
+
 pub struct ColumnOrderDisplay<'a> {
     pub column_order: &'a ColumnOrder,
     pub input_schema: &'a Schema,
@@ -859,5 +879,32 @@ mod tests {
                 &[OrderType::default()]
             )
         )
+    }
+
+    #[test]
+    fn test_topn_watermark_forwardable_order_key() {
+        assert_eq!(topn_watermark_forwardable_order_key(&[]), None);
+        for order_type in [OrderType::ascending(), OrderType::ascending_nulls_last()] {
+            assert_eq!(
+                topn_watermark_forwardable_order_key(&[
+                    ColumnOrder::new(2, order_type),
+                    ColumnOrder::new(0, OrderType::descending()),
+                ]),
+                Some(2)
+            );
+        }
+        for order_type in [
+            OrderType::descending(),
+            OrderType::descending_nulls_last(),
+            OrderType::ascending_nulls_first(),
+        ] {
+            assert_eq!(
+                topn_watermark_forwardable_order_key(&[
+                    ColumnOrder::new(2, order_type),
+                    ColumnOrder::new(0, OrderType::ascending()),
+                ]),
+                None
+            );
+        }
     }
 }

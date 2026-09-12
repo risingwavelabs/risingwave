@@ -15,11 +15,12 @@
 use std::assert_matches;
 
 use pretty_xmlish::XmlNode;
+use risingwave_common::util::sort_util::topn_watermark_forwardable_order_key;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{DistillUnit, TopNLimit};
 use super::stream::prelude::*;
-use super::utils::{Distill, plan_node_name};
+use super::utils::{Distill, plan_node_name, watermark_pretty};
 use super::{
     ExprRewritable, PlanBase, PlanTreeNodeUnary, StreamNode, StreamPlanRef as PlanRef, generic,
 };
@@ -41,7 +42,14 @@ impl StreamTopN {
         let input = &core.input;
         assert_matches!(input.distribution(), Distribution::Single);
         reject_upsert_input!(input);
-        let watermark_columns = WatermarkColumns::new();
+        // The executor only forwards watermarks on the first `ORDER BY` column ordered
+        // `ASC NULLS LAST`. Keep the optimizer in sync so EOWC won't be enabled on unsupported
+        // plans. See `topn_watermark_forwardable_order_key` for the reasoning.
+        let watermark_columns =
+            match topn_watermark_forwardable_order_key(&core.order.column_orders) {
+                Some(col_idx) => input.watermark_columns().retain_clone(&[col_idx]),
+                None => WatermarkColumns::new(),
+            };
 
         let base = PlanBase::new_stream_with_core(
             &core,
@@ -73,7 +81,11 @@ impl Distill for StreamTopN {
         let name = plan_node_name!("StreamTopN",
             { "append_only", self.input().append_only() },
         );
-        self.core.distill_with_name(name)
+        let mut node = self.core.distill_with_name(name);
+        if let Some(ow) = watermark_pretty(self.base.watermark_columns(), self.schema()) {
+            node.fields.push(("output_watermarks".into(), ow));
+        }
+        node
     }
 }
 

@@ -1,0 +1,157 @@
+# Watermark forwarding of TopN executors: a watermark on the first `ORDER BY` column ordered
+# `ASC NULLS LAST` is forwarded by both plain and group TopN, and watermarks on any group key
+# column are forwarded by group TopN. The forwarded watermarks make the queries below eligible
+# for EMIT ON WINDOW CLOSE, where the `EowcSort` after the TopN only emits rows whose value in the
+# watermark column is below the watermark, i.e. rows that will never be evicted from the top N.
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+SET streaming_parallelism = 1;
+
+statement ok
+CREATE TABLE t (k INT, ts TIMESTAMP, v INT, WATERMARK FOR ts AS ts - INTERVAL '5 minutes') APPEND ONLY;
+
+statement ok
+SET streaming_parallelism = 0;
+
+# Plain TopN ordered by the watermark column `ts` forwards the watermark on `ts`.
+statement ok
+CREATE MATERIALIZED VIEW mv_top_n AS
+SELECT ts, v FROM (SELECT * FROM t ORDER BY ts LIMIT 3)
+EMIT ON WINDOW CLOSE;
+
+# Group TopN forwards the watermark on `window_start`, the second group key column.
+statement ok
+CREATE MATERIALIZED VIEW mv_group_top_n AS
+SELECT k, window_start, v FROM (
+    SELECT *, row_number() OVER (PARTITION BY k, window_start ORDER BY v) AS rn
+    FROM tumble(t, ts, INTERVAL '1 hour')
+)
+WHERE rn <= 1
+EMIT ON WINDOW CLOSE;
+
+# Group TopN ordered by the watermark column `ts` forwards the watermark on `ts`.
+statement ok
+CREATE MATERIALIZED VIEW mv_first_per_key AS
+SELECT k, ts, v FROM (
+    SELECT *, row_number() OVER (PARTITION BY k ORDER BY ts) AS rn
+    FROM t
+)
+WHERE rn <= 1
+EMIT ON WINDOW CLOSE;
+
+# The watermark on `ts` is not forwarded when it's not the first `ORDER BY` column, or when it's
+# ordered `DESC`.
+statement error cannot be executed in Emit-On-Window-Close mode
+CREATE MATERIALIZED VIEW mv_err AS
+SELECT ts, v FROM (SELECT * FROM t ORDER BY v, ts LIMIT 3)
+EMIT ON WINDOW CLOSE;
+
+statement error cannot be executed in Emit-On-Window-Close mode
+CREATE MATERIALIZED VIEW mv_err AS
+SELECT ts, v FROM (SELECT * FROM t ORDER BY ts DESC LIMIT 3)
+EMIT ON WINDOW CLOSE;
+
+# Watermark: 16:53, i.e. `window_start` watermark 16:00.
+statement ok
+INSERT INTO t VALUES (1, '2023-05-06 16:51:00', 5), (2, '2023-05-06 16:58:00', 9);
+
+query TI
+SELECT * FROM mv_top_n ORDER BY ts;
+----
+2023-05-06 16:51:00 5
+
+query ITI
+SELECT * FROM mv_group_top_n ORDER BY window_start, k;
+----
+
+query ITI
+SELECT * FROM mv_first_per_key ORDER BY k;
+----
+1 2023-05-06 16:51:00 5
+
+# Watermark: 17:25, i.e. `window_start` watermark 17:00. The row at 17:30 is now in the top 3 but
+# stays above the watermark, so it's held back by the `EowcSort`.
+statement ok
+INSERT INTO t VALUES (1, '2023-05-06 17:30:00', 4);
+
+query TI
+SELECT * FROM mv_top_n ORDER BY ts;
+----
+2023-05-06 16:51:00 5
+2023-05-06 16:58:00 9
+
+query ITI
+SELECT * FROM mv_group_top_n ORDER BY window_start, k;
+----
+1 2023-05-06 16:00:00 5
+2 2023-05-06 16:00:00 9
+
+query ITI
+SELECT * FROM mv_first_per_key ORDER BY k;
+----
+1 2023-05-06 16:51:00 5
+2 2023-05-06 16:58:00 9
+
+# Watermark: 17:35. The row at 17:26 evicts the held-back row at 17:30 from the top 3, so the
+# latter never shows up in the output. In window 17:00, `v = 2` evicts `v = 4` for `k = 1`.
+statement ok
+INSERT INTO t VALUES (2, '2023-05-06 17:26:00', 7), (1, '2023-05-06 17:40:00', 2);
+
+query TI
+SELECT * FROM mv_top_n ORDER BY ts;
+----
+2023-05-06 16:51:00 5
+2023-05-06 16:58:00 9
+2023-05-06 17:26:00 7
+
+query ITI
+SELECT * FROM mv_group_top_n ORDER BY window_start, k;
+----
+1 2023-05-06 16:00:00 5
+2 2023-05-06 16:00:00 9
+
+query ITI
+SELECT * FROM mv_first_per_key ORDER BY k;
+----
+1 2023-05-06 16:51:00 5
+2 2023-05-06 16:58:00 9
+
+# Watermark: 18:05, i.e. `window_start` watermark 18:00, which closes window 17:00.
+statement ok
+INSERT INTO t VALUES (1, '2023-05-06 18:10:00', 8);
+
+query TI
+SELECT * FROM mv_top_n ORDER BY ts;
+----
+2023-05-06 16:51:00 5
+2023-05-06 16:58:00 9
+2023-05-06 17:26:00 7
+
+query ITI
+SELECT * FROM mv_group_top_n ORDER BY window_start, k;
+----
+1 2023-05-06 16:00:00 5
+2 2023-05-06 16:00:00 9
+1 2023-05-06 17:00:00 2
+2 2023-05-06 17:00:00 7
+
+query ITI
+SELECT * FROM mv_first_per_key ORDER BY k;
+----
+1 2023-05-06 16:51:00 5
+2 2023-05-06 16:58:00 9
+
+statement ok
+DROP MATERIALIZED VIEW mv_first_per_key;
+
+statement ok
+DROP MATERIALIZED VIEW mv_group_top_n;
+
+statement ok
+DROP MATERIALIZED VIEW mv_top_n;
+
+statement ok
+DROP TABLE t;

@@ -15,7 +15,7 @@
 use risingwave_common::array::Op;
 use risingwave_common::row::{RowDeserializer, RowExt};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_common::util::sort_util::{ColumnOrder, topn_watermark_forwardable_order_key};
 
 use super::top_n_cache::{AppendOnlyTopNCacheTrait, TopNStaging};
 use super::utils::*;
@@ -71,6 +71,9 @@ pub struct InnerAppendOnlyTopNExecutor<S: StateStore, const WITH_TIES: bool> {
 
     /// Used for serializing pk into `CacheKey`.
     cache_key_serde: CacheKeySerde,
+
+    /// The `ORDER BY` column whose watermarks can be forwarded, if any.
+    watermark_order_key: Option<usize>,
 }
 
 impl<S: StateStore, const WITH_TIES: bool> InnerAppendOnlyTopNExecutor<S, WITH_TIES> {
@@ -94,6 +97,7 @@ impl<S: StateStore, const WITH_TIES: bool> InnerAppendOnlyTopNExecutor<S, WITH_T
             storage_key_indices: storage_key.into_iter().map(|op| op.column_index).collect(),
             cache: TopNCache::new(num_offset, num_limit, data_types),
             cache_key_serde,
+            watermark_order_key: topn_watermark_forwardable_order_key(&order_by),
         })
     }
 }
@@ -155,9 +159,10 @@ where
             .await
     }
 
-    async fn handle_watermark(&mut self, _: Watermark) -> Option<Watermark> {
-        // TODO(yuhao): handle watermark
-        None
+    async fn handle_watermark(&mut self, watermark: Watermark) -> Option<Watermark> {
+        // Only watermarks on the first `ORDER BY` column ordered `ASC NULLS LAST` can be forwarded.
+        // See `topn_watermark_forwardable_order_key` for the reasoning.
+        (Some(watermark.col_idx) == self.watermark_order_key).then_some(watermark)
     }
 }
 
@@ -167,14 +172,16 @@ mod tests {
     use risingwave_common::array::StreamChunk;
     use risingwave_common::array::stream_chunk::StreamChunkTestExt;
     use risingwave_common::catalog::{Field, Schema};
-    use risingwave_common::types::DataType;
+    use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::epoch::test_epoch;
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 
     use super::AppendOnlyTopNExecutor;
     use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
     use crate::executor::test_utils::{MockSource, StreamExecutorTestExt};
-    use crate::executor::{ActorContext, Barrier, Execute, Executor, Message, StreamKey};
+    use crate::executor::{
+        ActorContext, Barrier, Execute, Executor, Message, StreamKey, Watermark,
+    };
 
     fn create_stream_chunks() -> Vec<StreamChunk> {
         let chunk1 = StreamChunk::from_pretty(
@@ -382,5 +389,56 @@ mod tests {
         );
         // We added (1, 1, 2, 3).
         // Now (1, 1, 1) -> (1, 2, 2, 3)
+    }
+
+    /// Only the watermark on the first `ORDER BY` column is forwarded, and only when the column
+    /// is ordered `ASC NULLS LAST`.
+    #[tokio::test]
+    async fn test_append_only_top_n_executor_watermark_forwarding() {
+        for order_type in [OrderType::ascending(), OrderType::descending()] {
+            let source = MockSource::with_messages(vec![
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
+                Message::Chunk(StreamChunk::from_pretty(
+                    " I I
+                    + 1 0
+                    + 2 1
+                    + 3 2",
+                )),
+                Message::Watermark(Watermark::new(0, DataType::Int64, ScalarImpl::Int64(2))),
+                Message::Watermark(Watermark::new(1, DataType::Int64, ScalarImpl::Int64(1))),
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
+            ])
+            .into_executor(create_schema(), stream_key());
+            let state_table = create_in_memory_state_table(
+                &[DataType::Int64, DataType::Int64],
+                &[order_type, OrderType::ascending()],
+                &stream_key(),
+            )
+            .await;
+            let schema = source.schema().clone();
+            let top_n = AppendOnlyTopNExecutor::<_, false>::new(
+                source,
+                ActorContext::for_test(0),
+                schema,
+                vec![
+                    ColumnOrder::new(0, order_type),
+                    ColumnOrder::new(1, OrderType::ascending()),
+                ],
+                (0, 2),
+                vec![ColumnOrder::new(0, order_type)],
+                state_table,
+            )
+            .unwrap();
+            let mut top_n = top_n.boxed().execute();
+
+            top_n.expect_barrier().await;
+            top_n.expect_chunk().await;
+            if order_type.is_ascending() {
+                let watermark = top_n.expect_watermark().await;
+                assert_eq!(watermark.col_idx, 0);
+                assert_eq!(watermark.val, ScalarImpl::Int64(2));
+            }
+            top_n.expect_barrier().await;
+        }
     }
 }
