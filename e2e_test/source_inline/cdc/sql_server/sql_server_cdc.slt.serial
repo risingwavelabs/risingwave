@@ -100,6 +100,17 @@ CREATE SOURCE upper_mssql_source WITH (
 statement error Should not create MATERIALIZED VIEW or SELECT directly on shared CDC source
 create materialized view mv as select * from mssql_source;
 
+# Debezium would rewrite the quote to `_` in the topic name.
+statement error Debezium replaces with `_` in topic names
+CREATE TABLE sql_server_unsafe_topic_name (
+    id INT PRIMARY KEY
+) from mssql_source table 'dbo.foo"bar';
+
+# Debezium truncates complete topic names longer than 249 characters.
+statement error exceeds Debezium's 249-character topic-name limit
+CREATE TABLE sql_server_truncated_topic_name (
+    id INT PRIMARY KEY
+) from mssql_source table 'ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss.tttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttttt';
 
 # invalid table name
 statement error Sql Server table 'dbo'.'wrong_orders' doesn't exist

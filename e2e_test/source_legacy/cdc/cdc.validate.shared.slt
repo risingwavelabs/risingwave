@@ -20,7 +20,7 @@ create source mysql_invalid_user with (
  port = '3306',
  username = 'rot',
  password = '123456',
- database.name = 'my@db',
+ database.name = 'my_db',
  server.id = '5801'
 );
 
@@ -32,7 +32,7 @@ create source mysql_invalid_pwd with (
  port = '3306',
  username = 'root',
  password = '1456',
- database.name = 'my@db',
+ database.name = 'my_db',
  server.id = '5801'
 );
 
@@ -60,9 +60,16 @@ create source mysql_validate_src with (
  port = '3306',
  username = 'root',
  password = '123456',
- database.name = 'my@db',
+ database.name = 'my_db',
  server.id = '5801'
 );
+
+# Debezium would rewrite the quote to `_` in the topic name, so the runtime routing key would
+# differ from the table name stored in RisingWave.
+statement error Debezium replaces with `_` in topic names
+create table mysql_unsafe_topic_name (
+ id INT PRIMARY KEY
+) from mysql_validate_src table 'my_db.foo"bar';
 
 # upstream table does not exist
 statement error
@@ -71,7 +78,7 @@ create table products (
  name STRING,
  description STRING,
  PRIMARY KEY (id)
-) from mysql_validate_src table 'my@db.prdcts';
+) from mysql_validate_src table 'my_db.prdcts';
 
 # primary key column does not match upstream
 statement error
@@ -83,7 +90,7 @@ create table orders (
  product_id int,
  order_status smallint,
  PRIMARY KEY (product_id)
-) from mysql_validate_src table 'my@db.orders';
+) from mysql_validate_src table 'my_db.orders';
 
 # column data type mismatch (decimal vs double)
 statement error
@@ -95,7 +102,7 @@ create table orders (
  product_id int,
  order_status smallint,
  PRIMARY KEY (order_id)
-) from mysql_validate_src table 'my@db.orders';
+) from mysql_validate_src table 'my_db.orders';
 
 # column name mismatch
 statement error
@@ -107,7 +114,7 @@ create table orders (
  product_id int,
  order_status smallint,
  PRIMARY KEY (order_id)
-) from mysql_validate_src table 'my@db.orders';
+) from mysql_validate_src table 'my_db.orders';
 
 statement ok
 drop source mysql_validate_src;
@@ -154,6 +161,19 @@ create source pg_validate_src with (
  database.name = '${PGDATABASE:postgres}',
  slot.name = 'validate_slot'
 );
+
+# The doubled quote represents a quote in the actual Postgres identifier. Quote delimiters around
+# an otherwise safe identifier, such as public."MixedCase", remain supported.
+statement error Debezium replaces with `_` in topic names
+create table pg_unsafe_topic_name (
+ id INT PRIMARY KEY
+) from pg_validate_src table 'public."foo""bar"';
+
+# Dots inside quoted identifiers are indistinguishable from topic component delimiters.
+statement error delimiter between Debezium topic-name components
+create table pg_ambiguous_topic_name (
+ id INT PRIMARY KEY
+) from pg_validate_src table 'public."foo.bar"';
 
 # NOT NULL constraint not supported on CDC tables
 statement error CDC table with NOT NULL constraint is not supported
