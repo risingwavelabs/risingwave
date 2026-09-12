@@ -37,6 +37,7 @@ pub(crate) enum PinCacheMembershipUpdate {
 pub(crate) struct PinCacheRefillController {
     sstable_store: SstableStoreRef,
     pinned_table_ids: Option<HashSet<TableId>>,
+    object_ref_counts: HashMap<HummockSstableObjectId, u32>,
     version: PinnedVersion,
 }
 
@@ -45,6 +46,7 @@ impl PinCacheRefillController {
         Self {
             sstable_store,
             pinned_table_ids: None,
+            object_ref_counts: HashMap::new(),
             version,
         }
     }
@@ -68,13 +70,22 @@ impl PinCacheRefillController {
         membership_update: PinCacheMembershipUpdate,
     ) -> HashSet<HummockSstableObjectId> {
         self.version = new_version;
-        let Some(pin_cache) = self.sstable_store.pin_cache() else {
+        let Some(pin_cache) = self.sstable_store.pin_cache().cloned() else {
             return HashSet::new();
         };
         match membership_update {
-            PinCacheMembershipUpdate::Delta => self.apply_desired_object_delta(deltas),
-            PinCacheMembershipUpdate::Rebuild => self.rebuild_desired_objects(),
-        }
+            PinCacheMembershipUpdate::Delta => {
+                if self.apply_desired_object_delta(deltas).is_none() {
+                    tracing::warn!(
+                        "pin-cache object reference count is inconsistent; rebuilding membership"
+                    );
+                    self.rebuild_desired_objects();
+                }
+            }
+            PinCacheMembershipUpdate::Rebuild => {
+                self.rebuild_desired_objects();
+            }
+        };
 
         deltas
             .iter()
@@ -84,12 +95,14 @@ impl PinCacheRefillController {
             .collect()
     }
 
-    fn rebuild_desired_objects(&self) {
-        let Some(pin_cache) = self.sstable_store.pin_cache() else {
-            return;
+    fn rebuild_desired_objects(&mut self) -> HashSet<HummockSstableObjectId> {
+        let Some(pin_cache) = self.sstable_store.pin_cache().cloned() else {
+            self.object_ref_counts.clear();
+            return HashSet::new();
         };
         let Some(pinned_table_ids) = &self.pinned_table_ids else {
-            return;
+            self.object_ref_counts.clear();
+            return HashSet::new();
         };
 
         let compaction_group_ids = pinned_table_ids
@@ -102,7 +115,9 @@ impl PinCacheRefillController {
                     .map(|info| info.compaction_group_id)
             })
             .collect::<HashSet<_>>();
-        let objects = compaction_group_ids
+        let mut objects = HashMap::new();
+        let mut object_ref_counts = HashMap::new();
+        for sst in compaction_group_ids
             .into_iter()
             .flat_map(|compaction_group_id| {
                 let levels = self
@@ -112,39 +127,89 @@ impl PinCacheRefillController {
             })
             .flat_map(|level| &level.table_infos)
             .filter(|sst| Self::is_pinned(sst, pinned_table_ids))
-            .map(|sst| (sst.object_id, sst.file_size));
-        pin_cache.replace_desired_objects(objects);
+        {
+            objects
+                .entry(sst.object_id)
+                .and_modify(|size| {
+                    assert_eq!(
+                        *size, sst.file_size,
+                        "one object must have one physical size"
+                    )
+                })
+                .or_insert(sst.file_size);
+            *object_ref_counts.entry(sst.object_id).or_insert(0) += 1;
+        }
+        pin_cache.replace_desired_objects(objects.iter().map(|(&id, &size)| (id, size)));
+        self.object_ref_counts = object_ref_counts;
+        objects.into_keys().collect()
     }
 
-    fn apply_desired_object_delta(&self, deltas: &[SstDeltaInfo]) {
-        let Some(pin_cache) = self.sstable_store.pin_cache() else {
-            return;
+    fn apply_desired_object_delta(
+        &mut self,
+        deltas: &[SstDeltaInfo],
+    ) -> Option<(
+        HashSet<HummockSstableObjectId>,
+        HashSet<HummockSstableObjectId>,
+    )> {
+        let Some(pin_cache) = self.sstable_store.pin_cache().cloned() else {
+            return Some((HashSet::new(), HashSet::new()));
         };
         let Some(pinned_table_ids) = &self.pinned_table_ids else {
-            return;
+            return Some((HashSet::new(), HashSet::new()));
         };
 
-        let mut removed = HashSet::new();
-        let mut inserted = HashMap::new();
+        let mut initial_counts = HashMap::new();
+        let mut inserted_sizes = HashMap::new();
         for delta in deltas {
             for sst in delta
                 .delete_sst_infos
                 .iter()
                 .filter(|sst| Self::is_pinned(sst, pinned_table_ids))
             {
-                inserted.remove(&sst.object_id);
-                removed.insert(sst.object_id);
+                let count = self.object_ref_counts.get_mut(&sst.object_id)?;
+                initial_counts.entry(sst.object_id).or_insert(*count);
+                *count = count.checked_sub(1)?;
+                if *count == 0 {
+                    self.object_ref_counts.remove(&sst.object_id);
+                }
             }
             for sst in delta
                 .insert_sst_infos
                 .iter()
                 .filter(|sst| Self::is_pinned(sst, pinned_table_ids))
             {
-                removed.remove(&sst.object_id);
-                inserted.insert(sst.object_id, sst.file_size);
+                let count = self.object_ref_counts.entry(sst.object_id).or_insert(0);
+                initial_counts.entry(sst.object_id).or_insert(*count);
+                *count = count.checked_add(1)?;
+                inserted_sizes
+                    .entry(sst.object_id)
+                    .and_modify(|size| {
+                        assert_eq!(
+                            *size, sst.file_size,
+                            "one object must have one physical size"
+                        )
+                    })
+                    .or_insert(sst.file_size);
             }
         }
-        pin_cache.apply_desired_object_delta(removed, inserted);
+
+        let mut removed = HashSet::new();
+        let mut inserted = HashMap::new();
+        let mut refill_objects = HashSet::new();
+        for (object_id, initial_count) in initial_counts {
+            let final_count = self.object_ref_counts.get(&object_id).copied().unwrap_or(0);
+            if initial_count > 0 && final_count == 0 {
+                removed.insert(object_id);
+            }
+            if final_count > initial_count {
+                refill_objects.insert(object_id);
+            }
+            if initial_count == 0 && final_count > 0 {
+                inserted.insert(object_id, inserted_sizes[&object_id]);
+            }
+        }
+        pin_cache.apply_desired_object_delta(removed.iter().copied(), inserted);
+        Some((removed, refill_objects))
     }
 
     fn is_pinned(sst: &SstableInfo, pinned_table_ids: &HashSet<TableId>) -> bool {
