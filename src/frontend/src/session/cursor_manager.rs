@@ -62,6 +62,10 @@ use crate::scheduler::{
 use crate::utils::Condition;
 use crate::{OptimizerContext, OptimizerContextRef, PgResponseStream, TableCatalog};
 
+#[expect(dead_code, reason = "The persistent-stream layer is not wired yet")]
+#[path = "cursor_stream.rs"]
+mod cursor_stream;
+
 /// Cursor-scoped shutdown resources, separate from individual FETCH cancellation.
 struct CursorShutdownHandle {
     /// Signals termination of this cursor's execution.
