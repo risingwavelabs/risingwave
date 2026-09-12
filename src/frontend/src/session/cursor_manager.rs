@@ -66,8 +66,9 @@ use crate::{OptimizerContext, OptimizerContextRef, TableCatalog};
 #[path = "cursor_stream.rs"]
 mod cursor_stream;
 use cursor_stream::{
-    QueryCursorDataChunkStream, QueryCursorPgResponseStream, SubscriptionCursorDataChunkStream,
-    SubscriptionCursorHandlerContext, SubscriptionCursorPgResponseStream, SubscriptionCursorState,
+    CursorPgResponseStream, QueryCursorDataChunkStream, QueryCursorPgResponseStream,
+    SubscriptionCursorDataChunkStream, SubscriptionCursorHandlerContext,
+    SubscriptionCursorPgResponseStream, SubscriptionCursorState,
 };
 
 /// Creates raw cursor-owned output using a snapshot selected by the caller before startup.
@@ -303,60 +304,72 @@ impl Cursor {
     }
 }
 
-/// Polls a temporary borrow of the persistent response stream for one FETCH.
-/// Cancellation can discard accumulated rows; transactional replay belongs to Goal 3.
-async fn fetch_rows<S: Stream<Item = Result<Row>> + Unpin>(
+/// Executes a prepared FETCH, committing progress on success (including timeout) and aborting
+/// on error. Polls only a temporary borrow so the persistent producer survives cancellation.
+async fn execute_fetch<S: CursorPgResponseStream>(
     stream: &mut S,
     count: u32,
     timeout_seconds: Option<u64>,
     cancel_handle: &mut FetchCursorCancelHandle,
     mut record_poll: impl FnMut(Duration),
 ) -> Result<Vec<Row>> {
-    let deadline =
-        timeout_seconds.map(|seconds| tokio::time::Instant::now() + Duration::from_secs(seconds));
-    let timeout = async {
-        match deadline {
-            Some(deadline) => tokio::time::sleep_until(deadline).await,
-            None => std::future::pending::<()>().await,
+    let result: Result<Vec<Row>> = async {
+        let deadline =
+            timeout_seconds.map(|seconds| tokio::time::Instant::now() + Duration::from_secs(seconds));
+        let timeout = async {
+            match deadline {
+                Some(deadline) => tokio::time::sleep_until(deadline).await,
+                None => std::future::pending::<()>().await,
+            }
+        };
+        tokio::pin!(timeout);
+        let mut rows = Vec::with_capacity(count.min(100) as usize);
+        while rows.len() < count as usize {
+            let started = Instant::now();
+            let row = if timeout_seconds == Some(0) {
+                // Keep the legacy zero-timeout behavior: allow an immediately-ready row, but do
+                // not wait for pending work. Cancellation always takes priority over consuming data.
+                tokio::select! {
+                    biased;
+                    _ = cancel_handle.cancelled() => {
+                        return Err(SchedulerError::QueryCancelled("Cancelled by user".to_owned()).into());
+                    }
+                    row = stream.next() => row,
+                    _ = &mut timeout => break,
+                }
+            } else {
+                tokio::select! {
+                    biased;
+                    _ = cancel_handle.cancelled() => {
+                        return Err(SchedulerError::QueryCancelled("Cancelled by user".to_owned()).into());
+                    }
+                    _ = &mut timeout => break,
+                    row = stream.next() => row,
+                }
+            };
+            let Some(row) = row.transpose()? else {
+                break;
+            };
+            record_poll(started.elapsed());
+            rows.push(row);
+            // Ready rows may keep this task running without letting the timer driver advance.
+            // Check elapsed time directly as well; zero timeout still returns at most one ready row.
+            if deadline.is_some_and(|deadline| tokio::time::Instant::now() >= deadline) {
+                break;
+            }
         }
-    };
-    tokio::pin!(timeout);
-    let mut rows = Vec::with_capacity(count.min(100) as usize);
-    while rows.len() < count as usize {
-        let started = Instant::now();
-        let row = if timeout_seconds == Some(0) {
-            // Keep the legacy zero-timeout behavior: allow an immediately-ready row, but do
-            // not wait for pending work. Cancellation always takes priority over consuming data.
-            tokio::select! {
-                biased;
-                _ = cancel_handle.cancelled() => {
-                    return Err(SchedulerError::QueryCancelled("Cancelled by user".to_owned()).into());
-                }
-                row = stream.next() => row,
-                _ = &mut timeout => break,
-            }
-        } else {
-            tokio::select! {
-                biased;
-                _ = cancel_handle.cancelled() => {
-                    return Err(SchedulerError::QueryCancelled("Cancelled by user".to_owned()).into());
-                }
-                _ = &mut timeout => break,
-                row = stream.next() => row,
-            }
-        };
-        let Some(row) = row.transpose()? else {
-            break;
-        };
-        record_poll(started.elapsed());
-        rows.push(row);
-        // Ready rows may keep this task running without letting the timer driver advance.
-        // Check elapsed time directly as well; zero timeout still returns at most one ready row.
-        if deadline.is_some_and(|deadline| tokio::time::Instant::now() >= deadline) {
-            break;
+        Ok(rows)
+    }.await;
+    match result {
+        Ok(rows) => {
+            stream.commit_fetch();
+            Ok(rows)
+        }
+        Err(error) => {
+            stream.abort_fetch();
+            Err(error)
         }
     }
-    Ok(rows)
 }
 
 pub struct QueryCursor {
@@ -391,7 +404,7 @@ impl QueryCursor {
     ) -> Result<(Vec<Row>, Vec<PgFieldDescriptor>)> {
         self.pg_response_stream
             .begin_fetch(formats, &handler_args.session);
-        let rows = fetch_rows(
+        let rows = execute_fetch(
             &mut self.pg_response_stream,
             count,
             timeout_seconds,
@@ -652,7 +665,7 @@ impl SubscriptionCursor {
         );
         let metrics = &self.cursor_metrics;
         let subscription_name = &self.subscription.name;
-        let rows = fetch_rows(
+        let rows = execute_fetch(
             &mut self.pg_response_stream,
             count,
             timeout_seconds,
@@ -1614,23 +1627,164 @@ mod cursor_lifecycle_tests {
         assert!(!shutdown_rx.is_cancelled());
     }
 
-    /// Verifies FETCH stops draining ready input after its deadline without relying on the timer
-    /// driver. Blocking a current-thread runtime simulates synchronous row work, not an executor.
+    /// Verifies session cancellation rolls back rows already consumed across two chunks, for
+    /// query and subscription FETCH. Retrying changes formats and then reads fresh injected output;
+    /// shutdown tokens prove ownership isolation, not real executor or protocol behavior.
+    #[tokio::test]
+    async fn test_cursor_fetch_cancellation_replays_consumed_rows() {
+        use pgwire::types::Format;
+        use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
+        use risingwave_common::types::DataType;
+        use risingwave_common::util::iter_util::ZipEqFast;
+
+        for is_subscription in [false, true] {
+            let session = Arc::new(SessionImpl::mock());
+            let manager = session.get_cursor_manager();
+            let (cursor_shutdown, query_shutdown, chunk_tx) = if is_subscription {
+                let catalog = TableCatalog {
+                    columns: vec![ColumnCatalog::visible(ColumnDesc::named(
+                        "v",
+                        ColumnId::new(1),
+                        DataType::Int32,
+                    ))],
+                    ..Default::default()
+                };
+                add_pending_subscription_cursor(&manager, "cursor", FieldsManager::new(&catalog))
+                    .await
+            } else {
+                add_pending_query_cursor(
+                    &manager,
+                    "cursor",
+                    vec![Field::with_name(DataType::Int32, "v")],
+                )
+                .await
+            };
+            chunk_tx
+                .try_send(Ok(DataChunk::from_pretty("i\n0")))
+                .unwrap();
+            let (rows, _) = manager
+                .get_rows_with_cursor(
+                    "cursor",
+                    1,
+                    query_cursor_fetch_handler_args_for_test(session.clone()),
+                    &vec![],
+                    None,
+                    &mut FetchCursorCancelHandle::new(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(rows[0].values()[0].as_deref(), Some(b"0".as_slice()));
+
+            chunk_tx
+                .try_send(Ok(DataChunk::from_pretty("i\n1\n2")))
+                .unwrap();
+            let formats = vec![];
+            let mut cancel = FetchCursorCancelHandle::new();
+            let mut fetch = Box::pin(manager.get_rows_with_cursor(
+                "cursor",
+                10,
+                query_cursor_fetch_handler_args_for_test(session.clone()),
+                &formats,
+                None,
+                &mut cancel,
+            ));
+            assert!(futures::poll!(fetch.as_mut()).is_pending());
+            chunk_tx
+                .try_send(Ok(DataChunk::from_pretty("i\n3\n4")))
+                .unwrap();
+            assert!(futures::poll!(fetch.as_mut()).is_pending());
+            session.cancel_current_query();
+            let error = tokio::time::timeout(Duration::from_secs(1), fetch)
+                .await
+                .unwrap()
+                .unwrap_err();
+            assert!(error.to_string().contains("Cancelled by user"));
+            assert!(!cursor_shutdown.is_cancelled());
+            assert!(!query_shutdown.is_cancelled());
+            assert!(!chunk_tx.is_closed());
+
+            chunk_tx
+                .try_send(Ok(DataChunk::from_pretty("i\n5")))
+                .unwrap();
+            let (rows, _) = manager
+                .get_rows_with_cursor(
+                    "cursor",
+                    5,
+                    query_cursor_fetch_handler_args_for_test(session),
+                    &vec![Format::Binary],
+                    None,
+                    &mut FetchCursorCancelHandle::new(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(rows.len(), 5);
+            for (row, expected) in rows.iter().zip_eq_fast(1i32..6) {
+                assert_eq!(
+                    row.values()[0].as_deref(),
+                    Some(expected.to_be_bytes().as_slice())
+                );
+            }
+            assert!(!cursor_shutdown.is_cancelled());
+            assert!(!query_shutdown.is_cancelled());
+        }
+    }
+
+    /// Verifies FETCH stops draining ready input after its deadline and calls commit on timeout.
+    /// Uses synchronous row work and mocked completion hooks, not a real executor.
     // This regression needs real elapsed time without advancing the simulated timer driver.
     #[cfg(not(madsim))]
     #[tokio::test(flavor = "current_thread")]
-    async fn test_fetch_rows_stops_at_deadline_with_ready_input() {
-        let mut stream = futures::stream::iter((1..=3).map(|value| {
+    async fn test_execute_fetch_stops_at_deadline_with_ready_input() {
+        use std::pin::Pin;
+        use std::task::{Context, Poll};
+
+        use futures::Stream;
+        use pgwire::types::Row;
+
+        use super::CursorPgResponseStream;
+        use crate::error::Result;
+
+        struct TestResponseStream {
+            inner: futures::stream::BoxStream<'static, Result<Row>>,
+            commits: usize,
+            aborts: usize,
+        }
+
+        impl Stream for TestResponseStream {
+            type Item = Result<Row>;
+
+            fn poll_next(
+                mut self: Pin<&mut Self>,
+                cx: &mut Context<'_>,
+            ) -> Poll<Option<Self::Item>> {
+                self.inner.poll_next_unpin(cx)
+            }
+        }
+
+        impl CursorPgResponseStream for TestResponseStream {
+            fn commit_fetch(&mut self) {
+                self.commits += 1;
+            }
+
+            fn abort_fetch(&mut self) {
+                self.aborts += 1;
+            }
+        }
+
+        let rows = futures::stream::iter((1..=3).map(|value| {
             if value == 1 {
                 // Cross the deadline without yielding to the timer driver. Every input poll
                 // still returns Ready, including those for the remaining rows.
                 std::thread::sleep(Duration::from_millis(1100));
             }
-            Ok(pgwire::types::Row::new(vec![Some(
-                value.to_string().into(),
-            )]))
+            Ok(Row::new(vec![Some(value.to_string().into())]))
         }));
-        let rows = super::fetch_rows(
+        let mut stream = TestResponseStream {
+            inner: rows.boxed(),
+            commits: 0,
+            aborts: 0,
+        };
+        let rows = super::execute_fetch(
             &mut stream,
             3,
             Some(1),
@@ -1641,10 +1795,26 @@ mod cursor_lifecycle_tests {
         .unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].values()[0].as_deref(), Some(b"1".as_slice()));
-        for expected in ["2", "3"] {
-            let row = stream.next().await.unwrap().unwrap();
-            assert_eq!(row.values()[0].as_deref(), Some(expected.as_bytes()));
+        assert_eq!(stream.commits, 1);
+        assert_eq!(stream.aborts, 0);
+        let rows = super::execute_fetch(
+            &mut stream,
+            3,
+            None,
+            &mut FetchCursorCancelHandle::new(),
+            |_| {},
+        )
+        .await
+        .unwrap();
+        assert_eq!(rows.len(), 2);
+        for (index, expected) in ["2", "3"].into_iter().enumerate() {
+            assert_eq!(
+                rows[index].values()[0].as_deref(),
+                Some(expected.as_bytes())
+            );
         }
+        assert_eq!(stream.commits, 2);
+        assert_eq!(stream.aborts, 0);
         assert!(stream.next().await.is_none());
     }
 
