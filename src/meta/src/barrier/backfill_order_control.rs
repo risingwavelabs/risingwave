@@ -17,6 +17,7 @@ use std::collections::{HashMap, HashSet};
 use risingwave_common::catalog::{FragmentTypeFlag, TableId};
 pub use risingwave_common::id::ActorId;
 
+use super::rpc::build_locality_fragment_state_table_mapping;
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::model::FragmentId;
 use crate::stream::ExtendedFragmentBackfillOrder;
@@ -126,7 +127,6 @@ impl BackfillOrderState {
     pub fn recover_from_fragment_infos(
         backfill_orders: &ExtendedFragmentBackfillOrder,
         fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
-        locality_fragment_state_table_mapping: HashMap<FragmentId, Vec<TableId>>,
     ) -> Self {
         tracing::debug!(
             ?backfill_orders,
@@ -141,6 +141,9 @@ impl BackfillOrderState {
                     .map(|actor_id| (*actor_id, *fragment_id))
             })
             .collect();
+
+        let locality_fragment_state_table_mapping =
+            build_locality_fragment_state_table_mapping(fragment_infos);
 
         let mut backfill_nodes: HashMap<FragmentId, BackfillNode> = HashMap::new();
 
