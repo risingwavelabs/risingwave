@@ -133,7 +133,7 @@ impl PinCacheRefillController {
             return;
         }
         self.pinned_table_ids = Some(pinned_table_ids);
-        self.rebuild_desired_objects();
+        self.rebuild_desired_objects(false);
     }
 
     pub(crate) fn apply_version_update(
@@ -152,11 +152,11 @@ impl PinCacheRefillController {
                     tracing::warn!(
                         "pin-cache object reference count is inconsistent; rebuilding membership"
                     );
-                    self.rebuild_desired_objects();
+                    self.rebuild_desired_objects(true);
                 }
             }
             PinCacheMembershipUpdate::Rebuild => {
-                self.rebuild_desired_objects();
+                self.rebuild_desired_objects(true);
             }
         };
 
@@ -168,7 +168,10 @@ impl PinCacheRefillController {
             .collect()
     }
 
-    fn rebuild_desired_objects(&mut self) -> HashSet<HummockSstableObjectId> {
+    fn rebuild_desired_objects(
+        &mut self,
+        preserve_versions: bool,
+    ) -> HashSet<HummockSstableObjectId> {
         let Some(pin_cache) = self.sstable_store.pin_cache().cloned() else {
             self.object_ref_counts.clear();
             return HashSet::new();
@@ -212,7 +215,11 @@ impl PinCacheRefillController {
                 .or_insert(sst.file_size);
             *object_ref_counts.entry(sst.object_id).or_insert(0) += 1;
         }
-        pin_cache.replace_desired_objects(objects.iter().map(|(&id, &size)| (id, size)));
+        if preserve_versions {
+            pin_cache.replace_version_objects(objects.clone());
+        } else {
+            pin_cache.replace_desired_objects(objects.iter().map(|(&id, &size)| (id, size)));
+        }
         self.object_ref_counts = object_ref_counts;
         objects.into_keys().collect()
     }
@@ -296,23 +303,22 @@ pub(crate) async fn refill_pin_cache_objects(
     sstable_store: SstableStoreRef,
     concurrency: Arc<Semaphore>,
     plan: PinCacheRefillPlan,
-) {
+) -> bool {
     let futures = plan.objects.into_iter().map(|(object_id, projections)| {
         let sstable_store = sstable_store.clone();
         let concurrency = concurrency.clone();
         let ownership = plan.ownership.clone();
         async move {
             let _permit = concurrency.acquire().await.unwrap();
-            if let Err(error) =
-                refill_pin_cache_object(&sstable_store, &projections, &ownership).await
-            {
-                tracing::warn!(
-                    object_id = object_id.as_raw_id(),
-                    error = %error.as_report(),
-                    "pin cache refill failed"
-                );
+            match refill_pin_cache_object(&sstable_store, &projections, &ownership).await {
+                Ok(PinCacheRefillOutcome::Published | PinCacheRefillOutcome::AlreadyPublished | PinCacheRefillOutcome::Obsolete) => true,
+                Ok(_) => false,
+                Err(error) => {
+                    tracing::warn!(object_id = object_id.as_raw_id(), error = %error.as_report(), "pin cache refill failed");
+                    false
+                }
             }
         }
     });
-    join_all(futures).await;
+    join_all(futures).await.into_iter().all(|ready| ready)
 }
