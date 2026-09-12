@@ -70,11 +70,6 @@ impl LookupCache {
         self.data.len()
     }
 
-    /// Clear the cache.
-    pub fn clear(&mut self) {
-        self.data.clear();
-    }
-
     pub fn new(watermark_sequence: AtomicU64Ref, metrics_info: MetricsInfo) -> Self {
         let cache = ManagedLruCache::unbounded(watermark_sequence, metrics_info);
         Self { data: cache }

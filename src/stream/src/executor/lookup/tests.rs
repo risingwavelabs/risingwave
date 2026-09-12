@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::AtomicU64;
 
@@ -24,9 +25,12 @@ use risingwave_common::catalog::{ColumnDesc, ConflictBehavior, Field, Schema, Ta
 use risingwave_common::types::DataType;
 use risingwave_common::util::epoch::test_epoch;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_storage::memory::MemoryStateStore;
-use risingwave_storage::table::batch_table::BatchTable;
+use risingwave_common::util::value_encoding::BasicSerde;
+use risingwave_hummock_test::test_utils::prepare_hummock_test_env;
+use risingwave_storage::StateStore;
+use risingwave_storage::hummock::HummockStorage;
 
+use crate::common::table::state_table::{StateTableBuilder, StateTableOpConsistencyLevel};
 use crate::executor::lookup::LookupExecutor;
 use crate::executor::lookup::impl_::LookupExecutorParams;
 use crate::executor::test_utils::*;
@@ -69,7 +73,7 @@ fn arrangement_col_arrange_rules_join_key() -> Vec<ColumnOrder> {
 /// | +  | 2337  | 8    | 3       |
 /// | -  | 2333  | 6    | 3       |
 /// | b  |       |      | 3 -> 4  |
-async fn create_arrangement(table_id: TableId, memory_state_store: MemoryStateStore) -> Executor {
+async fn create_arrangement<S: StateStore>(table_id: TableId, store: S) -> Executor {
     // Two columns of int32 type, the second column is arrange key.
     let columns = arrangement_col_descs();
 
@@ -117,7 +121,7 @@ async fn create_arrangement(table_id: TableId, memory_state_store: MemoryStateSt
         ),
         MaterializeExecutor::for_test(
             source,
-            memory_state_store,
+            store,
             table_id,
             arrangement_col_arrange_rules(),
             column_ids,
@@ -182,12 +186,66 @@ fn check_chunk_eq(chunk1: &StreamChunk, chunk2: &StreamChunk) {
     assert_eq!(format!("{:?}", chunk1), format!("{:?}", chunk2));
 }
 
+fn create_storage_table_desc(table_id: TableId) -> risingwave_pb::plan_common::StorageTableDesc {
+    let col_descs = arrangement_col_descs();
+    let order_rules = arrangement_col_arrange_rules();
+    risingwave_pb::plan_common::StorageTableDesc {
+        table_id,
+        columns: col_descs.iter().map(|c| c.to_protobuf()).collect(),
+        pk: order_rules.iter().map(|o| o.to_protobuf()).collect(),
+        dist_key_in_pk_indices: vec![],
+        value_indices: vec![0, 1],
+        read_prefix_len_hint: 0,
+        versioned: false,
+        stream_key: vec![1, 0],
+        vnode_col_idx_in_pk: None,
+        retention_seconds: None,
+        maybe_vnode_count: None,
+    }
+}
+
+async fn create_replicated_state_table<S: StateStore>(
+    store: S,
+    table_id: TableId,
+) -> crate::common::table::state_table::ReplicatedStateTable<S, BasicSerde> {
+    let table_desc = create_storage_table_desc(table_id);
+    let column_ids = arrangement_col_descs()
+        .iter()
+        .map(|c| c.column_id)
+        .collect_vec();
+    StateTableBuilder::<_, BasicSerde, true, _>::new_from_storage_table_desc(
+        &table_desc,
+        store,
+        None,
+        0.into(),
+    )
+    .with_op_consistency_level(StateTableOpConsistencyLevel::Inconsistent)
+    .with_output_column_ids(column_ids)
+    .forbid_preload_all_rows()
+    .build()
+    .await
+}
+
+async fn prepare_hummock_store(table_id: TableId) -> HummockStorage {
+    let test_env = prepare_hummock_test_env().await;
+    test_env.register_table_id(table_id).await;
+    // Commit the initial epoch so that init_epoch's wait_for_epoch(prev) returns immediately.
+    test_env
+        .storage
+        .start_epoch(test_epoch(1), HashSet::from_iter([table_id]));
+    test_env.commit_epoch(test_epoch(1)).await;
+    for epoch in [test_epoch(2), test_epoch(3), test_epoch(4)] {
+        test_env
+            .storage
+            .start_epoch(epoch, HashSet::from_iter([table_id]));
+    }
+    test_env.storage
+}
+
 #[tokio::test]
 async fn test_lookup_this_epoch() {
-    // TODO: memory state store doesn't support read epoch yet, so it is possible that this test
-    // fails because read epoch doesn't take effect in memory state store.
-    let store = MemoryStateStore::new();
     let table_id = TableId::new(1);
+    let store = prepare_hummock_store(table_id).await;
     let arrangement = create_arrangement(table_id, store.clone()).await;
     let stream = create_source();
     let info = ExecutorInfo::for_test(
@@ -212,17 +270,7 @@ async fn test_lookup_this_epoch() {
         stream_join_key_indices: vec![0],
         arrange_join_key_indices: vec![1],
         column_mapping: vec![2, 3, 0, 1],
-        batch_table: BatchTable::for_test(
-            store.clone(),
-            table_id,
-            arrangement_col_descs(),
-            arrangement_col_arrange_rules()
-                .iter()
-                .map(|x| x.order_type)
-                .collect_vec(),
-            vec![1, 0],
-            vec![0, 1],
-        ),
+        state_table: create_replicated_state_table(store, table_id).await,
         watermark_epoch: Arc::new(AtomicU64::new(0)),
         chunk_size: 1024,
     }));
@@ -261,8 +309,8 @@ async fn test_lookup_this_epoch() {
 
 #[tokio::test]
 async fn test_lookup_last_epoch() {
-    let store = MemoryStateStore::new();
     let table_id = TableId::new(1);
+    let store = prepare_hummock_store(table_id).await;
     let arrangement = create_arrangement(table_id, store.clone()).await;
     let stream = create_source();
     let info = ExecutorInfo::for_test(
@@ -287,29 +335,22 @@ async fn test_lookup_last_epoch() {
         stream_join_key_indices: vec![0],
         arrange_join_key_indices: vec![1],
         column_mapping: vec![0, 1, 2, 3],
-        batch_table: BatchTable::for_test(
-            store.clone(),
-            table_id,
-            arrangement_col_descs(),
-            arrangement_col_arrange_rules()
-                .iter()
-                .map(|x| x.order_type)
-                .collect_vec(),
-            vec![1, 0],
-            vec![0, 1],
-        ),
+        state_table: create_replicated_state_table(store, table_id).await,
         watermark_epoch: Arc::new(AtomicU64::new(0)),
         chunk_size: 1024,
     }));
     let mut lookup_executor = lookup_executor.execute();
 
     let mut msgs = vec![];
-
     next_msg(&mut msgs, &mut lookup_executor).await;
     next_msg(&mut msgs, &mut lookup_executor).await;
     next_msg(&mut msgs, &mut lookup_executor).await;
     next_msg(&mut msgs, &mut lookup_executor).await;
 
+    // With HummockStateStore, the lookup table is isolated from the arrangement's store.
+    // Stream chunks in epoch 1 see no arrangement data (the lookup table is empty until
+    // the first ArrangeReady writes data). Stream chunks in epoch 2 see arrangement
+    // data replicated from epoch 1, matching the expected prev-epoch semantics.
     assert_eq!(msgs.len(), 4);
     assert_matches!(msgs[0], Message::Barrier(_));
     assert_matches!(msgs[1], Message::Barrier(_));

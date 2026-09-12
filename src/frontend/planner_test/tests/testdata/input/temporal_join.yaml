@@ -6,6 +6,48 @@
   expected_outputs:
   - batch_error
   - stream_plan
+- name: Broadcast temporal join shuffles the left input by its stream key into an independent fragment
+  sql: |
+    create table stream(id1 int, a1 int, b1 int) APPEND ONLY;
+    create table version(id2 int, a2 int, b2 int, primary key (id2));
+    select id1, a1, id2, a2 from stream broadcast left join version FOR SYSTEM_TIME AS OF PROCTIME() on id1 = id2;
+  expected_outputs:
+  - stream_plan
+  - stream_dist_plan
+- name: Broadcast temporal join on a kafka source is not fused into the source fragment
+  with_config_map:
+    streaming_use_shared_source: true
+  sql: |
+    create source stream(id1 int, a1 int, b1 int)
+    with (
+        connector = 'kafka',
+        topic = 'mytopic',
+        properties.bootstrap.server = '6',
+        scan.startup.mode = 'earliest'
+    ) format plain encode json;
+    create table version(id2 int, a2 int, b2 int, primary key (id2));
+    select id1, a1, id2, a2 from stream broadcast left join version FOR SYSTEM_TIME AS OF PROCTIME() on id1 = id2;
+  expected_outputs:
+  - stream_plan
+  - stream_dist_plan
+- name: Broadcast temporal join memo table follows the non-append-only left distribution
+  sql: |
+    create table stream(id1 int primary key, a1 int, b1 int);
+    create table version(id2 int, a2 int, b2 int, primary key (id2));
+    select id1, a1, id2, a2 from stream broadcast join version FOR SYSTEM_TIME AS OF PROCTIME() on a1 = id2;
+  expected_outputs:
+  - stream_plan
+  - stream_dist_plan
+- name: Broadcast temporal join supports a singleton retractable left input
+  sql: |
+    create table stream(id int primary key, v int);
+    create table version(id int primary key, name varchar);
+    select s.k, s.c, version.name
+    from (select max(id) as k, count(*) as c from stream) as s
+    broadcast left join version FOR SYSTEM_TIME AS OF PROCTIME() on s.k = version.id;
+  expected_outputs:
+  - stream_plan
+  - stream_dist_plan
 - name: Inner join type for temporal join
   sql: |
     create table stream(id1 int, a1 int, b1 int) APPEND ONLY;
