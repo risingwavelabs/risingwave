@@ -123,6 +123,42 @@ fn validate_license(connector: &str) -> Result<()> {
     Ok(())
 }
 
+/// Keep this policy in sync with Java's `SourceValidateHandler.validateHeartbeatInterval`.
+/// Validates user-supplied options, not the final Debezium configuration. On CREATE, an omitted
+/// interval uses the connector default (300000 ms for PostgreSQL/Citus); on ALTER, omission leaves
+/// the existing interval unchanged. Unrelated connector heartbeat mechanisms are not checked here.
+pub(crate) fn validate_cdc_heartbeat_interval(
+    connector: &str,
+    props: &BTreeMap<String, String>,
+) -> Result<()> {
+    let heartbeat_required = match connector {
+        POSTGRES_CDC_CONNECTOR | CITUS_CDC_CONNECTOR => true,
+        MYSQL_CDC_CONNECTOR | SQL_SERVER_CDC_CONNECTOR | MONGODB_CDC_CONNECTOR => false,
+        _ => return Ok(()),
+    };
+    let Some(value) = props.get("debezium.heartbeat.interval.ms") else {
+        return Ok(());
+    };
+
+    // Debezium defines this field as INT with a nonnegative-integer validator, not LONG.
+    let interval = value
+        .parse::<i32>()
+        .ok()
+        .filter(|interval| *interval >= 0)
+        .ok_or_else(|| {
+            ErrorCode::InvalidParameterValue(format!(
+                "'debezium.heartbeat.interval.ms' must be an integer between 0 and 2147483647, got: '{value}'"
+            ))
+        })?;
+    if heartbeat_required && interval == 0 {
+        return Err(ErrorCode::InvalidParameterValue(
+            "'debezium.heartbeat.interval.ms' must be greater than 0 for PostgreSQL and Citus CDC: heartbeats are required for replication-slot progress and WAL reclamation".to_owned(),
+        )
+        .into());
+    }
+    Ok(())
+}
+
 pub fn validate_compatibility(
     format_encode: &FormatEncodeOptions,
     props: &mut BTreeMap<String, String>,
@@ -271,17 +307,166 @@ pub fn validate_compatibility(
         .into());
     }
 
-    // Validate debezium.heartbeat.interval.ms for Postgres CDC: must be a valid integer and not 0
-    if connector == POSTGRES_CDC_CONNECTOR
-        && let Some(interval_value) = props.get("debezium.heartbeat.interval.ms")
-        && !interval_value.parse::<i64>().is_ok_and(|v| v != 0)
-    {
-        return Err(ErrorCode::InvalidConfigValue {
-            config_entry: "debezium.heartbeat.interval.ms".to_owned(),
-            config_value: interval_value.to_owned(),
+    validate_cdc_heartbeat_interval(&connector, props)
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_sqlparser::ast::{Ident, SqlOption, SqlOptionValue, Value};
+
+    use super::*;
+    use crate::handler::alter_source_props::handle_alter_source_props_inner;
+    use crate::test_utils::LocalFrontend;
+
+    const HEARTBEAT_INTERVAL_CASES: [Option<&str>; 8] = [
+        None,
+        Some("0"),
+        Some("1"),
+        Some("300000"),
+        Some("2147483647"),
+        Some("-1"),
+        Some("invalid"),
+        Some("2147483648"),
+    ];
+
+    #[test]
+    fn test_cdc_heartbeat_interval() {
+        for connector in [
+            MYSQL_CDC_CONNECTOR,
+            SQL_SERVER_CDC_CONNECTOR,
+            MONGODB_CDC_CONNECTOR,
+            POSTGRES_CDC_CONNECTOR,
+            CITUS_CDC_CONNECTOR,
+        ] {
+            let mut props = BTreeMap::new();
+            assert!(validate_cdc_heartbeat_interval(connector, &props).is_ok());
+            for value in ["1", "300000", "2147483647", "+1"] {
+                props.insert(
+                    "debezium.heartbeat.interval.ms".to_owned(),
+                    value.to_owned(),
+                );
+                assert!(
+                    validate_cdc_heartbeat_interval(connector, &props).is_ok(),
+                    "{connector}: {value}"
+                );
+            }
+            for value in [
+                "-1",
+                "",
+                "invalid",
+                "0.5",
+                "2147483648",
+                "9223372036854775807",
+                "9223372036854775808",
+                " 1",
+                "1 ",
+                "１",
+            ] {
+                props.insert(
+                    "debezium.heartbeat.interval.ms".to_owned(),
+                    value.to_owned(),
+                );
+                let err = validate_cdc_heartbeat_interval(connector, &props).unwrap_err();
+                assert!(
+                    err.to_string().contains("between 0 and 2147483647"),
+                    "{err}"
+                );
+            }
+            for value in ["0", "+0", "-0"] {
+                props.insert(
+                    "debezium.heartbeat.interval.ms".to_owned(),
+                    value.to_owned(),
+                );
+                let result = validate_cdc_heartbeat_interval(connector, &props);
+                if matches!(connector, POSTGRES_CDC_CONNECTOR | CITUS_CDC_CONNECTOR) {
+                    let err = result.unwrap_err();
+                    assert!(err.to_string().contains("WAL reclamation"), "{err}");
+                } else {
+                    result.unwrap();
+                }
+            }
         }
-        .into());
     }
 
-    Ok(())
+    #[test]
+    fn test_create_cdc_heartbeat_interval() {
+        for (connector, format) in [
+            (MYSQL_CDC_CONNECTOR, FormatEncodeOptions::debezium_json()),
+            (POSTGRES_CDC_CONNECTOR, FormatEncodeOptions::debezium_json()),
+            (
+                MONGODB_CDC_CONNECTOR,
+                FormatEncodeOptions::debezium_mongo_json(),
+            ),
+        ] {
+            for value in HEARTBEAT_INTERVAL_CASES {
+                let mut props = BTreeMap::from([("connector".to_owned(), connector.to_owned())]);
+                if let Some(value) = value {
+                    props.insert(
+                        "debezium.heartbeat.interval.ms".to_owned(),
+                        value.to_owned(),
+                    );
+                }
+                let expected = validate_cdc_heartbeat_interval(connector, &props);
+                let result = validate_compatibility(&format, &mut props);
+                assert_eq!(
+                    result.map_err(|e| e.to_string()),
+                    expected.map_err(|e| e.to_string()),
+                    "{connector}: {value:?}"
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_alter_cdc_heartbeat_interval() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        for connector in [
+            MYSQL_CDC_CONNECTOR,
+            POSTGRES_CDC_CONNECTOR,
+            MONGODB_CDC_CONNECTOR,
+            SQL_SERVER_CDC_CONNECTOR,
+            CITUS_CDC_CONNECTOR,
+        ] {
+            for value in HEARTBEAT_INTERVAL_CASES {
+                let mut props = BTreeMap::new();
+                let mut options = Vec::new();
+                if let Some(value) = value {
+                    props.insert(
+                        "debezium.heartbeat.interval.ms".to_owned(),
+                        value.to_owned(),
+                    );
+                    options.push(SqlOption {
+                        name: ObjectName(vec![Ident::new_unchecked(
+                            "debezium.heartbeat.interval.ms",
+                        )]),
+                        value: SqlOptionValue::Value(Value::SingleQuotedString(value.to_owned())),
+                    });
+                }
+                let expected = validate_cdc_heartbeat_interval(connector, &props);
+                // Exercise the shared ALTER SOURCE/TABLE frontend path. The mock meta client
+                // accepts valid requests; connector-specific ALTER allowlists are not tested here.
+                let result = handle_alter_source_props_inner(
+                    &frontend.session_ref(),
+                    options,
+                    SourceId::new(1),
+                    connector,
+                )
+                .await;
+                assert_eq!(
+                    result.map_err(|e| e.to_string()),
+                    expected.map_err(|e| e.to_string()),
+                    "{connector}: {value:?}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn test_non_cdc_heartbeat_interval_ignored() {
+        let props = BTreeMap::from([(
+            "debezium.heartbeat.interval.ms".to_owned(),
+            "invalid".to_owned(),
+        )]);
+        assert!(validate_cdc_heartbeat_interval(KAFKA_CONNECTOR, &props).is_ok());
+    }
 }

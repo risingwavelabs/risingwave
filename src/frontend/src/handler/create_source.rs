@@ -115,6 +115,7 @@ pub use external_schema::{
     bind_columns_from_source, get_schema_location, schema_has_schema_registry,
 };
 mod validate;
+pub(crate) use validate::validate_cdc_heartbeat_interval;
 pub use validate::validate_compatibility;
 use validate::{SOURCE_ALLOWED_CONNECTION_CONNECTOR, SOURCE_ALLOWED_CONNECTION_SCHEMA_REGISTRY};
 mod additional_column;
