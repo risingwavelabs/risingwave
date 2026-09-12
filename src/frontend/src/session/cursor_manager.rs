@@ -14,9 +14,8 @@
 
 use core::mem;
 use core::time::Duration;
+use std::collections::HashMap;
 use std::collections::hash_map::Entry;
-use std::collections::{HashMap, HashSet, VecDeque};
-use std::fmt::{Display, Formatter};
 use std::pin::Pin;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -30,11 +29,12 @@ use itertools::Itertools;
 use parking_lot::Mutex;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::StatementType;
-use pgwire::types::{Format, Row};
+use pgwire::types::{Format, FormatIterator, Row};
 use risingwave_batch::task::{ShutdownSender, ShutdownToken};
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{ColumnCatalog, Field};
 use risingwave_common::error::BoxedError;
+use risingwave_common::row::OwnedRow;
 use risingwave_common::session_config::QueryMode;
 use risingwave_common::types::{DataType, ScalarImpl, StructType, StructValue};
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -46,11 +46,12 @@ use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::error::{ErrorCode, Result};
 use crate::expr::{ExprType, FunctionCall, InputRef, Literal};
 use crate::handler::HandlerArgs;
-use crate::handler::declare_cursor::create_chunk_stream_for_cursor;
-use crate::handler::query::{RwBatchQueryPlanResult, gen_batch_plan_fragmenter};
+use crate::handler::query::{
+    BatchPlanFragmenterResult, RwBatchQueryPlanResult, distribute_execute_for_cursor,
+    local_execute_for_cursor,
+};
 use crate::handler::util::{
-    DataChunkToRowSetAdapter, StaticSessionData, convert_logstore_u64_to_unix_millis,
-    pg_value_format, to_pg_field,
+    StaticSessionData, convert_logstore_u64_to_unix_millis, pg_value_format, to_pg_field,
 };
 use crate::monitor::{CursorMetrics, PeriodicCursorMetrics};
 use crate::optimizer::PlanRoot;
@@ -60,11 +61,50 @@ use crate::scheduler::{
     DistributedQueryStream, LocalQueryStream, QueryManager, ReadSnapshot, SchedulerError,
 };
 use crate::utils::Condition;
-use crate::{OptimizerContext, OptimizerContextRef, PgResponseStream, TableCatalog};
+use crate::{OptimizerContext, OptimizerContextRef, TableCatalog};
 
-#[expect(dead_code, reason = "The persistent-stream layer is not wired yet")]
 #[path = "cursor_stream.rs"]
 mod cursor_stream;
+use cursor_stream::{
+    QueryCursorDataChunkStream, QueryCursorPgResponseStream, SubscriptionCursorDataChunkStream,
+    SubscriptionCursorHandlerContext, SubscriptionCursorPgResponseStream, SubscriptionCursorState,
+};
+
+/// Creates raw cursor-owned output using a snapshot selected by the caller before startup.
+/// The snapshot is retained across asynchronous fragmentation and scheduling, without consulting
+/// the current transaction's snapshot again when a suspended startup resumes.
+async fn create_cursor_query_stream(
+    session: Arc<SessionImpl>,
+    plan_fragmenter_result: BatchPlanFragmenterResult,
+    snapshot: ReadSnapshot,
+) -> Result<(CursorQueryStream, Vec<Field>)> {
+    let BatchPlanFragmenterResult {
+        plan_fragmenter,
+        query_mode,
+        schema,
+        ..
+    } = plan_fragmenter_result;
+
+    let query = plan_fragmenter.generate_complete_query().await?;
+    tracing::trace!("Generated query after plan fragmenter: {:?}", &query);
+
+    // Cursor-owned queries outlive individual statements and must not inherit statement_timeout.
+    let stream = match query_mode {
+        QueryMode::Auto => unreachable!(),
+        QueryMode::Local => {
+            let (shutdown_tx, shutdown_rx) = ShutdownToken::new();
+            CursorQueryStream::local(
+                local_execute_for_cursor(session, query, shutdown_rx, snapshot)?,
+                shutdown_tx,
+            )
+        }
+        QueryMode::Distributed => CursorQueryStream::distributed(
+            distribute_execute_for_cursor(session.clone(), query, snapshot).await?,
+            session.env().query_manager().clone(),
+        ),
+    };
+    Ok((stream, schema.fields))
+}
 
 /// Cursor-scoped shutdown resources, separate from individual FETCH cancellation.
 struct CursorShutdownHandle {
@@ -189,12 +229,6 @@ impl Drop for CursorQueryStream {
     }
 }
 
-pub enum CursorDataChunkStream {
-    LocalDataChunk(Option<CursorQueryStream>),
-    DistributedDataChunk(Option<CursorQueryStream>),
-    PgResponse(PgResponseStream),
-}
-
 pub struct FetchCursorCancelHandle {
     cancel_tx: ShutdownSender,
     cancel_rx: ShutdownToken,
@@ -216,49 +250,8 @@ impl FetchCursorCancelHandle {
     async fn cancelled(&mut self) {
         self.cancel_rx.cancelled().await;
     }
-
-    fn is_cancelled(&self) -> bool {
-        self.cancel_rx.is_cancelled()
-    }
 }
 
-impl CursorDataChunkStream {
-    pub fn init_row_stream(
-        &mut self,
-        fields: &Vec<Field>,
-        formats: &Vec<Format>,
-        session: Arc<SessionImpl>,
-    ) {
-        let columns_type = fields.iter().map(|f| f.data_type()).collect();
-        match self {
-            CursorDataChunkStream::LocalDataChunk(data_chunk)
-            | CursorDataChunkStream::DistributedDataChunk(data_chunk) => {
-                let data_chunk = mem::take(data_chunk).unwrap();
-                let row_stream = PgResponseStream::Rows(
-                    DataChunkToRowSetAdapter::new(
-                        data_chunk,
-                        columns_type,
-                        formats.clone(),
-                        session,
-                    )
-                    .boxed(),
-                );
-                *self = CursorDataChunkStream::PgResponse(row_stream);
-            }
-            _ => {}
-        }
-    }
-
-    pub async fn next(&mut self) -> Result<Option<std::result::Result<Vec<Row>, BoxedError>>> {
-        match self {
-            CursorDataChunkStream::PgResponse(row_stream) => Ok(row_stream.next().await),
-            _ => Err(ErrorCode::InternalError(
-                "Only 'CursorDataChunkStream' can call next and return rows".to_owned(),
-            )
-            .into()),
-        }
-    }
-}
 pub enum Cursor {
     Subscription(SubscriptionCursor),
     Query(QueryCursor),
@@ -271,7 +264,7 @@ impl Cursor {
         }
     }
 
-    pub async fn next(
+    pub async fn fetch(
         &mut self,
         count: u32,
         handler_args: HandlerArgs,
@@ -279,151 +272,144 @@ impl Cursor {
         timeout_seconds: Option<u64>,
         cancel_handle: &mut FetchCursorCancelHandle,
     ) -> Result<(Vec<Row>, Vec<PgFieldDescriptor>)> {
-        match self {
-            Cursor::Subscription(cursor) => cursor
-                .next(count, handler_args, formats, timeout_seconds, cancel_handle)
-                .await
-                .inspect_err(|_| cursor.cursor_metrics.subscription_cursor_error_count.inc()),
-            Cursor::Query(cursor) => {
-                cursor
-                    .next(count, formats, handler_args, timeout_seconds)
-                    .await
+        let mut shutdown_rx = self.shutdown_handle().shutdown_token();
+        // Dropping FETCH's future is safe for terminal shutdown because the cursor is discarded.
+        tokio::select! {
+            biased;
+            _ = shutdown_rx.cancelled() => {
+                Err(SchedulerError::QueryCancelled("cursor closed".to_owned()).into())
             }
+            result = async {
+                match self {
+                    Cursor::Subscription(cursor) => cursor
+                        .fetch(count, handler_args, formats, timeout_seconds, cancel_handle)
+                        .await
+                        .inspect_err(|_| cursor.cursor_metrics.subscription_cursor_error_count.inc()),
+                    Cursor::Query(cursor) => {
+                        cursor
+                            .fetch(count, formats, handler_args, timeout_seconds, cancel_handle)
+                            .await
+                    }
+                }
+            } => result,
         }
     }
 
     pub fn get_fields(&mut self) -> Vec<Field> {
         match self {
-            Cursor::Subscription(cursor) => cursor.fields_manager.get_output_fields(),
-            Cursor::Query(cursor) => cursor.fields.clone(),
+            Cursor::Subscription(cursor) => cursor.pg_response_stream.fields(),
+            Cursor::Query(cursor) => cursor.pg_response_stream.fields(),
         }
     }
+}
+
+/// Polls a temporary borrow of the persistent response stream for one FETCH.
+/// Cancellation can discard accumulated rows; transactional replay belongs to Goal 3.
+async fn fetch_rows<S: Stream<Item = Result<Row>> + Unpin>(
+    stream: &mut S,
+    count: u32,
+    timeout_seconds: Option<u64>,
+    cancel_handle: &mut FetchCursorCancelHandle,
+    mut record_poll: impl FnMut(Duration),
+) -> Result<Vec<Row>> {
+    let deadline =
+        timeout_seconds.map(|seconds| tokio::time::Instant::now() + Duration::from_secs(seconds));
+    let timeout = async {
+        match deadline {
+            Some(deadline) => tokio::time::sleep_until(deadline).await,
+            None => std::future::pending::<()>().await,
+        }
+    };
+    tokio::pin!(timeout);
+    let mut rows = Vec::with_capacity(count.min(100) as usize);
+    while rows.len() < count as usize {
+        let started = Instant::now();
+        let row = if timeout_seconds == Some(0) {
+            // Keep the legacy zero-timeout behavior: allow an immediately-ready row, but do
+            // not wait for pending work. Cancellation always takes priority over consuming data.
+            tokio::select! {
+                biased;
+                _ = cancel_handle.cancelled() => {
+                    return Err(SchedulerError::QueryCancelled("Cancelled by user".to_owned()).into());
+                }
+                row = stream.next() => row,
+                _ = &mut timeout => break,
+            }
+        } else {
+            tokio::select! {
+                biased;
+                _ = cancel_handle.cancelled() => {
+                    return Err(SchedulerError::QueryCancelled("Cancelled by user".to_owned()).into());
+                }
+                _ = &mut timeout => break,
+                row = stream.next() => row,
+            }
+        };
+        let Some(row) = row.transpose()? else {
+            break;
+        };
+        record_poll(started.elapsed());
+        rows.push(row);
+        // Ready rows may keep this task running without letting the timer driver advance.
+        // Check elapsed time directly as well; zero timeout still returns at most one ready row.
+        if deadline.is_some_and(|deadline| tokio::time::Instant::now() >= deadline) {
+            break;
+        }
+    }
+    Ok(rows)
 }
 
 pub struct QueryCursor {
     shutdown_handle: CursorShutdownHandle,
-    chunk_stream: CursorDataChunkStream,
-    fields: Vec<Field>,
-    remaining_rows: VecDeque<Row>,
+    pg_response_stream: QueryCursorPgResponseStream,
 }
 
 impl QueryCursor {
-    pub fn new(chunk_stream: CursorDataChunkStream, fields: Vec<Field>) -> Result<Self> {
+    /// Creates shutdown resources, selects the snapshot, and starts the cursor-owned query.
+    pub(crate) async fn new(
+        session: Arc<SessionImpl>,
+        plan_fragmenter_result: BatchPlanFragmenterResult,
+    ) -> Result<Self> {
+        let shutdown_handle = CursorShutdownHandle::new();
+        let snapshot = session.pinned_snapshot();
+        let (query_stream, fields) =
+            create_cursor_query_stream(session, plan_fragmenter_result, snapshot).await?;
+        let data_stream = QueryCursorDataChunkStream::new(query_stream, fields.clone());
         Ok(Self {
-            shutdown_handle: CursorShutdownHandle::new(),
-            chunk_stream,
-            fields,
-            remaining_rows: VecDeque::<Row>::new(),
+            shutdown_handle,
+            pg_response_stream: QueryCursorPgResponseStream::new(data_stream, fields),
         })
     }
 
-    pub async fn next_once(&mut self) -> Result<Option<Row>> {
-        while self.remaining_rows.is_empty() {
-            let rows = self.chunk_stream.next().await?;
-            let rows = match rows {
-                None => return Ok(None),
-                Some(row) => row?,
-            };
-            self.remaining_rows = rows.into_iter().collect();
-        }
-        let row = self.remaining_rows.pop_front().unwrap();
-        Ok(Some(row))
-    }
-
-    pub async fn next(
+    pub async fn fetch(
         &mut self,
         count: u32,
         formats: &Vec<Format>,
         handler_args: HandlerArgs,
         timeout_seconds: Option<u64>,
+        cancel_handle: &mut FetchCursorCancelHandle,
     ) -> Result<(Vec<Row>, Vec<PgFieldDescriptor>)> {
-        // `FETCH NEXT` is equivalent to `FETCH 1`.
-        // min with 100 to avoid allocating too many memory at once.
-        let timeout_instant = timeout_seconds.map(|s| Instant::now() + Duration::from_secs(s));
-        let session = handler_args.session;
-        let mut ans = Vec::with_capacity(std::cmp::min(100, count) as usize);
-        let mut cur = 0;
-        let desc = self.fields.iter().map(to_pg_field).collect();
-        self.chunk_stream
-            .init_row_stream(&self.fields, formats, session);
-        while cur < count
-            && let Some(row) = self.next_once().await?
-        {
-            cur += 1;
-            ans.push(row);
-            if let Some(timeout_instant) = timeout_instant
-                && Instant::now() > timeout_instant
-            {
-                break;
-            }
-        }
-        Ok((ans, desc))
+        self.pg_response_stream
+            .begin_fetch(formats, &handler_args.session);
+        let rows = fetch_rows(
+            &mut self.pg_response_stream,
+            count,
+            timeout_seconds,
+            cancel_handle,
+            |_| {},
+        )
+        .await?;
+        let desc = self
+            .pg_response_stream
+            .fields()
+            .iter()
+            .map(to_pg_field)
+            .collect();
+        Ok((rows, desc))
     }
 }
 
-enum State {
-    InitLogStoreQuery {
-        // The rw_timestamp used to initiate the query to read from subscription logstore.
-        seek_timestamp: u64,
-
-        // If specified, the expected_timestamp must be an exact match for the next rw_timestamp.
-        expected_timestamp: Option<u64>,
-    },
-    Fetch {
-        // Whether the query is reading from snapshot
-        // true: read from the upstream table snapshot
-        // false: read from subscription logstore
-        from_snapshot: bool,
-
-        // The rw_timestamp used to initiate the query to read from subscription logstore.
-        rw_timestamp: u64,
-
-        // The row stream to from the batch query read.
-        // It is returned from the batch execution.
-        chunk_stream: CursorDataChunkStream,
-
-        // A cache to store the remaining rows from the row stream.
-        remaining_rows: VecDeque<Row>,
-
-        expected_timestamp: Option<u64>,
-
-        init_query_timer: Instant,
-    },
-    Invalid,
-}
-
-impl Display for State {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        match self {
-            State::InitLogStoreQuery {
-                seek_timestamp,
-                expected_timestamp,
-            } => write!(
-                f,
-                "InitLogStoreQuery {{ seek_timestamp: {}, expected_timestamp: {:?} }}",
-                seek_timestamp, expected_timestamp
-            ),
-            State::Fetch {
-                from_snapshot,
-                rw_timestamp,
-                expected_timestamp,
-                remaining_rows,
-                init_query_timer,
-                ..
-            } => write!(
-                f,
-                "Fetch {{ from_snapshot: {}, rw_timestamp: {}, expected_timestamp: {:?}, cached rows: {}, query init at {}ms before }}",
-                from_snapshot,
-                rw_timestamp,
-                expected_timestamp,
-                remaining_rows.len(),
-                init_query_timer.elapsed().as_millis()
-            ),
-            State::Invalid => write!(f, "Invalid"),
-        }
-    }
-}
-
+#[derive(Clone)]
 struct FieldsManager {
     columns_catalog: Vec<ColumnCatalog>,
     // All row fields, including hidden pk, op, rw_timestamp and all non-hidden columns in the upstream table.
@@ -445,18 +431,20 @@ impl FieldsManager {
     pub fn new(catalog: &TableCatalog) -> Self {
         let mut row_fields = Vec::new();
         let mut row_output_col_indices = Vec::new();
-        let mut row_pk_indices = Vec::new();
+        let mut row_pk_indices = vec![0; catalog.pk.len()];
         let mut stream_chunk_row_indices = Vec::new();
         let mut output_idx = 0_usize;
-        let pk_set: HashSet<usize> = catalog
+        let pk_positions: HashMap<usize, usize> = catalog
             .pk
             .iter()
-            .map(|col_order| col_order.column_index)
+            .enumerate()
+            .map(|(position, col_order)| (col_order.column_index, position))
             .collect();
 
         for (index, v) in catalog.columns.iter().enumerate() {
-            if pk_set.contains(&index) {
-                row_pk_indices.push(output_idx);
+            if let Some(&pk_position) = pk_positions.get(&index) {
+                // Seek predicates pair values with catalog.pk, not table-column order.
+                row_pk_indices[pk_position] = output_idx;
                 stream_chunk_row_indices.push(output_idx);
                 row_fields.push(Field::with_name(v.data_type().clone(), v.name()));
                 if !v.is_hidden {
@@ -496,18 +484,6 @@ impl FieldsManager {
         }
     }
 
-    pub fn process_output_desc_row(&self, mut rows: Vec<Row>) -> (Vec<Row>, Option<Row>) {
-        let last_row = rows.last_mut().map(|row| {
-            let mut row = row.clone();
-            row.project(&self.row_pk_indices)
-        });
-        let rows = rows
-            .iter_mut()
-            .map(|row| row.project(&self.row_output_col_indices))
-            .collect();
-        (rows, last_row)
-    }
-
     pub fn get_output_fields(&self) -> Vec<Field> {
         self.row_output_col_indices
             .iter()
@@ -515,30 +491,36 @@ impl FieldsManager {
             .collect()
     }
 
-    // In the beginning (declare cur), we will give it an empty formats,
-    // this formats is not a real, when we fetch, We fill it with the formats returned from the pg client.
+    /// Maps FETCH result formats to the full row layout, including hidden and synthetic columns.
+    /// An empty list selects default text; a single code is expanded to all visible columns.
     pub fn get_row_stream_fields_and_formats(
         &self,
-        formats: &Vec<Format>,
+        formats: &[Format],
         from_snapshot: bool,
-    ) -> (Vec<Field>, Vec<Format>) {
-        let mut fields = Vec::new();
-        let need_format = !(formats.is_empty() || formats.len() == 1);
-        let mut new_formats = formats.clone();
-        let stream_chunk_row_indices_iter = if from_snapshot {
-            self.stream_chunk_row_indices.iter().chain(None)
-        } else {
-            self.stream_chunk_row_indices
-                .iter()
-                .chain(Some(&self.op_index))
-        };
-        for index in stream_chunk_row_indices_iter {
-            fields.push(self.row_fields[*index].clone());
-            if need_format && !self.row_output_col_indices.contains(index) {
-                new_formats.insert(*index, Format::Text);
-            }
+    ) -> Result<(Vec<Field>, Vec<Format>)> {
+        let raw_indices = self
+            .stream_chunk_row_indices
+            .iter()
+            .copied()
+            .chain((!from_snapshot).then_some(self.op_index));
+        let fields = raw_indices
+            .map(|index| self.row_fields[index].clone())
+            .collect();
+        if formats.is_empty() {
+            return Ok((fields, vec![]));
         }
-        (fields, new_formats)
+        let output_formats = FormatIterator::new(formats, self.row_output_col_indices.len())
+            .map_err(ErrorCode::InternalError)?;
+        let mut row_formats = vec![Format::Text; self.row_fields.len()];
+        for (row_index, format) in self
+            .row_output_col_indices
+            .iter()
+            .copied()
+            .zip_eq_fast(output_formats)
+        {
+            row_formats[row_index] = format;
+        }
+        Ok((fields, row_formats))
     }
 }
 
@@ -547,14 +529,9 @@ pub struct SubscriptionCursor {
     cursor_name: String,
     subscription: Arc<SubscriptionCatalog>,
     dependent_table_id: TableId,
-    cursor_need_drop_time: Instant,
-    state: State,
-    // fields will be set in the table's catalog when the cursor is created,
-    // and will be reset each time it is created chunk_stream, this is to avoid changes in the catalog due to alter.
-    fields_manager: FieldsManager,
+    pg_response_stream: SubscriptionCursorPgResponseStream,
     cursor_metrics: Arc<CursorMetrics>,
     last_fetch: Instant,
-    seek_pk_row: Option<Row>,
 }
 
 impl SubscriptionCursor {
@@ -566,26 +543,21 @@ impl SubscriptionCursor {
         handler_args: &HandlerArgs,
         cursor_metrics: Arc<CursorMetrics>,
     ) -> Result<Self> {
+        let shutdown_handle = CursorShutdownHandle::new();
         let (state, fields_manager) = if let Some(start_timestamp) = start_timestamp {
             let table_catalog = handler_args.session.get_table_by_id(dependent_table_id)?;
             (
-                State::InitLogStoreQuery {
+                SubscriptionCursorState::InitLogStoreQuery {
                     seek_timestamp: start_timestamp,
                     expected_timestamp: None,
                 },
                 FieldsManager::new(&table_catalog),
             )
         } else {
-            // The query stream needs to initiated on cursor creation to make sure
-            // future fetch on the cursor starts from the snapshot when the cursor is declared.
-            //
-            // TODO: is this the right behavior? Should we delay the query stream initiation till the first fetch?
-            let (chunk_stream, init_query_timer, table_catalog) =
-                Self::initiate_query(None, dependent_table_id, handler_args.clone(), None).await?;
-            let pinned_epoch = match handler_args.session.get_pinned_snapshot().ok_or_else(
-                || ErrorCode::InternalError("Fetch Cursor can't find snapshot epoch".to_owned()),
-            )? {
-                ReadSnapshot::FrontendPinned { snapshot, .. } => {
+            // FULL selects its snapshot and epoch during DECLARE, before startup can suspend.
+            let snapshot = handler_args.session.pinned_snapshot();
+            let pinned_epoch = match &snapshot {
+                ReadSnapshot::FrontendPinned { snapshot } => {
                     snapshot
                         .version()
                         .state_table_info
@@ -606,171 +578,53 @@ impl SubscriptionCursor {
                     .into());
                 }
             };
-            let start_timestamp = pinned_epoch;
-
+            let (query_stream, init_query_timer, table_catalog) =
+                SubscriptionCursorDataChunkStream::initiate_query(
+                    None,
+                    dependent_table_id,
+                    handler_args.clone(),
+                    snapshot,
+                )
+                .await?;
             (
-                State::Fetch {
+                SubscriptionCursorState::Fetch {
                     from_snapshot: true,
-                    rw_timestamp: start_timestamp,
-                    chunk_stream,
-                    remaining_rows: VecDeque::new(),
+                    rw_timestamp: pinned_epoch,
+                    query_stream,
                     expected_timestamp: None,
                     init_query_timer,
                 },
                 FieldsManager::new(&table_catalog),
             )
         };
-
-        let cursor_need_drop_time =
-            Instant::now() + Duration::from_secs(subscription.retention_seconds);
+        let expires_at = Instant::now() + Duration::from_secs(subscription.retention_seconds);
+        let output_fields = fields_manager.get_output_fields();
+        let response_state = state.strip_query_stream();
+        let data_stream = SubscriptionCursorDataChunkStream::new(
+            subscription.clone(),
+            dependent_table_id,
+            SubscriptionCursorHandlerContext::new(handler_args),
+            fields_manager,
+            state,
+            cursor_metrics.clone(),
+        );
         Ok(Self {
-            shutdown_handle: CursorShutdownHandle::new(),
+            shutdown_handle,
             cursor_name,
             subscription,
             dependent_table_id,
-            cursor_need_drop_time,
-            state,
-            fields_manager,
+            pg_response_stream: SubscriptionCursorPgResponseStream::new(
+                data_stream,
+                output_fields,
+                response_state,
+                expires_at,
+            ),
             cursor_metrics,
             last_fetch: Instant::now(),
-            seek_pk_row: None,
         })
     }
 
-    async fn next_row(
-        &mut self,
-        handler_args: &HandlerArgs,
-        formats: &Vec<Format>,
-    ) -> Result<Option<Row>> {
-        loop {
-            match &mut self.state {
-                State::InitLogStoreQuery {
-                    seek_timestamp,
-                    expected_timestamp,
-                } => {
-                    let from_snapshot = false;
-
-                    // Initiate a new batch query to continue fetching
-                    match Self::get_next_rw_timestamp(
-                        *seek_timestamp,
-                        self.dependent_table_id,
-                        *expected_timestamp,
-                        handler_args.clone(),
-                        &self.subscription,
-                    )
-                    .await
-                    {
-                        Ok((Some(rw_timestamp), expected_timestamp)) => {
-                            let (mut chunk_stream, init_query_timer, catalog) =
-                                Self::initiate_query(
-                                    Some(rw_timestamp),
-                                    self.dependent_table_id,
-                                    handler_args.clone(),
-                                    None,
-                                )
-                                .await?;
-                            let table_schema_changed =
-                                self.fields_manager.try_refill_fields(&catalog);
-                            let (fields, formats) = self
-                                .fields_manager
-                                .get_row_stream_fields_and_formats(formats, from_snapshot);
-                            chunk_stream.init_row_stream(
-                                &fields,
-                                &formats,
-                                handler_args.session.clone(),
-                            );
-
-                            self.cursor_need_drop_time = Instant::now()
-                                + Duration::from_secs(self.subscription.retention_seconds);
-                            let mut remaining_rows = VecDeque::new();
-                            Self::try_refill_remaining_rows(&mut chunk_stream, &mut remaining_rows)
-                                .await?;
-                            // Transition to the Fetch state
-                            self.state = State::Fetch {
-                                from_snapshot,
-                                rw_timestamp,
-                                chunk_stream,
-                                remaining_rows,
-                                expected_timestamp,
-                                init_query_timer,
-                            };
-                            if table_schema_changed {
-                                return Ok(None);
-                            }
-                        }
-                        Ok((None, _)) => return Ok(None),
-                        Err(e) => {
-                            self.state = State::Invalid;
-                            return Err(e);
-                        }
-                    }
-                }
-                State::Fetch {
-                    from_snapshot,
-                    rw_timestamp,
-                    chunk_stream,
-                    remaining_rows,
-                    expected_timestamp,
-                    init_query_timer,
-                } => {
-                    let session_data = StaticSessionData {
-                        timezone: handler_args.session.config().timezone(),
-                    };
-                    let from_snapshot = *from_snapshot;
-                    let rw_timestamp = *rw_timestamp;
-
-                    // Try refill remaining rows
-                    Self::try_refill_remaining_rows(chunk_stream, remaining_rows).await?;
-
-                    if let Some(row) = remaining_rows.pop_front() {
-                        // 1. Fetch the next row
-                        if from_snapshot {
-                            return Ok(Some(Self::build_row(
-                                row.take(),
-                                None,
-                                formats,
-                                &session_data,
-                            )?));
-                        } else {
-                            return Ok(Some(Self::build_row(
-                                row.take(),
-                                Some(rw_timestamp),
-                                formats,
-                                &session_data,
-                            )?));
-                        }
-                    } else {
-                        self.cursor_metrics
-                            .subscription_cursor_query_duration
-                            .with_label_values(&[&self.subscription.name])
-                            .observe(init_query_timer.elapsed().as_millis() as _);
-                        // 2. Reach EOF for the current query.
-                        if let Some(expected_timestamp) = expected_timestamp {
-                            self.state = State::InitLogStoreQuery {
-                                seek_timestamp: *expected_timestamp,
-                                expected_timestamp: Some(*expected_timestamp),
-                            };
-                        } else {
-                            self.state = State::InitLogStoreQuery {
-                                seek_timestamp: rw_timestamp + 1,
-                                expected_timestamp: None,
-                            };
-                        }
-                    }
-                }
-                State::Invalid => {
-                    // TODO: auto close invalid cursor?
-                    return Err(ErrorCode::InternalError(
-                        "Cursor is in invalid state. Please close and re-create the cursor."
-                            .to_owned(),
-                    )
-                    .into());
-                }
-            }
-        }
-    }
-
-    pub async fn next(
+    pub async fn fetch(
         &mut self,
         count: u32,
         handler_args: HandlerArgs,
@@ -778,107 +632,40 @@ impl SubscriptionCursor {
         timeout_seconds: Option<u64>,
         cancel_handle: &mut FetchCursorCancelHandle,
     ) -> Result<(Vec<Row>, Vec<PgFieldDescriptor>)> {
-        let timeout_instant = timeout_seconds.map(|s| Instant::now() + Duration::from_secs(s));
-        if Instant::now() > self.cursor_need_drop_time {
+        if self.pg_response_stream.is_expired(Instant::now()) {
             return Err(ErrorCode::InternalError(
                 "The cursor has exceeded its maximum lifetime, please recreate it (close then declare cursor).".to_owned(),
-            )
-            .into());
+            ).into());
         }
-
-        let session = &handler_args.session;
-        let mut ans = Vec::with_capacity(std::cmp::min(100, count) as usize);
-        let mut cur = 0;
-        if let State::Fetch {
-            from_snapshot,
-            chunk_stream,
-            ..
-        } = &mut self.state
-        {
-            let (fields, fotmats) = self
-                .fields_manager
-                .get_row_stream_fields_and_formats(formats, *from_snapshot);
-            chunk_stream.init_row_stream(&fields, &fotmats, session.clone());
-        }
-        while cur < count {
-            if cancel_handle.is_cancelled() {
-                return Err(SchedulerError::QueryCancelled("Cancelled by user".to_owned()).into());
-            }
-            let fetch_cursor_timer = Instant::now();
-            let row = self.next_row(&handler_args, formats).await?;
-            self.cursor_metrics
-                .subscription_cursor_fetch_duration
-                .with_label_values(&[&self.subscription.name])
-                .observe(fetch_cursor_timer.elapsed().as_millis() as _);
-            match row {
-                Some(row) => {
-                    cur += 1;
-                    ans.push(row);
-                }
-                None => {
-                    let timeout_seconds = timeout_seconds.unwrap_or(0);
-                    if cur > 0 || timeout_seconds == 0 {
-                        break;
-                    }
-                    let State::InitLogStoreQuery { seek_timestamp, .. } = &self.state else {
-                        // Triggered when previous next_row returns None while self.state is State::Fetch.
-                        continue;
-                    };
-                    // This is the only point where subscription cursor fetch waits without an
-                    // inner query. Register the FETCH-level cancel token so CancelRequest can
-                    // interrupt this wait. The token also marks the whole FETCH as cancelled, so
-                    // we won't start another inner query after a cancellation.
-                    cancel_handle.register(session);
-                    let timeout = tokio::time::sleep(Duration::from_secs(timeout_seconds));
-                    tokio::pin!(timeout);
-                    tokio::select! {
-                        biased;
-                        _ = cancel_handle.cancelled() => {
-                            return Err(SchedulerError::QueryCancelled(
-                                "Cancelled by user".to_owned(),
-                            )
-                            .into());
-                        }
-                        result = session
-                            .env
-                            .hummock_snapshot_manager()
-                            .wait_table_change_log_notification(
-                                self.dependent_table_id,
-                                *seek_timestamp,
-                            ) => {
-                            result?;
-                        }
-                        _ = &mut timeout => {
-                            tracing::debug!("Cursor wait next epoch timeout");
-                            break;
-                        }
-                    }
-                    if cancel_handle.is_cancelled() {
-                        return Err(
-                            SchedulerError::QueryCancelled("Cancelled by user".to_owned()).into(),
-                        );
-                    }
-                }
-            }
-            // Timeout, return with current value
-            if let Some(timeout_instant) = timeout_instant
-                && Instant::now() > timeout_instant
-            {
-                break;
-            }
-        }
-        self.last_fetch = Instant::now();
-        let (rows, seek_pk_row) = self.fields_manager.process_output_desc_row(ans);
-        if let Some(seek_pk_row) = seek_pk_row {
-            self.seek_pk_row = Some(seek_pk_row);
-        }
+        // A schema boundary publishes fields for the next FETCH before ending this one.
+        // Keep this response's descriptors consistent with its rows and any earlier Describe.
         let desc = self
-            .fields_manager
-            .get_output_fields()
+            .pg_response_stream
+            .fields()
             .iter()
             .map(to_pg_field)
             .collect();
-
+        self.pg_response_stream.begin_fetch(
+            formats,
+            &handler_args.session,
+            timeout_seconds.is_some_and(|seconds| seconds > 0),
+        );
+        let metrics = &self.cursor_metrics;
+        let subscription_name = &self.subscription.name;
+        let rows = fetch_rows(
+            &mut self.pg_response_stream,
+            count,
+            timeout_seconds,
+            cancel_handle,
+            |elapsed| {
+                metrics
+                    .subscription_cursor_fetch_duration
+                    .with_label_values(&[subscription_name])
+                    .observe(elapsed.as_millis() as _);
+            },
+        )
+        .await?;
+        self.last_fetch = Instant::now();
         Ok((rows, desc))
     }
 
@@ -922,36 +709,38 @@ impl SubscriptionCursor {
         &self,
         handler_args: HandlerArgs,
     ) -> Result<RwBatchQueryPlanResult> {
-        match self.state {
+        match self.pg_response_stream.subscription_state() {
             // Only used to return generated plans, so rw_timestamp are meaningless
-            State::InitLogStoreQuery { .. } => Self::init_batch_plan_for_subscription_cursor(
-                Some(0),
-                self.dependent_table_id,
-                handler_args,
-                self.seek_pk_row.clone(),
-            ),
-            State::Fetch {
+            SubscriptionCursorState::InitLogStoreQuery { .. } => {
+                Self::init_batch_plan_for_subscription_cursor(
+                    Some(0),
+                    self.dependent_table_id,
+                    handler_args,
+                    self.pg_response_stream.seek_pk_row(),
+                )
+            }
+            SubscriptionCursorState::Fetch {
                 from_snapshot,
                 rw_timestamp,
                 ..
             } => {
-                if from_snapshot {
+                if *from_snapshot {
                     Self::init_batch_plan_for_subscription_cursor(
                         None,
                         self.dependent_table_id,
                         handler_args,
-                        self.seek_pk_row.clone(),
+                        self.pg_response_stream.seek_pk_row(),
                     )
                 } else {
                     Self::init_batch_plan_for_subscription_cursor(
-                        Some(rw_timestamp),
+                        Some(*rw_timestamp),
                         self.dependent_table_id,
                         handler_args,
-                        self.seek_pk_row.clone(),
+                        self.pg_response_stream.seek_pk_row(),
                     )
                 }
             }
-            State::Invalid => Err(ErrorCode::InternalError(
+            SubscriptionCursorState::Invalid => Err(ErrorCode::InternalError(
                 "Cursor is in invalid state. Please close and re-create the cursor.".to_owned(),
             )
             .into()),
@@ -962,7 +751,7 @@ impl SubscriptionCursor {
         rw_timestamp: Option<u64>,
         dependent_table_id: TableId,
         handler_args: HandlerArgs,
-        seek_pk_row: Option<Row>,
+        seek_pk_row: Option<OwnedRow>,
     ) -> Result<RwBatchQueryPlanResult> {
         let session = handler_args.clone().session;
         let table_catalog = session.get_table_by_id(dependent_table_id)?;
@@ -987,39 +776,6 @@ impl SubscriptionCursor {
             version_id,
             seek_pk_row,
         )
-    }
-
-    async fn initiate_query(
-        rw_timestamp: Option<u64>,
-        dependent_table_id: TableId,
-        handler_args: HandlerArgs,
-        seek_pk_row: Option<Row>,
-    ) -> Result<(CursorDataChunkStream, Instant, Arc<TableCatalog>)> {
-        let init_query_timer = Instant::now();
-        let session = handler_args.clone().session;
-        let table_catalog = session.get_table_by_id(dependent_table_id)?;
-        let plan_result = Self::init_batch_plan_for_subscription_cursor(
-            rw_timestamp,
-            dependent_table_id,
-            handler_args.clone(),
-            seek_pk_row,
-        )?;
-        let plan_fragmenter_result = gen_batch_plan_fragmenter(&handler_args.session, plan_result)?;
-        let (chunk_stream, _) =
-            create_chunk_stream_for_cursor(handler_args.session, plan_fragmenter_result).await?;
-        Ok((chunk_stream, init_query_timer, table_catalog))
-    }
-
-    async fn try_refill_remaining_rows(
-        chunk_stream: &mut CursorDataChunkStream,
-        remaining_rows: &mut VecDeque<Row>,
-    ) -> Result<()> {
-        if remaining_rows.is_empty()
-            && let Some(row_set) = chunk_stream.next().await?
-        {
-            remaining_rows.extend(row_set?);
-        }
-        Ok(())
     }
 
     pub fn build_row(
@@ -1067,7 +823,7 @@ impl SubscriptionCursor {
         context: OptimizerContextRef,
         epoch_range: Option<(u64, u64)>,
         version_id: HummockVersionId,
-        seek_pk_rows: Option<Row>,
+        seek_pk_rows: Option<OwnedRow>,
     ) -> Result<RwBatchQueryPlanResult> {
         // pk + all column without hidden
         let output_col_idx = table_catalog
@@ -1094,17 +850,18 @@ impl SubscriptionCursor {
         let (scan, predicate) = if let Some(seek_pk_rows) = seek_pk_rows {
             let mut pk_rows = vec![];
             let mut values = vec![];
-            for (seek_pk, (data_type, column_index)) in
-                seek_pk_rows.take().into_iter().zip_eq_fast(pks.into_iter())
+            for (seek_pk, (data_type, column_index)) in seek_pk_rows
+                .into_inner()
+                .into_vec()
+                .into_iter()
+                .zip_eq_fast(pks.into_iter())
             {
                 if let Some(seek_pk) = seek_pk {
                     pk_rows.push(InputRef {
                         index: column_index,
                         data_type: data_type.clone(),
                     });
-                    let value_string = String::from_utf8(seek_pk.clone().into()).unwrap();
-                    let value_data = ScalarImpl::from_text(&value_string, data_type).unwrap();
-                    values.push((Some(value_data), data_type.clone()));
+                    values.push((Some(seek_pk), data_type.clone()));
                 }
             }
             if pk_rows.is_empty() {
@@ -1219,16 +976,16 @@ impl SubscriptionCursor {
     }
 
     pub fn state_info_string(&self) -> String {
-        format!("{}", self.state)
+        self.pg_response_stream.state_info_string()
     }
 }
 
+#[derive(Default)]
 pub struct CursorManager {
     cursor_map: tokio::sync::Mutex<HashMap<String, Cursor>>,
     /// Sender clones accessible without the cursor map lock held by FETCH.
     cursor_shutdown_sender_map: Mutex<HashMap<String, ShutdownSender>>,
     shutting_down: AtomicBool,
-    cursor_metrics: Arc<CursorMetrics>,
 }
 
 impl CursorManager {
@@ -1304,43 +1061,16 @@ impl CursorManager {
 }
 
 impl CursorManager {
-    pub fn new(cursor_metrics: Arc<CursorMetrics>) -> Self {
-        Self {
-            cursor_map: tokio::sync::Mutex::new(HashMap::new()),
-            cursor_shutdown_sender_map: Mutex::new(HashMap::new()),
-            shutting_down: AtomicBool::new(false),
-            cursor_metrics,
-        }
-    }
-
-    pub async fn add_subscription_cursor(
-        &self,
-        cursor_name: String,
-        start_timestamp: Option<u64>,
-        dependent_table_id: TableId,
-        subscription: Arc<SubscriptionCatalog>,
-        handler_args: &HandlerArgs,
-    ) -> Result<()> {
-        let create_cursor_timer = Instant::now();
-        let subscription_name = subscription.name.clone();
-        let cursor = SubscriptionCursor::new(
-            cursor_name,
-            start_timestamp,
-            subscription,
-            dependent_table_id,
-            handler_args,
-            self.cursor_metrics.clone(),
-        )
-        .await?;
+    /// Registers a constructed subscription cursor, rejecting insertion after shutdown.
+    pub async fn add_subscription_cursor(&self, cursor: SubscriptionCursor) -> Result<()> {
         let mut cursor_map = self.cursor_map.lock().await;
-        self.cursor_metrics
-            .subscription_cursor_declare_duration
-            .with_label_values(&[&subscription_name])
-            .observe(create_cursor_timer.elapsed().as_millis() as _);
 
         cursor_map.retain(|name, v| {
             if let Cursor::Subscription(cursor) = v
-                && matches!(cursor.state, State::Invalid)
+                && matches!(
+                    cursor.pg_response_stream.subscription_state(),
+                    SubscriptionCursorState::Invalid
+                )
             {
                 self.cursor_shutdown_sender_map.lock().remove(name);
                 false
@@ -1356,13 +1086,8 @@ impl CursorManager {
         )
     }
 
-    pub async fn add_query_cursor(
-        &self,
-        cursor_name: String,
-        chunk_stream: CursorDataChunkStream,
-        fields: Vec<Field>,
-    ) -> Result<()> {
-        let cursor = QueryCursor::new(chunk_stream, fields)?;
+    /// Registers a constructed query cursor, rejecting insertion after shutdown.
+    pub async fn add_query_cursor(&self, cursor_name: String, cursor: QueryCursor) -> Result<()> {
         let mut cursor_map = self.cursor_map.lock().await;
         self.insert_cursor(&mut cursor_map, cursor_name, Cursor::Query(cursor))
     }
@@ -1402,16 +1127,11 @@ impl CursorManager {
         timeout_seconds: Option<u64>,
         cancel_handle: &mut FetchCursorCancelHandle,
     ) -> Result<(Vec<Row>, Vec<PgFieldDescriptor>)> {
+        cancel_handle.register(&handler_args.session);
         if let Some(cursor) = self.cursor_map.lock().await.get_mut(cursor_name) {
-            let mut shutdown_rx = cursor.shutdown_handle().shutdown_token();
-            // Dropping FETCH's future is safe for terminal shutdown because the cursor is discarded.
-            tokio::select! {
-                biased;
-                _ = shutdown_rx.cancelled() => {
-                    Err(SchedulerError::QueryCancelled("cursor closed".to_owned()).into())
-                }
-                result = cursor.next(count, handler_args, formats, timeout_seconds, cancel_handle) => result,
-            }
+            cursor
+                .fetch(count, handler_args, formats, timeout_seconds, cancel_handle)
+                .await
         } else {
             Err(ErrorCode::InternalError(format!("Cannot find cursor `{}`", cursor_name)).into())
         }
@@ -1432,7 +1152,10 @@ impl CursorManager {
         for cursor in self.cursor_map.lock().await.values() {
             if let Cursor::Subscription(subscription_cursor) = cursor {
                 subscription_cursor_nums += 1;
-                if matches!(subscription_cursor.state, State::Invalid) {
+                if matches!(
+                    subscription_cursor.pg_response_stream.subscription_state(),
+                    SubscriptionCursorState::Invalid
+                ) {
                     invalid_subscription_cursor_nums += 1;
                 } else {
                     let fetch_duration =
@@ -1491,24 +1214,90 @@ impl CursorManager {
     }
 }
 
+// Statement timeouts are disabled unconditionally under madsim.
+#[cfg(all(test, not(madsim)))]
+mod cursor_query_startup_tests {
+    use std::time::Duration;
+
+    use futures::StreamExt;
+    use risingwave_sqlparser::parser::Parser;
+
+    use super::*;
+    use crate::handler::query::{gen_batch_plan_by_statement, gen_batch_plan_fragmenter};
+
+    /// Verifies that a local cursor query survives being left unread beyond `statement_timeout`
+    /// and subsequently returns every row without a timeout error.
+    #[tokio::test]
+    async fn test_local_cursor_query_does_not_inherit_statement_timeout() {
+        let session = Arc::new(SessionImpl::mock());
+        session
+            .set_config("visibility_mode", "all".to_owned())
+            .unwrap();
+        session
+            .set_config("query_mode", "local".to_owned())
+            .unwrap();
+        session
+            .set_config("statement_timeout", "50ms".to_owned())
+            .unwrap();
+        let _txn = session.txn_begin_implicit();
+        // The result exceeds the output channel's capacity, keeping execution active while unread.
+        let sql = "SELECT * FROM generate_series(1, 1000000)";
+        let stmt = Parser::parse_sql(sql).unwrap().pop().unwrap();
+        let args = HandlerArgs::new(session.clone(), &stmt, sql.into()).unwrap();
+        let context = OptimizerContext::from_handler_args(args);
+        let plan = gen_batch_plan_by_statement(&session, context.into(), stmt)
+            .unwrap()
+            .unwrap_rw()
+            .unwrap();
+        let fragment = gen_batch_plan_fragmenter(&session, plan).unwrap();
+        assert_eq!(fragment.query_mode, QueryMode::Local);
+        let snapshot = session.pinned_snapshot();
+        let (mut stream, _) = create_cursor_query_stream(session, fragment, snapshot)
+            .await
+            .unwrap();
+        let first_chunk = tokio::time::timeout(Duration::from_secs(5), stream.next())
+            .await
+            .expect("the local cursor query must produce its first chunk")
+            .unwrap()
+            .unwrap();
+        let mut rows = first_chunk.cardinality();
+
+        // Keep the cursor unread beyond the 50 ms statement timeout while backpressure keeps it
+        // active. Otherwise, a fast query could finish before the deadline and hide a regression.
+        tokio::time::sleep(Duration::from_millis(100)).await;
+
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while let Some(chunk) = stream.next().await {
+                rows += chunk
+                    .expect("cursor execution must not time out")
+                    .cardinality();
+            }
+        })
+        .await
+        .expect("the cursor query must finish after consumption resumes");
+        assert_eq!(rows, 1000000);
+    }
+}
+
 #[cfg(test)]
 mod cursor_lifecycle_tests {
-    use std::collections::VecDeque;
     use std::sync::Arc;
     use std::time::{Duration, Instant};
 
     use futures::StreamExt;
     use risingwave_batch::task::ShutdownToken;
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
-    use risingwave_common::catalog::TableId;
+    use risingwave_common::catalog::{Field, TableId};
     use risingwave_common::error::BoxedError;
     use risingwave_sqlparser::parser::Parser;
     use tokio::sync::mpsc;
     use tokio_stream::wrappers::ReceiverStream;
 
     use super::{
-        Cursor, CursorDataChunkStream, CursorManager, CursorQueryStream, CursorShutdownHandle,
-        FetchCursorCancelHandle, FieldsManager, State, SubscriptionCursor,
+        CursorManager, CursorQueryStream, CursorShutdownHandle, FetchCursorCancelHandle,
+        FieldsManager, QueryCursor, QueryCursorDataChunkStream, QueryCursorPgResponseStream,
+        SubscriptionCursor, SubscriptionCursorDataChunkStream, SubscriptionCursorHandlerContext,
+        SubscriptionCursorPgResponseStream, SubscriptionCursorState,
     };
     use crate::TableCatalog;
     use crate::catalog::subscription_catalog::SubscriptionCatalog;
@@ -1520,7 +1309,21 @@ mod cursor_lifecycle_tests {
     };
     use crate::session::SessionImpl;
 
-    impl CursorDataChunkStream {
+    impl QueryCursor {
+        /// Constructs a cursor around injected output without planning or starting an executor.
+        pub(crate) fn from_query_stream_for_test(
+            query_stream: CursorQueryStream,
+            fields: Vec<Field>,
+        ) -> Self {
+            let data_stream = QueryCursorDataChunkStream::new(query_stream, fields.clone());
+            Self {
+                shutdown_handle: CursorShutdownHandle::new(),
+                pg_response_stream: QueryCursorPgResponseStream::new(data_stream, fields),
+            }
+        }
+    }
+
+    impl CursorQueryStream {
         /// Creates a local cursor stream backed by `chunk_rx`, without a real executor.
         /// The shutdown pair only satisfies the wrapper's constructor: the receiver is unused,
         /// and the sender has no executor to cancel.
@@ -1528,23 +1331,30 @@ mod cursor_lifecycle_tests {
             chunk_rx: mpsc::Receiver<Result<DataChunk, BoxedError>>,
         ) -> Self {
             let (shutdown_tx, _shutdown_rx) = ShutdownToken::new();
-            Self::LocalDataChunk(Some(CursorQueryStream::local(
-                ReceiverStream::new(chunk_rx),
-                shutdown_tx,
-            )))
+            Self::local(ReceiverStream::new(chunk_rx), shutdown_tx)
         }
     }
 
+    /// Returns the cursor shutdown token, query shutdown token, and injected chunk sender.
+    /// The query token observes cancellation signalling; there is no real executor in this fixture.
     async fn add_pending_query_cursor(
         manager: &CursorManager,
         name: &str,
-    ) -> (ShutdownToken, mpsc::Sender<Result<DataChunk, BoxedError>>) {
+        fields: Vec<Field>,
+    ) -> (
+        ShutdownToken,
+        ShutdownToken,
+        mpsc::Sender<Result<DataChunk, BoxedError>>,
+    ) {
         let (chunk_tx, chunk_rx) = mpsc::channel(1);
+        let (shutdown_tx, shutdown_rx) = ShutdownToken::new();
         manager
             .add_query_cursor(
                 name.to_owned(),
-                CursorDataChunkStream::local_stream_without_executor_for_test(chunk_rx),
-                vec![],
+                QueryCursor::from_query_stream_for_test(
+                    CursorQueryStream::local(ReceiverStream::new(chunk_rx), shutdown_tx),
+                    fields,
+                ),
             )
             .await
             .unwrap();
@@ -1556,62 +1366,295 @@ mod cursor_lifecycle_tests {
             .unwrap()
             .shutdown_handle()
             .shutdown_token();
-        (token, chunk_tx)
+        (token, shutdown_rx, chunk_tx)
     }
 
     /// Creates a subscription cursor with a test-controlled pending stream for lifecycle tests.
-    /// `add_subscription_cursor` does not accept an injected stream: it looks up the catalog and
-    /// may start a snapshot query. Constructing `State::Fetch` directly avoids that setup while
-    /// `insert_cursor` still exercises normal cursor and shutdown-sender registration.
+    /// Constructing `SubscriptionCursorState::Fetch` directly avoids the catalog lookup and snapshot query
+    /// in `SubscriptionCursor::new`; `add_subscription_cursor` still exercises normal cursor and
+    /// shutdown-sender registration. Returns the cursor shutdown token, query shutdown token,
+    /// and injected chunk sender, like `add_pending_query_cursor`.
     async fn add_pending_subscription_cursor(
         manager: &CursorManager,
         name: &str,
-    ) -> (ShutdownToken, mpsc::Sender<Result<DataChunk, BoxedError>>) {
+        fields: FieldsManager,
+    ) -> (
+        ShutdownToken,
+        ShutdownToken,
+        mpsc::Sender<Result<DataChunk, BoxedError>>,
+    ) {
         let (chunk_tx, chunk_rx) = mpsc::channel(1);
+        let (shutdown_tx, shutdown_rx) = ShutdownToken::new();
+        let subscription = Arc::new(SubscriptionCatalog {
+            name: name.to_owned(),
+            retention_seconds: 60,
+            ..Default::default()
+        });
+        let cursor_metrics = Arc::new(CursorMetrics::for_test());
+        let state = SubscriptionCursorState::Fetch {
+            from_snapshot: true,
+            rw_timestamp: 0,
+            query_stream: CursorQueryStream::local(ReceiverStream::new(chunk_rx), shutdown_tx),
+            expected_timestamp: None,
+            init_query_timer: Instant::now(),
+        };
+        let response_state = state.strip_query_stream();
+        let output_fields = fields.get_output_fields();
+        let session = Arc::new(SessionImpl::mock());
+        let sql = "select 1";
+        let stmt = Parser::parse_sql(sql).unwrap().pop().unwrap();
+        let args = HandlerArgs::new(session, &stmt, sql.into()).unwrap();
+        let data_stream = SubscriptionCursorDataChunkStream::new(
+            subscription.clone(),
+            TableId::new(1),
+            SubscriptionCursorHandlerContext::new(&args),
+            fields,
+            state,
+            cursor_metrics.clone(),
+        );
         let cursor = SubscriptionCursor {
             shutdown_handle: CursorShutdownHandle::new(),
             cursor_name: name.to_owned(),
-            subscription: Arc::new(SubscriptionCatalog {
-                name: name.to_owned(),
-                retention_seconds: 60,
-                ..Default::default()
-            }),
+            subscription,
             dependent_table_id: TableId::new(1),
-            cursor_need_drop_time: Instant::now() + Duration::from_secs(60),
-            state: State::Fetch {
-                from_snapshot: true,
-                rw_timestamp: 0,
-                chunk_stream: CursorDataChunkStream::local_stream_without_executor_for_test(
-                    chunk_rx,
-                ),
-                remaining_rows: VecDeque::new(),
-                expected_timestamp: None,
-                init_query_timer: Instant::now(),
-            },
-            fields_manager: FieldsManager::new(&TableCatalog::default()),
-            cursor_metrics: manager.cursor_metrics.clone(),
+            pg_response_stream: SubscriptionCursorPgResponseStream::new(
+                data_stream,
+                output_fields,
+                response_state,
+                Instant::now() + Duration::from_secs(60),
+            ),
+            cursor_metrics,
             last_fetch: Instant::now(),
-            seek_pk_row: None,
         };
         let token = cursor.shutdown_handle.shutdown_token();
-        let mut cursor_map = manager.cursor_map.lock().await;
-        manager
-            .insert_cursor(
-                &mut cursor_map,
-                name.to_owned(),
-                Cursor::Subscription(cursor),
-            )
+        manager.add_subscription_cursor(cursor).await.unwrap();
+        (token, shutdown_rx, chunk_tx)
+    }
+
+    fn query_cursor_fetch_handler_args_for_test(session: Arc<SessionImpl>) -> HandlerArgs {
+        let sql = "fetch 10 from cursor";
+        let stmt = Parser::parse_sql(sql).unwrap().pop().unwrap();
+        HandlerArgs::new(session, &stmt, sql.into()).unwrap()
+    }
+
+    /// Verifies `CancelRequest` interrupts a pending FETCH without cancelling its channel-backed
+    /// cursor query, and another FETCH receives later output. No rows were consumed before cancel;
+    /// this is not a real executor or a transactional replay test.
+    #[tokio::test]
+    async fn test_query_cursor_fetch_cancellation_preserves_cursor_query() {
+        let session = Arc::new(SessionImpl::mock());
+        let manager = session.get_cursor_manager();
+        let (_, shutdown_rx, chunk_tx) = add_pending_query_cursor(
+            &manager,
+            "cursor",
+            vec![Field::with_name(
+                risingwave_common::types::DataType::Int32,
+                "v",
+            )],
+        )
+        .await;
+        let formats = vec![];
+        let mut cancel = FetchCursorCancelHandle::new();
+        let mut fetch = Box::pin(manager.get_rows_with_cursor(
+            "cursor",
+            1,
+            query_cursor_fetch_handler_args_for_test(session.clone()),
+            &formats,
+            None,
+            &mut cancel,
+        ));
+        assert!(futures::poll!(fetch.as_mut()).is_pending());
+        session.cancel_current_query();
+        let error = tokio::time::timeout(Duration::from_secs(1), fetch)
+            .await
+            .unwrap()
+            .unwrap_err();
+        assert!(error.to_string().contains("Cancelled by user"));
+        assert!(!shutdown_rx.is_cancelled());
+        assert!(!chunk_tx.is_closed());
+        chunk_tx
+            .try_send(Ok(DataChunk::from_pretty("i\n7")))
             .unwrap();
-        (token, chunk_tx)
+        let (rows, _) = manager
+            .get_rows_with_cursor(
+                "cursor",
+                1,
+                query_cursor_fetch_handler_args_for_test(session),
+                &formats,
+                None,
+                &mut FetchCursorCancelHandle::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(rows[0].values()[0].as_deref(), Some(b"7".as_slice()));
+        assert!(!shutdown_rx.is_cancelled());
+        manager.remove_cursor("cursor").await.unwrap();
+        assert!(shutdown_rx.is_cancelled());
+    }
+
+    /// Verifies a zero-timeout FETCH returns an immediately-ready row, and cancellation between
+    /// FETCH commands makes a reused cancel handle reject the next FETCH without consuming buffered rows.
+    /// No FETCH is active when cancellation is requested. This channel-backed fixture retains and
+    /// reuses the registered handle rather than exercising normal per-command handle lifetimes.
+    #[tokio::test]
+    async fn test_query_cursor_fetch_zero_timeout_and_cancellation_between_fetches() {
+        let session = Arc::new(SessionImpl::mock());
+        let manager = session.get_cursor_manager();
+        let (_, _shutdown_rx, chunk_tx) = add_pending_query_cursor(
+            &manager,
+            "cursor",
+            vec![Field::with_name(
+                risingwave_common::types::DataType::Int32,
+                "v",
+            )],
+        )
+        .await;
+        let mut cancel = FetchCursorCancelHandle::new();
+        chunk_tx
+            .try_send(Ok(DataChunk::from_pretty("i\n1\n2")))
+            .unwrap();
+        drop(chunk_tx);
+        let (rows, _) = manager
+            .get_rows_with_cursor(
+                "cursor",
+                10,
+                query_cursor_fetch_handler_args_for_test(session.clone()),
+                &vec![],
+                Some(0),
+                &mut cancel,
+            )
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].values()[0].as_deref(), Some(b"1".as_slice()));
+        session.cancel_current_query();
+        assert!(
+            manager
+                .get_rows_with_cursor(
+                    "cursor",
+                    1,
+                    query_cursor_fetch_handler_args_for_test(session.clone()),
+                    &vec![],
+                    None,
+                    &mut cancel,
+                )
+                .await
+                .is_err()
+        );
+        let (rows, _) = manager
+            .get_rows_with_cursor(
+                "cursor",
+                10,
+                query_cursor_fetch_handler_args_for_test(session),
+                &vec![],
+                None,
+                &mut FetchCursorCancelHandle::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].values()[0].as_deref(), Some(b"2".as_slice()));
+    }
+
+    /// Verifies that a positive FETCH timeout returns accumulated rows while retaining a pending
+    /// channel-backed query, and a later FETCH can continue. This does not exercise SQL or an executor.
+    #[tokio::test]
+    async fn test_query_cursor_fetch_timeout_returns_rows_and_preserves_cursor_query() {
+        let session = Arc::new(SessionImpl::mock());
+        let manager = session.get_cursor_manager();
+        let (_, shutdown_rx, chunk_tx) = add_pending_query_cursor(
+            &manager,
+            "cursor",
+            vec![Field::with_name(
+                risingwave_common::types::DataType::Int32,
+                "v",
+            )],
+        )
+        .await;
+        chunk_tx
+            .try_send(Ok(DataChunk::from_pretty("i\n1\n2")))
+            .unwrap();
+        let formats = vec![];
+        let mut cancel = FetchCursorCancelHandle::new();
+        let started = tokio::time::Instant::now();
+        let mut fetch = Box::pin(manager.get_rows_with_cursor(
+            "cursor",
+            3,
+            query_cursor_fetch_handler_args_for_test(session.clone()),
+            &formats,
+            Some(1),
+            &mut cancel,
+        ));
+        assert!(futures::poll!(fetch.as_mut()).is_pending());
+        let (rows, _) = tokio::time::timeout(Duration::from_secs(5), fetch)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(started.elapsed() >= Duration::from_secs(1));
+        assert_eq!(rows.len(), 2);
+        assert_eq!(rows[0].values()[0].as_deref(), Some(b"1".as_slice()));
+        assert_eq!(rows[1].values()[0].as_deref(), Some(b"2".as_slice()));
+        assert!(!shutdown_rx.is_cancelled());
+        assert!(!chunk_tx.is_closed());
+        chunk_tx
+            .try_send(Ok(DataChunk::from_pretty("i\n3")))
+            .unwrap();
+        let (rows, _) = manager
+            .get_rows_with_cursor(
+                "cursor",
+                1,
+                query_cursor_fetch_handler_args_for_test(session),
+                &vec![],
+                None,
+                &mut FetchCursorCancelHandle::new(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(rows[0].values()[0].as_deref(), Some(b"3".as_slice()));
+        assert!(!shutdown_rx.is_cancelled());
+    }
+
+    /// Verifies FETCH stops draining ready input after its deadline without relying on the timer
+    /// driver. Blocking a current-thread runtime simulates synchronous row work, not an executor.
+    // This regression needs real elapsed time without advancing the simulated timer driver.
+    #[cfg(not(madsim))]
+    #[tokio::test(flavor = "current_thread")]
+    async fn test_fetch_rows_stops_at_deadline_with_ready_input() {
+        let mut stream = futures::stream::iter((1..=3).map(|value| {
+            if value == 1 {
+                // Cross the deadline without yielding to the timer driver. Every input poll
+                // still returns Ready, including those for the remaining rows.
+                std::thread::sleep(Duration::from_millis(1100));
+            }
+            Ok(pgwire::types::Row::new(vec![Some(
+                value.to_string().into(),
+            )]))
+        }));
+        let rows = super::fetch_rows(
+            &mut stream,
+            3,
+            Some(1),
+            &mut FetchCursorCancelHandle::new(),
+            |_| {},
+        )
+        .await
+        .unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].values()[0].as_deref(), Some(b"1".as_slice()));
+        for expected in ["2", "3"] {
+            let row = stream.next().await.unwrap().unwrap();
+            assert_eq!(row.values()[0].as_deref(), Some(expected.as_bytes()));
+        }
+        assert!(stream.next().await.is_none());
     }
 
     /// Verifies that initiating shutdown signals all registered cursors and drops their streams
     /// before returning when the cursor map is unlocked.
     #[tokio::test]
     async fn test_cursor_shutdown_with_unlocked_map() {
-        let manager = Arc::new(CursorManager::new(Arc::new(CursorMetrics::for_test())));
-        let (first, first_tx) = add_pending_query_cursor(&manager, "first").await;
-        let (second, second_tx) = add_pending_query_cursor(&manager, "second").await;
+        let manager = Arc::new(CursorManager::default());
+        let (first, _, first_tx) = add_pending_query_cursor(&manager, "first", vec![]).await;
+        let (second, _, second_tx) = add_pending_query_cursor(&manager, "second", vec![]).await;
 
         manager.initiate_shutdown();
 
@@ -1625,9 +1668,9 @@ mod cursor_lifecycle_tests {
     /// locked cursor map, then drops their streams in the background after the lock is released.
     #[tokio::test]
     async fn test_cursor_shutdown_with_locked_map() {
-        let manager = Arc::new(CursorManager::new(Arc::new(CursorMetrics::for_test())));
-        let (first, first_tx) = add_pending_query_cursor(&manager, "first").await;
-        let (second, second_tx) = add_pending_query_cursor(&manager, "second").await;
+        let manager = Arc::new(CursorManager::default());
+        let (first, _, first_tx) = add_pending_query_cursor(&manager, "first", vec![]).await;
+        let (second, _, second_tx) = add_pending_query_cursor(&manager, "second", vec![]).await;
         let cursor_map = manager.cursor_map.lock().await;
 
         manager.initiate_shutdown();
@@ -1649,8 +1692,8 @@ mod cursor_lifecycle_tests {
     /// and signals late registrations while cleanup is blocked, and returns after stream drop.
     #[tokio::test]
     async fn test_cursor_shutdown_and_wait_blocks_until_streams_are_dropped() {
-        let manager = Arc::new(CursorManager::new(Arc::new(CursorMetrics::for_test())));
-        let (handle, chunk_tx) = add_pending_query_cursor(&manager, "cursor").await;
+        let manager = Arc::new(CursorManager::default());
+        let (handle, _, chunk_tx) = add_pending_query_cursor(&manager, "cursor", vec![]).await;
         let cursor_map = manager.cursor_map.lock().await;
         let mut shutdown = Box::pin(manager.shutdown_and_wait());
 
@@ -1679,10 +1722,15 @@ mod cursor_lifecycle_tests {
             for wait_for_cleanup in [false, true] {
                 let session = Arc::new(SessionImpl::mock());
                 let manager = session.get_cursor_manager();
-                let (token, chunk_tx) = if is_subscription {
-                    add_pending_subscription_cursor(&manager, "c").await
+                let (token, _, chunk_tx) = if is_subscription {
+                    add_pending_subscription_cursor(
+                        &manager,
+                        "c",
+                        FieldsManager::new(&TableCatalog::default()),
+                    )
+                    .await
                 } else {
-                    add_pending_query_cursor(&manager, "c").await
+                    add_pending_query_cursor(&manager, "c", vec![]).await
                 };
                 let sql = "FETCH 1 FROM c";
                 let stmt = Parser::parse_sql(sql).unwrap().pop().unwrap();
@@ -1729,13 +1777,15 @@ mod cursor_lifecycle_tests {
     /// shutdown begins, and its unregistered result stream is dropped.
     #[tokio::test]
     async fn test_cursor_shutdown_rejects_creation_waiting_for_map() {
-        let manager = Arc::new(CursorManager::new(Arc::new(CursorMetrics::for_test())));
+        let manager = Arc::new(CursorManager::default());
         let cursor_map = manager.cursor_map.lock().await;
         let (chunk_tx, chunk_rx) = mpsc::channel(1);
         let mut adding = Box::pin(manager.add_query_cursor(
             "late".to_owned(),
-            CursorDataChunkStream::local_stream_without_executor_for_test(chunk_rx),
-            vec![],
+            QueryCursor::from_query_stream_for_test(
+                CursorQueryStream::local_stream_without_executor_for_test(chunk_rx),
+                vec![],
+            ),
         ));
         assert!(futures::poll!(adding.as_mut()).is_pending());
 
@@ -1757,16 +1807,18 @@ mod cursor_lifecycle_tests {
     /// signaling the existing cursor or dropping its stream.
     #[tokio::test]
     async fn test_duplicate_cursor_name_rejects_new_cursor_and_preserves_existing_cursor() {
-        let manager = Arc::new(CursorManager::new(Arc::new(CursorMetrics::for_test())));
-        let (query, query_tx) = add_pending_query_cursor(&manager, "query").await;
+        let manager = Arc::new(CursorManager::default());
+        let (query, _, query_tx) = add_pending_query_cursor(&manager, "query", vec![]).await;
         let (duplicate_tx, duplicate_rx) = mpsc::channel(1);
 
         assert!(
             manager
                 .add_query_cursor(
                     "query".to_owned(),
-                    CursorDataChunkStream::local_stream_without_executor_for_test(duplicate_rx),
-                    vec![],
+                    QueryCursor::from_query_stream_for_test(
+                        CursorQueryStream::local_stream_without_executor_for_test(duplicate_rx),
+                        vec![],
+                    ),
                 )
                 .await
                 .is_err()
@@ -1781,10 +1833,14 @@ mod cursor_lifecycle_tests {
     /// another cursor untouched, and permits a new live cursor to reuse the closed cursor's name.
     #[tokio::test]
     async fn test_cursor_shutdown_preserves_other_cursor_and_allows_name_reuse() {
-        let manager = Arc::new(CursorManager::new(Arc::new(CursorMetrics::for_test())));
-        let (query, query_tx) = add_pending_query_cursor(&manager, "query").await;
-        let (subscription, subscription_tx) =
-            add_pending_subscription_cursor(&manager, "subscription").await;
+        let manager = Arc::new(CursorManager::default());
+        let (query, _, query_tx) = add_pending_query_cursor(&manager, "query", vec![]).await;
+        let (subscription, _, subscription_tx) = add_pending_subscription_cursor(
+            &manager,
+            "subscription",
+            FieldsManager::new(&TableCatalog::default()),
+        )
+        .await;
 
         manager.remove_cursor("query").await.unwrap();
 
@@ -1792,7 +1848,8 @@ mod cursor_lifecycle_tests {
         assert!(query_tx.is_closed());
         assert!(!subscription.is_cancelled());
         assert!(!subscription_tx.is_closed());
-        let (replacement, replacement_tx) = add_pending_query_cursor(&manager, "query").await;
+        let (replacement, _, replacement_tx) =
+            add_pending_query_cursor(&manager, "query", vec![]).await;
         assert!(!replacement.is_cancelled());
         assert!(!replacement_tx.is_closed());
     }
@@ -1801,10 +1858,14 @@ mod cursor_lifecycle_tests {
     /// leaving subscription cursors unsignalled with their streams still open.
     #[tokio::test]
     async fn test_all_query_cursors_shutdown_preserves_subscription_cursors() {
-        let manager = Arc::new(CursorManager::new(Arc::new(CursorMetrics::for_test())));
-        let (query, query_tx) = add_pending_query_cursor(&manager, "query").await;
-        let (subscription, subscription_tx) =
-            add_pending_subscription_cursor(&manager, "subscription").await;
+        let manager = Arc::new(CursorManager::default());
+        let (query, _, query_tx) = add_pending_query_cursor(&manager, "query", vec![]).await;
+        let (subscription, _, subscription_tx) = add_pending_subscription_cursor(
+            &manager,
+            "subscription",
+            FieldsManager::new(&TableCatalog::default()),
+        )
+        .await;
 
         manager.remove_all_query_cursor().await;
 
@@ -1818,10 +1879,14 @@ mod cursor_lifecycle_tests {
     /// the manager's lifetime: new live cursors can be declared using both removed names.
     #[tokio::test]
     async fn test_all_cursors_shutdown_allows_new_declarations() {
-        let manager = Arc::new(CursorManager::new(Arc::new(CursorMetrics::for_test())));
-        let (query, query_tx) = add_pending_query_cursor(&manager, "query").await;
-        let (subscription, subscription_tx) =
-            add_pending_subscription_cursor(&manager, "subscription").await;
+        let manager = Arc::new(CursorManager::default());
+        let (query, _, query_tx) = add_pending_query_cursor(&manager, "query", vec![]).await;
+        let (subscription, _, subscription_tx) = add_pending_subscription_cursor(
+            &manager,
+            "subscription",
+            FieldsManager::new(&TableCatalog::default()),
+        )
+        .await;
 
         manager.remove_all_cursor().await;
 
@@ -1829,9 +1894,14 @@ mod cursor_lifecycle_tests {
         assert!(query_tx.is_closed());
         assert!(subscription.is_cancelled());
         assert!(subscription_tx.is_closed());
-        let (new_query, new_query_tx) = add_pending_query_cursor(&manager, "query").await;
-        let (new_subscription, new_subscription_tx) =
-            add_pending_subscription_cursor(&manager, "subscription").await;
+        let (new_query, _, new_query_tx) =
+            add_pending_query_cursor(&manager, "query", vec![]).await;
+        let (new_subscription, _, new_subscription_tx) = add_pending_subscription_cursor(
+            &manager,
+            "subscription",
+            FieldsManager::new(&TableCatalog::default()),
+        )
+        .await;
         assert!(!new_query.is_cancelled());
         assert!(!new_query_tx.is_closed());
         assert!(!new_subscription.is_cancelled());
@@ -1839,9 +1909,8 @@ mod cursor_lifecycle_tests {
     }
 
     /// Verifies that unfinished local cursor shutdown via CLOSE signals its executor token and drops
-    /// its output stream without signaling the ordinary local query. A query cursor converts its
-    /// chunk stream to a row stream only when the first FETCH is invoked, so shutdown must work
-    /// with either representation.
+    /// its output stream without signaling the ordinary local query. Shutdown must work both
+    /// before and after the first FETCH initializes row formatting in the persistent adapter.
     #[tokio::test]
     async fn test_local_cursor_shutdown_preserves_ordinary_query() {
         // Simulate shutdown before the first FETCH (false) or after it initializes the row stream
@@ -1853,13 +1922,13 @@ mod cursor_lifecycle_tests {
             let (chunk_tx, chunk_rx) = mpsc::channel(1);
             let mut stream = CursorQueryStream::local(ReceiverStream::new(chunk_rx), shutdown_tx);
             assert!(futures::poll!(stream.next()).is_pending());
-            let mut stream = CursorDataChunkStream::LocalDataChunk(Some(stream));
+            let mut cursor = QueryCursor::from_query_stream_for_test(stream, vec![]);
             if initialize_rows {
-                stream.init_row_stream(&vec![], &vec![], session.clone());
+                cursor.pg_response_stream.begin_fetch(&[], &session);
             }
             let manager = session.get_cursor_manager();
             manager
-                .add_query_cursor("cursor".to_owned(), stream, vec![])
+                .add_query_cursor("cursor".to_owned(), cursor)
                 .await
                 .unwrap();
 
@@ -1894,8 +1963,8 @@ mod cursor_lifecycle_tests {
 
     /// Verifies that unfinished distributed cursor shutdown via CLOSE requests cancellation and
     /// removes its global and session registrations. Another registered query remains owned and
-    /// receives no cancellation request. A query cursor converts its chunk stream to a row stream
-    /// only when the first FETCH is invoked, so shutdown must work with either representation.
+    /// receives no cancellation request. Shutdown must work both before and after the first FETCH
+    /// initializes row formatting in the persistent adapter.
     #[tokio::test]
     async fn test_distributed_cursor_shutdown_cancels_only_owned_query() {
         // Simulate shutdown before the first FETCH (false) or after it initializes the row stream
@@ -1921,14 +1990,14 @@ mod cursor_lifecycle_tests {
                 manager.clone(),
             );
             assert!(futures::poll!(stream.next()).is_pending());
-            let mut chunk_stream = CursorDataChunkStream::DistributedDataChunk(Some(stream));
+            let mut cursor = QueryCursor::from_query_stream_for_test(stream, vec![]);
             if initialize_rows {
-                chunk_stream.init_row_stream(&vec![], &vec![], session.clone());
-                assert!(futures::poll!(std::pin::pin!(chunk_stream.next())).is_pending());
+                cursor.pg_response_stream.begin_fetch(&[], &session);
+                assert!(futures::poll!(cursor.pg_response_stream.next()).is_pending());
             }
             let cursors = session.get_cursor_manager();
             cursors
-                .add_query_cursor("cursor".to_owned(), chunk_stream, vec![])
+                .add_query_cursor("cursor".to_owned(), cursor)
                 .await
                 .unwrap();
 
