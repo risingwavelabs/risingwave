@@ -27,7 +27,7 @@ use risingwave_hummock_sdk::compaction_group::{
 };
 use risingwave_hummock_sdk::version::{GroupDelta, GroupDeltas, HummockVersion};
 use risingwave_hummock_sdk::{CompactionGroupId, can_concat};
-use risingwave_pb::hummock::compact_task::TaskStatus;
+use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
 use risingwave_pb::hummock::rise_ctl_update_compaction_config_request::mutable_config::MutableConfig;
 use risingwave_pb::hummock::{
     CompatibilityVersion, PbGroupConstruct, PbGroupMerge, PbStateTableInfoDelta,
@@ -442,10 +442,6 @@ impl HummockManager {
                 );
             }
 
-            // clean up compaction schedule state for the merged group
-            self.compaction_state
-                .remove_compaction_group(right_group_id);
-
             // clear `partition_vnode_count` for the hybrid group
             {
                 if let Err(err) = compaction_groups_txn.update_compaction_config(
@@ -465,6 +461,13 @@ impl HummockManager {
             // remove right_group_id
             compaction_groups_txn.remove(right_group_id);
             commit_multi_var!(self.meta_store_ref(), version, compaction_groups_txn)?;
+        }
+
+        // Update candidates only after commit, while versioning still protects group membership.
+        self.compaction_state
+            .remove_compaction_group(right_group_id);
+        if !self.env.opts.compaction_deterministic_test {
+            self.try_send_compaction_request(left_group_id, TaskType::Dynamic);
         }
 
         // Instead of handling DeltaType::GroupConstruct for time travel, simply enforce a version snapshot.
@@ -805,6 +808,11 @@ impl HummockManager {
             new_version_delta.pre_apply();
             commit_multi_var!(self.meta_store_ref(), version, compaction_groups_txn)?;
         }
+        if !self.env.opts.compaction_deterministic_test {
+            for (group_id, _) in &result {
+                self.try_send_compaction_request(*group_id, TaskType::Dynamic);
+            }
+        }
         // Instead of handling DeltaType::GroupConstruct for time travel, simply enforce a version snapshot.
         versioning.mark_next_time_travel_version_snapshot();
 
@@ -1096,6 +1104,11 @@ impl HummockManager {
 
             commit_multi_var!(self.meta_store_ref(), version, compaction_groups_txn)?;
             versioning.mark_next_time_travel_version_snapshot();
+            if !self.env.opts.compaction_deterministic_test {
+                for group_id in [plan.parent_group_id, new_compaction_group_id] {
+                    self.try_send_compaction_request(group_id, TaskType::Dynamic);
+                }
+            }
 
             (
                 table_ids_right,
@@ -1139,9 +1152,9 @@ impl HummockManager {
         let versioning = versioning_guard.deref_mut();
         let compact_task_assignments =
             compaction_guard.get_compact_task_assignments_by_group_id(parent_group_id);
-        let levels = versioning
-            .current_version
-            .get_compaction_group_levels(parent_group_id);
+        let Some(levels) = versioning.current_version.levels.get(&parent_group_id) else {
+            return Ok(());
+        };
         compact_task_assignments
             .into_iter()
             .for_each(|task_assignment| {

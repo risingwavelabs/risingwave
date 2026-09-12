@@ -91,7 +91,7 @@ fn pin_versions_sum(pin_versions: &[HummockPinnedVersion]) -> usize {
     pin_versions.iter().len()
 }
 
-fn gen_sstable_info(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> SstableInfo {
+pub(super) fn gen_sstable_info(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> SstableInfo {
     gen_sstable_info_impl(sst_id, table_ids, epoch).into()
 }
 
@@ -325,7 +325,7 @@ async fn list_pinned_version_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPin
         .collect()
 }
 
-async fn setup_compute_env_with_meta_opts(
+pub(super) async fn setup_compute_env_with_meta_opts(
     port: i32,
     opts: MetaOpts,
 ) -> (
