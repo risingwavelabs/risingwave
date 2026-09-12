@@ -1377,7 +1377,10 @@ impl DdlController {
                     self.iceberg_pk_index_sink_manager
                         .register_sink(
                             sink.id,
-                            crate::barrier::to_partial_graph_id(sink.database_id, None),
+                            crate::barrier::to_partial_graph_id(
+                                sink.database_id,
+                                Some(sink.id.as_job_id()),
+                            ),
                             iceberg_config,
                         )
                         .await

@@ -442,6 +442,7 @@ pub struct SinceEpochInfo {
 pub enum IndependentStreamingJobType {
     SnapshotBackfill { since_epoch: Option<SinceEpochInfo> },
     BatchRefresh { refresh_interval_sec: u64 },
+    IcebergV3,
 }
 
 #[derive(Debug, Clone)]
