@@ -25,7 +25,7 @@ use risingwave_common::types::{DefaultOrd, DefaultOrdered, ScalarImpl};
 use risingwave_common::util::memcmp_encoding::{self, MemcmpEncoded};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_expr::window_function::{
-    RangeFrameBounds, RowsFrameBounds, StateKey, WindowFuncCall,
+    RangeFrameBounds, RowsFrameBounds, StateKey, WindowFuncCall, can_forward_watermark_on_order_key,
 };
 
 use super::frame_finder::merge_rows_frames;
@@ -43,6 +43,10 @@ use crate::executor::prelude::*;
 ///
 /// - State table schema = output schema, state table pk = `partition key | order key | input pk`.
 /// - Output schema = input schema + window function results.
+/// - Watermarks on partition key columns are always forwarded, since a row can only affect rows in
+///   the same partition. Watermarks on the first order key column are forwarded only if the window
+///   frames guarantee that a row can only affect rows not below itself in that column (see
+///   [`can_forward_watermark_on_order_key`]). All other watermarks are dropped.
 /// - When [`StateCleaning`] is enabled, stale rows below the watermark of the first order key
 ///   column are deleted from recently touched partitions at barriers.
 pub struct OverWindowExecutor<S: StateStore> {
@@ -70,6 +74,9 @@ struct ExecutorInner<S: StateStore> {
     cache_policy: CachePolicy,
     /// Watermark-driven state cleaning strategy, `None` if disabled.
     state_cleaning: Option<StateCleaning>,
+    /// Indices of input columns on which watermarks are forwarded to downstream: the partition key
+    /// columns, and the first order key column if allowed by the window frames.
+    watermark_forward_cols: HashSet<usize>,
 }
 
 struct ExecutionVars<S: StateStore> {
@@ -275,7 +282,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
             &input_info.stream_key,
         );
 
-        let deduped_part_key_indices = {
+        let deduped_part_key_indices: Vec<usize> = {
             let mut dedup = HashSet::new();
             args.partition_key_indices
                 .iter()
@@ -311,6 +318,19 @@ impl<S: StateStore> OverWindowExecutor<S> {
             None
         };
 
+        let watermark_forward_cols = {
+            let mut cols: HashSet<usize> = deduped_part_key_indices.iter().copied().collect();
+            if let Some(&first_order_key_idx) = args.order_key_indices.first()
+                && can_forward_watermark_on_order_key(
+                    calls.iter().map(|call| &call.frame),
+                    args.order_key_order_types[0],
+                )
+            {
+                cols.insert(first_order_key_idx);
+            }
+            cols
+        };
+
         Self {
             input: args.input,
             inner: ExecutorInner {
@@ -328,6 +348,7 @@ impl<S: StateStore> OverWindowExecutor<S> {
                 chunk_size: args.chunk_size,
                 cache_policy,
                 state_cleaning,
+                watermark_forward_cols,
             },
         }
     }
@@ -715,12 +736,14 @@ impl<S: StateStore> OverWindowExecutor<S> {
                             .is_none_or(|old| old.default_cmp(&watermark.val).is_lt())
                     {
                         // Only used for state cleaning at the next barrier.
-                        vars.cleaning_watermark = Some(watermark.val);
+                        vars.cleaning_watermark = Some(watermark.val.clone());
                     }
-                    // TODO(rc): We don't propagate watermarks to downstream for now, because rows
-                    // below the watermark may still be updated by later rows if there's any
-                    // following frame bound, e.g. `lead`. We need to think about it carefully.
-                    continue;
+                    if this.watermark_forward_cols.contains(&watermark.col_idx) {
+                        // All changes caused by the rows received so far have already been
+                        // emitted, and rows arriving in the future can only affect rows that are
+                        // not below the watermark in this column, so it's safe to forward it now.
+                        yield Message::Watermark(watermark);
+                    }
                 }
                 Message::Chunk(chunk) => {
                     #[for_await]

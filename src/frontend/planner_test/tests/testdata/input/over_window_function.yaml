@@ -825,3 +825,80 @@
     from t;
   expected_outputs:
     - binder_error
+
+# Watermark forwarding of the general streaming over window
+- name: forward watermark on the first order key column for frames without following rows
+  sql: |
+    create table t (a int, b int, ts timestamp, watermark for ts as ts - interval '1 minute') append only;
+    select
+      *,
+      lag(b) over (partition by a order by ts),
+      row_number() over (partition by a order by ts),
+      sum(b) over (partition by a order by ts range between interval '1 hour' preceding and current row)
+    from t;
+  expected_outputs:
+    - stream_plan
+- name: do not forward watermark on the order key column if any frame has following rows
+  sql: |
+    create table t (a int, b int, ts timestamp, watermark for ts as ts - interval '1 minute') append only;
+    select
+      *,
+      lag(b) over (partition by a order by ts),
+      lead(b) over (partition by a order by ts)
+    from t;
+  expected_outputs:
+    - stream_plan
+- name: do not forward watermark on the order key column for descending order with preceding rows
+  sql: |
+    create table t (a int, b int, ts timestamp, watermark for ts as ts - interval '1 minute') append only;
+    select
+      *,
+      row_number() over (partition by a order by ts desc)
+    from t;
+  expected_outputs:
+    - stream_plan
+- name: forward watermark on the first order key column for descending order with only following rows
+  sql: |
+    create table t (a int, b int, ts timestamp, watermark for ts as ts - interval '1 minute') append only;
+    select
+      *,
+      lead(b) over (partition by a order by ts desc)
+    from t;
+  expected_outputs:
+    - stream_plan
+- name: do not forward watermark on the order key column if NULLs are not ordered as the largest
+  sql: |
+    create table t (a int, b int, ts timestamp, watermark for ts as ts - interval '1 minute') append only;
+    select
+      *,
+      lag(b) over (partition by a order by ts asc nulls first)
+    from t;
+  expected_outputs:
+    - stream_plan
+- name: do not forward watermark on non-first order key columns
+  sql: |
+    create table t (a int, b int, ts timestamp, watermark for ts as ts - interval '1 minute') append only;
+    select
+      *,
+      lag(b) over (partition by a order by b, ts)
+    from t;
+  expected_outputs:
+    - stream_plan
+- name: always forward watermark on partition key columns
+  sql: |
+    create table t (a int, b int, ts timestamp, watermark for ts as ts - interval '1 minute') append only;
+    select
+      *,
+      lead(b) over (partition by ts order by b)
+    from t;
+  expected_outputs:
+    - stream_plan
+- name: forwarded watermark enables state cleaning of a downstream join on the watermark column
+  sql: |
+    create table t1 (k int, ts int, v int, watermark for ts as ts - 5) append only;
+    create table t2 (ts int, x int, watermark for ts as ts - 5) append only;
+    select w.k, w.ts, w.v, w.lag_v, t2.x
+    from (select k, ts, v, lag(v) over (partition by k order by ts) as lag_v from t1) w
+    join t2 on w.ts = t2.ts;
+  expected_outputs:
+    - stream_plan
