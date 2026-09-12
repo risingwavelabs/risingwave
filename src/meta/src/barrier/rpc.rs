@@ -1223,6 +1223,7 @@ impl PartialGraphRecoverer<'_> {
                 job_backfill_orders,
                 hummock_version_stats,
                 mutation,
+                &term_id,
                 self,
                 render_result,
             )?;

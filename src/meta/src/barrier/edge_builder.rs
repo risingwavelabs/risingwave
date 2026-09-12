@@ -19,8 +19,8 @@ use risingwave_meta_model::WorkerId;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_pb::common::{ActorInfo, HostAddress, WorkerNode};
 use risingwave_pb::id::{PartialGraphId, SubscriberId};
-use risingwave_pb::stream_plan::StreamNode;
 use risingwave_pb::stream_plan::update_mutation::MergeUpdate;
+use risingwave_pb::stream_plan::{Dispatcher as PbDispatcher, StreamNode};
 use tracing::warn;
 
 use crate::barrier::rpc::ControlStreamManager;
@@ -143,6 +143,24 @@ impl FragmentEdgeBuildResult {
         &self.actor_new_no_shuffle
     }
 
+    pub(super) fn take_actor_edges(
+        &mut self,
+        fragment_id: FragmentId,
+        actor_id: ActorId,
+    ) -> (ActorUpstreams, Vec<PbDispatcher>) {
+        let upstreams = self
+            .upstreams
+            .get_mut(&fragment_id)
+            .and_then(|upstreams| upstreams.remove(&actor_id))
+            .unwrap_or_default();
+        let dispatchers = self
+            .dispatchers
+            .get_mut(&fragment_id)
+            .and_then(|dispatchers| dispatchers.remove(&actor_id))
+            .unwrap_or_default();
+        (upstreams, dispatchers)
+    }
+
     pub(super) fn collect_actors_to_create(
         &mut self,
         actors: impl Iterator<
@@ -158,16 +176,7 @@ impl FragmentEdgeBuildResult {
         for (fragment_id, node, actors, subscriber_ids) in actors {
             let subscriber_ids: HashSet<_> = subscriber_ids.into_iter().collect();
             for (actor, worker_id) in actors {
-                let upstreams = self
-                    .upstreams
-                    .get_mut(&fragment_id)
-                    .and_then(|upstreams| upstreams.remove(&actor.actor_id))
-                    .unwrap_or_default();
-                let dispatchers = self
-                    .dispatchers
-                    .get_mut(&fragment_id)
-                    .and_then(|upstreams| upstreams.remove(&actor.actor_id))
-                    .unwrap_or_default();
+                let (upstreams, dispatchers) = self.take_actor_edges(fragment_id, actor.actor_id);
                 actors_to_create
                     .entry(worker_id)
                     .or_default()
@@ -181,9 +190,9 @@ impl FragmentEdgeBuildResult {
     }
 
     pub(super) fn is_empty(&self) -> bool {
-        self.merge_updates
+        self.upstreams
             .values()
-            .all(|updates| updates.is_empty())
+            .all(|upstreams| upstreams.is_empty())
             && self.dispatchers.values().all(|dispatchers| {
                 dispatchers
                     .values()
