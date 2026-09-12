@@ -237,6 +237,7 @@ impl CheckpointControl {
         &mut self,
         new_barrier: NewBarrier,
         partial_graph_manager: &mut PartialGraphManager,
+        periodic_barriers: &mut PeriodicBarriers,
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
     ) -> MetaResult<()> {
         let NewBarrier {
@@ -355,6 +356,7 @@ impl CheckpointControl {
                 checkpoint,
                 span,
                 partial_graph_manager,
+                periodic_barriers,
                 &self.hummock_version_stats,
                 worker_nodes,
             )
@@ -382,6 +384,7 @@ impl CheckpointControl {
                 checkpoint,
                 span,
                 partial_graph_manager,
+                periodic_barriers,
                 &self.hummock_version_stats,
                 worker_nodes,
             )
@@ -1214,6 +1217,7 @@ impl DatabaseCheckpointControl {
         checkpoint: bool,
         span: tracing::Span,
         partial_graph_manager: &mut PartialGraphManager,
+        periodic_barriers: &mut PeriodicBarriers,
         hummock_version_stats: &HummockVersionStats,
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
     ) -> MetaResult<()> {
@@ -1333,6 +1337,7 @@ impl DatabaseCheckpointControl {
             &mut notifier_start,
             barrier_info,
             partial_graph_manager,
+            periodic_barriers,
             hummock_version_stats,
             worker_nodes,
         ) {

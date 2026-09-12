@@ -809,10 +809,9 @@ message MergeNode {
   DispatcherType upstream_dispatcher_type = 3;
   // The schema of input columns. Already deprecated.
   repeated plan_common.Field fields = 4 [deprecated = true];
-  // Allows this merge to have no upstream actors, either initially or after a MergeUpdate.
-  // When true, the merge must not use the singleton receiver optimization because a singleton
-  // receiver cannot transition to empty.
-  bool allow_empty_upstream = 5;
+  // Deprecated. Executors that need to support an empty upstream use an explicit runtime
+  // constructor instead.
+  bool allow_empty_upstream = 5 [deprecated = true];
 }
 
 // passed from frontend to meta, used by fragmenter to generate `MergeNode`
