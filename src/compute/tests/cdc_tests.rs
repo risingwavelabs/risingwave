@@ -27,7 +27,9 @@ use risingwave_batch_executors::{Executor as BatchExecutor, RowSeqScanExecutor, 
 use risingwave_common::array::{
     Array, ArrayBuilder, DataChunk, DataChunkTestExt, Op, StreamChunk, Utf8ArrayBuilder,
 };
-use risingwave_common::catalog::{ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId};
+use risingwave_common::catalog::{
+    CdcKeyComparison, ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId,
+};
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{DataType, Datum, JsonbVal, ScalarImpl};
 use risingwave_common::util::epoch::{EpochExt, test_epoch};
@@ -185,6 +187,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         ExternalCdcTableType::Mock,
         table_schema.clone(),
         table_pk_order_types,
+        vec![CdcKeyComparison::Native],
         table_pk_indices.clone(),
     );
 
@@ -493,6 +496,7 @@ async fn setup_parallelized_cdc_backfill_test_context() -> ParallelizedCdcBackfi
         ExternalCdcTableType::Mock,
         table_schema.clone(),
         table_pk_order_types,
+        vec![CdcKeyComparison::Native],
         table_pk_indices.clone(),
     );
     let actor_id = 0x1a.into();

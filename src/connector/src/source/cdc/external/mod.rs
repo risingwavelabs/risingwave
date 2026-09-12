@@ -25,7 +25,7 @@ use futures::pin_mut;
 use futures::stream::BoxStream;
 use futures_async_stream::try_stream;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnDesc, Field, Schema};
+use risingwave_common::catalog::{CdcKeyComparison, ColumnDesc, Field, Schema};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::secret::LocalSecretManager;
 use risingwave_pb::catalog::table::CdcTableType as PbCdcTableType;
@@ -79,6 +79,16 @@ impl ExternalCdcTableType {
         // So we only allow transactional metadata for MySQL and Postgres.
         // See more in https://debezium.io/documentation/reference/2.6/connectors/sqlserver.html#sqlserver-transaction-metadata
         matches!(self, Self::MySql | Self::Postgres)
+    }
+
+    pub fn get_cdc_offset_parser(&self) -> ConnectorResult<CdcOffsetParseFunc> {
+        match self {
+            Self::MySql => Ok(MySqlExternalTableReader::get_cdc_offset_parser()),
+            Self::Postgres => Ok(PostgresExternalTableReader::get_cdc_offset_parser()),
+            Self::SqlServer => Ok(SqlServerExternalTableReader::get_cdc_offset_parser()),
+            Self::Mock => Ok(MockExternalTableReader::get_cdc_offset_parser()),
+            _ => bail!("invalid external table type: {:?}", *self),
+        }
     }
 
     pub async fn create_table_reader(
@@ -389,21 +399,6 @@ impl ExternalTableReader for ExternalTableReaderImpl {
 }
 
 impl ExternalTableReaderImpl {
-    /// For each given primary key column (by name), returns whether comparing the RisingWave
-    /// `i64` value needs upstream unsigned `BIGINT` semantics. Only MySQL `BIGINT UNSIGNED` can
-    /// overflow into a negative `i64`; other connectors are always false.
-    pub fn pk_column_unsigned_i64_compare_flags(
-        &self,
-        pk_names: &[String],
-    ) -> ConnectorResult<Vec<bool>> {
-        match self {
-            ExternalTableReaderImpl::MySql(mysql) => {
-                mysql.pk_column_unsigned_i64_compare_flags(pk_names)
-            }
-            _ => Ok(vec![false; pk_names.len()]),
-        }
-    }
-
     pub fn get_cdc_offset_parser(&self) -> CdcOffsetParseFunc {
         match self {
             ExternalTableReaderImpl::MySql(_) => MySqlExternalTableReader::get_cdc_offset_parser(),
@@ -542,6 +537,30 @@ impl ExternalTableImpl {
             ExternalTableImpl::MySql(mysql) => mysql.pk_names(),
             ExternalTableImpl::Postgres(postgres) => postgres.pk_names(),
             ExternalTableImpl::SqlServer(sql_server) => sql_server.pk_names(),
+        }
+    }
+
+    pub fn pk_column_comparisons(
+        &self,
+        pk_names: &[String],
+    ) -> ConnectorResult<Vec<CdcKeyComparison>> {
+        match self {
+            ExternalTableImpl::MySql(mysql) => mysql.pk_column_comparisons(pk_names),
+            ExternalTableImpl::Postgres(_) | ExternalTableImpl::SqlServer(_) => {
+                Ok(vec![CdcKeyComparison::Native; pk_names.len()])
+            }
+        }
+    }
+
+    pub async fn discover_pk_column_comparisons(
+        config: &ExternalTableConfig,
+        pk_names: &[String],
+    ) -> ConnectorResult<Vec<CdcKeyComparison>> {
+        match CdcSourceType::from(config.connector.as_str()) {
+            CdcSourceType::Mysql => {
+                MySqlExternalTable::discover_pk_column_comparisons(config, pk_names).await
+            }
+            _ => Ok(vec![CdcKeyComparison::Native; pk_names.len()]),
         }
     }
 }

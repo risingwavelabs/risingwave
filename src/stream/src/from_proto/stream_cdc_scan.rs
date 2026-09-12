@@ -15,7 +15,7 @@
 use std::sync::Arc;
 
 use anyhow::Context;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{CdcKeyComparison, Schema};
 use risingwave_common::util::sort_util::OrderType;
 use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::cdc::external::{
@@ -56,16 +56,38 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
         assert_eq!(output_schema.data_types(), params.info.schema.data_types());
 
         let properties = table_desc.connect_properties.clone();
-        let table_pk_order_types = table_desc
-            .pk
-            .iter()
-            .map(|desc| OrderType::from_protobuf(desc.get_order_type().unwrap()))
-            .collect_vec();
-        let table_pk_indices = table_desc
-            .pk
-            .iter()
-            .map(|k| k.column_index as usize)
-            .collect_vec();
+        let (table_pk_order_types, table_pk_comparisons, table_pk_indices) =
+            if let Some(table_pk) = &table_desc.pk_ordering {
+                let order_types = table_pk
+                    .columns
+                    .iter()
+                    .map(|_| OrderType::ascending())
+                    .collect_vec();
+                let comparisons = table_pk
+                    .columns
+                    .iter()
+                    .map(|column| column.get_comparison().map(CdcKeyComparison::from_protobuf))
+                    .try_collect()?;
+                let indices = table_pk
+                    .columns
+                    .iter()
+                    .map(|column| column.pk_col_idx as usize)
+                    .collect_vec();
+                (order_types, comparisons, indices)
+            } else {
+                let order_types = table_desc
+                    .pk
+                    .iter()
+                    .map(|column| OrderType::from_protobuf(column.get_order_type().unwrap()))
+                    .collect_vec();
+                let comparisons = vec![CdcKeyComparison::Native; table_desc.pk.len()];
+                let indices = table_desc
+                    .pk
+                    .iter()
+                    .map(|column| column.column_index as usize)
+                    .collect_vec();
+                (order_types, comparisons, indices)
+            };
 
         let scan_options = node
             .options
@@ -105,6 +127,7 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             table_type,
             table_schema,
             table_pk_order_types,
+            table_pk_comparisons,
             table_pk_indices,
         );
 
