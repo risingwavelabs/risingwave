@@ -12,26 +12,33 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Persistent cursor-stream infrastructure, separate from the active cursor execution path.
+//! Persistent raw cursor streams and PostgreSQL response adapters.
 
 use std::collections::VecDeque;
+use std::mem;
 use std::pin::Pin;
 use std::sync::{Arc, Weak};
 use std::task::{Context, Poll};
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use pgwire::types::{Format, Row};
 use risingwave_common::array::DataChunk;
-use risingwave_common::catalog::Field;
+use risingwave_common::catalog::{Field, TableId};
 use risingwave_common::error::BoxedError;
+use risingwave_common::row::{OwnedRow, Row as _, RowExt as _};
 
-use super::{CursorQueryStream, FieldsManager, SubscriptionCursor};
+use super::{CursorQueryStream, FieldsManager, SubscriptionCursor, create_cursor_query_stream};
+use crate::TableCatalog;
+use crate::catalog::subscription_catalog::SubscriptionCatalog;
 use crate::error::{ErrorCode, Result};
 use crate::handler::HandlerArgs;
+use crate::handler::query::gen_batch_plan_fragmenter;
 use crate::handler::util::{StaticSessionData, to_pg_rows};
+use crate::monitor::CursorMetrics;
+use crate::scheduler::ReadSnapshot;
 use crate::session::SessionImpl;
 use crate::utils::WithOptions;
 
@@ -54,7 +61,7 @@ enum CursorDataChunkMetadata {
 }
 
 /// Unformatted executor output and the metadata needed to interpret its rows.
-struct CursorDataChunk {
+pub(super) struct CursorDataChunk {
     chunk: DataChunk,
     metadata: CursorDataChunkMetadata,
 }
@@ -63,7 +70,17 @@ impl CursorDataChunk {
     fn into_pg_rows(
         self,
         format: &CursorRowFormat,
-    ) -> Result<(VecDeque<Row>, CursorDataChunkMetadata)> {
+    ) -> Result<(VecDeque<CursorPgRow>, CursorDataChunkMetadata)> {
+        // Keep seek values typed and independent of the PostgreSQL result encoding.
+        let mut seek_keys = match &self.metadata {
+            CursorDataChunkMetadata::Query { .. } => None,
+            CursorDataChunkMetadata::Subscription { fields, .. } => Some(
+                self.chunk
+                    .rows()
+                    .map(|row| row.project(&fields.row_pk_indices).into_owned_row())
+                    .collect::<VecDeque<_>>(),
+            ),
+        };
         let (column_types, formats) = match &self.metadata {
             CursorDataChunkMetadata::Query { fields } => (
                 fields.iter().map(Field::data_type).collect::<Vec<_>>(),
@@ -74,13 +91,35 @@ impl CursorDataChunk {
                 from_snapshot,
                 ..
             } => {
-                let (row_fields, formats) =
-                    fields.get_row_stream_fields_and_formats(&format.formats, *from_snapshot);
-                (row_fields.iter().map(Field::data_type).collect(), formats)
+                let (row_fields, mut row_formats) =
+                    fields.get_row_stream_fields_and_formats(&format.formats, *from_snapshot)?;
+                // Raw chunks omit the synthetic columns appended by build_row.
+                row_formats.truncate(row_fields.len());
+                (
+                    row_fields.iter().map(Field::data_type).collect(),
+                    row_formats,
+                )
             }
         };
         let rows = to_pg_rows(&column_types, self.chunk, &formats, &format.session_data)?;
-        Ok((rows.into(), self.metadata))
+        // Each formatted subscription row must have one typed seek key from the same raw row.
+        // Query cursor rows have no seek keys.
+        debug_assert!(
+            seek_keys
+                .as_ref()
+                .is_none_or(|keys| keys.len() == rows.len())
+        );
+        let rows = rows
+            .into_iter()
+            .map(|row| CursorPgRow {
+                row,
+                seek_pk_row: seek_keys.as_mut().map(|keys| {
+                    keys.pop_front()
+                        .expect("one seek key per formatted subscription row")
+                }),
+            })
+            .collect();
+        Ok((rows, self.metadata))
     }
 }
 
@@ -88,7 +127,7 @@ impl CursorDataChunk {
 ///
 /// Unlike [`std::task::Poll::Pending`], each barrier identifies a specific transition rather
 /// than an arbitrary unfinished asynchronous operation. These events are not FETCH checkpoints.
-enum CursorDataChunkBarrier {
+pub(super) enum CursorDataChunkBarrier {
     /// The single query owned by a regular query cursor has completed.
     QueryEnd,
     /// A query for the subscription snapshot or a log-store epoch has started.
@@ -121,25 +160,25 @@ enum CursorDataChunkBarrier {
     /// The wait for the next log-store epoch has finished.
     /// The stream will check for available log-store epochs again.
     SubscriptionIdleEnded,
-    /// The output schema changed. End a nonwaiting FETCH or one that already yielded rows;
-    /// otherwise, continue with the new schema in the current FETCH.
+    /// The output schema changed. Always end the current FETCH before consuming new-schema
+    /// rows, even if it is empty and waiting. The new fields have already been published.
     SchemaChanged,
 }
 
 /// A raw data chunk or a control barrier, ordered by the cursor's persistent producer.
-enum CursorDataChunkEvent {
+pub(super) enum CursorDataChunkEvent {
     Chunk(CursorDataChunk),
     Barrier(CursorDataChunkBarrier),
 }
 
 /// A persistent producer of raw query chunks followed by a query-completion barrier.
-struct QueryCursorDataChunkStream {
+pub(super) struct QueryCursorDataChunkStream {
     /// Owns the query stream and its pending read across individual FETCH calls.
     inner: BoxStream<'static, std::result::Result<CursorDataChunkEvent, BoxedError>>,
 }
 
 impl QueryCursorDataChunkStream {
-    fn new(query_stream: CursorQueryStream, fields: Vec<Field>) -> Self {
+    pub(super) fn new(query_stream: CursorQueryStream, fields: Vec<Field>) -> Self {
         Self {
             inner: Self::event_stream(query_stream, fields).boxed(),
         }
@@ -169,12 +208,202 @@ impl Stream for QueryCursorDataChunkStream {
 }
 
 /// A persistent subscription event stream, independent of any single FETCH future.
-///
-/// TODO: Implement `event_stream` in the subsequent PR once the prerequisite snapshot-aware query
-/// startup and execution refactors are in place.
-struct SubscriptionCursorDataChunkStream {
+pub(super) struct SubscriptionCursorDataChunkStream {
     /// Owns the event producer, including its suspended asynchronous operations.
     inner: BoxStream<'static, std::result::Result<CursorDataChunkEvent, BoxedError>>,
+}
+
+impl SubscriptionCursorDataChunkStream {
+    /// Starts a snapshot or log-store query with the snapshot selected before asynchronous startup.
+    pub(super) async fn initiate_query(
+        rw_timestamp: Option<u64>,
+        dependent_table_id: TableId,
+        handler_args: HandlerArgs,
+        snapshot: ReadSnapshot,
+    ) -> Result<(CursorQueryStream, Instant, Arc<TableCatalog>)> {
+        let init_query_timer = Instant::now();
+        let session = handler_args.session.clone();
+        let table_catalog = session.get_table_by_id(dependent_table_id)?;
+        let plan_result = SubscriptionCursor::init_batch_plan_for_subscription_cursor(
+            rw_timestamp,
+            dependent_table_id,
+            handler_args,
+            None,
+        )?;
+        let plan_fragmenter_result = gen_batch_plan_fragmenter(&session, plan_result)?;
+        let (query_stream, _) =
+            create_cursor_query_stream(session, plan_fragmenter_result, snapshot).await?;
+        Ok((query_stream, init_query_timer, table_catalog))
+    }
+
+    /// FULL supplies `Fetch` with its query already started during DECLARE; SINCE supplies
+    /// `InitLogStoreQuery`. Constructing this container does not poll either state.
+    pub(super) fn new(
+        subscription: Arc<SubscriptionCatalog>,
+        dependent_table_id: TableId,
+        handler_context: SubscriptionCursorHandlerContext,
+        fields_manager: FieldsManager,
+        state: SubscriptionCursorState<CursorQueryStream>,
+        cursor_metrics: Arc<CursorMetrics>,
+    ) -> Self {
+        Self {
+            inner: Self::event_stream(
+                subscription,
+                dependent_table_id,
+                handler_context,
+                fields_manager,
+                state,
+                cursor_metrics,
+            )
+            .boxed(),
+        }
+    }
+
+    #[try_stream(ok = CursorDataChunkEvent, error = BoxedError)]
+    async fn event_stream(
+        subscription: Arc<SubscriptionCatalog>,
+        dependent_table_id: TableId,
+        handler_context: SubscriptionCursorHandlerContext,
+        fields_manager: FieldsManager,
+        mut state: SubscriptionCursorState<CursorQueryStream>,
+        cursor_metrics: Arc<CursorMetrics>,
+    ) {
+        let mut fields_manager = Arc::new(fields_manager);
+        loop {
+            match mem::replace(&mut state, SubscriptionCursorState::Invalid) {
+                SubscriptionCursorState::InitLogStoreQuery {
+                    seek_timestamp,
+                    expected_timestamp,
+                } => {
+                    let (rw_timestamp, next_expected_timestamp) =
+                        match SubscriptionCursor::get_next_rw_timestamp(
+                            seek_timestamp,
+                            dependent_table_id,
+                            expected_timestamp,
+                            handler_context.handler_args()?,
+                            &subscription,
+                        )
+                        .await?
+                        {
+                            (Some(rw_timestamp), next_expected_timestamp) => {
+                                (rw_timestamp, next_expected_timestamp)
+                            }
+                            (None, _) => {
+                                state = SubscriptionCursorState::InitLogStoreQuery {
+                                    seek_timestamp,
+                                    expected_timestamp,
+                                };
+                                yield CursorDataChunkEvent::Barrier(
+                                    CursorDataChunkBarrier::SubscriptionIdle,
+                                );
+                                let session = handler_context.handler_args()?.session;
+                                session
+                                    .env()
+                                    .hummock_snapshot_manager()
+                                    .wait_table_change_log_notification(
+                                        dependent_table_id,
+                                        seek_timestamp,
+                                    )
+                                    .await?;
+                                yield CursorDataChunkEvent::Barrier(
+                                    CursorDataChunkBarrier::SubscriptionIdleEnded,
+                                );
+                                continue;
+                            }
+                        };
+                    let handler_args = handler_context.handler_args()?;
+                    let snapshot = ReadSnapshot::FrontendPinned {
+                        snapshot: handler_args
+                            .session
+                            .env()
+                            .hummock_snapshot_manager()
+                            .acquire(),
+                    };
+                    let (query_stream, init_query_timer, catalog) = Self::initiate_query(
+                        Some(rw_timestamp),
+                        dependent_table_id,
+                        handler_args,
+                        snapshot,
+                    )
+                    .await?;
+                    let schema_changed =
+                        Arc::make_mut(&mut fields_manager).try_refill_fields(&catalog);
+                    let expires_at =
+                        Instant::now() + Duration::from_secs(subscription.retention_seconds);
+                    state = SubscriptionCursorState::Fetch {
+                        from_snapshot: false,
+                        rw_timestamp,
+                        query_stream,
+                        expected_timestamp: next_expected_timestamp,
+                        init_query_timer,
+                    };
+                    // Publish the new fields before ending FETCH so the next Parse/Describe
+                    // sees them. The current FETCH keeps its original response descriptors.
+                    yield CursorDataChunkEvent::Barrier(
+                        CursorDataChunkBarrier::SubscriptionQueryStarted {
+                            from_snapshot: false,
+                            rw_timestamp,
+                            expected_timestamp: next_expected_timestamp,
+                            init_query_timer,
+                            output_fields: fields_manager.get_output_fields(),
+                            expires_at,
+                        },
+                    );
+                    // Always stop before new-schema rows: even an empty waiting FETCH may
+                    // already have sent an extended-protocol Describe for the old schema.
+                    if schema_changed {
+                        yield CursorDataChunkEvent::Barrier(CursorDataChunkBarrier::SchemaChanged);
+                    }
+                }
+                SubscriptionCursorState::Fetch {
+                    from_snapshot,
+                    rw_timestamp,
+                    mut query_stream,
+                    expected_timestamp,
+                    init_query_timer,
+                } => match query_stream.next().await {
+                    Some(Ok(chunk)) => {
+                        state = SubscriptionCursorState::Fetch {
+                            from_snapshot,
+                            rw_timestamp,
+                            query_stream,
+                            expected_timestamp,
+                            init_query_timer,
+                        };
+                        yield CursorDataChunkEvent::Chunk(CursorDataChunk {
+                            chunk,
+                            metadata: CursorDataChunkMetadata::Subscription {
+                                fields: fields_manager.clone(),
+                                from_snapshot,
+                                rw_timestamp,
+                            },
+                        });
+                    }
+                    Some(Err(error)) => Err(error)?,
+                    None => {
+                        // EOF disarms the wrapper's unfinished-execution cancellation.
+                        drop(query_stream);
+                        cursor_metrics
+                            .subscription_cursor_query_duration
+                            .with_label_values(&[&subscription.name])
+                            .observe(init_query_timer.elapsed().as_millis() as _);
+                        let seek_timestamp = expected_timestamp.unwrap_or_else(|| rw_timestamp + 1);
+                        state = SubscriptionCursorState::InitLogStoreQuery {
+                            seek_timestamp,
+                            expected_timestamp,
+                        };
+                        yield CursorDataChunkEvent::Barrier(
+                            CursorDataChunkBarrier::SubscriptionNewEpoch {
+                                seek_timestamp,
+                                expected_timestamp,
+                            },
+                        );
+                    }
+                },
+                SubscriptionCursorState::Invalid => return Ok(()),
+            }
+        }
+    }
 }
 
 impl Stream for SubscriptionCursorDataChunkStream {
@@ -185,9 +414,10 @@ impl Stream for SubscriptionCursorDataChunkStream {
     }
 }
 
-/// Subscription position exposed to the response adapter by ordered control barriers.
-/// This is not a checkpoint for rolling back a cancelled FETCH.
-enum SubscriptionCursorState {
+/// Shared subscription state definition for the producer and its response adapter.
+/// The producer owns a `CursorQueryStream` in Fetch; the adapter uses `()` and tracks position
+/// through ordered barriers without duplicating query ownership. This is not a rollback checkpoint.
+pub(super) enum SubscriptionCursorState<QueryStream = ()> {
     /// Looking for the next available log-store epoch.
     InitLogStoreQuery {
         /// Lower bound for the next log-store epoch search.
@@ -205,14 +435,46 @@ enum SubscriptionCursorState {
         expected_timestamp: Option<u64>,
         /// When query initialization began, for duration metrics and diagnostics.
         init_query_timer: Instant,
+        /// Holds the actual query stream in the producer. The response adapter does not use this
+        /// field, so it uses the unit type `()` and assigns `()` instead.
+        query_stream: QueryStream,
     },
     /// The producer reported an unrecoverable error.
     Invalid,
 }
 
+impl<QueryStream> SubscriptionCursorState<QueryStream> {
+    /// Returns a copy of the cursor state with `query_stream` replaced by `()`.
+    pub(super) fn strip_query_stream(&self) -> SubscriptionCursorState {
+        match self {
+            Self::InitLogStoreQuery {
+                seek_timestamp,
+                expected_timestamp,
+            } => SubscriptionCursorState::InitLogStoreQuery {
+                seek_timestamp: *seek_timestamp,
+                expected_timestamp: *expected_timestamp,
+            },
+            Self::Fetch {
+                from_snapshot,
+                rw_timestamp,
+                expected_timestamp,
+                init_query_timer,
+                ..
+            } => SubscriptionCursorState::Fetch {
+                from_snapshot: *from_snapshot,
+                rw_timestamp: *rw_timestamp,
+                expected_timestamp: *expected_timestamp,
+                init_query_timer: *init_query_timer,
+                query_stream: (),
+            },
+            Self::Invalid => SubscriptionCursorState::Invalid,
+        }
+    }
+}
+
 /// Stored planning context for later subscription queries, without a strong session reference.
 /// Reconstructed handler arguments may still retain the session during an asynchronous operation.
-struct SubscriptionCursorHandlerContext {
+pub(super) struct SubscriptionCursorHandlerContext {
     session: Weak<SessionImpl>,
     sql: Arc<str>,
     normalized_sql: String,
@@ -220,7 +482,7 @@ struct SubscriptionCursorHandlerContext {
 }
 
 impl SubscriptionCursorHandlerContext {
-    fn new(handler_args: &HandlerArgs) -> Self {
+    pub(super) fn new(handler_args: &HandlerArgs) -> Self {
         Self {
             session: Arc::downgrade(&handler_args.session),
             sql: handler_args.sql.clone(),
@@ -259,6 +521,12 @@ impl CursorRowFormat {
     }
 }
 
+/// A formatted output row paired with its original typed subscription seek key, if any.
+struct CursorPgRow {
+    row: Row,
+    seek_pk_row: Option<OwnedRow>,
+}
+
 /// Shared row conversion and buffering for query and subscription response streams.
 /// Only unread formatted rows are retained; rows returned to FETCH cannot be replayed.
 ///
@@ -267,11 +535,10 @@ impl CursorRowFormat {
 struct CursorPgResponseStreamInner<S> {
     /// Released on terminal EOF or error, but retained across individual FETCH boundaries.
     data_stream: Option<S>,
-    /// Currently inspected only by subscription cursors; their integration will use it for
-    /// invalid-cursor cleanup and statistics. Query cursors also record this state for possible
-    /// future query-cursor failure statistics.
+    /// Records terminal failure without clearing it on subsequent EOF polls.
+    /// Subscription invalidity checks use `SubscriptionCursorState::Invalid` instead.
     failed: bool,
-    current_rows: VecDeque<Row>,
+    current_rows: VecDeque<CursorPgRow>,
     current_metadata: Option<Arc<CursorDataChunkMetadata>>,
     /// Fixed for each underlying query, matching the existing row-stream initialization.
     row_format: Option<Arc<CursorRowFormat>>,
@@ -282,7 +549,7 @@ struct CursorPgResponseStreamInner<S> {
 
 enum CursorPgResponsePollItem {
     Row {
-        row: Row,
+        row: CursorPgRow,
         metadata: Arc<CursorDataChunkMetadata>,
     },
     Barrier(CursorDataChunkBarrier),
@@ -368,22 +635,22 @@ where
 }
 
 /// A query response stream that retains unread rows across FETCH boundaries.
-struct QueryCursorPgResponseStream {
+pub(super) struct QueryCursorPgResponseStream {
     inner: CursorPgResponseStreamInner<QueryCursorDataChunkStream>,
 }
 
 impl QueryCursorPgResponseStream {
-    fn new(data_stream: QueryCursorDataChunkStream, output_fields: Vec<Field>) -> Self {
+    pub(super) fn new(data_stream: QueryCursorDataChunkStream, output_fields: Vec<Field>) -> Self {
         Self {
             inner: CursorPgResponseStreamInner::new(data_stream, output_fields),
         }
     }
 
-    fn fields(&self) -> Vec<Field> {
+    pub(super) fn fields(&self) -> Vec<Field> {
         self.inner.output_fields.clone()
     }
 
-    fn begin_fetch(&mut self, formats: &[Format], session: &SessionImpl) {
+    pub(super) fn begin_fetch(&mut self, formats: &[Format], session: &SessionImpl) {
         self.inner
             .begin_fetch(Arc::new(CursorRowFormat::new(formats, session)));
     }
@@ -401,7 +668,7 @@ impl Stream for QueryCursorPgResponseStream {
             Poll::Pending => Poll::Pending,
             Poll::Ready(Err(error)) => Poll::Ready(Some(Err(error))),
             Poll::Ready(Ok(CursorPgResponsePollItem::Row { row, .. })) => {
-                Poll::Ready(Some(Ok(row)))
+                Poll::Ready(Some(Ok(row.row)))
             }
             Poll::Ready(Ok(CursorPgResponsePollItem::Barrier(
                 CursorDataChunkBarrier::QueryEnd,
@@ -423,15 +690,14 @@ impl Stream for QueryCursorPgResponseStream {
 
 /// A subscription response stream that applies log-store epoch and schema barriers in order.
 /// Position and seek metadata advance as rows/events are consumed, without FETCH rollback.
-struct SubscriptionCursorPgResponseStream {
+pub(super) struct SubscriptionCursorPgResponseStream {
     inner: CursorPgResponseStreamInner<SubscriptionCursorDataChunkStream>,
     subscription_state: SubscriptionCursorState,
-    seek_pk_row: Option<Row>,
+    seek_pk_row: Option<OwnedRow>,
     expires_at: Instant,
     is_idle: bool,
     /// Whether an idle FETCH should wait when it has yielded no rows. Once rows have been
     /// yielded, idle always ends the FETCH, regardless of this flag.
-    /// Also allows an empty FETCH to continue past a schema boundary.
     should_wait_when_idle_and_empty: bool,
     yielded_rows: usize,
     /// Used for synthetic subscription columns; raw columns keep the query's row format.
@@ -439,7 +705,7 @@ struct SubscriptionCursorPgResponseStream {
 }
 
 impl SubscriptionCursorPgResponseStream {
-    fn new(
+    pub(super) fn new(
         data_stream: SubscriptionCursorDataChunkStream,
         output_fields: Vec<Field>,
         subscription_state: SubscriptionCursorState,
@@ -457,27 +723,50 @@ impl SubscriptionCursorPgResponseStream {
         }
     }
 
-    fn fields(&self) -> Vec<Field> {
+    pub(super) fn fields(&self) -> Vec<Field> {
         self.inner.output_fields.clone()
     }
 
-    fn subscription_state(&self) -> &SubscriptionCursorState {
+    pub(super) fn state_info_string(&self) -> String {
+        match self.subscription_state() {
+            SubscriptionCursorState::InitLogStoreQuery {
+                seek_timestamp,
+                expected_timestamp,
+            } => format!(
+                "InitLogStoreQuery {{ seek_timestamp: {}, expected_timestamp: {:?} }}",
+                seek_timestamp, expected_timestamp
+            ),
+            SubscriptionCursorState::Fetch {
+                from_snapshot,
+                rw_timestamp,
+                expected_timestamp,
+                init_query_timer,
+                ..
+            } => format!(
+                "Fetch {{ from_snapshot: {}, rw_timestamp: {}, expected_timestamp: {:?}, cached rows: {}, query init at {}ms before }}",
+                from_snapshot,
+                rw_timestamp,
+                expected_timestamp,
+                self.inner.current_rows.len(),
+                init_query_timer.elapsed().as_millis()
+            ),
+            SubscriptionCursorState::Invalid => "Invalid".to_owned(),
+        }
+    }
+
+    pub(super) fn subscription_state(&self) -> &SubscriptionCursorState {
         &self.subscription_state
     }
 
-    fn seek_pk_row(&self) -> Option<Row> {
+    pub(super) fn seek_pk_row(&self) -> Option<OwnedRow> {
         self.seek_pk_row.clone()
     }
 
-    fn is_expired(&self, now: Instant) -> bool {
+    pub(super) fn is_expired(&self, now: Instant) -> bool {
         now > self.expires_at
     }
 
-    fn is_failed(&self) -> bool {
-        self.inner.failed
-    }
-
-    fn begin_fetch(
+    pub(super) fn begin_fetch(
         &mut self,
         formats: &[Format],
         session: &SessionImpl,
@@ -490,7 +779,12 @@ impl SubscriptionCursorPgResponseStream {
         self.yielded_rows = 0;
     }
 
-    fn project_row(&mut self, row: Row, metadata: &CursorDataChunkMetadata) -> Result<Row> {
+    fn project_row(
+        &mut self,
+        row: Row,
+        seek_pk_row: Option<OwnedRow>,
+        metadata: &CursorDataChunkMetadata,
+    ) -> Result<Row> {
         let CursorDataChunkMetadata::Subscription {
             fields,
             from_snapshot,
@@ -503,15 +797,17 @@ impl SubscriptionCursorPgResponseStream {
             .into());
         };
         let format = self.fetch_format.as_ref().unwrap();
-        let row = SubscriptionCursor::build_row(
+        let (_, row_formats) =
+            fields.get_row_stream_fields_and_formats(&format.formats, *from_snapshot)?;
+        let mut row = SubscriptionCursor::build_row(
             row.take(),
             (!from_snapshot).then_some(*rw_timestamp),
-            &format.formats,
+            &row_formats,
             &format.session_data,
         )?;
-        let (mut rows, seek_pk_row) = fields.process_output_desc_row(vec![row]);
+        let row = row.project(&fields.row_output_col_indices);
         self.seek_pk_row = seek_pk_row;
-        Ok(rows.pop().unwrap())
+        Ok(row)
     }
 }
 
@@ -547,7 +843,7 @@ impl Stream for SubscriptionCursorPgResponseStream {
                     return Poll::Ready(Some(Err(error)));
                 }
                 Poll::Ready(Ok(CursorPgResponsePollItem::Row { row, metadata })) => {
-                    let row = this.project_row(row, &metadata);
+                    let row = this.project_row(row.row, row.seek_pk_row, &metadata);
                     if row.is_err() {
                         this.inner.mark_completed(true);
                         this.subscription_state = SubscriptionCursorState::Invalid;
@@ -569,6 +865,7 @@ impl Stream for SubscriptionCursorPgResponseStream {
                             expires_at,
                         } => {
                             this.subscription_state = SubscriptionCursorState::Fetch {
+                                query_stream: (),
                                 from_snapshot,
                                 rw_timestamp,
                                 expected_timestamp,
@@ -596,14 +893,17 @@ impl Stream for SubscriptionCursorPgResponseStream {
                         }
                         CursorDataChunkBarrier::SubscriptionIdleEnded => {}
                         CursorDataChunkBarrier::SchemaChanged => {
-                            // Rows preceding this barrier have been drained. Release their metadata
-                            // before continuing with the new schema or ending this FETCH.
+                            // Old-schema rows have been drained. Retain the producer and end the
+                            // current FETCH regardless of waiting mode, so that any new-schema rows
+                            // will be left for the next FETCH with latest description.
                             debug_assert!(this.inner.current_rows.is_empty());
                             this.inner.current_metadata = None;
-                            if this.yielded_rows > 0 || !this.should_wait_when_idle_and_empty {
-                                this.inner.fetch_stream_terminated = true;
-                                return Poll::Ready(None);
-                            }
+                            // No new-query rows have been formatted yet. The next FETCH supplies
+                            // formats for its new schema, which may have a different column count,
+                            // so the current format should not be used any more.
+                            this.inner.row_format = None;
+                            this.inner.fetch_stream_terminated = true;
+                            return Poll::Ready(None);
                         }
                         CursorDataChunkBarrier::QueryEnd => {
                             this.inner.mark_completed(true);
@@ -635,13 +935,18 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use std::time::Duration;
 
+    use pgwire::pg_server::Session as _;
     use risingwave_batch::task::ShutdownToken;
     use risingwave_common::array::DataChunkTestExt;
     use risingwave_common::types::DataType;
+    use risingwave_sqlparser::parser::Parser;
     use tokio::sync::{mpsc, oneshot};
     use tokio_stream::wrappers::ReceiverStream;
 
+    use super::super::{CursorShutdownHandle, FetchCursorCancelHandle};
     use super::*;
+    use crate::handler::fetch_cursor::handle_parse;
+    use crate::handler::util::to_pg_field;
 
     /// Verifies that the cursor data chunk stream preserves chunks and schema, then emits
     /// `QueryEnd` and EOF; this does not exercise a real executor.
@@ -760,6 +1065,118 @@ mod tests {
         ));
         assert_eq!(wait_starts.load(Ordering::Relaxed), 1);
         assert!(stream.next().await.is_none());
+    }
+
+    /// Creates a subscription cursor data chunk stream for a FULL subscription cursor, starting in
+    /// `SubscriptionCursorState::Fetch` with the supplied query stream. This bypasses real snapshot
+    /// selection and query startup. The handler context contains an empty weak session reference,
+    /// so attempting to look up the next log-store epoch returns an error.
+    fn full_subscription_cursor_data_chunk_stream_with_empty_weak_session_ref_for_test(
+        query_stream: CursorQueryStream,
+    ) -> SubscriptionCursorDataChunkStream {
+        SubscriptionCursorDataChunkStream::new(
+            Arc::new(SubscriptionCatalog {
+                name: "subscription".to_owned(),
+                retention_seconds: 60,
+                ..Default::default()
+            }),
+            TableId::new(1),
+            SubscriptionCursorHandlerContext {
+                session: Weak::new(),
+                sql: "".into(),
+                normalized_sql: String::new(),
+                with_options: WithOptions::default(),
+            },
+            subscription_fields_for_test("v").as_ref().clone(),
+            SubscriptionCursorState::Fetch {
+                from_snapshot: true,
+                rw_timestamp: 12,
+                expected_timestamp: Some(20),
+                init_query_timer: Instant::now(),
+                query_stream,
+            },
+            Arc::new(CursorMetrics::for_test()),
+        )
+    }
+
+    /// Verifies that a subscription cursor data chunk stream retains its pending channel-backed
+    /// query, yields snapshot chunks, then advances to the expected log-store epoch without
+    /// cancellation. This does not exercise query startup, real snapshot selection, or log-store
+    /// notifications.
+    #[tokio::test]
+    async fn test_subscription_cursor_data_chunk_stream_preserves_pending_query_and_advances_epoch()
+    {
+        let (shutdown_tx, shutdown_rx) = ShutdownToken::new();
+        let (chunk_tx, chunk_rx) = mpsc::channel(2);
+        let mut stream =
+            full_subscription_cursor_data_chunk_stream_with_empty_weak_session_ref_for_test(
+                CursorQueryStream::local(ReceiverStream::new(chunk_rx), shutdown_tx),
+            );
+        for _ in 0..2 {
+            let mut next = Box::pin(stream.next());
+            assert!(futures::poll!(next.as_mut()).is_pending());
+            drop(next);
+            assert!(!chunk_tx.is_closed());
+            assert!(!shutdown_rx.is_cancelled());
+        }
+        let expected = DataChunk::from_pretty("i i\n7 42");
+        chunk_tx.try_send(Ok(expected.clone())).unwrap();
+        chunk_tx.try_send(Ok(expected.clone())).unwrap();
+        drop(chunk_tx);
+        let mut previous_fields = None;
+        for _ in 0..2 {
+            let CursorDataChunkEvent::Chunk(chunk) = stream.next().await.unwrap().unwrap() else {
+                panic!("expected the existing snapshot query's chunk");
+            };
+            assert_eq!(chunk.chunk, expected);
+            let CursorDataChunkMetadata::Subscription {
+                fields,
+                from_snapshot,
+                rw_timestamp,
+            } = chunk.metadata
+            else {
+                panic!("expected subscription metadata");
+            };
+            assert!(from_snapshot);
+            assert_eq!(rw_timestamp, 12);
+            if let Some(previous) = previous_fields {
+                assert!(Arc::ptr_eq(&previous, &fields));
+            }
+            previous_fields = Some(fields);
+        }
+        assert!(matches!(
+            stream.next().await.unwrap().unwrap(),
+            CursorDataChunkEvent::Barrier(CursorDataChunkBarrier::SubscriptionNewEpoch {
+                seek_timestamp: 20,
+                expected_timestamp: Some(20),
+            })
+        ));
+        assert!(!shutdown_rx.is_cancelled());
+        // Only the next poll attempts a lookup; this fixture deliberately has no live session.
+        let error = stream.next().await.unwrap().err().unwrap();
+        assert!(error.to_string().contains("session ended"));
+        assert!(!shutdown_rx.is_cancelled());
+    }
+
+    /// Verifies that an injected query error terminates the subscription cursor data chunk stream
+    /// and requests cancellation of its failed query. The channel-backed input is also dropped;
+    /// token signaling is not proof of real executor termination.
+    #[tokio::test]
+    async fn test_subscription_cursor_data_chunk_stream_cancels_failed_query() {
+        let (shutdown_tx, shutdown_rx) = ShutdownToken::new();
+        let (chunk_tx, chunk_rx) = mpsc::channel(1);
+        let mut stream =
+            full_subscription_cursor_data_chunk_stream_with_empty_weak_session_ref_for_test(
+                CursorQueryStream::local(ReceiverStream::new(chunk_rx), shutdown_tx),
+            );
+        chunk_tx
+            .try_send(Err(anyhow::anyhow!("injected query failure").into()))
+            .unwrap();
+        let error = stream.next().await.unwrap().err().unwrap();
+        assert!(error.to_string().contains("injected query failure"));
+        assert!(stream.next().await.is_none());
+        assert!(chunk_tx.is_closed());
+        assert!(shutdown_rx.is_cancelled());
     }
 
     fn assert_text_row(row: &Row, expected: &[Option<&str>]) {
@@ -917,13 +1334,145 @@ mod tests {
                 [Some("42"), Some("Delete"), Some("1700000000000")]
             };
             assert_text_row(&row, &expected);
-            assert_text_row(&stream.seek_pk_row().unwrap(), &[Some("7")]);
+            assert_eq!(
+                stream.seek_pk_row().unwrap(),
+                OwnedRow::new(vec![Some(7i32.into())])
+            );
         }
     }
 
-    /// Verifies that the subscription response stream continues through a schema change when a
-    /// waiting FETCH has no rows, but stops when nonwaiting or after yielding rows. Ordered barriers
-    /// also update position and expiry; this uses injected events, not SQL FETCH or a real executor.
+    /// Verifies zero, single, and per-column format codes for snapshot and log-store output.
+    /// The fixture has a hidden key, so output-format positions differ from raw-column positions.
+    /// Events are injected directly; protocol coverage lives in the extended-mode E2E suite.
+    #[tokio::test]
+    async fn test_subscription_cursor_pg_response_stream_honors_result_format_codes() {
+        let session = SessionImpl::mock();
+        let fields = subscription_fields_for_test("v");
+        let timestamp = 1700000000000i64;
+        let rw_timestamp =
+            crate::handler::util::convert_unix_millis_to_logstore_u64(timestamp as u64);
+        for from_snapshot in [true, false] {
+            for (formats, binary_value, binary_timestamp) in [
+                (vec![], false, false),
+                (vec![Format::Binary], true, true),
+                (
+                    vec![Format::Binary, Format::Text, Format::Text],
+                    true,
+                    false,
+                ),
+                (
+                    vec![Format::Text, Format::Binary, Format::Binary],
+                    false,
+                    true,
+                ),
+            ] {
+                let (mut stream, event_tx) =
+                    pending_subscription_response_stream_for_test(&fields, Instant::now());
+                let chunk = if from_snapshot {
+                    "i i\n7 42"
+                } else {
+                    "i i T\n7 42 Delete"
+                };
+                event_tx
+                    .try_send(Ok(subscription_chunk_for_test(
+                        fields.clone(),
+                        from_snapshot,
+                        rw_timestamp,
+                        chunk,
+                    )))
+                    .unwrap();
+                stream.begin_fetch(&formats, &session, false);
+                let row = stream.next().await.unwrap().unwrap();
+                let value = if binary_value {
+                    42i32.to_be_bytes().to_vec()
+                } else {
+                    b"42".to_vec()
+                };
+                let timestamp = if from_snapshot {
+                    None
+                } else if binary_timestamp {
+                    Some(timestamp.to_be_bytes().to_vec())
+                } else {
+                    Some(timestamp.to_string().into_bytes())
+                };
+                assert_eq!(row.values().len(), 3);
+                assert_eq!(row.values()[0].as_deref(), Some(value.as_slice()));
+                assert_eq!(
+                    row.values()[1].as_deref(),
+                    Some(if from_snapshot {
+                        b"Insert".as_slice()
+                    } else {
+                        b"Delete".as_slice()
+                    })
+                );
+                assert_eq!(row.values()[2].as_deref(), timestamp.as_deref());
+                assert_eq!(
+                    stream.seek_pk_row(),
+                    Some(OwnedRow::new(vec![Some(7i32.into())]))
+                );
+            }
+        }
+    }
+
+    /// Verifies that binary-formatted subscription rows retain typed seek keys in declared primary
+    /// key order, advancing per yielded row rather than per chunk. This uses injected snapshot
+    /// events.
+    #[tokio::test]
+    async fn test_subscription_cursor_pg_response_stream_preserves_typed_seek_keys_with_binary_rows()
+     {
+        use risingwave_common::catalog::{ColumnCatalog, ColumnDesc, ColumnId};
+        use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+
+        let session = SessionImpl::mock();
+        let catalog = TableCatalog {
+            columns: vec![
+                ColumnCatalog::visible(ColumnDesc::named("a", ColumnId::new(1), DataType::Int32)),
+                ColumnCatalog::visible(ColumnDesc::named("b", ColumnId::new(2), DataType::Int32)),
+            ],
+            pk: vec![
+                ColumnOrder::new(1, OrderType::ascending()),
+                ColumnOrder::new(0, OrderType::ascending()),
+            ],
+            ..Default::default()
+        };
+        let fields = Arc::new(FieldsManager::new(&catalog));
+        let (mut stream, event_tx) =
+            pending_subscription_response_stream_for_test(&fields, Instant::now());
+        event_tx
+            .try_send(Ok(subscription_chunk_for_test(
+                fields,
+                true,
+                12,
+                "i i\n7 42\n8 43",
+            )))
+            .unwrap();
+        stream.begin_fetch(&[Format::Binary], &session, false);
+        assert!(stream.seek_pk_row().is_none());
+        let row = stream.next().await.unwrap().unwrap();
+        assert_eq!(
+            row.values()[0].as_deref(),
+            Some(7i32.to_be_bytes().as_slice())
+        );
+        assert_eq!(
+            stream.seek_pk_row(),
+            Some(OwnedRow::new(vec![Some(42i32.into()), Some(7i32.into())]))
+        );
+        assert_eq!(stream.inner.current_rows.len(), 1);
+        stream.begin_fetch(&[Format::Binary], &session, false);
+        let row = stream.next().await.unwrap().unwrap();
+        assert_eq!(
+            row.values()[0].as_deref(),
+            Some(8i32.to_be_bytes().as_slice())
+        );
+        assert_eq!(
+            stream.seek_pk_row(),
+            Some(OwnedRow::new(vec![Some(43i32.into()), Some(8i32.into())]))
+        );
+    }
+
+    /// Verifies that every schema boundary ends the subscription response stream's current FETCH,
+    /// with new fields, position, and expiry already visible but new-schema rows left unread.
+    /// This uses injected events, not SQL FETCH or a real executor.
     #[tokio::test]
     async fn test_subscription_cursor_pg_response_stream_handles_log_store_epoch_and_schema_boundaries()
      {
@@ -961,7 +1510,6 @@ mod tests {
             assert!(stream.is_expired(initial_expiry + Duration::from_secs(1)));
 
             for event in [
-                CursorDataChunkEvent::Barrier(CursorDataChunkBarrier::SchemaChanged),
                 CursorDataChunkEvent::Barrier(CursorDataChunkBarrier::SubscriptionQueryStarted {
                     from_snapshot: false,
                     rw_timestamp: 12,
@@ -970,6 +1518,7 @@ mod tests {
                     output_fields: new_fields.get_output_fields(),
                     expires_at: renewed_expiry,
                 }),
+                CursorDataChunkEvent::Barrier(CursorDataChunkBarrier::SchemaChanged),
                 subscription_chunk_for_test(
                     new_fields.clone(),
                     false,
@@ -980,7 +1529,6 @@ mod tests {
                     seek_timestamp: 20,
                     expected_timestamp: Some(20),
                 }),
-                CursorDataChunkEvent::Barrier(CursorDataChunkBarrier::SchemaChanged),
                 CursorDataChunkEvent::Barrier(CursorDataChunkBarrier::SubscriptionQueryStarted {
                     from_snapshot: false,
                     rw_timestamp: 20,
@@ -989,6 +1537,7 @@ mod tests {
                     output_fields: latest_fields.get_output_fields(),
                     expires_at: latest_expiry,
                 }),
+                CursorDataChunkEvent::Barrier(CursorDataChunkBarrier::SchemaChanged),
                 subscription_chunk_for_test(
                     latest_fields.clone(),
                     false,
@@ -999,21 +1548,23 @@ mod tests {
                 event_tx.try_send(Ok(event)).unwrap();
             }
 
-            // With no accumulated rows, only a nonwaiting FETCH stops at the first schema change.
-            if !should_wait_when_idle_and_empty {
-                assert!(stream.next().await.is_none());
-                assert!(stream.inner.current_metadata.is_none());
-                assert_eq!(stream.fields(), old_fields.get_output_fields());
-                assert!(stream.is_expired(initial_expiry + Duration::from_secs(1)));
-                assert!(matches!(
-                    stream.subscription_state(),
-                    SubscriptionCursorState::InitLogStoreQuery {
-                        seek_timestamp: 12,
-                        expected_timestamp: Some(12),
-                    }
-                ));
-                stream.begin_fetch(&[], &session, should_wait_when_idle_and_empty);
-            }
+            // Even an empty waiting FETCH stops. Publish the next query's metadata before
+            // the boundary so the next Parse/Describe sees the schema of its unread rows.
+            assert!(stream.next().await.is_none());
+            assert!(stream.inner.current_rows.is_empty());
+            assert!(stream.inner.current_metadata.is_none());
+            assert_eq!(stream.fields(), new_fields.get_output_fields());
+            assert!(!stream.is_expired(initial_expiry + Duration::from_secs(1)));
+            assert!(stream.is_expired(renewed_expiry + Duration::from_secs(1)));
+            assert!(matches!(
+                stream.subscription_state(),
+                SubscriptionCursorState::Fetch {
+                    rw_timestamp: 12,
+                    expected_timestamp: Some(20),
+                    ..
+                }
+            ));
+            stream.begin_fetch(&[], &session, should_wait_when_idle_and_empty);
             let row = stream.next().await.unwrap().unwrap();
             assert_eq!(row.values()[0].as_deref(), Some(b"99".as_slice()));
             assert_eq!(stream.fields(), new_fields.get_output_fields());
@@ -1034,24 +1585,25 @@ mod tests {
             // Drain the buffered row before reading the second schema barrier; do not discard it.
             let row = stream.next().await.unwrap().unwrap();
             assert_eq!(row.values()[0].as_deref(), Some(b"100".as_slice()));
-            // This FETCH has yielded two rows, so the second schema change must end it even in
-            // waiting mode, before consuming the next query's metadata or rows.
+            // The second boundary also ends FETCH after its two old-schema rows, with the
+            // latest metadata published but no rows from that query consumed.
             assert!(stream.next().await.is_none());
             assert!(stream.inner.current_rows.is_empty());
             assert!(stream.inner.current_metadata.is_none());
             assert!(!event_tx.is_closed());
-            assert_eq!(stream.fields(), new_fields.get_output_fields());
+            assert_eq!(stream.fields(), latest_fields.get_output_fields());
             assert!(matches!(
                 stream.subscription_state(),
-                SubscriptionCursorState::InitLogStoreQuery {
-                    seek_timestamp: 20,
-                    expected_timestamp: Some(20),
+                SubscriptionCursorState::Fetch {
+                    rw_timestamp: 20,
+                    expected_timestamp: None,
+                    ..
                 }
             ));
-            assert!(!stream.is_expired(initial_expiry + Duration::from_secs(1)));
-            assert!(stream.is_expired(renewed_expiry + Duration::from_secs(1)));
+            assert!(!stream.is_expired(renewed_expiry + Duration::from_secs(1)));
+            assert!(stream.is_expired(latest_expiry + Duration::from_secs(1)));
 
-            // The next query's metadata and chunk remain unread until the next FETCH begins.
+            // The next query's first chunk remains unread until the next FETCH begins.
             stream.begin_fetch(&[], &session, should_wait_when_idle_and_empty);
             let row = stream.next().await.unwrap().unwrap();
             assert_eq!(row.values()[0].as_deref(), Some(b"changed".as_slice()));
@@ -1067,6 +1619,143 @@ mod tests {
             ));
             assert!(!stream.is_expired(renewed_expiry + Duration::from_secs(1)));
             assert!(stream.is_expired(latest_expiry + Duration::from_secs(1)));
+        }
+    }
+
+    /// Verifies a subscription FETCH retains its response fields while the next Parse/Describe
+    /// sees the new schema, for empty and nonempty FETCH commands with or without waiting.
+    /// This uses injected events, not SQL FETCH or a real executor.
+    #[tokio::test]
+    async fn test_subscription_cursor_fetch_preserves_response_fields_across_schema_change() {
+        let old_fields = subscription_fields_for_test("v");
+        let mut new_fields = old_fields.as_ref().clone();
+        // Simulate adding a visible column between the old value and the synthetic columns.
+        new_fields
+            .row_fields
+            .insert(2, Field::with_name(DataType::Varchar, "added_value"));
+        new_fields.row_output_col_indices = vec![1, 2, 3, 4];
+        new_fields.stream_chunk_row_indices = vec![0, 1, 2];
+        new_fields.op_index = 3;
+        let new_fields = Arc::new(new_fields);
+        let expected_old_desc = old_fields
+            .get_output_fields()
+            .iter()
+            .map(to_pg_field)
+            .collect::<Vec<_>>();
+        let expected_new_desc = new_fields
+            .get_output_fields()
+            .iter()
+            .map(to_pg_field)
+            .collect::<Vec<_>>();
+
+        // SubscriptionCursor::fetch enables idle waiting only for a positive timeout:
+        // None is nonwaiting; Some(5) allows an empty FETCH to wait. SchemaChanged must
+        // end both immediately, without waiting for the timeout or consuming new-schema rows.
+        for timeout_seconds in [None, Some(5)] {
+            // false reaches the boundary with no rows; true queues an old-schema row first,
+            // so FETCH must return that accumulated row with its original descriptors.
+            for has_old_row in [false, true] {
+                let session = Arc::new(SessionImpl::mock());
+                let manager = session.get_cursor_manager();
+                let expires_at = Instant::now() + Duration::from_secs(60);
+                let (pg_response_stream, event_tx) =
+                    pending_subscription_response_stream_for_test(&old_fields, expires_at);
+                manager
+                    .add_subscription_cursor(SubscriptionCursor {
+                        shutdown_handle: CursorShutdownHandle::new(),
+                        cursor_name: "cursor".to_owned(),
+                        subscription: Arc::new(SubscriptionCatalog {
+                            name: "subscription".to_owned(),
+                            retention_seconds: 60,
+                            ..Default::default()
+                        }),
+                        dependent_table_id: TableId::new(1),
+                        pg_response_stream,
+                        cursor_metrics: session.env().cursor_metrics.clone(),
+                        last_fetch: Instant::now(),
+                    })
+                    .await
+                    .unwrap();
+                if has_old_row {
+                    event_tx
+                        .try_send(Ok(subscription_chunk_for_test(
+                            old_fields.clone(),
+                            true,
+                            0,
+                            "i i\n7 42",
+                        )))
+                        .unwrap();
+                }
+                for event in [
+                    CursorDataChunkEvent::Barrier(
+                        CursorDataChunkBarrier::SubscriptionQueryStarted {
+                            from_snapshot: false,
+                            rw_timestamp: 12,
+                            expected_timestamp: None,
+                            init_query_timer: Instant::now(),
+                            output_fields: new_fields.get_output_fields(),
+                            expires_at,
+                        },
+                    ),
+                    CursorDataChunkEvent::Barrier(CursorDataChunkBarrier::SchemaChanged),
+                    subscription_chunk_for_test(
+                        new_fields.clone(),
+                        false,
+                        12,
+                        "i i T T\n8 99 added Insert",
+                    ),
+                ] {
+                    event_tx.try_send(Ok(event)).unwrap();
+                }
+
+                let sql = "fetch 10 from cursor";
+                let stmt = Parser::parse_sql(sql).unwrap().pop().unwrap();
+                let args = HandlerArgs::new(session.clone(), &stmt, sql.into()).unwrap();
+                let prepared = handle_parse(args.clone(), stmt.clone(), vec![])
+                    .await
+                    .unwrap();
+                let (_, described_fields) = session.clone().describe_statement(prepared).unwrap();
+                assert_eq!(described_fields, expected_old_desc);
+
+                // Explicit per-column codes must be selected again for the new column count.
+                let (rows, response_fields) = manager
+                    .get_rows_with_cursor(
+                        "cursor",
+                        10,
+                        args.clone(),
+                        &vec![Format::Text; described_fields.len()],
+                        timeout_seconds,
+                        &mut FetchCursorCancelHandle::new(),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(rows.len(), usize::from(has_old_row));
+                if has_old_row {
+                    assert_text_row(&rows[0], &[Some("42"), Some("Insert"), None]);
+                }
+                // Simple mode uses these response fields; extended mode already described them.
+                assert_eq!(response_fields, described_fields);
+                assert!(!event_tx.is_closed());
+
+                let prepared = handle_parse(args.clone(), stmt, vec![]).await.unwrap();
+                let (_, described_fields) = session.clone().describe_statement(prepared).unwrap();
+                assert_eq!(described_fields, expected_new_desc);
+                let (rows, response_fields) = manager
+                    .get_rows_with_cursor(
+                        "cursor",
+                        1,
+                        args,
+                        &vec![Format::Text; described_fields.len()],
+                        timeout_seconds,
+                        &mut FetchCursorCancelHandle::new(),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(rows.len(), 1);
+                assert_eq!(response_fields, described_fields);
+                assert_eq!(rows[0].values().len(), response_fields.len());
+                assert_eq!(rows[0].values()[1].as_deref(), Some(b"added".as_slice()));
+            }
         }
     }
 
@@ -1167,7 +1856,7 @@ mod tests {
                 "ended unexpectedly"
             };
             assert!(error.to_string().contains(expected));
-            assert!(stream.is_failed());
+            assert!(stream.inner.failed);
             assert!(matches!(
                 stream.subscription_state(),
                 SubscriptionCursorState::Invalid

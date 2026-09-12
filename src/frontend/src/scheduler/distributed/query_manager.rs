@@ -34,7 +34,7 @@ use super::QueryExecution;
 use super::stats::DistributedQueryMetrics;
 use crate::catalog::catalog_service::CatalogReader;
 use crate::scheduler::plan_fragmenter::{Query, QueryId};
-use crate::scheduler::{ExecutionContextRef, SchedulerResult};
+use crate::scheduler::{ExecutionContextRef, ReadSnapshot, SchedulerResult};
 use crate::session::SessionImpl;
 
 pub struct DistributedQueryStream {
@@ -240,14 +240,17 @@ impl QueryManager {
         }
     }
 
+    /// Uses the supplied snapshot, or pins the current transaction's snapshot when none is
+    /// supplied.
     pub async fn schedule(
         &self,
         context: ExecutionContextRef,
         mut query: Query,
         is_cursor_query: bool,
+        snapshot: Option<ReadSnapshot>,
     ) -> SchedulerResult<DistributedQueryStream> {
         // TODO: if there's no table scan, we don't need to acquire snapshot.
-        let pinned_snapshot = context.session().pinned_snapshot();
+        let pinned_snapshot = snapshot.unwrap_or_else(|| context.session().pinned_snapshot());
         pinned_snapshot.fill_batch_query_epoch(&mut query)?;
 
         if let Some(query_limit) = self.distributed_query_limit
@@ -405,7 +408,7 @@ mod cursor_lifecycle_tests {
             let query = create_query().await;
             let query_id = query.query_id().clone();
             let context = Arc::new(ExecutionContext::new(session.clone(), None));
-            let mut scheduling = Box::pin(manager.schedule(context, query, is_cursor_query));
+            let mut scheduling = Box::pin(manager.schedule(context, query, is_cursor_query, None));
 
             // With no semaphore configured, get_permit().await completes immediately.
             // The registration checks below confirm this poll has passed that await;
@@ -432,6 +435,70 @@ mod cursor_lifecycle_tests {
             assert!(!manager.contains_query_for_test(&query_id));
             assert!(session.all_distributed_query_ids().is_empty());
         }
+    }
+
+    /// Verifies scheduling uses the supplied snapshot without calling `session.pinned_snapshot()`.
+    /// The mock session has no transaction, so that fallback would panic. Checking each table
+    /// scan's epoch additionally verifies that the supplied snapshot is actually applied.
+    #[tokio::test]
+    async fn test_schedule_uses_supplied_snapshot_when_provided() {
+        use risingwave_common::util::epoch::Epoch;
+        use risingwave_pb::batch_plan::plan_node::NodeBody;
+        use risingwave_pb::common::batch_query_epoch;
+
+        use crate::scheduler::plan_fragmenter::ExecutionPlanNode;
+
+        fn check_scan_epochs(node: &ExecutionPlanNode, epoch: u64) -> usize {
+            let own_scan = if let NodeBody::RowSeqScan(scan) = &node.node {
+                assert_eq!(
+                    scan.query_epoch.as_ref().unwrap().epoch,
+                    Some(batch_query_epoch::Epoch::Backup(epoch))
+                );
+                1
+            } else {
+                0
+            };
+            own_scan
+                + node
+                    .children
+                    .iter()
+                    .map(|child| check_scan_epochs(child, epoch))
+                    .sum::<usize>()
+        }
+
+        let session = Arc::new(SessionImpl::mock());
+        // Deliberately do not begin a transaction. Calling session.pinned_snapshot() would panic,
+        // so reaching suspended startup also verifies that the fallback was not evaluated.
+        let manager = session.env().query_manager().clone();
+        let query = create_query().await;
+        let query_id = query.query_id().clone();
+        let epoch = Epoch(123 << 16);
+        let context = Arc::new(ExecutionContext::new(session.clone(), None));
+        let mut scheduling =
+            Box::pin(manager.schedule(context, query, true, Some(ReadSnapshot::Other(epoch))));
+        assert!(futures::poll!(scheduling.as_mut()).is_pending());
+        let execution = manager
+            .query_execution_info
+            .read()
+            .unwrap()
+            .query_execution_map
+            .get(&query_id)
+            .unwrap()
+            .clone();
+        let scan_count: usize = execution
+            .query()
+            .stage_graph
+            .stages
+            .values()
+            .map(|stage| check_scan_epochs(&stage.root, epoch.0))
+            .sum();
+        assert!(scan_count > 0);
+        assert_eq!(session.all_distributed_query_ids(), vec![query_id.clone()]);
+        assert!(session.ordinary_distributed_query_ids().is_empty());
+
+        drop(scheduling);
+        assert!(!manager.contains_query_for_test(&query_id));
+        assert!(session.all_distributed_query_ids().is_empty());
     }
 
     async fn registration_guard_with_control_receiver() -> (
