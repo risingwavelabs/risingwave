@@ -52,7 +52,7 @@ use crate::hummock::block_stream::{
     BlockDataStream, BlockStream, MemoryUsageTracker, PrefetchBlockStream,
 };
 use crate::hummock::none::NoneRecentFilter;
-use crate::hummock::pin_cache::{PinCache, PinCacheReadHandle, PinCacheRefillOutcome};
+use crate::hummock::pin_cache::{PinCache, PinCacheReadHandle};
 use crate::hummock::vector::file::{VectorBlock, VectorBlockMeta, VectorFileMeta};
 use crate::hummock::vector::monitor::VectorStoreCacheStats;
 use crate::hummock::{BlockEntry, BlockHolder, HummockError, HummockResult, RecentFilterTrait};
@@ -342,12 +342,9 @@ impl SstableStore {
         self.pin_cache.get()
     }
 
-    pub(crate) async fn pin_sst(
-        &self,
-        object_id: HummockSstableObjectId,
-    ) -> HummockResult<PinCacheRefillOutcome> {
+    pub(crate) async fn pin_sst(&self, object_id: HummockSstableObjectId) -> HummockResult<()> {
         let Some(pin_cache) = self.pin_cache.get() else {
-            return Ok(PinCacheRefillOutcome::Skipped);
+            return Ok(());
         };
         pin_cache
             .pin_sst(
