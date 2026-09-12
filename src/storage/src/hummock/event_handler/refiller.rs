@@ -380,7 +380,7 @@ impl CacheRefiller {
         let config = Arc::new(config);
         let concurrency = Arc::new(Semaphore::new(config.concurrency));
         let default_policy = config.table_cache_refill_default_policy;
-        let pin_concurrency = config.concurrency;
+        let pin_concurrency = concurrency.clone();
         let meta_refill_concurrency = if config.meta_refill_concurrency == 0 {
             None
         } else {

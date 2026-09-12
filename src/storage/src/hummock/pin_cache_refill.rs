@@ -123,7 +123,7 @@ impl PinCacheRefillController {
     pub(crate) fn new(
         sstable_store: SstableStoreRef,
         version: PinnedVersion,
-        concurrency: usize,
+        concurrency: Arc<tokio::sync::Semaphore>,
     ) -> Self {
         let executor = PinCacheRefillExecutor::new(sstable_store.clone(), concurrency);
         Self {

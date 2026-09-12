@@ -1372,7 +1372,11 @@ mod tests {
             HummockVersion::from(PbHummockVersion::default()),
             tokio::sync::mpsc::unbounded_channel().0,
         );
-        let mut controller = PinCacheRefillController::new(sstable_store, version, 1);
+        let mut controller = PinCacheRefillController::new(
+            sstable_store,
+            version,
+            Arc::new(tokio::sync::Semaphore::new(1)),
+        );
         // The first empty policy snapshot must initialize membership, not take the no-op path.
         controller.replace_policies(&HashMap::new());
         tokio::time::timeout(std::time::Duration::from_secs(1), async {
