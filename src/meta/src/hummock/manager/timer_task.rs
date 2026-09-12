@@ -754,7 +754,12 @@ impl HummockManager {
                 )
                 .await
             {
-                Ok(_) => candidate += 1,
+                Ok(survivor) => {
+                    // Use the actual survivor and its state at commit, including accumulated
+                    // members and the config update, without rebuilding global statistics.
+                    group_infos[base] = survivor;
+                    candidate += 1;
+                }
                 Err(e) => {
                     tracing::debug!(
                         error = %e.as_report(),
