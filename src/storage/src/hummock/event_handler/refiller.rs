@@ -422,8 +422,7 @@ impl CacheRefiller {
         pin_cache_membership_update: PinCacheMembershipUpdate,
     ) {
         if let Some(cache) = self.sstable_store.pin_cache() {
-            cache.protect_version(&pinned_version);
-            cache.protect_version(&new_pinned_version);
+            cache.start_version_update(new_pinned_version.id());
         }
         // Capture pin admission with this delta. A later SET must not turn an already-running
         // refill into an implicit warm, while `PinCache::pin_sst` still rechecks current desired
@@ -583,6 +582,12 @@ impl CacheRefiller {
             }
         });
         self.active = Some(ActiveBatch { handle, events });
+    }
+
+    pub(crate) fn on_version_applied(&self, version: risingwave_hummock_sdk::HummockVersionId) {
+        if let Some(cache) = self.sstable_store.pin_cache() {
+            cache.release_retired(version);
+        }
     }
 
     fn pin_cache_owned_vnodes(&self) -> HashMap<TableId, Bitmap> {

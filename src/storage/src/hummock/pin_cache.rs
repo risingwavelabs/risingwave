@@ -132,10 +132,7 @@ struct PinCacheState {
     inflight: HashMap<HummockSstableObjectId, Arc<PinCacheEntry>>,
     recovered_files: Vec<(HummockSstableObjectId, Arc<PinCacheEntry>)>,
     recovery_state: RecoveryState,
-    protected_versions: std::collections::BTreeMap<
-        risingwave_hummock_sdk::HummockVersionId,
-        std::sync::Weak<risingwave_hummock_sdk::version::HummockVersion>,
-    >,
+    received_version: Option<risingwave_hummock_sdk::HummockVersionId>,
     retired: HashMap<HummockSstableObjectId, (u64, risingwave_hummock_sdk::HummockVersionId)>,
 }
 
@@ -336,42 +333,23 @@ impl PinCache {
         });
         let recovery = pin_cache.clone();
         tokio::spawn(async move { recovery.recover_local_files().await });
-        let weak = Arc::downgrade(&pin_cache);
-        tokio::spawn(async move {
-            loop {
-                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
-                let Some(cache) = weak.upgrade() else { break };
-                cache.prune_retired();
-            }
-        });
         pin_cache
     }
 
-    /// Weak version tracking never extends a reader's lifetime. The oldest live version is a
-    /// conservative reclamation frontier; replacement outputs need capacity in addition to it.
-    pub(crate) fn protect_version(
-        &self,
-        version: &crate::hummock::local_version::pinned_version::PinnedVersion,
-    ) {
-        self.state
-            .write()
-            .protected_versions
-            .insert(version.id(), version.downgrade_version());
+    pub(crate) fn start_version_update(&self, version: risingwave_hummock_sdk::HummockVersionId) {
+        self.state.write().received_version = Some(version);
     }
 
-    fn prune_retired(self: &Arc<Self>) {
+    /// Inputs stay routable until replacement application. Older snapshots may fall back later.
+    pub(crate) fn release_retired(
+        self: &Arc<Self>,
+        applied: risingwave_hummock_sdk::HummockVersionId,
+    ) {
         let stale = {
             let mut state = self.state.write();
-            state
-                .protected_versions
-                .retain(|_, version| version.strong_count() > 0);
-            let oldest = state
-                .protected_versions
-                .first_key_value()
-                .map(|(&id, _)| id);
             let removed = state
                 .retired
-                .extract_if(|_, (_, retired_at)| oldest.is_none_or(|oldest| oldest >= *retired_at))
+                .extract_if(|_, (_, retired_at)| applied >= *retired_at)
                 .map(|(id, _)| id)
                 .collect::<Vec<_>>();
             removed
@@ -485,11 +463,7 @@ impl PinCache {
     ) {
         let stale_objects = {
             let mut state = self.state.write();
-            state
-                .protected_versions
-                .retain(|_, version| version.strong_count() > 0);
-            let latest = state.protected_versions.last_key_value().map(|(&id, _)| id);
-            let protect = state.protected_versions.len() > 1;
+            let latest = state.received_version;
             let PinCacheState {
                 desired,
                 published,
@@ -506,8 +480,8 @@ impl PinCache {
                 if !inserted.contains_key(&object_id)
                     && let Some(size) = desired.remove(&object_id)
                 {
-                    if protect {
-                        retired.insert(object_id, (size, latest.unwrap()));
+                    if let Some(latest) = latest {
+                        retired.insert(object_id, (size, latest));
                         continue;
                     }
                     // The guard owns cleanup once the active download stops; revoking its token
@@ -875,11 +849,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_retired_route_waits_for_old_read_version() {
-        use risingwave_hummock_sdk::version::HummockVersion;
-        use risingwave_pb::hummock::PbHummockVersion;
-
-        use crate::hummock::local_version::pinned_version::PinnedVersion;
+    async fn test_retired_route_waits_for_version_application() {
         let cache = PinCache::new(in_memory_object_store(), u64::MAX);
         let object = HummockSstableObjectId::from(910);
         cache.replace_desired_objects([(object, 8)]);
@@ -891,26 +861,11 @@ mod tests {
             .await
             .unwrap();
         assert!(download.publish());
-        let old = PinnedVersion::new(
-            HummockVersion::from_rpc_protobuf(&PbHummockVersion {
-                id: 1.into(),
-                ..Default::default()
-            }),
-            tokio::sync::mpsc::unbounded_channel().0,
-        );
-        let new = old
-            .new_with_local_version(HummockVersion::from_rpc_protobuf(&PbHummockVersion {
-                id: 2.into(),
-                ..Default::default()
-            }))
-            .unwrap();
-        cache.protect_version(&old);
-        cache.protect_version(&new);
+        cache.start_version_update(2.into());
         cache.apply_desired_object_delta([object], HashMap::new());
-        cache.prune_retired();
+        cache.release_retired(1.into());
         assert!(cache.get(object).is_some());
-        drop(old);
-        cache.prune_retired();
+        cache.release_retired(2.into());
         assert!(cache.get(object).is_none());
     }
 

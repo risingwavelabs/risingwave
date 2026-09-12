@@ -159,10 +159,6 @@ impl PinnedVersion {
         self.version.id
     }
 
-    pub(crate) fn downgrade_version(&self) -> std::sync::Weak<HummockVersion> {
-        Arc::downgrade(&self.version)
-    }
-
     pub fn is_valid(&self) -> bool {
         self.version.id != INVALID_VERSION_ID
     }

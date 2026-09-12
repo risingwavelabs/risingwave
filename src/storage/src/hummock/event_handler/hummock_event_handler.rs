@@ -860,6 +860,7 @@ impl HummockEventHandler {
 
         self.uploader
             .update_pinned_version(latest_pinned_version.clone());
+        self.refiller.on_version_applied(latest_pinned_version.id());
     }
 }
 
