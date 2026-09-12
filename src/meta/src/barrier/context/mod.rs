@@ -35,9 +35,9 @@ use crate::barrier::command::{PostCollectCommand, SinceTimestampResolvedEpoch};
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::schedule::{MarkReadyOptions, ScheduledBarriers};
 use crate::barrier::{
-    BarrierManagerStatus, BarrierScheduler, BarrierWorkerRuntimeInfoSnapshot, BatchRefreshInfo,
+    BarrierManagerStatus, BarrierScheduler, BarrierWorkerRuntimeInfoSnapshot,
     CreateStreamingJobCommandInfo, CreateStreamingJobType, DatabaseRuntimeInfoSnapshot,
-    RecoveryReason, Scheduled, SnapshotBackfillInfo,
+    IndependentStreamingJobType, RecoveryReason, Scheduled, SnapshotBackfillInfo,
 };
 use crate::hummock::{CommitEpochInfo, HummockManagerRef};
 use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
@@ -51,33 +51,32 @@ use crate::stream::source_manager::SplitAssignment;
 use crate::stream::{GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef};
 
 #[derive(Debug)]
-pub(super) struct CreateSnapshotBackfillJobCommandInfo {
+pub(super) struct CreateIndependentStreamingJobCommandInfo {
     pub info: CreateStreamingJobCommandInfo,
     pub snapshot_backfill_info: SnapshotBackfillInfo,
     pub cross_db_snapshot_backfill_info: SnapshotBackfillInfo,
     pub resolved_split_assignment: SplitAssignment,
-    /// If set, this is a batch refresh job rather than a regular snapshot backfill.
-    pub refresh_interval_sec: Option<u64>,
+    pub kind: IndependentStreamingJobType,
 }
 
-impl CreateSnapshotBackfillJobCommandInfo {
+impl CreateIndependentStreamingJobCommandInfo {
     pub(super) fn into_post_collect(self) -> PostCollectCommand {
-        let job_type = if let Some(refresh_interval_sec) = self.refresh_interval_sec {
-            CreateStreamingJobType::BatchRefresh(BatchRefreshInfo {
-                snapshot_backfill_info: self.snapshot_backfill_info,
-                refresh_interval_sec,
-            })
-        } else {
-            CreateStreamingJobType::SnapshotBackfill {
-                snapshot_backfill_info: self.snapshot_backfill_info,
-                // `since_epoch` is only used before job creation barriers are injected, and
-                // post-collect snapshot backfill does not go through that path.
-                since_epoch: None,
+        let kind = match self.kind {
+            IndependentStreamingJobType::SnapshotBackfill { .. } => {
+                IndependentStreamingJobType::SnapshotBackfill {
+                    // `since_epoch` is only used before job creation barriers are injected, and
+                    // post-collect snapshot backfill does not go through that path.
+                    since_epoch: None,
+                }
             }
+            kind @ IndependentStreamingJobType::BatchRefresh { .. } => kind,
         };
         PostCollectCommand::CreateStreamingJob {
             info: self.info,
-            job_type,
+            job_type: CreateStreamingJobType::Independent {
+                snapshot_backfill_info: self.snapshot_backfill_info,
+                kind,
+            },
             cross_db_snapshot_backfill_info: self.cross_db_snapshot_backfill_info,
             resolved_split_assignment: self.resolved_split_assignment,
         }

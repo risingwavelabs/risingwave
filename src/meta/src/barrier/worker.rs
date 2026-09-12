@@ -51,8 +51,8 @@ use crate::barrier::rpc::{
 use crate::barrier::schedule::{MarkReadyOptions, PeriodicBarriers};
 use crate::barrier::{
     BarrierManagerRequest, BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, Command,
-    CreateStreamingJobType, RecoveryReason, RescheduleContext, UpdateDatabaseBarrierRequest,
-    schedule,
+    CreateStreamingJobType, IndependentStreamingJobType, RecoveryReason, RescheduleContext,
+    UpdateDatabaseBarrierRequest, schedule,
 };
 use crate::controller::scale::{materialize_actor_assignments, preview_actor_assignments};
 use crate::error::MetaErrorInner;
@@ -436,9 +436,12 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
         let Some((
             Command::CreateStreamingJob {
                 job_type:
-                    CreateStreamingJobType::SnapshotBackfill {
+                    CreateStreamingJobType::Independent {
                         snapshot_backfill_info,
-                        since_epoch: Some(since_epoch),
+                        kind:
+                            IndependentStreamingJobType::SnapshotBackfill {
+                                since_epoch: Some(since_epoch),
+                            },
                     },
                 ..
             },

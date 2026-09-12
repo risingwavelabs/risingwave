@@ -46,7 +46,7 @@ use tracing::{debug, info};
 use crate::MetaResult;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::command::{PostCollectCommand, ThrottleConfigMap, extract_throttle_config};
-use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
+use crate::barrier::context::CreateIndependentStreamingJobCommandInfo;
 use crate::barrier::edge_builder::{EdgeBuilderFragmentInfo, FragmentEdgeBuilder};
 use crate::barrier::info::BarrierInfo;
 use crate::barrier::notifier::NotifierStarter;
@@ -97,6 +97,17 @@ pub(crate) struct BatchRefreshRenderResult {
     pub node_actors: HashMap<WorkerId, HashSet<ActorId>>,
     pub state_table_ids: HashSet<TableId>,
     pub actors_to_create: StreamJobActorsToCreate,
+}
+
+/// Static actor metadata rendered for a closed independent-job graph.
+///
+/// This does not build edges or decide which fragments are active. In particular,
+/// Iceberg V3 can render all of its actor partitions once and activate only the
+/// input or compaction-resolver partition for a given phase.
+#[derive(Debug)]
+pub(crate) struct RenderedIndependentJobActors {
+    pub fragment_infos: HashMap<FragmentId, InflightFragmentInfo>,
+    pub stream_actors: HashMap<FragmentId, Vec<StreamActor>>,
 }
 
 // ── Batch refresh job metadata ───────────────────────────────────────────────
@@ -196,6 +207,136 @@ pub(crate) struct BatchRefreshJobCheckpointControl {
 
 // ── Unified actor rendering ───────────────────────────────────────────────────
 
+/// Render actor IDs, placement, vnode bitmaps, and actor definitions for a closed
+/// independent-job graph.
+///
+/// Every fragment in a no-shuffle ensemble must belong to `fragments`. Independent
+/// jobs consume upstream data through the log store, so their actor placement does
+/// not need to align with an existing upstream fragment.
+impl RenderedIndependentJobActors {
+    pub(crate) fn render(
+        fragments: &HashMap<FragmentId, LoadedFragment>,
+        downstreams: &FragmentDownstreamRelation,
+        definition: &str,
+        actor_id_generator: &AtomicU32,
+        worker_nodes: &HashMap<WorkerId, WorkerNode>,
+        database_resource_group: &str,
+        streaming_job_model: &streaming_job::Model,
+    ) -> MetaResult<Self> {
+        let ensembles =
+            BatchRefreshJobCheckpointControl::resolve_ensembles(fragments, downstreams)?;
+
+        let mut actor_assignments: HashMap<
+            FragmentId,
+            HashMap<ActorId, (WorkerId, Option<risingwave_common::bitmap::Bitmap>)>,
+        > = HashMap::new();
+
+        for ensemble in &ensembles {
+            let first_component = ensemble
+                .component_fragments()
+                .next()
+                .expect("ensemble must have at least one component");
+            let fragment = &fragments[&first_component];
+            let distribution_type = fragment.distribution_type;
+            let vnode_count = fragment.vnode_count;
+
+            for fid in ensemble.component_fragments() {
+                let f = &fragments[&fid];
+                assert_eq!(
+                    vnode_count, f.vnode_count,
+                    "fragments {} and {} in same ensemble have different vnode counts",
+                    first_component, fid,
+                );
+            }
+
+            let entry_fragment_parallelism = Itertools::exactly_one(
+                ensemble
+                    .entry_fragments()
+                    .map(|fid| fragments[&fid].parallelism.clone())
+                    .dedup(),
+            )
+            .map_err(|_| {
+                anyhow!("entry fragments have inconsistent parallelism settings in independent job")
+            })?;
+
+            let actor_template = EnsembleActorTemplate::render_new(
+                streaming_job_model,
+                worker_nodes,
+                entry_fragment_parallelism,
+                database_resource_group.to_owned(),
+                distribution_type,
+                vnode_count,
+            )?;
+
+            for fid in ensemble.component_fragments() {
+                let f = &fragments[&fid];
+                let aligner =
+                    ComponentFragmentAligner::new_persistent(&actor_template, actor_id_generator);
+                let assignments = aligner.align_component_actor(f.distribution_type);
+                actor_assignments.insert(fid, assignments);
+            }
+        }
+
+        let stream_context = streaming_job_model.stream_context();
+        let mut stream_actors: HashMap<FragmentId, Vec<StreamActor>> = HashMap::new();
+        let mut actor_location: HashMap<ActorId, WorkerId> = HashMap::new();
+
+        for (fragment_id, assignments) in &actor_assignments {
+            let mut actors = Vec::with_capacity(assignments.len());
+            for (&actor_id, (worker_id, vnode_bitmap)) in assignments {
+                actor_location.insert(actor_id, *worker_id);
+                actors.push(StreamActor {
+                    actor_id,
+                    fragment_id: *fragment_id,
+                    vnode_bitmap: vnode_bitmap.clone(),
+                    mview_definition: definition.to_owned(),
+                    expr_context: Some(stream_context.to_expr_context()),
+                    config_override: stream_context.config_override.clone(),
+                });
+            }
+            stream_actors.insert(*fragment_id, actors);
+        }
+
+        let fragment_infos = fragments
+            .iter()
+            .map(|(fragment_id, loaded)| {
+                let actors = stream_actors
+                    .get(fragment_id)
+                    .into_iter()
+                    .flatten()
+                    .map(|actor| {
+                        (
+                            actor.actor_id,
+                            crate::controller::fragment::InflightActorInfo {
+                                worker_id: actor_location[&actor.actor_id],
+                                vnode_bitmap: actor.vnode_bitmap.clone(),
+                                splits: vec![],
+                            },
+                        )
+                    })
+                    .collect();
+                (
+                    *fragment_id,
+                    InflightFragmentInfo {
+                        fragment_id: *fragment_id,
+                        distribution_type: loaded.distribution_type,
+                        fragment_type_mask: loaded.fragment_type_mask,
+                        vnode_count: loaded.vnode_count,
+                        nodes: loaded.nodes.clone(),
+                        actors,
+                        state_table_ids: loaded.state_table_ids.clone(),
+                    },
+                )
+            })
+            .collect();
+
+        Ok(Self {
+            fragment_infos,
+            stream_actors,
+        })
+    }
+}
+
 impl BatchRefreshJobCheckpointControl {
     /// Render actors for a batch refresh job from logical metadata only.
     ///
@@ -219,119 +360,18 @@ impl BatchRefreshJobCheckpointControl {
         // Edge building context:
         partial_graph_id: PartialGraphId,
     ) -> MetaResult<BatchRefreshRenderResult> {
-        // Step 1: Derive no-shuffle ensembles from downstreams.
-        let ensembles = Self::resolve_ensembles(fragments, downstreams)?;
-
-        // Step 2: Render actor assignments for each ensemble.
-        let mut actor_assignments: HashMap<
-            FragmentId,
-            HashMap<ActorId, (WorkerId, Option<risingwave_common::bitmap::Bitmap>)>,
-        > = HashMap::new();
-
-        for ensemble in &ensembles {
-            // All fragments are new (batch refresh has no existing upstream fragments).
-            let first_component = ensemble
-                .component_fragments()
-                .next()
-                .expect("ensemble must have at least one component");
-            let fragment = &fragments[&first_component];
-            let distribution_type = fragment.distribution_type;
-            let vnode_count = fragment.vnode_count;
-
-            // Assert all component fragments share the same vnode count.
-            for fid in ensemble.component_fragments() {
-                let f = &fragments[&fid];
-                assert_eq!(
-                    vnode_count, f.vnode_count,
-                    "fragments {} and {} in same ensemble have different vnode counts",
-                    first_component, fid,
-                );
-            }
-
-            let entry_fragment_parallelism = Itertools::exactly_one(
-                ensemble
-                    .entry_fragments()
-                    .map(|fid| fragments[&fid].parallelism.clone())
-                    .dedup(),
-            )
-            .map_err(|_| {
-                anyhow!(
-                    "entry fragments have inconsistent parallelism settings in batch refresh job"
-                )
-            })?;
-
-            let actor_template = EnsembleActorTemplate::render_new(
-                streaming_job_model,
-                worker_nodes,
-                entry_fragment_parallelism,
-                database_resource_group.to_owned(),
-                distribution_type,
-                vnode_count,
-            )?;
-
-            for fid in ensemble.component_fragments() {
-                let f = &fragments[&fid];
-                let aligner =
-                    ComponentFragmentAligner::new_persistent(&actor_template, actor_id_generator);
-                let assignments = aligner.align_component_actor(f.distribution_type);
-                actor_assignments.insert(fid, assignments);
-            }
-        }
-
-        // Step 3: Expand assignments into StreamActor + actor_location + InflightFragmentInfo.
-        let mut stream_actors: HashMap<FragmentId, Vec<StreamActor>> = HashMap::new();
-        let mut actor_location: HashMap<ActorId, WorkerId> = HashMap::new();
-
-        for (fragment_id, assignments) in &actor_assignments {
-            let mut actors = Vec::with_capacity(assignments.len());
-            for (&actor_id, (worker_id, vnode_bitmap)) in assignments {
-                actor_location.insert(actor_id, *worker_id);
-                let stream_context = streaming_job_model.stream_context();
-                actors.push(StreamActor {
-                    actor_id,
-                    fragment_id: *fragment_id,
-                    vnode_bitmap: vnode_bitmap.clone(),
-                    mview_definition: definition.to_owned(),
-                    expr_context: Some(stream_context.to_expr_context()),
-                    config_override: stream_context.config_override.clone(),
-                });
-            }
-            stream_actors.insert(*fragment_id, actors);
-        }
-
-        // Build InflightFragmentInfo from logical fragments + rendered actors.
-        let fragment_infos: HashMap<FragmentId, InflightFragmentInfo> = fragments
-            .iter()
-            .map(|(fragment_id, loaded)| {
-                let actors = stream_actors
-                    .get(fragment_id)
-                    .into_iter()
-                    .flatten()
-                    .map(|actor| {
-                        (
-                            actor.actor_id,
-                            crate::controller::fragment::InflightActorInfo {
-                                worker_id: actor_location[&actor.actor_id],
-                                vnode_bitmap: actor.vnode_bitmap.clone(),
-                                splits: vec![], // batch refresh has no source splits
-                            },
-                        )
-                    })
-                    .collect();
-                (
-                    *fragment_id,
-                    InflightFragmentInfo {
-                        fragment_id: *fragment_id,
-                        distribution_type: loaded.distribution_type,
-                        fragment_type_mask: loaded.fragment_type_mask,
-                        vnode_count: loaded.vnode_count,
-                        nodes: loaded.nodes.clone(),
-                        actors,
-                        state_table_ids: loaded.state_table_ids.clone(),
-                    },
-                )
-            })
-            .collect();
+        let RenderedIndependentJobActors {
+            fragment_infos,
+            stream_actors,
+        } = RenderedIndependentJobActors::render(
+            fragments,
+            downstreams,
+            definition,
+            actor_id_generator,
+            worker_nodes,
+            database_resource_group,
+            streaming_job_model,
+        )?;
 
         // Step 4: Build edges (internal-only, no upstream).
         let mut builder = FragmentEdgeBuilder::new(fragment_infos.values().map(|f| {
@@ -465,7 +505,7 @@ impl BatchRefreshJobCheckpointControl {
     pub(crate) fn new(
         database_id: DatabaseId,
         job_id: JobId,
-        create_info: CreateSnapshotBackfillJobCommandInfo,
+        create_info: CreateIndependentStreamingJobCommandInfo,
         notifier: Option<&mut NotifierStarter>,
         snapshot_backfill_upstream_tables: HashSet<TableId>,
         snapshot_epoch: u64,
@@ -688,7 +728,7 @@ impl BatchRefreshJobCheckpointControl {
         new_actors: Option<StreamJobActorsToCreate>,
         mutation: Option<Mutation>,
         notifier: Option<&mut NotifierStarter>,
-        first_create_info: Option<CreateSnapshotBackfillJobCommandInfo>,
+        first_create_info: Option<CreateIndependentStreamingJobCommandInfo>,
         is_stop: bool,
     ) -> MetaResult<()> {
         if is_stop {
@@ -712,7 +752,7 @@ impl BatchRefreshJobCheckpointControl {
             PartialGraphBarrierInfo::new(
                 first_create_info.map_or_else(
                     PostCollectCommand::barrier,
-                    CreateSnapshotBackfillJobCommandInfo::into_post_collect,
+                    CreateIndependentStreamingJobCommandInfo::into_post_collect,
                 ),
                 barrier_info,
                 notifier,

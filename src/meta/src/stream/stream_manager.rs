@@ -45,8 +45,8 @@ use super::{
     StreamFragmentGraph, UserDefinedFragmentBackfillOrder,
 };
 use crate::barrier::{
-    BarrierScheduler, BatchRefreshInfo, Command, CreateStreamingJobCommandInfo,
-    CreateStreamingJobType, ReplaceStreamJobPlan, SinceEpochInfo, SnapshotBackfillInfo,
+    BarrierScheduler, Command, CreateStreamingJobCommandInfo, CreateStreamingJobType,
+    IndependentStreamingJobType, ReplaceStreamJobPlan, SinceEpochInfo, SnapshotBackfillInfo,
 };
 use crate::controller::catalog::DropTableConnectorContext;
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
@@ -666,7 +666,7 @@ impl GlobalStreamManager {
             refresh_interval_sec,
         };
 
-        let job_type = if let Some(refresh_interval_sec) = refresh_interval_sec {
+        let create_job_type = if let Some(refresh_interval_sec) = refresh_interval_sec {
             if since_timestamp_epoch.is_some() {
                 bail!("since_timestamp should not be specified when no snapshot backfill");
             }
@@ -694,21 +694,25 @@ impl GlobalStreamManager {
                 refresh_interval_sec,
                 "sending Command::CreateBatchRefreshStreamingJob"
             );
-            CreateStreamingJobType::BatchRefresh(BatchRefreshInfo {
+            CreateStreamingJobType::Independent {
                 snapshot_backfill_info,
-                refresh_interval_sec,
-            })
+                kind: IndependentStreamingJobType::BatchRefresh {
+                    refresh_interval_sec,
+                },
+            }
         } else if let Some(snapshot_backfill_info) = snapshot_backfill_info {
             tracing::debug!(
                 ?snapshot_backfill_info,
                 "sending Command::CreateSnapshotBackfillStreamingJob"
             );
-            CreateStreamingJobType::SnapshotBackfill {
+            CreateStreamingJobType::Independent {
                 snapshot_backfill_info,
-                since_epoch: since_timestamp_epoch.map(|provided_since_epoch| SinceEpochInfo {
-                    provided_since_epoch,
-                    resolved: None,
-                }),
+                kind: IndependentStreamingJobType::SnapshotBackfill {
+                    since_epoch: since_timestamp_epoch.map(|provided_since_epoch| SinceEpochInfo {
+                        provided_since_epoch,
+                        resolved: None,
+                    }),
+                },
             }
         } else {
             if since_timestamp_epoch.is_some() {
@@ -724,7 +728,7 @@ impl GlobalStreamManager {
 
         let command = Command::CreateStreamingJob {
             info,
-            job_type,
+            job_type: create_job_type,
             cross_db_snapshot_backfill_info,
         };
 
