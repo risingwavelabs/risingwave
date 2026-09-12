@@ -748,7 +748,6 @@ impl AuthContext {
 
 /// Distributed query IDs grouped by their owner's cancellation domain.
 #[derive(Default)]
-#[expect(dead_code, reason = "wired into session ownership in the follow-up PR")]
 struct SessionDistributedQueryIds {
     /// Single-statement queries that can be terminated by `CancelRequest` and cannot resume
     /// after cancellation. Queries retained by extended-protocol portals are currently also
@@ -786,6 +785,9 @@ pub struct SessionImpl {
     /// This flag is set only when current query is executed in local mode, and used to cancel
     /// local query.
     current_query_cancel_flag: Mutex<Option<ShutdownSender>>,
+
+    /// Distributed queries owned by this session, grouped by cancellation domain.
+    distributed_query_ids: Mutex<SessionDistributedQueryIds>,
 
     /// execution context represents the lifetime of a running SQL in the current session
     exec_context: Mutex<Option<Weak<ExecContext>>>,
@@ -884,6 +886,42 @@ impl From<CheckRelationError> for RwError {
 }
 
 impl SessionImpl {
+    pub(crate) fn register_distributed_query(&self, query_id: QueryId, is_cursor_query: bool) {
+        let mut ids = self.distributed_query_ids.lock();
+        let query_ids = if is_cursor_query {
+            &mut ids.cursor_query_ids
+        } else {
+            &mut ids.ordinary_query_ids
+        };
+        query_ids.insert(query_id);
+    }
+
+    pub(crate) fn unregister_distributed_query(&self, query_id: &QueryId) {
+        let mut ids = self.distributed_query_ids.lock();
+        ids.ordinary_query_ids.remove(query_id);
+        ids.cursor_query_ids.remove(query_id);
+    }
+
+    pub(crate) fn ordinary_distributed_query_ids(&self) -> Vec<QueryId> {
+        self.distributed_query_ids
+            .lock()
+            .ordinary_query_ids
+            .iter()
+            .cloned()
+            .collect()
+    }
+
+    pub(crate) fn all_distributed_query_ids(&self) -> Vec<QueryId> {
+        let ids = self.distributed_query_ids.lock();
+        ids.ordinary_query_ids
+            .iter()
+            .chain(&ids.cursor_query_ids)
+            .cloned()
+            .collect()
+    }
+}
+
+impl SessionImpl {
     pub(crate) fn new(
         env: FrontendEnv,
         auth_context: AuthContext,
@@ -904,6 +942,7 @@ impl SessionImpl {
             peer_addr,
             txn: Default::default(),
             current_query_cancel_flag: Mutex::new(None),
+            distributed_query_ids: Default::default(),
             notice_tx,
             notice_rx: Mutex::new(notice_rx),
             exec_context: Mutex::new(None),
@@ -932,6 +971,7 @@ impl SessionImpl {
             id: (0, 0),
             txn: Default::default(),
             current_query_cancel_flag: Mutex::new(None),
+            distributed_query_ids: Default::default(),
             notice_tx,
             notice_rx: Mutex::new(notice_rx),
             exec_context: Mutex::new(None),
@@ -1404,16 +1444,29 @@ impl SessionImpl {
         *flag = Some(shutdown_tx);
     }
 
-    pub fn cancel_current_query(&self) {
-        let mut flag_guard = self.current_query_cancel_flag.lock();
-        if let Some(sender) = flag_guard.take() {
+    fn cancel_current_local_query(&self) {
+        let cancel_sender = self.current_query_cancel_flag.lock().take();
+        if let Some(sender) = cancel_sender {
             info!("Trying to cancel query in local mode.");
             // Current running query is in local mode
             sender.cancel();
             info!("Cancel query request sent.");
         }
+    }
+
+    pub fn cancel_current_query(&self) {
+        self.cancel_current_local_query();
         info!("Trying to cancel query in distributed mode.");
-        self.env.query_manager().cancel_queries_in_session(self.id)
+        self.env
+            .query_manager()
+            .cancel_queries_by_ids(&self.ordinary_distributed_query_ids(), "cancelled by user");
+    }
+
+    fn cancel_all_queries(&self) {
+        self.cancel_current_local_query();
+        self.env
+            .query_manager()
+            .cancel_queries_by_ids(&self.all_distributed_query_ids(), "session ended");
     }
 
     pub fn cancel_current_creating_job(&self) {
@@ -1603,7 +1656,12 @@ impl SessionManager for SessionManagerImpl {
         self.connect_inner(database_id, user_name, peer_addr)
     }
 
-    /// Used when cancel request happened.
+    /// Handles cancellation requests for ordinary queries in this session; cursor-owned queries
+    /// are excluded. Portal queries are currently also treated as ordinary queries due to #26999,
+    /// so the distributed path cancels all ordinary queries in the session, not just the current one.
+    ///
+    /// TODO(#26999): Split portal queries out of the ordinary-query group and rename this API to
+    /// reflect cancellation of only the current ordinary query.
     fn cancel_queries_in_session(&self, session_id: SessionId) {
         self.env.cancel_queries_in_session(session_id);
     }
@@ -1617,8 +1675,16 @@ impl SessionManager for SessionManagerImpl {
     }
 
     async fn shutdown(&self) {
-        // Clean up the session map.
-        self.env.sessions_map().write().clear();
+        // Release the session map lock before requesting query cancellation.
+        let sessions = std::mem::take(&mut *self.env.sessions_map().write());
+        self.env.frontend_metrics.active_sessions.set(0);
+        for session in sessions.values() {
+            session.cancel_all_queries();
+            session.get_cursor_manager().initiate_shutdown();
+        }
+        for session in sessions.into_values() {
+            session.get_cursor_manager().shutdown_and_wait().await;
+        }
         // Unregister from the meta service.
         self.env.meta_client().try_unregister().await;
     }
@@ -1653,15 +1719,19 @@ impl SessionManagerImpl {
     }
 
     fn delete_session(&self, session_id: &SessionId) {
-        let active_sessions = {
+        let (session, active_sessions) = {
             let mut write_guard = self.env.sessions_map.write();
-            write_guard.remove(session_id);
-            write_guard.len()
+            let session = write_guard.remove(session_id);
+            (session, write_guard.len())
         };
         self.env
             .frontend_metrics
             .active_sessions
             .set(active_sessions as i64);
+        if let Some(session) = session {
+            session.cancel_all_queries();
+            session.get_cursor_manager().initiate_shutdown();
+        }
     }
 
     fn connect_inner(
@@ -2050,5 +2120,242 @@ pub fn cancel_creating_jobs_in_session(session_id: SessionId, sessions_map: Sess
     } else {
         info!("Current session finished, ignoring cancel creating request");
         false
+    }
+}
+
+#[cfg(test)]
+mod cancellation_tests {
+    use std::time::Duration;
+
+    use futures::StreamExt;
+    use risingwave_common::array::DataChunk;
+    use risingwave_common::error::BoxedError;
+    use tokio::sync::mpsc;
+
+    use super::*;
+    use crate::scheduler::tests::{
+        create_query, running_query_execution_with_query_message_receiver,
+    };
+    use crate::scheduler::{DistributedQueryStream, QueryMessage, SchedulerError};
+    use crate::session::cursor_manager::CursorDataChunkStream;
+
+    fn session_manager_for_test() -> SessionManagerImpl {
+        SessionManagerImpl {
+            env: FrontendEnv::mock(),
+            _join_handles: vec![],
+            _shutdown_senders: vec![],
+            number: AtomicI32::new(0),
+        }
+    }
+
+    fn add_session_for_test(manager: &SessionManagerImpl, id: SessionId) -> Arc<SessionImpl> {
+        let mut session = SessionImpl::mock();
+        session.env = manager.env.clone();
+        session.id = id;
+        let session = Arc::new(session);
+        manager.insert_session(session.clone());
+        session
+    }
+
+    async fn add_pending_query_cursor(
+        session: &SessionImpl,
+    ) -> mpsc::Sender<std::result::Result<DataChunk, BoxedError>> {
+        let (chunk_tx, chunk_rx) = mpsc::channel(1);
+        session
+            .get_cursor_manager()
+            .add_query_cursor(
+                "cursor".to_owned(),
+                CursorDataChunkStream::local_stream_without_executor_for_test(chunk_rx),
+                vec![],
+            )
+            .await
+            .unwrap();
+        chunk_tx
+    }
+
+    async fn register_running_distributed_query_stream(
+        session: &Arc<SessionImpl>,
+        is_cursor_query: bool,
+    ) -> (QueryId, DistributedQueryStream) {
+        let query = create_query().await;
+        let query_id = query.query_id().clone();
+        let (execution, mut control_rx) =
+            running_query_execution_with_query_message_receiver(query);
+        let manager = session.env().query_manager();
+        manager.add_query(query_id.clone(), execution);
+        session.register_distributed_query(query_id.clone(), is_cursor_query);
+        let (chunk_tx, chunk_rx) = mpsc::channel(1);
+        // Simulate the executor reporting cancellation through its result stream.
+        tokio::spawn(async move {
+            if let Some(QueryMessage::CancelQuery(reason)) = control_rx.recv().await {
+                let _ = chunk_tx
+                    .send(Err(SchedulerError::QueryCancelled(reason)))
+                    .await;
+            }
+        });
+        let stream =
+            manager.query_stream_for_test(query_id.clone(), chunk_rx, Arc::downgrade(session));
+        (query_id, stream)
+    }
+
+    async fn assert_cancelled_and_drop(mut stream: DistributedQueryStream, expected_reason: &str) {
+        let error = tokio::time::timeout(Duration::from_secs(1), stream.next())
+            .await
+            .expect("cancellation must reach the result stream")
+            .expect("the stream must report a cancellation error")
+            .expect_err("the cancelled query must not return a data chunk");
+        assert!(matches!(
+            error.downcast_ref::<SchedulerError>(),
+            Some(SchedulerError::QueryCancelled(reason)) if reason == expected_reason
+        ));
+        drop(stream);
+    }
+
+    /// Verifies that `CancelRequest` targets all ordinary distributed queries, while cursor-owned
+    /// and other-session streams remain pending and registered. The fixture simulates executor
+    /// cancellation errors; dropping affected streams removes global and session registrations.
+    /// Also checks the local-query cancellation token, without starting a local executor.
+    #[tokio::test]
+    async fn test_cancel_request_respects_distributed_query_ownership() {
+        let manager = session_manager_for_test();
+        let session = add_session_for_test(&manager, (0, 0));
+        let other_session = add_session_for_test(&manager, (1, 1));
+        let local_shutdown = session.reset_cancel_query_flag();
+        let (ordinary_id, ordinary_stream) =
+            register_running_distributed_query_stream(&session, false).await;
+        // Preserve cancellation of all ordinary queries, including retained portals, for now.
+        let (other_ordinary_id, other_ordinary_stream) =
+            register_running_distributed_query_stream(&session, false).await;
+        let (cursor_id, mut cursor_stream) =
+            register_running_distributed_query_stream(&session, true).await;
+        let (other_session_query_id, mut other_session_stream) =
+            register_running_distributed_query_stream(&other_session, false).await;
+
+        manager.cancel_queries_in_session(session.id());
+
+        assert!(local_shutdown.is_cancelled());
+        for stream in [ordinary_stream, other_ordinary_stream] {
+            assert_cancelled_and_drop(stream, "cancelled by user").await;
+        }
+        for stream in [&mut cursor_stream, &mut other_session_stream] {
+            assert!(
+                tokio::time::timeout(Duration::from_secs(1), stream.next())
+                    .await
+                    .is_err(),
+                "cursor-owned and other-session streams must remain pending"
+            );
+        }
+        assert_eq!(session.all_distributed_query_ids(), vec![cursor_id.clone()]);
+        assert_eq!(
+            other_session.all_distributed_query_ids(),
+            vec![other_session_query_id.clone()]
+        );
+        let queries = manager.env.query_manager();
+        for query_id in [ordinary_id, other_ordinary_id] {
+            assert!(!queries.contains_query_for_test(&query_id));
+        }
+        for query_id in [cursor_id, other_session_query_id] {
+            assert!(queries.contains_query_for_test(&query_id));
+        }
+        manager.shutdown().await;
+    }
+
+    /// Verifies that ending one session targets its ordinary and cursor-owned distributed queries.
+    /// The fixture simulates executor cancellation errors; dropping affected streams removes their
+    /// global and session registrations without affecting another session's distributed query.
+    /// Also checks local-query tokens and executor-free cursor-stream fixtures: only the ended
+    /// session's token is signaled and its registered cursor stream dropped.
+    #[tokio::test]
+    async fn test_end_session_cancels_all_owned_distributed_queries() {
+        let manager = session_manager_for_test();
+        let session = add_session_for_test(&manager, (0, 0));
+        let other_session = add_session_for_test(&manager, (1, 1));
+        let local_shutdown = session.reset_cancel_query_flag();
+        let other_local_shutdown = other_session.reset_cancel_query_flag();
+        let cursor_tx = add_pending_query_cursor(&session).await;
+        let other_cursor_tx = add_pending_query_cursor(&other_session).await;
+        let (ordinary_id, ordinary_stream) =
+            register_running_distributed_query_stream(&session, false).await;
+        let (cursor_id, cursor_stream) =
+            register_running_distributed_query_stream(&session, true).await;
+        let (other_query_id, mut other_stream) =
+            register_running_distributed_query_stream(&other_session, false).await;
+
+        manager.end_session(&session);
+
+        assert!(!manager.env.sessions_map.read().contains_key(&session.id()));
+        assert!(
+            manager
+                .env
+                .sessions_map
+                .read()
+                .contains_key(&other_session.id())
+        );
+        assert!(local_shutdown.is_cancelled());
+        assert!(!other_local_shutdown.is_cancelled());
+        assert!(cursor_tx.is_closed());
+        assert!(!other_cursor_tx.is_closed());
+        for stream in [ordinary_stream, cursor_stream] {
+            assert_cancelled_and_drop(stream, "session ended").await;
+        }
+        assert!(session.all_distributed_query_ids().is_empty());
+        assert!(
+            tokio::time::timeout(Duration::from_secs(1), other_stream.next())
+                .await
+                .is_err(),
+            "ending one session must leave the other session's stream pending"
+        );
+        assert_eq!(
+            other_session.all_distributed_query_ids(),
+            vec![other_query_id.clone()]
+        );
+        let queries = manager.env.query_manager();
+        for query_id in [ordinary_id, cursor_id] {
+            assert!(!queries.contains_query_for_test(&query_id));
+        }
+        assert!(queries.contains_query_for_test(&other_query_id));
+        manager.shutdown().await;
+        assert!(other_cursor_tx.is_closed());
+    }
+
+    /// Verifies that frontend shutdown targets ordinary and cursor-owned distributed queries in
+    /// every session. The fixture simulates executor cancellation errors; dropping their result
+    /// streams removes all global and session registrations. Also checks each session's local-query
+    /// cancellation token and cleanup of executor-free cursor-stream fixtures, without starting
+    /// local executors.
+    #[tokio::test]
+    async fn test_frontend_shutdown_cancels_distributed_queries_in_all_sessions() {
+        let manager = session_manager_for_test();
+        let first = add_session_for_test(&manager, (0, 0));
+        let second = add_session_for_test(&manager, (1, 1));
+        let first_local_shutdown = first.reset_cancel_query_flag();
+        let second_local_shutdown = second.reset_cancel_query_flag();
+        let first_cursor_tx = add_pending_query_cursor(&first).await;
+        let second_cursor_tx = add_pending_query_cursor(&second).await;
+        let queries = [
+            register_running_distributed_query_stream(&first, false).await,
+            register_running_distributed_query_stream(&first, true).await,
+            register_running_distributed_query_stream(&second, false).await,
+            register_running_distributed_query_stream(&second, true).await,
+        ];
+
+        manager.shutdown().await;
+
+        assert!(manager.env.sessions_map.read().is_empty());
+        assert!(first_local_shutdown.is_cancelled());
+        assert!(second_local_shutdown.is_cancelled());
+        assert!(first_cursor_tx.is_closed());
+        assert!(second_cursor_tx.is_closed());
+        for (query_id, stream) in queries {
+            assert_cancelled_and_drop(stream, "session ended").await;
+            assert!(
+                !manager
+                    .env
+                    .query_manager()
+                    .contains_query_for_test(&query_id)
+            );
+        }
+        assert!(first.all_distributed_query_ids().is_empty());
+        assert!(second.all_distributed_query_ids().is_empty());
     }
 }

@@ -14,10 +14,12 @@
 
 use core::mem;
 use core::time::Duration;
+use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::fmt::{Display, Formatter};
 use std::pin::Pin;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::task::{Context, Poll};
 use std::time::Instant;
 
@@ -61,10 +63,6 @@ use crate::utils::Condition;
 use crate::{OptimizerContext, OptimizerContextRef, PgResponseStream, TableCatalog};
 
 /// Cursor-scoped shutdown resources, separate from individual FETCH cancellation.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "wired into cursor execution in the follow-up PR")
-)]
 struct CursorShutdownHandle {
     /// Signals termination of this cursor's execution.
     shutdown_tx: ShutdownSender,
@@ -72,10 +70,6 @@ struct CursorShutdownHandle {
     shutdown_rx: ShutdownToken,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "wired into cursor execution in the follow-up PR")
-)]
 impl CursorShutdownHandle {
     fn new() -> Self {
         let (shutdown_tx, shutdown_rx) = ShutdownToken::new();
@@ -107,10 +101,6 @@ impl Drop for CursorShutdownHandle {
 }
 
 /// A cursor-owned query stream and the resources needed to stop its execution and clean up.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "wired into cursor execution in the follow-up PR")
-)]
 enum CursorQueryStreamInner {
     Local {
         stream: LocalQueryStream,
@@ -126,20 +116,12 @@ enum CursorQueryStreamInner {
 ///
 /// Ownership begins after query scheduling returns a stream. The distributed registration guard
 /// covers cancellation during scheduling, before this wrapper can take ownership.
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "wired into cursor execution in the follow-up PR")
-)]
-pub(crate) struct CursorQueryStream {
+pub struct CursorQueryStream {
     inner: CursorQueryStreamInner,
     /// Whether the underlying stream has reached EOF and no longer needs cancellation.
     finished: bool,
 }
 
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "wired into cursor execution in the follow-up PR")
-)]
 impl CursorQueryStream {
     /// Takes ownership of a local query stream and its executor's shutdown sender.
     pub(crate) fn local(stream: LocalQueryStream, shutdown_tx: ShutdownSender) -> Self {
@@ -204,8 +186,8 @@ impl Drop for CursorQueryStream {
 }
 
 pub enum CursorDataChunkStream {
-    LocalDataChunk(Option<LocalQueryStream>),
-    DistributedDataChunk(Option<DistributedQueryStream>),
+    LocalDataChunk(Option<CursorQueryStream>),
+    DistributedDataChunk(Option<CursorQueryStream>),
     PgResponse(PgResponseStream),
 }
 
@@ -245,24 +227,18 @@ impl CursorDataChunkStream {
     ) {
         let columns_type = fields.iter().map(|f| f.data_type()).collect();
         match self {
-            CursorDataChunkStream::LocalDataChunk(data_chunk) => {
+            CursorDataChunkStream::LocalDataChunk(data_chunk)
+            | CursorDataChunkStream::DistributedDataChunk(data_chunk) => {
                 let data_chunk = mem::take(data_chunk).unwrap();
-                let row_stream = PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
-                    data_chunk,
-                    columns_type,
-                    formats.clone(),
-                    session,
-                ));
-                *self = CursorDataChunkStream::PgResponse(row_stream);
-            }
-            CursorDataChunkStream::DistributedDataChunk(data_chunk) => {
-                let data_chunk = mem::take(data_chunk).unwrap();
-                let row_stream = PgResponseStream::DistributedQuery(DataChunkToRowSetAdapter::new(
-                    data_chunk,
-                    columns_type,
-                    formats.clone(),
-                    session,
-                ));
+                let row_stream = PgResponseStream::Rows(
+                    DataChunkToRowSetAdapter::new(
+                        data_chunk,
+                        columns_type,
+                        formats.clone(),
+                        session,
+                    )
+                    .boxed(),
+                );
                 *self = CursorDataChunkStream::PgResponse(row_stream);
             }
             _ => {}
@@ -284,6 +260,13 @@ pub enum Cursor {
     Query(QueryCursor),
 }
 impl Cursor {
+    fn shutdown_handle(&self) -> &CursorShutdownHandle {
+        match self {
+            Cursor::Subscription(cursor) => &cursor.shutdown_handle,
+            Cursor::Query(cursor) => &cursor.shutdown_handle,
+        }
+    }
+
     pub async fn next(
         &mut self,
         count: u32,
@@ -314,6 +297,7 @@ impl Cursor {
 }
 
 pub struct QueryCursor {
+    shutdown_handle: CursorShutdownHandle,
     chunk_stream: CursorDataChunkStream,
     fields: Vec<Field>,
     remaining_rows: VecDeque<Row>,
@@ -322,6 +306,7 @@ pub struct QueryCursor {
 impl QueryCursor {
     pub fn new(chunk_stream: CursorDataChunkStream, fields: Vec<Field>) -> Result<Self> {
         Ok(Self {
+            shutdown_handle: CursorShutdownHandle::new(),
             chunk_stream,
             fields,
             remaining_rows: VecDeque::<Row>::new(),
@@ -554,6 +539,7 @@ impl FieldsManager {
 }
 
 pub struct SubscriptionCursor {
+    shutdown_handle: CursorShutdownHandle,
     cursor_name: String,
     subscription: Arc<SubscriptionCatalog>,
     dependent_table_id: TableId,
@@ -634,6 +620,7 @@ impl SubscriptionCursor {
         let cursor_need_drop_time =
             Instant::now() + Duration::from_secs(subscription.retention_seconds);
         Ok(Self {
+            shutdown_handle: CursorShutdownHandle::new(),
             cursor_name,
             subscription,
             dependent_table_id,
@@ -1235,9 +1222,81 @@ impl SubscriptionCursor {
 pub struct CursorManager {
     cursor_map: tokio::sync::Mutex<HashMap<String, Cursor>>,
     /// Sender clones accessible without the cursor map lock held by FETCH.
-    #[expect(dead_code, reason = "wired into cursor management in the follow-up PR")]
     cursor_shutdown_sender_map: Mutex<HashMap<String, ShutdownSender>>,
+    shutting_down: AtomicBool,
     cursor_metrics: Arc<CursorMetrics>,
+}
+
+impl CursorManager {
+    fn register_cursor_shutdown_sender(
+        &self,
+        cursor_name: String,
+        sender: ShutdownSender,
+    ) -> Result<()> {
+        let mut senders = self.cursor_shutdown_sender_map.lock();
+        if self.shutting_down.load(Ordering::Acquire) {
+            drop(senders);
+            sender.cancel();
+            return Err(SchedulerError::QueryCancelled("session ended".to_owned()).into());
+        }
+        senders.try_insert(cursor_name, sender).map_err(|error| {
+            ErrorCode::CatalogError(format!("cursor `{}` already exists", error.entry.key()).into())
+        })?;
+        Ok(())
+    }
+
+    fn insert_cursor(
+        &self,
+        cursor_map: &mut HashMap<String, Cursor>,
+        cursor_name: String,
+        cursor: Cursor,
+    ) -> Result<()> {
+        match cursor_map.entry(cursor_name) {
+            Entry::Occupied(entry) => Err(ErrorCode::CatalogError(
+                format!("cursor `{}` already exists", entry.key()).into(),
+            )
+            .into()),
+            Entry::Vacant(entry) => {
+                self.register_cursor_shutdown_sender(
+                    entry.key().clone(),
+                    cursor.shutdown_handle().shutdown_sender(),
+                )?;
+                entry.insert(cursor);
+                Ok(())
+            }
+        }
+    }
+
+    fn signal_shutdown(&self) {
+        let senders = {
+            // Serialize registration with terminal shutdown so no sender misses the signal.
+            let mut senders = self.cursor_shutdown_sender_map.lock();
+            self.shutting_down.store(true, Ordering::Release);
+            mem::take(&mut *senders)
+        };
+        for sender in senders.into_values() {
+            sender.cancel();
+        }
+    }
+
+    /// Signals shutdown immediately and schedules cleanup if the cursor map is busy.
+    pub(crate) fn initiate_shutdown(self: &Arc<Self>) {
+        self.signal_shutdown();
+        if let Ok(mut cursor_map) = self.cursor_map.try_lock() {
+            cursor_map.clear();
+            return;
+        }
+        let manager = self.clone();
+        tokio::spawn(async move {
+            manager.cursor_map.lock().await.clear();
+        });
+    }
+
+    /// Signals shutdown and waits until every cursor in the map has been dropped.
+    pub(crate) async fn shutdown_and_wait(&self) {
+        self.signal_shutdown();
+        self.cursor_map.lock().await.clear();
+    }
 }
 
 impl CursorManager {
@@ -1245,6 +1304,7 @@ impl CursorManager {
         Self {
             cursor_map: tokio::sync::Mutex::new(HashMap::new()),
             cursor_shutdown_sender_map: Mutex::new(HashMap::new()),
+            shutting_down: AtomicBool::new(false),
             cursor_metrics,
         }
     }
@@ -1274,24 +1334,22 @@ impl CursorManager {
             .with_label_values(&[&subscription_name])
             .observe(create_cursor_timer.elapsed().as_millis() as _);
 
-        cursor_map.retain(|_, v| {
+        cursor_map.retain(|name, v| {
             if let Cursor::Subscription(cursor) = v
                 && matches!(cursor.state, State::Invalid)
             {
+                self.cursor_shutdown_sender_map.lock().remove(name);
                 false
             } else {
                 true
             }
         });
 
-        cursor_map
-            .try_insert(cursor.cursor_name.clone(), Cursor::Subscription(cursor))
-            .map_err(|error| {
-                ErrorCode::CatalogError(
-                    format!("cursor `{}` already exists", error.entry.key()).into(),
-                )
-            })?;
-        Ok(())
+        self.insert_cursor(
+            &mut cursor_map,
+            cursor.cursor_name.clone(),
+            Cursor::Subscription(cursor),
+        )
     }
 
     pub async fn add_query_cursor(
@@ -1301,39 +1359,34 @@ impl CursorManager {
         fields: Vec<Field>,
     ) -> Result<()> {
         let cursor = QueryCursor::new(chunk_stream, fields)?;
-        self.cursor_map
-            .lock()
-            .await
-            .try_insert(cursor_name, Cursor::Query(cursor))
-            .map_err(|error| {
-                ErrorCode::CatalogError(
-                    format!("cursor `{}` already exists", error.entry.key()).into(),
-                )
-            })?;
-
-        Ok(())
+        let mut cursor_map = self.cursor_map.lock().await;
+        self.insert_cursor(&mut cursor_map, cursor_name, Cursor::Query(cursor))
     }
 
     pub async fn remove_cursor(&self, cursor_name: &str) -> Result<()> {
-        self.cursor_map
-            .lock()
-            .await
-            .remove(cursor_name)
-            .ok_or_else(|| {
-                ErrorCode::CatalogError(format!("cursor `{}` don't exists", cursor_name).into())
-            })?;
+        let mut cursor_map = self.cursor_map.lock().await;
+        cursor_map.remove(cursor_name).ok_or_else(|| {
+            ErrorCode::CatalogError(format!("cursor `{}` don't exists", cursor_name).into())
+        })?;
+        self.cursor_shutdown_sender_map.lock().remove(cursor_name);
         Ok(())
     }
 
     pub async fn remove_all_cursor(&self) {
-        self.cursor_map.lock().await.clear();
+        let mut cursor_map = self.cursor_map.lock().await;
+        cursor_map.clear();
+        self.cursor_shutdown_sender_map.lock().clear();
     }
 
     pub async fn remove_all_query_cursor(&self) {
-        self.cursor_map
-            .lock()
-            .await
-            .retain(|_, v| matches!(v, Cursor::Subscription(_)));
+        self.cursor_map.lock().await.retain(|name, cursor| {
+            if matches!(cursor, Cursor::Subscription(_)) {
+                true
+            } else {
+                self.cursor_shutdown_sender_map.lock().remove(name);
+                false
+            }
+        });
     }
 
     pub async fn get_rows_with_cursor(
@@ -1346,9 +1399,15 @@ impl CursorManager {
         cancel_handle: &mut FetchCursorCancelHandle,
     ) -> Result<(Vec<Row>, Vec<PgFieldDescriptor>)> {
         if let Some(cursor) = self.cursor_map.lock().await.get_mut(cursor_name) {
-            cursor
-                .next(count, handler_args, formats, timeout_seconds, cancel_handle)
-                .await
+            let mut shutdown_rx = cursor.shutdown_handle().shutdown_token();
+            // Dropping FETCH's future is safe for terminal shutdown because the cursor is discarded.
+            tokio::select! {
+                biased;
+                _ = shutdown_rx.cancelled() => {
+                    Err(SchedulerError::QueryCancelled("cursor closed".to_owned()).into())
+                }
+                result = cursor.next(count, handler_args, formats, timeout_seconds, cancel_handle) => result,
+            }
         } else {
             Err(ErrorCode::InternalError(format!("Cannot find cursor `{}`", cursor_name)).into())
         }
@@ -1430,31 +1489,385 @@ impl CursorManager {
 
 #[cfg(test)]
 mod cursor_lifecycle_tests {
-    use std::time::Duration;
+    use std::collections::VecDeque;
+    use std::sync::Arc;
+    use std::time::{Duration, Instant};
 
     use futures::StreamExt;
     use risingwave_batch::task::ShutdownToken;
     use risingwave_common::array::{DataChunk, DataChunkTestExt};
+    use risingwave_common::catalog::TableId;
+    use risingwave_common::error::BoxedError;
+    use risingwave_sqlparser::parser::Parser;
     use tokio::sync::mpsc;
     use tokio_stream::wrappers::ReceiverStream;
 
-    use super::{CursorQueryStream, CursorShutdownHandle};
+    use super::{
+        Cursor, CursorDataChunkStream, CursorManager, CursorQueryStream, CursorShutdownHandle,
+        FetchCursorCancelHandle, FieldsManager, State, SubscriptionCursor,
+    };
+    use crate::TableCatalog;
+    use crate::catalog::subscription_catalog::SubscriptionCatalog;
+    use crate::handler::HandlerArgs;
+    use crate::monitor::CursorMetrics;
     use crate::scheduler::QueryMessage;
-    use crate::scheduler::tests::{create_query, running_query_execution_with_control_receiver};
+    use crate::scheduler::tests::{
+        create_query, running_query_execution_with_query_message_receiver,
+    };
     use crate::session::SessionImpl;
 
-    /// Verifies that dropping a local cursor query stream before EOF signals its shutdown token.
+    impl CursorDataChunkStream {
+        /// Creates a local cursor stream backed by `chunk_rx`, without a real executor.
+        /// The shutdown pair only satisfies the wrapper's constructor: the receiver is unused,
+        /// and the sender has no executor to cancel.
+        pub(crate) fn local_stream_without_executor_for_test(
+            chunk_rx: mpsc::Receiver<Result<DataChunk, BoxedError>>,
+        ) -> Self {
+            let (shutdown_tx, _shutdown_rx) = ShutdownToken::new();
+            Self::LocalDataChunk(Some(CursorQueryStream::local(
+                ReceiverStream::new(chunk_rx),
+                shutdown_tx,
+            )))
+        }
+    }
+
+    async fn add_pending_query_cursor(
+        manager: &CursorManager,
+        name: &str,
+    ) -> (ShutdownToken, mpsc::Sender<Result<DataChunk, BoxedError>>) {
+        let (chunk_tx, chunk_rx) = mpsc::channel(1);
+        manager
+            .add_query_cursor(
+                name.to_owned(),
+                CursorDataChunkStream::local_stream_without_executor_for_test(chunk_rx),
+                vec![],
+            )
+            .await
+            .unwrap();
+        let token = manager
+            .cursor_map
+            .lock()
+            .await
+            .get(name)
+            .unwrap()
+            .shutdown_handle()
+            .shutdown_token();
+        (token, chunk_tx)
+    }
+
+    /// Creates a subscription cursor with a test-controlled pending stream for lifecycle tests.
+    /// `add_subscription_cursor` does not accept an injected stream: it looks up the catalog and
+    /// may start a snapshot query. Constructing `State::Fetch` directly avoids that setup while
+    /// `insert_cursor` still exercises normal cursor and shutdown-sender registration.
+    async fn add_pending_subscription_cursor(
+        manager: &CursorManager,
+        name: &str,
+    ) -> (ShutdownToken, mpsc::Sender<Result<DataChunk, BoxedError>>) {
+        let (chunk_tx, chunk_rx) = mpsc::channel(1);
+        let cursor = SubscriptionCursor {
+            shutdown_handle: CursorShutdownHandle::new(),
+            cursor_name: name.to_owned(),
+            subscription: Arc::new(SubscriptionCatalog {
+                name: name.to_owned(),
+                retention_seconds: 60,
+                ..Default::default()
+            }),
+            dependent_table_id: TableId::new(1),
+            cursor_need_drop_time: Instant::now() + Duration::from_secs(60),
+            state: State::Fetch {
+                from_snapshot: true,
+                rw_timestamp: 0,
+                chunk_stream: CursorDataChunkStream::local_stream_without_executor_for_test(
+                    chunk_rx,
+                ),
+                remaining_rows: VecDeque::new(),
+                expected_timestamp: None,
+                init_query_timer: Instant::now(),
+            },
+            fields_manager: FieldsManager::new(&TableCatalog::default()),
+            cursor_metrics: manager.cursor_metrics.clone(),
+            last_fetch: Instant::now(),
+            seek_pk_row: None,
+        };
+        let token = cursor.shutdown_handle.shutdown_token();
+        let mut cursor_map = manager.cursor_map.lock().await;
+        manager
+            .insert_cursor(
+                &mut cursor_map,
+                name.to_owned(),
+                Cursor::Subscription(cursor),
+            )
+            .unwrap();
+        (token, chunk_tx)
+    }
+
+    /// Verifies that initiating shutdown signals all registered cursors and drops their streams
+    /// before returning when the cursor map is unlocked.
     #[tokio::test]
-    async fn test_dropping_unfinished_local_cursor_query_signals_shutdown() {
-        let (shutdown_tx, shutdown_rx) = ShutdownToken::new();
-        let (_chunk_tx, chunk_rx) = mpsc::channel(1);
-        let mut stream = CursorQueryStream::local(ReceiverStream::new(chunk_rx), shutdown_tx);
-        assert!(futures::poll!(stream.next()).is_pending());
-        assert!(!shutdown_rx.is_cancelled());
+    async fn test_cursor_shutdown_with_unlocked_map() {
+        let manager = Arc::new(CursorManager::new(Arc::new(CursorMetrics::for_test())));
+        let (first, first_tx) = add_pending_query_cursor(&manager, "first").await;
+        let (second, second_tx) = add_pending_query_cursor(&manager, "second").await;
 
-        drop(stream);
+        manager.initiate_shutdown();
 
-        assert!(shutdown_rx.is_cancelled());
+        assert!(first.is_cancelled());
+        assert!(second.is_cancelled());
+        assert!(first_tx.is_closed());
+        assert!(second_tx.is_closed());
+    }
+
+    /// Verifies that initiating shutdown signals all registered cursors without waiting for the
+    /// locked cursor map, then drops their streams in the background after the lock is released.
+    #[tokio::test]
+    async fn test_cursor_shutdown_with_locked_map() {
+        let manager = Arc::new(CursorManager::new(Arc::new(CursorMetrics::for_test())));
+        let (first, first_tx) = add_pending_query_cursor(&manager, "first").await;
+        let (second, second_tx) = add_pending_query_cursor(&manager, "second").await;
+        let cursor_map = manager.cursor_map.lock().await;
+
+        manager.initiate_shutdown();
+
+        assert!(first.is_cancelled());
+        assert!(second.is_cancelled());
+        assert!(!first_tx.is_closed());
+        assert!(!second_tx.is_closed());
+        drop(cursor_map);
+        tokio::time::timeout(Duration::from_secs(1), async {
+            first_tx.closed().await;
+            second_tx.closed().await;
+        })
+        .await
+        .expect("background cleanup must drop both cursor streams after the lock is released");
+    }
+
+    /// Verifies that awaited shutdown signals the cursor before waiting for its map lock, rejects
+    /// and signals late registrations while cleanup is blocked, and returns after stream drop.
+    #[tokio::test]
+    async fn test_cursor_shutdown_and_wait_blocks_until_streams_are_dropped() {
+        let manager = Arc::new(CursorManager::new(Arc::new(CursorMetrics::for_test())));
+        let (handle, chunk_tx) = add_pending_query_cursor(&manager, "cursor").await;
+        let cursor_map = manager.cursor_map.lock().await;
+        let mut shutdown = Box::pin(manager.shutdown_and_wait());
+
+        assert!(futures::poll!(shutdown.as_mut()).is_pending());
+        assert!(handle.is_cancelled());
+        assert!(!chunk_tx.is_closed());
+        let late = CursorShutdownHandle::new();
+        assert!(
+            manager
+                .register_cursor_shutdown_sender("late".to_owned(), late.shutdown_sender())
+                .is_err()
+        );
+        assert!(late.shutdown_token().is_cancelled());
+
+        drop(cursor_map);
+        shutdown.await;
+
+        assert!(chunk_tx.is_closed());
+    }
+
+    /// Verifies that shutdown interrupts pending query and subscription cursors' FETCH futures,
+    /// allowing both shutdown methods to acquire the cursor-map lock and drop their result streams.
+    #[tokio::test]
+    async fn test_cursor_shutdown_interrupts_pending_fetch() {
+        for is_subscription in [false, true] {
+            for wait_for_cleanup in [false, true] {
+                let session = Arc::new(SessionImpl::mock());
+                let manager = session.get_cursor_manager();
+                let (token, chunk_tx) = if is_subscription {
+                    add_pending_subscription_cursor(&manager, "c").await
+                } else {
+                    add_pending_query_cursor(&manager, "c").await
+                };
+                let sql = "FETCH 1 FROM c";
+                let stmt = Parser::parse_sql(sql).unwrap().pop().unwrap();
+                let args = HandlerArgs::new(session, &stmt, sql.into()).unwrap();
+                let formats = vec![];
+                let mut cancel_handle = FetchCursorCancelHandle::new();
+                let mut fetch = Box::pin(manager.get_rows_with_cursor(
+                    "c",
+                    1,
+                    args,
+                    &formats,
+                    None,
+                    &mut cancel_handle,
+                ));
+                assert!(futures::poll!(fetch.as_mut()).is_pending());
+                assert!(manager.cursor_map.try_lock().is_err());
+
+                let result = if wait_for_cleanup {
+                    let mut shutdown = Box::pin(manager.shutdown_and_wait());
+                    assert!(futures::poll!(shutdown.as_mut()).is_pending());
+                    tokio::time::timeout(Duration::from_secs(1), async {
+                        let (result, ()) = tokio::join!(fetch, shutdown);
+                        result
+                    })
+                    .await
+                    .expect("FETCH must release the lock so awaited shutdown can finish")
+                } else {
+                    manager.initiate_shutdown();
+                    tokio::time::timeout(Duration::from_secs(1), fetch)
+                        .await
+                        .expect("initiated shutdown must interrupt FETCH")
+                };
+
+                assert!(result.unwrap_err().to_string().contains("cursor closed"));
+                assert!(token.is_cancelled());
+                tokio::time::timeout(Duration::from_secs(1), chunk_tx.closed())
+                    .await
+                    .expect("shutdown must drop the cursor stream after FETCH releases the lock");
+            }
+        }
+    }
+
+    /// Verifies that a cursor creation already waiting for the map lock is rejected after terminal
+    /// shutdown begins, and its unregistered result stream is dropped.
+    #[tokio::test]
+    async fn test_cursor_shutdown_rejects_creation_waiting_for_map() {
+        let manager = Arc::new(CursorManager::new(Arc::new(CursorMetrics::for_test())));
+        let cursor_map = manager.cursor_map.lock().await;
+        let (chunk_tx, chunk_rx) = mpsc::channel(1);
+        let mut adding = Box::pin(manager.add_query_cursor(
+            "late".to_owned(),
+            CursorDataChunkStream::local_stream_without_executor_for_test(chunk_rx),
+            vec![],
+        ));
+        assert!(futures::poll!(adding.as_mut()).is_pending());
+
+        manager.initiate_shutdown();
+        drop(cursor_map);
+
+        let error = tokio::time::timeout(Duration::from_secs(1), adding)
+            .await
+            .expect("cursor creation must finish after the lock is released")
+            .unwrap_err();
+        assert!(error.to_string().contains("session ended"));
+        assert!(chunk_tx.is_closed());
+        manager.shutdown_and_wait().await;
+        assert!(manager.cursor_map.lock().await.is_empty());
+        assert!(manager.cursor_shutdown_sender_map.lock().is_empty());
+    }
+
+    /// Verifies that declaring a duplicate name fails and drops the new cursor's stream without
+    /// signaling the existing cursor or dropping its stream.
+    #[tokio::test]
+    async fn test_duplicate_cursor_name_rejects_new_cursor_and_preserves_existing_cursor() {
+        let manager = Arc::new(CursorManager::new(Arc::new(CursorMetrics::for_test())));
+        let (query, query_tx) = add_pending_query_cursor(&manager, "query").await;
+        let (duplicate_tx, duplicate_rx) = mpsc::channel(1);
+
+        assert!(
+            manager
+                .add_query_cursor(
+                    "query".to_owned(),
+                    CursorDataChunkStream::local_stream_without_executor_for_test(duplicate_rx),
+                    vec![],
+                )
+                .await
+                .is_err()
+        );
+
+        assert!(duplicate_tx.is_closed());
+        assert!(!query.is_cancelled());
+        assert!(!query_tx.is_closed());
+    }
+
+    /// Verifies that shutting down one cursor via CLOSE signals it and drops its stream, leaves
+    /// another cursor untouched, and permits a new live cursor to reuse the closed cursor's name.
+    #[tokio::test]
+    async fn test_cursor_shutdown_preserves_other_cursor_and_allows_name_reuse() {
+        let manager = Arc::new(CursorManager::new(Arc::new(CursorMetrics::for_test())));
+        let (query, query_tx) = add_pending_query_cursor(&manager, "query").await;
+        let (subscription, subscription_tx) =
+            add_pending_subscription_cursor(&manager, "subscription").await;
+
+        manager.remove_cursor("query").await.unwrap();
+
+        assert!(query.is_cancelled());
+        assert!(query_tx.is_closed());
+        assert!(!subscription.is_cancelled());
+        assert!(!subscription_tx.is_closed());
+        let (replacement, replacement_tx) = add_pending_query_cursor(&manager, "query").await;
+        assert!(!replacement.is_cancelled());
+        assert!(!replacement_tx.is_closed());
+    }
+
+    /// Verifies that query-only cleanup signals query cursors and drops their streams while
+    /// leaving subscription cursors unsignalled with their streams still open.
+    #[tokio::test]
+    async fn test_all_query_cursors_shutdown_preserves_subscription_cursors() {
+        let manager = Arc::new(CursorManager::new(Arc::new(CursorMetrics::for_test())));
+        let (query, query_tx) = add_pending_query_cursor(&manager, "query").await;
+        let (subscription, subscription_tx) =
+            add_pending_subscription_cursor(&manager, "subscription").await;
+
+        manager.remove_all_query_cursor().await;
+
+        assert!(query.is_cancelled());
+        assert!(query_tx.is_closed());
+        assert!(!subscription.is_cancelled());
+        assert!(!subscription_tx.is_closed());
+    }
+
+    /// Verifies that CLOSE ALL signals both cursor types and drops their streams without ending
+    /// the manager's lifetime: new live cursors can be declared using both removed names.
+    #[tokio::test]
+    async fn test_all_cursors_shutdown_allows_new_declarations() {
+        let manager = Arc::new(CursorManager::new(Arc::new(CursorMetrics::for_test())));
+        let (query, query_tx) = add_pending_query_cursor(&manager, "query").await;
+        let (subscription, subscription_tx) =
+            add_pending_subscription_cursor(&manager, "subscription").await;
+
+        manager.remove_all_cursor().await;
+
+        assert!(query.is_cancelled());
+        assert!(query_tx.is_closed());
+        assert!(subscription.is_cancelled());
+        assert!(subscription_tx.is_closed());
+        let (new_query, new_query_tx) = add_pending_query_cursor(&manager, "query").await;
+        let (new_subscription, new_subscription_tx) =
+            add_pending_subscription_cursor(&manager, "subscription").await;
+        assert!(!new_query.is_cancelled());
+        assert!(!new_query_tx.is_closed());
+        assert!(!new_subscription.is_cancelled());
+        assert!(!new_subscription_tx.is_closed());
+    }
+
+    /// Verifies that unfinished local cursor shutdown via CLOSE signals its executor token and drops
+    /// its output stream without signaling the ordinary local query. A query cursor converts its
+    /// chunk stream to a row stream only when the first FETCH is invoked, so shutdown must work
+    /// with either representation.
+    #[tokio::test]
+    async fn test_local_cursor_shutdown_preserves_ordinary_query() {
+        // Simulate shutdown before the first FETCH (false) or after it initializes the row stream
+        // (true), without executing FETCH itself.
+        for initialize_rows in [false, true] {
+            let session = Arc::new(SessionImpl::mock());
+            let ordinary_shutdown = session.reset_cancel_query_flag();
+            let (shutdown_tx, shutdown_rx) = ShutdownToken::new();
+            let (chunk_tx, chunk_rx) = mpsc::channel(1);
+            let mut stream = CursorQueryStream::local(ReceiverStream::new(chunk_rx), shutdown_tx);
+            assert!(futures::poll!(stream.next()).is_pending());
+            let mut stream = CursorDataChunkStream::LocalDataChunk(Some(stream));
+            if initialize_rows {
+                stream.init_row_stream(&vec![], &vec![], session.clone());
+            }
+            let manager = session.get_cursor_manager();
+            manager
+                .add_query_cursor("cursor".to_owned(), stream, vec![])
+                .await
+                .unwrap();
+
+            assert!(!shutdown_rx.is_cancelled());
+            manager.remove_cursor("cursor").await.unwrap();
+
+            assert!(shutdown_rx.is_cancelled());
+            assert!(chunk_tx.is_closed());
+            assert!(!ordinary_shutdown.is_cancelled());
+            session.cancel_current_query();
+            assert!(ordinary_shutdown.is_cancelled());
+        }
     }
 
     /// Verifies that a local cursor query stream forwards chunks and does not request
@@ -1475,61 +1888,89 @@ mod cursor_lifecycle_tests {
         assert!(!shutdown_rx.is_cancelled());
     }
 
-    /// Verifies that dropping an unfinished distributed cursor query cancels only its query ID,
-    /// even when another query belongs to the same session, and removes its stream registration.
+    /// Verifies that unfinished distributed cursor shutdown via CLOSE requests cancellation and
+    /// removes its global and session registrations. Another registered query remains owned and
+    /// receives no cancellation request. A query cursor converts its chunk stream to a row stream
+    /// only when the first FETCH is invoked, so shutdown must work with either representation.
     #[tokio::test]
-    async fn test_dropping_unfinished_distributed_cursor_query_cancels_only_owned_query() {
-        let manager = SessionImpl::mock().env().query_manager().clone();
-        let query = create_query().await;
-        let query_id = query.query_id().clone();
-        let (execution, mut control_rx) =
-            running_query_execution_with_control_receiver(query, (0, 0));
-        manager.add_query(query_id.clone(), execution);
-        let other_query = create_query().await;
-        let other_id = other_query.query_id().clone();
-        let (other_execution, mut other_control_rx) =
-            running_query_execution_with_control_receiver(other_query, (0, 0));
-        manager.add_query(other_id.clone(), other_execution);
-        let (_chunk_tx, chunk_rx) = mpsc::channel(1);
-        let mut stream = CursorQueryStream::distributed(
-            manager.query_stream_for_test(query_id.clone(), chunk_rx),
-            manager.clone(),
-        );
-        assert!(futures::poll!(stream.next()).is_pending());
-
-        drop(stream);
-
-        let message = tokio::time::timeout(Duration::from_secs(1), control_rx.recv())
-            .await
-            .expect("dropping the stream must request query cancellation")
-            .expect("query cancellation message must arrive");
-        assert!(matches!(message, QueryMessage::CancelQuery(reason) if reason == "cursor closed"));
-        assert!(!manager.contains_query_for_test(&query_id));
-        assert!(manager.contains_query_for_test(&other_id));
-        assert!(
-            tokio::time::timeout(Duration::from_secs(1), other_control_rx.recv())
+    async fn test_distributed_cursor_shutdown_cancels_only_owned_query() {
+        // Simulate shutdown before the first FETCH (false) or after it initializes the row stream
+        // (true), without executing FETCH itself.
+        for initialize_rows in [false, true] {
+            let session = Arc::new(SessionImpl::mock());
+            let manager = session.env().query_manager().clone();
+            let query = create_query().await;
+            let query_id = query.query_id().clone();
+            let (execution, mut control_rx) =
+                running_query_execution_with_query_message_receiver(query);
+            manager.add_query(query_id.clone(), execution);
+            session.register_distributed_query(query_id.clone(), true);
+            let other_query = create_query().await;
+            let other_id = other_query.query_id().clone();
+            let (other_execution, mut other_control_rx) =
+                running_query_execution_with_query_message_receiver(other_query);
+            manager.add_query(other_id.clone(), other_execution);
+            session.register_distributed_query(other_id.clone(), false);
+            let (_chunk_tx, chunk_rx) = mpsc::channel(1);
+            let mut stream = CursorQueryStream::distributed(
+                manager.query_stream_for_test(query_id.clone(), chunk_rx, Arc::downgrade(&session)),
+                manager.clone(),
+            );
+            assert!(futures::poll!(stream.next()).is_pending());
+            let mut chunk_stream = CursorDataChunkStream::DistributedDataChunk(Some(stream));
+            if initialize_rows {
+                chunk_stream.init_row_stream(&vec![], &vec![], session.clone());
+                assert!(futures::poll!(std::pin::pin!(chunk_stream.next())).is_pending());
+            }
+            let cursors = session.get_cursor_manager();
+            cursors
+                .add_query_cursor("cursor".to_owned(), chunk_stream, vec![])
                 .await
-                .is_err(),
-            "dropping one cursor stream must not cancel another query in the same session"
-        );
+                .unwrap();
+
+            cursors.remove_cursor("cursor").await.unwrap();
+
+            let message = tokio::time::timeout(Duration::from_secs(1), control_rx.recv())
+                .await
+                .expect("closing the cursor must request query cancellation")
+                .expect("query cancellation message must arrive");
+            assert!(
+                matches!(message, QueryMessage::CancelQuery(reason) if reason == "cursor closed")
+            );
+            assert!(!manager.contains_query_for_test(&query_id));
+            assert_eq!(session.all_distributed_query_ids(), vec![other_id.clone()]);
+            assert_eq!(
+                session.ordinary_distributed_query_ids(),
+                vec![other_id.clone()]
+            );
+            assert!(manager.contains_query_for_test(&other_id));
+            assert!(
+                tokio::time::timeout(Duration::from_secs(1), other_control_rx.recv())
+                    .await
+                    .is_err(),
+                "closing one cursor must not cancel another registered query"
+            );
+        }
     }
 
-    /// Verifies that a distributed cursor query stream forwards chunks and releases its
-    /// registration without cancellation when dropped after EOF.
+    /// Verifies that a distributed cursor query stream forwards chunks and releases its global
+    /// and session registrations without cancellation when dropped after EOF.
     #[tokio::test]
-    async fn test_completed_distributed_cursor_query_does_not_cancel_execution() {
-        let manager = SessionImpl::mock().env().query_manager().clone();
+    async fn test_completed_distributed_cursor_query_does_not_request_query_cancellation() {
+        let session = Arc::new(SessionImpl::mock());
+        let manager = session.env().query_manager().clone();
         let query = create_query().await;
         let query_id = query.query_id().clone();
         let (execution, mut control_rx) =
-            running_query_execution_with_control_receiver(query, (0, 0));
+            running_query_execution_with_query_message_receiver(query);
         manager.add_query(query_id.clone(), execution.clone());
+        session.register_distributed_query(query_id.clone(), true);
         let (chunk_tx, chunk_rx) = mpsc::channel(1);
         let chunk = DataChunk::from_pretty("i\n1\n2");
         chunk_tx.try_send(Ok(chunk.clone())).unwrap();
         drop(chunk_tx);
         let mut stream = CursorQueryStream::distributed(
-            manager.query_stream_for_test(query_id.clone(), chunk_rx),
+            manager.query_stream_for_test(query_id.clone(), chunk_rx, Arc::downgrade(&session)),
             manager.clone(),
         );
 
@@ -1538,6 +1979,7 @@ mod cursor_lifecycle_tests {
         drop(stream);
 
         assert!(!manager.contains_query_for_test(&query_id));
+        assert!(session.all_distributed_query_ids().is_empty());
         assert!(
             tokio::time::timeout(Duration::from_secs(1), control_rx.recv())
                 .await

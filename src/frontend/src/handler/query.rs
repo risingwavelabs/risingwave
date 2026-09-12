@@ -20,6 +20,7 @@ use itertools::Itertools;
 use pgwire::pg_field_descriptor::PgFieldDescriptor;
 use pgwire::pg_response::{PgResponse, StatementType};
 use pgwire::types::Format;
+use risingwave_batch::task::ShutdownToken;
 use risingwave_batch::worker_manager::worker_node_manager::WorkerNodeSelector;
 use risingwave_common::bail_not_implemented;
 use risingwave_common::catalog::{FunctionId, Schema, SecretId};
@@ -513,7 +514,7 @@ pub async fn create_stream(
     let row_stream = match query_mode {
         QueryMode::Auto => unreachable!(),
         QueryMode::Local => PgResponseStream::LocalQuery(DataChunkToRowSetAdapter::new(
-            local_execute(session.clone(), query, can_timeout_cancel).await?,
+            local_execute(session.clone(), query, can_timeout_cancel, None).await?,
             column_types,
             formats,
             session.clone(),
@@ -521,7 +522,7 @@ pub async fn create_stream(
         // Local mode do not support cancel tasks.
         QueryMode::Distributed => {
             PgResponseStream::DistributedQuery(DataChunkToRowSetAdapter::new(
-                distribute_execute(session.clone(), query, can_timeout_cancel).await?,
+                distribute_execute(session.clone(), query, can_timeout_cancel, false).await?,
                 column_types,
                 formats,
                 session.clone(),
@@ -601,6 +602,7 @@ pub async fn distribute_execute(
     session: Arc<SessionImpl>,
     query: Query,
     can_timeout_cancel: bool,
+    is_cursor_query: bool,
 ) -> Result<DistributedQueryStream> {
     let timeout = if cfg!(madsim) {
         None
@@ -614,7 +616,7 @@ pub async fn distribute_execute(
     let query_manager = session.env().query_manager().clone();
 
     query_manager
-        .schedule(execution_context, query)
+        .schedule(execution_context, query, is_cursor_query)
         .await
         .map_err(|err| err.into())
 }
@@ -623,6 +625,7 @@ pub async fn local_execute(
     session: Arc<SessionImpl>,
     mut query: Query,
     can_timeout_cancel: bool,
+    shutdown_rx: Option<ShutdownToken>,
 ) -> Result<LocalQueryStream> {
     let timeout = if cfg!(madsim) {
         None
@@ -643,6 +646,7 @@ pub async fn local_execute(
         snapshot.support_barrier_read(),
         session,
         timeout,
+        shutdown_rx,
     );
 
     Ok(execution.stream_rows())
