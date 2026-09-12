@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use futures::future::{Either as FutureEither, select};
+use futures::future::{Either as FutureEither, pending, select};
 use futures::{StreamExt, TryStreamExt, pin_mut};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
@@ -26,7 +26,8 @@ use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{Datum, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::sort_util::cmp_datum_iter;
-use risingwave_common_rate_limit::RateLimit;
+use risingwave_common_rate_limit::{MonitoredRateLimiter, RateLimit, RateLimiter};
+use risingwave_pb::common::ThrottleType;
 use risingwave_storage::StateStore;
 use risingwave_storage::store::PrefetchOptions;
 
@@ -188,6 +189,8 @@ pub struct LocalityProviderExecutor<S: StateStore> {
 
     /// Chunk size for output
     chunk_size: usize,
+
+    rate_limiter: MonitoredRateLimiter,
 }
 
 impl<S: StateStore> LocalityProviderExecutor<S> {
@@ -202,7 +205,9 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
         metrics: Arc<StreamingMetrics>,
         chunk_size: usize,
         fragment_id: FragmentId,
+        rate_limit: RateLimit,
     ) -> Self {
+        let rate_limiter = RateLimiter::new(rate_limit).monitored(state_table.table_id());
         Self {
             upstream,
             locality_columns,
@@ -214,14 +219,42 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
             metrics,
             chunk_size,
             fragment_id,
+            rate_limiter,
         }
+    }
+
+    /// Returns the new rate limit if it changed.
+    fn apply_throttle(
+        rate_limiter: &MonitoredRateLimiter,
+        fragment_id: FragmentId,
+        barrier: &Barrier,
+    ) -> Option<RateLimit> {
+        let Some(Mutation::Throttle(fragment_to_apply)) = barrier.mutation.as_deref() else {
+            return None;
+        };
+        let entry = fragment_to_apply.get(&fragment_id)?;
+        if entry.throttle_type() != ThrottleType::Backfill {
+            return None;
+        }
+        let new_rate_limit = entry.rate_limit.into();
+        let old_rate_limit = rate_limiter.update(new_rate_limit);
+        (old_rate_limit != new_rate_limit).then(|| {
+            tracing::info!(
+                ?old_rate_limit,
+                ?new_rate_limit,
+                %fragment_id,
+                "locality backfill rate limit changed"
+            );
+            new_rate_limit
+        })
     }
 
     /// Creates a snapshot stream that reads from state table in locality order
     #[try_stream(ok = (VirtualNode, OwnedRow), error = StreamExecutorError)]
-    async fn make_snapshot_stream(
+    async fn make_snapshot_stream<'a>(
         reader: FlushedStateTableReader<S>,
         backfill_state: LocalityBackfillState,
+        rate_limiter: &'a MonitoredRateLimiter,
     ) {
         // Read from state table per vnode in locality order
         for vnode in reader.vnodes().iter_vnodes() {
@@ -260,6 +293,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
             pin_mut!(iter);
 
             while let Some(row) = iter.try_next().await? {
+                rate_limiter.wait(1).await;
                 yield (vnode, row);
             }
         }
@@ -445,6 +479,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
 
         let mut state_table = self.state_table;
         let mut progress_table = self.progress_table;
+        let rate_limiter = self.rate_limiter;
 
         // Initialize state tables
         state_table.init_epoch(first_epoch).await?;
@@ -482,6 +517,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                     }
                     Message::Barrier(barrier) => {
                         let epoch = barrier.epoch;
+                        Self::apply_throttle(&rate_limiter, self.fragment_id, &barrier);
 
                         // Check for StartFragmentBackfill mutation
                         if let Some(mutation) = barrier.mutation.as_deref() {
@@ -552,22 +588,28 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
 
             // Create builders for snapshot data chunks
             let snapshot_data_types = self.input_schema.data_types();
-            let mut builders: Builders = state_table
-                .vnodes()
-                .iter_vnodes()
-                .map(|vnode| {
-                    let builder = create_builder(
-                        RateLimit::Disabled,
-                        self.chunk_size,
-                        snapshot_data_types.clone(),
-                    );
-                    (vnode, builder)
-                })
-                .collect();
+            let vnodes = state_table.vnodes().clone();
+            let new_builders = |rate_limit| -> Builders {
+                vnodes
+                    .iter_vnodes()
+                    .map(|vnode| {
+                        let builder = create_builder(
+                            rate_limit,
+                            self.chunk_size,
+                            snapshot_data_types.clone(),
+                        );
+                        (vnode, builder)
+                    })
+                    .collect()
+            };
+            let mut builders = new_builders(rate_limiter.rate_limit());
 
             let snapshot_reader = state_table.flushed_snapshot_reader();
-            let snapshot_stream =
-                Self::make_snapshot_stream(snapshot_reader.clone(), backfill_state.clone());
+            let snapshot_stream = Self::make_snapshot_stream(
+                snapshot_reader.clone(),
+                backfill_state.clone(),
+                &rate_limiter,
+            );
             pin_mut!(snapshot_stream);
 
             'backfill_loop: loop {
@@ -579,7 +621,14 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                 let barrier = loop {
                     let upstream_next = upstream.next();
                     let mut snapshot_stream_ref = snapshot_stream.as_mut();
-                    let snapshot_next = snapshot_stream_ref.next();
+                    let snapshot_paused = rate_limiter.rate_limit().is_paused();
+                    let snapshot_next = async move {
+                        if snapshot_paused {
+                            pending().await
+                        } else {
+                            snapshot_stream_ref.next().await
+                        }
+                    };
                     pin_mut!(upstream_next);
                     pin_mut!(snapshot_next);
 
@@ -669,6 +718,12 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                     }
                 }
 
+                if let Some(new_rate_limit) =
+                    Self::apply_throttle(&rate_limiter, self.fragment_id, &barrier)
+                {
+                    builders = new_builders(new_rate_limit);
+                }
+
                 // Process upstream buffer chunks with marking
                 let should_refresh_snapshot = !upstream_chunk_buffer.is_empty();
                 for chunk in upstream_chunk_buffer.drain(..) {
@@ -731,6 +786,7 @@ impl<S: StateStore> LocalityProviderExecutor<S> {
                     snapshot_stream.set(Self::make_snapshot_stream(
                         snapshot_reader.clone(),
                         backfill_state.clone(),
+                        &rate_limiter,
                     ));
                 }
             }
