@@ -536,6 +536,13 @@ struct CursorPgRow {
     seek_pk_row: Option<OwnedRow>,
 }
 
+/// Unread formatted rows preserved by a successful FETCH, tied to the front raw chunk.
+struct CachedCursorPgRows {
+    rows: VecDeque<CursorPgRow>,
+    metadata: Arc<CursorDataChunkMetadata>,
+    format: Arc<CursorRowFormat>,
+}
+
 /// A raw event retained until a successful FETCH commits past it.
 struct CachedCursorDataChunkEvent {
     event: CursorDataChunkEvent,
@@ -560,8 +567,10 @@ struct CursorPgResponseStreamInner<S> {
     next_event_index: usize,
     /// Tentative output-row offset in the current chunk, including its committed prefix.
     row_offset_in_chunk: usize,
-    /// Unread rows formatted only for the current FETCH.
+    /// Unread formatted rows for the active FETCH.
     current_rows: VecDeque<CursorPgRow>,
+    /// Reusable only after a successful FETCH and with identical formatting settings.
+    cached_pg_rows: Option<CachedCursorPgRows>,
     current_metadata: Option<Arc<CursorDataChunkMetadata>>,
     /// Result formats and session settings captured for the current FETCH.
     row_format: Option<Arc<CursorRowFormat>>,
@@ -592,6 +601,7 @@ impl<S> CursorPgResponseStreamInner<S> {
             next_event_index: 0,
             row_offset_in_chunk: 0,
             current_rows: VecDeque::new(),
+            cached_pg_rows: None,
             current_metadata: None,
             row_format: None,
             output_fields,
@@ -601,8 +611,17 @@ impl<S> CursorPgResponseStreamInner<S> {
     }
 
     fn begin_fetch(&mut self, format: Arc<CursorRowFormat>) {
+        let cached = self.cached_pg_rows.take();
         // Also discard tentative progress if the preceding FETCH future was dropped.
         self.abort_fetch();
+        if let Some(cached) = cached
+            && cached.format.formats == format.formats
+            && cached.format.session_data.timezone == format.session_data.timezone
+        {
+            self.row_offset_in_chunk = self.cached_events.front().unwrap().row_offset_in_chunk;
+            self.current_rows = cached.rows;
+            self.current_metadata = Some(cached.metadata);
+        }
         self.row_format = Some(format);
         self.fetch_stream_terminated = false;
     }
@@ -617,10 +636,20 @@ impl<S> CursorPgResponseStreamInner<S> {
         if let Some(fields) = self.output_fields_to_commit.take() {
             self.output_fields = fields;
         }
+        let cached = self
+            .current_metadata
+            .take()
+            .map(|metadata| CachedCursorPgRows {
+                rows: std::mem::take(&mut self.current_rows),
+                metadata,
+                format: self.row_format.as_ref().unwrap().clone(),
+            });
         self.abort_fetch();
+        self.cached_pg_rows = cached;
     }
 
     fn abort_fetch(&mut self) {
+        self.cached_pg_rows = None;
         self.next_event_index = 0;
         self.row_offset_in_chunk = 0;
         self.current_rows.clear();
@@ -1439,6 +1468,158 @@ mod tests {
         stream.commit_fetch();
         stream.begin_fetch(&[], &session);
         assert!(stream.next().await.is_none());
+    }
+
+    /// Successful FETCH commands reuse the unread formatted suffix. Aborted or abandoned
+    /// commands discard it and replay from the committed raw position, using injected output.
+    #[tokio::test]
+    async fn test_query_cursor_pg_response_stream_reuses_committed_formatted_rows() {
+        let session = SessionImpl::mock();
+        let (mut stream, chunk_tx) = pending_query_response_stream_for_test();
+        chunk_tx
+            .try_send(Ok(DataChunk::from_pretty("i\n1\n2\n3\n4")))
+            .unwrap();
+        drop(chunk_tx);
+
+        stream.begin_fetch(&[], &session);
+        assert_text_row(&stream.next().await.unwrap().unwrap(), &[Some("1")]);
+        let metadata = stream.inner.current_metadata.as_ref().unwrap().clone();
+        stream.commit_fetch();
+        assert_eq!(stream.inner.cached_pg_rows.as_ref().unwrap().rows.len(), 3);
+
+        stream.begin_fetch(&[], &session);
+        assert_eq!(stream.inner.current_rows.len(), 3);
+        assert!(Arc::ptr_eq(
+            stream.inner.current_metadata.as_ref().unwrap(),
+            &metadata
+        ));
+        assert_eq!(stream.inner.row_offset_in_chunk, 1);
+        assert_text_row(&stream.next().await.unwrap().unwrap(), &[Some("2")]);
+        stream.commit_fetch();
+
+        // A successful zero-row FETCH must not lose the cached suffix or its raw offset.
+        stream.begin_fetch(&[], &session);
+        stream.commit_fetch();
+        stream.begin_fetch(&[], &session);
+        assert_eq!(stream.inner.current_rows.len(), 2);
+        assert_eq!(stream.inner.row_offset_in_chunk, 2);
+        assert_text_row(&stream.next().await.unwrap().unwrap(), &[Some("3")]);
+        stream.abort_fetch();
+        assert!(stream.inner.cached_pg_rows.is_none());
+
+        stream.begin_fetch(&[], &session);
+        assert!(stream.inner.current_rows.is_empty());
+        assert_text_row(&stream.next().await.unwrap().unwrap(), &[Some("3")]);
+        // Starting another FETCH without commit/abort models an abandoned command future.
+        stream.begin_fetch(&[], &session);
+        assert!(stream.inner.current_rows.is_empty());
+        assert_text_row(&stream.next().await.unwrap().unwrap(), &[Some("3")]);
+        assert_text_row(&stream.next().await.unwrap().unwrap(), &[Some("4")]);
+        assert!(stream.next().await.is_none());
+        stream.commit_fetch();
+        assert!(stream.inner.cached_pg_rows.is_none());
+        assert!(stream.inner.cached_events.is_empty());
+    }
+
+    /// A timezone change invalidates cached encoding even if PostgreSQL formats are unchanged.
+    /// Injecting the formatting context isolates cache invalidation from SQL session setup.
+    #[tokio::test]
+    async fn test_query_cursor_pg_response_stream_discards_cached_rows_on_timezone_change() {
+        let session = SessionImpl::mock();
+        let (mut stream, chunk_tx) = pending_query_response_stream_for_test();
+        chunk_tx
+            .try_send(Ok(DataChunk::from_pretty("i\n1\n2")))
+            .unwrap();
+        drop(chunk_tx);
+        let mut format = CursorRowFormat::new(&[], &session);
+        format.session_data.timezone = "UTC".to_owned();
+        stream.inner.begin_fetch(Arc::new(format));
+        assert_text_row(&stream.next().await.unwrap().unwrap(), &[Some("1")]);
+        stream.commit_fetch();
+        assert!(stream.inner.cached_pg_rows.is_some());
+
+        let mut format = CursorRowFormat::new(&[], &session);
+        format.session_data.timezone = "Asia/Shanghai".to_owned();
+        stream.inner.begin_fetch(Arc::new(format));
+        assert!(stream.inner.cached_pg_rows.is_none());
+        assert!(stream.inner.current_rows.is_empty());
+        assert!(stream.inner.current_metadata.is_none());
+        assert_text_row(&stream.next().await.unwrap().unwrap(), &[Some("2")]);
+        assert!(stream.next().await.is_none());
+        stream.commit_fetch();
+    }
+
+    /// Reuses encoded subscription rows and their typed keys across successful FETCH commands
+    /// for both snapshot and log-store chunks; no real subscription executor is involved.
+    #[tokio::test]
+    async fn test_subscription_cursor_pg_response_stream_reuses_committed_formatted_rows() {
+        let session = SessionImpl::mock();
+        let fields = subscription_fields_for_test("v");
+        let timestamp = 1700000000000i64;
+        let rw_timestamp =
+            crate::handler::util::convert_unix_millis_to_logstore_u64(timestamp as u64);
+        for from_snapshot in [true, false] {
+            let (mut stream, event_tx) =
+                pending_subscription_response_stream_for_test(&fields, Instant::now());
+            let chunk = if from_snapshot {
+                "i i\n7 42\n8 43\n9 44"
+            } else {
+                "i i T\n7 42 Delete\n8 43 Insert\n9 44 Delete"
+            };
+            event_tx
+                .try_send(Ok(subscription_chunk_for_test(
+                    fields.clone(),
+                    from_snapshot,
+                    rw_timestamp,
+                    chunk,
+                )))
+                .unwrap();
+
+            stream.begin_fetch(&[Format::Binary], &session, false);
+            let row = stream.next().await.unwrap().unwrap();
+            assert_eq!(
+                row.values()[0].as_deref(),
+                Some(42i32.to_be_bytes().as_slice())
+            );
+            let metadata = stream.inner.current_metadata.as_ref().unwrap().clone();
+            stream.commit_fetch();
+            stream.begin_fetch(&[Format::Binary], &session, false);
+            assert_eq!(stream.inner.current_rows.len(), 2);
+            assert!(Arc::ptr_eq(
+                stream.inner.current_metadata.as_ref().unwrap(),
+                &metadata
+            ));
+            let row = stream.next().await.unwrap().unwrap();
+            assert_eq!(
+                row.values()[0].as_deref(),
+                Some(43i32.to_be_bytes().as_slice())
+            );
+            assert_eq!(row.values()[1].as_deref(), Some(b"Insert".as_slice()));
+            assert_eq!(
+                row.values()[2].as_deref(),
+                (!from_snapshot).then_some(timestamp.to_be_bytes().as_slice())
+            );
+            stream.commit_fetch();
+            assert_eq!(
+                stream.seek_pk_row(),
+                Some(OwnedRow::new(vec![Some(8i32.into())]))
+            );
+
+            stream.begin_fetch(&[Format::Binary], &session, false);
+            assert_eq!(stream.inner.current_rows.len(), 1);
+            let row = stream.next().await.unwrap().unwrap();
+            assert_eq!(
+                row.values()[0].as_deref(),
+                Some(44i32.to_be_bytes().as_slice())
+            );
+            stream.commit_fetch();
+            assert_eq!(
+                stream.seek_pk_row(),
+                Some(OwnedRow::new(vec![Some(9i32.into())]))
+            );
+            assert!(stream.inner.cached_pg_rows.is_none());
+            assert!(stream.inner.cached_events.is_empty());
+        }
     }
 
     /// Verifies unread rows from one raw chunk use each FETCH's requested format without
