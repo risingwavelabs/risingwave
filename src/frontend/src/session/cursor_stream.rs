@@ -612,21 +612,14 @@ where
                             self.current_rows = rows;
                             self.current_metadata = Some(Arc::new(metadata));
                         }
-                        Err(error) => {
-                            self.mark_completed(true);
-                            return Poll::Ready(Err(error));
-                        }
+                        Err(error) => return Poll::Ready(Err(error)),
                     }
                 }
                 Poll::Ready(Some(Ok(CursorDataChunkEvent::Barrier(barrier)))) => {
                     return Poll::Ready(Ok(CursorPgResponsePollItem::Barrier(barrier)));
                 }
-                Poll::Ready(Some(Err(error))) => {
-                    self.mark_completed(true);
-                    return Poll::Ready(Err(error.into()));
-                }
+                Poll::Ready(Some(Err(error))) => return Poll::Ready(Err(error.into())),
                 Poll::Ready(None) => {
-                    self.mark_completed(false);
                     return Poll::Ready(Ok(CursorPgResponsePollItem::DataChunkStreamEnd));
                 }
             }
@@ -665,22 +658,26 @@ impl Stream for QueryCursorPgResponseStream {
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
-        if this.inner.fetch_stream_terminated {
+        // A completed producer stays terminal even if another FETCH begins.
+        if this.inner.fetch_stream_terminated || this.inner.data_stream.is_none() {
             return Poll::Ready(None);
         }
         match this.inner.poll_next_item(cx) {
             Poll::Pending => Poll::Pending,
-            Poll::Ready(Err(error)) => Poll::Ready(Some(Err(error))),
+            Poll::Ready(Err(error)) => {
+                this.inner.mark_completed(true);
+                Poll::Ready(Some(Err(error)))
+            }
             Poll::Ready(Ok(CursorPgResponsePollItem::Row { row, .. })) => {
                 Poll::Ready(Some(Ok(row.row)))
             }
             Poll::Ready(Ok(CursorPgResponsePollItem::Barrier(
                 CursorDataChunkBarrier::QueryEnd,
-            ))) => {
+            )))
+            | Poll::Ready(Ok(CursorPgResponsePollItem::DataChunkStreamEnd)) => {
                 this.inner.mark_completed(false);
                 Poll::Ready(None)
             }
-            Poll::Ready(Ok(CursorPgResponsePollItem::DataChunkStreamEnd)) => Poll::Ready(None),
             Poll::Ready(Ok(CursorPgResponsePollItem::Barrier(_))) => {
                 this.fail_fetch();
                 Poll::Ready(Some(Err(ErrorCode::InternalError(
@@ -848,6 +845,7 @@ impl Stream for SubscriptionCursorPgResponseStream {
                     return Poll::Pending;
                 }
                 Poll::Ready(Err(error)) => {
+                    this.inner.mark_completed(true);
                     this.subscription_state = SubscriptionCursorState::Invalid;
                     return Poll::Ready(Some(Err(error)));
                 }
