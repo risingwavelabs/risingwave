@@ -92,7 +92,7 @@ impl ExecutorBuilder for NowExecutorBuilder {
             state_table,
             progress_ratio,
             barrier_interval_ms,
-            Some(&params.executor_stats),
+            params.executor_stats,
             fragment_id,
         );
         Ok((params.info, exec).into())

@@ -47,8 +47,7 @@ pub struct NowExecutor<S: StateStore> {
     barrier_interval_ms: u32,
 
     /// Metrics for observing the streaming NOW() clock and its drift from wall time.
-    /// `None` when constructed without a metrics registry (e.g. unit tests).
-    metrics: Option<Arc<StreamingMetrics>>,
+    metrics: Arc<StreamingMetrics>,
     fragment_id: FragmentId,
 }
 
@@ -81,7 +80,7 @@ impl<S: StateStore> NowExecutor<S> {
         state_table: StateTable<S>,
         progress_ratio: Option<f32>,
         barrier_interval_ms: u32,
-        streaming_metrics: Option<&Arc<StreamingMetrics>>,
+        streaming_metrics: Arc<StreamingMetrics>,
         fragment_id: FragmentId,
     ) -> Self {
         Self {
@@ -92,7 +91,7 @@ impl<S: StateStore> NowExecutor<S> {
             state_table,
             progress_ratio,
             barrier_interval_ms,
-            metrics: streaming_metrics.cloned(),
+            metrics: streaming_metrics,
             fragment_id,
         }
     }
@@ -316,8 +315,7 @@ impl<S: StateStore> NowExecutor<S> {
 
             let curr_timestamp_datum = curr_timestamp_datum.unwrap();
 
-            if let Some(metrics) = metrics.as_ref()
-                && let Some(wall_ms) = last_barrier_wall_ms
+            if let Some(wall_ms) = last_barrier_wall_ms
                 && let ScalarImpl::Timestamptz(ts) = &curr_timestamp_datum
             {
                 let streaming_now_ms = ts.timestamp_millis();
@@ -422,7 +420,7 @@ mod tests {
             let state_store = create_state_store();
             let (tx, mut executor) =
                 build_executor(NowMode::UpdateCurrent, &state_store, Some(2.0)).await;
-            executor.metrics = Some(metrics.clone());
+            executor.metrics = metrics.clone();
             executor.fragment_id = 1.into();
             let mut now = executor.boxed().execute();
 
@@ -1093,7 +1091,7 @@ mod tests {
             state_table,
             progress_ratio,
             barrier_interval_ms,
-            None,
+            Arc::new(StreamingMetrics::unused()),
             0.into(),
         );
         (sender, now_executor)
