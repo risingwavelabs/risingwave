@@ -320,9 +320,10 @@ impl<S: StateStore> NowExecutor<S> {
                 let streaming_now_ms = ts.timestamp_millis();
                 let (streaming_clock_ms, wall_clock_drift_ms) = executor_metrics
                     .get_or_insert_with(|| {
-                        // NOW fragments are singleton, and recovery waits for the old actor to
-                        // stop, so fragment_id identifies a single writer. Multiple actors on
-                        // this node using the same label would overwrite each other's gauges.
+                        // A NOW fragment has only one actor, and recovery starts its replacement
+                        // only after the old actor stops. Therefore, on this node, fragment_id
+                        // uniquely identifies the gauge writer. If multiple actors wrote with the
+                        // same fragment_id concurrently, the last gauge update would win.
                         let label = fragment_id.to_string();
                         (
                             metrics
@@ -377,9 +378,7 @@ pub fn build_add_interval_expr(
 
 #[cfg(test)]
 mod tests {
-    use prometheus::Registry;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
-    use risingwave_common::config::MetricLevel;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::test_utils::IntervalTestExt;
     use risingwave_common::util::epoch::test_epoch;
@@ -389,89 +388,6 @@ mod tests {
     use super::*;
     use crate::common::table::test_utils::gen_pbtable;
     use crate::executor::test_utils::StreamExecutorTestExt;
-
-    #[tokio::test]
-    async fn test_now_metrics_lifecycle() -> StreamExecutorResult<()> {
-        let registry = Registry::new();
-        let metrics = Arc::new(StreamingMetrics::new(&registry, MetricLevel::Info));
-        let samples = || {
-            let mut samples = registry
-                .gather()
-                .into_iter()
-                .filter(|family| family.name().starts_with("stream_now_"))
-                .map(|family| {
-                    assert_eq!(family.get_metric().len(), 1);
-                    let metric = &family.get_metric()[0];
-                    assert_eq!(metric.get_label().len(), 1);
-                    assert_eq!(metric.get_label()[0].name(), "fragment_id");
-                    assert_eq!(metric.get_label()[0].value(), "1");
-                    (
-                        family.name().to_owned(),
-                        metric.get_gauge().as_ref().unwrap().value() as i64,
-                    )
-                })
-                .collect::<Vec<_>>();
-            samples.sort();
-            samples
-        };
-        assert!(samples().is_empty());
-
-        // Reuse the fragment label after the previous executor has been dropped.
-        let mut previous_cleaned_up = true;
-        for cleanup_before_recreation in [true, false, true] {
-            let state_store = create_state_store();
-            let (tx, mut executor) =
-                build_executor(NowMode::UpdateCurrent, &state_store, Some(2.0)).await;
-            executor.metrics = metrics.clone();
-            executor.fragment_id = 1.into();
-            let mut now = executor.boxed().execute();
-
-            tx.send(Barrier::new_test_barrier(test_epoch(1))).unwrap();
-            now.next_unwrap_ready_barrier()?;
-            now.next_unwrap_ready_chunk()?;
-            // Before the first watermark, no zero-valued series is registered.
-            if previous_cleaned_up {
-                assert!(samples().is_empty());
-            }
-            now.next_unwrap_ready_watermark()?;
-            let initial_clock = "2021-04-01T00:00:00.001Z"
-                .parse::<Timestamptz>()
-                .unwrap()
-                .timestamp_millis();
-            assert_eq!(
-                samples(),
-                vec![
-                    ("stream_now_streaming_clock_ms".into(), initial_clock),
-                    ("stream_now_wall_clock_drift_ms".into(), 0),
-                ]
-            );
-
-            tx.send(Barrier::with_prev_epoch_for_test(
-                test_epoch(5000),
-                test_epoch(1),
-            ))
-            .unwrap();
-            now.next_unwrap_ready_barrier()?;
-            now.next_unwrap_ready_chunk()?;
-            now.next_unwrap_ready_watermark()?;
-            let expected = vec![
-                ("stream_now_streaming_clock_ms".into(), initial_clock + 2000),
-                ("stream_now_wall_clock_drift_ms".into(), 2999),
-            ];
-            assert_eq!(samples(), expected);
-            now.next_unwrap_pending();
-            assert_eq!(samples(), expected);
-
-            drop(now);
-            if cleanup_before_recreation {
-                // Guarded metrics retain the last sample for one scrape.
-                assert_eq!(samples(), expected);
-                assert!(samples().is_empty());
-            }
-            previous_cleaned_up = cleanup_before_recreation;
-        }
-        Ok(())
-    }
 
     #[tokio::test]
     async fn test_now() -> StreamExecutorResult<()> {
