@@ -708,18 +708,15 @@ impl MySqlExternalTableReader {
     ) -> ConnectorResult<Vec<(String, ColumnType)>> {
         let mut conn = pool.get_conn().await?;
 
-        // Query primary key columns and their data types
-        let sql = format!(
-            "SELECT COLUMN_NAME, COLUMN_TYPE
+        // Query primary key columns and their data types.
+        let sql = "SELECT COLUMN_NAME, COLUMN_TYPE
             FROM INFORMATION_SCHEMA.COLUMNS
-            WHERE TABLE_SCHEMA = '{}'
-            AND TABLE_NAME = '{}'
+            WHERE TABLE_SCHEMA = ?
+            AND TABLE_NAME = ?
             AND COLUMN_KEY = 'PRI'
-            ORDER BY ORDINAL_POSITION",
-            database, table
-        );
+            ORDER BY ORDINAL_POSITION";
 
-        let rs = conn.query::<mysql_async::Row, _>(sql).await?;
+        let rs: Vec<mysql_async::Row> = conn.exec(sql, (database, table)).await?;
 
         let mut column_infos = Vec::new();
         for row in &rs {
