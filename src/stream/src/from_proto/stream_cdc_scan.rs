@@ -33,6 +33,44 @@ pub struct StreamCdcScanExecutorBuilder;
 
 impl_stream_node_body!(StreamCdcScan(StreamCdcScanNode) => StreamCdcScanExecutorBuilder);
 
+fn decode_table_pk(
+    table_desc: &ExternalTableDesc,
+    table_type: &ExternalCdcTableType,
+) -> StreamResult<(Vec<OrderType>, Option<Vec<CdcKeyComparison>>, Vec<usize>)> {
+    if let Some(table_pk) = &table_desc.pk_ordering {
+        let order_types = table_pk
+            .columns
+            .iter()
+            .map(|_| OrderType::ascending())
+            .collect_vec();
+        let comparisons = table_pk
+            .columns
+            .iter()
+            .map(|column| column.get_comparison().map(CdcKeyComparison::from_protobuf))
+            .try_collect()?;
+        let indices = table_pk
+            .columns
+            .iter()
+            .map(|column| column.pk_col_idx as usize)
+            .collect_vec();
+        Ok((order_types, Some(comparisons), indices))
+    } else {
+        let order_types = table_desc
+            .pk
+            .iter()
+            .map(|column| OrderType::from_protobuf(column.get_order_type().unwrap()))
+            .collect_vec();
+        let comparisons = (*table_type != ExternalCdcTableType::MySql)
+            .then(|| vec![CdcKeyComparison::Native; table_desc.pk.len()]);
+        let indices = table_desc
+            .pk
+            .iter()
+            .map(|column| column.column_index as usize)
+            .collect_vec();
+        Ok((order_types, comparisons, indices))
+    }
+}
+
 impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
     type Node = StreamCdcScanNode;
 
@@ -56,38 +94,9 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
         assert_eq!(output_schema.data_types(), params.info.schema.data_types());
 
         let properties = table_desc.connect_properties.clone();
+        let table_type = ExternalCdcTableType::from_properties(&properties);
         let (table_pk_order_types, table_pk_comparisons, table_pk_indices) =
-            if let Some(table_pk) = &table_desc.pk_ordering {
-                let order_types = table_pk
-                    .columns
-                    .iter()
-                    .map(|_| OrderType::ascending())
-                    .collect_vec();
-                let comparisons = table_pk
-                    .columns
-                    .iter()
-                    .map(|column| column.get_comparison().map(CdcKeyComparison::from_protobuf))
-                    .try_collect()?;
-                let indices = table_pk
-                    .columns
-                    .iter()
-                    .map(|column| column.pk_col_idx as usize)
-                    .collect_vec();
-                (order_types, comparisons, indices)
-            } else {
-                let order_types = table_desc
-                    .pk
-                    .iter()
-                    .map(|column| OrderType::from_protobuf(column.get_order_type().unwrap()))
-                    .collect_vec();
-                let comparisons = vec![CdcKeyComparison::Native; table_desc.pk.len()];
-                let indices = table_desc
-                    .pk
-                    .iter()
-                    .map(|column| column.column_index as usize)
-                    .collect_vec();
-                (order_types, comparisons, indices)
-            };
+            decode_table_pk(table_desc, &table_type)?;
 
         let scan_options = node
             .options
@@ -97,7 +106,6 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
                 disable_backfill: node.disable_backfill,
                 ..Default::default()
             });
-        let table_type = ExternalCdcTableType::from_properties(&properties);
         // Filter out additional columns to construct the external table schema
         let table_schema: Schema = table_desc
             .columns
@@ -177,5 +185,88 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
             );
             Ok((params.info, exec).into())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::CdcKeyComparison;
+    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+    use risingwave_connector::source::cdc::external::ExternalCdcTableType;
+    use risingwave_pb::plan_common::cdc_key_ordering::{Column, Comparison};
+    use risingwave_pb::plan_common::{CdcKeyOrdering, ExternalTableDesc};
+
+    use super::decode_table_pk;
+
+    fn legacy_desc() -> ExternalTableDesc {
+        ExternalTableDesc {
+            pk: vec![
+                ColumnOrder::new(2, OrderType::descending()).to_protobuf(),
+                ColumnOrder::new(0, OrderType::ascending()).to_protobuf(),
+            ],
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_decode_legacy_mysql_pk_comparisons_as_unknown() {
+        let (order_types, comparisons, indices) =
+            decode_table_pk(&legacy_desc(), &ExternalCdcTableType::MySql).unwrap();
+
+        assert_eq!(
+            order_types,
+            vec![OrderType::descending(), OrderType::ascending()]
+        );
+        assert_eq!(comparisons, None);
+        assert_eq!(indices, vec![2, 0]);
+    }
+
+    #[test]
+    fn test_decode_legacy_non_mysql_pk_comparisons_as_native() {
+        for table_type in [
+            ExternalCdcTableType::Postgres,
+            ExternalCdcTableType::SqlServer,
+            ExternalCdcTableType::Mock,
+        ] {
+            let (_, comparisons, _) = decode_table_pk(&legacy_desc(), &table_type).unwrap();
+            assert_eq!(
+                comparisons,
+                Some(vec![CdcKeyComparison::Native, CdcKeyComparison::Native])
+            );
+        }
+    }
+
+    #[test]
+    fn test_decode_new_pk_comparisons_and_column_order() {
+        let desc = ExternalTableDesc {
+            pk_ordering: Some(CdcKeyOrdering {
+                columns: vec![
+                    Column {
+                        pk_col_idx: 3,
+                        comparison: Comparison::UnsignedInt64 as i32,
+                    },
+                    Column {
+                        pk_col_idx: 1,
+                        comparison: Comparison::Native as i32,
+                    },
+                ],
+            }),
+            ..Default::default()
+        };
+
+        let (order_types, comparisons, indices) =
+            decode_table_pk(&desc, &ExternalCdcTableType::MySql).unwrap();
+        assert_eq!(
+            order_types,
+            vec![OrderType::ascending(), OrderType::ascending()]
+        );
+        assert_eq!(
+            comparisons,
+            Some(vec![
+                CdcKeyComparison::UnsignedInt64,
+                CdcKeyComparison::Native,
+            ])
+        );
+        assert_eq!(indices, vec![3, 1]);
     }
 }

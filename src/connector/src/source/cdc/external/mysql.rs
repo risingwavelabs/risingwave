@@ -264,25 +264,7 @@ impl MySqlExternalTable {
         .await?;
         pool.disconnect().await?;
 
-        pk_names
-            .iter()
-            .map(|pk_name| {
-                pk_infos
-                    .iter()
-                    .find(|(name, _)| name.eq_ignore_ascii_case(pk_name))
-                    .map(|(_, col_type)| {
-                        if mysql_type_is_unsigned_bigint(col_type) {
-                            CdcKeyComparison::UnsignedInt64
-                        } else {
-                            CdcKeyComparison::Native
-                        }
-                    })
-                    .ok_or_else(|| {
-                        anyhow!("primary key column `{pk_name}` not found in upstream MySQL schema")
-                            .into()
-                    })
-            })
-            .collect()
+        pk_column_comparisons_from_infos(&pk_infos, pk_names)
     }
 }
 
@@ -434,6 +416,33 @@ fn mysql_type_is_unsigned_bigint(col_type: &ColumnType) -> bool {
         ColumnType::BigInt(attr) => attr.unsigned == Some(true),
         _ => false,
     }
+}
+
+fn pk_column_comparisons_from_infos(
+    pk_infos: &[(String, ColumnType)],
+    pk_names: &[String],
+) -> ConnectorResult<Vec<CdcKeyComparison>> {
+    pk_names
+        .iter()
+        .map(|pk_name| {
+            pk_infos
+                .iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case(pk_name))
+                .map(|(_, col_type)| {
+                    if mysql_type_is_unsigned_bigint(col_type) {
+                        CdcKeyComparison::UnsignedInt64
+                    } else {
+                        CdcKeyComparison::Native
+                    }
+                })
+                .ok_or_else(|| {
+                    anyhow!(
+                        "primary key column `{pk_name}` not found in upstream MySQL primary key info"
+                    )
+                    .into()
+                })
+        })
+        .collect()
 }
 
 pub fn mysql_type_to_rw_type(col_type: &ColumnType) -> ConnectorResult<DataType> {
@@ -745,6 +754,13 @@ impl MySqlExternalTableReader {
             })
     }
 
+    pub(crate) fn pk_column_comparisons(
+        &self,
+        pk_names: &[String],
+    ) -> ConnectorResult<Vec<CdcKeyComparison>> {
+        pk_column_comparisons_from_infos(&self.upstream_mysql_pk_infos, pk_names)
+    }
+
     /// Convert negative i64 to unsigned u64 based on column type
     fn convert_negative_to_unsigned(&self, negative_val: i64) -> u64 {
         negative_val as u64
@@ -931,8 +947,8 @@ mod tests {
     use sea_schema::mysql::def::{ColumnType, IndexInfo, IndexOrder, IndexPart, IndexType};
 
     use super::{
-        mysql_type_is_unsigned_bigint, mysql_type_to_rw_type, primary_key_names,
-        type_name_to_mysql_type,
+        mysql_type_is_unsigned_bigint, mysql_type_to_rw_type, pk_column_comparisons_from_infos,
+        primary_key_names, type_name_to_mysql_type,
     };
     use crate::source::cdc::external::mysql::MySqlExternalTable;
     use crate::source::cdc::external::{
@@ -986,6 +1002,38 @@ mod tests {
                 .pk_column_comparisons(&["UNSIGNED_ID".to_owned(), "SIGNED_ID".to_owned(),])
                 .unwrap(),
             vec![CdcKeyComparison::UnsignedInt64, CdcKeyComparison::Native,]
+        );
+    }
+
+    #[test]
+    fn test_reader_pk_column_comparisons_follow_requested_order() {
+        let pk_infos = vec![
+            ("Signed_ID".to_owned(), parse_mysql_type_name("BIGINT")),
+            (
+                "Unsigned_ID".to_owned(),
+                parse_mysql_type_name("BIGINT UNSIGNED"),
+            ),
+            (
+                "Narrow_Unsigned".to_owned(),
+                parse_mysql_type_name("INTEGER UNSIGNED"),
+            ),
+        ];
+
+        assert_eq!(
+            pk_column_comparisons_from_infos(
+                &pk_infos,
+                &[
+                    "UNSIGNED_id".to_owned(),
+                    "signed_id".to_owned(),
+                    "narrow_unsigned".to_owned(),
+                ],
+            )
+            .unwrap(),
+            vec![
+                CdcKeyComparison::UnsignedInt64,
+                CdcKeyComparison::Native,
+                CdcKeyComparison::Native,
+            ]
         );
     }
 

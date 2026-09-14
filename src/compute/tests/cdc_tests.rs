@@ -187,7 +187,7 @@ async fn test_cdc_backfill() -> StreamResult<()> {
         ExternalCdcTableType::Mock,
         table_schema.clone(),
         table_pk_order_types,
-        vec![CdcKeyComparison::Native],
+        Some(vec![CdcKeyComparison::Native]),
         table_pk_indices.clone(),
     );
 
@@ -496,7 +496,7 @@ async fn setup_parallelized_cdc_backfill_test_context() -> ParallelizedCdcBackfi
         ExternalCdcTableType::Mock,
         table_schema.clone(),
         table_pk_order_types,
-        vec![CdcKeyComparison::Native],
+        Some(vec![CdcKeyComparison::Native]),
         table_pk_indices.clone(),
     );
     let actor_id = 0x1a.into();

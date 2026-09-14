@@ -399,6 +399,17 @@ impl ExternalTableReader for ExternalTableReaderImpl {
 }
 
 impl ExternalTableReaderImpl {
+    /// Recover comparison semantics for primary-key columns from the live reader.
+    pub fn pk_column_comparisons(
+        &self,
+        pk_names: &[String],
+    ) -> ConnectorResult<Vec<CdcKeyComparison>> {
+        match self {
+            ExternalTableReaderImpl::MySql(mysql) => mysql.pk_column_comparisons(pk_names),
+            _ => Ok(vec![CdcKeyComparison::Native; pk_names.len()]),
+        }
+    }
+
     pub fn get_cdc_offset_parser(&self) -> CdcOffsetParseFunc {
         match self {
             ExternalTableReaderImpl::MySql(_) => MySqlExternalTableReader::get_cdc_offset_parser(),

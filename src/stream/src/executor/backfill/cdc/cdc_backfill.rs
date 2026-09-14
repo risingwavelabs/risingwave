@@ -64,6 +64,13 @@ struct PkCompareInfo<'a> {
     needs_unsigned_i64_compare: &'a [bool],
 }
 
+fn can_poll_upstream_while_creating_reader(
+    current_pk_pos: Option<&OwnedRow>,
+    pk_comparisons_are_known: bool,
+) -> bool {
+    current_pk_pos.is_none() || pk_comparisons_are_known
+}
+
 // The TimestampHandling/TimestamptzHandling/TimeHandling parser's behavior depends on the debezium.time.precision.mode setting:
 // - If left unset, Debezium defaults to time.precision.mode=microseconds (per debezium.properties), and the parser uses Micro.
 // - If set to "connect", Debezium uses time.precision.mode=connect, and the parser uses Milli by design.
@@ -323,12 +330,13 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         // The indices to primary key columns
         let pk_indices = self.external_table.pk_indices().to_vec();
         let pk_order = self.external_table.pk_order_types().to_vec();
-        let pk_needs_unsigned_i64_compare = self
-            .external_table
-            .pk_comparisons()
-            .iter()
-            .map(|comparison| *comparison == CdcKeyComparison::UnsignedInt64)
-            .collect_vec();
+        let mut pk_needs_unsigned_i64_compare =
+            self.external_table.pk_comparisons().map(|comparisons| {
+                comparisons
+                    .iter()
+                    .map(|comparison| *comparison == CdcKeyComparison::UnsignedInt64)
+                    .collect_vec()
+            });
 
         let table_id = self.external_table.table_id();
         let upstream_table_name = self.external_table.qualified_table_name();
@@ -416,8 +424,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             //
             // A fresh backfill can ignore CDC events here because its snapshot starts from the
             // beginning. Recovery preserves events for the already-scanned prefix while reader
-            // creation is retried. Both offset parsing and PK comparison metadata are available
-            // without a live reader.
+            // creation is retried. Legacy MySQL graphs must first recover PK comparison metadata
+            // from the reader so that those events are filtered with unsigned-aware ordering.
             let offset_parse_func = self.external_table.table_type().get_cdc_offset_parser()?;
             let mut table_reader = None;
             let external_table = self.external_table.clone();
@@ -438,46 +446,82 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 .await
                 .expect("Retry create cdc table reader until success.")
             });
-            while let Some(msg) =
-                build_reader_and_poll_upstream(&mut upstream, &mut table_reader, &mut future)
-                    .await?
-            {
-                match msg {
-                    Message::Barrier(barrier) => {
-                        state_impl.commit_state(barrier.epoch).await?;
-                        yield Message::Barrier(barrier);
-                    }
-                    Message::Chunk(chunk) => {
-                        if let Some(current_pos) = current_pk_pos.as_ref() {
-                            let (chunk, consumed_offset) = Self::filter_recovery_chunk(
-                                &offset_parse_func,
-                                chunk,
-                                current_pos,
-                                PkCompareInfo {
-                                    indices: &pk_indices,
-                                    order: &pk_order,
-                                    needs_unsigned_i64_compare: &pk_needs_unsigned_i64_compare,
-                                },
-                                &last_binlog_offset,
-                                &self.output_indices,
-                            )?;
-                            if let Some(chunk) = chunk {
-                                Self::report_metrics(&self.metrics, 0, chunk.cardinality() as u64);
-                                yield Message::Chunk(chunk);
+            if can_poll_upstream_while_creating_reader(
+                current_pk_pos.as_ref(),
+                pk_needs_unsigned_i64_compare.is_some(),
+            ) {
+                while let Some(msg) =
+                    build_reader_and_poll_upstream(&mut upstream, &mut table_reader, &mut future)
+                        .await?
+                {
+                    match msg {
+                        Message::Barrier(barrier) => {
+                            state_impl.commit_state(barrier.epoch).await?;
+                            yield Message::Barrier(barrier);
+                        }
+                        Message::Chunk(chunk) => {
+                            if let Some(current_pos) = current_pk_pos.as_ref() {
+                                let pk_needs_unsigned_i64_compare =
+                                    pk_needs_unsigned_i64_compare.as_deref().expect(
+                                        "recovery may only poll upstream with known PK comparisons",
+                                    );
+                                let (chunk, consumed_offset) = Self::filter_recovery_chunk(
+                                    &offset_parse_func,
+                                    chunk,
+                                    current_pos,
+                                    PkCompareInfo {
+                                        indices: &pk_indices,
+                                        order: &pk_order,
+                                        needs_unsigned_i64_compare: pk_needs_unsigned_i64_compare,
+                                    },
+                                    &last_binlog_offset,
+                                    &self.output_indices,
+                                )?;
+                                if let Some(chunk) = chunk {
+                                    Self::report_metrics(
+                                        &self.metrics,
+                                        0,
+                                        chunk.cardinality() as u64,
+                                    );
+                                    yield Message::Chunk(chunk);
+                                }
+                                if let Some(consumed_offset) = consumed_offset {
+                                    last_binlog_offset = Some(consumed_offset);
+                                }
+                            } else {
+                                // The snapshot starts from the beginning and covers these changes.
                             }
-                            if let Some(consumed_offset) = consumed_offset {
-                                last_binlog_offset = Some(consumed_offset);
-                            }
-                        } else {
-                            // The snapshot starts from the beginning and covers these changes.
+                        }
+                        Message::Watermark(_) => {
+                            // ignore watermark
                         }
                     }
-                    Message::Watermark(_) => {
-                        // ignore watermark
-                    }
                 }
+            } else {
+                tracing::warn!(
+                    %table_id,
+                    upstream_table_name,
+                    "waiting for the CDC table reader to recover legacy MySQL primary-key comparison metadata; checkpoint progress is paused"
+                );
+                table_reader = Some(future.as_mut().await);
             }
             let table_reader = table_reader.expect("table reader must be created");
+            if pk_needs_unsigned_i64_compare.is_none() {
+                let pk_names = pk_indices
+                    .iter()
+                    .map(|&idx| self.external_table.schema().fields[idx].name.clone())
+                    .collect_vec();
+                let comparisons = table_reader.pk_column_comparisons(&pk_names)?;
+                assert_eq!(comparisons.len(), pk_indices.len());
+                pk_needs_unsigned_i64_compare = Some(
+                    comparisons
+                        .into_iter()
+                        .map(|comparison| comparison == CdcKeyComparison::UnsignedInt64)
+                        .collect_vec(),
+                );
+            }
+            let pk_needs_unsigned_i64_compare = pk_needs_unsigned_i64_compare
+                .expect("PK comparison metadata must be resolved after reader creation");
             tracing::info!(
                 %table_id,
                 upstream_table_name,
@@ -1191,7 +1235,9 @@ mod tests {
     };
     use risingwave_storage::memory::MemoryStateStore;
 
-    use super::{PkCompareInfo, build_reader_and_poll_upstream};
+    use super::{
+        PkCompareInfo, build_reader_and_poll_upstream, can_poll_upstream_while_creating_reader,
+    };
     use crate::common::table::test_utils::gen_pbtable;
     use crate::executor::backfill::cdc::cdc_backfill::transform_upstream;
     use crate::executor::backfill::cdc::state::CdcBackfillState;
@@ -1370,6 +1416,21 @@ mod tests {
         );
     }
 
+    #[test]
+    fn test_reader_startup_polling_selection() {
+        let recovered_position = OwnedRow::new(vec![Some(ScalarImpl::Int64(1))]);
+
+        assert!(!can_poll_upstream_while_creating_reader(
+            Some(&recovered_position),
+            false,
+        ));
+        assert!(can_poll_upstream_while_creating_reader(None, false));
+        assert!(can_poll_upstream_while_creating_reader(
+            Some(&recovered_position),
+            true,
+        ));
+    }
+
     #[tokio::test]
     async fn test_disabled_cdc_backfill_finishes_without_table_reader() {
         let actor_context = ActorContext::for_test(1);
@@ -1384,7 +1445,7 @@ mod tests {
             ExternalCdcTableType::Undefined,
             Schema::new(vec![Field::with_name(DataType::Int64, "id")]),
             vec![OrderType::ascending()],
-            vec![CdcKeyComparison::Native],
+            Some(vec![CdcKeyComparison::Native]),
             vec![0],
         );
         let schema = Schema::new(vec![
@@ -1585,7 +1646,7 @@ mod tests {
                 Field::with_name(DataType::Float64, "price"),
             ]),
             vec![OrderType::ascending()],
-            vec![CdcKeyComparison::Native],
+            Some(vec![CdcKeyComparison::Native]),
             vec![0],
         );
         let output_columns = vec![
@@ -2304,7 +2365,7 @@ mod tests {
                 Field::with_name(DataType::Float64, "price"),
             ]),
             vec![OrderType::ascending()],
-            vec![CdcKeyComparison::Native],
+            Some(vec![CdcKeyComparison::Native]),
             vec![0],
         );
         let output_columns = vec![

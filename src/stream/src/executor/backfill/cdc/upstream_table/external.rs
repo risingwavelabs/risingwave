@@ -44,7 +44,11 @@ pub struct ExternalStorageTable {
 
     pk_order_types: Vec<OrderType>,
 
-    pk_comparisons: Vec<CdcKeyComparison>,
+    /// Comparison semantics persisted in the stream graph.
+    ///
+    /// `None` is only expected for legacy MySQL graphs, whose comparison semantics must be
+    /// recovered from a live external table reader.
+    pk_comparisons: Option<Vec<CdcKeyComparison>>,
 
     /// Indices of primary key.
     /// Note that the index is based on the all columns of the table.
@@ -64,11 +68,13 @@ impl ExternalStorageTable {
         table_type: ExternalCdcTableType,
         schema: Schema,
         pk_order_types: Vec<OrderType>,
-        pk_comparisons: Vec<CdcKeyComparison>,
+        pk_comparisons: Option<Vec<CdcKeyComparison>>,
         pk_indices: Vec<usize>,
     ) -> Self {
-        assert_eq!(pk_order_types.len(), pk_comparisons.len());
         assert_eq!(pk_order_types.len(), pk_indices.len());
+        if let Some(pk_comparisons) = &pk_comparisons {
+            assert_eq!(pk_order_types.len(), pk_comparisons.len());
+        }
         Self {
             table_id,
             table_name,
@@ -94,7 +100,7 @@ impl ExternalStorageTable {
             table_type: ExternalCdcTableType::Undefined,
             schema: Schema::empty().to_owned(),
             pk_order_types: vec![],
-            pk_comparisons: vec![],
+            pk_comparisons: Some(vec![]),
             pk_indices: vec![],
         }
     }
@@ -107,8 +113,8 @@ impl ExternalStorageTable {
         &self.pk_order_types
     }
 
-    pub fn pk_comparisons(&self) -> &[CdcKeyComparison] {
-        &self.pk_comparisons
+    pub fn pk_comparisons(&self) -> Option<&[CdcKeyComparison]> {
+        self.pk_comparisons.as_deref()
     }
 
     pub fn schema(&self) -> &Schema {
