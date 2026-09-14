@@ -46,7 +46,7 @@ pub struct NowExecutor<S: StateStore> {
 
     barrier_interval_ms: u32,
 
-    /// Metrics for observing the streaming NOW() clock and its drift from wall time.
+    /// Metrics for observing the streaming `NOW()` clock and its drift from wall time.
     metrics: Arc<StreamingMetrics>,
     fragment_id: FragmentId,
 }
