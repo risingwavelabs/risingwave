@@ -111,10 +111,10 @@ def _(outer_panels: Panels):
                 ),
                 panels.timeseries_latency_ms(
                     "Temporal Filter NOW() vs Wall Clock Drift",
-                    "Milliseconds between the fragment's latest processed barrier epoch "
-                    "and its minimum streaming `NOW()` clock across compute nodes. Zero "
-                    "means it has caught up to that barrier, not necessarily to current "
-                    "wall time. Each live executor retains its previous sample while "
+                    "The maximum reported lag between the latest processed barrier epoch "
+                    "and streaming `NOW()` for each fragment across compute nodes. Zero "
+                    "means it has caught up to its processed barrier, not necessarily to "
+                    "current wall time. Each live executor retains its previous sample while "
                     "watermark emission is paused or stalled. A growing series "
                     "alone does not establish that recovery is required. For drift caused "
                     "by a stale `barrier_interval_ms`, RECOVER reloads the interval but "
@@ -122,8 +122,7 @@ def _(outer_panels: Panels):
                     "progress permits, rather than an immediate reset to zero.",
                     [
                         panels.target(
-                            f"max by (fragment_id) ({now_clock} + {now_drift}) "
-                            f"- min by (fragment_id) ({now_clock})",
+                            f"max by (fragment_id) ({now_drift})",
                             "drift ms - fragment {{fragment_id}}",
                         ),
                     ],
