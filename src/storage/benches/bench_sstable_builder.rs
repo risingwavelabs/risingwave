@@ -36,7 +36,7 @@ fn keys(count: usize, len: usize, shared_prefix: bool) -> Vec<FullKey<Vec<u8>>> 
         .map(|i| {
             let mut key = VirtualNode::ZERO.to_be_bytes().to_vec();
             if !shared_prefix {
-                key.extend_from_slice(&(i as u64).to_be_bytes());
+                key.push(u8::try_from(i).expect("non-shared prefix supports at most 256 keys"));
             }
             key.resize(len - 8, b'k');
             key.extend_from_slice(&(i as u64).to_be_bytes());
