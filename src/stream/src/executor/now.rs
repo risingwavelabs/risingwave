@@ -1021,8 +1021,8 @@ mod tests {
             progress_ratio,
             barrier_interval_ms,
             None,
-            123,
-            0,
+            123.into(),
+            0.into(),
         );
         (sender, now_executor.boxed().execute())
     }

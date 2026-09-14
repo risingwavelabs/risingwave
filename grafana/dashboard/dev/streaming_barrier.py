@@ -107,7 +107,7 @@ def _(outer_panels: Panels):
                     "both the streaming timestamp and barrier progress when diagnosing stalls.",
                     height=2.5,
                 ),
-                panels.timeseries_ms(
+                panels.timeseries_latency_ms(
                     "Temporal Filter NOW() vs Wall Clock Drift",
                     "Milliseconds by which streaming `NOW()` lags the latest processed "
                     "barrier epoch. Zero means it has caught up to that barrier, not "
@@ -128,7 +128,7 @@ def _(outer_panels: Panels):
                         ),
                     ],
                 ),
-                panels.timeseries_ms(
+                panels.timeseries_count(
                     "Temporal Filter NOW() Streaming Clock",
                     "The most recent streaming `NOW()` value emitted by each `NowExecutor`, "
                     "expressed as milliseconds since the Unix epoch. Compare against the "
@@ -139,6 +139,7 @@ def _(outer_panels: Panels):
                             "streaming NOW() ms - fragment {{fragment_id}} actor {{actor_id}}",
                         ),
                     ],
+                    unit="dateTimeAsIso",
                 ),
             ],
         )
