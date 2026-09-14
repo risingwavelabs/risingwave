@@ -100,19 +100,23 @@ def _(outer_panels: Panels):
                 panels.subheader(
                     "Temporal Filter NOW()",
                     "Observability for the per-fragment streaming `NOW()` clock exposed by "
-                    "`NowExecutor`. When `streaming.developer.now_progress_ratio` is set, the "
-                    "streaming clock advances at a bounded rate per barrier, which can trail "
-                    "wall time if the barrier interval changes without a recovery. A steadily "
-                    "growing **Wall-Clock Drift** panel means downstream temporal filters "
-                    "(`col < NOW()`, `col <= NOW()`) will delay eligible rows.",
+                    "`NowExecutor`. When `streaming.developer.now_progress_ratio > 1`, clock "
+                    "advancement is bounded using the barrier interval captured at startup. "
+                    "Increasing the runtime interval beyond that bound can make `NOW()` lag "
+                    "processed barrier timestamps and delay temporal-filter output. Inspect "
+                    "both the streaming timestamp and barrier progress when diagnosing stalls.",
                     height=2.5,
                 ),
                 panels.timeseries_ms(
                     "Temporal Filter NOW() vs Wall Clock Drift",
-                    "Milliseconds by which the streaming `NOW()` value lags the barrier's "
-                    "wall-clock epoch. Zero or near-zero is healthy. A monotonically "
-                    "increasing series indicates the streaming clock is falling behind and "
-                    "the fragment likely needs a RECOVER after a `barrier_interval_ms` change.",
+                    "Milliseconds by which streaming `NOW()` lags the latest processed "
+                    "barrier epoch. Zero means it has caught up to that barrier, not "
+                    "necessarily to current wall time. This gauge retains its previous "
+                    "value while watermark emission is paused or stalled. A growing series "
+                    "alone does not establish that recovery is required. For drift caused "
+                    "by a stale `barrier_interval_ms`, RECOVER reloads the interval but "
+                    "restores the checkpointed clock; catch-up is gradual as barrier "
+                    "progress permits, rather than an immediate reset to zero.",
                     [
                         panels.target(
                             f"{metric('stream_now_wall_clock_drift_ms')}",
