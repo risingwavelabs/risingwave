@@ -37,9 +37,7 @@ pub enum CdcKeyComparison {
 impl CdcKeyComparison {
     pub fn from_protobuf(comparison: Comparison) -> Self {
         match comparison {
-            // The generated `get_comparison()` getter rejects `Unspecified` before the CDC
-            // executor builder reaches this conversion. Direct callers default it to native.
-            Comparison::Unspecified => Self::Native,
+            Comparison::Unspecified => unreachable!("comparison must be specified"),
             Comparison::Native => Self::Native,
             Comparison::UnsignedInt64 => Self::UnsignedInt64,
         }
