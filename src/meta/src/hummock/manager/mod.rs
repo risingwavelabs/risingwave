@@ -67,6 +67,7 @@ pub(crate) mod checkpoint;
 mod commit_epoch;
 mod compaction;
 pub mod sequence;
+mod table_change_log;
 pub mod table_write_throughput_statistic;
 pub mod time_travel;
 mod timer_task;
@@ -665,7 +666,7 @@ impl HummockManager {
                 .push(tx);
             Ok((epoch, rx))
         } else {
-            Err(anyhow!("table {} not exist", table_id).into())
+            Err(anyhow!("table {} does not exist", table_id).into())
         }
     }
 }

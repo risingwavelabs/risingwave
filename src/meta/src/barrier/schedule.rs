@@ -857,7 +857,6 @@ mod tests {
         async fn new_control_stream(
             &self,
             _node: &risingwave_pb::common::WorkerNode,
-            _init_request: &risingwave_pb::stream_service::streaming_control_stream_request::PbInitRequest,
         ) -> MetaResult<risingwave_rpc_client::StreamingControlHandle> {
             unimplemented!()
         }
@@ -916,9 +915,7 @@ mod tests {
 
         async fn pre_commit_iceberg_pk_index_sink_metadata(
             &self,
-            _reports: Vec<
-                risingwave_pb::stream_service::barrier_complete_response::IcebergPkIndexSinkMetadata,
-            >,
+            _metadata: Vec<crate::manager::iceberg_pk_index_sink::IcebergPkIndexPreCommitMetadata>,
         ) -> MetaResult<Vec<risingwave_meta_model::SinkId>> {
             unimplemented!()
         }

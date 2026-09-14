@@ -41,6 +41,7 @@ env_scripts = [
   is_udf_enabled = get_env ENABLE_UDF
   is_datafusion_enabled = get_env ENABLE_DATAFUSION
   is_default_features_disabled = get_env DISABLE_DEFAULT_FEATURES
+  are_heavy_connectors_disabled = get_env DISABLE_HEAVY_CONNECTORS
 
   if ${is_sanitizer_enabled}
     set_env RISEDEV_CARGO_BUILD_EXTRA_ARGS "--timings -Zbuild-std --target ${CARGO_MAKE_RUST_TARGET_TRIPLE}"
@@ -72,6 +73,15 @@ env_scripts = [
 
   if ${is_default_features_disabled}
     set_env RISINGWAVE_FEATURE_FLAGS "${flags} --no-default-features"
+  else
+    if ${are_heavy_connectors_disabled}
+      # Cargo cannot subtract a feature from the default bundle. Disable defaults,
+      # then restore rw-static-link and all connectors except heavyweight connectors.
+      # These linking features control different dependencies: rw-static-link enables
+      # static libz/lzma/sasl2, while rw-dynamic-link enables dynamic zstd.
+      # They can coexist in dev builds, so keep rw-static-link to preserve the defaults.
+      set_env RISINGWAVE_FEATURE_FLAGS "${flags} --no-default-features --features rw-static-link,all-connectors-lite"
+    end
   end
 
   if ${is_hummock_trace}
@@ -1226,9 +1236,11 @@ script = """
 echo "Running $(tput setaf 4)cargo clippy$(tput sgr0) checks"
 set -x
 cargo clippy $@ ${RISINGWAVE_FEATURE_FLAGS}
+STATUS=$?
 set +x
 echo "If cargo clippy check failed or generates warning, you may run $(tput setaf 4)cargo clippy --workspace --all-targets --fix$(tput sgr0) to fix it. Note that clippy fix requires manual review, as not all auto fixes are guaranteed to be reasonable."
 echo "Alternately, you may run $(tput setaf 4)./risedev cf {package_names}$(tput sgr0) to fix those packages (e.g. frontend, meta)."
+exit $STATUS
 """
 
 [tasks.check-clippy-fix]
@@ -1263,13 +1275,14 @@ script = """
 
 if ! typos ; then
   echo "Hint: use 'typos -w' to fix."
+  exit 1
 fi
 """
 
 [tasks.check-license-header]
 category = "RiseDev - Check"
 description = "Check license headers by HawkEye"
-install_crate = { min_version = "6.3.0", crate_name = "hawkeye", binary = "hawkeye", test_arg = [
+install_crate = { crate_name = "hawkeye", binary = "hawkeye", test_arg = [
     "--help",
 ], install_command = "binstall" }
 command = "hawkeye"
@@ -1279,7 +1292,7 @@ env = { RUST_LOG = "info" }
 [tasks.fix-license-header]
 category = "RiseDev - Check"
 description = "Auto-fix license headers by HawkEye"
-install_crate = { min_version = "6.3.0", crate_name = "hawkeye", binary = "hawkeye", test_arg = [
+install_crate = { crate_name = "hawkeye", binary = "hawkeye", test_arg = [
     "--help",
 ], install_command = "binstall" }
 command = "hawkeye"
