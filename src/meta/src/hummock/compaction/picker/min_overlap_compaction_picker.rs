@@ -78,6 +78,10 @@ impl MinOverlappingPicker {
             !pending_compact
         });
 
+        let mut select_prefix_sizes = None;
+        let mut same_overlap_ends = vec![];
+        let mut tried_skipping = false;
+
         let mut min_score = u64::MAX;
         let mut min_score_select_range = 0..0;
         let mut min_score_target_range = 0..0;
@@ -91,7 +95,9 @@ impl MinOverlappingPicker {
             }
             let start_idx = select_file_ranges[left].0;
             let mut end_idx = start_idx + 1;
-            for (idx, range) in select_file_ranges.iter().skip(left) {
+            let mut right = left;
+            while right < select_file_ranges.len() {
+                let (idx, range) = &select_file_ranges[right];
                 if select_file_size > self.max_select_bytes
                     || *idx > end_idx
                     || range.start >= target_level_overlap_range.end
@@ -105,17 +111,82 @@ impl MinOverlappingPicker {
                     }
                     target_level_overlap_range.end = range.end;
                 }
-                let score = (total_file_size * 100)
+                let numerator = total_file_size * 100;
+                let mut score = numerator
                     .checked_div(select_file_size)
                     .unwrap_or(total_file_size);
+                let mut candidate_size = select_file_size;
+                let mut candidate_end = idx + 1;
                 end_idx = idx + 1;
+                // Build search metadata lazily, after finding eight equal-overlap
+                // windows. Short windows keep the original allocation behavior.
+                if !tried_skipping
+                    && right >= left + 7
+                    && select_file_size <= self.max_select_bytes
+                    && select_file_ranges[right - 7..right]
+                        .iter()
+                        .all(|(_, previous_range)| previous_range == range)
+                {
+                    tried_skipping = true;
+                    let mut sums = Vec::with_capacity(select_file_ranges.len() + 1);
+                    sums.push(0_u64);
+                    // Zero sizes and overflowing sums retain exhaustive enumeration.
+                    select_prefix_sizes =
+                        select_file_ranges
+                            .iter()
+                            .try_fold(sums, |mut sums, (idx, _)| {
+                                let size = select_tables[*idx].sst_size;
+                                if size == 0 {
+                                    return None;
+                                }
+                                sums.push(sums.last()?.checked_add(size)?);
+                                Some(sums)
+                            });
+                    if select_prefix_sizes.is_some() {
+                        same_overlap_ends = (1..=select_file_ranges.len()).collect::<Vec<_>>();
+                        for i in (0..select_file_ranges.len() - 1).rev() {
+                            if select_file_ranges[i].0 + 1 == select_file_ranges[i + 1].0
+                                && select_file_ranges[i].1 == select_file_ranges[i + 1].1
+                            {
+                                same_overlap_ends[i] = same_overlap_ends[i + 1];
+                            }
+                        }
+                    }
+                }
+                if let Some(sums) = &select_prefix_sizes
+                    && same_overlap_ends[right] >= right + 8
+                    && sums[right + 7] - sums[left] <= self.max_select_bytes
+                {
+                    let base = sums[left];
+                    // The limit is checked BEFORE adding the next SST, so include
+                    // the first SST that takes the window over the limit.
+                    let end = right
+                        + 1
+                        + sums[right + 1..same_overlap_ends[right]]
+                            .partition_point(|size| size - base <= self.max_select_bytes);
+                    select_file_size = sums[end] - base;
+                    score = numerator / select_file_size;
+                    // The numerator is constant throughout this run. Find the first
+                    // window attaining its minimum integer score, preserving both
+                    // the smaller-size tie break and the original encounter order.
+                    let best_end = right
+                        + 1
+                        + sums[right + 1..=end]
+                            .partition_point(|size| numerator / (size - base) > score);
+                    candidate_size = sums[best_end] - base;
+                    candidate_end = select_file_ranges[best_end - 1].0 + 1;
+                    end_idx = select_file_ranges[end - 1].0 + 1;
+                    right = end;
+                } else {
+                    right += 1;
+                }
                 if score < min_score
-                    || (score == min_score && select_file_size < min_score_select_file_size)
+                    || (score == min_score && candidate_size < min_score_select_file_size)
                 {
                     min_score = score;
-                    min_score_select_range = start_idx..end_idx;
+                    min_score_select_range = start_idx..candidate_end;
                     min_score_target_range = target_level_overlap_range.clone();
-                    min_score_select_file_size = select_file_size;
+                    min_score_select_file_size = candidate_size;
                 }
             }
         }
@@ -177,6 +248,195 @@ pub mod tests {
     use crate::hummock::compaction::selector::tests::{
         generate_l0_nonoverlapping_sublevels, generate_table,
     };
+
+    fn sized_table(id: u64, left: usize, right: usize, size: u64) -> SstableInfo {
+        let mut table =
+            crate::hummock::compaction::selector::tests::generate_table_impl(id, 1, left, right, 1);
+        table.sst_size = size;
+        table.into()
+    }
+
+    #[test]
+    fn test_equal_overlap_window_ties_and_limit() {
+        let source: Vec<_> = (0..16)
+            .map(|i| sized_table(i, i as usize * 2, i as usize * 2 + 1, 20))
+            .collect();
+        let handlers: Vec<_> = (0..3).map(LevelHandler::new).collect();
+        for (target_size, limit, expected_len) in [
+            (1, u64::MAX, 6), /* Score zero is first reached at 120 bytes, not at the longest window. */
+            (1000, u64::MAX, 16),
+            (1000, 160, 9),
+            (1000, 0, 1),
+            (1000, 20, 2),
+            (1000, 99, 5),
+            (1000, 100, 6), // Preserve the last SST that takes the window over the limit.
+        ] {
+            let picker = MinOverlappingPicker::new(
+                1,
+                2,
+                limit,
+                0,
+                Arc::new(RangeOverlapStrategy::default()),
+            );
+            let target = vec![sized_table(100, 0, 100, target_size)];
+            let (selected, overlapped) = picker.pick_tables(&source, &target, &handlers);
+            assert_eq!(selected, source[..expected_len]);
+            assert_eq!(overlapped, target);
+        }
+    }
+
+    #[test]
+    fn test_equal_overlap_pending_gap() {
+        let source: Vec<_> = (0..16)
+            .map(|i| sized_table(i, i as usize * 2, i as usize * 2 + 1, 20))
+            .collect();
+        let target = vec![sized_table(100, 0, 100, 1)];
+        let mut handlers: Vec<_> = (0..3).map(LevelHandler::new).collect();
+        handlers[1].test_add_pending_sst(source[4].sst_id, 1);
+        let picker =
+            MinOverlappingPicker::new(1, 2, u64::MAX, 0, Arc::new(RangeOverlapStrategy::default()));
+        let (selected, overlapped) = picker.pick_tables(&source, &target, &handlers);
+        assert_eq!(selected, source[5..11]);
+        assert_eq!(overlapped, target);
+        handlers[2].test_add_pending_sst(target[0].sst_id, 2);
+        assert_eq!(
+            picker.pick_tables(&source, &target, &handlers),
+            (vec![], vec![])
+        );
+    }
+
+    #[test]
+    fn test_equal_overlap_zero_and_overflowing_prefix() {
+        let handlers: Vec<_> = (0..3).map(LevelHandler::new).collect();
+        for size in [0, u64::MAX] {
+            let source: Vec<_> = (0..8)
+                .map(|i| sized_table(i, i as usize * 2, i as usize * 2 + 1, size))
+                .collect();
+            let target = vec![sized_table(100, 0, 100, 0)];
+            let picker =
+                MinOverlappingPicker::new(1, 2, 0, 0, Arc::new(RangeOverlapStrategy::default()));
+            let (selected, overlapped) = picker.pick_tables(&source, &target, &handlers);
+            assert_eq!(selected, source[..1]);
+            assert_eq!(overlapped, target);
+        }
+    }
+
+    #[test]
+    fn test_equal_overlap_overflow_outside_window() {
+        let source: Vec<_> = (0..18)
+            .map(|i| {
+                sized_table(
+                    i,
+                    i as usize * 2,
+                    i as usize * 2 + 1,
+                    if i >= 16 { u64::MAX } else { 1 },
+                )
+            })
+            .collect();
+        let target = vec![sized_table(100, 0, 100, 0)];
+        let mut handlers: Vec<_> = (0..3).map(LevelHandler::new).collect();
+        handlers[1].test_add_pending_sst(source[15].sst_id, 1);
+        let picker =
+            MinOverlappingPicker::new(1, 2, 8, 0, Arc::new(RangeOverlapStrategy::default()));
+        // No legal window overflows, even though the prefix over all candidates would.
+        let (selected, overlapped) = picker.pick_tables(&source, &target, &handlers);
+        assert_eq!(selected, source[..1]);
+        assert_eq!(overlapped, target);
+    }
+
+    #[test]
+    fn test_equal_overlap_expansion_after_skipping() {
+        let source: Vec<_> = (0..16)
+            .map(|i| {
+                sized_table(
+                    i,
+                    i as usize * 2,
+                    i as usize * 2 + 1,
+                    if i == 8 { 10000 } else { 100 },
+                )
+            })
+            .collect();
+        let target = vec![
+            sized_table(100, 0, 16, 1000),
+            sized_table(101, 17, 100, 1000),
+        ];
+        let handlers: Vec<_> = (0..3).map(LevelHandler::new).collect();
+        let picker =
+            MinOverlappingPicker::new(1, 2, u64::MAX, 0, Arc::new(RangeOverlapStrategy::default()));
+        let (selected, overlapped) = picker.pick_tables(&source, &target, &handlers);
+        // The bridging SST expands the target range. Score 17 is first reached at 11200 bytes.
+        assert_eq!(selected, source[..13]);
+        assert_eq!(overlapped, target);
+    }
+
+    // Run with cargo test --release -p risingwave_meta bench_min_overlap -- --ignored --nocapture --test-threads=1.
+    #[test]
+    #[ignore = "microbenchmark"]
+    fn bench_min_overlap() {
+        use std::hint::black_box;
+        use std::time::Duration;
+        let mut c = criterion::Criterion::default()
+            .sample_size(30)
+            .warm_up_time(Duration::from_millis(500))
+            .measurement_time(Duration::from_secs(1))
+            .without_plots();
+        for (name, n, group, limit, pending) in [
+            ("small", 8, 1, u64::MAX, false),
+            ("one_to_one", 10000, 1, u64::MAX, false),
+            ("short_runs", 10000, 7, u64::MAX, false),
+            ("tiny_limit", 10000, 10000, 4, false),
+            ("fan_in_1000", 1000, 1000, u64::MAX, false),
+            ("fan_in_10000", 10000, 10000, u64::MAX, false),
+            ("limited", 10000, 10000, 128, false),
+            ("pending_gaps", 10000, 10000, u64::MAX, true),
+            ("mixed", 10000, 20, 2048, false),
+        ] {
+            let source: Vec<_> = (0..n)
+                .map(|i| sized_table(i as u64, i * 4, i * 4 + 3, 1 + (i % 7) as u64))
+                .collect();
+            let target: Vec<_> = (0..n.div_ceil(group))
+                .map(|i| {
+                    sized_table(
+                        100000 + i as u64,
+                        if name == "mixed" && i > 0 {
+                            i * group * 4 + 2
+                        } else {
+                            i * group * 4
+                        },
+                        if name == "mixed" {
+                            (i + 1) * group * 4 + 1
+                        } else {
+                            (i + 1) * group * 4 - 1
+                        },
+                        1000,
+                    )
+                })
+                .collect();
+            let mut handlers: Vec<_> = (0..3).map(LevelHandler::new).collect();
+            if pending {
+                for i in (99..n).step_by(100) {
+                    handlers[1].test_add_pending_sst((i as u64).into(), 1);
+                }
+            }
+            let picker = MinOverlappingPicker::new(
+                1,
+                2,
+                limit,
+                0,
+                Arc::new(RangeOverlapStrategy::default()),
+            );
+            c.bench_function(&format!("min_overlap/{name}"), |b| {
+                b.iter(|| {
+                    black_box(picker.pick_tables(
+                        black_box(&source),
+                        black_box(&target),
+                        black_box(&handlers),
+                    ))
+                })
+            });
+        }
+        c.final_summary();
+    }
 
     #[test]
     fn test_compact_l1() {
