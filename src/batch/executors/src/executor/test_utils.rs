@@ -31,6 +31,143 @@ use crate::exchange_source::ExchangeSourceImpl;
 use crate::executor::{BoxedExecutor, CreateSource, LookupExecutorBuilder};
 use crate::task::BatchTaskContext;
 
+/// Inspect spill-buffer cleanup at remaining-input EOF, before recursive partitions run.
+pub fn assert_spill_buffer_released_at_eof(
+    input: BoxedExecutor,
+    child: risingwave_common::memory::MemoryContext,
+    parent: risingwave_common::memory::MemoryContext,
+    unrelated_usage: i64,
+) -> BoxedExecutor {
+    #[futures_async_stream::try_stream(boxed, ok = DataChunk, error = crate::error::BatchError)]
+    async fn checked_input(
+        input: BoxedExecutor,
+        child: risingwave_common::memory::MemoryContext,
+        parent: risingwave_common::memory::MemoryContext,
+        unrelated_usage: i64,
+    ) {
+        #[for_await]
+        for chunk in input.execute() {
+            yield chunk?;
+        }
+        assert_eq!(child.get_bytes_used(), 0);
+        assert_eq!(parent.get_bytes_used(), unrelated_usage);
+    }
+    Box::new(crate::executor::WrapStreamExecutor::new(
+        input.schema().clone(),
+        checked_input(input, child, parent, unrelated_usage),
+    ))
+}
+
+/// Shared fixtures for interrupting executors while their retained input is still charged.
+#[cfg(test)]
+pub mod memory_cleanup {
+    use futures::{FutureExt, StreamExt, TryStreamExt};
+    use risingwave_common::memory::MemoryContext;
+    use risingwave_common::metrics::LabelGuardedIntGauge;
+
+    use super::*;
+    use crate::error::BatchError;
+    use crate::executor::{BoxedDataChunkStream, WrapStreamExecutor};
+
+    #[derive(Clone, Copy)]
+    pub enum Exit {
+        InputError,
+        PendingInput,
+        Output,
+        Eof,
+    }
+
+    pub fn contexts() -> (MemoryContext, MemoryContext) {
+        let parent = MemoryContext::root(LabelGuardedIntGauge::test_int_gauge::<4>(), 64);
+        assert!(parent.add(16));
+        let child = MemoryContext::new_with_mem_limit(
+            Some(parent.clone()),
+            LabelGuardedIntGauge::test_int_gauge::<4>(),
+            0,
+        );
+        (parent, child)
+    }
+
+    /// Forward real input, then inject an error, wait forever, or return EOF for output cases.
+    pub fn input(input: BoxedExecutor, exit: Exit, child: MemoryContext) -> BoxedExecutor {
+        #[futures_async_stream::try_stream(boxed, ok = DataChunk, error = BatchError)]
+        async fn interrupted(input: BoxedExecutor, exit: Exit, child: MemoryContext) {
+            #[for_await]
+            for chunk in input.execute() {
+                yield chunk?;
+            }
+            // The executor must have retained and charged data before the interruption.
+            assert!(child.get_bytes_used() > 0);
+            match exit {
+                Exit::InputError => Err(anyhow::anyhow!("injected input error"))?,
+                Exit::PendingInput => futures::future::pending::<()>().await,
+                Exit::Output | Exit::Eof => {}
+            }
+        }
+        Box::new(WrapStreamExecutor::new(
+            input.schema().clone(),
+            interrupted(input, exit, child),
+        ))
+    }
+
+    /// Check cleanup after an error, cancellation, or EOF while keeping the shared contexts and
+    /// returned chunks alive. The EOF case compares all output rows, regardless of chunk boundaries.
+    /// `expected` must be `None` for input errors and pending input, and `Some` for output and EOF.
+    pub async fn assert_released(
+        mut output: BoxedDataChunkStream,
+        exit: Exit,
+        expected: Option<&DataChunk>,
+        child: &MemoryContext,
+        parent: &MemoryContext,
+    ) {
+        let returned_chunks = match exit {
+            Exit::InputError => {
+                assert!(expected.is_none());
+                let error = output.next().await.unwrap().unwrap_err();
+                assert_eq!(error.to_string(), "injected input error");
+                assert_eq!(parent.get_bytes_used(), child.get_bytes_used() + 16);
+                // The error ends execution and releases its private context.
+                // Keep the stream alive to verify cleanup without an explicit drop.
+                Vec::new()
+            }
+            Exit::PendingInput => {
+                assert!(expected.is_none());
+                assert!(output.next().now_or_never().is_none());
+                assert!(child.get_bytes_used() > 0);
+                assert_eq!(parent.get_bytes_used(), child.get_bytes_used() + 16);
+                // Cancel while waiting for input; polling to EOF would wait forever.
+                drop(output);
+                Vec::new()
+            }
+            Exit::Output => {
+                let expected = expected.expect("output requires expected rows");
+                let chunk = output.next().await.unwrap().unwrap();
+                assert_eq!(&chunk, expected);
+                assert!(child.get_bytes_used() > 0);
+                assert_eq!(parent.get_bytes_used(), child.get_bytes_used() + 16);
+                // Cancel after a yield, before execution resumes and finishes normally.
+                drop(output);
+                vec![chunk]
+            }
+            Exit::Eof => {
+                let expected = expected.expect("EOF requires expected rows");
+                let chunks = output.by_ref().try_collect::<Vec<_>>().await.unwrap();
+                let chunk_size = expected.cardinality().max(1);
+                assert_eq!(
+                    DataChunk::rechunk(&chunks, chunk_size).unwrap(),
+                    DataChunk::rechunk(std::slice::from_ref(expected), chunk_size).unwrap(),
+                );
+                // EOF ends execution. Keep the stream and original output chunks alive while
+                // checking that completion released its accounting without an explicit drop.
+                chunks
+            }
+        };
+        assert_eq!(child.get_bytes_used(), 0);
+        assert_eq!(parent.get_bytes_used(), 16);
+        drop(returned_chunks);
+    }
+}
+
 const SEED: u64 = 0xFF67FEABBAEF76FF;
 
 pub use risingwave_batch::executor::test_utils::*;

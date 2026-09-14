@@ -20,11 +20,13 @@ use bytes::Bytes;
 use futures_async_stream::try_stream;
 use hashbrown::hash_map::Entry;
 use itertools::Itertools;
+use prometheus::core::Atomic;
 use risingwave_common::array::{DataChunk, StreamChunk};
 use risingwave_common::bitmap::{Bitmap, FilterByBitmap};
 use risingwave_common::catalog::{Field, Schema};
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
 use risingwave_common::memory::MemoryContext;
+use risingwave_common::metrics::TrAdderAtomic;
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -491,6 +493,9 @@ impl AggSpillManager {
 impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
+        // Keep this partition's charges separate from the shared parent. Its private context
+        // releases remaining state charges on completion, errors, or cancellation.
+        let mem_context = MemoryContext::new(Some(self.mem_context.clone()), TrAdderAtomic::new(0));
         let child_schema = self.child.schema().clone();
         let mut need_to_spill = false;
         // If the memory upper bound is less than 1MB, we don't need to check memory usage.
@@ -499,10 +504,12 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             None => true,
         };
 
+        // Track only this executor's manual charges; spill partitions share the parent counter.
+        let mut states_heap_size = 0;
         // hash map for each agg groups
         let mut groups = AggHashMap::<K, _>::with_hasher_in(
             PrecomputedBuildHasher,
-            self.mem_context.global_allocator(),
+            mem_context.global_allocator(),
         );
 
         if let Some(init_agg_state_executor) = self.init_agg_state_executor {
@@ -531,7 +538,10 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                     groups.try_insert(key, agg_states).unwrap();
                 }
 
-                if !self.mem_context.add(memory_usage_diff) && check_memory {
+                // Restored states are retained even when loading the partition exceeds the limit.
+                states_heap_size += memory_usage_diff;
+                mem_context.add_unchecked(memory_usage_diff);
+                if check_memory && !mem_context.check_memory_usage() {
                     warn!(
                         "not enough memory to load one partition agg state after spill which is not a normal case, so keep going"
                     );
@@ -574,8 +584,10 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
                     memory_usage_diff += state.estimated_size() as i64;
                 }
             }
-            // update memory usage
-            if !self.mem_context.add(memory_usage_diff) && check_memory {
+            // States have already been updated and must remain charged until they are released.
+            states_heap_size += memory_usage_diff;
+            mem_context.add_unchecked(memory_usage_diff);
+            if check_memory && !mem_context.check_memory_usage() {
                 if self.spill_backend.is_some() {
                     need_to_spill = true;
                     break;
@@ -627,7 +639,8 @@ impl<K: HashKey + Send + Sync> HashAggExecutor<K> {
             }
 
             // Release memory occupied by agg hash map.
-            self.mem_context.add(memory_usage_diff);
+            debug_assert_eq!(memory_usage_diff, -states_heap_size);
+            mem_context.add_unchecked(memory_usage_diff);
 
             // Spill input chunks.
             #[for_await]
@@ -846,8 +859,8 @@ mod tests {
             ));
             diff_executor_output(actual_exec, expect_exec).await;
 
-            // check estimated memory usage = 4 groups x state size
-            assert_eq!(mem_context.get_bytes_used() as usize, 4 * 24);
+            // Finishing a partition promptly clears its memory usage accounting.
+            assert_eq!(mem_context.get_bytes_used(), 0);
         }
 
         // Ensure that agg memory counter has been dropped.
@@ -1072,6 +1085,182 @@ mod tests {
             None,
             BatchSpillMetrics::for_test(),
         ))
+    }
+
+    mod memory_budget {
+        use super::*;
+
+        /// Verifies that aggregation counts the memory used to keep each group's running result, even
+        /// above budget, and removes those charges after spilling, completion, or OOM. Budget checks
+        /// make normal input spill or fail, but only warn when loading saved results.
+        ///
+        /// Equivalent query: `SELECT group_id, COUNT(*) FROM input GROUP BY group_id`.
+        /// Input: two rows with `group_id` = 1. Expected output on success: `(1, 2)`.
+        /// The restore case has no new input rows; it loads saved state `(1, 2)` and returns `(1, 2)`.
+        #[tokio::test]
+        async fn test_over_budget_aggregate_state_accounting() {
+            use futures::StreamExt;
+            use risingwave_common::hash::Key64;
+
+            use crate::executor::test_utils::assert_spill_buffer_released_at_eof;
+
+            // restore=false counts new rows; restore=true loads a saved count without any new rows.
+            // (true, true, false): New input exceeds budget → spill → produce the count;
+            // (false, false, false): Ignore budget enforcement → produce the count, but still account
+            // for memory;
+            // (true, false, false): New input exceeds budget and no spill backend → return OOM;
+            // (true, false, true): Loading the saved count exceeds budget → warn and produce the count,
+            // without spilling or returning OOM; the restored state's memory must still be counted.
+            // (true, true, true) is covered by (true, false, true): restoring only warns, so the spill
+            // backend is unused when there are no new rows.
+            // (false, false, true) has the same checks-disabled behavior as (false, false, false), but
+            // restoring still uses a different path. Small recursive partitions in (true, true, false)
+            // cover that restoration path with checks disabled.
+            for (check_memory, spill, restore) in [
+                (true, true, false),
+                (false, false, false),
+                (true, false, false),
+                (true, false, true),
+            ] {
+                let parent = MemoryContext::root(LabelGuardedIntGauge::test_int_gauge::<4>(), 64);
+                assert!(parent.add(16));
+                let child = MemoryContext::new_with_mem_limit(
+                    Some(parent.clone()),
+                    LabelGuardedIntGauge::test_int_gauge::<4>(),
+                    0,
+                );
+                // Reuse the shared context after both successful execution and OOM. Each private
+                // partition context must release its charges before the next attempt.
+                for _ in 0..2 {
+                    assert_eq!(child.get_bytes_used(), 0);
+                    assert_eq!(parent.get_bytes_used(), 16);
+                    let agg = build_agg(&risingwave_expr::aggregate::AggCall::from_pretty(
+                        "(count:int8)",
+                    ))
+                    .unwrap();
+                    let state_charge = agg.create_state().unwrap().estimated_size() as i64;
+                    assert!(state_charge > 0);
+                    let input_schema = Schema::new(vec![Field::unnamed(DataType::Int32)]);
+                    let output_schema = Schema::new(vec![
+                        Field::unnamed(DataType::Int32),
+                        Field::unnamed(DataType::Int64),
+                    ]);
+                    let mut input = MockExecutor::new(input_schema);
+                    if !restore {
+                        input.add(DataChunk::from_pretty("i\n1\n1"));
+                    }
+                    let mut input: BoxedExecutor = Box::new(input);
+                    if spill {
+                        input = assert_spill_buffer_released_at_eof(
+                            input,
+                            child.clone(),
+                            parent.clone(),
+                            16,
+                        );
+                    }
+                    let restored = restore.then(|| {
+                        Box::new(MockExecutor::with_chunk(
+                            DataChunk::from_pretty("i I\n1 2"),
+                            output_schema.clone(),
+                        )) as BoxedExecutor
+                    });
+                    let exec = HashAggExecutor::<Key64>::new_inner(
+                        Arc::new(vec![agg]),
+                        vec![0],
+                        vec![DataType::Int32],
+                        output_schema,
+                        input,
+                        restored,
+                        "agg-accounting".into(),
+                        CHUNK_SIZE,
+                        child.clone(),
+                        spill.then_some(SpillBackend::Memory),
+                        BatchSpillMetrics::for_test(),
+                        if check_memory { None } else { Some(0) },
+                        ShutdownToken::empty(),
+                    );
+                    let mut output = Box::new(exec).execute();
+                    if check_memory && !spill && !restore {
+                        assert!(matches!(
+                            output.next().await.unwrap(),
+                            Err(BatchError::OutOfMemory(0))
+                        ));
+                    } else {
+                        assert_eq!(
+                            output.next().await.unwrap().unwrap(),
+                            DataChunk::from_pretty("i I\n1 2")
+                        );
+                        // The state must stay charged while its output stream is suspended.
+                        assert!(child.get_bytes_used() > state_charge);
+                    }
+                    assert!(output.next().await.is_none());
+                    // The shared context stays alive; private-context cleanup also covers OOM.
+                    assert_eq!(child.get_bytes_used(), 0);
+                    assert_eq!(parent.get_bytes_used(), 16);
+                    drop(output);
+                }
+                drop(child);
+                assert_eq!(parent.get_bytes_used(), 16);
+                assert!(parent.add(-16));
+            }
+        }
+
+        /// Verifies that an input error or dropping the stream while waiting for input or after an
+        /// output releases aggregate states, without clearing unrelated parent usage.
+        ///
+        /// Equivalent query: `SELECT group_id, COUNT(*) FROM input GROUP BY group_id`.
+        /// Input: two rows with `group_id` = 1. Expected output before dropping the output case: `(1, 2)`.
+        /// The other cases fail or wait at input EOF, after counting both rows but before output.
+        #[tokio::test]
+        async fn test_hash_agg_cleanup_on_error_and_cancellation() {
+            use risingwave_common::hash::Key64;
+
+            use crate::executor::test_utils::memory_cleanup::{self, Exit};
+
+            let (parent, child) = memory_cleanup::contexts();
+            for exit in [Exit::InputError, Exit::PendingInput, Exit::Output] {
+                let agg = build_agg(&risingwave_expr::aggregate::AggCall::from_pretty(
+                    "(count:int8)",
+                ))
+                .unwrap();
+                let input = memory_cleanup::input(
+                    Box::new(MockExecutor::with_chunk(
+                        DataChunk::from_pretty("i\n1\n1"),
+                        Schema::new(vec![Field::unnamed(DataType::Int32)]),
+                    )),
+                    exit,
+                    child.clone(),
+                );
+                let exec = HashAggExecutor::<Key64>::new_inner(
+                    Arc::new(vec![agg]),
+                    vec![0],
+                    vec![DataType::Int32],
+                    Schema::new(vec![
+                        Field::unnamed(DataType::Int32),
+                        Field::unnamed(DataType::Int64),
+                    ]),
+                    input,
+                    None,
+                    "agg-cleanup".into(),
+                    CHUNK_SIZE,
+                    child.clone(),
+                    None,
+                    BatchSpillMetrics::for_test(),
+                    Some(0), // Record above-budget usage without triggering spill/OOM first.
+                    ShutdownToken::empty(),
+                );
+                let expected =
+                    matches!(exit, Exit::Output).then(|| DataChunk::from_pretty("i I\n1 2"));
+                memory_cleanup::assert_released(
+                    Box::new(exec).execute(),
+                    exit,
+                    expected.as_ref(),
+                    &child,
+                    &parent,
+                )
+                .await;
+            }
+        }
     }
 
     #[tokio::test]
