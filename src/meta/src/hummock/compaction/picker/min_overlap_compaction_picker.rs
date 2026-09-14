@@ -112,11 +112,6 @@ impl MinOverlappingPicker {
                     target_level_overlap_range.end = range.end;
                 }
                 let numerator = total_file_size * 100;
-                let mut score = numerator
-                    .checked_div(select_file_size)
-                    .unwrap_or(total_file_size);
-                let mut candidate_size = select_file_size;
-                let mut candidate_end = idx + 1;
                 end_idx = idx + 1;
                 // Build search metadata lazily, after finding eight equal-overlap
                 // windows. Short windows keep the original allocation behavior.
@@ -165,28 +160,23 @@ impl MinOverlappingPicker {
                         + sums[right + 1..same_overlap_ends[right]]
                             .partition_point(|size| size - base <= self.max_select_bytes);
                     select_file_size = sums[end] - base;
-                    score = numerator / select_file_size;
-                    // The numerator is constant throughout this run. Find the first
-                    // window attaining its minimum integer score, preserving both
-                    // the smaller-size tie break and the original encounter order.
-                    let best_end = right
-                        + 1
-                        + sums[right + 1..=end]
-                            .partition_point(|size| numerator / (size - base) > score);
-                    candidate_size = sums[best_end] - base;
-                    candidate_end = select_file_ranges[best_end - 1].0 + 1;
+                    // With a constant numerator, the furthest legal endpoint has
+                    // the lowest score and the largest source size on a score tie.
                     end_idx = select_file_ranges[end - 1].0 + 1;
                     right = end;
                 } else {
                     right += 1;
                 }
+                let score = numerator
+                    .checked_div(select_file_size)
+                    .unwrap_or(total_file_size);
                 if score < min_score
-                    || (score == min_score && candidate_size < min_score_select_file_size)
+                    || (score == min_score && select_file_size > min_score_select_file_size)
                 {
                     min_score = score;
-                    min_score_select_range = start_idx..candidate_end;
+                    min_score_select_range = start_idx..end_idx;
                     min_score_target_range = target_level_overlap_range.clone();
-                    min_score_select_file_size = candidate_size;
+                    min_score_select_file_size = select_file_size;
                 }
             }
         }
@@ -241,6 +231,7 @@ impl CompactionPicker for MinOverlappingPicker {
 
 #[cfg(test)]
 pub mod tests {
+    use risingwave_hummock_sdk::key_range::KeyRangeCommon;
     use risingwave_hummock_sdk::level::Level;
 
     use super::*;
@@ -253,6 +244,13 @@ pub mod tests {
         let mut table =
             crate::hummock::compaction::selector::tests::generate_table_impl(id, 1, left, right, 1);
         table.sst_size = size;
+        // Fixed-width keys preserve byte ordering beyond the shared helper's five-digit range.
+        let key = |idx: usize| {
+            risingwave_hummock_sdk::key::FullKey::for_test(1.into(), (idx as u64).to_be_bytes(), 1)
+                .encode()
+        };
+        table.key_range.left = key(left).into();
+        table.key_range.right = key(right).into();
         table.into()
     }
 
@@ -263,7 +261,7 @@ pub mod tests {
             .collect();
         let handlers: Vec<_> = (0..3).map(LevelHandler::new).collect();
         for (target_size, limit, expected_len) in [
-            (1, u64::MAX, 6), /* Score zero is first reached at 120 bytes, not at the longest window. */
+            (1, u64::MAX, 16), // Prefer the largest window on the score-zero plateau.
             (1000, u64::MAX, 16),
             (1000, 160, 9),
             (1000, 0, 1),
@@ -286,6 +284,36 @@ pub mod tests {
     }
 
     #[test]
+    fn test_score_then_source_size_then_encounter_order() {
+        let handlers: Vec<_> = (0..3).map(LevelHandler::new).collect();
+        for (second_source_size, second_target_size, expected_idx) in [
+            (1000, 1009, 1), // Equal integer scores: prefer more source bytes.
+            (1000, 1010, 0), // A lower score still wins over a larger source.
+            (100, 100, 0),   // Equal score and size: preserve encounter order.
+        ] {
+            let source = vec![
+                sized_table(0, 0, 9, 100),
+                sized_table(1, 10, 19, second_source_size),
+            ];
+            let target = vec![
+                sized_table(100, 0, 9, 100),
+                sized_table(101, 10, 19, second_target_size),
+            ];
+            let picker = MinOverlappingPicker::new(
+                1,
+                2,
+                u64::MAX,
+                0,
+                Arc::new(RangeOverlapStrategy::default()),
+            );
+            let (selected, overlapped) = picker.pick_tables(&source, &target, &handlers);
+            // Adjacent disjoint target ranges remain separate candidates.
+            assert_eq!(selected, source[expected_idx..expected_idx + 1]);
+            assert_eq!(overlapped, target[expected_idx..expected_idx + 1]);
+        }
+    }
+
+    #[test]
     fn test_equal_overlap_pending_gap() {
         let source: Vec<_> = (0..16)
             .map(|i| sized_table(i, i as usize * 2, i as usize * 2 + 1, 20))
@@ -296,7 +324,7 @@ pub mod tests {
         let picker =
             MinOverlappingPicker::new(1, 2, u64::MAX, 0, Arc::new(RangeOverlapStrategy::default()));
         let (selected, overlapped) = picker.pick_tables(&source, &target, &handlers);
-        assert_eq!(selected, source[5..11]);
+        assert_eq!(selected, source[5..16]);
         assert_eq!(overlapped, target);
         handlers[2].test_add_pending_sst(target[0].sst_id, 2);
         assert_eq!(
@@ -340,7 +368,7 @@ pub mod tests {
             MinOverlappingPicker::new(1, 2, 8, 0, Arc::new(RangeOverlapStrategy::default()));
         // No legal window overflows, even though the prefix over all candidates would.
         let (selected, overlapped) = picker.pick_tables(&source, &target, &handlers);
-        assert_eq!(selected, source[..1]);
+        assert_eq!(selected, source[16..17]);
         assert_eq!(overlapped, target);
     }
 
@@ -364,8 +392,8 @@ pub mod tests {
         let picker =
             MinOverlappingPicker::new(1, 2, u64::MAX, 0, Arc::new(RangeOverlapStrategy::default()));
         let (selected, overlapped) = picker.pick_tables(&source, &target, &handlers);
-        // The bridging SST expands the target range. Score 17 is first reached at 11200 bytes.
-        assert_eq!(selected, source[..13]);
+        // The bridging SST expands the target range. Prefer all 11600 bytes at score 17.
+        assert_eq!(selected, source);
         assert_eq!(overlapped, target);
     }
 
@@ -387,6 +415,7 @@ pub mod tests {
             ("tiny_limit", 10000, 10000, 4, false),
             ("fan_in_1000", 1000, 1000, u64::MAX, false),
             ("fan_in_10000", 10000, 10000, u64::MAX, false),
+            ("fan_in_100000", 100000, 100000, u64::MAX, false),
             ("limited", 10000, 10000, 128, false),
             ("pending_gaps", 10000, 10000, u64::MAX, true),
             ("mixed", 10000, 20, 2048, false),
@@ -412,6 +441,14 @@ pub mod tests {
                     )
                 })
                 .collect();
+            for tables in [&source, &target] {
+                assert!(tables.windows(2).all(|pair| {
+                    pair[0]
+                        .key_range
+                        .compare_right_with(&pair[1].key_range.left)
+                        == std::cmp::Ordering::Less
+                }));
+            }
             let mut handlers: Vec<_> = (0..3).map(LevelHandler::new).collect();
             if pending {
                 for i in (99..n).step_by(100) {
@@ -425,6 +462,14 @@ pub mod tests {
                 0,
                 Arc::new(RangeOverlapStrategy::default()),
             );
+            let (selected, overlapped) = picker.pick_tables(&source, &target, &handlers);
+            assert!(
+                !overlapped.is_empty(),
+                "fixture must not take the trivial-move path"
+            );
+            if name.starts_with("fan_in_") {
+                assert_eq!(selected, source);
+            }
             c.bench_function(&format!("min_overlap/{name}"), |b| {
                 b.iter(|| {
                     black_box(picker.pick_tables(
