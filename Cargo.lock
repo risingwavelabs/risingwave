@@ -934,7 +934,7 @@ dependencies = [
  "ring",
  "rustls-native-certs 0.8.1",
  "rustls-pki-types",
- "rustls-webpki 0.103.10",
+ "rustls-webpki 0.103.13",
  "serde",
  "serde_json",
  "serde_nanos",
@@ -1628,7 +1628,7 @@ dependencies = [
  "aws-smithy-runtime-api",
  "aws-smithy-types",
  "h2 0.3.26",
- "h2 0.4.12",
+ "h2 0.4.17",
  "http 0.2.12",
  "http 1.4.0",
  "http-body 0.4.6",
@@ -7227,9 +7227,9 @@ dependencies = [
 
 [[package]]
 name = "h2"
-version = "0.4.12"
+version = "0.4.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f3c0b69cfcb4e1b9f1bf2f53f95f766e4661169728ec61cd3fe5a0166f2d1386"
+checksum = "9f877e75f39e9827ec50a572dd592684ac28c029578726c85f1b2aa6ab807449"
 dependencies = [
  "atomic-waker",
  "bytes",
@@ -7625,7 +7625,7 @@ dependencies = [
  "bytes",
  "futures-channel",
  "futures-core",
- "h2 0.4.12",
+ "h2 0.4.17",
  "http 1.4.0",
  "http-body 1.0.1",
  "httparse",
@@ -9591,9 +9591,9 @@ dependencies = [
 
 [[package]]
 name = "lru"
-version = "0.18.1"
+version = "0.18.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b6180140927ee907000b0aa540091f6ea512ead4447c92b8fc35bc72788a5a6"
+checksum = "5d2f2f9b4ba7e6b24d95e7e899329d35be83bcded72c8540cdd5368932d1d90a"
 dependencies = [
  "hashbrown 0.17.1",
 ]
@@ -13514,7 +13514,7 @@ dependencies = [
  "futures-channel",
  "futures-core",
  "futures-util",
- "h2 0.4.12",
+ "h2 0.4.17",
  "http 1.4.0",
  "http-body 1.0.1",
  "http-body-util",
@@ -13563,7 +13563,7 @@ dependencies = [
  "encoding_rs",
  "futures-core",
  "futures-util",
- "h2 0.4.12",
+ "h2 0.4.17",
  "http 1.4.0",
  "http-body 1.0.1",
  "http-body-util",
@@ -13962,7 +13962,7 @@ dependencies = [
  "jni",
  "jsonbb",
  "linkme",
- "lru 0.18.1",
+ "lru 0.18.2",
  "madsim-tokio",
  "memcomparable",
  "more-asserts",
@@ -15214,7 +15214,7 @@ dependencies = [
  "either",
  "futures",
  "http 1.4.0",
- "lru 0.18.1",
+ "lru 0.18.2",
  "madsim-tokio",
  "madsim-tonic",
  "moka",
@@ -15901,7 +15901,7 @@ dependencies = [
  "once_cell",
  "ring",
  "rustls-pki-types",
- "rustls-webpki 0.103.10",
+ "rustls-webpki 0.103.13",
  "subtle",
  "zeroize",
 ]
@@ -15972,7 +15972,7 @@ dependencies = [
  "rustls 0.23.35",
  "rustls-native-certs 0.8.1",
  "rustls-platform-verifier-android",
- "rustls-webpki 0.103.10",
+ "rustls-webpki 0.103.13",
  "security-framework 3.5.1",
  "security-framework-sys",
  "webpki-root-certs",
@@ -16008,9 +16008,9 @@ dependencies = [
 
 [[package]]
 name = "rustls-webpki"
-version = "0.103.10"
+version = "0.103.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "df33b2b81ac578cabaf06b89b0631153a3f416b0a886e8a7a1707fb51abbd1ef"
+checksum = "61c429a8649f110dddef65e2a5ad240f747e85f7758a6bccc7e5777bd33f756e"
 dependencies = [
  "aws-lc-rs",
  "ring",
@@ -18389,7 +18389,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "flate2",
- "h2 0.4.12",
+ "h2 0.4.17",
  "http 1.4.0",
  "http-body 1.0.1",
  "http-body-util",
