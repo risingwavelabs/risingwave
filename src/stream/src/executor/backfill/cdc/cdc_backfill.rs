@@ -424,8 +424,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             //
             // A fresh backfill can ignore CDC events here because its snapshot starts from the
             // beginning. Recovery preserves events for the already-scanned prefix while reader
-            // creation is retried. Legacy MySQL graphs must first recover PK comparison metadata
-            // from the reader so that those events are filtered with unsigned-aware ordering.
+            // creation is retried. Legacy MySQL graphs with Int64 PK columns must first recover
+            // comparison metadata from the reader so events use unsigned-aware ordering if needed.
             let offset_parse_func = self.external_table.table_type().get_cdc_offset_parser()?;
             let mut table_reader = None;
             let external_table = self.external_table.clone();

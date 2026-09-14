@@ -21,6 +21,7 @@ use risingwave_connector::source::cdc::CdcScanOptions;
 use risingwave_connector::source::cdc::external::{
     ExternalCdcTableType, ExternalTableConfig, SchemaTableName,
 };
+use risingwave_pb::data::data_type::TypeName;
 use risingwave_pb::plan_common::ExternalTableDesc;
 use risingwave_pb::stream_plan::StreamCdcScanNode;
 
@@ -60,13 +61,24 @@ fn decode_table_pk(
             .iter()
             .map(|column| OrderType::from_protobuf(column.get_order_type().unwrap()))
             .collect_vec();
-        let comparisons = (*table_type != ExternalCdcTableType::MySql)
-            .then(|| vec![CdcKeyComparison::Native; table_desc.pk.len()]);
         let indices = table_desc
             .pk
             .iter()
             .map(|column| column.column_index as usize)
             .collect_vec();
+        // Legacy graphs do not retain MySQL signedness. Only Int64 PK columns can need
+        // unsigned reinterpretation; other types (including Decimal) use native ordering.
+        let mut needs_reader_comparisons = false;
+        if *table_type == ExternalCdcTableType::MySql {
+            for &idx in &indices {
+                if table_desc.columns[idx].get_column_type()?.get_type_name()? == TypeName::Int64 {
+                    needs_reader_comparisons = true;
+                    break;
+                }
+            }
+        }
+        let comparisons = (!needs_reader_comparisons)
+            .then(|| vec![CdcKeyComparison::Native; table_desc.pk.len()]);
         Ok((order_types, comparisons, indices))
     }
 }
@@ -190,7 +202,8 @@ impl ExecutorBuilder for StreamCdcScanExecutorBuilder {
 
 #[cfg(test)]
 mod tests {
-    use risingwave_common::catalog::CdcKeyComparison;
+    use risingwave_common::catalog::{CdcKeyComparison, ColumnDesc};
+    use risingwave_common::types::DataType;
     use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
     use risingwave_connector::source::cdc::external::ExternalCdcTableType;
     use risingwave_pb::plan_common::cdc_key_ordering::{Column, Comparison};
@@ -198,8 +211,13 @@ mod tests {
 
     use super::decode_table_pk;
 
-    fn legacy_desc() -> ExternalTableDesc {
+    fn legacy_desc(pk_type: DataType) -> ExternalTableDesc {
         ExternalTableDesc {
+            columns: vec![
+                ColumnDesc::unnamed(0.into(), DataType::Varchar).to_protobuf(),
+                ColumnDesc::unnamed(1.into(), DataType::Int64).to_protobuf(),
+                ColumnDesc::unnamed(2.into(), pk_type).to_protobuf(),
+            ],
             pk: vec![
                 ColumnOrder::new(2, OrderType::descending()).to_protobuf(),
                 ColumnOrder::new(0, OrderType::ascending()).to_protobuf(),
@@ -209,9 +227,9 @@ mod tests {
     }
 
     #[test]
-    fn test_decode_legacy_mysql_pk_comparisons_as_unknown() {
+    fn test_decode_legacy_mysql_int64_pk_comparisons_as_unknown() {
         let (order_types, comparisons, indices) =
-            decode_table_pk(&legacy_desc(), &ExternalCdcTableType::MySql).unwrap();
+            decode_table_pk(&legacy_desc(DataType::Int64), &ExternalCdcTableType::MySql).unwrap();
 
         assert_eq!(
             order_types,
@@ -222,13 +240,39 @@ mod tests {
     }
 
     #[test]
+    fn test_decode_legacy_mysql_non_int64_pk_comparisons_as_native() {
+        // An Int64 non-PK column must not require recovering comparison metadata.
+        for pk_type in [
+            DataType::Int16,
+            DataType::Int32,
+            DataType::Decimal,
+            DataType::Float32,
+            DataType::Float64,
+            DataType::Varchar,
+        ] {
+            let (order_types, comparisons, indices) =
+                decode_table_pk(&legacy_desc(pk_type), &ExternalCdcTableType::MySql).unwrap();
+            assert_eq!(
+                order_types,
+                vec![OrderType::descending(), OrderType::ascending()]
+            );
+            assert_eq!(
+                comparisons,
+                Some(vec![CdcKeyComparison::Native, CdcKeyComparison::Native])
+            );
+            assert_eq!(indices, vec![2, 0]);
+        }
+    }
+
+    #[test]
     fn test_decode_legacy_non_mysql_pk_comparisons_as_native() {
         for table_type in [
             ExternalCdcTableType::Postgres,
             ExternalCdcTableType::SqlServer,
             ExternalCdcTableType::Mock,
         ] {
-            let (_, comparisons, _) = decode_table_pk(&legacy_desc(), &table_type).unwrap();
+            let (_, comparisons, _) =
+                decode_table_pk(&legacy_desc(DataType::Int64), &table_type).unwrap();
             assert_eq!(
                 comparisons,
                 Some(vec![CdcKeyComparison::Native, CdcKeyComparison::Native])

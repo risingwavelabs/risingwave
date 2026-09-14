@@ -46,8 +46,8 @@ pub struct ExternalStorageTable {
 
     /// Comparison semantics persisted in the stream graph.
     ///
-    /// `None` is only expected for legacy MySQL graphs, whose comparison semantics must be
-    /// recovered from a live external table reader.
+    /// `None` is only expected for legacy MySQL graphs with Int64 primary-key columns, whose
+    /// signedness must be recovered from a live external table reader.
     pk_comparisons: Option<Vec<CdcKeyComparison>>,
 
     /// Indices of primary key.

@@ -551,6 +551,13 @@ impl ExternalTableImpl {
         }
     }
 
+    /// Return CDC backfill comparison semantics in the requested `pk_names` order.
+    /// Reuses metadata loaded by [`Self::connect`], without querying upstream again.
+    ///
+    /// MySQL `BIGINT UNSIGNED` keys use `UnsignedInt64` to preserve upstream ordering
+    /// when represented as signed `i64` values; other types use `Native`. MySQL names
+    /// are matched case-insensitively, and missing upstream PK names return an error.
+    /// PostgreSQL and SQL Server return `Native` for every requested name.
     pub fn pk_column_comparisons(
         &self,
         pk_names: &[String],
@@ -563,6 +570,14 @@ impl ExternalTableImpl {
         }
     }
 
+    /// Discover CDC backfill comparison semantics without loading the full table schema.
+    /// Used when SQL defines the columns explicitly, so there is no existing table
+    /// instance whose metadata can be reused via [`Self::pk_column_comparisons`].
+    ///
+    /// For MySQL, queries upstream PK names and types and returns the same comparison
+    /// modes in the requested `pk_names` order, with case-insensitive name matching and
+    /// an error for missing upstream PK names. Other connectors return `Native` for
+    /// every requested name without querying upstream.
     pub async fn discover_pk_column_comparisons(
         config: &ExternalTableConfig,
         pk_names: &[String],
