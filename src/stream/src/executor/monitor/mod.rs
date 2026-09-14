@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod now_metrics;
 pub mod profiling_stats;
 pub mod streaming_stats;
 pub use streaming_stats::*;

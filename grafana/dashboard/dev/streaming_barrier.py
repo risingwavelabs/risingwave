@@ -4,6 +4,8 @@ from . import section
 @section
 def _(outer_panels: Panels):
     panels = outer_panels.sub_panel()
+    now_clock = metric("stream_now_streaming_clock_ms")
+    now_drift = metric("stream_now_wall_clock_drift_ms")
     return [
         outer_panels.row_collapsed(
             "Streaming Barrier",
@@ -109,34 +111,33 @@ def _(outer_panels: Panels):
                 ),
                 panels.timeseries_latency_ms(
                     "Temporal Filter NOW() vs Wall Clock Drift",
-                    "Milliseconds by which streaming `NOW()` lags the latest processed "
-                    "barrier epoch. Zero means it has caught up to that barrier, not "
-                    "necessarily to current wall time. This gauge retains its previous "
-                    "value while watermark emission is paused or stalled. A growing series "
+                    "Milliseconds between the fragment's latest processed barrier epoch "
+                    "and its minimum streaming `NOW()` clock across compute nodes. Zero "
+                    "means it has caught up to that barrier, not necessarily to current "
+                    "wall time. Each live executor retains its previous sample while "
+                    "watermark emission is paused or stalled. A growing series "
                     "alone does not establish that recovery is required. For drift caused "
                     "by a stale `barrier_interval_ms`, RECOVER reloads the interval but "
                     "restores the checkpointed clock; catch-up is gradual as barrier "
                     "progress permits, rather than an immediate reset to zero.",
                     [
                         panels.target(
-                            f"{metric('stream_now_wall_clock_drift_ms')}",
-                            "drift ms - fragment {{fragment_id}} actor {{actor_id}}",
-                        ),
-                        panels.target(
-                            f"max by (fragment_id) ({metric('stream_now_wall_clock_drift_ms')})",
-                            "max drift ms - fragment {{fragment_id}}",
+                            f"max by (fragment_id) ({now_clock} + {now_drift}) "
+                            f"- min by (fragment_id) ({now_clock})",
+                            "drift ms - fragment {{fragment_id}}",
                         ),
                     ],
                 ),
                 panels.timeseries_count(
                     "Temporal Filter NOW() Streaming Clock",
-                    "The most recent streaming `NOW()` value emitted by each `NowExecutor`, "
-                    "expressed as milliseconds since the Unix epoch. Compare against the "
-                    "dashboard time to see when a fragment's clock stops advancing.",
+                    "The minimum of the latest streaming `NOW()` timestamps emitted by "
+                    "live executors in each fragment, across compute nodes, in milliseconds "
+                    "since the Unix epoch. Executors that have not emitted a watermark are "
+                    "excluded. Compare against dashboard time to detect a stalled clock.",
                     [
                         panels.target(
-                            f"{metric('stream_now_streaming_clock_ms')}",
-                            "streaming NOW() ms - fragment {{fragment_id}} actor {{actor_id}}",
+                            f"min by (fragment_id) ({now_clock})",
+                            "streaming NOW() ms - fragment {{fragment_id}}",
                         ),
                     ],
                     unit="dateTimeAsIso",

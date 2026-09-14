@@ -38,6 +38,7 @@ use risingwave_pb::id::ExecutorId;
 use crate::common::log_store_impl::kv_log_store::{
     REWIND_BACKOFF_MULTIPLIER, REWIND_INITIAL_DELAY, REWIND_MAX_DELAY,
 };
+use crate::executor::monitor::now_metrics::NowMetrics;
 use crate::executor::prelude::ActorId;
 use crate::task::FragmentId;
 
@@ -240,8 +241,7 @@ pub struct StreamingMetrics {
     pub gap_fill_generated_rows_count: RelabeledGuardedIntCounterVec,
 
     // Now (temporal filter clock)
-    pub now_streaming_clock_ms: LabelGuardedIntGaugeVec,
-    pub now_wall_clock_drift_ms: LabelGuardedIntGaugeVec,
+    pub now_metrics: NowMetrics,
 
     // State Table
     pub state_table_iter_count: RelabeledGuardedIntCounterVec,
@@ -1378,25 +1378,7 @@ impl StreamingMetrics {
         .unwrap()
         .relabel_debug_1(level);
 
-        let now_streaming_clock_ms = register_guarded_int_gauge_vec_with_registry!(
-            "stream_now_streaming_clock_ms",
-            "The streaming-time NOW() value (milliseconds since epoch) most recently emitted \
-             by a temporal-filter NowExecutor. Compare against wall-clock time to detect a \
-             streaming clock that is falling behind (see stream_now_wall_clock_drift_ms).",
-            &["actor_id", "fragment_id"],
-            registry,
-        )
-        .unwrap();
-
-        let now_wall_clock_drift_ms = register_guarded_int_gauge_vec_with_registry!(
-            "stream_now_wall_clock_drift_ms",
-            "Milliseconds by which a temporal-filter NowExecutor's streaming NOW() lags the \
-             barrier's wall-clock epoch (barrier_epoch_ms - streaming_now_ms). A steadily \
-             growing value means downstream temporal filters will delay eligible rows.",
-            &["actor_id", "fragment_id"],
-            registry,
-        )
-        .unwrap();
+        let now_metrics = NowMetrics::new(registry);
 
         Self {
             level,
@@ -1529,8 +1511,7 @@ impl StreamingMetrics {
             sqlserver_cdc_state_commit_lsn,
             sqlserver_cdc_jni_commit_offset_lsn,
             gap_fill_generated_rows_count,
-            now_streaming_clock_ms,
-            now_wall_clock_drift_ms,
+            now_metrics,
             state_table_iter_count,
             state_table_get_count,
             state_table_iter_vnode_pruned_count,
