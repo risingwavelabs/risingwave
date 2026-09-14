@@ -23,6 +23,10 @@ use crate::id::SourceId;
 use crate::util::iter_util::ZipEqFast;
 use crate::util::sort_util::ColumnOrder;
 
+/// A resolved comparison rule for a CDC primary-key column.
+///
+/// There is no `Unspecified` variant: `ExternalStorageTable` represents unresolved legacy
+/// comparison metadata with `None` in its `Option<Vec<CdcKeyComparison>>` instead.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
 pub enum CdcKeyComparison {
     #[default]
@@ -33,6 +37,8 @@ pub enum CdcKeyComparison {
 impl CdcKeyComparison {
     pub fn from_protobuf(comparison: Comparison) -> Self {
         match comparison {
+            // The generated `get_comparison()` getter rejects `Unspecified` before the CDC
+            // executor builder reaches this conversion. Direct callers default it to native.
             Comparison::Unspecified => Self::Native,
             Comparison::Native => Self::Native,
             Comparison::UnsignedInt64 => Self::UnsignedInt64,

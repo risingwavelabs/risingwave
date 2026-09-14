@@ -34,10 +34,12 @@ pub struct StreamCdcScanExecutorBuilder;
 
 impl_stream_node_body!(StreamCdcScan(StreamCdcScanNode) => StreamCdcScanExecutorBuilder);
 
+type DecodedTablePk = (Vec<OrderType>, Option<Vec<CdcKeyComparison>>, Vec<usize>);
+
 fn decode_table_pk(
     table_desc: &ExternalTableDesc,
     table_type: &ExternalCdcTableType,
-) -> StreamResult<(Vec<OrderType>, Option<Vec<CdcKeyComparison>>, Vec<usize>)> {
+) -> StreamResult<DecodedTablePk> {
     if let Some(table_pk) = &table_desc.pk_ordering {
         let order_types = table_pk
             .columns
