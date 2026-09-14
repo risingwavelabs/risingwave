@@ -66,8 +66,9 @@ fn decode_table_pk(
             .iter()
             .map(|column| column.column_index as usize)
             .collect_vec();
-        // Legacy graphs do not retain MySQL signedness. Only Int64 PK columns can need
-        // unsigned reinterpretation; other types (including Decimal) use native ordering.
+        // Legacy graphs do not retain MySQL signedness: signed and unsigned BIGINT stored as
+        // Int64 are indistinguishable until the reader checks upstream. Only Int64 PK columns
+        // can need unsigned reinterpretation; other types (including Decimal) use native ordering.
         let mut needs_reader_comparisons = false;
         if *table_type == ExternalCdcTableType::MySql {
             for &idx in &indices {
