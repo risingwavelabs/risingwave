@@ -28,7 +28,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::monitor::now_metrics::NowExecutorMetrics;
+use crate::executor::monitor::now_metrics::NowMetrics;
 use crate::executor::prelude::*;
 use crate::task::{ActorEvalErrorReport, FragmentId};
 
@@ -49,7 +49,8 @@ pub struct NowExecutor<S: StateStore> {
 
     /// Metrics for observing the streaming NOW() clock and its drift from wall time.
     /// `None` when constructed without a metrics registry (e.g. unit tests).
-    metrics: Option<NowExecutorMetrics>,
+    metrics: Option<NowMetrics>,
+    fragment_id: FragmentId,
 }
 
 pub enum NowMode {
@@ -84,8 +85,7 @@ impl<S: StateStore> NowExecutor<S> {
         streaming_metrics: Option<&Arc<StreamingMetrics>>,
         fragment_id: FragmentId,
     ) -> Self {
-        let metrics =
-            streaming_metrics.map(|metrics| metrics.now_metrics.for_executor(fragment_id));
+        let metrics = streaming_metrics.map(|metrics| metrics.now_metrics.clone());
         Self {
             data_types,
             mode,
@@ -95,6 +95,7 @@ impl<S: StateStore> NowExecutor<S> {
             progress_ratio,
             barrier_interval_ms,
             metrics,
+            fragment_id,
         }
     }
 
@@ -109,7 +110,11 @@ impl<S: StateStore> NowExecutor<S> {
             progress_ratio,
             barrier_interval_ms,
             metrics,
+            fragment_id,
         } = self;
+
+        // Create the guarded metrics only once a watermark is emitted.
+        let mut executor_metrics = None;
 
         info!(
             "NowExecutor started. progress_ratio: {:?}, barrier_interval_ms: {:?}",
@@ -318,7 +323,9 @@ impl<S: StateStore> NowExecutor<S> {
                 && let ScalarImpl::Timestamptz(ts) = &curr_timestamp_datum
             {
                 let streaming_now_ms = ts.timestamp_millis();
-                metrics.update(streaming_now_ms, wall_ms);
+                executor_metrics
+                    .get_or_insert_with(|| metrics.for_executor(fragment_id))
+                    .update(streaming_now_ms, wall_ms);
             }
 
             yield Message::Watermark(Watermark::new(
