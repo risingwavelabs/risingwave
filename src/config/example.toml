@@ -424,6 +424,7 @@ max_blocking_threads = 0
 meta_refill_concurrency = 0
 data_refill_levels = []
 timeout_ms = 6000
+pin_cache_max_batch_size = 16
 concurrency = 10
 unit = 64
 threshold = 0.5

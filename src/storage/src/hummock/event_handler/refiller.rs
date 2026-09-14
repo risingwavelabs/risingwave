@@ -27,8 +27,9 @@ use futures::{Future, FutureExt};
 use itertools::Itertools;
 use prometheus::core::{AtomicU64, GenericCounter, GenericCounterVec};
 use prometheus::{
-    Histogram, HistogramVec, IntGauge, Registry, register_histogram_vec_with_registry,
-    register_int_counter_vec_with_registry, register_int_gauge_with_registry,
+    Histogram, HistogramVec, IntGauge, Registry, exponential_buckets, histogram_opts,
+    register_histogram_vec_with_registry, register_int_counter_vec_with_registry,
+    register_int_gauge_with_registry,
 };
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::config::Role;
@@ -63,6 +64,7 @@ pub struct CacheRefillMetrics {
     pub refill_duration: HistogramVec,
     pub refill_total: GenericCounterVec<AtomicU64>,
     pub refill_bytes: GenericCounterVec<AtomicU64>,
+    pub refill_version_batch_size: HistogramVec,
 
     pub data_refill_success_duration: Histogram,
     pub meta_refill_success_duration: Histogram,
@@ -106,6 +108,16 @@ impl CacheRefillMetrics {
             "refill_bytes",
             "refill bytes",
             &["type", "op"],
+            registry,
+        )
+        .unwrap();
+        let refill_version_batch_size = register_histogram_vec_with_registry!(
+            histogram_opts!(
+                "refill_version_batch_size",
+                "Number of ordered version events released in one cache-refill batch",
+                exponential_buckets(1.0, 2.0, 11).unwrap(),
+            ),
+            &["outcome"],
             registry,
         )
         .unwrap();
@@ -168,6 +180,7 @@ impl CacheRefillMetrics {
             refill_duration,
             refill_total,
             refill_bytes,
+            refill_version_batch_size,
 
             data_refill_success_duration,
             meta_refill_success_duration,
@@ -196,6 +209,9 @@ impl CacheRefillMetrics {
 pub struct CacheRefillConfig {
     /// Cache refill timeout.
     pub timeout: Duration,
+
+    /// Maximum version events merged into one Pin Cache refill batch.
+    pub pin_cache_max_batch_size: usize,
 
     /// Data file cache refill levels.
     pub data_refill_levels: HashSet<u32>,
@@ -240,6 +256,7 @@ impl CacheRefillConfig {
 
         Self {
             timeout: Duration::from_millis(options.cache_refill_timeout_ms),
+            pin_cache_max_batch_size: options.cache_refill_pin_cache_max_batch_size.max(1),
             data_refill_levels,
             concurrency: options.cache_refill_concurrency,
             meta_refill_concurrency: options.cache_refill_meta_refill_concurrency,
@@ -254,9 +271,8 @@ impl CacheRefillConfig {
 }
 
 struct Item {
-    plan: CacheRefillPlan,
+    foyer_handle: JoinHandle<bool>,
     pin_plan: PinCacheRefillPlan,
-    context: CacheRefillContext,
     event: CacheRefillerEvent,
     received_at: tokio::time::Instant,
 }
@@ -272,6 +288,27 @@ enum RefillBatchOutcome {
 struct ActiveBatch {
     handle: JoinHandle<RefillBatchOutcome>,
     events: Vec<CacheRefillerEvent>,
+    oldest_received_at: tokio::time::Instant,
+    pin_objects: u64,
+    pin_bytes: u64,
+}
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct PinRefillPlanStats {
+    objects: u64,
+    bytes: u64,
+}
+
+impl PinRefillPlanStats {
+    fn add_plan(&mut self, plan: &PinCacheRefillPlan) {
+        self.objects += plan.objects.len() as u64;
+        self.bytes += plan
+            .objects
+            .values()
+            .filter_map(|projections| projections.first())
+            .map(|info| info.file_size)
+            .sum::<u64>();
+    }
 }
 
 pub(crate) struct CacheRefillPlan {
@@ -410,8 +447,13 @@ impl CacheRefiller {
 
     pub(crate) fn default_spawn_refill_task() -> SpawnRefillTask {
         Arc::new(|plan, context, _, _| {
+            let timeout = context.config.timeout;
             let task = CacheRefillTask { plan, context };
-            tokio::spawn(task.run())
+            tokio::spawn(async move {
+                tokio::time::timeout(timeout, task.run())
+                    .await
+                    .unwrap_or(false)
+            })
         })
     }
 
@@ -436,7 +478,7 @@ impl CacheRefiller {
         let pin_cache_refill = match pin_cache_membership_update {
             // A full snapshot can arrive after initial ownership. Its existing SSTs belong
             // to the same release gate, not an independent background bootstrap.
-            PinCacheMembershipUpdate::Rebuild => self.pin_cache_refill.live_objects_plan(),
+            PinCacheMembershipUpdate::Rebuild => self.pin_cache_refill.live_objects_plan(false),
             PinCacheMembershipUpdate::Delta => PinCacheRefillPlan::new(
                 &deltas,
                 &pin_cache_refill_object_ids,
@@ -494,14 +536,21 @@ impl CacheRefiller {
         }
         let context = self.new_cache_refill_context(&deltas);
         let plan = CacheRefillPlan { deltas };
+        // Preserve the main-path behavior: Foyer refill starts when the delta arrives. Only the
+        // Pin whole-SST plan waits in the merge queue.
+        let foyer_handle = (self.spawn_refill_task)(
+            plan,
+            context,
+            pinned_version.clone(),
+            new_pinned_version.clone(),
+        );
         let event = CacheRefillerEvent {
             pinned_version,
             new_pinned_version,
         };
         let item = Item {
-            plan,
+            foyer_handle,
             pin_plan: pin_cache_refill,
-            context,
             event,
             received_at: tokio::time::Instant::now(),
         };
@@ -516,38 +565,55 @@ impl CacheRefiller {
         if self.pending.is_empty() {
             return;
         }
-        let items = std::mem::take(&mut self.pending);
-        let deadline = items[0].received_at + self.config.timeout;
+        let batch_size = self
+            .config
+            .pin_cache_max_batch_size
+            .max(1)
+            .min(self.pending.len());
+        let items = self.pending.drain(..batch_size).collect::<Vec<_>>();
+        let oldest_received_at = items[0].received_at;
+        let deadline = oldest_received_at + self.config.timeout;
         // Keep the commit snapshots that RecentVersions may retain, as well as the final target.
         // Compaction-only intermediate outputs never exposed outside this batch can be omitted.
+        let candidate_objects = items
+            .iter()
+            .flat_map(|item| item.pin_plan.objects.keys().copied())
+            .collect::<HashSet<_>>();
         let mut required_objects = HashSet::new();
-        for (index, item) in items.iter().enumerate() {
-            if index + 1 == items.len()
-                || RecentVersions::has_table_committed(
-                    &item.event.pinned_version,
-                    &item.event.new_pinned_version,
-                )
-            {
-                for levels in item.event.new_pinned_version.levels.values() {
-                    for sst in levels
-                        .l0
-                        .sub_levels
-                        .iter()
-                        .chain(&levels.levels)
-                        .flat_map(|level| &level.table_infos)
-                    {
-                        required_objects.insert(sst.object_id);
+        if !candidate_objects.is_empty() {
+            for (index, item) in items.iter().enumerate() {
+                if index + 1 == items.len()
+                    || RecentVersions::has_table_committed(
+                        &item.event.pinned_version,
+                        &item.event.new_pinned_version,
+                    )
+                {
+                    for levels in item.event.new_pinned_version.levels.values() {
+                        for sst in levels
+                            .l0
+                            .sub_levels
+                            .iter()
+                            .chain(&levels.levels)
+                            .flat_map(|level| &level.table_infos)
+                            .filter(|sst| candidate_objects.contains(&sst.object_id))
+                        {
+                            required_objects.insert(sst.object_id);
+                        }
                     }
                 }
             }
         }
         let mut pin_plans: HashMap<HummockSstableObjectId, PinCacheRefillPlan> = HashMap::new();
+        let mut input_pin_plan = PinRefillPlanStats::default();
+        let mut retained_pin_plan = PinRefillPlanStats::default();
         let mut foyer_handles = Vec::new();
         let mut events = Vec::new();
         for mut item in items {
+            input_pin_plan.add_plan(&item.pin_plan);
             item.pin_plan
                 .objects
                 .retain(|object, _| required_objects.contains(object));
+            retained_pin_plan.add_plan(&item.pin_plan);
             for (object, infos) in item.pin_plan.objects {
                 let plan = pin_plans.entry(object).or_default();
                 let projections = plan.objects.entry(object).or_default();
@@ -566,13 +632,28 @@ impl CacheRefiller {
                         .or_insert_with(|| bitmap.clone());
                 }
             }
-            foyer_handles.push((self.spawn_refill_task)(
-                item.plan,
-                item.context,
-                item.event.pinned_version.clone(),
-                item.event.new_pinned_version.clone(),
-            ));
+            foyer_handles.push(item.foyer_handle);
             events.push(item.event);
+        }
+        // Input and retained count per-event candidates. Submitted counts the final
+        // cross-event-deduplicated physical plans sent to the executor.
+        let mut submitted_pin_plan = PinRefillPlanStats::default();
+        for plan in pin_plans.values() {
+            submitted_pin_plan.add_plan(plan);
+        }
+        for (stage, stats) in [
+            ("input", input_pin_plan),
+            ("retained", retained_pin_plan),
+            ("submitted", submitted_pin_plan),
+        ] {
+            GLOBAL_CACHE_REFILL_METRICS
+                .refill_total
+                .with_label_values(&["pin_plan", stage])
+                .inc_by(stats.objects);
+            GLOBAL_CACHE_REFILL_METRICS
+                .refill_bytes
+                .with_label_values(&["pin_plan", stage])
+                .inc_by(stats.bytes);
         }
         let tickets = pin_plans
             .into_values()
@@ -603,7 +684,13 @@ impl CacheRefiller {
                 Err(_) => RefillBatchOutcome::DegradedTimeout,
             }
         });
-        self.active = Some(ActiveBatch { handle, events });
+        self.active = Some(ActiveBatch {
+            handle,
+            events,
+            oldest_received_at,
+            pin_objects: submitted_pin_plan.objects,
+            pin_bytes: submitted_pin_plan.bytes,
+        });
     }
 
     pub(crate) fn on_version_applied(&self, version: risingwave_hummock_sdk::HummockVersionId) {
@@ -671,6 +758,15 @@ impl CacheRefiller {
         &mut self,
         policies: HashMap<TableId, CacheRefillPolicy>,
     ) {
+        let pinned_tables = policies
+            .iter()
+            .filter_map(|(&table, policy)| policy.is_pinned().then_some(table))
+            .collect();
+        for item in &mut self.pending {
+            // Pending admission is monotonic: RESET can revoke it, while a later SET must not
+            // turn an already-observed delta into an implicit Warm.
+            item.pin_plan.retain_tables(&pinned_tables);
+        }
         let initial = self.pin_cache_refill.replace_policies(&policies);
         self.table_cache_refill_policies = policies;
         self.pin_cache_refill
@@ -789,9 +885,21 @@ impl CacheRefiller {
                 .refill_total
                 .with_label_values(&["version", label])
                 .inc();
+            GLOBAL_CACHE_REFILL_METRICS
+                .refill_duration
+                .with_label_values(&["version", label])
+                .observe(batch.oldest_received_at.elapsed().as_secs_f64());
+            GLOBAL_CACHE_REFILL_METRICS
+                .refill_version_batch_size
+                .with_label_values(&[label])
+                .observe(batch.events.len() as f64);
             if outcome != RefillBatchOutcome::Ready {
                 tracing::warn!(
                     ?outcome,
+                    batch_size = batch.events.len(),
+                    pin_objects = batch.pin_objects,
+                    pin_bytes = batch.pin_bytes,
+                    elapsed_ms = batch.oldest_received_at.elapsed().as_millis(),
                     "publishing version batch with cache refill fallback"
                 );
             }
@@ -1100,7 +1208,8 @@ impl CacheRefillTask {
                 }
             })
             .collect_vec();
-        // The sequencer owns the sole fixed deadline; do not hide an inner timeout as success.
+        // The Foyer task keeps its main-path timeout. The batch sequencer applies the same bound
+        // to Pin tickets so whole-SST refill cannot indefinitely delay version publication.
         join_all(tasks).await.into_iter().all(|ready| ready)
     }
 
@@ -1306,14 +1415,15 @@ mod tests {
 
     use super::{
         CacheRefillConfig, CacheRefillContext, CacheRefiller, DataCacheRefillTaskGenerator,
-        SpawnRefillTask, SstDeltaInfo, block_vnode_range, vnode_range_overlaps_bitmap,
+        PinRefillPlanStats, SpawnRefillTask, SstDeltaInfo, block_vnode_range,
+        vnode_range_overlaps_bitmap,
     };
     use crate::hummock::iterator::test_utils::{
         iterator_test_table_key_of, mock_sstable_store, mock_sstable_store_with_recent_filter,
     };
     use crate::hummock::local_version::pinned_version::PinnedVersion;
     use crate::hummock::pin_cache::PinCache;
-    use crate::hummock::pin_cache_refill::PinCacheMembershipUpdate;
+    use crate::hummock::pin_cache_refill::{PinCacheMembershipUpdate, PinCacheRefillController};
     use crate::hummock::recent_filter::simple::SimpleRecentFilter;
     use crate::hummock::test_utils::{
         default_builder_opt_for_test, gen_test_sstable_with_table_ids,
@@ -1327,6 +1437,7 @@ mod tests {
     fn test_refill_config(default_policy: CacheRefillPolicy) -> CacheRefillConfig {
         CacheRefillConfig {
             timeout: Duration::from_secs(1),
+            pin_cache_max_batch_size: 16,
             data_refill_levels: HashSet::new(),
             meta_refill_concurrency: 1,
             concurrency: 1,
@@ -1873,6 +1984,78 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_pin_reset_set_does_not_revive_queued_admission() {
+        let table_id = TableId::from(233);
+        let sstable_store = mock_sstable_store().await;
+        let (_, sst_info) =
+            gen_test_sst_with_object_id(table_id, sstable_store.clone(), 1002).await;
+        let pin_cache = pin_cache_for_test();
+        sstable_store.set_pin_cache(pin_cache.clone());
+
+        let gate = Arc::new(tokio::sync::Semaphore::new(0));
+        let task_gate = gate.clone();
+        let spawn_refill_task: SpawnRefillTask = Arc::new(move |plan, context, _, _| {
+            let task_gate = task_gate.clone();
+            tokio::spawn(async move {
+                let _permit = task_gate.acquire().await.unwrap();
+                super::CacheRefillTask { plan, context }.run().await
+            })
+        });
+        let base = pinned_version_for_test();
+        let next = pinned_version_with_sst(table_id, &sst_info);
+        let mut refiller = CacheRefiller::new(
+            Role::Streaming,
+            test_refill_config(CacheRefillPolicy::Disabled),
+            sstable_store,
+            spawn_refill_task,
+            base.clone(),
+        );
+        refiller.replace_table_cache_refill_policies(HashMap::from([(
+            table_id,
+            CacheRefillPolicy::Pinned,
+        )]));
+        refiller.update_streaming_table_vnodes(
+            table_id,
+            Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+        );
+
+        // Keep one event active so the admitted delta remains in the pending batch.
+        refiller.start_cache_refill(
+            vec![],
+            base.clone(),
+            base.clone(),
+            PinCacheMembershipUpdate::Delta,
+        );
+        refiller.start_cache_refill(
+            vec![SstDeltaInfo {
+                insert_sst_infos: vec![sst_info.clone()],
+                ..Default::default()
+            }],
+            base,
+            next,
+            PinCacheMembershipUpdate::Delta,
+        );
+
+        refiller.replace_table_cache_refill_policies(HashMap::from([(
+            table_id,
+            CacheRefillPolicy::Disabled,
+        )]));
+        refiller.replace_table_cache_refill_policies(HashMap::from([(
+            table_id,
+            CacheRefillPolicy::Pinned,
+        )]));
+        assert!(pin_cache.is_desired(sst_info.object_id));
+
+        gate.add_permits(1);
+        assert_eq!(refiller.next_events().await.len(), 1);
+        assert_eq!(refiller.next_events().await.len(), 1);
+        assert!(
+            pin_cache.get(sst_info.object_id).is_none(),
+            "RESET must invalidate the old admission even when a later SET reuses the table"
+        );
+    }
+
+    #[tokio::test]
     async fn test_pin_cache_desired_objects_follow_policy_and_version() {
         let table_id = TableId::from(233);
         let sstable_store = mock_sstable_store().await;
@@ -1894,6 +2077,10 @@ mod tests {
             sstable_store.clone(),
             CacheRefiller::default_spawn_refill_task(),
             pinned_version_with_sst(table_id, &sst_info),
+        );
+        refiller.update_streaming_table_vnodes(
+            table_id,
+            Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
         );
 
         refiller.replace_table_cache_refill_policies(HashMap::from([(
@@ -3105,6 +3292,72 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_recovery_reconciles_empty_and_latest_ownership() {
+        let table = TableId::from(233);
+        for replace_stale_reconcile in [false, true] {
+            let store = mock_sstable_store().await;
+            let (_, info) = gen_test_sst_with_object_id(table, store.clone(), 826).await;
+            let local_store = pin_cache_store_for_test();
+            let bytes = store
+                .store()
+                .read(&store.get_sst_data_path(info.object_id), ..)
+                .await
+                .unwrap();
+            local_store
+                .upload(&format!("{}-42.sst", info.object_id.as_raw_id()), bytes)
+                .await
+                .unwrap();
+            let cache = PinCache::new(local_store, u64::MAX);
+            cache.wait_for_recovery().await;
+            store.set_pin_cache(cache.clone());
+
+            let concurrency = Arc::new(tokio::sync::Semaphore::new(if replace_stale_reconcile {
+                0
+            } else {
+                1
+            }));
+            let mut controller = PinCacheRefillController::new(
+                store,
+                pinned_version_with_sst(table, &info),
+                concurrency.clone(),
+            );
+            controller.replace_policies(&[(table, CacheRefillPolicy::Pinned)].into());
+            assert!(cache.get(info.object_id).is_some());
+
+            if replace_stale_reconcile {
+                controller.update_ownership(
+                    [(
+                        table,
+                        Bitmap::from_indices(VirtualNode::COUNT_FOR_TEST, [128]),
+                    )]
+                    .into(),
+                    false,
+                );
+                tokio::task::yield_now().await;
+                controller.update_ownership(
+                    [(table, Bitmap::ones(VirtualNode::COUNT_FOR_TEST))].into(),
+                    false,
+                );
+                concurrency.add_permits(1);
+                tokio::time::sleep(Duration::from_millis(20)).await;
+                assert!(
+                    cache.get(info.object_id).is_some(),
+                    "a stale delayed reconcile must not overwrite newer ownership"
+                );
+            } else {
+                controller.update_ownership(HashMap::new(), false);
+                tokio::time::timeout(Duration::from_secs(1), async {
+                    while cache.get(info.object_id).is_some() {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .expect("initial empty ownership must remove recovered routes");
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn test_pin_full_snapshot_waits_and_late_old_owner_cannot_publish() {
         let table = TableId::from(233);
         let store = mock_sstable_store().await;
@@ -3455,6 +3708,10 @@ mod tests {
                 ownership,
             );
             assert_eq!(plan.objects.len(), 1, "physical downloads are deduplicated");
+            let mut stats = PinRefillPlanStats::default();
+            stats.add_plan(&plan);
+            assert_eq!(stats.objects, 1);
+            assert_eq!(stats.bytes, info.file_size);
         }
         assert!(!PinCacheRefillPlan::owns_object(
             &sst,

@@ -22,8 +22,9 @@ use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use parking_lot::Mutex;
 use prometheus::{
-    IntCounterVec, IntGaugeVec, register_int_counter_vec_with_registry,
-    register_int_gauge_vec_with_registry,
+    Histogram, HistogramVec, IntCounterVec, IntGaugeVec, exponential_buckets, histogram_opts,
+    register_histogram_vec_with_registry, register_histogram_with_registry,
+    register_int_counter_vec_with_registry, register_int_gauge_vec_with_registry,
 };
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
@@ -35,7 +36,9 @@ use thiserror_ext::AsReport;
 use tokio::sync::{Notify, Semaphore, watch};
 use tokio::time::Instant;
 
-use super::{PinCacheRefillPlan, refill_pin_cache_object};
+use super::{
+    PinCacheRefillError, PinCacheRefillPlan, pin_cache_object_is_owned, refill_pin_cache_object,
+};
 use crate::hummock::SstableStoreRef;
 use crate::hummock::pin_cache::PinCacheRefillOutcome;
 
@@ -44,6 +47,51 @@ static REFILL_OUTCOMES: LazyLock<IntCounterVec> = LazyLock::new(|| {
         "pin_cache_refill_total",
         "Pin whole-object refill attempt outcomes",
         &["result"],
+        &GLOBAL_METRICS_REGISTRY
+    )
+    .unwrap()
+});
+
+static REFILL_ATTEMPT_DURATION: LazyLock<HistogramVec> = LazyLock::new(|| {
+    register_histogram_vec_with_registry!(
+        histogram_opts!(
+            "pin_cache_refill_attempt_duration_seconds",
+            "End-to-end duration of one Pin whole-object refill attempt",
+            exponential_buckets(0.01, 2.0, 17).unwrap(),
+        ),
+        &["result"],
+        &GLOBAL_METRICS_REGISTRY
+    )
+    .unwrap()
+});
+
+static REFILL_ATTEMPT_BYTES: LazyLock<IntCounterVec> = LazyLock::new(|| {
+    register_int_counter_vec_with_registry!(
+        "pin_cache_refill_attempt_object_bytes",
+        "Planned object bytes of Pin refill attempts by result",
+        &["result"],
+        &GLOBAL_METRICS_REGISTRY
+    )
+    .unwrap()
+});
+
+static REFILL_PERMIT_WAIT_DURATION: LazyLock<Histogram> = LazyLock::new(|| {
+    register_histogram_with_registry!(
+        histogram_opts!(
+            "pin_cache_refill_permit_wait_duration_seconds",
+            "Time a Pin whole-object refill attempt waits for shared refill concurrency",
+            exponential_buckets(0.001, 2.0, 18).unwrap(),
+        ),
+        &GLOBAL_METRICS_REGISTRY
+    )
+    .unwrap()
+});
+
+static REFILL_FAILURES: LazyLock<IntCounterVec> = LazyLock::new(|| {
+    register_int_counter_vec_with_registry!(
+        "pin_cache_refill_failure_total",
+        "Pin whole-object refill failures by phase",
+        &["phase"],
         &GLOBAL_METRICS_REGISTRY
     )
     .unwrap()
@@ -70,6 +118,61 @@ fn report_backlog(current: [[i64; 2]; 3], previous: &mut [[i64; 2]; 3]) {
         }
     }
     *previous = current;
+}
+
+struct RefillAttemptGuard {
+    object: HummockSstableObjectId,
+    generation: u64,
+    object_size: u64,
+    started_at: Instant,
+    finished: bool,
+}
+
+impl RefillAttemptGuard {
+    fn new(object: HummockSstableObjectId, generation: u64, object_size: u64) -> Self {
+        Self {
+            object,
+            generation,
+            object_size,
+            started_at: Instant::now(),
+            finished: false,
+        }
+    }
+
+    fn finish(&mut self, result: &'static str) -> Duration {
+        let elapsed = self.started_at.elapsed();
+        REFILL_ATTEMPT_DURATION
+            .with_label_values(&[result])
+            .observe(elapsed.as_secs_f64());
+        REFILL_ATTEMPT_BYTES
+            .with_label_values(&[result])
+            .inc_by(self.object_size);
+        self.finished = true;
+        elapsed
+    }
+}
+
+impl Drop for RefillAttemptGuard {
+    fn drop(&mut self) {
+        if self.finished {
+            return;
+        }
+        let elapsed = self.started_at.elapsed();
+        REFILL_OUTCOMES.with_label_values(&["cancelled"]).inc();
+        REFILL_ATTEMPT_DURATION
+            .with_label_values(&["cancelled"])
+            .observe(elapsed.as_secs_f64());
+        REFILL_ATTEMPT_BYTES
+            .with_label_values(&["cancelled"])
+            .inc_by(self.object_size);
+        tracing::warn!(
+            object_id = self.object.as_raw_id(),
+            generation = self.generation,
+            object_size = self.object_size,
+            elapsed_ms = elapsed.as_millis(),
+            "pin refill attempt was cancelled before completion"
+        );
+    }
 }
 
 #[derive(Clone, Copy)]
@@ -112,6 +215,7 @@ struct State {
     schedule: BTreeSet<(Instant, HummockSstableObjectId)>,
     backlog: [[i64; 2]; 3],
     generation: u64,
+    recovered_route_epoch: u64,
 }
 
 impl State {
@@ -145,6 +249,8 @@ pub(super) struct PinCacheRefillExecutor {
     changed: Arc<Notify>,
     alive: Arc<AtomicBool>,
     store: SstableStoreRef,
+    concurrency: Arc<Semaphore>,
+    limit: usize,
 }
 
 pub(crate) struct Ticket {
@@ -180,6 +286,23 @@ impl Ticket {
 
 impl PinCacheRefillExecutor {
     pub(super) fn new(store: SstableStoreRef, concurrency: Arc<Semaphore>) -> Self {
+        for result in [
+            "published",
+            "already_published",
+            "in_progress",
+            "capacity_rejected",
+            "obsolete",
+            "error",
+            "panic",
+            "cancelled",
+        ] {
+            let _ = REFILL_OUTCOMES.with_label_values(&[result]);
+            let _ = REFILL_ATTEMPT_DURATION.with_label_values(&[result]);
+            let _ = REFILL_ATTEMPT_BYTES.with_label_values(&[result]);
+        }
+        for phase in ["ownership_meta", "object_copy", "panic"] {
+            let _ = REFILL_FAILURES.with_label_values(&[phase]);
+        }
         let state = Arc::new(Mutex::new(State::default()));
         let changed = Arc::new(Notify::new());
         let alive = Arc::new(AtomicBool::new(true));
@@ -191,7 +314,7 @@ impl PinCacheRefillExecutor {
             changed.clone(),
             alive.clone(),
             receiver,
-            concurrency,
+            concurrency.clone(),
             limit,
         ));
         Self {
@@ -200,7 +323,101 @@ impl PinCacheRefillExecutor {
             changed,
             alive,
             store,
+            concurrency,
+            limit,
         }
+    }
+
+    pub(super) fn cancel_recovered_route_reconcile(&self) {
+        self.state.lock().recovered_route_epoch += 1;
+    }
+
+    /// Recovery knows which complete files exist, but only the refiller knows worker ownership.
+    /// Validate recovered routes without downloading a missing object or creating refill debt.
+    pub(super) fn reconcile_recovered_routes(
+        &self,
+        unplanned_objects: Vec<HummockSstableObjectId>,
+        validation_plan: Option<PinCacheRefillPlan>,
+    ) {
+        let Some(cache) = self.store.pin_cache().cloned() else {
+            return;
+        };
+        let epoch = {
+            let mut state = self.state.lock();
+            state.recovered_route_epoch += 1;
+            state.recovered_route_epoch
+        };
+        let state = self.state.clone();
+        let store = self.store.clone();
+        let concurrency = self.concurrency.clone();
+        let changed = self.changed.clone();
+        let limit = self.limit;
+        tokio::spawn(async move {
+            cache.wait_for_recovery().await;
+            if state.lock().recovered_route_epoch != epoch {
+                return;
+            }
+
+            for object in unplanned_objects {
+                let mut guard = state.lock();
+                if guard.recovered_route_epoch != epoch {
+                    return;
+                }
+                if let Some(work) = guard.remove(object) {
+                    work.completion.store(2, Ordering::Release);
+                }
+                cache.revoke_inflight(object);
+                if let Some(route) = cache.get(object) {
+                    route.invalidate();
+                }
+            }
+            changed.notify_waiters();
+            let Some(PinCacheRefillPlan {
+                objects, ownership, ..
+            }) = validation_plan
+            else {
+                return;
+            };
+
+            futures::stream::iter(objects)
+                .for_each_concurrent(limit, |(object, projections)| {
+                    let cache = cache.clone();
+                    let store = store.clone();
+                    let ownership = ownership.clone();
+                    let concurrency = concurrency.clone();
+                    let state = state.clone();
+                    async move {
+                        if state.lock().recovered_route_epoch != epoch {
+                            return;
+                        }
+                        let Some(route) = cache.get(object) else {
+                            return;
+                        };
+                        let _permit = concurrency
+                            .acquire_owned()
+                            .await
+                            .expect("refill concurrency stays open");
+                        if state.lock().recovered_route_epoch != epoch {
+                            return;
+                        }
+                        let owned = pin_cache_object_is_owned(&store, &projections, &ownership)
+                            .await
+                            .unwrap_or_else(|error| {
+                                tracing::warn!(
+                                    object_id = object.as_raw_id(),
+                                    error = %error.as_report(),
+                                    "failed to validate recovered pin-cache route"
+                                );
+                                false
+                            });
+                        let state = state.lock();
+                        if state.recovered_route_epoch == epoch && !owned {
+                            route.invalidate();
+                        }
+                    }
+                })
+                .await;
+        });
     }
 
     pub(super) fn submit(&self, plan: PinCacheRefillPlan) -> Ticket {
@@ -380,16 +597,21 @@ impl PinCacheRefillExecutor {
                 (jobs, state.schedule.first().map(|&(at, _)| at))
             };
             for (object, generation, projections, ownership, cache_generation) in work {
-                running.insert(object, projections[0].file_size);
+                let object_size = projections[0].file_size;
+                running.insert(object, object_size);
                 let store = store.clone();
                 let concurrency = concurrency.clone();
                 tasks.push(async move {
+                    let mut attempt = RefillAttemptGuard::new(object, generation, object_size);
                     // A panicking I/O task is a failed admission, not a permanently lost ticket.
                     let result = AssertUnwindSafe(async {
+                        let permit_wait_started_at = Instant::now();
                         let _permit = concurrency
                             .acquire_owned()
                             .await
                             .expect("refill concurrency stays open");
+                        REFILL_PERMIT_WAIT_DURATION
+                            .observe(permit_wait_started_at.elapsed().as_secs_f64());
                         if let Some(generation) = cache_generation {
                             refill_pin_cache_object(&store, &projections, &ownership, generation)
                                 .await
@@ -399,13 +621,23 @@ impl PinCacheRefillExecutor {
                     })
                     .rw_catch_unwind()
                     .await;
-                    (object, generation, result)
+                    let result_label = match &result {
+                        Ok(Ok(PinCacheRefillOutcome::Published)) => "published",
+                        Ok(Ok(PinCacheRefillOutcome::AlreadyPublished)) => "already_published",
+                        Ok(Ok(PinCacheRefillOutcome::InProgress)) => "in_progress",
+                        Ok(Ok(PinCacheRefillOutcome::CapacityRejected)) => "capacity_rejected",
+                        Ok(Ok(PinCacheRefillOutcome::Obsolete)) => "obsolete",
+                        Ok(Err(_)) => "error",
+                        Err(_) => "panic",
+                    };
+                    let elapsed = attempt.finish(result_label);
+                    (object, generation, result, elapsed)
                 });
             }
             tokio::select! {
                 change = receiver.changed() => if change.is_err() { break; },
                 _ = tokio::time::sleep_until(next_retry.unwrap_or_else(Instant::now)), if next_retry.is_some() && running.len() < limit => {},
-                Some((object, generation, result)) = tasks.next(), if !tasks.is_empty() => {
+                Some((object, generation, result, elapsed)) = tasks.next(), if !tasks.is_empty() => {
                     running.remove(&object);
                     let outcome = match &result {
                         Ok(Ok(PinCacheRefillOutcome::Published)) => "published",
@@ -413,15 +645,17 @@ impl PinCacheRefillExecutor {
                         Ok(Ok(PinCacheRefillOutcome::InProgress)) => "in_progress",
                         Ok(Ok(PinCacheRefillOutcome::CapacityRejected)) => "capacity_rejected",
                         Ok(Ok(PinCacheRefillOutcome::Obsolete)) => "obsolete",
-                        _ => "error",
+                        Ok(Err(_)) => "error",
+                        Err(_) => "panic",
                     };
                     REFILL_OUTCOMES.with_label_values(&[outcome]).inc();
                     let mut state = state.lock();
                     if state.objects.get(&object).is_some_and(|work| work.generation == generation) {
                         let mut work = state.remove(object).unwrap();
-                        match result {
+                        let retry = match result {
                             Ok(Ok(PinCacheRefillOutcome::Published | PinCacheRefillOutcome::AlreadyPublished)) => {
                                 let _ = work.completion.compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire);
+                                false
                             },
                             Ok(Ok(PinCacheRefillOutcome::Obsolete)) => {
                                 // The matching generation has rechecked block geometry. Retire
@@ -430,17 +664,50 @@ impl PinCacheRefillExecutor {
                                     route.invalidate();
                                 }
                                 let _ = work.completion.compare_exchange(0, 1, Ordering::AcqRel, Ordering::Acquire);
+                                false
                             },
-                            other => {
-                                if let Ok(Err(error)) = &other {
-                                    tracing::warn!(object_id = object.as_raw_id(), error = %error.as_report(), "pin refill failed; retaining retry debt");
-                                }
-                                work.attempts = work.attempts.saturating_add(1);
-                                work.status = Status::Failed(Instant::now() + Duration::from_millis(100 * (1_u64 << work.attempts.min(8))));
-                                work.completion.store(2, Ordering::Release);
-                                state.insert(object, work);
+                            Ok(Ok(
+                                PinCacheRefillOutcome::InProgress
+                                | PinCacheRefillOutcome::CapacityRejected,
+                            )) => true,
+                            Ok(Err(PinCacheRefillError { phase, error })) => {
+                                REFILL_FAILURES.with_label_values(&[phase]).inc();
+                                tracing::warn!(
+                                    object_id = object.as_raw_id(),
+                                    generation,
+                                    object_size = work.projections[0].file_size,
+                                    attempt = work.attempts + 1,
+                                    elapsed_ms = elapsed.as_millis(),
+                                    phase,
+                                    error = %error.as_report(),
+                                    "pin refill failed; retaining retry debt"
+                                );
+                                true
+                            },
+                            Err(_) => {
+                                REFILL_FAILURES.with_label_values(&["panic"]).inc();
+                                tracing::warn!(
+                                    object_id = object.as_raw_id(),
+                                    generation,
+                                    object_size = work.projections[0].file_size,
+                                    attempt = work.attempts + 1,
+                                    elapsed_ms = elapsed.as_millis(),
+                                    "pin refill panicked; retaining retry debt"
+                                );
+                                true
                             }
                         };
+                        if retry {
+                            work.attempts = work.attempts.saturating_add(1);
+                            work.status = Status::Failed(
+                                Instant::now()
+                                    + Duration::from_millis(
+                                        100 * (1_u64 << work.attempts.min(8)),
+                                    ),
+                            );
+                            work.completion.store(2, Ordering::Release);
+                            state.insert(object, work);
+                        }
                     }
                     // An old-generation transfer may have occupied this object's slot while
                     // its replacement was queued. Re-enable that replacement now.

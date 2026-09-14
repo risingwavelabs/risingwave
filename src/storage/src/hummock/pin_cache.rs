@@ -12,19 +12,48 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
 use futures::StreamExt;
 use parking_lot::{Mutex, RwLock};
+use prometheus::{
+    IntCounterVec, IntGaugeVec, register_int_counter_vec_with_registry,
+    register_int_gauge_vec_with_registry,
+};
+use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::{
     MonitoredStreamingReader, ObjectError, ObjectRangeBounds, ObjectResult, ObjectStoreRef,
 };
 use thiserror_ext::AsReport;
 use tokio::sync::{Notify, Semaphore};
+
+static PIN_CACHE_IO_FAILURES: LazyLock<IntCounterVec> = LazyLock::new(|| {
+    register_int_counter_vec_with_registry!(
+        "pin_cache_io_failure_total",
+        "Pin Cache refill I/O failures by phase",
+        &["phase"],
+        &GLOBAL_METRICS_REGISTRY
+    )
+    .unwrap()
+});
+
+static PIN_CACHE_CAPACITY_BYTES: LazyLock<IntGaugeVec> = LazyLock::new(|| {
+    register_int_gauge_vec_with_registry!(
+        "pin_cache_capacity_bytes",
+        "Pin Cache capacity accounting by state",
+        &["state"],
+        &GLOBAL_METRICS_REGISTRY
+    )
+    .unwrap()
+});
+
+fn metric_bytes(bytes: u64) -> i64 {
+    bytes.min(i64::MAX as u64) as i64
+}
 
 struct PinCacheEntry {
     path: String,
@@ -35,6 +64,8 @@ struct PinCacheEntry {
 struct PinCacheGcState {
     accounted_paths: HashMap<String, u64>,
     accounted_bytes: u64,
+    uncertain_paths: HashSet<String>,
+    uncertain_bytes: u64,
 }
 
 /// Owns physical-path accounting and reclamation. Callers must withdraw routes first.
@@ -47,6 +78,15 @@ struct PinCacheGc {
 
 impl PinCacheGc {
     fn new(store: ObjectStoreRef, capacity: u64) -> Arc<Self> {
+        PIN_CACHE_CAPACITY_BYTES
+            .with_label_values(&["capacity"])
+            .set(metric_bytes(capacity));
+        PIN_CACHE_CAPACITY_BYTES
+            .with_label_values(&["accounted"])
+            .set(0);
+        PIN_CACHE_CAPACITY_BYTES
+            .with_label_values(&["uncertain"])
+            .set(0);
         Arc::new(Self {
             store,
             capacity,
@@ -63,6 +103,9 @@ impl PinCacheGc {
             .is_none()
         {
             state.accounted_bytes = state.accounted_bytes.saturating_add(entry.size);
+            PIN_CACHE_CAPACITY_BYTES
+                .with_label_values(&["accounted"])
+                .set(metric_bytes(state.accounted_bytes));
         }
     }
 
@@ -77,7 +120,20 @@ impl PinCacheGc {
         let old = state.accounted_paths.insert(entry.path.clone(), entry.size);
         debug_assert!(old.is_none(), "pin-cache paths must be unique");
         state.accounted_bytes = accounted_bytes;
+        PIN_CACHE_CAPACITY_BYTES
+            .with_label_values(&["accounted"])
+            .set(metric_bytes(state.accounted_bytes));
         Ok(())
+    }
+
+    fn mark_uncertain(&self, entry: &PinCacheEntry) {
+        let mut state = self.state.lock();
+        if state.uncertain_paths.insert(entry.path.clone()) {
+            state.uncertain_bytes = state.uncertain_bytes.saturating_add(entry.size);
+            PIN_CACHE_CAPACITY_BYTES
+                .with_label_values(&["uncertain"])
+                .set(metric_bytes(state.uncertain_bytes));
+        }
     }
 
     fn reclaim(self: &Arc<Self>, entries: impl IntoIterator<Item = Arc<PinCacheEntry>>) {
@@ -108,10 +164,22 @@ impl PinCacheGc {
     fn finish_delete(&self, paths: &[String]) {
         let mut state = self.state.lock();
         for path in paths {
-            if let Some(size) = state.accounted_paths.remove(path) {
+            let size = state.accounted_paths.remove(path);
+            if let Some(size) = size {
                 state.accounted_bytes = state.accounted_bytes.saturating_sub(size);
             }
+            if state.uncertain_paths.remove(path) {
+                state.uncertain_bytes = state
+                    .uncertain_bytes
+                    .saturating_sub(size.unwrap_or_default());
+            }
         }
+        PIN_CACHE_CAPACITY_BYTES
+            .with_label_values(&["accounted"])
+            .set(metric_bytes(state.accounted_bytes));
+        PIN_CACHE_CAPACITY_BYTES
+            .with_label_values(&["uncertain"])
+            .set(metric_bytes(state.uncertain_bytes));
     }
 }
 
@@ -184,37 +252,63 @@ struct PinCacheDownloadGuard {
 }
 
 impl PinCacheDownloadGuard {
+    fn record_io_failure(&self, phase: &'static str) {
+        PIN_CACHE_IO_FAILURES.with_label_values(&[phase]).inc();
+    }
+
     async fn write(
         mut self,
         mut reader: MonitoredStreamingReader,
     ) -> ObjectResult<PinCacheRefillOutcome> {
         // Set this before opening the writer: cancellation can occur during its creation too.
         self.may_have_temporary_file = true;
-        let mut writer = self
+        let mut writer = match self
             .pin_cache
             .store
             .streaming_upload(&self.entry.path)
-            .await?;
+            .await
+        {
+            Ok(writer) => writer,
+            Err(error) => {
+                self.record_io_failure("local_upload_init");
+                return Err(error);
+            }
+        };
         let mut written = 0_u64;
         while let Some(chunk) = reader.read_bytes().await {
-            let chunk = chunk?;
+            let chunk = match chunk {
+                Ok(chunk) => chunk,
+                Err(error) => {
+                    self.record_io_failure("remote_read");
+                    return Err(error);
+                }
+            };
             written = written.saturating_add(chunk.len() as u64);
             if written > self.entry.size {
+                self.record_io_failure("size_validation");
                 return Err(ObjectError::internal(
                     "pinned SST is larger than its version metadata",
                 ));
             }
-            writer.write_bytes(chunk).await?;
+            if let Err(error) = writer.write_bytes(chunk).await {
+                self.record_io_failure("local_upload_write");
+                return Err(error);
+            }
         }
-        writer.finish().await?;
+        if let Err(error) = writer.finish().await {
+            self.record_io_failure("local_upload_finish");
+            return Err(error);
+        }
         self.may_have_temporary_file = false;
-        let local_size = self
-            .pin_cache
-            .store
-            .metadata(&self.entry.path)
-            .await?
-            .total_size as u64;
+        let local_size = match self.pin_cache.store.metadata(&self.entry.path).await {
+            Ok(metadata) => metadata.total_size as u64,
+            Err(error) => {
+                self.record_io_failure("local_metadata");
+                return Err(error);
+            }
+        };
         if written != self.entry.size || local_size != self.entry.size {
+            self.record_io_failure("size_validation");
             return Err(ObjectError::internal(
                 "pinned SST size does not match its version metadata",
             ));
@@ -261,6 +355,7 @@ impl Drop for PinCacheDownloadGuard {
         if self.may_have_temporary_file {
             // Keep the full reservation until startup recovery inventories the actual files.
             // Do not let final-path deletion release capacity while hidden temporary bytes remain.
+            self.pin_cache.gc.mark_uncertain(&self.entry);
             tracing::warn!(
                 object_id = self.object_id.as_raw_id(),
                 path = %self.entry.path,
@@ -323,6 +418,17 @@ impl PinCacheReadHandle {
 
 impl PinCache {
     pub(crate) fn new(store: ObjectStoreRef, capacity: u64) -> Arc<Self> {
+        for phase in [
+            "remote_read_init",
+            "remote_read",
+            "local_upload_init",
+            "local_upload_write",
+            "local_upload_finish",
+            "local_metadata",
+            "size_validation",
+        ] {
+            let _ = PIN_CACHE_IO_FAILURES.with_label_values(&[phase]);
+        }
         let gc = PinCacheGc::new(store.clone(), capacity);
         let pin_cache = Arc::new(Self {
             store,
@@ -411,27 +517,33 @@ impl PinCache {
 
         let stale_objects = {
             let mut state = self.state.write();
-            state.generations.retain(|id, _| desired.contains_key(id));
+            // A policy snapshot replaces current desired membership, but it must not revoke
+            // routes still protecting an older readable version. Re-admission cancels retirement.
+            state.retired.retain(|id, _| !desired.contains_key(id));
             state.desired = Some(desired);
-            state.retired.clear();
             let PinCacheState {
                 desired,
                 published,
                 inflight,
+                retired,
+                generations,
                 ..
             } = &mut *state;
             let desired = desired.as_ref().unwrap();
-            // Revoking the token also prevents an old queued or in-flight task from publishing.
-            inflight.retain(|object_id, entry| {
+            let needed_size = |object_id: &HummockSstableObjectId| {
                 desired
                     .get(object_id)
-                    .is_some_and(|desired_size| *desired_size == entry.size)
+                    .copied()
+                    .or_else(|| retired.get(object_id).map(|(size, _)| *size))
+            };
+            generations.retain(|id, _| needed_size(id).is_some());
+            // Revoking the token also prevents an old queued or in-flight task from publishing.
+            inflight.retain(|object_id, entry| {
+                needed_size(object_id).is_some_and(|desired_size| desired_size == entry.size)
             });
             let mut stale = published
                 .extract_if(|object_id, entry| {
-                    !desired
-                        .get(object_id)
-                        .is_some_and(|desired_size| *desired_size == entry.size)
+                    !needed_size(object_id).is_some_and(|desired_size| desired_size == entry.size)
                 })
                 .map(|(_, entry)| entry)
                 .collect::<Vec<_>>();
@@ -573,7 +685,7 @@ impl PinCache {
         stale
     }
 
-    async fn wait_for_recovery(&self) {
+    pub(crate) async fn wait_for_recovery(&self) {
         loop {
             let notified = self.recovery_notify.notified();
             if self.state.read().recovery_state != RecoveryState::Pending {
@@ -745,7 +857,13 @@ impl PinCache {
             PinCacheDownloadStart::Download(download) => download,
             PinCacheDownloadStart::Complete(outcome) => return Ok(outcome),
         };
-        let reader = remote_store.streaming_read(&remote_path, ..).await?;
+        let reader = match remote_store.streaming_read(&remote_path, ..).await {
+            Ok(reader) => reader,
+            Err(error) => {
+                download.record_io_failure("remote_read_init");
+                return Err(error);
+            }
+        };
         download.write(reader).await
     }
 }
@@ -946,6 +1064,7 @@ mod tests {
     async fn test_retired_route_waits_for_version_application() {
         let cache = PinCache::new(in_memory_object_store(), u64::MAX);
         let object = HummockSstableObjectId::from(910);
+        let unrelated = HummockSstableObjectId::from(911);
         cache.replace_desired_objects([(object, 8)]);
         cache.wait_for_recovery().await;
         let download = start_download(&cache, object);
@@ -957,8 +1076,12 @@ mod tests {
         assert!(download.publish());
         cache.start_version_update(2.into());
         cache.apply_desired_object_delta([object], HashMap::new());
+        cache.replace_desired_objects([(unrelated, 8)]);
         cache.release_retired(1.into());
-        assert!(cache.get(object).is_some());
+        assert!(
+            cache.get(object).is_some(),
+            "an unrelated policy rebuild must preserve the version-protected route"
+        );
         cache.release_retired(2.into());
         assert!(cache.get(object).is_none());
     }

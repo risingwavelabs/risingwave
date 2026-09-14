@@ -25,7 +25,7 @@ use risingwave_pb::id::TableId;
 use crate::hummock::local_version::pinned_version::PinnedVersion;
 use crate::hummock::pin_cache::PinCacheRefillOutcome;
 use crate::hummock::refill_locality::{block_vnode_range, vnode_range_overlaps_bitmap};
-use crate::hummock::{HummockResult, Sstable, SstableStoreRef};
+use crate::hummock::{HummockError, HummockResult, Sstable, SstableStoreRef};
 use crate::monitor::StoreLocalStatistic;
 
 mod executor;
@@ -61,6 +61,17 @@ impl PinCacheRefillPlan {
         }
     }
 
+    pub(crate) fn retain_tables(&mut self, pinned_tables: &HashSet<TableId>) {
+        Arc::make_mut(&mut self.ownership).retain(|table, _| pinned_tables.contains(table));
+        self.objects.retain(|_, infos| {
+            infos.iter().any(|info| {
+                info.table_ids
+                    .iter()
+                    .any(|table| self.ownership.contains_key(table))
+            })
+        });
+    }
+
     pub(crate) fn owns_object(
         sst: &Sstable,
         projections: &[SstableInfo],
@@ -87,20 +98,48 @@ async fn refill_pin_cache_object(
     projections: &[SstableInfo],
     ownership: &HashMap<TableId, Bitmap>,
     generation: u64,
-) -> HummockResult<PinCacheRefillOutcome> {
-    let Some(info) = projections.first() else {
+) -> Result<PinCacheRefillOutcome, PinCacheRefillError> {
+    if !pin_cache_object_is_owned(store, projections, ownership)
+        .await
+        .map_err(|error| PinCacheRefillError {
+            phase: "ownership_meta",
+            error,
+        })?
+    {
         return Ok(PinCacheRefillOutcome::Obsolete);
+    }
+    let info = &projections[0];
+    store
+        .pin_sst_at_generation(info.object_id, generation)
+        .await
+        .map_err(|error| PinCacheRefillError {
+            phase: "object_copy",
+            error,
+        })
+}
+
+struct PinCacheRefillError {
+    phase: &'static str,
+    error: HummockError,
+}
+
+async fn pin_cache_object_is_owned(
+    store: &SstableStoreRef,
+    projections: &[SstableInfo],
+    ownership: &HashMap<TableId, Bitmap>,
+) -> HummockResult<bool> {
+    let Some(info) = projections.first() else {
+        return Ok(false);
     };
     let mut stats = StoreLocalStatistic::default();
     let sst = store.sstable(info, &mut stats).await;
     stats.discard();
     let sst = sst?;
-    if !PinCacheRefillPlan::owns_object(&sst, projections, ownership) {
-        return Ok(PinCacheRefillOutcome::Obsolete);
-    }
-    store
-        .pin_sst_at_generation(info.object_id, generation)
-        .await
+    Ok(PinCacheRefillPlan::owns_object(
+        &sst,
+        projections,
+        ownership,
+    ))
 }
 
 #[derive(Clone, Copy)]
@@ -113,6 +152,7 @@ pub(crate) enum PinCacheMembershipUpdate {
 pub(crate) struct PinCacheRefillController {
     sstable_store: SstableStoreRef,
     pinned_table_ids: Option<HashSet<TableId>>,
+    policy_dirty: bool,
     object_ref_counts: HashMap<HummockSstableObjectId, u32>,
     version: PinnedVersion,
     ownership: Arc<HashMap<TableId, Bitmap>>,
@@ -129,6 +169,7 @@ impl PinCacheRefillController {
         Self {
             sstable_store,
             pinned_table_ids: None,
+            policy_dirty: false,
             object_ref_counts: HashMap::new(),
             version,
             ownership: Arc::default(),
@@ -148,7 +189,9 @@ impl PinCacheRefillController {
         if self.pinned_table_ids.as_ref() == Some(&pinned_table_ids) {
             return false;
         }
+        self.executor.cancel_recovered_route_reconcile();
         self.pinned_table_ids = Some(pinned_table_ids);
+        self.policy_dirty = true;
         self.rebuild_desired_objects(false);
         initial
     }
@@ -159,51 +202,55 @@ impl PinCacheRefillController {
         bootstrap: bool,
     ) {
         let changed = self.ownership.as_ref() != &ownership;
-        self.ownership = Arc::new(ownership);
-        self.executor.reproject(self.ownership.clone());
-        if !bootstrap || !changed {
+        let policy_dirty = std::mem::take(&mut self.policy_dirty);
+        if !changed && !policy_dirty {
             return;
         }
-        self.bootstrap_owned_objects();
+        self.executor.cancel_recovered_route_reconcile();
+        self.ownership = Arc::new(ownership);
+        self.executor.reproject(self.ownership.clone());
+        let refill = bootstrap && changed;
+        let plan = self.live_objects_plan(!refill);
+        if refill {
+            self.executor.submit(plan);
+        }
     }
 
-    fn bootstrap_owned_objects(&self) {
-        self.executor.submit(self.live_objects_plan());
-    }
-
-    pub(crate) fn live_objects_plan(&self) -> PinCacheRefillPlan {
+    pub(crate) fn live_objects_plan(&self, validate_routes: bool) -> PinCacheRefillPlan {
         // Ownership acquisition is a separate trigger from SET: new workers and newly acquired
         // vnodes must cover already-live SSTs even if no future version delta arrives.
-        let inserts = self
-            .version
-            .levels
-            .values()
-            .flat_map(|levels| levels.l0.sub_levels.iter().chain(&levels.levels))
-            .flat_map(|level| &level.table_infos)
-            .filter(|sst| self.object_ref_counts.contains_key(&sst.object_id))
-            .cloned()
-            .collect();
-        let plan = PinCacheRefillPlan::new(
-            &[SstDeltaInfo {
-                insert_sst_infos: inserts,
+        let plan = if self.object_ref_counts.is_empty() || self.ownership.is_empty() {
+            PinCacheRefillPlan {
+                ownership: self.ownership.clone(),
                 ..Default::default()
-            }],
-            &self.object_ref_counts.keys().copied().collect(),
-            self.ownership.as_ref().clone(),
-        );
-        // Project every logical reference before retiring a shared physical object.
-        if let Some(cache) = self.sstable_store.pin_cache() {
-            for &object in self
-                .object_ref_counts
-                .keys()
-                .filter(|object| !plan.objects.contains_key(*object))
-            {
-                cache.revoke_inflight(object);
-                if let Some(route) = cache.get(object) {
-                    route.invalidate();
-                }
             }
-        }
+        } else {
+            let inserts = self
+                .version
+                .levels
+                .values()
+                .flat_map(|levels| levels.l0.sub_levels.iter().chain(&levels.levels))
+                .flat_map(|level| &level.table_infos)
+                .filter(|sst| self.object_ref_counts.contains_key(&sst.object_id))
+                .cloned()
+                .collect();
+            PinCacheRefillPlan::new(
+                &[SstDeltaInfo {
+                    insert_sst_infos: inserts,
+                    ..Default::default()
+                }],
+                &self.object_ref_counts.keys().copied().collect(),
+                self.ownership.as_ref().clone(),
+            )
+        };
+        let unplanned_objects = self
+            .object_ref_counts
+            .keys()
+            .filter(|object| !plan.objects.contains_key(*object))
+            .copied()
+            .collect();
+        self.executor
+            .reconcile_recovered_routes(unplanned_objects, validate_routes.then(|| plan.clone()));
         plan
     }
 

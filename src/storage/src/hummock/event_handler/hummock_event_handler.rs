@@ -798,7 +798,7 @@ impl HummockEventHandler {
             return;
         };
         if events.len() > 1 {
-            warn!(
+            debug!(
                 count = events.len(),
                 "handle multiple version updates in batch"
             );
