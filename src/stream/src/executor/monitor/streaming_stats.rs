@@ -38,7 +38,6 @@ use risingwave_pb::id::ExecutorId;
 use crate::common::log_store_impl::kv_log_store::{
     REWIND_BACKOFF_MULTIPLIER, REWIND_INITIAL_DELAY, REWIND_MAX_DELAY,
 };
-use crate::executor::monitor::now_metrics::NowMetrics;
 use crate::executor::prelude::ActorId;
 use crate::task::FragmentId;
 
@@ -241,7 +240,8 @@ pub struct StreamingMetrics {
     pub gap_fill_generated_rows_count: RelabeledGuardedIntCounterVec,
 
     // Now (temporal filter clock)
-    pub now_metrics: NowMetrics,
+    pub now_streaming_clock_ms: LabelGuardedIntGaugeVec,
+    pub now_wall_clock_drift_ms: LabelGuardedIntGaugeVec,
 
     // State Table
     pub state_table_iter_count: RelabeledGuardedIntCounterVec,
@@ -1378,7 +1378,23 @@ impl StreamingMetrics {
         .unwrap()
         .relabel_debug_1(level);
 
-        let now_metrics = NowMetrics::new(registry);
+        let now_streaming_clock_ms = register_guarded_int_gauge_vec_with_registry!(
+            "stream_now_streaming_clock_ms",
+            "Latest streaming NOW() timestamp (milliseconds since Unix epoch) \
+             emitted as a watermark by this fragment on this compute node.",
+            &["fragment_id"],
+            registry,
+        )
+        .unwrap();
+        let now_wall_clock_drift_ms = register_guarded_int_gauge_vec_with_registry!(
+            "stream_now_wall_clock_drift_ms",
+            "Latest processed barrier epoch minus the latest streaming NOW() timestamp \
+             emitted as a watermark by this fragment on this compute node, \
+             in milliseconds. This is relative to processed barriers, not scrape-time wall clock.",
+            &["fragment_id"],
+            registry,
+        )
+        .unwrap();
 
         Self {
             level,
@@ -1511,7 +1527,8 @@ impl StreamingMetrics {
             sqlserver_cdc_state_commit_lsn,
             sqlserver_cdc_jni_commit_offset_lsn,
             gap_fill_generated_rows_count,
-            now_metrics,
+            now_streaming_clock_ms,
+            now_wall_clock_drift_ms,
             state_table_iter_count,
             state_table_get_count,
             state_table_iter_vnode_pruned_count,

@@ -28,7 +28,6 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::executor::monitor::StreamingMetrics;
-use crate::executor::monitor::now_metrics::NowMetrics;
 use crate::executor::prelude::*;
 use crate::task::{ActorEvalErrorReport, FragmentId};
 
@@ -49,7 +48,7 @@ pub struct NowExecutor<S: StateStore> {
 
     /// Metrics for observing the streaming NOW() clock and its drift from wall time.
     /// `None` when constructed without a metrics registry (e.g. unit tests).
-    metrics: Option<NowMetrics>,
+    metrics: Option<Arc<StreamingMetrics>>,
     fragment_id: FragmentId,
 }
 
@@ -85,7 +84,6 @@ impl<S: StateStore> NowExecutor<S> {
         streaming_metrics: Option<&Arc<StreamingMetrics>>,
         fragment_id: FragmentId,
     ) -> Self {
-        let metrics = streaming_metrics.map(|metrics| metrics.now_metrics.clone());
         Self {
             data_types,
             mode,
@@ -94,7 +92,7 @@ impl<S: StateStore> NowExecutor<S> {
             state_table,
             progress_ratio,
             barrier_interval_ms,
-            metrics,
+            metrics: streaming_metrics.cloned(),
             fragment_id,
         }
     }
@@ -323,9 +321,20 @@ impl<S: StateStore> NowExecutor<S> {
                 && let ScalarImpl::Timestamptz(ts) = &curr_timestamp_datum
             {
                 let streaming_now_ms = ts.timestamp_millis();
-                executor_metrics
-                    .get_or_insert_with(|| metrics.for_executor(fragment_id))
-                    .update(streaming_now_ms, wall_ms);
+                let (streaming_clock_ms, wall_clock_drift_ms) = executor_metrics
+                    .get_or_insert_with(|| {
+                        let label = fragment_id.to_string();
+                        (
+                            metrics
+                                .now_streaming_clock_ms
+                                .with_guarded_label_values(&[&label]),
+                            metrics
+                                .now_wall_clock_drift_ms
+                                .with_guarded_label_values(&[&label]),
+                        )
+                    });
+                streaming_clock_ms.set(streaming_now_ms);
+                wall_clock_drift_ms.set(wall_ms.saturating_sub(streaming_now_ms));
             }
 
             yield Message::Watermark(Watermark::new(
@@ -368,7 +377,9 @@ pub fn build_add_interval_expr(
 
 #[cfg(test)]
 mod tests {
+    use prometheus::Registry;
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
+    use risingwave_common::config::MetricLevel;
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::test_utils::IntervalTestExt;
     use risingwave_common::util::epoch::test_epoch;
@@ -378,6 +389,89 @@ mod tests {
     use super::*;
     use crate::common::table::test_utils::gen_pbtable;
     use crate::executor::test_utils::StreamExecutorTestExt;
+
+    #[tokio::test]
+    async fn test_now_metrics_lifecycle() -> StreamExecutorResult<()> {
+        let registry = Registry::new();
+        let metrics = Arc::new(StreamingMetrics::new(&registry, MetricLevel::Info));
+        let samples = || {
+            let mut samples = registry
+                .gather()
+                .into_iter()
+                .filter(|family| family.name().starts_with("stream_now_"))
+                .map(|family| {
+                    assert_eq!(family.get_metric().len(), 1);
+                    let metric = &family.get_metric()[0];
+                    assert_eq!(metric.get_label().len(), 1);
+                    assert_eq!(metric.get_label()[0].name(), "fragment_id");
+                    assert_eq!(metric.get_label()[0].value(), "1");
+                    (
+                        family.name().to_owned(),
+                        metric.get_gauge().as_ref().unwrap().value() as i64,
+                    )
+                })
+                .collect::<Vec<_>>();
+            samples.sort();
+            samples
+        };
+        assert!(samples().is_empty());
+
+        // Reuse the fragment label after the previous executor has been dropped.
+        let mut previous_cleaned_up = true;
+        for cleanup_before_recreation in [true, false, true] {
+            let state_store = create_state_store();
+            let (tx, mut executor) =
+                build_executor(NowMode::UpdateCurrent, &state_store, Some(2.0)).await;
+            executor.metrics = Some(metrics.clone());
+            executor.fragment_id = 1.into();
+            let mut now = executor.boxed().execute();
+
+            tx.send(Barrier::new_test_barrier(test_epoch(1))).unwrap();
+            now.next_unwrap_ready_barrier()?;
+            now.next_unwrap_ready_chunk()?;
+            // Before the first watermark, no zero-valued series is registered.
+            if previous_cleaned_up {
+                assert!(samples().is_empty());
+            }
+            now.next_unwrap_ready_watermark()?;
+            let initial_clock = "2021-04-01T00:00:00.001Z"
+                .parse::<Timestamptz>()
+                .unwrap()
+                .timestamp_millis();
+            assert_eq!(
+                samples(),
+                vec![
+                    ("stream_now_streaming_clock_ms".into(), initial_clock),
+                    ("stream_now_wall_clock_drift_ms".into(), 0),
+                ]
+            );
+
+            tx.send(Barrier::with_prev_epoch_for_test(
+                test_epoch(5000),
+                test_epoch(1),
+            ))
+            .unwrap();
+            now.next_unwrap_ready_barrier()?;
+            now.next_unwrap_ready_chunk()?;
+            now.next_unwrap_ready_watermark()?;
+            let expected = vec![
+                ("stream_now_streaming_clock_ms".into(), initial_clock + 2000),
+                ("stream_now_wall_clock_drift_ms".into(), 2999),
+            ];
+            assert_eq!(samples(), expected);
+            now.next_unwrap_pending();
+            assert_eq!(samples(), expected);
+
+            drop(now);
+            if cleanup_before_recreation {
+                // Guarded metrics retain the last sample for one scrape.
+                assert_eq!(samples(), expected);
+                assert!(samples().is_empty());
+            }
+            previous_cleaned_up = cleanup_before_recreation;
+        }
+        Ok(())
+    }
 
     #[tokio::test]
     async fn test_now() -> StreamExecutorResult<()> {
@@ -970,11 +1064,11 @@ mod tests {
         MemoryStateStore::new()
     }
 
-    async fn create_executor_with_progress_ratio(
+    async fn build_executor(
         mode: NowMode,
         state_store: &MemoryStateStore,
         progress_ratio: Option<f32>,
-    ) -> (UnboundedSender<Barrier>, BoxedMessageStream) {
+    ) -> (UnboundedSender<Barrier>, NowExecutor<MemoryStateStore>) {
         let table_id = TableId::new(1);
         let column_descs = vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Timestamptz)];
         let state_table = StateTable::from_table_catalog(
@@ -1002,7 +1096,16 @@ mod tests {
             None,
             0.into(),
         );
-        (sender, now_executor.boxed().execute())
+        (sender, now_executor)
+    }
+
+    async fn create_executor_with_progress_ratio(
+        mode: NowMode,
+        state_store: &MemoryStateStore,
+        progress_ratio: Option<f32>,
+    ) -> (UnboundedSender<Barrier>, BoxedMessageStream) {
+        let (sender, executor) = build_executor(mode, state_store, progress_ratio).await;
+        (sender, executor.boxed().execute())
     }
 
     async fn create_executor(
