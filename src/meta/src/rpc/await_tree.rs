@@ -22,8 +22,8 @@ use thiserror_ext::AsReport as _;
 use crate::MetaResult;
 use crate::manager::MetadataManager;
 
-/// Dump the await tree of all nodes in the cluster, including compute nodes, compactor nodes,
-/// and the current meta node.
+/// Dump the await tree of all nodes in the cluster, including compute nodes, frontend nodes,
+/// compactor nodes, and the current meta node.
 pub async fn dump_cluster_await_tree(
     metadata_manager: &MetadataManager,
     meta_node_registry: &await_tree::Registry,
@@ -36,6 +36,12 @@ pub async fn dump_cluster_await_tree(
         .await?;
     let compute_traces = dump_worker_node_await_tree(&compute_nodes, actor_traces_format).await?;
     all.merge_other(compute_traces);
+
+    let frontend_nodes = metadata_manager
+        .list_worker_node(Some(WorkerType::Frontend), None)
+        .await?;
+    let frontend_traces = dump_worker_node_await_tree(&frontend_nodes, actor_traces_format).await?;
+    all.merge_other(frontend_traces);
 
     let compactor_nodes = metadata_manager
         .list_worker_node(Some(WorkerType::Compactor), None)
@@ -66,7 +72,7 @@ pub fn dump_meta_node_await_tree(
     })
 }
 
-/// Dump the await tree of the given worker nodes (compute nodes or compactor nodes).
+/// Dump the await tree of the given worker nodes.
 pub async fn dump_worker_node_await_tree(
     worker_nodes: impl IntoIterator<Item = &WorkerNode>,
     actor_traces_format: ActorTracesFormat,

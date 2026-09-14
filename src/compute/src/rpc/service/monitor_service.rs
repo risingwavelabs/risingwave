@@ -186,6 +186,7 @@ impl MonitorService for MonitorServiceImpl {
             meta_traces: Default::default(),
             node_errors: Default::default(),
             batch_traces,
+            frontend_traces: Default::default(),
         }))
     }
 
