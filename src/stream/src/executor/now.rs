@@ -110,7 +110,6 @@ impl<S: StateStore> NowExecutor<S> {
             fragment_id,
         } = self;
 
-        // Create the guarded metrics only once a watermark is emitted.
         let mut executor_metrics = None;
 
         info!(
@@ -321,6 +320,9 @@ impl<S: StateStore> NowExecutor<S> {
                 let streaming_now_ms = ts.timestamp_millis();
                 let (streaming_clock_ms, wall_clock_drift_ms) = executor_metrics
                     .get_or_insert_with(|| {
+                        // NOW fragments are singleton, and recovery waits for the old actor to
+                        // stop, so fragment_id identifies a single writer. Multiple actors on
+                        // this node using the same label would overwrite each other's gauges.
                         let label = fragment_id.to_string();
                         (
                             metrics
