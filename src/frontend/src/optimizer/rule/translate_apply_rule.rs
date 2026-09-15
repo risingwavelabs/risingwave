@@ -15,6 +15,7 @@
 use std::collections::HashMap;
 
 use risingwave_common::types::DataType;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_pb::plan_common::JoinType;
 
 use super::prelude::{PlanRef, *};
@@ -285,7 +286,7 @@ impl TranslateApplyRule {
                 data_types,
                 index,
             )?;
-            for (output, input) in correlated_indices.into_iter().zip(input_indices) {
+            for (output, input) in correlated_indices.into_iter().zip_eq_fast(input_indices) {
                 index_mapping.put(output + offset, Some(input_mapping.map(input)));
             }
             Some(rewritten)
