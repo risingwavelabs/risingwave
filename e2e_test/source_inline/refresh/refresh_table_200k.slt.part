@@ -1,0 +1,36 @@
+# A refreshable table with 200k rows across 4 files, so that a refresh spans several barriers.
+# Dropped by drop_refresh_table_200k.slt.part.
+
+system ok
+rm -rf ./e2e_test/source_inline/refresh/refresh_200k_tmp && mkdir -p ./e2e_test/source_inline/refresh/refresh_200k_tmp
+
+system ok
+for i in 0 1 2 3; do seq $((i*50000+1)) $(((i+1)*50000)) | awk '{print $1","$1%97}' > ./e2e_test/source_inline/refresh/refresh_200k_tmp/f$i.csv; done
+
+statement ok
+CREATE TABLE refresh_200k_t (id int, grp int, PRIMARY KEY (id)) WITH (
+    connector = '__for_testing_only_batch_posix_fs',
+    batch_posix_fs.root = './e2e_test/source_inline/refresh/refresh_200k_tmp',
+    refresh_mode = 'FULL_RELOAD',
+    match_pattern = '*.csv'
+) FORMAT PLAIN ENCODE CSV (without_header = 'true', delimiter = ',');
+
+statement ok
+CREATE MATERIALIZED VIEW refresh_200k_mv AS SELECT grp, count(*) AS cnt FROM refresh_200k_t GROUP BY grp;
+
+statement ok retry 3 backoff 5s
+REFRESH TABLE refresh_200k_t;
+
+query I retry 12 backoff 5s
+SELECT count(*) FROM refresh_200k_t;
+----
+200000
+
+
+query T retry 12 backoff 5s
+SELECT s.current_status
+FROM rw_catalog.rw_refresh_table_state s
+JOIN rw_catalog.rw_tables t ON s.table_id = t.id
+WHERE t.name = 'refresh_200k_t';
+----
+IDLE

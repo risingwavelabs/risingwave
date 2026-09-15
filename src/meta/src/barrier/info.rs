@@ -468,6 +468,17 @@ impl InflightDatabaseInfo {
         self.jobs.contains_key(&job_id)
     }
 
+    /// Empty if the job is not in this database.
+    pub fn job_fragment_infos(
+        &self,
+        job_id: JobId,
+    ) -> impl Iterator<Item = &InflightFragmentInfo> + '_ {
+        self.jobs
+            .get(&job_id)
+            .into_iter()
+            .flat_map(|job| job.fragment_infos())
+    }
+
     pub(super) fn job_id_by_fragment(&self, fragment_id: FragmentId) -> Option<JobId> {
         self.fragment_location.get(&fragment_id).copied()
     }

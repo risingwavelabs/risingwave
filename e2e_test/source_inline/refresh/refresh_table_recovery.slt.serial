@@ -1,0 +1,63 @@
+# A refresh interrupted by recovery is abandoned and re-run once.
+
+include ./refresh_table_200k.slt.part
+
+statement ok
+REFRESH TABLE refresh_200k_t;
+
+# The load spans several barriers, so the cycle is still in flight here.
+query T
+SELECT s.current_status
+FROM rw_catalog.rw_refresh_table_state s
+JOIN rw_catalog.rw_tables t ON s.table_id = t.id
+WHERE t.name = 'refresh_200k_t';
+----
+REFRESHING
+
+system ok
+psql -h "${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS:-127.0.0.1}" -p "${RISEDEV_RW_FRONTEND_PORT:-4566}" -U root -d dev -t -A -c "SELECT s.last_trigger_time FROM rw_catalog.rw_refresh_table_state s JOIN rw_catalog.rw_tables t ON s.table_id = t.id WHERE t.name = 'refresh_200k_t'" > ./e2e_test/source_inline/refresh/refresh_200k_tmp/trigger_before
+
+statement ok
+recover;
+
+# A newer trigger than the interrupted one ends in success.
+system ok
+for i in $(seq 1 12); do
+  state=$(psql -h "${RISEDEV_RW_FRONTEND_LISTEN_ADDRESS:-127.0.0.1}" -p "${RISEDEV_RW_FRONTEND_PORT:-4566}" -U root -d dev -t -A -c "SELECT s.current_status, s.last_trigger_time > '$(cat ./e2e_test/source_inline/refresh/refresh_200k_tmp/trigger_before)', s.last_success_time > s.last_trigger_time FROM rw_catalog.rw_refresh_table_state s JOIN rw_catalog.rw_tables t ON s.table_id = t.id WHERE t.name = 'refresh_200k_t'")
+  [ "$state" = "IDLE|t|t" ] && exit 0
+  sleep 5
+done
+echo "unexpected refresh state: $state"; exit 1
+
+query I
+SELECT count(*) FROM refresh_200k_t;
+----
+200000
+
+
+query II
+SELECT count(*), sum(cnt) FROM refresh_200k_mv;
+----
+97 200000
+
+
+# The next refresh picks up upstream changes.
+system ok
+rm ./e2e_test/source_inline/refresh/refresh_200k_tmp/f3.csv
+
+statement ok retry 3 backoff 5s
+REFRESH TABLE refresh_200k_t;
+
+query I retry 12 backoff 5s
+SELECT count(*) FROM refresh_200k_t;
+----
+150000
+
+
+query II retry 12 backoff 5s
+SELECT count(*), sum(cnt) FROM refresh_200k_mv;
+----
+97 150000
+
+
+include ./drop_refresh_table_200k.slt.part
