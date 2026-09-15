@@ -3695,7 +3695,7 @@ fn parse_fetch() {
     let fetch_first_two_rows_only = Some(Fetch {
         with_ties: false,
 
-        quantity: Some("2".to_owned()),
+        quantity: Some(Expr::Value(Value::Number("2".to_owned()))),
     });
     let ast = verified_query("SELECT foo FROM bar FETCH FIRST 2 ROWS ONLY");
     assert_eq!(ast.fetch, fetch_first_two_rows_only);
@@ -3720,7 +3720,7 @@ fn parse_fetch() {
         ast.fetch,
         Some(Fetch {
             with_ties: true,
-            quantity: Some("2".to_owned()),
+            quantity: Some(Expr::Value(Value::Number("2".to_owned()))),
         })
     );
     let ast = verified_query(
@@ -3779,6 +3779,41 @@ fn parse_fetch_variations() {
     one_statement_parses_to(
         "SELECT foo FROM bar FETCH FIRST ROWS ONLY",
         "SELECT foo FROM bar FETCH FIRST ROWS ONLY",
+    );
+}
+
+#[test]
+fn parse_fetch_expression() {
+    // The quantity of a FETCH clause can be an arbitrary expression, not just a literal
+    // number, e.g. `FETCH FIRST 1 + 1 ROWS ONLY`.
+    let ast = verified_query("SELECT foo FROM bar FETCH FIRST 1 + 1 ROWS ONLY");
+    assert_eq!(
+        ast.fetch,
+        Some(Fetch {
+            with_ties: false,
+            quantity: Some(Expr::BinaryOp {
+                left: Box::new(Expr::Value(Value::Number("1".to_owned()))),
+                op: BinaryOperator::Plus,
+                right: Box::new(Expr::Value(Value::Number("1".to_owned()))),
+            }),
+        })
+    );
+
+    // Regression test for the grammar conflict described in
+    // <https://github.com/risingwavelabs/risingwave/issues/19952>: when the quantity is
+    // omitted, the `ROW`/`ROWS` noise word must not be misparsed as the start of a `ROW(...)`
+    // expression.
+    let ast = query(
+        "SELECT 1 OFFSET 1 ROW FETCH FIRST ROW ONLY",
+        "SELECT 1 OFFSET 1 FETCH FIRST ROWS ONLY",
+    );
+    assert_eq!(ast.offset, Some("1".to_owned()));
+    assert_eq!(
+        ast.fetch,
+        Some(Fetch {
+            with_ties: false,
+            quantity: None,
+        })
     );
 }
 
