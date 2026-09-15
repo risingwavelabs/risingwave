@@ -1204,7 +1204,7 @@ impl InflightDatabaseInfo {
         control_stream_manager: &ControlStreamManager,
         stream_actors: &HashMap<FragmentId, Vec<StreamActor>>,
         actor_location: &HashMap<ActorId, WorkerId>,
-    ) -> FragmentEdgeBuildResult {
+    ) -> MetaResult<FragmentEdgeBuildResult> {
         // `existing_fragment_ids` consists of
         //  - keys of `info.upstream_fragment_downstreams`, which are the `fragment_id` the upstream fragment of the newly created job
         //  - keys of `replace_job.upstream_fragment_downstreams`, which are the `fragment_id` of upstream fragment of replace_job,
@@ -1296,17 +1296,17 @@ impl InflightDatabaseInfo {
         }));
         let mut builder = builder.finish_fragments();
         if let Some((info, _)) = info {
-            builder.add_relations(&info.upstream_fragment_downstreams);
-            builder.add_relations(&info.stream_job_fragments.downstreams);
+            builder.add_relations(&info.upstream_fragment_downstreams)?;
+            builder.add_relations(&info.stream_job_fragments.downstreams)?;
         }
         if let Some(replace_job) = replace_job {
-            builder.add_relations(&replace_job.upstream_fragment_downstreams);
-            builder.add_relations(&replace_job.new_fragments.downstreams);
+            builder.add_relations(&replace_job.upstream_fragment_downstreams)?;
+            builder.add_relations(&replace_job.new_fragments.downstreams)?;
         }
         if let Some(new_upstream_sink) = new_upstream_sink {
             let sink_fragment_id = new_upstream_sink.sink_fragment_id;
             let new_sink_downstream = &new_upstream_sink.new_sink_downstream;
-            builder.add_edge(sink_fragment_id, new_sink_downstream);
+            builder.add_edge(sink_fragment_id, new_sink_downstream)?;
         }
         if let Some(replace_job) = replace_job {
             for (fragment_id, fragment_replacement) in &replace_job.replace_upstream {
@@ -1321,7 +1321,7 @@ impl InflightDatabaseInfo {
                 }
             }
         }
-        builder.build()
+        Ok(builder.build())
     }
 
     /// Post-apply reschedule: remove actors that were marked for removal.

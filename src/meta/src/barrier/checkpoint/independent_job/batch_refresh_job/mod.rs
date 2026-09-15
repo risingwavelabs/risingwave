@@ -387,7 +387,7 @@ impl BatchRefreshJobCheckpointControl {
             )
         }));
         let mut builder = builder.finish_fragments();
-        builder.add_relations(downstreams);
+        builder.add_relations(downstreams)?;
         let mut edges = builder.build();
 
         let actors_to_create = edges.collect_actors_to_create(fragment_infos.values().map(|f| {

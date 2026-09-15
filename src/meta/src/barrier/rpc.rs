@@ -969,7 +969,7 @@ impl PartialGraphRecoverer<'_> {
                 )),
         );
         let mut builder = builder.finish_fragments();
-        builder.add_relations(fragment_relations);
+        builder.add_relations(fragment_relations)?;
         let mut edges = builder.build();
 
         {

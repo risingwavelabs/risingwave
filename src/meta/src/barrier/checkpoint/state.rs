@@ -594,7 +594,7 @@ impl DatabaseCheckpointControl {
                         partial_graph_manager.control_stream_manager(),
                         &actors.stream_actors,
                         &actors.actor_location,
-                    );
+                    )?;
                     // Phase 2: Resolve source-level DiscoveredSplits to actor-level SplitAssignment
                     let resolved_split_assignment = resolve_source_splits(
                         &info,
@@ -901,7 +901,7 @@ impl DatabaseCheckpointControl {
                     partial_graph_manager.control_stream_manager(),
                     &actors.stream_actors,
                     &actors.actor_location,
-                );
+                )?;
                 // Phase 2: Resolve source-level DiscoveredSplits to actor-level SplitAssignment
                 let resolved_split_assignment = resolve_source_splits(
                     &info,
@@ -1252,7 +1252,7 @@ impl DatabaseCheckpointControl {
                     partial_graph_manager.control_stream_manager(),
                     &render_result.stream_actors,
                     &render_result.actor_location,
-                );
+                )?;
 
                 // Phase 2: Resolve splits to actor-level assignment.
                 let fragment_actor_ids: HashMap<FragmentId, Vec<ActorId>> = render_result
@@ -1696,8 +1696,8 @@ impl DatabaseCheckpointControl {
                             }),
                         );
                         let mut edge_builder = edge_builder.finish_fragments();
-                        edge_builder.add_relations(&info.upstream_fragment_downstreams);
-                        edge_builder.add_relations(&info.downstreams);
+                        edge_builder.add_relations(&info.upstream_fragment_downstreams)?;
+                        edge_builder.add_relations(&info.downstreams)?;
                         let mut edges = edge_builder.build();
                         let new_actors_to_create = edges.collect_actors_to_create(
                             new_fragment_info.values().map(|fragment| {
