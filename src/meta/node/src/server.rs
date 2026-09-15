@@ -460,6 +460,7 @@ pub async fn start_service_as_election_leader(
         metadata_manager.clone(),
         iceberg_compaction_stat_tx,
         env.await_tree_reg().clone(),
+        env.sink_writer_terms().clone(),
     );
     tracing::info!("SinkCoordinatorManager started");
     // TODO(shutdown): remove this as there's no need to gracefully shutdown some of these sub-tasks.

@@ -39,9 +39,9 @@ use tracing::{debug, error, info, warn};
 
 use crate::hummock::HummockManagerRef;
 use crate::manager::MetadataManager;
-use crate::manager::sink_coordination::SinkWriterRequestStream;
 use crate::manager::sink_coordination::coordinator_worker::CoordinatorWorker;
 use crate::manager::sink_coordination::handle::SinkWriterCoordinationHandle;
+use crate::manager::sink_coordination::{SinkWriterRequestStream, SinkWriterTerms};
 
 macro_rules! send_with_err_check {
     ($tx:expr, $msg:expr) => {
@@ -73,6 +73,8 @@ enum ManagerRequest {
 #[derive(Clone)]
 pub struct SinkCoordinatorManager {
     request_tx: mpsc::Sender<ManagerRequest>,
+    /// Recovery terms whose writers are currently admitted. See [`SinkWriterTerms`].
+    writer_terms: SinkWriterTerms,
 }
 fn new_committed_epoch_subscriber(
     hummock_manager: HummockManagerRef,
@@ -105,9 +107,10 @@ impl SinkCoordinatorManager {
         metadata_manager: MetadataManager,
         iceberg_compact_stat_sender: UnboundedSender<IcebergSinkCompactionUpdate>,
         await_tree_reg: await_tree::Registry,
+        writer_terms: SinkWriterTerms,
     ) -> (Self, (JoinHandle<()>, Sender<()>)) {
         let subscriber = new_committed_epoch_subscriber(hummock_manager, metadata_manager);
-        Self::start_worker_with_spawn_worker({
+        Self::start_worker_with_spawn_worker(writer_terms, {
             move |param, manager_request_stream| {
                 let sink_id = param.sink_id;
                 let fut = CoordinatorWorker::run(
@@ -127,6 +130,7 @@ impl SinkCoordinatorManager {
     }
 
     fn start_worker_with_spawn_worker(
+        writer_terms: SinkWriterTerms,
         spawn_coordinator_worker: impl SpawnCoordinatorFn,
     ) -> (Self, (JoinHandle<()>, Sender<()>)) {
         let (request_tx, request_rx) = mpsc::channel(BOUNDED_CHANNEL_SIZE);
@@ -134,7 +138,10 @@ impl SinkCoordinatorManager {
         let worker = ManagerWorker::new(request_rx, shutdown_rx);
         let join_handle = tokio::spawn(worker.execute(spawn_coordinator_worker));
         (
-            SinkCoordinatorManager { request_tx },
+            SinkCoordinatorManager {
+                request_tx,
+                writer_terms,
+            },
             (join_handle, shutdown_tx),
         )
     }
@@ -143,14 +150,19 @@ impl SinkCoordinatorManager {
         &self,
         mut request_stream: SinkWriterRequestStream,
     ) -> Result<impl Stream<Item = Result<CoordinateResponse, Status>> + use<>, Status> {
-        let (param, vnode_bitmap) = match request_stream.try_next().await? {
+        let (param, vnode_bitmap, term_id) = match request_stream.try_next().await? {
             Some(CoordinateRequest {
                 msg:
                     Some(Msg::StartRequest(coordinate_request::StartCoordinationRequest {
                         param: Some(param),
                         vnode_bitmap: Some(vnode_bitmap),
+                        term_id,
                     })),
-            }) => (SinkParam::from_proto(param), Bitmap::from(&vnode_bitmap)),
+            }) => (
+                SinkParam::from_proto(param),
+                Bitmap::from(&vnode_bitmap),
+                term_id,
+            ),
             msg => {
                 return Err(Status::invalid_argument(format!(
                     "expected CoordinateRequest::StartRequest in the first request, get {:?}",
@@ -158,6 +170,20 @@ impl SinkCoordinatorManager {
                 )));
             }
         };
+        // Writers of a previous recovery incarnation must never reach a coordinator: recovery has
+        // aborted or is about to abort the epochs they may still deliver, and a coordinator they
+        // spawn could load the sink state before recovery reconciles it.
+        if term_id.is_empty() {
+            warn!(
+                sink_id = %param.sink_id,
+                "admitting a sink writer without recovery term, the compute node may run an older version"
+            );
+        } else if !self.writer_terms.is_active(&term_id) {
+            return Err(Status::failed_precondition(format!(
+                "sink writer of sink {} belongs to stale recovery term {}",
+                param.sink_id, term_id
+            )));
+        }
         let (response_tx, response_rx) = mpsc::unbounded_channel();
         self.request_tx
             .send(ManagerRequest::NewSinkWriter(
@@ -435,9 +461,9 @@ mod tests {
     use tokio::sync::mpsc::unbounded_channel;
     use tokio_stream::wrappers::ReceiverStream;
 
-    use crate::manager::sink_coordination::SinkCoordinatorManager;
     use crate::manager::sink_coordination::coordinator_worker::CoordinatorWorker;
     use crate::manager::sink_coordination::manager::SinkCommittedEpochSubscriber;
+    use crate::manager::sink_coordination::{SinkCoordinatorManager, SinkWriterTerms};
 
     struct MockSinglePhaseCoordinator<
         C,
@@ -536,7 +562,7 @@ mod tests {
         };
 
         let (manager, (_join_handle, _stop_tx)) =
-            SinkCoordinatorManager::start_worker_with_spawn_worker({
+            SinkCoordinatorManager::start_worker_with_spawn_worker(SinkWriterTerms::default(), {
                 let expected_param = param.clone();
                 let metadata = metadata.clone();
                 let db = db.clone();
@@ -598,15 +624,20 @@ mod tests {
             });
 
         let build_client = |vnode| async {
-            CoordinatorStreamHandle::new_with_init_stream(param.to_proto(), vnode, |rx| async {
-                Ok(tonic::Response::new(
-                    manager
-                        .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
-                        .await
-                        .unwrap()
-                        .boxed(),
-                ))
-            })
+            CoordinatorStreamHandle::new_with_init_stream(
+                param.to_proto(),
+                vnode,
+                String::new(),
+                |rx| async {
+                    Ok(tonic::Response::new(
+                        manager
+                            .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
+                            .await
+                            .unwrap()
+                            .boxed(),
+                    ))
+                },
+            )
             .await
             .unwrap()
             .0
@@ -742,7 +773,7 @@ mod tests {
             })
         };
         let (manager, (_join_handle, _stop_tx)) =
-            SinkCoordinatorManager::start_worker_with_spawn_worker({
+            SinkCoordinatorManager::start_worker_with_spawn_worker(SinkWriterTerms::default(), {
                 let expected_param = param.clone();
                 let metadata = metadata.clone();
                 let db = db.clone();
@@ -802,15 +833,20 @@ mod tests {
             });
 
         let build_client = |vnode| async {
-            CoordinatorStreamHandle::new_with_init_stream(param.to_proto(), vnode, |rx| async {
-                Ok(tonic::Response::new(
-                    manager
-                        .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
-                        .await
-                        .unwrap()
-                        .boxed(),
-                ))
-            })
+            CoordinatorStreamHandle::new_with_init_stream(
+                param.to_proto(),
+                vnode,
+                String::new(),
+                |rx| async {
+                    Ok(tonic::Response::new(
+                        manager
+                            .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
+                            .await
+                            .unwrap()
+                            .boxed(),
+                    ))
+                },
+            )
             .await
             .unwrap()
             .0
@@ -894,7 +930,7 @@ mod tests {
             })
         };
         let (manager, (_join_handle, _stop_tx)) =
-            SinkCoordinatorManager::start_worker_with_spawn_worker({
+            SinkCoordinatorManager::start_worker_with_spawn_worker(SinkWriterTerms::default(), {
                 let expected_param = param.clone();
                 let db = db.clone();
                 move |param, new_writer_rx| {
@@ -922,15 +958,20 @@ mod tests {
             });
 
         let build_client = |vnode| async {
-            CoordinatorStreamHandle::new_with_init_stream(param.to_proto(), vnode, |rx| async {
-                Ok(tonic::Response::new(
-                    manager
-                        .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
-                        .await
-                        .unwrap()
-                        .boxed(),
-                ))
-            })
+            CoordinatorStreamHandle::new_with_init_stream(
+                param.to_proto(),
+                vnode,
+                String::new(),
+                |rx| async {
+                    Ok(tonic::Response::new(
+                        manager
+                            .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
+                            .await
+                            .unwrap()
+                            .boxed(),
+                    ))
+                },
+            )
             .await
             .unwrap()
             .0
@@ -1002,7 +1043,7 @@ mod tests {
             })
         };
         let (manager, (_join_handle, _stop_tx)) =
-            SinkCoordinatorManager::start_worker_with_spawn_worker({
+            SinkCoordinatorManager::start_worker_with_spawn_worker(SinkWriterTerms::default(), {
                 let expected_param = param.clone();
                 let db = db.clone();
                 move |param, new_writer_rx| {
@@ -1031,15 +1072,20 @@ mod tests {
             });
 
         let build_client = |vnode| async {
-            CoordinatorStreamHandle::new_with_init_stream(param.to_proto(), vnode, |rx| async {
-                Ok(tonic::Response::new(
-                    manager
-                        .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
-                        .await
-                        .unwrap()
-                        .boxed(),
-                ))
-            })
+            CoordinatorStreamHandle::new_with_init_stream(
+                param.to_proto(),
+                vnode,
+                String::new(),
+                |rx| async {
+                    Ok(tonic::Response::new(
+                        manager
+                            .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
+                            .await
+                            .unwrap()
+                            .boxed(),
+                    ))
+                },
+            )
             .await
             .unwrap()
             .0
@@ -1135,7 +1181,7 @@ mod tests {
             })
         };
         let (manager, (_join_handle, _stop_tx)) =
-            SinkCoordinatorManager::start_worker_with_spawn_worker({
+            SinkCoordinatorManager::start_worker_with_spawn_worker(SinkWriterTerms::default(), {
                 let expected_param = param.clone();
                 let metadata = metadata.clone();
                 let metadata_scale_out = metadata_scale_out.clone();
@@ -1196,15 +1242,20 @@ mod tests {
             });
 
         let build_client = |vnode| async {
-            CoordinatorStreamHandle::new_with_init_stream(param.to_proto(), vnode, |rx| async {
-                Ok(tonic::Response::new(
-                    manager
-                        .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
-                        .await
-                        .unwrap()
-                        .boxed(),
-                ))
-            })
+            CoordinatorStreamHandle::new_with_init_stream(
+                param.to_proto(),
+                vnode,
+                String::new(),
+                |rx| async {
+                    Ok(tonic::Response::new(
+                        manager
+                            .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
+                            .await
+                            .unwrap()
+                            .boxed(),
+                    ))
+                },
+            )
             .await
         };
 
@@ -1523,6 +1574,74 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn test_reject_writer_of_stale_term() {
+        use risingwave_common::bitmap::Bitmap;
+        use risingwave_pb::connector_service::{CoordinateRequest, coordinate_request};
+        use risingwave_pb::id::PartialGraphId;
+
+        let writer_terms = SinkWriterTerms::default();
+        let partial_graph_id = PartialGraphId::new(1 << 32 | u32::MAX as u64);
+        writer_terms.register(partial_graph_id, "term-1");
+
+        let param = SinkParam {
+            sink_id: SinkId::from(1),
+            sink_name: "test".into(),
+            properties: Default::default(),
+            columns: vec![],
+            downstream_pk: None,
+            sink_type: SinkType::AppendOnly,
+            ignore_delete: false,
+            format_desc: None,
+            db_name: "test".into(),
+            sink_from_name: "test".into(),
+        };
+
+        let (spawned_tx, mut spawned_rx) = unbounded_channel();
+        let (manager, (_join_handle, _stop_tx)) =
+            SinkCoordinatorManager::start_worker_with_spawn_worker(writer_terms.clone(), {
+                move |param, new_writer_rx| {
+                    let spawned_tx = spawned_tx.clone();
+                    tokio::spawn(async move {
+                        spawned_tx.send(param.sink_id).unwrap();
+                        let _new_writer_rx = new_writer_rx;
+                        std::future::pending::<()>().await;
+                    })
+                }
+            });
+
+        let start_request = |term_id: &str| CoordinateRequest {
+            msg: Some(coordinate_request::Msg::StartRequest(
+                coordinate_request::StartCoordinationRequest {
+                    param: Some(param.to_proto()),
+                    vnode_bitmap: Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST).to_protobuf()),
+                    term_id: term_id.to_owned(),
+                },
+            )),
+        };
+        let new_request_stream = |request: CoordinateRequest| {
+            let (tx, rx) = tokio::sync::mpsc::channel(1);
+            tx.try_send(request).unwrap();
+            (tx, ReceiverStream::new(rx).map(Ok).boxed())
+        };
+
+        // A writer of a previous incarnation is rejected before any coordinator is spawned.
+        let (_tx, stream) = new_request_stream(start_request("term-0"));
+        let err = manager.handle_new_request(stream).await.err().unwrap();
+        assert_eq!(err.code(), tonic::Code::FailedPrecondition);
+
+        let (_tx, stream) = new_request_stream(start_request("term-1"));
+        let _response = manager.handle_new_request(stream).await.unwrap();
+        assert_eq!(spawned_rx.recv().await, Some(SinkId::from(1)));
+
+        // Resetting the partial graph fences its writers as well.
+        writer_terms.unregister([partial_graph_id]);
+        let (_tx, stream) = new_request_stream(start_request("term-1"));
+        let err = manager.handle_new_request(stream).await.err().unwrap();
+        assert_eq!(err.code(), tonic::Code::FailedPrecondition);
+        assert!(spawned_rx.try_recv().is_err());
+    }
+
     async fn prepare_db_backend() -> DatabaseConnection {
         let db: DatabaseConnection = Database::connect("sqlite::memory:").await.unwrap();
         let ddl = "
@@ -1648,7 +1767,7 @@ mod tests {
         let pre_commit_attempt = Arc::new(AtomicI32::new(0));
         let commit_attempt = Arc::new(AtomicI32::new(0));
         let (manager, (_join_handle, _stop_tx)) =
-            SinkCoordinatorManager::start_worker_with_spawn_worker({
+            SinkCoordinatorManager::start_worker_with_spawn_worker(SinkWriterTerms::default(), {
                 let expected_param = param.clone();
                 let db = db.clone();
                 let pre_commit_attempt = pre_commit_attempt.clone();
@@ -1692,15 +1811,20 @@ mod tests {
             });
 
         let (_client, log_store_rewind_start_epoch) =
-            CoordinatorStreamHandle::new_with_init_stream(param.to_proto(), vnode, |rx| async {
-                Ok(tonic::Response::new(
-                    manager
-                        .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
-                        .await
-                        .unwrap()
-                        .boxed(),
-                ))
-            })
+            CoordinatorStreamHandle::new_with_init_stream(
+                param.to_proto(),
+                vnode,
+                String::new(),
+                |rx| async {
+                    Ok(tonic::Response::new(
+                        manager
+                            .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
+                            .await
+                            .unwrap()
+                            .boxed(),
+                    ))
+                },
+            )
             .await
             .unwrap();
         assert_eq!(log_store_rewind_start_epoch, Some(epoch1));
@@ -1771,7 +1895,7 @@ mod tests {
         };
 
         let (manager, (_join_handle, _stop_tx)) =
-            SinkCoordinatorManager::start_worker_with_spawn_worker({
+            SinkCoordinatorManager::start_worker_with_spawn_worker(SinkWriterTerms::default(), {
                 let expected_param = param.clone();
                 let db = db.clone();
                 move |param, new_writer_rx| {
@@ -1802,15 +1926,20 @@ mod tests {
             });
 
         let build_client = |vnode| async {
-            CoordinatorStreamHandle::new_with_init_stream(param.to_proto(), vnode, |rx| async {
-                Ok(tonic::Response::new(
-                    manager
-                        .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
-                        .await
-                        .unwrap()
-                        .boxed(),
-                ))
-            })
+            CoordinatorStreamHandle::new_with_init_stream(
+                param.to_proto(),
+                vnode,
+                String::new(),
+                |rx| async {
+                    Ok(tonic::Response::new(
+                        manager
+                            .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
+                            .await
+                            .unwrap()
+                            .boxed(),
+                    ))
+                },
+            )
             .await
             .unwrap()
             .0
@@ -1886,7 +2015,7 @@ mod tests {
         };
 
         let (manager, (_join_handle, _stop_tx)) =
-            SinkCoordinatorManager::start_worker_with_spawn_worker({
+            SinkCoordinatorManager::start_worker_with_spawn_worker(SinkWriterTerms::default(), {
                 let expected_param = param.clone();
                 let db = db.clone();
                 move |param, new_writer_rx| {
@@ -1918,15 +2047,20 @@ mod tests {
             });
 
         let build_client = |vnode| async {
-            CoordinatorStreamHandle::new_with_init_stream(param.to_proto(), vnode, |rx| async {
-                Ok(tonic::Response::new(
-                    manager
-                        .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
-                        .await
-                        .unwrap()
-                        .boxed(),
-                ))
-            })
+            CoordinatorStreamHandle::new_with_init_stream(
+                param.to_proto(),
+                vnode,
+                String::new(),
+                |rx| async {
+                    Ok(tonic::Response::new(
+                        manager
+                            .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
+                            .await
+                            .unwrap()
+                            .boxed(),
+                    ))
+                },
+            )
             .await
             .unwrap()
             .0
@@ -2028,7 +2162,7 @@ mod tests {
         let commit_attempt = Arc::new(AtomicI32::new(0));
 
         let (manager, (_join_handle, _stop_tx)) =
-            SinkCoordinatorManager::start_worker_with_spawn_worker({
+            SinkCoordinatorManager::start_worker_with_spawn_worker(SinkWriterTerms::default(), {
                 let expected_param = param.clone();
                 let metadata = metadata.clone();
                 let db = db.clone();
@@ -2081,15 +2215,20 @@ mod tests {
             });
 
         let build_client = |vnode| async {
-            CoordinatorStreamHandle::new_with_init_stream(param.to_proto(), vnode, |rx| async {
-                Ok(tonic::Response::new(
-                    manager
-                        .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
-                        .await
-                        .unwrap()
-                        .boxed(),
-                ))
-            })
+            CoordinatorStreamHandle::new_with_init_stream(
+                param.to_proto(),
+                vnode,
+                String::new(),
+                |rx| async {
+                    Ok(tonic::Response::new(
+                        manager
+                            .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
+                            .await
+                            .unwrap()
+                            .boxed(),
+                    ))
+                },
+            )
             .await
             .unwrap()
             .0
@@ -2180,7 +2319,7 @@ mod tests {
         };
 
         let (manager, (_join_handle, _stop_tx)) =
-            SinkCoordinatorManager::start_worker_with_spawn_worker({
+            SinkCoordinatorManager::start_worker_with_spawn_worker(SinkWriterTerms::default(), {
                 let expected_param = param.clone();
                 let metadata = metadata.clone();
                 let db = db.clone();
@@ -2224,15 +2363,20 @@ mod tests {
             });
 
         let build_client = |vnode| async {
-            CoordinatorStreamHandle::new_with_init_stream(param.to_proto(), vnode, |rx| async {
-                Ok(tonic::Response::new(
-                    manager
-                        .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
-                        .await
-                        .unwrap()
-                        .boxed(),
-                ))
-            })
+            CoordinatorStreamHandle::new_with_init_stream(
+                param.to_proto(),
+                vnode,
+                String::new(),
+                |rx| async {
+                    Ok(tonic::Response::new(
+                        manager
+                            .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
+                            .await
+                            .unwrap()
+                            .boxed(),
+                    ))
+                },
+            )
             .await
             .unwrap()
             .0
@@ -2348,7 +2492,7 @@ mod tests {
         };
 
         let (manager, (_join_handle, _stop_tx)) =
-            SinkCoordinatorManager::start_worker_with_spawn_worker({
+            SinkCoordinatorManager::start_worker_with_spawn_worker(SinkWriterTerms::default(), {
                 let expected_param = param.clone();
                 let metadata = metadata.clone();
                 let schema_change = schema_change.clone();
@@ -2401,15 +2545,20 @@ mod tests {
             });
 
         let build_client = |vnode| async {
-            CoordinatorStreamHandle::new_with_init_stream(param.to_proto(), vnode, |rx| async {
-                Ok(tonic::Response::new(
-                    manager
-                        .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
-                        .await
-                        .unwrap()
-                        .boxed(),
-                ))
-            })
+            CoordinatorStreamHandle::new_with_init_stream(
+                param.to_proto(),
+                vnode,
+                String::new(),
+                |rx| async {
+                    Ok(tonic::Response::new(
+                        manager
+                            .handle_new_request(ReceiverStream::new(rx).map(Ok).boxed())
+                            .await
+                            .unwrap()
+                            .boxed(),
+                    ))
+                },
+            )
             .await
         };
 

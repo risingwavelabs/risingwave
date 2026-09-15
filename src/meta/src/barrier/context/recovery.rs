@@ -42,7 +42,7 @@ use crate::barrier::checkpoint::{
 };
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::progress::TrackingJob;
-use crate::barrier::rpc::to_partial_graph_id;
+use crate::barrier::rpc::{from_partial_graph_id, to_partial_graph_id};
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::scale::{
     FragmentRenderMap, LoadedFragment, LoadedFragmentContext, RenderedGraph,
@@ -465,6 +465,17 @@ impl GlobalBarrierWorkerContextImpl {
     }
 
     async fn reset_sink_coordinator(&self, database_id: Option<DatabaseId>) -> MetaResult<()> {
+        // Writers of the incarnations being recovered must not be admitted again, and no writer
+        // must be admitted before the pending sink state has been reconciled below. The terms of
+        // the new incarnations are only registered when their partial graphs are created.
+        let sink_writer_terms = self.env.sink_writer_terms();
+        if let Some(database_id) = database_id {
+            sink_writer_terms.unregister_if(|partial_graph_id| {
+                from_partial_graph_id(partial_graph_id).0 == database_id
+            });
+        } else {
+            sink_writer_terms.clear();
+        }
         if let Some(database_id) = database_id {
             let sink_ids = self
                 .metadata_manager

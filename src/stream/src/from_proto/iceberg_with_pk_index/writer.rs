@@ -100,6 +100,7 @@ impl ExecutorBuilder for IcebergWithPkIndexWriterExecutorBuilder {
             connector: ICEBERG_SINK.to_owned(),
             streaming_config: params.config.as_ref().clone(),
             time_zone: params.actor_context.time_zone,
+            term_id: params.local_barrier_manager.term_id.clone(),
         };
         let writer = IcebergWriterImpl::build(&config, table, &writer_param)?;
 
