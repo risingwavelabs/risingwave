@@ -35,6 +35,7 @@ use tonic::Streaming;
 
 use super::MetaSrvEnv;
 use crate::MetaResult;
+use crate::barrier::BarrierScheduler;
 use crate::controller::streaming_job::AbortCreatingJobResult;
 use crate::hummock::IcebergCompactorManagerRef;
 use crate::manager::MetadataManager;
@@ -58,6 +59,7 @@ pub struct IcebergCompactionManager {
     inner: Arc<RwLock<IcebergCompactionManagerInner>>,
 
     metadata_manager: MetadataManager,
+    barrier_scheduler: BarrierScheduler,
     pub iceberg_compactor_manager: IcebergCompactorManagerRef,
 
     compactor_streams_change_tx: CompactorChangeTx,
@@ -86,6 +88,7 @@ impl IcebergCompactionManager {
         metadata_manager: MetadataManager,
         iceberg_compactor_manager: IcebergCompactorManagerRef,
         metrics: Arc<MetaMetrics>,
+        barrier_scheduler: BarrierScheduler,
     ) -> (Arc<Self>, CompactorChangeRx) {
         let (compactor_streams_change_tx, compactor_streams_change_rx) =
             tokio::sync::mpsc::unbounded_channel();
@@ -99,6 +102,7 @@ impl IcebergCompactionManager {
                     manual_compaction_waiters: HashMap::default(),
                 })),
                 metadata_manager,
+                barrier_scheduler,
                 iceberg_compactor_manager,
                 compactor_streams_change_tx,
                 metrics,
