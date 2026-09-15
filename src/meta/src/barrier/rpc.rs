@@ -41,9 +41,7 @@ use risingwave_pb::id::PartialGraphId;
 use risingwave_pb::source::{PbCdcTableSnapshotSplits, PbCdcTableSnapshotSplitsWithGeneration};
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
-use risingwave_pb::stream_plan::{
-    AddMutation, Barrier, BarrierMutation, IcebergPkIndexCompactionContext,
-};
+use risingwave_pb::stream_plan::{AddMutation, Barrier, BarrierMutation};
 use risingwave_pb::stream_service::inject_barrier_request::build_actor_info::UpstreamActors;
 use risingwave_pb::stream_service::inject_barrier_request::{
     BuildActorInfo, FragmentBuildActorInfo,
@@ -69,7 +67,7 @@ use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::checkpoint::{
     BarrierWorkerState, BatchRefreshJobCheckpointControl, BatchRefreshRenderResult,
     CreatingStreamingJobControl, DatabaseCheckpointControl, DatabaseCheckpointControlMetrics,
-    IndependentCheckpointJobControl,
+    IndependentCheckpointJobControl, IndependentCheckpointJobStatus,
 };
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::edge_builder::{EdgeBuilderFragmentInfo, FragmentEdgeBuilder};
@@ -1112,7 +1110,12 @@ impl PartialGraphRecoverer<'_> {
             )?;
             independent_checkpoint_job_controls.insert(
                 job_id,
-                IndependentCheckpointJobControl::CreatingStreamingJob(job),
+                IndependentCheckpointJobControl::creating_streaming_job(
+                    job_id,
+                    to_partial_graph_id(database_id, Some(job_id)),
+                    IndependentCheckpointJobStatus::Ready,
+                    job,
+                ),
             );
         }
 
@@ -1186,8 +1189,15 @@ impl PartialGraphRecoverer<'_> {
                 self,
                 refresh_interval_sec,
             )?;
-            independent_checkpoint_job_controls
-                .insert(job_id, IndependentCheckpointJobControl::BatchRefresh(job));
+            independent_checkpoint_job_controls.insert(
+                job_id,
+                IndependentCheckpointJobControl::batch_refresh(
+                    job_id,
+                    to_partial_graph_id(database_id, Some(job_id)),
+                    IndependentCheckpointJobStatus::Ready,
+                    job,
+                ),
+            );
         }
 
         self.control_stream_manager()
@@ -1251,7 +1261,6 @@ impl ControlStreamManager {
         &mut self,
         partial_graph_id: PartialGraphId,
         mutation: Option<Mutation>,
-        iceberg_pk_index_compaction: Option<IcebergPkIndexCompactionContext>,
         barrier_info: &BarrierInfo,
         node_actors: &HashMap<WorkerId, HashSet<ActorId>>,
         table_ids_to_sync: impl Iterator<Item = TableId>,
@@ -1300,7 +1309,6 @@ impl ControlStreamManager {
                         tracing_context: TracingContext::from_span(barrier_info.curr_epoch.span())
                             .to_protobuf(),
                         kind: barrier_info.kind.to_protobuf() as i32,
-                        iceberg_pk_index_compaction,
                     };
 
                     node.handle

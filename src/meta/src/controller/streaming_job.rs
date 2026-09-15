@@ -2783,6 +2783,10 @@ impl CatalogController {
                             node.rate_limit = rate_limit;
                             found = true;
                         }
+                        PbNodeBody::LocalityProvider(node) => {
+                            node.rate_limit = rate_limit;
+                            found = true;
+                        }
                         _ => {}
                     });
                 }
@@ -3815,6 +3819,10 @@ impl CatalogController {
                                 node.rate_limit = rate_limit;
                                 found = Ok(true);
                             }
+                            PbNodeBody::LocalityProvider(node) => {
+                                node.rate_limit = rate_limit;
+                                found = Ok(true);
+                            }
                             _ => {}
                         });
                     }
@@ -3912,6 +3920,10 @@ impl CatalogController {
                     PbNodeBody::StreamCdcScan(node) => {
                         rate_limit = node.rate_limit;
                         node_name = Some("STREAM_CDC_SCAN");
+                    }
+                    PbNodeBody::LocalityProvider(node) => {
+                        rate_limit = node.rate_limit;
+                        node_name = Some("LOCALITY_PROVIDER");
                     }
                     PbNodeBody::Sink(node) => {
                         rate_limit = node.rate_limit;

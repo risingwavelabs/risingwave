@@ -917,8 +917,8 @@ impl Command {
                 .expect("non-duplicate");
         }
         info.truncate_tables.extend(truncate_tables);
-        task.iceberg_pk_index_sink_metadata
-            .extend(iceberg_pk_index_sink_metadata);
+        task.iceberg_pk_index_pre_commit_metadata
+            .extend(iceberg_pk_index_sink_metadata.into_iter().map(Into::into));
     }
 }
 
@@ -1344,6 +1344,7 @@ impl Command {
                     }),
                     sink_schema_change: Default::default(),
                     subscriptions_to_drop: vec![],
+                    iceberg_pk_index_compaction: None,
                 });
                 tracing::debug!("update mutation: {mutation:?}");
                 Ok(Some(mutation))

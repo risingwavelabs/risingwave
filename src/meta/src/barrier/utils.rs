@@ -190,8 +190,8 @@ pub(super) fn collect_independent_job_commit_epoch_info(
                 .expect("non-duplicate");
         }
     };
-    task.iceberg_pk_index_sink_metadata
-        .extend(iceberg_pk_index_sink_metadata);
+    task.iceberg_pk_index_pre_commit_metadata
+        .extend(iceberg_pk_index_sink_metadata.into_iter().map(Into::into));
 }
 
 pub(super) type NodeToCollect = HashSet<WorkerId>;

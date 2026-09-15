@@ -1,0 +1,155 @@
+- name: scalar SUM decorrelates without duplicating the random outer sample
+  sql: |
+    create table hourly_facts (user_id int, amount int);
+    create table windows (user_id int, lifetime_sum bigint);
+    select s.user_id, w.lifetime_sum,
+      (select sum(h.amount) from hourly_facts h where h.user_id = s.user_id) as scalar_sum
+    from (select user_id from windows order by random() limit 50) s
+    join windows w on w.user_id = s.user_id;
+  expected_outputs:
+    - optimized_logical_plan_for_batch
+    - batch_plan
+- name: scalar SUM over an unordered LIMIT does not need a domain
+  sql: |
+    create table outer_rows (id int);
+    create table facts (id int, amount int);
+    select s.id, (select sum(f.amount) from facts f where f.id = s.id)
+    from (select id from outer_rows limit 50) s;
+  expected_outputs:
+    - optimized_logical_plan_for_batch
+    - optimized_logical_plan_for_stream
+- name: inner LATERAL scalar aggregate preserves an empty group
+  sql: |
+    create table outer_rows (id int);
+    create table facts (id int, amount int);
+    select s.id, a.total
+    from outer_rows s,
+    lateral (select sum(f.amount) as total from facts f where f.id = s.id) a;
+  expected_outputs:
+    - optimized_logical_plan_for_batch
+    - optimized_logical_plan_for_stream
+- name: inner LATERAL ON still filters the scalar aggregate result
+  sql: |
+    create table outer_rows (id int);
+    create table facts (id int, amount int);
+    select s.id, a.total
+    from outer_rows s
+    join lateral (select sum(f.amount) as total from facts f where f.id = s.id) a
+    on a.total is null;
+  expected_outputs:
+    - optimized_logical_plan_for_batch
+- name: a null rejecting filter can keep the inner join
+  sql: |
+    create table outer_rows (id int);
+    create table facts (id int, amount int);
+    select s.id, a.total
+    from outer_rows s,
+    lateral (select sum(f.amount) as total from facts f where f.id = s.id) a
+    where a.total > 0;
+  expected_outputs:
+    - optimized_logical_plan_for_batch
+- name: COUNT derives its domain without repeating random sampling
+  sql: |
+    create table outer_rows (id int);
+    create table facts (id int, amount int);
+    select s.id, (select count(*) from facts f where f.id = s.id)
+    from (select id from outer_rows order by random() limit 50) s;
+  expected_outputs:
+    - optimized_logical_plan_for_batch
+    - batch_plan
+    - optimized_logical_plan_for_stream
+- name: impurity in a nested filter also prevents general decorrelation
+  sql: |
+    create table outer_rows (id int);
+    create table facts (id int, amount int);
+    select s.id, (select count(*) from facts f where f.id = s.id)
+    from (select id from outer_rows where random() < 0.5 limit 50) s;
+  expected_outputs:
+    - batch_error
+- name: an impure correlation key cannot be independently re-evaluated
+  sql: |
+    create table outer_rows (id int);
+    create table facts (id int, amount int);
+    select s.id, (select count(*) from facts f where f.id = s.id)
+    from (select floor(random() * 10)::int as id from outer_rows) s;
+  expected_outputs:
+    - batch_error
+- name: deterministic outer TopN remains supported by general decorrelation
+  sql: |
+    create table outer_rows (id int primary key);
+    create table facts (id int, amount int);
+    select s.id, (select count(*) from facts f where f.id = s.id)
+    from (select id from outer_rows order by id limit 50) s;
+  expected_outputs:
+    - optimized_logical_plan_for_batch
+    - optimized_logical_plan_for_stream
+- name: a random predicate pushed into the scan also needs shared evaluation
+  sql: |
+    create table outer_rows (id int);
+    create table facts (id int, amount int);
+    select s.id, (select count(*) from facts f where f.id = s.id)
+    from outer_rows s where random() < 0.5;
+  expected_outputs:
+    - batch_error
+    - optimized_logical_plan_for_stream
+- name: an outer random join is safe when the domain comes from an unfiltered scan
+  sql: |
+    create table outer_rows (id int);
+    create table other_rows (id int);
+    create table facts (id int, amount int);
+    select s.id, (select count(*) from facts f where f.id = s.id)
+    from outer_rows s join other_rows o on random() < (s.id + o.id)::double precision;
+  expected_outputs:
+    - optimized_logical_plan_for_batch
+- name: COUNT over an unordered LIMIT with offset
+  sql: |
+    create table outer_rows (id int);
+    create table facts (id int);
+    select s.id, (select count(*) from facts f where f.id = s.id)
+    from (select id from outer_rows limit 50 offset 10) s;
+  expected_outputs:
+    - batch_plan
+    - optimized_logical_plan_for_stream
+- name: COUNT over a TopN with non-unique ordering
+  sql: |
+    create table outer_rows (id int, priority int);
+    create table facts (id int);
+    select s.id, (select count(*) from facts f where f.id = s.id)
+    from (select id from outer_rows order by priority limit 50) s;
+  expected_outputs:
+    - batch_plan
+- name: multiple scalar aggregates over a random sample
+  sql: |
+    create table outer_rows (id int);
+    create table facts (id int, amount int);
+    select s.id,
+      (select sum(f.amount) from facts f where f.id = s.id),
+      (select count(*) from facts f where f.id = s.id)
+    from (select id from outer_rows order by random() limit 50) s;
+  expected_outputs:
+    - batch_plan
+- name: remap duplicate correlated columns on both sides of a join
+  sql: |
+    create table t(id int);
+    select s.x, s.y, u.id,
+      (select count(*) from t where t.id = s.x or t.id = s.y or t.id = u.id)
+    from (select id as x, id as y from t order by random() limit 5) s
+    cross join (select id from t limit 5) u;
+  expected_outputs:
+    - batch_plan
+- name: an unordered LIMIT that cannot be removed needs sharing
+  sql: |
+    create table t(id int);
+    select s.max_id, (select count(*) from t where t.id = s.max_id)
+    from (select max(id) as max_id from (select id from t limit 5) t) s;
+  expected_outputs:
+    - batch_error
+    - optimized_logical_plan_for_stream
+- name: a TopN that cannot be removed needs sharing
+  sql: |
+    create table t(id int, priority int);
+    select s.max_id, (select count(*) from t where t.id = s.max_id)
+    from (select max(id) as max_id from (select id from t order by priority limit 5) t) s;
+  expected_outputs:
+    - batch_error
+    - optimized_logical_plan_for_stream
