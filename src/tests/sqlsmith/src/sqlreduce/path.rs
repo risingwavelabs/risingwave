@@ -324,7 +324,7 @@ impl AstNode {
                     }
                 }
                 AstField::Limit => query.limit.as_ref().map(|e| AstNode::Expr(e.clone())),
-                AstField::Offset => None, // offset is Option<String>, not navigable as expression
+                AstField::Offset => query.offset.as_ref().map(|e| AstNode::Expr(e.clone())),
                 _ => None,
             },
 

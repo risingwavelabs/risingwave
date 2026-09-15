@@ -304,6 +304,81 @@ Caused by these errors (recent errors listed first):
   2: expects an integer or expression that can be evaluated to an integer after LIMIT, but found non-const expression
 
 
+# expression and parameter support in the offset clause
+# Regression test for https://github.com/risingwavelabs/risingwave/issues/23345
+query I
+SELECT * FROM generate_series(0,4,1) as t(v) order by v OFFSET 1+2;
+----
+3
+4
+
+query I
+SELECT * FROM generate_series(0,4,1) as t(v) order by v LIMIT 2 OFFSET 1.5*2;
+----
+3
+4
+
+# A non-constant expression after OFFSET is rejected.
+statement error expects an integer or expression that can be evaluated to an integer after OFFSET, but found non-const expression
+SELECT * FROM generate_series(0,3,1) as t(v) order by v OFFSET generate_series(1, 2);
+
+# A negative offset is rejected.
+statement error OFFSET must not be negative, but found: -1
+SELECT * FROM generate_series(0,3,1) as t(v) order by v OFFSET -1;
+
+# NULL LIMIT means no limit and NULL OFFSET means zero, following PostgreSQL.
+query I
+SELECT * FROM generate_series(0,4,1) as t(v) order by v LIMIT NULL OFFSET NULL;
+----
+0
+1
+2
+3
+4
+
+# LIMIT NULL means no limit, but a positive OFFSET still applies. The NULL limit must
+# not overflow `offset + limit` and crash (regression guard for the ordered/unordered
+# batch limit + local TopN paths).
+query I
+SELECT count(*) FROM (SELECT * FROM generate_series(1,3,1) as t(v) LIMIT NULL OFFSET 1);
+----
+2
+
+query I
+SELECT * FROM generate_series(1,3,1) as t(v) order by v LIMIT NULL OFFSET 1;
+----
+2
+3
+
+# FETCH FIRST also accepts an expression as its quantity.
+query I
+SELECT * FROM generate_series(0,4,1) as t(v) order by v OFFSET 1 FETCH FIRST 1+1 ROWS ONLY;
+----
+1
+2
+
+# A bad FETCH quantity reports the FETCH clause, not LIMIT.
+statement error FETCH FIRST must not be negative, but found: -1
+SELECT * FROM generate_series(0,4,1) as t(v) order by v FETCH FIRST -1 ROWS ONLY;
+
+# A column reference is rejected in OFFSET: it is not visible in the offset scope.
+statement error Invalid column: v
+SELECT * FROM generate_series(0,3,1) as t(v) order by v OFFSET v;
+
+# An aggregate in OFFSET is rejected.
+statement error expects an integer or expression that can be evaluated to an integer after OFFSET, but found non-const expression
+SELECT count(*) FROM generate_series(0,3,1) as t(v) OFFSET count(*);
+
+# A window function in OFFSET is rejected.
+statement error expects an integer or expression that can be evaluated to an integer after OFFSET, but found non-const expression
+SELECT * FROM generate_series(0,3,1) as t(v) order by v OFFSET row_number() OVER ();
+
+# A volatile function in OFFSET is rejected: RisingWave folds LIMIT/OFFSET to a
+# plan-time constant, unlike PostgreSQL which evaluates it once at executor start.
+statement error expects an integer or expression that can be evaluated to an integer after OFFSET, but found non-const expression
+SELECT * FROM generate_series(0,3,1) as t(v) order by v OFFSET (random() * 10)::int8;
+
+
 # Subqueries that return negative values
 statement error
 SELECT * FROM integers as int LIMIT (SELECT -1);
