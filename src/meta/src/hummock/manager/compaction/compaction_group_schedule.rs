@@ -634,9 +634,14 @@ mod tests {
             "one commit after a pause is insufficient"
         );
         let mut stats = TableWriteThroughputStatisticManager::new(240);
-        for age in (0..240).rev() {
-            for table in [100, 101] {
-                stats.add_table_throughput_with_ts(table.into(), 0, now - age, 1);
+        for (table, seconds) in [(100, 1), (101, 10)] {
+            for age in (0_usize..240).step_by(seconds).rev() {
+                stats.add_table_throughput_with_ts(
+                    table.into(),
+                    0,
+                    now - age as i64,
+                    seconds as i64,
+                );
             }
         }
         assert!(
@@ -1331,27 +1336,38 @@ impl HummockManager {
         {
             return;
         }
-        // split high throughput table to dedicated compaction group
-        let mut refresh_groups = false;
-        for table_id in group.table_statistic.keys() {
-            refresh_groups |= self
-                .try_move_high_throughput_table_to_dedicated_cg(
-                    table_write_throughput_statistic_manager,
-                    *table_id,
+        let mut hot_tables = group
+            .table_statistic
+            .keys()
+            .copied()
+            .filter(|&table_id| {
+                GroupMergeValidator::is_table_high_write_throughput(
+                    table_write_throughput_statistic_manager.get_table_throughput_descending(
+                        table_id,
+                        self.env.opts.table_stat_throuput_window_seconds_for_split as i64,
+                    ),
+                    self.env.opts.table_high_write_throughput_threshold,
+                    self.env
+                        .opts
+                        .table_stat_high_write_throughput_ratio_for_split,
                 )
-                .await;
-        }
-
+            })
+            .peekable();
         let group_max_size = (group.compaction_group_config.max_estimated_group_size() as f64
             * self.env.opts.split_group_size_ratio) as u64;
-        if !refresh_groups
+        if hot_tables.peek().is_none()
             && (group.table_statistic.len() < 2 || group.group_size <= group_max_size)
         {
             return;
         }
 
-        // Refresh only groups that may split. Hot-table attempts can move members even when a
-        // later step fails; size-based plans also need current sizes and config before splitting.
+        for table_id in hot_tables {
+            self.try_move_high_throughput_table_to_dedicated_cg(table_id)
+                .await;
+        }
+
+        // Plan size-based splits from current groups, not the snapshot used to select hot tables.
+        // Refresh even after a failed move: its first split may already have committed.
         let table_ids = group.table_statistic.keys().copied().collect_vec();
         for current in self
             .calculate_compaction_group_statistic_for_tables(&table_ids)
@@ -1368,37 +1384,10 @@ impl HummockManager {
         }
     }
 
-    /// Try to move the high throughput table to a dedicated compaction group.
-    /// Returns whether the caller needs to refresh membership after inspecting a hot table.
-    pub async fn try_move_high_throughput_table_to_dedicated_cg(
-        &self,
-        table_write_throughput_statistic_manager: &TableWriteThroughputStatisticManager,
-        table_id: TableId,
-    ) -> bool {
-        let mut table_throughput = table_write_throughput_statistic_manager
-            .get_table_throughput_descending(
-                table_id,
-                self.env.opts.table_stat_throuput_window_seconds_for_split as i64,
-            )
-            .peekable();
-
-        if table_throughput.peek().is_none() {
-            return false;
-        }
-
-        let is_high_write_throughput = GroupMergeValidator::is_table_high_write_throughput(
-            table_throughput,
-            self.env.opts.table_high_write_throughput_threshold,
-            self.env
-                .opts
-                .table_stat_high_write_throughput_ratio_for_split,
-        );
-
-        // do not split a table to dedicated compaction group if it is not high write throughput
-        if !is_high_write_throughput {
-            return false;
-        }
-
+    /// Try to isolate a table already selected as hot by the scheduler.
+    async fn try_move_high_throughput_table_to_dedicated_cg(&self, table_id: TableId) {
+        // An earlier hot-table split in this round may have moved this table to a new group.
+        // Resolve its current parent instead of using the scheduler's original group snapshot.
         let parent_group_id = self
             .on_current_version(|version| {
                 let group_id = version
@@ -1415,7 +1404,8 @@ impl HummockManager {
             })
             .await;
         let Some(parent_group_id) = parent_group_id else {
-            return true;
+            // The table was removed or is already in a single-table group, so no move is needed.
+            return;
         };
 
         let ret = self
@@ -1444,7 +1434,6 @@ impl HummockManager {
                 )
             }
         }
-        true
     }
 
     pub async fn try_split_huge_compaction_group(&self, group: CompactionGroupStatistic) {

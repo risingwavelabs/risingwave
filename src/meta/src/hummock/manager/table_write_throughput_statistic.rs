@@ -79,6 +79,13 @@ impl TableWriteThroughputStatisticManager {
         }
     }
 
+    /// Latest sample within the retention window, even if no subsequent commit has pruned it.
+    pub fn latest_table_throughput(&self, table_id: TableId) -> Option<u64> {
+        self.get_table_throughput_descending(table_id, self.max_statistic_expired_secs)
+            .next()
+            .map(|sample| sample.throughput)
+    }
+
     // `get_table_throughput` return the statistics of the table with the given `table_id` within the given `window_secs`.
     // The statistics are sorted by timestamp in descending order.
     pub fn get_table_throughput_descending(
