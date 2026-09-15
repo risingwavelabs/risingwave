@@ -17,11 +17,13 @@ use std::marker::PhantomData;
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
+use prometheus::core::Atomic;
 use risingwave_common::array::DataChunk;
 use risingwave_common::bitmap::FilterByBitmap;
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashKey, NullBitmap, PrecomputedBuildHasher};
 use risingwave_common::memory::MemoryContext;
+use risingwave_common::metrics::TrAdderAtomic;
 use risingwave_common::row::Row;
 use risingwave_common::types::{DataType, ToOwnedDatum};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -123,11 +125,11 @@ impl<K: HashKey, B: LookupExecutorBuilder> LookupJoinBase<K, B> {
             ]
             .concat();
 
-            // We need to temporary variable to record heap size, since in each loop we
-            // will free build side hash map, and the subtraction is not executed automatically.
-            let mut tmp_heap_size = 0i64;
+            // This round's private context releases remaining charges on completion, errors, or
+            // cancellation, before the next round starts.
+            let mem_ctx = MemoryContext::new(Some(self.mem_ctx.clone()), TrAdderAtomic::new(0));
 
-            let mut build_side = Vec::new_in(self.mem_ctx.global_allocator());
+            let mut build_side = Vec::new_in(mem_ctx.global_allocator());
             let mut build_row_count = 0;
             #[for_await]
             for build_chunk in hash_join_build_side_input.execute() {
@@ -135,15 +137,14 @@ impl<K: HashKey, B: LookupExecutorBuilder> LookupJoinBase<K, B> {
                 if build_chunk.cardinality() > 0 {
                     build_row_count += build_chunk.cardinality();
                     let chunk_estimated_heap_size = build_chunk.estimated_heap_size() as i64;
-                    self.mem_ctx.add(chunk_estimated_heap_size);
-                    tmp_heap_size += chunk_estimated_heap_size;
                     build_side.push(build_chunk);
+                    mem_ctx.add_unchecked(chunk_estimated_heap_size);
                 }
             }
             let mut hash_map = JoinHashMap::with_capacity_and_hasher_in(
                 build_row_count,
                 PrecomputedBuildHasher,
-                self.mem_ctx.global_allocator(),
+                mem_ctx.global_allocator(),
             );
             let mut next_build_row_with_same_key =
                 ChunkedData::with_chunk_sizes(build_side.iter().map(|c| c.capacity()))?;
@@ -162,9 +163,8 @@ impl<K: HashKey, B: LookupExecutorBuilder> LookupJoinBase<K, B> {
                     if build_key.null_bitmap().is_subset(&null_matched) {
                         let row_id = RowId::new(build_chunk_id, build_row_id);
                         let build_key_estimated_heap_size = build_key.estimated_heap_size() as i64;
-                        self.mem_ctx.add(build_key_estimated_heap_size);
-                        tmp_heap_size += build_key_estimated_heap_size;
                         next_build_row_with_same_key[row_id] = hash_map.insert(build_key, row_id);
+                        mem_ctx.add_unchecked(build_key_estimated_heap_size);
                     }
                 }
             }
@@ -240,8 +240,163 @@ impl<K: HashKey, B: LookupExecutorBuilder> LookupJoinBase<K, B> {
                     yield chunk?.project(&self.output_indices)
                 }
             }
-
-            self.mem_ctx.add(-tmp_heap_size);
         }
+    }
+}
+
+#[cfg(test)]
+mod memory_budget {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use risingwave_common::array::DataChunkTestExt;
+    use risingwave_common::catalog::Field;
+    use risingwave_common::hash::KeySerialized;
+    use risingwave_common::metrics::LabelGuardedIntGauge;
+    use risingwave_common::types::Datum;
+
+    use super::*;
+    use crate::error::Result;
+    use crate::executor::test_utils::MockExecutor;
+    use crate::executor::test_utils::memory_cleanup::{self, Exit};
+
+    /// Use an in-memory build-side fixture while exercising the real lookup/hash-join execution.
+    struct AccountingLookupBuilder {
+        schema: Schema,
+        chunk: DataChunk,
+        child: MemoryContext,
+        parent: MemoryContext,
+        rounds: Arc<AtomicUsize>,
+        exit: Option<Exit>,
+    }
+
+    impl LookupExecutorBuilder for AccountingLookupBuilder {
+        fn reset(&mut self) {
+            // The shared context stays alive across rounds and executions.
+            assert_eq!(self.child.get_bytes_used(), 0);
+            assert_eq!(self.parent.get_bytes_used(), 16);
+            self.rounds.fetch_add(1, Ordering::Relaxed);
+        }
+
+        async fn add_scan_range(&mut self, _key_datums: Vec<Datum>) -> Result<()> {
+            Ok(())
+        }
+
+        async fn build_executor(&mut self) -> Result<BoxedExecutor> {
+            let input: BoxedExecutor = Box::new(MockExecutor::with_chunk(
+                self.chunk.clone(),
+                self.schema.clone(),
+            ));
+            Ok(match self.exit {
+                Some(exit) => memory_cleanup::input(input, exit, self.child.clone()),
+                None => input,
+            })
+        }
+    }
+
+    /// Verifies that a lookup round must record its retained build memory even above budget, then
+    /// release those charges before the next round starts. A build-input error or dropping the
+    /// stream while waiting for build input or after an output also releases the round's charges.
+    ///
+    /// Equivalent query: `SELECT o.k, i.k FROM outer_rows o JOIN inner_rows i ON o.k = i.k`.
+    /// Input: two outer chunks, each with 512 rows `(K)`, and one inner row `(K)`.
+    /// `K` is a string of 128 `x` characters.
+    /// Expected output: 512 rows `(K, K)` per lookup round, or 1,024 rows across both rounds.
+    /// Interrupted cases fail or wait at the first build EOF, or drop after the first 512-row output.
+    #[tokio::test]
+    async fn test_over_budget_lookup_join_accounting_memory_across_lookup_rounds() {
+        let parent = MemoryContext::root(LabelGuardedIntGauge::test_int_gauge::<4>(), 64);
+        assert!(parent.add(16));
+        let child = MemoryContext::new_with_mem_limit(
+            Some(parent.clone()),
+            LabelGuardedIntGauge::test_int_gauge::<4>(),
+            0,
+        );
+        let schema = Schema::new(vec![Field::unnamed(DataType::Varchar)]);
+        let key = "x".repeat(128);
+        let inner = DataChunk::from_pretty(&format!("T\n{key}"));
+        let keys = <KeySerialized as HashKey>::build_many(&[0], &inner);
+        let key_size = keys[0].estimated_heap_size() as i64;
+        assert!(key_size > 0);
+        let manual_charge = inner.estimated_heap_size() as i64 + key_size;
+        let outer = DataChunk::from_pretty(&format!(
+            "T\n{}",
+            format!("{key}\n").repeat(AT_LEAST_OUTER_SIDE_ROWS)
+        ));
+        for exit in [
+            None,
+            Some(Exit::InputError),
+            Some(Exit::PendingInput),
+            Some(Exit::Output),
+        ] {
+            let mut input = MockExecutor::new(schema.clone());
+            // Each chunk fills batch_read's threshold, forcing two independent build/release rounds.
+            input.add(outer.clone());
+            input.add(outer.clone());
+            let rounds = Arc::new(AtomicUsize::new(0));
+            let output_schema = Schema::new(vec![
+                Field::unnamed(DataType::Varchar),
+                Field::unnamed(DataType::Varchar),
+            ]);
+            let exec = LookupJoinBase::<KeySerialized, _> {
+                join_type: JoinType::Inner,
+                condition: None,
+                outer_side_input: Box::new(input),
+                outer_side_data_types: schema.data_types(),
+                outer_side_key_idxs: vec![0],
+                inner_side_builder: AccountingLookupBuilder {
+                    schema: schema.clone(),
+                    chunk: inner.clone(),
+                    child: child.clone(),
+                    parent: parent.clone(),
+                    rounds: rounds.clone(),
+                    exit,
+                },
+                inner_side_key_types: schema.data_types(),
+                inner_side_key_idxs: vec![0],
+                null_safe: vec![false],
+                lookup_prefix_len: 1,
+                chunk_builder: DataChunkBuilder::new(
+                    output_schema.data_types(),
+                    AT_LEAST_OUTER_SIDE_ROWS,
+                ),
+                schema: output_schema,
+                output_indices: vec![0, 1],
+                chunk_size: AT_LEAST_OUTER_SIDE_ROWS,
+                asof_desc: None,
+                identity: "accounting-test".into(),
+                shutdown_rx: ShutdownToken::empty(),
+                mem_ctx: child.clone(),
+                _phantom: PhantomData,
+            };
+            let expected = matches!(exit, None | Some(Exit::Output)).then(|| {
+                DataChunk::from_pretty(&format!(
+                    "T T\n{}",
+                    format!("{key} {key}\n").repeat(AT_LEAST_OUTER_SIDE_ROWS)
+                ))
+            });
+            let mut output = Box::new(exec).do_execute();
+            if let Some(exit) = exit {
+                memory_cleanup::assert_released(output, exit, expected.as_ref(), &child, &parent)
+                    .await;
+                assert_eq!(rounds.load(Ordering::Relaxed), 1);
+                continue;
+            }
+            let expected = expected.unwrap();
+            for round in 1..=2 {
+                assert_eq!(output.next().await.unwrap().unwrap(), expected);
+                assert_eq!(rounds.load(Ordering::Relaxed), round);
+                // Alongside the manual charge, the monitored Vec/hash map have backing allocations.
+                assert!(child.get_bytes_used() > manual_charge);
+                assert_eq!(parent.get_bytes_used(), child.get_bytes_used() + 16);
+                assert!(!child.check_memory_usage());
+            }
+            assert!(output.next().await.is_none());
+            assert_eq!(child.get_bytes_used(), 0);
+            assert_eq!(parent.get_bytes_used(), 16);
+        }
+        drop(child);
+        assert_eq!(parent.get_bytes_used(), 16);
+        assert!(parent.add(-16));
     }
 }

@@ -21,11 +21,13 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
+use prometheus::core::Atomic;
 use risingwave_common::array::{Array, DataChunk, RowRef};
 use risingwave_common::bitmap::{Bitmap, BitmapBuilder, FilterByBitmap};
 use risingwave_common::catalog::Schema;
 use risingwave_common::hash::{HashKey, HashKeyDispatcher, PrecomputedBuildHasher};
 use risingwave_common::memory::{MemoryContext, MonitoredGlobalAlloc};
+use risingwave_common::metrics::TrAdderAtomic;
 use risingwave_common::row::{Row, RowExt, repeat_n};
 use risingwave_common::types::{DataType, Datum, DefaultOrd};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
@@ -474,6 +476,9 @@ impl JoinSpillManager {
 impl<K: HashKey> HashJoinExecutor<K> {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
+        // This invocation owns its accounting. Its private context releases remaining charges
+        // on completion, errors, or cancellation, even if the shared parent stays alive.
+        let mem_ctx = MemoryContext::new(Some(self.mem_ctx.clone()), TrAdderAtomic::new(0));
         let mut need_to_spill = false;
         // If the memory upper bound is less than 1MB, we don't need to check memory usage.
         let check_memory = match self.memory_upper_bound {
@@ -487,7 +492,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         let build_data_types = self.build_side_source.schema().data_types();
         let full_data_types = [probe_data_types.clone(), build_data_types.clone()].concat();
 
-        let mut build_side = Vec::new_in(self.mem_ctx.global_allocator());
+        let mut build_side = Vec::new_in(mem_ctx.global_allocator());
         let mut build_row_count = 0;
         let mut build_side_stream = self.build_side_source.execute();
         #[for_await]
@@ -498,7 +503,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                 let chunk_estimated_heap_size = build_chunk.estimated_heap_size();
                 // push build_chunk to build_side before checking memory limit, otherwise we will lose that chunk when spilling.
                 build_side.push(build_chunk);
-                if !self.mem_ctx.add(chunk_estimated_heap_size as i64) && check_memory {
+                mem_ctx.add_unchecked(chunk_estimated_heap_size as i64);
+                if check_memory && !mem_ctx.check_memory_usage() {
                     if self.spill_backend.is_some() {
                         need_to_spill = true;
                         break;
@@ -511,7 +517,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         let mut hash_map = JoinHashMap::with_capacity_and_hasher_in(
             build_row_count,
             PrecomputedBuildHasher,
-            self.mem_ctx.global_allocator(),
+            mem_ctx.global_allocator(),
         );
         let mut next_build_row_with_same_key =
             ChunkedData::with_chunk_sizes(build_side.iter().map(|c| c.capacity()))?;
@@ -521,7 +527,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
         let mut mem_added_by_hash_table = 0;
         if !need_to_spill {
             // Build hash map
-            for (build_chunk_id, build_chunk) in build_side.iter().enumerate() {
+            'build: for (build_chunk_id, build_chunk) in build_side.iter().enumerate() {
                 let build_keys = K::build_many(&self.build_key_idxs, build_chunk);
 
                 for (build_row_id, build_key) in build_keys
@@ -534,16 +540,18 @@ impl<K: HashKey> HashJoinExecutor<K> {
                     if build_key.null_bitmap().is_subset(&null_matched) {
                         let row_id = RowId::new(build_chunk_id, build_row_id);
                         let build_key_size = build_key.estimated_heap_size() as i64;
+                        next_build_row_with_same_key[row_id] = hash_map.insert(build_key, row_id);
+                        // Retain and charge the key before deciding whether to spill the table.
                         mem_added_by_hash_table += build_key_size;
-                        if !self.mem_ctx.add(build_key_size) && check_memory {
+                        mem_ctx.add_unchecked(build_key_size);
+                        if check_memory && !mem_ctx.check_memory_usage() {
                             if self.spill_backend.is_some() {
                                 need_to_spill = true;
-                                break;
+                                break 'build;
                             } else {
                                 Err(BatchError::OutOfMemory(self.mem_ctx.mem_limit()))?;
                             }
                         }
-                        next_build_row_with_same_key[row_id] = hash_map.insert(build_key, row_id);
                     }
                 }
             }
@@ -572,14 +580,14 @@ impl<K: HashKey> HashJoinExecutor<K> {
             join_spill_manager.init_writers().await?;
 
             // Release memory occupied by the hash map
-            self.mem_ctx.add(-mem_added_by_hash_table);
             drop(hash_map);
             drop(next_build_row_with_same_key);
+            mem_ctx.add_unchecked(-mem_added_by_hash_table);
 
             // Spill buffered build side chunks
             for chunk in build_side {
                 // Release the memory occupied by the buffered chunks
-                self.mem_ctx.add(-(chunk.estimated_heap_size() as i64));
+                let chunk_size = chunk.estimated_heap_size() as i64;
                 let hash_codes = chunk.get_hash_values(
                     self.build_key_idxs.as_slice(),
                     join_spill_manager.spill_build_hasher,
@@ -593,6 +601,7 @@ impl<K: HashKey> HashJoinExecutor<K> {
                             .collect(),
                     )
                     .await?;
+                mem_ctx.add_unchecked(-chunk_size);
             }
 
             // Spill build side chunks
@@ -759,6 +768,8 @@ impl<K: HashKey> HashJoinExecutor<K> {
                     yield chunk?.project(&self.output_indices)
                 }
             }
+            // Build data can be reused throughout the join. The private context releases its
+            // remaining charges when this invocation exits.
         }
     }
 
@@ -2531,6 +2542,237 @@ mod tests {
     use crate::task::ShutdownToken;
 
     const CHUNK_SIZE: usize = 1024;
+
+    mod memory_budget {
+        use super::*;
+
+        /// Verifies that build chunks are counted even when loading them puts the join over budget.
+        /// It spills or reports out of memory with checks on, and finishes with checks off.
+        /// Spilling, completion, and OOM leave no build charges for the next partition or run.
+        ///
+        /// Equivalent query: `SELECT p.k, b.k FROM probe p JOIN build b ON p.k = b.k`.
+        /// Input: one row `(K)` on each side, where `K` is a string of 128 `x` characters.
+        /// Expected output on success: one row `(K, K)` per execution.
+        #[tokio::test]
+        async fn test_over_budget_hash_join_when_loading_build_chunks() {
+            check_over_budget_hash_join(HashJoinBudgetStage::LoadingBuildChunks).await;
+        }
+
+        /// Verifies that build chunks fit the budget but adding hash keys exceeds it, and both are
+        /// still counted. The join spills or reports out of memory when checks are enabled, and
+        /// finishes when they are disabled. Spilling, completion, and OOM remove the chunk and
+        /// key charges.
+        ///
+        /// Equivalent query: `SELECT p.k, b.k FROM probe p JOIN build b ON p.k = b.k`.
+        /// Input: one row `(K)` on each side, where `K` is a string of 128 `x` characters.
+        /// Expected output on success: one row `(K, K)` per execution.
+        #[tokio::test]
+        async fn test_over_budget_hash_join_when_building_hash_keys() {
+            check_over_budget_hash_join(HashJoinBudgetStage::BuildingHashKeys).await;
+        }
+
+        /// Verifies that a probe error or dropping the stream while waiting for probe input or
+        /// after an output releases build chunks and keys, without clearing unrelated parent usage.
+        ///
+        /// Equivalent query: `SELECT p.k, b.k FROM probe p JOIN build b ON p.k = b.k`.
+        /// Input: one row `(K)` on each side, where `K` is a string of 128 `x` characters.
+        /// Expected output before dropping the output case: one row `(K, K)`.
+        /// The other cases fail or wait at probe EOF, before producing an output chunk.
+        #[tokio::test]
+        async fn test_hash_join_cleanup_on_error_and_cancellation() {
+            use risingwave_common::hash::KeySerialized;
+
+            use crate::executor::test_utils::memory_cleanup::{self, Exit};
+
+            let (parent, child) = memory_cleanup::contexts();
+            for exit in [Exit::InputError, Exit::PendingInput, Exit::Output] {
+                let key = "x".repeat(128);
+                let chunk = DataChunk::from_pretty(&format!("T\n{key}"));
+                let schema = Schema::new(vec![Field::unnamed(DataType::Varchar)]);
+                let probe = memory_cleanup::input(
+                    Box::new(MockExecutor::with_chunk(chunk.clone(), schema.clone())),
+                    exit,
+                    child.clone(),
+                );
+                let exec = HashJoinExecutor::<KeySerialized>::new_inner(
+                    JoinType::Inner,
+                    vec![0, 1],
+                    probe,
+                    Box::new(MockExecutor::with_chunk(chunk, schema)),
+                    vec![0],
+                    vec![0],
+                    vec![false],
+                    None,
+                    "join-cleanup".into(),
+                    CHUNK_SIZE,
+                    None,
+                    None,
+                    BatchSpillMetrics::for_test(),
+                    Some(0), // Record above-budget usage without triggering spill/OOM first.
+                    ShutdownToken::empty(),
+                    child.clone(),
+                );
+                let expected = matches!(exit, Exit::Output)
+                    .then(|| DataChunk::from_pretty(&format!("T T\n{key} {key}")));
+                memory_cleanup::assert_released(
+                    Box::new(exec).execute(),
+                    exit,
+                    expected.as_ref(),
+                    &child,
+                    &parent,
+                )
+                .await;
+            }
+        }
+
+        #[derive(Clone, Copy)]
+        enum HashJoinBudgetStage {
+            LoadingBuildChunks,
+            BuildingHashKeys,
+        }
+
+        async fn check_over_budget_hash_join(stage: HashJoinBudgetStage) {
+            use risingwave_common::hash::{HashKey, KeySerialized};
+            use risingwave_common_estimate_size::EstimateSize;
+
+            use crate::error::BatchError;
+            use crate::executor::WrapStreamExecutor;
+            use crate::executor::test_utils::assert_spill_buffer_released_at_eof;
+
+            /// Checks that the build chunks are all buffered before proceeding to build the hash keys.
+            #[futures_async_stream::try_stream(boxed, ok = DataChunk, error = BatchError)]
+            async fn assert_build_buffer_fits_at_eof(
+                input: BoxedExecutor,
+                mem_ctx: MemoryContext,
+                raw_charge: i64,
+            ) {
+                #[for_await]
+                for chunk in input.execute() {
+                    yield chunk?;
+                }
+                // At build-input EOF, the original chunk and monitored build vector must still be
+                // charged and fit the budget.
+                assert!(mem_ctx.get_bytes_used() > raw_charge);
+                assert!(mem_ctx.check_memory_usage());
+            }
+
+            let (parent_limit, child_limit) = match stage {
+                HashJoinBudgetStage::LoadingBuildChunks => (64, 0),
+                // The 128-byte string chunk and build vector fit in 640 bytes, but retaining the hash
+                // table and serialized key exceeds it. The build-input EOF check verifies the first
+                // bound; the over-budget output or OOM assertions below verify the second bound.
+                HashJoinBudgetStage::BuildingHashKeys => (656, 640),
+            };
+
+            // (true, true): Budget exceeded → spill → produce the join result;
+            // (false, false): Ignore budget enforcement → produce the result, but still account for
+            // memory;
+            // (true, false): Budget exceeded and no spill backend → return OOM;
+            // There is no (false, true) because when check_memory is false, the need_spill will never
+            // be set.
+            for (check_memory, spill) in [(true, true), (false, false), (true, false)] {
+                let parent =
+                    MemoryContext::root(LabelGuardedIntGauge::test_int_gauge::<4>(), parent_limit);
+                assert!(parent.add(16));
+                let child = MemoryContext::new_with_mem_limit(
+                    Some(parent.clone()),
+                    LabelGuardedIntGauge::test_int_gauge::<4>(),
+                    child_limit,
+                );
+                // Reuse the shared context after both successful execution and OOM. Each invocation
+                // has a private child context and must leave no charges for the next attempt.
+                for _ in 0..2 {
+                    assert_eq!(child.get_bytes_used(), 0);
+                    assert_eq!(parent.get_bytes_used(), 16);
+                    let key = "x".repeat(128);
+                    let chunk = DataChunk::from_pretty(&format!("T\n{key}"));
+                    let raw_charge = chunk.estimated_heap_size() as i64;
+                    let key_charge = <KeySerialized as HashKey>::build_many(&[0], &chunk)[0]
+                        .estimated_heap_size() as i64;
+                    assert!(key_charge > 0);
+                    let schema = Schema::new(vec![Field::unnamed(DataType::Varchar)]);
+                    let mut probe: BoxedExecutor =
+                        Box::new(MockExecutor::with_chunk(chunk.clone(), schema.clone()));
+                    let mut build: BoxedExecutor =
+                        Box::new(MockExecutor::with_chunk(chunk, schema));
+                    match stage {
+                        HashJoinBudgetStage::LoadingBuildChunks => {
+                            if spill {
+                                build = assert_spill_buffer_released_at_eof(
+                                    build,
+                                    child.clone(),
+                                    parent.clone(),
+                                    16,
+                                );
+                            }
+                        }
+                        HashJoinBudgetStage::BuildingHashKeys => {
+                            build = Box::new(WrapStreamExecutor::new(
+                                build.schema().clone(),
+                                assert_build_buffer_fits_at_eof(build, child.clone(), raw_charge),
+                            ));
+                            if spill {
+                                // Build-input EOF precedes key construction, so check spill cleanup at
+                                // probe-input EOF instead, before recursive partitions start.
+                                probe = assert_spill_buffer_released_at_eof(
+                                    probe,
+                                    child.clone(),
+                                    parent.clone(),
+                                    16,
+                                );
+                            }
+                        }
+                    }
+                    let exec = HashJoinExecutor::<KeySerialized>::new_inner(
+                        JoinType::Inner,
+                        vec![0, 1],
+                        probe,
+                        build,
+                        vec![0],
+                        vec![0],
+                        vec![false],
+                        None,
+                        "join-accounting".into(),
+                        CHUNK_SIZE,
+                        None,
+                        spill.then_some(SpillBackend::Memory),
+                        BatchSpillMetrics::for_test(),
+                        (!check_memory).then_some(0),
+                        ShutdownToken::empty(),
+                        child.clone(),
+                    );
+                    let mut output = Box::new(exec).execute();
+                    if check_memory && !spill {
+                        assert!(matches!(
+                            output.next().await.unwrap(),
+                            Err(BatchError::OutOfMemory(limit)) if limit == child_limit
+                        ));
+                    } else {
+                        assert_eq!(
+                            output.next().await.unwrap().unwrap(),
+                            DataChunk::from_pretty(&format!("T T\n{key} {key}"))
+                        );
+                        // When not spilling, the original build chunk and key remain charged;
+                        // When spilling, this single-row input goes into one partition, whose rebuilt
+                        // chunk and key have the same estimated heap sizes. In both cases, the monitored
+                        // build vector and hash table add their own storage charges, so the total is
+                        // greater than the chunk and key charges alone.
+                        assert!(child.get_bytes_used() > raw_charge + key_charge);
+                        assert_eq!(parent.get_bytes_used(), child.get_bytes_used() + 16);
+                        assert!(!child.check_memory_usage());
+                    }
+                    assert!(output.next().await.is_none());
+                    // The shared context remains alive; private-context cleanup also covers OOM.
+                    assert_eq!(child.get_bytes_used(), 0);
+                    assert_eq!(parent.get_bytes_used(), child.get_bytes_used() + 16);
+                    drop(output);
+                }
+                drop(child);
+                assert_eq!(parent.get_bytes_used(), 16);
+                assert!(parent.add(-16));
+            }
+        }
+    }
 
     struct DataChunkMerger {
         array_builders: Vec<ArrayBuilderImpl>,

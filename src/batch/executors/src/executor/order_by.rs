@@ -17,9 +17,11 @@ use std::sync::Arc;
 use bytes::Bytes;
 use futures_async_stream::try_stream;
 use itertools::Itertools;
+use prometheus::core::Atomic;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::memory::MemoryContext;
+use risingwave_common::metrics::TrAdderAtomic;
 use risingwave_common::types::DataType;
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::memcmp_encoding::encode_chunk;
@@ -111,6 +113,9 @@ impl BoxedExecutorBuilder for SortExecutor {
 impl SortExecutor {
     #[try_stream(boxed, ok = DataChunk, error = BatchError)]
     async fn do_execute(self: Box<Self>) {
+        // Each sort invocation owns a private context. Completion, errors, and cancellation release
+        // its remaining charges without waiting for the shared parent or sibling sorts to finish.
+        let mem_context = MemoryContext::new(Some(self.mem_context.clone()), TrAdderAtomic::new(0));
         let child_schema = self.child.schema().clone();
         let mut need_to_spill = false;
         // If the memory upper bound is less than 1MB, we don't need to check memory usage.
@@ -120,7 +125,7 @@ impl SortExecutor {
         };
 
         let mut chunk_builder = DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
-        let mut chunks = Vec::new_in(self.mem_context.global_allocator());
+        let mut chunks = Vec::new_in(mem_context.global_allocator());
 
         let mut input_stream = self.child.execute();
         #[for_await]
@@ -128,7 +133,9 @@ impl SortExecutor {
             let chunk = chunk?.compact_vis();
             let chunk_estimated_heap_size = chunk.estimated_heap_size();
             chunks.push(chunk);
-            if !self.mem_context.add(chunk_estimated_heap_size as i64) && check_memory {
+            // The chunk is retained for sorting or spilling regardless of the budget check.
+            mem_context.add_unchecked(chunk_estimated_heap_size as i64);
+            if check_memory && !mem_context.check_memory_usage() {
                 if self.spill_backend.is_some() {
                     need_to_spill = true;
                     break;
@@ -138,8 +145,8 @@ impl SortExecutor {
             }
         }
 
-        let mut encoded_rows =
-            Vec::with_capacity_in(chunks.len(), self.mem_context.global_allocator());
+        let mut encoded_rows_heap_size = 0;
+        let mut encoded_rows = Vec::with_capacity_in(chunks.len(), mem_context.global_allocator());
 
         for chunk in &chunks {
             let encoded_chunk = encode_chunk(chunk, &self.column_orders)?;
@@ -153,7 +160,9 @@ impl SortExecutor {
                     .enumerate()
                     .map(|(row_id, row)| (chunk.row_at_unchecked_vis(row_id), row)),
             );
-            if !self.mem_context.add(chunk_estimated_heap_size as i64) && check_memory {
+            encoded_rows_heap_size += chunk_estimated_heap_size as i64;
+            mem_context.add_unchecked(chunk_estimated_heap_size as i64);
+            if check_memory && !mem_context.check_memory_usage() {
                 if self.spill_backend.is_some() {
                     need_to_spill = true;
                     break;
@@ -183,10 +192,13 @@ impl SortExecutor {
 
             // Release memory
             drop(encoded_rows);
+            mem_context.add_unchecked(-encoded_rows_heap_size);
 
-            // Spill buffer
+            // Release manual buffer charges before recursive sorts charge the shared context.
             for chunk in chunks {
+                let chunk_heap_size = chunk.estimated_heap_size() as i64;
                 sort_spill_manager.write_input_chunk(chunk).await?;
+                mem_context.add_unchecked(-chunk_heap_size);
             }
 
             // Spill input chunks.
@@ -990,6 +1002,223 @@ mod tests {
         let mut stream = order_by_executor.execute();
         let res = stream.next().await;
         assert_eq!(res.unwrap().unwrap(), output_chunk)
+    }
+
+    mod memory_budget {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+        use std::task::Poll;
+
+        use risingwave_common::metrics::LabelGuardedIntGauge;
+
+        use super::*;
+        use crate::executor::WrapStreamExecutor;
+        use crate::executor::test_utils::assert_spill_buffer_released_at_eof;
+
+        /// Verifies that sorting counts its input chunks and sort keys even above budget, and
+        /// removes those charges after spilling, completion, or OOM. It spills or reports out of
+        /// memory when checks are enabled, and finishes normally when checks are disabled.
+        /// Here the budget is exceeded while loading the input chunk.
+        ///
+        /// Equivalent query: `SELECT v FROM input ORDER BY v`.
+        /// Input: one chunk `[2, 1]`. Expected output on success: one chunk `[1, 2]`.
+        #[tokio::test]
+        async fn test_over_budget_sort_when_loading_chunks() {
+            check_over_budget_sort(SortBudgetStage::LoadingChunks).await;
+        }
+
+        /// Verifies that input chunks fit the budget but building sort keys exceeds it, and both
+        /// chunks and keys are still counted. Sorting then spills or reports out of memory when
+        /// checks are enabled, and finishes when they are disabled. Spilling, completion, and OOM
+        /// remove the chunk and key charges.
+        ///
+        /// Equivalent query: `SELECT v FROM input ORDER BY v`.
+        /// Input: one chunk `[2, 1]`. Expected output on success: one chunk `[1, 2]`.
+        #[tokio::test]
+        async fn test_over_budget_sort_when_building_sort_keys() {
+            check_over_budget_sort(SortBudgetStage::BuildingSortKeys).await;
+        }
+
+        /// Verifies that an input error or dropping the stream while waiting for input or after
+        /// an output releases sort memory, without clearing unrelated parent usage.
+        ///
+        /// Equivalent query: `SELECT v FROM input ORDER BY v`.
+        /// Input: one chunk `[2, 1]`. Expected output before dropping the output case: `[1, 2]`.
+        /// The other cases fail or wait at input EOF, before sorting or producing output.
+        #[tokio::test]
+        async fn test_sort_cleanup_on_error_and_cancellation() {
+            use crate::executor::test_utils::memory_cleanup::{self, Exit};
+
+            let (parent, child) = memory_cleanup::contexts();
+            for exit in [Exit::InputError, Exit::PendingInput, Exit::Output] {
+                let input = memory_cleanup::input(
+                    Box::new(MockExecutor::with_chunk(
+                        DataChunk::from_pretty("i\n2\n1"),
+                        Schema::new(vec![Field::unnamed(DataType::Int32)]),
+                    )),
+                    exit,
+                    child.clone(),
+                );
+                let exec = SortExecutor::new_inner(
+                    input,
+                    Arc::new(vec![ColumnOrder::new(0, OrderType::ascending())]),
+                    "sort-cleanup".into(),
+                    CHUNK_SIZE,
+                    child.clone(),
+                    None,
+                    BatchSpillMetrics::for_test(),
+                    Some(0), // Record above-budget usage without triggering spill/OOM first.
+                );
+                let expected =
+                    matches!(exit, Exit::Output).then(|| DataChunk::from_pretty("i\n1\n2"));
+                memory_cleanup::assert_released(
+                    Box::new(exec).execute(),
+                    exit,
+                    expected.as_ref(),
+                    &child,
+                    &parent,
+                )
+                .await;
+            }
+        }
+
+        #[derive(Clone, Copy)]
+        enum SortBudgetStage {
+            LoadingChunks,
+            BuildingSortKeys,
+        }
+
+        async fn check_over_budget_sort(stage: SortBudgetStage) {
+            let (parent_limit, child_limit) = match stage {
+                SortBudgetStage::LoadingChunks => (64, 0),
+                // The [2, 1] chunk and its vector fit in 256 bytes. Building sort keys adds both
+                // encoded bytes and row-reference storage, which together exceed that budget.
+                // The first input EOF below verifies that chunk loading stayed within budget.
+                SortBudgetStage::BuildingSortKeys => (272, 256),
+            };
+
+            // (true, true): Budget exceeded → spill → produce the sorted rows;
+            // (false, false): Ignore budget enforcement → produce the sorted rows, but still
+            // account for memory;
+            // (true, false): Budget exceeded and no spill backend → return OOM;
+            // There is no (false, true): with check_memory=false, spilling is not triggered.
+            for (check_memory, spill) in [(true, true), (false, false), (true, false)] {
+                let parent =
+                    MemoryContext::root(LabelGuardedIntGauge::test_int_gauge::<4>(), parent_limit);
+                assert!(parent.add(16));
+                let child = MemoryContext::new_with_mem_limit(
+                    Some(parent.clone()),
+                    LabelGuardedIntGauge::test_int_gauge::<4>(),
+                    child_limit,
+                );
+                // Reuse the shared context after success, spilling, and OOM. Private sort and
+                // merge contexts must release all charges before the next attempt.
+                for _ in 0..2 {
+                    assert_eq!(child.get_bytes_used(), 0);
+                    assert_eq!(parent.get_bytes_used(), 16);
+                    let chunk = DataChunk::from_pretty("i\n2\n1");
+                    let orders = Arc::new(vec![ColumnOrder::new(0, OrderType::ascending())]);
+                    let raw_charge = chunk.estimated_heap_size() as i64;
+                    let encoded_charge = encode_chunk(&chunk, &orders)
+                        .unwrap()
+                        .iter()
+                        .map(|row| row.estimated_heap_size() as i64)
+                        .sum::<i64>();
+                    assert!(encoded_charge > 0);
+                    let schema = Schema::new(vec![Field::unnamed(DataType::Int32)]);
+                    let mut input: BoxedExecutor =
+                        Box::new(MockExecutor::with_chunk(chunk, schema));
+                    let input_eofs = Arc::new(AtomicUsize::new(0));
+                    match stage {
+                        SortBudgetStage::LoadingChunks => {
+                            if spill {
+                                input = assert_spill_buffer_released_at_eof(
+                                    input,
+                                    child.clone(),
+                                    parent.clone(),
+                                    16,
+                                );
+                            }
+                        }
+                        SortBudgetStage::BuildingSortKeys => {
+                            let schema = input.schema().clone();
+                            let mut stream = input.execute().fuse();
+                            let observed_child = child.clone();
+                            let observed_parent = parent.clone();
+                            let observed_eofs = input_eofs.clone();
+                            // Sort first drains its input before building keys. If key building
+                            // triggers spilling, it reads EOF again after releasing
+                            // its buffers, before any child sort starts. Only observe these points;
+                            // do not inject memory charges or change the input rows.
+                            let checked_input = futures::stream::poll_fn(move |cx| {
+                                let result = stream.poll_next_unpin(cx);
+                                if matches!(&result, Poll::Ready(None)) {
+                                    if observed_eofs.fetch_add(1, Ordering::Relaxed) == 0 {
+                                        // First EOF: the original chunk and its vector are still
+                                        // charged, and loading them did not exceed the budget.
+                                        assert!(observed_child.get_bytes_used() > raw_charge);
+                                        assert!(observed_child.check_memory_usage());
+                                    } else {
+                                        // Second EOF: spilling released the original chunk and key
+                                        // charges before recursive sorts start using this context.
+                                        assert_eq!(observed_child.get_bytes_used(), 0);
+                                        assert_eq!(observed_parent.get_bytes_used(), 16);
+                                    }
+                                }
+                                result
+                            });
+                            input =
+                                Box::new(WrapStreamExecutor::new(schema, Box::pin(checked_input)));
+                        }
+                    }
+                    let exec = SortExecutor::new_inner(
+                        input,
+                        orders,
+                        "sort-accounting".into(),
+                        CHUNK_SIZE,
+                        child.clone(),
+                        spill.then_some(SpillBackend::Memory),
+                        BatchSpillMetrics::for_test(),
+                        (!check_memory).then_some(0),
+                    );
+                    let mut output = Box::new(exec).execute();
+                    if check_memory && !spill {
+                        assert!(matches!(
+                            output.next().await.unwrap(),
+                            Err(BatchError::OutOfMemory(limit)) if limit == child_limit
+                        ));
+                    } else {
+                        assert_eq!(
+                            output.next().await.unwrap().unwrap(),
+                            DataChunk::from_pretty("i\n1\n2")
+                        );
+                        if !spill {
+                            // Manual chunk/key charges remain until completion. The encoded-row
+                            // vector was consumed before this yield, so its storage is freed
+                            // and total usage need not still exceed the budget.
+                            assert!(child.get_bytes_used() > raw_charge + encoded_charge);
+                        } else {
+                            // The merge can finish its child sorts before yielding the final rows,
+                            // but its own storage must still be counted at this yield.
+                            assert!(child.get_bytes_used() > 0);
+                        }
+                    }
+                    if matches!(stage, SortBudgetStage::BuildingSortKeys) {
+                        // Ensure the cleanup check actually ran in the spilling configuration.
+                        let expected_eofs = if check_memory && spill { 2 } else { 1 };
+                        assert_eq!(input_eofs.load(Ordering::Relaxed), expected_eofs);
+                    }
+                    assert_eq!(parent.get_bytes_used(), child.get_bytes_used() + 16);
+                    assert!(output.next().await.is_none());
+                    // Private sort and merge contexts are gone, but the shared context stays alive.
+                    assert_eq!(child.get_bytes_used(), 0);
+                    assert_eq!(parent.get_bytes_used(), child.get_bytes_used() + 16);
+                    drop(output);
+                }
+                drop(child);
+                assert_eq!(parent.get_bytes_used(), 16);
+                assert!(parent.add(-16));
+            }
+        }
     }
 
     #[tokio::test]

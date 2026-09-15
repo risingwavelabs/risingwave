@@ -100,11 +100,13 @@ impl std::fmt::Debug for RwMemoryPool {
 
 impl MemoryPool for RwMemoryPool {
     fn grow(&self, reservation: &MemoryReservation, additional: usize) {
-        let success = match reservation.consumer().can_spill() {
-            true => self.spillable_ctx.add(additional as i64),
-            false => self.unspillable_ctx.add(additional as i64),
+        let ctx = match reservation.consumer().can_spill() {
+            true => &self.spillable_ctx,
+            false => &self.unspillable_ctx,
         };
-        if !success {
+        // Unlike try_grow, grow cannot reject the reservation. Record it before checking limits.
+        ctx.add_unchecked(additional as i64);
+        if !ctx.check_memory_usage() {
             tracing::warn!(
                 error = %insufficient_capacity_err(
                     reservation,
@@ -116,8 +118,8 @@ impl MemoryPool for RwMemoryPool {
 
     fn shrink(&self, reservation: &MemoryReservation, shrink: usize) {
         match reservation.consumer().can_spill() {
-            true => self.spillable_ctx.add(-(shrink as i64)),
-            false => self.unspillable_ctx.add(-(shrink as i64)),
+            true => self.spillable_ctx.add_unchecked(-(shrink as i64)),
+            false => self.unspillable_ctx.add_unchecked(-(shrink as i64)),
         };
     }
 
@@ -225,6 +227,36 @@ mod tests {
 
         drop(reservation);
         assert_eq!(pool.reserved(), 0);
+    }
+
+    /// Verifies that `grow` counts memory even above budget, `try_grow` rejects more memory without
+    /// changing the counts, and shrinking or dropping the reservation subtracts only its own bytes.
+    #[test]
+    fn test_over_budget_grow_and_shrink() {
+        // Both spillable and unspillable consumers support infallible grow as well as try_grow.
+        for can_spill in [false, true] {
+            let (pool, parent) = create_pool(64);
+            assert!(parent.add(16));
+            let reservation = MemoryConsumer::new("over-budget")
+                .with_can_spill(can_spill)
+                .register(&pool);
+            reservation.grow(128);
+            assert_eq!(pool.reserved(), 128);
+            assert_eq!(parent.get_bytes_used(), 144);
+            assert!(reservation.try_grow(1).is_err());
+            assert_eq!(reservation.size(), 128);
+            assert_eq!(pool.reserved(), 128);
+            assert_eq!(parent.get_bytes_used(), 144);
+            reservation.shrink(32);
+            assert_eq!(pool.reserved(), 96);
+            assert_eq!(parent.get_bytes_used(), 112);
+            drop(reservation);
+            // Keep the pool alive: its child-context cleanup must not hide unmatched releases.
+            assert_eq!(pool.reserved(), 0);
+            assert_eq!(parent.get_bytes_used(), 16);
+            assert!(parent.add(1));
+            assert!(parent.add(-17));
+        }
     }
 
     #[test]

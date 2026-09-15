@@ -18,9 +18,11 @@ use std::sync::Arc;
 use futures_async_stream::try_stream;
 use futures_util::StreamExt;
 use itertools::Itertools;
+use prometheus::core::Atomic;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::memory::{MemMonitoredHeap, MemoryContext, MonitoredGlobalAlloc};
+use risingwave_common::metrics::TrAdderAtomic;
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::sort_util::{ColumnOrder, HeapElem};
 use risingwave_common_estimate_size::EstimateSize;
@@ -62,22 +64,17 @@ impl MergeSortExecutor {
             .into_iter()
             .map(|input| input.execute())
             .collect_vec();
-        for (input_idx, input_stream) in input_streams.iter_mut().enumerate() {
-            match input_stream.next().await {
-                Some(chunk) => {
-                    let chunk = chunk?;
-                    self.current_chunks.push(Some(chunk));
-                    if let Some(chunk) = &self.current_chunks[input_idx] {
-                        // We assume that we would always get a non-empty chunk from the upstream of
-                        // exchange, therefore we are sure that there is at least
-                        // one visible row.
-                        let next_row_idx = chunk.next_visible_row_idx(0);
-                        self.push_row_into_heap(input_idx, next_row_idx.unwrap());
-                    }
-                }
-                None => {
-                    self.current_chunks.push(None);
-                }
+        debug_assert!(
+            self.current_chunks.is_empty(),
+            "merge-sort input slots must be empty before execution"
+        );
+        for input_idx in 0..input_streams.len() {
+            self.current_chunks.push(None);
+            // Initial chunks need the same charge as replacements: both are released on retirement.
+            self.get_input_chunk(&mut input_streams, input_idx).await?;
+            if let Some(chunk) = &self.current_chunks[input_idx] {
+                let next_row_idx = chunk.next_visible_row_idx(0);
+                self.push_row_into_heap(input_idx, next_row_idx.unwrap());
             }
         }
 
@@ -144,7 +141,7 @@ impl MergeSortExecutor {
                 assert_ne!(chunk.cardinality(), 0);
                 let new_chunk_size = chunk.estimated_heap_size() as i64;
                 let old = self.current_chunks[input_idx].replace(chunk);
-                self.mem_context.add(new_chunk_size);
+                self.mem_context.add_unchecked(new_chunk_size);
                 old
             }
             None => std::mem::take(&mut self.current_chunks[input_idx]),
@@ -152,7 +149,8 @@ impl MergeSortExecutor {
 
         if let Some(chunk) = old {
             // Reduce the heap size of retired chunk
-            self.mem_context.add(-(chunk.estimated_heap_size() as i64));
+            self.mem_context
+                .add_unchecked(-(chunk.estimated_heap_size() as i64));
         }
 
         Ok(())
@@ -180,6 +178,9 @@ impl MergeSortExecutor {
         chunk_size: usize,
         mem_context: MemoryContext,
     ) -> Self {
+        // Create the private context before allocating either container. Once this executor and
+        // its allocators are dropped, even unfinished chunk and heap charges leave the parent.
+        let mem_context = MemoryContext::new(Some(mem_context), TrAdderAtomic::new(0));
         let inputs_num = inputs.len();
         Self {
             inputs,
@@ -191,5 +192,119 @@ impl MergeSortExecutor {
             current_chunks: Vec::with_capacity_in(inputs_num, mem_context.global_allocator()),
             mem_context,
         }
+    }
+}
+
+#[cfg(test)]
+mod memory_budget {
+    use risingwave_common::array::DataChunkTestExt;
+    use risingwave_common::catalog::Field;
+    use risingwave_common::metrics::LabelGuardedIntGauge;
+    use risingwave_common::types::DataType;
+
+    use super::*;
+    use crate::executor::test_utils::MockExecutor;
+
+    /// Verifies that a replacement-input error or dropping the stream while waiting for a
+    /// replacement or after an output releases chunks and heap memory, preserving parent usage.
+    ///
+    /// Equivalent query: `SELECT v FROM input ORDER BY v` (the merge step on sorted input).
+    /// Input: `[1]` for the error/wait cases; fetching the next chunk fails or waits before output.
+    /// Input: `[1, 2]` for the output case; expected first output: `[1]`, with row 2 still buffered.
+    #[tokio::test]
+    async fn test_merge_sort_cleanup_on_error_and_cancellation() {
+        use crate::executor::test_utils::memory_cleanup::{self, Exit};
+
+        let (parent, child) = memory_cleanup::contexts();
+        for exit in [Exit::InputError, Exit::PendingInput, Exit::Output] {
+            let chunk = if matches!(exit, Exit::Output) {
+                DataChunk::from_pretty("i\n1\n2")
+            } else {
+                DataChunk::from_pretty("i\n1")
+            };
+            let schema = Schema::new(vec![Field::unnamed(DataType::Int32)]);
+            let input = memory_cleanup::input(
+                Box::new(MockExecutor::with_chunk(chunk, schema.clone())),
+                exit,
+                child.clone(),
+            );
+            let exec = MergeSortExecutor::new(
+                vec![input],
+                Arc::new(vec![ColumnOrder::new(0, Default::default())]),
+                schema,
+                "merge-cleanup".into(),
+                1,
+                child.clone(),
+            );
+            let expected = matches!(exit, Exit::Output).then(|| DataChunk::from_pretty("i\n1"));
+            memory_cleanup::assert_released(
+                Box::new(exec).execute(),
+                exit,
+                expected.as_ref(),
+                &child,
+                &parent,
+            )
+            .await;
+        }
+    }
+
+    /// Verifies that merge sort returns the expected rows even above budget, with memory usage
+    /// greater than the expected current-chunk charge while loading, replacing, and retiring chunks.
+    /// Completion releases all charges while the shared context remains alive.
+    ///
+    /// Equivalent query: `SELECT v FROM input ORDER BY v` (the merge step on sorted input).
+    /// Input chunks: `[1, 2]`, then `[3, 4, 5]`, from one already-sorted input stream.
+    /// Expected output: `[1, 2, 3, 4, 5]`, returned one row at a time.
+    #[tokio::test]
+    async fn test_over_budget_chunk_accounting_during_execution() {
+        let parent = MemoryContext::root(LabelGuardedIntGauge::test_int_gauge::<4>(), 64);
+        assert!(parent.add(16));
+        let child = MemoryContext::new_with_mem_limit(
+            Some(parent.clone()),
+            LabelGuardedIntGauge::test_int_gauge::<4>(),
+            0,
+        );
+        let first = DataChunk::from_pretty("i\n1\n2");
+        let second = DataChunk::from_pretty("i\n3\n4\n5");
+        let first_size = first.estimated_heap_size() as i64;
+        let second_size = second.estimated_heap_size() as i64;
+        let schema = Schema::new(vec![Field::unnamed(DataType::Int32)]);
+        let mut input = MockExecutor::new(schema.clone());
+        input.add(first);
+        input.add(second);
+        let exec = MergeSortExecutor::new(
+            vec![Box::new(input)],
+            Arc::new(vec![ColumnOrder::new(0, Default::default())]),
+            schema,
+            "accounting-test".into(),
+            1,
+            child.clone(),
+        );
+        let mut output = Box::new(exec).execute();
+        // Each output contains one row. Exhausting a chunk fetches its replacement before yielding.
+        for (row, chunk_charge) in [
+            (1, first_size),  // The initial chunk is still current.
+            (2, second_size), // The initial chunk has been replaced.
+            (3, second_size),
+            (4, second_size),
+            (5, 0), // EOF retires the last chunk, leaving only container backing allocations.
+        ] {
+            assert_eq!(
+                output.next().await.unwrap().unwrap(),
+                DataChunk::from_pretty(&format!("i\n{row}"))
+            );
+            // Container backing allocations add to the current chunk's charge.
+            assert!(child.get_bytes_used() > chunk_charge);
+            assert_eq!(parent.get_bytes_used(), child.get_bytes_used() + 16);
+            if chunk_charge > 0 {
+                // The chunk alone exceeds the child's zero-byte limit.
+                assert!(chunk_charge > child.mem_limit() as i64);
+                assert!(!child.check_memory_usage());
+            }
+        }
+        // All accounting assertions above run before executor/context destruction.
+        assert!(output.next().await.is_none());
+        assert_eq!(child.get_bytes_used(), 0);
+        assert_eq!(parent.get_bytes_used(), 16);
     }
 }

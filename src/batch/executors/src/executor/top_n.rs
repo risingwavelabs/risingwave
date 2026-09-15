@@ -16,9 +16,11 @@ use std::cmp::Ordering;
 use std::sync::Arc;
 
 use futures_async_stream::try_stream;
+use prometheus::core::Atomic;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::memory::{MemMonitoredHeap, MemoryContext};
+use risingwave_common::metrics::TrAdderAtomic;
 use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_common::util::memcmp_encoding::{MemcmpEncoded, encode_chunk};
@@ -198,6 +200,32 @@ impl TopNHeap {
     }
 
     /// Returns the elements in the range `[offset, offset+limit)`.
+    ///
+    /// # Warning
+    ///
+    /// `deallocate` only subtracts the backing-storage size. The elements may already have been
+    /// dropped, so it cannot determine the size of their separately allocated memory. Those charges
+    /// need separate cleanup, either explicitly or through a private memory context. A future
+    /// redesign should make this handling automatic.
+    ///
+    /// In this executor example, the heap is charged directly to a new private `mem_ctx`. Skipped
+    /// and consumed elements stay charged until the context is dropped on normal return, errors,
+    /// or cancellation, even though the elements themselves are dropped earlier.
+    ///
+    /// ```rust,ignore
+    /// let mem_ctx = MemoryContext::new(Some(parent), TrAdderAtomic::new(0));
+    /// let mut heap = TopNHeap::new(3, 1, false, mem_ctx.clone());
+    /// for elem in input_elements {
+    ///     heap.push(elem);
+    /// }
+    /// for elem in heap.dump() {
+    ///     let output = chunk_builder.append_one_row(elem.row());
+    ///     drop(elem);
+    ///     if let Some(output) = output {
+    ///         yield output;
+    ///     }
+    /// }
+    /// ```
     pub fn dump(self) -> impl Iterator<Item = HeapElem> {
         self.heap
             .into_sorted_vec()
@@ -252,12 +280,9 @@ impl TopNExecutor {
         if self.limit == 0 {
             return Ok(());
         }
-        let mut heap = TopNHeap::new(
-            self.limit,
-            self.offset,
-            self.with_ties,
-            self.mem_ctx.clone(),
-        );
+        // Keep payload charges until this execution exits, including errors and cancellation.
+        let mem_ctx = MemoryContext::new(Some(self.mem_ctx.clone()), TrAdderAtomic::new(0));
+        let mut heap = TopNHeap::new(self.limit, self.offset, self.with_ties, mem_ctx.clone());
 
         #[for_await]
         for chunk in self.child.execute() {
@@ -274,9 +299,11 @@ impl TopNExecutor {
         }
 
         let mut chunk_builder = DataChunkBuilder::new(self.schema.data_types(), self.chunk_size);
-        for HeapElem { row, .. } in heap.dump() {
-            if let Some(spilled) = chunk_builder.append_one_row(row) {
-                yield spilled
+        for elem in heap.dump() {
+            let output = chunk_builder.append_one_row(elem.row());
+            drop(elem);
+            if let Some(output) = output {
+                yield output
             }
         }
         if let Some(spilled) = chunk_builder.consume_all() {
@@ -299,6 +326,132 @@ mod tests {
     use crate::executor::test_utils::MockExecutor;
 
     const CHUNK_SIZE: usize = 1024;
+
+    mod memory_budget {
+        use super::*;
+        use crate::executor::test_utils::memory_cleanup::{self, Exit};
+
+        /// Verifies that Top-N releases retained rows and sort keys above a zero-byte child budget
+        /// after input errors, cancellation while waiting for input or after an output, and EOF.
+        /// The shared contexts stay alive and unrelated parent usage is preserved.
+        ///
+        /// Equivalent query: `SELECT k FROM input ORDER BY k LIMIT 2 OFFSET 1`.
+        /// Input: `[A, B, C]`, where each value repeats its lowercase letter 128 times.
+        /// Expected output: `[B, C]` at EOF, or `[B]` before output cancellation.
+        /// Input-error and pending-input cases stop at input EOF before producing output.
+        #[tokio::test]
+        async fn test_over_budget_top_n_memory_cleanup() {
+            let (parent, child) = memory_cleanup::contexts();
+            assert_eq!(child.mem_limit(), 0);
+            for exit in [
+                Exit::InputError,
+                Exit::PendingInput,
+                Exit::Output,
+                Exit::Eof,
+            ] {
+                let (a, b, c) = ("a".repeat(128), "b".repeat(128), "c".repeat(128));
+                let input = memory_cleanup::input(
+                    Box::new(MockExecutor::with_chunk(
+                        DataChunk::from_pretty(&format!("T\n{a}\n{b}\n{c}")),
+                        Schema::new(vec![Field::unnamed(DataType::Varchar)]),
+                    )),
+                    exit,
+                    child.clone(),
+                );
+                let exec = TopNExecutor::new(
+                    input,
+                    vec![ColumnOrder::new(0, OrderType::ascending())],
+                    1,
+                    2,
+                    false,
+                    "top-n-cleanup".into(),
+                    1,
+                    child.clone(),
+                );
+                let expected = match exit {
+                    Exit::InputError | Exit::PendingInput => None,
+                    Exit::Output => Some(DataChunk::from_pretty(&format!("T\n{b}"))),
+                    Exit::Eof => Some(DataChunk::from_pretty(&format!("T\n{b}\n{c}"))),
+                };
+                memory_cleanup::assert_released(
+                    Box::new(exec).execute(),
+                    exit,
+                    expected.as_ref(),
+                    &child,
+                    &parent,
+                )
+                .await;
+            }
+        }
+
+        /// Verifies that Top-N keeps row and sort-key payloads charged above a zero-byte child
+        /// budget throughout output, including skipped and consumed rows, then releases all charges
+        /// at EOF. Each offset runs twice with the same shared contexts to check for accumulation.
+        ///
+        /// Equivalent query: `SELECT k FROM input ORDER BY k LIMIT 3 OFFSET $1`, with offsets 0, 1, 3.
+        /// Input: `[A, B, C]`, each repeating its lowercase letter 128 times.
+        /// Expected outputs: `[A, B, C]`, `[B, C]`, and no rows, respectively.
+        #[tokio::test]
+        async fn test_over_budget_top_n_accounting_during_execution() {
+            let (parent, child) = memory_cleanup::contexts();
+            assert_eq!(child.mem_limit(), 0);
+            for offset in [0, 1, 3] {
+                for _ in 0..2 {
+                    assert_eq!(child.get_bytes_used(), 0);
+                    assert_eq!(parent.get_bytes_used(), 16);
+                    let keys = ["a".repeat(128), "b".repeat(128), "c".repeat(128)];
+                    let chunk = DataChunk::from_pretty(&format!("T\n{}", keys.join("\n")));
+                    let orders = vec![ColumnOrder::new(0, OrderType::ascending())];
+                    let payload_charge = encode_chunk(&chunk, &orders)
+                        .unwrap()
+                        .into_iter()
+                        .enumerate()
+                        .map(|(row_id, encoded)| {
+                            HeapElem::new(encoded, chunk.row_at(row_id).0).estimated_heap_size()
+                                as i64
+                        })
+                        .sum::<i64>();
+                    assert!(payload_charge > 0);
+                    // Also observe live accounting at input EOF when the offset skips all rows.
+                    let input = memory_cleanup::input(
+                        Box::new(MockExecutor::with_chunk(
+                            chunk,
+                            Schema::new(vec![Field::unnamed(DataType::Varchar)]),
+                        )),
+                        Exit::Eof,
+                        child.clone(),
+                    );
+                    let exec = TopNExecutor::new(
+                        input,
+                        orders,
+                        offset,
+                        3,
+                        false,
+                        "top-n-accounting".into(),
+                        1,
+                        child.clone(),
+                    );
+                    let mut output = Box::new(exec).execute();
+                    for key in keys.iter().skip(offset) {
+                        assert_eq!(
+                            output.next().await.unwrap().unwrap(),
+                            DataChunk::from_pretty(&format!("T\n{key}"))
+                        );
+                        // All payloads stay charged until execution exits, including skipped and
+                        // consumed rows. The iterator's backing storage adds its own charge.
+                        assert!(child.get_bytes_used() > payload_charge);
+                        assert_eq!(parent.get_bytes_used(), child.get_bytes_used() + 16);
+                        assert!(!child.check_memory_usage());
+                    }
+                    assert!(output.next().await.is_none());
+                    // Check before dropping the stream or either shared context.
+                    assert_eq!(child.get_bytes_used(), 0);
+                    assert_eq!(parent.get_bytes_used(), 16);
+                    drop(output);
+                }
+            }
+        }
+    }
 
     #[tokio::test]
     async fn test_simple_top_n_executor() {
