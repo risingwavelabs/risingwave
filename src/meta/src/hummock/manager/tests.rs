@@ -1973,7 +1973,17 @@ async fn test_merge_compaction_group_removes_split_group_metrics() {
     let ssts = [100, 101, 102]
         .into_iter()
         .enumerate()
-        .map(|(idx, table_id)| gen_local_sstable_info(10 + idx as u64, vec![table_id], epoch))
+        .map(|(idx, table_id)| {
+            let mut sst = gen_local_sstable_info(10 + idx as u64, vec![table_id], epoch);
+            sst.table_stats.insert(
+                table_id.into(),
+                TableStats {
+                    total_value_size: (idx + 1) as i64,
+                    ..Default::default()
+                },
+            );
+            sst
+        })
         .collect_vec();
     hummock_meta_client
         .commit_epoch(
@@ -2031,13 +2041,31 @@ async fn test_merge_compaction_group_removes_split_group_metrics() {
     }
 
     hummock_manager
-        .merge_compaction_group_for_test(
-            left_group_id,
+        .update_compaction_config(&[left_group_id], &[MutableConfig::SplitWeightByVnode(16)])
+        .await
+        .unwrap();
+    // Reverse the arguments: returned statistics must describe the actual survivor.
+    let survivor = hummock_manager
+        .merge_compaction_group_impl(
             right_group_id,
-            HashSet::from_iter([100.into(), 101.into(), 102.into()]),
+            left_group_id,
+            Some(HashSet::from([100.into(), 101.into(), 102.into()])),
         )
         .await
         .unwrap();
+    assert_eq!(survivor.group_id, left_group_id);
+    assert_eq!(survivor.group_size, 6);
+    assert_eq!(
+        survivor.table_statistic.into_iter().collect_vec(),
+        vec![(100.into(), 1), (101.into(), 2), (102.into(), 3)]
+    );
+    assert_eq!(
+        survivor
+            .compaction_group_config
+            .compaction_config
+            .split_weight_by_vnode,
+        0
+    );
 
     for (metric_name, metric_families) in collect_group_metrics() {
         assert!(
@@ -2861,7 +2889,7 @@ async fn test_unregister_moved_table() {
     );
 
     hummock_manager
-        .register_table_ids_for_test(&[(100, 2.into()), (101, 2.into())])
+        .register_table_ids_for_test(&[(100, 2.into()), (101, 2.into()), (200, 3.into())])
         .await
         .unwrap();
     let sst_1 = LocalSstableInfo {
@@ -2928,6 +2956,16 @@ async fn test_unregister_moved_table() {
         vec![100]
     );
 
+    // Follow the original members into their current groups, excluding unrelated table 200.
+    let original_members = [100.into(), 101.into()];
+    let groups = hummock_manager
+        .calculate_compaction_group_statistic_for_tables(&original_members)
+        .await;
+    assert_eq!(
+        groups.iter().map(|g| g.group_id).collect::<HashSet<_>>(),
+        HashSet::from([left_compaction_group_id, right_compaction_group_id])
+    );
+
     hummock_manager
         .unregister_table_ids([TableId::new(101)])
         .await
@@ -2946,6 +2984,17 @@ async fn test_unregister_moved_table() {
             .map(|table_id| table_id.as_raw_id())
             .collect_vec(),
         vec![100]
+    );
+
+    // A refresh using the same old membership must skip the deleted table and group.
+    let groups = hummock_manager
+        .calculate_compaction_group_statistic_for_tables(&original_members)
+        .await;
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].group_id, left_compaction_group_id);
+    assert_eq!(
+        groups[0].table_statistic.keys().copied().collect_vec(),
+        vec![TableId::new(100)]
     );
 }
 
@@ -4371,79 +4420,7 @@ async fn test_merge_catalog_wait_does_not_hold_hummock_write_locks() {
 }
 
 #[tokio::test]
-async fn test_huge_split_rejects_disabled_snapshot() {
-    let (manager, group) = huge_group_split_fixture().await;
-    manager
-        .update_compaction_config(
-            &[group.group_id],
-            &[MutableConfig::DisableAutoGroupScheduling(true)],
-        )
-        .await
-        .unwrap();
-    let before = manager.get_current_version().await.id;
-    manager
-        .try_split_compaction_group(&TableWriteThroughputStatisticManager::new(240), group)
-        .await;
-    assert_eq!(
-        manager.get_current_version().await.id,
-        before,
-        "an automatic split must honor a config update after its scheduling snapshot"
-    );
-}
-
-#[tokio::test]
-async fn test_huge_split_rejects_shrunk_snapshot() {
-    let (manager, group) = huge_group_split_fixture().await;
-    {
-        let mut versioning = manager.versioning.write().await;
-        for stats in versioning.version_stats.table_stats.values_mut() {
-            stats.total_value_size = 1;
-        }
-    }
-    let before = manager.get_current_version().await.id;
-    manager
-        .try_split_compaction_group(&TableWriteThroughputStatisticManager::new(240), group)
-        .await;
-    assert_eq!(
-        manager.get_current_version().await.id,
-        before,
-        "a group that is no longer huge must not be split using old sizes"
-    );
-}
-
-#[tokio::test]
-async fn test_huge_split_refreshes_prefix_sizes() {
-    let (manager, group) = huge_group_split_fixture().await;
-    {
-        let mut versioning = manager.versioning.write().await;
-        for (table_id, stats) in &mut versioning.version_stats.table_stats {
-            stats.total_value_size = if *table_id == TableId::new(101) {
-                group.group_size as i64
-            } else {
-                1
-            };
-        }
-    }
-    manager
-        .try_split_compaction_group(&TableWriteThroughputStatisticManager::new(240), group)
-        .await;
-    let group_100 = get_compaction_group_id_by_table_id(manager.clone(), 100).await;
-    let group_101 = get_compaction_group_id_by_table_id(manager.clone(), 101).await;
-    let group_102 = get_compaction_group_id_by_table_id(manager.clone(), 102).await;
-    assert_eq!(
-        group_100, group_101,
-        "the small first table must stay with the large table"
-    );
-    assert_ne!(
-        group_101, group_102,
-        "the refreshed prefix must be split in this round"
-    );
-}
-
-async fn huge_group_split_fixture() -> (
-    HummockManagerRef,
-    super::compaction::CompactionGroupStatistic,
-) {
+async fn test_huge_split_revalidates_snapshot() {
     let (env, manager, _, _) = setup_compute_env(80).await;
     manager
         .register_table_ids_for_test(&[(100, 2.into()), (101, 2.into()), (102, 2.into())])
@@ -4475,87 +4452,71 @@ async fn huge_group_split_fixture() -> (
         .into_iter()
         .find(|group| group.group_id == 2)
         .unwrap();
-    (manager, group)
-}
+    let stats = TableWriteThroughputStatisticManager::new(240);
 
-#[tokio::test]
-async fn test_group_statistics_for_tables_resolves_children_and_deleted_members() {
-    let (_, manager, _, _) = setup_compute_env(80).await;
+    // An old snapshot must not bypass a newer scheduling disable.
     manager
-        .register_table_ids_for_test(&[(100, 2.into()), (101, 2.into()), (200, 3.into())])
+        .update_compaction_config(
+            &[group.group_id],
+            &[MutableConfig::DisableAutoGroupScheduling(true)],
+        )
         .await
         .unwrap();
+    let before = manager.get_current_version().await.id;
     manager
-        .move_state_tables_to_dedicated_compaction_group(2.into(), &[100.into()], None)
-        .await
-        .unwrap();
-    let child = get_compaction_group_id_by_table_id(manager.clone(), 101).await;
-    assert_ne!(child, CompactionGroupId::from(2));
-    let original_members = [100.into(), 101.into()];
-    let groups = manager
-        .calculate_compaction_group_statistic_for_tables(&original_members)
+        .try_split_compaction_group(&stats, group.clone())
         .await;
     assert_eq!(
-        groups.iter().map(|group| group.group_id).collect_vec(),
-        vec![2.into(), child],
-        "refresh must follow members to their current children and exclude unrelated groups"
+        manager.get_current_version().await.id,
+        before,
+        "scheduling was disabled"
     );
-    manager.unregister_table_ids([100.into()]).await.unwrap();
-    let groups = manager
-        .calculate_compaction_group_statistic_for_tables(&original_members)
-        .await;
-    assert_eq!(groups.len(), 1);
-    assert_eq!(groups[0].group_id, child);
-    assert_eq!(
-        groups[0].table_statistic.keys().copied().collect_vec(),
-        vec![TableId::new(101)]
-    );
-}
 
-#[tokio::test]
-async fn test_merge_statistic_uses_actual_survivor() {
-    let (_, manager, _, _) = setup_compute_env(80).await;
+    // Re-enable scheduling, but shrink the group below the split threshold.
     manager
-        .register_table_ids_for_test(&[(100, 2.into()), (101, 3.into())])
-        .await
-        .unwrap();
-    manager
-        .update_compaction_config(&[2.into()], &[MutableConfig::SplitWeightByVnode(16)])
+        .update_compaction_config(
+            &[group.group_id],
+            &[MutableConfig::DisableAutoGroupScheduling(false)],
+        )
         .await
         .unwrap();
     {
         let mut versioning = manager.versioning.write().await;
-        for (table, size) in [(100, 7), (101, 11)] {
-            versioning.version_stats.table_stats.insert(
-                table.into(),
-                risingwave_pb::hummock::TableStats {
-                    total_value_size: size,
-                    ..Default::default()
-                },
-            );
+        for stats in versioning.version_stats.table_stats.values_mut() {
+            stats.total_value_size = 1;
         }
     }
-    let survivor = manager
-        .merge_compaction_group_impl(
-            3.into(),
-            2.into(),
-            Some(HashSet::from([100.into(), 101.into()])),
-        )
-        .await
-        .unwrap();
-    assert_eq!(survivor.group_id, CompactionGroupId::from(2));
-    assert_eq!(survivor.group_size, 18);
+    let before = manager.get_current_version().await.id;
+    manager
+        .try_split_compaction_group(&stats, group.clone())
+        .await;
     assert_eq!(
-        survivor.table_statistic.into_iter().collect_vec(),
-        vec![(100.into(), 7), (101.into(), 11)]
+        manager.get_current_version().await.id,
+        before,
+        "the group is no longer huge"
     );
+
+    // Make it huge again with a different size distribution: refresh the split boundary too.
+    {
+        let mut versioning = manager.versioning.write().await;
+        versioning
+            .version_stats
+            .table_stats
+            .get_mut(&TableId::new(101))
+            .unwrap()
+            .total_value_size = group.group_size as i64;
+    }
+    manager.try_split_compaction_group(&stats, group).await;
+    let group_100 = get_compaction_group_id_by_table_id(manager.clone(), 100).await;
+    let group_101 = get_compaction_group_id_by_table_id(manager.clone(), 101).await;
+    let group_102 = get_compaction_group_id_by_table_id(manager.clone(), 102).await;
     assert_eq!(
-        survivor
-            .compaction_group_config
-            .compaction_config
-            .split_weight_by_vnode,
-        0,
-        "the returned config must include the merge transaction's update"
+        group_100, group_101,
+        "the small first table must stay with the large table"
+    );
+    assert_ne!(
+        group_101, group_102,
+        "the refreshed prefix must be split in this round"
     );
 }
 
@@ -4571,22 +4532,14 @@ async fn test_split_multiple_hot_tables_uses_current_parent() {
         ])
         .await
         .unwrap();
-    let mut stats = TableWriteThroughputStatisticManager::new(240);
-    for table in [100, 101, 102] {
-        stats.add_table_throughput_with_ts(
-            table.into(),
-            u64::MAX / 2,
-            chrono::Utc::now().timestamp(),
-            1,
-        );
+    {
+        let mut stats = manager.table_write_throughput_statistic_manager.write();
+        let now = chrono::Utc::now().timestamp();
+        for table in [100, 101, 102] {
+            stats.add_table_throughput_with_ts(table.into(), u64::MAX / 2, now, 1);
+        }
     }
-    let group = manager
-        .calculate_compaction_group_statistic()
-        .await
-        .into_iter()
-        .find(|g| g.group_id == 2)
-        .unwrap();
-    manager.try_split_compaction_group(&stats, group).await;
+    manager.schedule_group_split_for_test().await;
     let version = manager.get_current_version().await;
     for table in [100, 101, 102, 103] {
         let group = version.state_table_info.info()
@@ -4717,47 +4670,102 @@ async fn test_empty_commits_observe_only_committed_tables() {
         .register_table_ids_for_test(&[(100, 2.into()), (101, 2.into())])
         .await
         .unwrap();
-    // Only table 100 commits; the paused table must receive no observation.
+    // Only table 100 commits; table 101 has no observation yet.
     manager
         .commit_epoch(super::commit_epoch::CommitEpochInfo {
             tables_to_commit: HashMap::from([(100.into(), test_epoch(30))]),
+            table_checkpoint_secs: HashMap::from([(100.into(), 10)]),
             ..Default::default()
         })
         .await
         .unwrap();
     {
         let stats = manager.table_write_throughput_statistic_manager.read();
-        assert_eq!(
-            stats
-                .get_table_throughput_descending(100.into(), 240)
-                .count(),
-            1
-        );
-        assert_eq!(
+        let samples = stats
+            .get_table_throughput_descending(100.into(), 240)
+            .collect_vec();
+        assert_eq!(samples.len(), 1);
+        assert_eq!((samples[0].throughput, samples[0].interval_secs), (0, 10));
+        assert!(
             stats
                 .get_table_throughput_descending(101.into(), 240)
-                .count(),
-            0
+                .next()
+                .is_none()
         );
     }
 
-    // Both tables now commit without SSTs, including the resumed table 101.
-    let client = MockHummockMetaClient::new(manager.clone(), worker_id as _);
-    client
-        .commit_epoch(test_epoch(31), SyncResult::default())
+    // Commit both databases: table 100 writes 100 bytes; resumed table 101 is idle.
+    let sst =
+        generate_test_sstables_with_table_id(test_epoch(31), 100, get_sst_ids(&manager, 1).await)
+            .pop()
+            .unwrap();
+    let mut sst = LocalSstableInfo::for_test(sst);
+    sst.table_stats.insert(
+        100.into(),
+        TableStats {
+            total_key_size: 40,
+            total_value_size: 60,
+            ..Default::default()
+        },
+    );
+    manager
+        .commit_epoch(super::commit_epoch::CommitEpochInfo {
+            sst_to_context: HashMap::from([(sst.sst_info.object_id, worker_id as _)]),
+            sstables: vec![sst],
+            tables_to_commit: HashMap::from([
+                (100.into(), test_epoch(31)),
+                (101.into(), test_epoch(31)),
+            ]),
+            table_checkpoint_secs: HashMap::from([(100.into(), 10), (101.into(), 2)]),
+            ..Default::default()
+        })
         .await
         .unwrap();
     let stats = manager.table_write_throughput_statistic_manager.read();
-    for (table, expected_samples) in [(100, 2), (101, 1)] {
+    for (table, count, throughput, seconds) in [(100, 2, 10, 10), (101, 1, 0, 2)] {
         let samples = stats
             .get_table_throughput_descending(table.into(), 240)
             .collect_vec();
+        assert_eq!(samples.len(), count);
         assert_eq!(
-            samples.len(),
-            expected_samples,
-            "successful idle commits are observations"
+            (samples[0].throughput, samples[0].interval_secs),
+            (throughput, seconds)
         );
-        assert!(samples.iter().all(|sample| sample.throughput == 0));
+    }
+}
+
+#[tokio::test]
+async fn test_vnode_partition_ignores_expired_throughput() {
+    let (_, manager, _, _) = setup_compute_env(80).await;
+    let config = CompactionConfigBuilder::new()
+        .target_file_size_base(1)
+        .build();
+    let table = TableId::new(100);
+    let mut task = CompactTask {
+        input_ssts: vec![risingwave_hummock_sdk::level::InputLevel {
+            table_infos: vec![
+                SstableInfoInner {
+                    table_ids: vec![table],
+                    sst_size: 2,
+                    ..Default::default()
+                }
+                .into(),
+            ],
+            ..Default::default()
+        }],
+        ..Default::default()
+    };
+    let now = chrono::Utc::now().timestamp();
+    for (timestamp, expected) in [
+        (now - 3600, 1),
+        (now, manager.env.opts.hybrid_partition_node_count),
+    ] {
+        manager
+            .table_write_throughput_statistic_manager
+            .write()
+            .add_table_throughput_with_ts(table, u64::MAX / 2, timestamp, 1);
+        manager.calculate_vnode_partition(&mut task, &config, &[table]);
+        assert_eq!(task.table_vnode_partition[&table], expected);
     }
 }
 
@@ -4793,15 +4801,11 @@ async fn test_huge_split_refreshes_children_after_hot_table_split() {
             );
         }
     }
-    let mut stats = TableWriteThroughputStatisticManager::new(240);
-    stats.add_table_throughput_with_ts(100.into(), u64::MAX / 2, chrono::Utc::now().timestamp(), 1);
-    let group = manager
-        .calculate_compaction_group_statistic()
-        .await
-        .into_iter()
-        .find(|g| g.group_id == 2)
-        .unwrap();
-    manager.try_split_compaction_group(&stats, group).await;
+    manager
+        .table_write_throughput_statistic_manager
+        .write()
+        .add_table_throughput_with_ts(100.into(), u64::MAX / 2, chrono::Utc::now().timestamp(), 1);
+    manager.schedule_group_split_for_test().await;
     let groups = manager.calculate_compaction_group_statistic().await;
     let nonempty = groups
         .iter()
