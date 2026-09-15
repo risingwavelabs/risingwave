@@ -158,6 +158,7 @@ pub struct StreamingMetrics {
     over_window_accessed_entry_count: LabelGuardedIntCounterVec,
     over_window_compute_count: LabelGuardedIntCounterVec,
     over_window_same_output_count: LabelGuardedIntCounterVec,
+    over_window_state_cleaned_row_count: LabelGuardedIntCounterVec,
 
     // Match recognize
     match_recognize_matches_emitted_count: LabelGuardedIntCounterVec,
@@ -933,6 +934,14 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let over_window_state_cleaned_row_count = register_guarded_int_counter_vec_with_registry!(
+            "stream_over_window_state_cleaned_row_count",
+            "Over window number of stale state rows deleted by watermark-driven state cleaning",
+            &["table_id", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
         let match_recognize_matches_emitted_count =
             register_guarded_int_counter_vec_with_registry!(
                 "stream_match_recognize_matches_emitted_count",
@@ -1448,6 +1457,7 @@ impl StreamingMetrics {
             over_window_accessed_entry_count,
             over_window_compute_count,
             over_window_same_output_count,
+            over_window_state_cleaned_row_count,
             match_recognize_matches_emitted_count,
             match_recognize_evicted_rows_count,
             match_recognize_scan_budget_exhausted_count,
@@ -1825,6 +1835,9 @@ impl StreamingMetrics {
             over_window_same_output_count: self
                 .over_window_same_output_count
                 .with_guarded_label_values(label_list),
+            over_window_state_cleaned_row_count: self
+                .over_window_state_cleaned_row_count
+                .with_guarded_label_values(label_list),
         }
     }
 
@@ -2021,6 +2034,7 @@ pub struct OverWindowMetrics {
     pub over_window_accessed_entry_count: LabelGuardedIntCounter,
     pub over_window_compute_count: LabelGuardedIntCounter,
     pub over_window_same_output_count: LabelGuardedIntCounter,
+    pub over_window_state_cleaned_row_count: LabelGuardedIntCounter,
 }
 
 pub struct MatchRecognizeMetrics {

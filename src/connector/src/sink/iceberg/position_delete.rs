@@ -15,6 +15,7 @@
 //! Shared iceberg position-delete (Puffin deletion vector) helpers.
 
 use std::collections::HashMap;
+use std::fmt::Display;
 use std::sync::Arc;
 
 use anyhow::{Context, Result, anyhow, bail};
@@ -23,7 +24,9 @@ use iceberg::arrow::schema_to_arrow_schema;
 use iceberg::delete_vector::DeleteVector;
 use iceberg::io::FileIO;
 use iceberg::puffin::{CompressionCodec, PuffinReader, PuffinWriter};
-use iceberg::spec::{DataContentType, DataFile, DataFileBuilder, DataFileFormat, PartitionKey};
+use iceberg::spec::{
+    DataContentType, DataFile, DataFileBuilder, DataFileFormat, FormatVersion, PartitionKey,
+};
 use iceberg::table::Table;
 use iceberg::writer::base_writer::position_delete_file_writer::POSITION_DELETE_SCHEMA;
 use iceberg::writer::file_writer::location_generator::{
@@ -41,6 +44,94 @@ use risingwave_common::array::arrow::arrow_schema_iceberg::SchemaRef as ArrowSch
 
 use crate::sink::iceberg::{IcebergConfig, PARQUET_CREATED_BY};
 use crate::source::iceberg::parquet_file_handler::ParquetFileReader;
+
+/// File-name generators shared by all Iceberg position-delete writers.
+///
+/// All writers use the same prefix and format-specific suffix pattern. The identity is the only
+/// caller-specific part and prevents concurrent actors/epochs from generating the same path.
+#[derive(Clone, Debug)]
+pub struct PositionDeleteFileNameGenerators {
+    pub puffin: DefaultFileNameGenerator,
+    pub parquet: DefaultFileNameGenerator,
+}
+
+impl PositionDeleteFileNameGenerators {
+    pub fn new(identity: impl Display) -> Self {
+        let prefix = "position-delete".to_owned();
+        let unique_suffix = identity.to_string();
+        Self {
+            puffin: DefaultFileNameGenerator::new(
+                prefix.clone(),
+                Some(unique_suffix.clone()),
+                DataFileFormat::Puffin,
+            ),
+            parquet: DefaultFileNameGenerator::new(
+                prefix,
+                Some(unique_suffix),
+                DataFileFormat::Parquet,
+            ),
+        }
+    }
+
+    pub fn for_format(&self, format: DataFileFormat) -> anyhow::Result<&DefaultFileNameGenerator> {
+        match format {
+            DataFileFormat::Puffin => Ok(&self.puffin),
+            DataFileFormat::Parquet => Ok(&self.parquet),
+            other => anyhow::bail!(
+                "unsupported position-delete output format {:?}; expected Puffin or Parquet",
+                other
+            ),
+        }
+    }
+}
+
+/// Write one file-scoped position-delete artifact using the table's configured on-disk format.
+///
+/// All callers share this dispatch so Puffin deletion vectors and V2 Parquet position deletes use
+/// identical file-name and partition-path handling.
+pub async fn write_position_delete_file(
+    table: &Table,
+    config: &IcebergConfig,
+    location_generator: &DefaultLocationGenerator,
+    file_name_generators: &PositionDeleteFileNameGenerators,
+    format_version: FormatVersion,
+    data_file_path: String,
+    delete_vector: &DeleteVector,
+    partition_key: Option<&PartitionKey>,
+) -> Result<DataFile> {
+    let format = if format_version >= FormatVersion::V3 {
+        DataFileFormat::Puffin
+    } else {
+        DataFileFormat::Parquet
+    };
+    let file_name_generator = file_name_generators.for_format(format)?;
+    match format {
+        DataFileFormat::Puffin => {
+            write_dv_puffin_file(
+                table,
+                location_generator,
+                file_name_generator,
+                data_file_path,
+                delete_vector,
+                partition_key,
+            )
+            .await
+        }
+        DataFileFormat::Parquet => {
+            write_parquet_position_delete_file(
+                table,
+                location_generator,
+                file_name_generator,
+                config,
+                data_file_path,
+                delete_vector,
+                partition_key,
+            )
+            .await
+        }
+        _ => unreachable!("position-delete format is selected above"),
+    }
+}
 
 /// Puffin blob property for deletion vector cardinality.
 const DELETION_VECTOR_PROPERTY_CARDINALITY: &str = "cardinality";
