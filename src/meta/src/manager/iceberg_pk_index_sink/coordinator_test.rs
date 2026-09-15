@@ -14,6 +14,7 @@
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use async_trait::async_trait;
 use iceberg::delete_vector::DeleteVector;
@@ -244,12 +245,16 @@ async fn write_test_position_delete_with_partition(
 #[derive(Debug)]
 struct ReloadingTestCatalog {
     table: Mutex<Table>,
+    lose_next_commit_response: AtomicBool,
+    update_count: AtomicUsize,
 }
 
 impl ReloadingTestCatalog {
     fn new(table: Table) -> Self {
         Self {
             table: Mutex::new(table),
+            lose_next_commit_response: AtomicBool::new(false),
+            update_count: AtomicUsize::new(0),
         }
     }
 
@@ -335,8 +340,21 @@ impl Catalog for ReloadingTestCatalog {
         unreachable!("test only loads a table")
     }
 
-    async fn update_table(&self, _commit: TableCommit) -> iceberg::Result<Table> {
-        unreachable!("test only loads a table")
+    #[expect(
+        clippy::disallowed_types,
+        reason = "the test catalog injects an Iceberg API error"
+    )]
+    async fn update_table(&self, commit: TableCommit) -> iceberg::Result<Table> {
+        let mut table = self.table.lock().unwrap();
+        *table = commit.apply(table.clone())?;
+        self.update_count.fetch_add(1, Ordering::SeqCst);
+        if self.lose_next_commit_response.swap(false, Ordering::SeqCst) {
+            return Err(iceberg::Error::new(
+                iceberg::ErrorKind::Unexpected,
+                "injected lost response after successful catalog commit",
+            ));
+        }
+        Ok(table.clone())
     }
 }
 
@@ -760,6 +778,7 @@ fn pre_commit_state_round_trip_preserves_format_version() -> Result<()> {
         schema_id: 3,
         partition_spec_id: 4,
         format_version: Some(FormatVersion::V3),
+        source_commit: None,
         data_files: vec![serialized_file("data")],
         delete_files: vec![serialized_file("delete")],
         overwrite_files: vec![serialized_file("overwrite")],
@@ -797,6 +816,7 @@ fn pre_commit_state_decodes_legacy_state_without_format_version() -> Result<()> 
 
     assert_eq!(snapshot_id, 99);
     assert_eq!(decoded.format_version, None);
+    assert_eq!(decoded.source_commit, None);
     Ok(())
 }
 
@@ -961,4 +981,291 @@ fn aggregate_reports_ignores_empty_ordinary_metadata() {
 
     assert_eq!(merged.schema_id, 3);
     assert_eq!(merged.partition_spec_id, 4);
+}
+
+fn with_source_contract(table: &Table) -> Result<Table> {
+    let contract = IcebergSourceContract::new(table.metadata().current_schema(), vec![1])?;
+    let metadata = table
+        .metadata()
+        .clone()
+        .into_builder(None)
+        .set_properties(contract.to_properties())?
+        .build()?
+        .metadata;
+    Ok(Table::builder()
+        .identifier(table.identifier().clone())
+        .file_io(table.file_io().clone())
+        .runtime(Runtime::try_current()?)
+        .metadata(metadata)
+        .metadata_location(format!(
+            "{}/metadata/00000-{}.metadata.json",
+            table.metadata().location(),
+            table.metadata().uuid()
+        ))
+        .build()?)
+}
+
+fn empty_aggregate(table: &Table) -> IcebergPkIndexSinkAggResult {
+    IcebergPkIndexSinkAggResult {
+        schema_id: table.metadata().current_schema_id(),
+        partition_spec_id: table.metadata().default_partition_spec_id(),
+        format_version: Some(table.metadata().format_version()),
+        source_commit: None,
+        data_files: vec![],
+        delete_files: vec![],
+        overwrite_files: vec![],
+    }
+}
+
+#[tokio::test]
+async fn source_contract_rejects_mixed_commits_but_preserves_legacy_behavior() -> Result<()> {
+    for version in [FormatVersion::V2, FormatVersion::V3] {
+        let temp_dir = tempfile::tempdir()?;
+        let legacy = coalesce_test_table(&temp_dir, version)?;
+        let table = with_source_contract(&legacy)?;
+        let empty = empty_aggregate(&table);
+        for ordinary in [None, Some(&empty)] {
+            let marker = source_commit_for_pre_commit(&table, "main", ordinary, true)?.unwrap();
+            assert_eq!(marker.kind, IcebergCommitKind::Compaction);
+        }
+        // Even overwrite-only ordinary reports must not be hidden in a compaction snapshot.
+        for index in 0..3 {
+            let mut ordinary = empty.clone();
+            match index {
+                0 => ordinary.data_files.push(serialized_file("ordinary-data")),
+                1 => ordinary
+                    .delete_files
+                    .push(serialized_file("ordinary-delete")),
+                _ => ordinary
+                    .overwrite_files
+                    .push(serialized_file("ordinary-overwrite")),
+            }
+            assert!(source_commit_for_pre_commit(&table, "main", Some(&ordinary), true).is_err());
+            assert_eq!(
+                source_commit_for_pre_commit(&legacy, "main", Some(&ordinary), true)?,
+                None
+            );
+            assert_eq!(
+                source_commit_for_pre_commit(&table, "main", Some(&ordinary), false)?
+                    .unwrap()
+                    .kind,
+                IcebergCommitKind::Data
+            );
+        }
+        assert!(source_commit_for_pre_commit(&table, "other", None, false).is_err());
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn source_contract_mixed_pre_commit_fails_before_persistence_or_io() -> Result<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let table = with_source_contract(&coalesce_test_table(&temp_dir, FormatVersion::V3)?)?;
+    let mut coordinator = test_coordinator(
+        table.clone(),
+        Arc::new(ReloadingTestCatalog::new(table)),
+        coalesce_test_config(),
+        DatabaseConnection::Disconnected,
+    );
+    let error = coordinator
+        .pre_commit(
+            1,
+            vec![report(
+                PbIcebergPkIndexSinkRole::Writer,
+                Some(writer_metadata(0, 0, vec![serialized_file("ordinary")])),
+            )],
+            Some(CompactionOverwrite {
+                sink_id: SinkId::new(42),
+                epoch: 1,
+                schema_id: 0,
+                partition_spec_id: 0,
+                output_files: vec![],
+                input_file_paths: vec!["must-not-read".to_owned()],
+                read_snapshot_id: 1,
+            }),
+        )
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("mixing ordinary writes"));
+    assert!(coordinator.waiting_commit.is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn source_contract_recovery_rejects_rollout_and_identity_changes() -> Result<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let legacy = coalesce_test_table(&temp_dir, FormatVersion::V2)?;
+    let table = with_source_contract(&legacy)?;
+    let commit = source_commit_for_pre_commit(&table, "main", None, false)?.unwrap();
+    validate_source_commit_table(&table, "main", Some(&commit))?;
+    validate_source_commit_table(&legacy, "main", None)?;
+    assert!(validate_source_commit_table(&table, "main", None).is_err());
+    assert!(validate_source_commit_table(&legacy, "main", Some(&commit)).is_err());
+    assert!(validate_source_commit_table(&table, "other", Some(&commit)).is_err());
+    let mut other_uuid = commit.clone();
+    other_uuid.table_uuid = uuid::Uuid::nil();
+    assert!(validate_source_commit_table(&table, "main", Some(&other_uuid)).is_err());
+    let mut invalid_key = serde_json::to_value(&commit)?;
+    invalid_key["contract"]["key_field_ids"] = serde_json::json!([99]);
+    let invalid_key = serde_json::from_value(invalid_key)?;
+    assert!(validate_source_commit_table(&table, "main", Some(&invalid_key)).is_err());
+    Ok(())
+}
+
+#[tokio::test]
+async fn source_contract_survives_partition_backfill_and_pre_commit_round_trip() -> Result<()> {
+    for version in [FormatVersion::V2, FormatVersion::V3] {
+        let temp_dir = tempfile::tempdir()?;
+        let table = with_source_contract(&coalesce_test_table_with_partitioning(
+            &temp_dir, version, true,
+        )?)?;
+        let config = coalesce_test_config();
+        let data = output_data_file_with_partition(
+            &table,
+            "new",
+            Struct::from_iter([Some(Literal::long(11))]),
+        )?;
+        let delete =
+            write_test_position_delete(&table, &config, "delete", data.file_path(), [1, 3]).await?;
+        let marker = source_commit_for_pre_commit(&table, "main", None, false)?;
+        let mut aggregate = empty_aggregate(&table);
+        aggregate.source_commit = marker.clone();
+        aggregate.data_files = serialize_data_files_default_spec(&table, vec![data.clone()])?;
+        aggregate.delete_files = serialize_data_files_default_spec(&table, vec![delete])?;
+        let coordinator = test_coordinator(
+            table.clone(),
+            Arc::new(ReloadingTestCatalog::new(table)),
+            config,
+            DatabaseConnection::Disconnected,
+        );
+        let (aggregate, materialized) = coordinator
+            .backfill_delete_file_partitions(aggregate)
+            .await?;
+        assert_eq!(aggregate.source_commit, marker);
+        assert_eq!(materialized.unwrap()[1].partition(), data.partition());
+        let (recovered, snapshot_id) =
+            decode_pre_commit_state(&encode_pre_commit_state(&aggregate, 99)?)?;
+        assert_eq!(snapshot_id, 99);
+        assert_eq!(recovered.source_commit, marker);
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn source_contract_commits_markers_and_checks_idempotent_replay() -> Result<()> {
+    for version in [FormatVersion::V2, FormatVersion::V3] {
+        let temp_dir = tempfile::tempdir()?;
+        let mut table = with_source_contract(&coalesce_test_table(&temp_dir, version)?)?;
+        let catalog = Arc::new(ReloadingTestCatalog::new(table.clone()));
+        for (snapshot_id, kind) in [
+            (101, IcebergCommitKind::Data),
+            (102, IcebergCommitKind::Compaction),
+        ] {
+            let mut aggregate = empty_aggregate(&table);
+            aggregate.source_commit = source_commit_for_pre_commit(
+                &table,
+                "main",
+                None,
+                kind == IcebergCommitKind::Compaction,
+            )?;
+            // This exercises SDK metadata commits, not compactor logical equivalence.
+            if kind == IcebergCommitKind::Data {
+                aggregate.data_files = serialize_data_files_default_spec(
+                    &table,
+                    vec![output_data_file(&table, "data")?],
+                )?;
+            }
+            let (merged, snapshot_id) =
+                decode_pre_commit_state(&encode_pre_commit_state(&aggregate, snapshot_id)?)?;
+            let epoch = EpochCommit {
+                epoch: snapshot_id as u64,
+                merged,
+                snapshot_id,
+                materialized_add_files: None,
+            };
+            catalog
+                .lose_next_commit_response
+                .store(true, Ordering::SeqCst);
+            let update_count = catalog.update_count.load(Ordering::SeqCst);
+            table = commit_one_epoch(
+                catalog.clone(),
+                table.identifier().clone(),
+                "main".to_owned(),
+                SinkId::new(42),
+                &epoch,
+                1,
+            )
+            .await
+            .map_err(|error| match error {
+                CommitError::Commit(error) | CommitError::ReloadTable(error) => error,
+            })?;
+            assert_eq!(
+                catalog.update_count.load(Ordering::SeqCst),
+                update_count + 1
+            );
+            let snapshot = table.metadata().snapshot_by_id(snapshot_id).unwrap();
+            assert_eq!(
+                IcebergCommitKind::from_properties(&snapshot.summary().additional_properties)?,
+                Some(kind)
+            );
+            let snapshot_count = table.metadata().snapshots().len();
+            table = commit_one_epoch(
+                catalog.clone(),
+                table.identifier().clone(),
+                "main".to_owned(),
+                SinkId::new(42),
+                &epoch,
+                0,
+            )
+            .await
+            .map_err(|error| match error {
+                CommitError::Commit(error) | CommitError::ReloadTable(error) => error,
+            })?;
+            assert_eq!(table.metadata().snapshots().len(), snapshot_count);
+            let mut conflict = epoch.clone();
+            Arc::make_mut(&mut conflict.merged)
+                .source_commit
+                .as_mut()
+                .unwrap()
+                .kind = match kind {
+                IcebergCommitKind::Data => IcebergCommitKind::Compaction,
+                IcebergCommitKind::Compaction => IcebergCommitKind::Data,
+            };
+            assert!(
+                commit_one_epoch(
+                    catalog.clone(),
+                    table.identifier().clone(),
+                    "main".to_owned(),
+                    SinkId::new(42),
+                    &conflict,
+                    0
+                )
+                .await
+                .is_err()
+            );
+        }
+    }
+    Ok(())
+}
+
+#[test]
+fn source_contract_legacy_snapshot_idempotency_does_not_infer_markers() -> Result<()> {
+    validate_source_commit_snapshot(None, &HashMap::new())?;
+    for kind in [IcebergCommitKind::Data, IcebergCommitKind::Compaction] {
+        assert!(validate_source_commit_snapshot(None, &kind.to_properties()).is_err());
+    }
+    Ok(())
+}
+
+#[tokio::test]
+async fn source_contract_rejects_whole_file_data_removals() -> Result<()> {
+    let temp_dir = tempfile::tempdir()?;
+    let table = coalesce_test_table(&temp_dir, FormatVersion::V2)?;
+    let data = output_data_file(&table, "old")?;
+    assert!(
+        validate_source_commit_files(IcebergCommitKind::Data, &[], std::slice::from_ref(&data))
+            .is_err()
+    );
+    validate_source_commit_files(IcebergCommitKind::Compaction, &[], &[data])?;
+    Ok(())
 }

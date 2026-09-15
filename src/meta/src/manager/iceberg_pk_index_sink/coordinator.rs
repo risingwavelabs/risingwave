@@ -53,6 +53,9 @@ use iceberg::writer::file_writer::location_generator::{
     DefaultLocationGenerator, FileNameGenerator, LocationGenerator,
 };
 use prost::Message;
+use risingwave_connector::connector_common::{
+    IcebergCommitKind, IcebergSourceCommit, IcebergSourceContract,
+};
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::iceberg::commit_retry::{self, CommitError, CommitRetryLogContext};
 use risingwave_connector::sink::iceberg::{
@@ -186,12 +189,20 @@ impl IcebergPkIndexSinkCoordinator {
             current_partition_spec_id,
             current_format_version,
         )?;
+        // Determine semantics before merging ordinary and compaction file aggregates.
+        // Legacy tables keep their existing unmarked commits until the writer rollout is complete.
+        let source_commit = source_commit_for_pre_commit(
+            &self.table,
+            &self.target_branch,
+            ordinary_aggregate.as_ref(),
+            compaction.is_some(),
+        )?;
 
         let Some(compaction) = compaction else {
             if !resolver_reports.is_empty() {
                 bail!("compaction resolver reports require compaction pre-commit metadata");
             }
-            let Some(merged) = ordinary_aggregate else {
+            let Some(mut merged) = ordinary_aggregate else {
                 return Ok(());
             };
             if merged.data_files.is_empty() && merged.delete_files.is_empty() {
@@ -200,6 +211,7 @@ impl IcebergPkIndexSinkCoordinator {
                     prev_epoch
                 );
             }
+            merged.source_commit = source_commit;
             return self.stage_pre_commit(prev_epoch, merged).await;
         };
         let CompactionOverwrite {
@@ -294,6 +306,7 @@ impl IcebergPkIndexSinkCoordinator {
             serialize_data_files_default_spec(&self.table, added_delete_files)?;
         let merged = IcebergPkIndexSinkAggResult {
             delete_files: serialized_delete_files,
+            source_commit,
             ..merged
         };
         self.stage_pre_commit(prev_epoch, merged).await?;
@@ -515,12 +528,8 @@ impl IcebergPkIndexSinkCoordinator {
             .try_collect()?;
 
         let merged = IcebergPkIndexSinkAggResult {
-            schema_id: merged.schema_id,
-            partition_spec_id: merged.partition_spec_id,
-            format_version: merged.format_version,
-            data_files: merged.data_files,
             delete_files: serialized_delete_files,
-            overwrite_files: merged.overwrite_files,
+            ..merged
         };
 
         // `add_data_files` order in `commit_one_epoch` is data files followed by
@@ -704,12 +713,15 @@ async fn commit_one_epoch(
             let target_branch = target_branch.clone();
             let materialized_add_files = materialized_add_files.clone();
             async move {
+                validate_source_commit_table(&table, &target_branch, merged.source_commit.as_ref())
+                    .map_err(CommitError::ReloadTable)?;
                 // Idempotency: if iceberg already saw this `snapshot_id`, skip the overwrite_files transaction.
-                if table
-                    .metadata()
-                    .snapshots()
-                    .any(|s| s.snapshot_id() == snapshot_id)
-                {
+                if let Some(snapshot) = table.metadata().snapshot_by_id(snapshot_id) {
+                    validate_source_commit_snapshot(
+                        merged.source_commit.as_ref(),
+                        &snapshot.summary().additional_properties,
+                    )
+                    .map_err(CommitError::ReloadTable)?;
                     return Ok(table);
                 }
 
@@ -747,14 +759,21 @@ async fn commit_one_epoch(
                     .iter()
                     .map(&materialize)
                     .collect::<Result<Vec<_>, _>>()?;
+                if let Some(source_commit) = &merged.source_commit {
+                    validate_source_commit_files(source_commit.kind, &add_files, &overwrite_files)
+                        .map_err(CommitError::ReloadTable)?;
+                }
 
                 let txn = Transaction::new(&table);
-                let action = txn
+                let mut action = txn
                     .overwrite_files()
                     .set_snapshot_id(snapshot_id)
                     .set_target_branch(target_branch)
                     .add_data_files(add_files)
                     .delete_files(overwrite_files);
+                if let Some(source_commit) = &merged.source_commit {
+                    action.set_snapshot_properties(source_commit.kind.to_properties());
+                }
                 let txn = action.apply(txn).map_err(|err| {
                     CommitError::Commit(
                         anyhow!(err).context("apply iceberg pk-index sink overwrite_files action"),
@@ -779,6 +798,8 @@ struct IcebergPkIndexSinkAggResult {
     partition_spec_id: i32,
     #[serde(default)]
     format_version: Option<FormatVersion>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    source_commit: Option<IcebergSourceCommit>,
     data_files: Vec<SerializedDataFile>,
     delete_files: Vec<SerializedDataFile>,
     overwrite_files: Vec<SerializedDataFile>,
@@ -790,11 +811,110 @@ impl std::fmt::Debug for IcebergPkIndexSinkAggResult {
             .field("schema_id", &self.schema_id)
             .field("partition_spec_id", &self.partition_spec_id)
             .field("format_version", &self.format_version)
+            .field("source_commit", &self.source_commit)
             .field("data_files", &self.data_files.len())
             .field("delete_files", &self.delete_files.len())
             .field("overwrite_files", &self.overwrite_files.len())
             .finish()
     }
+}
+
+fn source_commit_for_pre_commit(
+    table: &Table,
+    target_branch: &str,
+    ordinary: Option<&IcebergPkIndexSinkAggResult>,
+    is_compaction: bool,
+) -> Result<Option<IcebergSourceCommit>> {
+    let Some(contract) = IcebergSourceContract::from_properties(
+        table.metadata().properties(),
+        table.metadata().current_schema(),
+    )?
+    else {
+        return Ok(None);
+    };
+    anyhow::ensure!(
+        target_branch == "main" && table.metadata().format_version() >= FormatVersion::V2,
+        "Iceberg source contract requires a V2/V3 main-branch PK-index writer"
+    );
+    if is_compaction
+        && ordinary.is_some_and(|ordinary| {
+            !ordinary.data_files.is_empty()
+                || !ordinary.delete_files.is_empty()
+                || !ordinary.overwrite_files.is_empty()
+        })
+    {
+        bail!("Iceberg source contract forbids mixing ordinary writes into compaction");
+    }
+    Ok(Some(IcebergSourceCommit {
+        table_uuid: table.metadata().uuid(),
+        contract,
+        kind: if is_compaction {
+            IcebergCommitKind::Compaction
+        } else {
+            IcebergCommitKind::Data
+        },
+    }))
+}
+
+fn validate_source_commit_table(
+    table: &Table,
+    target_branch: &str,
+    source_commit: Option<&IcebergSourceCommit>,
+) -> Result<()> {
+    let current = IcebergSourceContract::from_properties(
+        table.metadata().properties(),
+        table.metadata().current_schema(),
+    )?;
+    match (source_commit, current) {
+        (None, None) => Ok(()),
+        (Some(commit), Some(current)) => {
+            anyhow::ensure!(
+                target_branch == "main"
+                    && table.metadata().uuid() == commit.table_uuid
+                    && current == commit.contract,
+                "Iceberg source contract, table identity or branch changed after pre-commit"
+            );
+            Ok(())
+        }
+        _ => bail!("Iceberg source contract rollout conflicts with pending pre-commit state"),
+    }
+}
+
+fn validate_source_commit_snapshot(
+    source_commit: Option<&IcebergSourceCommit>,
+    properties: &HashMap<String, String>,
+) -> Result<()> {
+    if let Some(commit) = source_commit {
+        commit.validate_snapshot(properties)
+    } else {
+        anyhow::ensure!(
+            IcebergCommitKind::from_properties(properties)?.is_none(),
+            "legacy Iceberg pre-commit state unexpectedly matches a marked snapshot"
+        );
+        Ok(())
+    }
+}
+
+fn validate_source_commit_files(
+    kind: IcebergCommitKind,
+    added: &[DataFile],
+    overwritten: &[DataFile],
+) -> Result<()> {
+    for file in added.iter().chain(overwritten) {
+        anyhow::ensure!(
+            file.content_type() != DataContentType::EqualityDeletes,
+            "Iceberg source contract does not support equality deletes"
+        );
+    }
+    if kind == IcebergCommitKind::Data {
+        anyhow::ensure!(
+            overwritten
+                .iter()
+                .all(|file| file.content_type() != DataContentType::Data),
+            "Iceberg source contract data commits cannot remove old data files"
+        );
+    }
+    Ok(())
 }
 
 struct CompactionResolverDeleteAggregate {
@@ -1020,6 +1140,7 @@ fn combine_compaction_aggregate(
         schema_id: current_schema_id,
         partition_spec_id: current_partition_spec_id,
         format_version: None,
+        source_commit: None,
         data_files: vec![],
         delete_files: vec![],
         overwrite_files: vec![],
@@ -1099,6 +1220,7 @@ fn aggregate_reports(
         partition_spec_id,
         // Filled from the coordinator's current table after report ID validation.
         format_version: None,
+        source_commit: None,
         data_files,
         delete_files,
         overwrite_files,

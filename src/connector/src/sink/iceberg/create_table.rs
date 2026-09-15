@@ -37,7 +37,7 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use url::Url;
 
 use super::{IcebergConfig, PARTITION_DATA_ID_START, SinkError};
-use crate::connector_common::{IcebergCatalogKind, IcebergCatalogRuntime};
+use crate::connector_common::{IcebergCatalogKind, IcebergCatalogRuntime, IcebergSourceContract};
 use crate::sink::{Result, SinkParam};
 
 static ORDER_KEY_COLUMN_RE: LazyLock<Regex> =
@@ -89,6 +89,21 @@ pub async fn create_and_validate_table_impl(
 
     try_matches_arrow_schema(&sink_schema, &iceberg_arrow_schema)
         .map_err(|err| SinkError::Iceberg(anyhow!(err)))?;
+
+    if let Some(contract) = IcebergSourceContract::from_properties(
+        table.metadata().properties(),
+        table.metadata().current_schema(),
+    )
+    .map_err(SinkError::Config)?
+    {
+        contract
+            .validate_sink_key(
+                table.metadata().current_schema(),
+                config.enable_pk_index,
+                param.downstream_pk.as_deref(),
+            )
+            .map_err(SinkError::Config)?;
+    }
 
     Ok(table)
 }

@@ -31,6 +31,7 @@ pub use connection::{
     KafkaConnection, SCHEMA_REGISTRY_CONNECTION_TYPE, read_kafka_log_level, validate_connection,
 };
 pub use iceberg::compaction::{IcebergCommittedSnapshot, IcebergSinkCompactionUpdate};
+pub use iceberg::source_contract::{IcebergCommitKind, IcebergSourceCommit, IcebergSourceContract};
 
 mod iceberg;
 #[cfg(not(madsim))]
