@@ -31,7 +31,7 @@ async fn build_test_manager() -> Arc<IcebergCompactionManager> {
     opts.iceberg_compaction_report_timeout_sec = 30 * 60;
     let env = MetaSrvEnv::for_test_opts(opts, |_| ()).await;
     let cluster_ctl = Arc::new(
-        ClusterController::new(env.clone(), Duration::from_secs(1))
+        ClusterController::for_test(env.clone(), Duration::from_secs(1))
             .await
             .unwrap(),
     );

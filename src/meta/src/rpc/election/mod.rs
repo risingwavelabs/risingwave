@@ -15,6 +15,7 @@
 pub mod dummy;
 pub mod sql;
 
+use sea_orm::DatabaseTransaction;
 use serde::Serialize;
 use tokio::sync::watch::Receiver;
 
@@ -43,4 +44,8 @@ pub trait ElectionClient: Send + Sync + 'static {
     async fn leader(&self) -> MetaResult<Option<ElectionMember>>;
     async fn get_members(&self) -> MetaResult<Vec<ElectionMember>>;
     fn is_leader(&self) -> bool;
+
+    /// Fence a metadata transaction against leader handoff. The implementation must hold
+    /// the election lock until this transaction commits or rolls back.
+    async fn fence(&self, txn: &DatabaseTransaction) -> MetaResult<()>;
 }

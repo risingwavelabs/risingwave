@@ -17,8 +17,8 @@ use std::time::Duration;
 
 use anyhow::anyhow;
 use sea_orm::{
-    ConnectionTrait, DatabaseBackend, DatabaseConnection, FromQueryResult, Statement,
-    TransactionTrait, Value,
+    ConnectionTrait, DatabaseBackend, DatabaseConnection, DatabaseTransaction, FromQueryResult,
+    Statement, TransactionTrait, Value,
 };
 use thiserror_ext::AsReport;
 use tokio::sync::watch;
@@ -59,6 +59,9 @@ pub trait SqlDriver: Send + Sync + 'static {
 
     async fn try_campaign(&self, service_name: &str, id: &str, ttl: i64)
     -> MetaResult<ElectionRow>;
+    /// Renew only the existing, unexpired lease. A leader must never campaign for a new
+    /// term while services initialized under its previous term are still running.
+    async fn renew_leader(&self, service_name: &str, id: &str, ttl: i64) -> MetaResult<bool>;
     async fn leader(&self, service_name: &str) -> MetaResult<Option<ElectionRow>>;
 
     async fn candidates(&self, service_name: &str) -> MetaResult<Vec<ElectionRow>>;
@@ -66,6 +69,37 @@ pub trait SqlDriver: Send + Sync + 'static {
     async fn resign(&self, service_name: &str, id: &str) -> MetaResult<()>;
 
     async fn trim_candidates(&self, service_name: &str, timeout: i64) -> MetaResult<()>;
+}
+
+async fn renew_leader(
+    conn: &DatabaseConnection,
+    service_name: &str,
+    id: &str,
+    ttl: i64,
+) -> MetaResult<bool> {
+    let backend = conn.get_database_backend();
+    let (query, ttl) = match backend {
+        DatabaseBackend::Sqlite => (
+            "UPDATE election_leader SET last_heartbeat = CURRENT_TIMESTAMP WHERE service = $1 AND id = $2 AND DATETIME(last_heartbeat, '+' || $3 || ' seconds') >= CURRENT_TIMESTAMP",
+            Value::from(ttl),
+        ),
+        DatabaseBackend::Postgres => (
+            "UPDATE election_leader SET last_heartbeat = NOW() WHERE service = $1 AND id = $2 AND last_heartbeat >= NOW() - $3::INTERVAL",
+            Value::from(ttl.to_string()),
+        ),
+        DatabaseBackend::MySql => (
+            "UPDATE election_leader SET last_heartbeat = NOW() WHERE service = ? AND id = ? AND last_heartbeat >= NOW() - INTERVAL ? SECOND",
+            Value::from(ttl),
+        ),
+    };
+    let result = conn
+        .execute(Statement::from_sql_and_values(
+            backend,
+            query,
+            [Value::from(service_name), Value::from(id), ttl],
+        ))
+        .await?;
+    Ok(result.rows_affected() == 1)
 }
 
 pub trait SqlDriverCommon {
@@ -191,6 +225,10 @@ DO
         let row = row.ok_or_else(|| anyhow!("bad result from sqlite"))?;
 
         Ok(row)
+    }
+
+    async fn renew_leader(&self, service_name: &str, id: &str, ttl: i64) -> MetaResult<bool> {
+        renew_leader(&self.conn, service_name, id, ttl).await
     }
 
     async fn leader(&self, service_name: &str) -> MetaResult<Option<ElectionRow>> {
@@ -368,6 +406,10 @@ impl SqlDriver for MySqlDriver {
         Ok(row)
     }
 
+    async fn renew_leader(&self, service_name: &str, id: &str, ttl: i64) -> MetaResult<bool> {
+        renew_leader(&self.conn, service_name, id, ttl).await
+    }
+
     async fn leader(&self, service_name: &str) -> MetaResult<Option<ElectionRow>> {
         let query_result = self
             .conn
@@ -543,6 +585,10 @@ impl SqlDriver for PostgresDriver {
         Ok(row)
     }
 
+    async fn renew_leader(&self, service_name: &str, id: &str, ttl: i64) -> MetaResult<bool> {
+        renew_leader(&self.conn, service_name, id, ttl).await
+    }
+
     async fn leader(&self, service_name: &str) -> MetaResult<Option<ElectionRow>> {
         let query_result = self
             .conn
@@ -649,6 +695,10 @@ where
     }
 
     async fn run_once(&self, ttl: i64, stop: Receiver<()>) -> MetaResult<()> {
+        // Clear leadership on every exit, including errors and cancellation.
+        let _leadership_guard = scopeguard::guard((), |_| {
+            self.is_leader_sender.send_replace(false);
+        });
         let stop = stop.clone();
 
         let member_refresh_driver = self.driver.clone();
@@ -696,10 +746,28 @@ where
         loop {
             tokio::select! {
                     _ = election_ticker.tick() => {
-                        let election_row = self
-                            .driver
-                            .try_campaign(META_ELECTION_KEY, self.id.as_str(), ttl)
-                            .await?;
+                        let campaign = async {
+                            if is_leader {
+                                if !self.driver.renew_leader(META_ELECTION_KEY, &self.id, ttl).await? {
+                                    return Err(anyhow!("leader lease expired or changed owner").into());
+                                }
+                                Ok(ElectionRow { service: META_ELECTION_KEY.into(), id: self.id.clone() })
+                            } else {
+                                self.driver.try_campaign(META_ELECTION_KEY, &self.id, ttl).await
+                            }
+                        };
+                        let result = time::timeout(Duration::from_secs_f64(ttl as f64 / 2.0), campaign).await;
+                        let election_row = match result {
+                            Ok(Ok(row)) => row,
+                            result if is_leader => {
+                                // A leader must shut down, rather than retrying and acquiring
+                                // another term while its old services are still running.
+                                tracing::warn!(?result, "leader failed to renew election lease");
+                                break;
+                            }
+                            Ok(Err(err)) => return Err(err),
+                            Err(err) => return Err(anyhow!(err).into()),
+                        };
 
                         assert_eq!(election_row.service, META_ELECTION_KEY);
 
@@ -707,8 +775,6 @@ where
                             if !is_leader{
                                 self.is_leader_sender.send_replace(true);
                                 is_leader = true;
-                            } else {
-                                self.is_leader_sender.send_replace(false);
                             }
                         } else if is_leader {
                             tracing::warn!("leader has been changed to {}", election_row.id);
@@ -783,6 +849,37 @@ where
     fn is_leader(&self) -> bool {
         *self.is_leader_sender.borrow()
     }
+
+    async fn fence(&self, txn: &DatabaseTransaction) -> MetaResult<()> {
+        let backend = txn.get_database_backend();
+        let placeholder = if backend == DatabaseBackend::MySql {
+            "?"
+        } else {
+            "$1"
+        };
+        // A no-op UPDATE takes a write lock, including on SQLite (which has no FOR UPDATE).
+        // Campaign and resignation modify the same row, so neither can pass this transaction.
+        txn.execute(Statement::from_sql_and_values(
+            backend,
+            format!("UPDATE election_leader SET id = id WHERE service = {placeholder}"),
+            [Value::from(META_ELECTION_KEY)],
+        ))
+        .await?;
+        let row = txn
+            .query_one(Statement::from_sql_and_values(
+                backend,
+                format!("SELECT service, id FROM election_leader WHERE service = {placeholder}"),
+                [Value::from(META_ELECTION_KEY)],
+            ))
+            .await?;
+        let row = row
+            .map(|row| ElectionRow::from_query_result(&row, ""))
+            .transpose()?;
+        if !self.is_leader() || !row.is_some_and(|row| row.id == self.id) {
+            return Err(anyhow!("meta is no longer the elected leader").into());
+        }
+        Ok(())
+    }
 }
 
 #[cfg(not(madsim))]
@@ -819,6 +916,155 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_renewal_cannot_acquire_another_term() -> MetaResult<()> {
+        use super::SqlDriver;
+        use crate::rpc::election::META_ELECTION_KEY;
+
+        let conn = prepare_sqlite_env().await?;
+        let driver = SqliteDriver::new(conn.clone());
+        driver.try_campaign(META_ELECTION_KEY, "old", 60).await?;
+        assert!(driver.renew_leader(META_ELECTION_KEY, "old", 60).await?);
+        conn.execute(Statement::from_string(DbBackend::Sqlite,
+            "UPDATE election_leader SET last_heartbeat = DATETIME(CURRENT_TIMESTAMP, '-120 seconds')".to_owned())).await?;
+        assert!(!driver.renew_leader(META_ELECTION_KEY, "old", 60).await?);
+        driver.try_campaign(META_ELECTION_KEY, "new", 60).await?;
+        assert!(!driver.renew_leader(META_ELECTION_KEY, "old", 60).await?);
+        driver.resign(META_ELECTION_KEY, "new").await?;
+        assert!(!driver.renew_leader(META_ELECTION_KEY, "old", 60).await?);
+        assert!(driver.leader(META_ELECTION_KEY).await?.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_fence_serializes_handoff_with_commit() -> MetaResult<()> {
+        use sea_orm::{ConnectOptions, TransactionTrait};
+
+        use super::SqlDriver;
+        use crate::rpc::election::META_ELECTION_KEY;
+
+        let directory = tempfile::tempdir().unwrap();
+        let url = format!(
+            "sqlite://{}?mode=rwc",
+            directory.path().join("election.db").display()
+        );
+        let mut options = ConnectOptions::new(url);
+        options.max_connections(1);
+        let conn = Database::connect(options.clone()).await?;
+        let contender_conn = Database::connect(options).await?;
+        // Fail immediately on lock contention so the ordering assertion needs no sleeps.
+        contender_conn
+            .execute(Statement::from_string(
+                DbBackend::Sqlite,
+                "PRAGMA busy_timeout = 0".to_owned(),
+            ))
+            .await?;
+        let driver = SqliteDriver::new(conn.clone());
+        driver.init_database().await?;
+        driver.try_campaign(META_ELECTION_KEY, "old", 60).await?;
+        conn.execute(Statement::from_string(DbBackend::Sqlite,
+            "UPDATE election_leader SET last_heartbeat = DATETIME(CURRENT_TIMESTAMP, '-120 seconds')".to_owned())).await?;
+        let client = SqlBackendElectionClient::new("old".into(), driver);
+        client.is_leader_sender.send_replace(true);
+        let txn = conn.begin().await?;
+        client.fence(&txn).await?;
+        let contender = SqliteDriver::new(contender_conn);
+        assert!(
+            contender
+                .try_campaign(META_ELECTION_KEY, "new", 60)
+                .await
+                .is_err()
+        );
+        txn.commit().await?;
+        assert_eq!(
+            contender
+                .try_campaign(META_ELECTION_KEY, "new", 60)
+                .await?
+                .id,
+            "new"
+        );
+        let txn = conn.begin().await?;
+        assert!(client.fence(&txn).await.is_err());
+        txn.rollback().await?;
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_worker_mutations_fenced_after_handoff() -> MetaResult<()> {
+        use std::time::Duration;
+
+        use risingwave_pb::common::{HostAddress, WorkerType};
+
+        use super::SqlDriver;
+        use crate::controller::cluster::ClusterController;
+        use crate::manager::MetaSrvEnv;
+        use crate::rpc::election::META_ELECTION_KEY;
+
+        let env = MetaSrvEnv::for_test().await;
+        let driver = SqliteDriver::new(env.meta_store_ref().conn.clone());
+        driver.init_database().await?;
+        driver.try_campaign(META_ELECTION_KEY, "old", 60).await?;
+        let old = Arc::new(SqlBackendElectionClient::new("old".into(), driver.clone()));
+        old.is_leader_sender.send_replace(true);
+        let old_controller =
+            ClusterController::new(env.clone(), Duration::from_secs(60), old.clone()).await?;
+        let host = HostAddress {
+            host: "127.0.0.1".into(),
+            port: 1234,
+        };
+        let property = risingwave_pb::common::worker_node::Property {
+            is_streaming: true,
+            ..Default::default()
+        };
+        let worker_id = old_controller
+            .add_worker(
+                WorkerType::ComputeNode,
+                host.clone(),
+                property.clone(),
+                Default::default(),
+            )
+            .await?;
+        old_controller.activate_worker(worker_id).await?;
+
+        // Force handoff while the outgoing process still believes it is leader. Its checker
+        // may already have collected the worker, but has not begun the deletion transaction.
+        driver.resign(META_ELECTION_KEY, "old").await?;
+        driver.try_campaign(META_ELECTION_KEY, "new", 60).await?;
+        let new = Arc::new(SqlBackendElectionClient::new("new".into(), driver));
+        new.is_leader_sender.send_replace(true);
+        let new_controller = ClusterController::new(env, Duration::from_secs(60), new).await?;
+        let (snapshot, _rx) = new_controller
+            .subscribe_active_streaming_compute_nodes()
+            .await?;
+        assert_eq!(snapshot.len(), 1);
+        assert_eq!(snapshot[0].id, worker_id);
+
+        assert!(old.is_leader());
+        assert!(old_controller.delete_worker(host.clone()).await.is_err());
+        assert!(old_controller.activate_worker(worker_id).await.is_err());
+        assert!(
+            old_controller
+                .add_worker(
+                    WorkerType::ComputeNode,
+                    host.clone(),
+                    property.clone(),
+                    Default::default()
+                )
+                .await
+                .is_err()
+        );
+        let registered_id = new_controller
+            .add_worker(WorkerType::ComputeNode, host, property, Default::default())
+            .await?;
+        assert_eq!(registered_id, worker_id);
+        new_controller.activate_worker(registered_id).await?;
+        assert_eq!(
+            new_controller.list_active_streaming_workers().await?.len(),
+            1
+        );
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_sql_election() {
         let id = "test_id".to_owned();
         let conn = prepare_sqlite_env().await.unwrap();
@@ -836,7 +1082,8 @@ mod tests {
 
         let mut receiver = sql_election_client.subscribe();
         let client_ = sql_election_client.clone();
-        tokio::spawn(async move { client_.run_once(10, stop_receiver).await.unwrap() });
+        let handle =
+            tokio::spawn(async move { client_.run_once(10, stop_receiver).await.unwrap() });
 
         loop {
             receiver.changed().await.unwrap();
@@ -845,6 +1092,43 @@ mod tests {
                 break;
             }
         }
+        // A successful lease renewal must keep the published leader status true.
+        tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+        assert!(sql_election_client.is_leader());
+        stop_sender.send_replace(());
+        handle.await.unwrap();
+        assert!(!sql_election_client.is_leader());
+    }
+
+    #[tokio::test]
+    async fn test_leader_renewal_error_stops_election() -> MetaResult<()> {
+        let conn = prepare_sqlite_env().await?;
+        let client = Arc::new(SqlBackendElectionClient::new(
+            "leader".into(),
+            SqliteDriver::new(conn.clone()),
+        ));
+        let (_stop_tx, stop_rx) = watch::channel(());
+        let mut receiver = client.subscribe();
+        let task = tokio::spawn({
+            let client = client.clone();
+            async move { client.run_once(10, stop_rx).await }
+        });
+        while !*receiver.borrow_and_update() {
+            receiver.changed().await.unwrap();
+        }
+        conn.execute(Statement::from_string(
+            DbBackend::Sqlite,
+            "DROP TABLE election_leader".to_owned(),
+        ))
+        .await?;
+        // Returning Ok tells the server to shut down instead of retrying another election
+        // with the outgoing leader's controllers and background tasks still alive.
+        tokio::time::timeout(std::time::Duration::from_secs(5), task)
+            .await
+            .unwrap()
+            .unwrap()?;
+        assert!(!client.is_leader());
+        Ok(())
     }
 
     #[tokio::test]

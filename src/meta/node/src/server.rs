@@ -346,9 +346,13 @@ pub async fn start_service_as_election_leader(
     }
 
     let cluster_controller = Arc::new(
-        ClusterController::new(env.clone(), max_cluster_heartbeat_interval)
-            .await
-            .unwrap(),
+        ClusterController::new(
+            env.clone(),
+            max_cluster_heartbeat_interval,
+            election_client.clone(),
+        )
+        .await
+        .unwrap(),
     );
     let catalog_controller = Arc::new(CatalogController::new(env.clone()).await?);
     let metadata_manager = MetadataManager::new(cluster_controller, catalog_controller);

@@ -39,8 +39,8 @@ use risingwave_pb::common::{
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use sea_orm::ActiveValue::Set;
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, QuerySelect,
-    TransactionTrait,
+    ActiveModelTrait, ColumnTrait, DatabaseConnection, DatabaseTransaction, EntityTrait,
+    QueryFilter, QuerySelect, TransactionTrait,
 };
 use thiserror_ext::AsReport;
 use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
@@ -51,6 +51,7 @@ use tokio::task::JoinHandle;
 use crate::controller::utils::filter_workers_by_resource_group;
 use crate::manager::{LocalNotification, META_NODE_ID, MetaSrvEnv, WorkerKey};
 use crate::model::ClusterId;
+use crate::rpc::ElectionClientRef;
 use crate::{MetaError, MetaResult};
 
 pub type ClusterControllerRef = Arc<ClusterController>;
@@ -99,10 +100,26 @@ impl From<WorkerInfo> for PbWorkerNode {
 }
 
 impl ClusterController {
-    pub async fn new(env: MetaSrvEnv, max_heartbeat_interval: Duration) -> MetaResult<Self> {
+    pub async fn for_test(env: MetaSrvEnv, max_heartbeat_interval: Duration) -> MetaResult<Self> {
+        Self::new(
+            env,
+            max_heartbeat_interval,
+            Arc::new(crate::rpc::election::dummy::DummyElectionClient::new(
+                "test".into(),
+            )),
+        )
+        .await
+    }
+
+    pub async fn new(
+        env: MetaSrvEnv,
+        max_heartbeat_interval: Duration,
+        election_client: ElectionClientRef,
+    ) -> MetaResult<Self> {
         let inner = ClusterControllerInner::new(
             env.meta_store_ref().conn.clone(),
             env.opts.disable_automatic_parallelism_control,
+            election_client,
         )
         .await?;
         Ok(Self {
@@ -194,7 +211,63 @@ impl ClusterController {
     }
 
     pub async fn delete_worker(&self, host_address: HostAddress) -> MetaResult<WorkerNode> {
-        let worker = self.inner.write().await.delete_worker(host_address).await?;
+        let worker = self
+            .inner
+            .write()
+            .await
+            .delete_worker(
+                worker::Column::Host
+                    .eq(host_address.host)
+                    .and(worker::Column::Port.eq(host_address.port)),
+            )
+            .await?;
+        self.notify_worker_deleted(&worker).await?;
+        Ok(worker)
+    }
+
+    async fn delete_expired_worker(
+        &self,
+        worker_id: WorkerId,
+        now: u64,
+    ) -> MetaResult<Option<WorkerNode>> {
+        let mut inner = self.inner.write().await;
+        // A heartbeat or re-registration may have refreshed the TTL since collection.
+        if !inner
+            .worker_extra_info
+            .get(&worker_id)
+            .and_then(|info| info.expire_at)
+            .is_some_and(|expire_at| expire_at < now)
+        {
+            return Ok(None);
+        }
+        let worker = inner
+            .delete_worker(worker::Column::WorkerId.eq(worker_id))
+            .await?;
+        // Remove the endpoint's notification sender while registration/subscription is still
+        // excluded by the controller lock, before the endpoint can be reused by a new worker.
+        if matches!(
+            worker.r#type(),
+            PbWorkerType::Frontend
+                | PbWorkerType::ComputeNode
+                | PbWorkerType::Compactor
+                | PbWorkerType::RiseCtl
+        ) {
+            self.env
+                .notification_manager()
+                .delete_sender(worker.r#type(), WorkerKey(worker.host.clone().unwrap()));
+        }
+        drop(inner);
+        self.notify_worker_deleted(&worker).await?;
+        Ok(Some(worker))
+    }
+
+    async fn notify_worker_deleted(&self, worker: &WorkerNode) -> MetaResult<()> {
+        // Notify local subscribers.
+        // Note: Any type of workers may pin some hummock resource. So `HummockManager` expect this
+        // local notification.
+        self.env
+            .notification_manager()
+            .notify_local_subscribers(LocalNotification::WorkerNodeDeleted(worker.clone()));
 
         if worker.r#type() == PbWorkerType::ComputeNode || worker.r#type() == PbWorkerType::Frontend
         {
@@ -207,14 +280,7 @@ impl ClusterController {
         // Keep license manager in sync with the latest cluster resource.
         self.update_cluster_resource_for_license().await?;
 
-        // Notify local subscribers.
-        // Note: Any type of workers may pin some hummock resource. So `HummockManager` expect this
-        // local notification.
-        self.env
-            .notification_manager()
-            .notify_local_subscribers(LocalNotification::WorkerNodeDeleted(worker.clone()));
-
-        Ok(worker)
+        Ok(())
     }
 
     /// Invoked when it receives a heartbeat from a worker node.
@@ -268,49 +334,21 @@ impl ClusterController {
                     continue;
                 }
 
-                // 3. Delete expired workers.
-                let worker_infos = match Worker::find()
-                    .select_only()
-                    .column(worker::Column::WorkerId)
-                    .column(worker::Column::WorkerType)
-                    .column(worker::Column::Host)
-                    .column(worker::Column::Port)
-                    .filter(worker::Column::WorkerId.is_in(worker_to_delete.clone()))
-                    .into_tuple::<(WorkerId, WorkerType, String, i32)>()
-                    .all(&inner.db)
-                    .await
-                {
-                    Ok(keys) => keys,
-                    Err(err) => {
-                        tracing::warn!(error = %err.as_report(), "Failed to load expire worker info from db");
-                        continue;
-                    }
-                };
                 drop(inner);
 
-                for (worker_id, worker_type, host, port) in worker_infos {
-                    let host_addr = PbHostAddress { host, port };
-                    match cluster_controller.delete_worker(host_addr.clone()).await {
-                        Ok(_) => {
-                            tracing::warn!(
-                                %worker_id,
-                                ?host_addr,
-                                %now,
-                                "Deleted expired worker"
-                            );
-                            match worker_type {
-                                WorkerType::Frontend
-                                | WorkerType::ComputeNode
-                                | WorkerType::Compactor
-                                | WorkerType::RiseCtl => cluster_controller
-                                    .env
-                                    .notification_manager()
-                                    .delete_sender(worker_type.into(), WorkerKey(host_addr)),
-                                _ => {}
-                            };
+                // Delete by the collected identity, never by its reusable endpoint.
+                for worker_id in worker_to_delete {
+                    match cluster_controller
+                        .delete_expired_worker(worker_id, now)
+                        .await
+                    {
+                        Ok(Some(worker)) => {
+                            let host_addr = worker.host.clone().unwrap();
+                            tracing::warn!(%worker_id, ?host_addr, %now, "Deleted expired worker");
                         }
+                        Ok(None) => {}
                         Err(err) => {
-                            tracing::warn!(error = %err.as_report(), "Failed to delete expire worker from db");
+                            tracing::warn!(error = %err.as_report(), "Failed to delete expired worker from db");
                         }
                     }
                 }
@@ -491,6 +529,7 @@ fn meta_node_info(host: &str, started_at: Option<u64>) -> PbWorkerNode {
 
 pub struct ClusterControllerInner {
     db: DatabaseConnection,
+    election_client: ElectionClientRef,
     /// Record for tracking available machine ids, one is available.
     available_transactional_ids: VecDeque<TransactionId>,
     worker_extra_info: HashMap<WorkerId, WorkerExtraInfo>,
@@ -504,6 +543,7 @@ impl ClusterControllerInner {
     pub async fn new(
         db: DatabaseConnection,
         disable_automatic_parallelism_control: bool,
+        election_client: ElectionClientRef,
     ) -> MetaResult<Self> {
         let workers = Worker::find()
             .select_only()
@@ -527,10 +567,17 @@ impl ClusterControllerInner {
 
         Ok(Self {
             db,
+            election_client,
             available_transactional_ids,
             worker_extra_info,
             disable_automatic_parallelism_control,
         })
+    }
+
+    async fn begin_worker_transaction(&self) -> MetaResult<DatabaseTransaction> {
+        let txn = self.db.begin().await?;
+        self.election_client.fence(&txn).await?;
+        Ok(txn)
     }
 
     pub async fn count_worker_by_type(&self) -> MetaResult<HashMap<WorkerType, i64>> {
@@ -620,7 +667,7 @@ impl ClusterControllerInner {
         resource: PbResource,
         ttl: Duration,
     ) -> MetaResult<WorkerId> {
-        let txn = self.db.begin().await?;
+        let txn = self.begin_worker_transaction().await?;
 
         let worker = Worker::find()
             .filter(
@@ -826,41 +873,42 @@ impl ClusterControllerInner {
             ..Default::default()
         };
 
-        let worker = worker.update(&self.db).await?;
+        let txn = self.begin_worker_transaction().await?;
+        let worker = worker.update(&txn).await?;
         let worker_property = WorkerProperty::find_by_id(worker.worker_id)
-            .one(&self.db)
+            .one(&txn)
             .await?;
+        txn.commit().await?;
         Ok(WorkerInfo(worker, worker_property).into())
     }
 
-    pub async fn delete_worker(&mut self, host_addr: HostAddress) -> MetaResult<PbWorkerNode> {
+    async fn delete_worker(
+        &mut self,
+        identity: sea_orm::sea_query::SimpleExpr,
+    ) -> MetaResult<PbWorkerNode> {
+        let txn = self.begin_worker_transaction().await?;
         let worker = Worker::find()
-            .filter(
-                worker::Column::Host
-                    .eq(host_addr.host)
-                    .and(worker::Column::Port.eq(host_addr.port)),
-            )
+            .filter(identity)
             .find_also_related(WorkerProperty)
-            .one(&self.db)
+            .one(&txn)
             .await?;
         let Some((worker, property)) = worker else {
             return Err(MetaError::invalid_parameter("worker not found!"));
         };
 
-        let res = Worker::delete_by_id(worker.worker_id)
-            .exec(&self.db)
-            .await?;
+        let res = Worker::delete_by_id(worker.worker_id).exec(&txn).await?;
         if res.rows_affected == 0 {
             return Err(MetaError::invalid_parameter("worker not found!"));
         }
+        txn.commit().await?;
 
-        self.worker_extra_info.remove(&worker.worker_id).unwrap();
-        if let Some(txn_id) = &worker.transaction_id {
-            self.available_transactional_ids.push_back(*txn_id);
+        self.worker_extra_info.remove(&worker.worker_id);
+        if let Some(txn_id) = worker.transaction_id
+            && !self.available_transactional_ids.contains(&txn_id)
+        {
+            self.available_transactional_ids.push_back(txn_id);
         }
-        let worker: PbWorkerNode = WorkerInfo(worker, property).into();
-
-        Ok(worker)
+        Ok(WorkerInfo(worker, property).into())
     }
 
     pub fn heartbeat(&mut self, worker_id: WorkerId, ttl: Duration) -> MetaResult<()> {
@@ -988,9 +1036,106 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_expiration_rechecks_worker_identity_and_heartbeat() -> MetaResult<()> {
+        let env = MetaSrvEnv::for_test().await;
+        let controller = ClusterController::for_test(env, Duration::from_secs(60)).await?;
+        let host = mock_worker_hosts_for_test(1).pop().unwrap();
+        let old_id = controller
+            .add_worker(
+                PbWorkerType::ComputeNode,
+                host.clone(),
+                AddNodeProperty::default(),
+                PbResource::default(),
+            )
+            .await?;
+        let now = timestamp_now_sec();
+        controller
+            .inner
+            .write()
+            .await
+            .worker_extra_info
+            .get_mut(&old_id)
+            .unwrap()
+            .expire_at = Some(now - 1);
+
+        // The checker collected old_id, then a heartbeat arrived before deletion.
+        controller.heartbeat(old_id).await?;
+        assert!(
+            controller
+                .delete_expired_worker(old_id, now)
+                .await?
+                .is_none()
+        );
+        assert!(controller.get_worker_by_id(old_id).await?.is_some());
+
+        controller.delete_worker(host.clone()).await?;
+        let new_id = controller
+            .add_worker(
+                PbWorkerType::ComputeNode,
+                host.clone(),
+                AddNodeProperty::default(),
+                PbResource::default(),
+            )
+            .await?;
+        assert_ne!(old_id, new_id);
+        // Resume an old iteration after the endpoint has been reused.
+        assert!(
+            controller
+                .delete_expired_worker(old_id, now)
+                .await?
+                .is_none()
+        );
+        assert!(controller.get_worker_by_id(new_id).await?.is_some());
+
+        controller
+            .inner
+            .write()
+            .await
+            .worker_extra_info
+            .get_mut(&new_id)
+            .unwrap()
+            .expire_at = Some(now - 1);
+        assert_eq!(
+            controller
+                .delete_expired_worker(new_id, now)
+                .await?
+                .unwrap()
+                .id,
+            new_id
+        );
+        assert!(controller.get_worker_by_id(new_id).await?.is_none());
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn test_missing_worker_extra_info() -> MetaResult<()> {
+        let env = MetaSrvEnv::for_test().await;
+        let controller = ClusterController::for_test(env, Duration::from_secs(60)).await?;
+        let host = mock_worker_hosts_for_test(1).pop().unwrap();
+        let id = controller
+            .add_worker(
+                PbWorkerType::ComputeNode,
+                host.clone(),
+                AddNodeProperty::default(),
+                PbResource::default(),
+            )
+            .await?;
+        controller.inner.write().await.worker_extra_info.remove(&id);
+        assert_eq!(
+            controller
+                .list_workers(Some(WorkerType::ComputeNode), None)
+                .await?
+                .len(),
+            1
+        );
+        assert_eq!(controller.delete_worker(host).await?.id, id);
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_cluster_controller() -> MetaResult<()> {
         let env = MetaSrvEnv::for_test().await;
-        let cluster_ctl = ClusterController::new(env, Duration::from_secs(1)).await?;
+        let cluster_ctl = ClusterController::for_test(env, Duration::from_secs(1)).await?;
 
         let parallelism_num = 4_usize;
         let worker_count = 5_usize;
@@ -1078,7 +1223,7 @@ mod tests {
     #[tokio::test]
     async fn test_list_workers_include_meta_node() -> MetaResult<()> {
         let env = MetaSrvEnv::for_test().await;
-        let cluster_ctl = ClusterController::new(env, Duration::from_secs(1)).await?;
+        let cluster_ctl = ClusterController::for_test(env, Duration::from_secs(1)).await?;
 
         // List all workers should include the synthesized meta node.
         let workers = cluster_ctl.list_workers(None, None).await?;
@@ -1103,7 +1248,7 @@ mod tests {
     #[tokio::test]
     async fn test_heartbeat_does_not_update_resource() -> MetaResult<()> {
         let env = MetaSrvEnv::for_test().await;
-        let cluster_ctl = ClusterController::new(env.clone(), Duration::from_secs(1)).await?;
+        let cluster_ctl = ClusterController::for_test(env.clone(), Duration::from_secs(1)).await?;
 
         let host = HostAddress {
             host: "localhost".to_owned(),
@@ -1142,7 +1287,8 @@ mod tests {
             resource_v1
         );
 
-        let recovered_cluster_ctl = ClusterController::new(env, Duration::from_secs(1)).await?;
+        let recovered_cluster_ctl =
+            ClusterController::for_test(env, Duration::from_secs(1)).await?;
         let worker = recovered_cluster_ctl
             .get_worker_by_id(worker_id)
             .await?
@@ -1159,7 +1305,7 @@ mod tests {
     #[tokio::test]
     async fn test_cluster_controller_restores_worker_extra_info() -> MetaResult<()> {
         let env = MetaSrvEnv::for_test().await;
-        let cluster_ctl = ClusterController::new(env.clone(), Duration::from_secs(1)).await?;
+        let cluster_ctl = ClusterController::for_test(env.clone(), Duration::from_secs(1)).await?;
 
         let host = HostAddress {
             host: "localhost".to_owned(),
@@ -1191,7 +1337,8 @@ mod tests {
             .expect("worker should exist")
             .started_at;
 
-        let recovered_cluster_ctl = ClusterController::new(env, Duration::from_secs(1)).await?;
+        let recovered_cluster_ctl =
+            ClusterController::for_test(env, Duration::from_secs(1)).await?;
         let recovered_worker = recovered_cluster_ctl
             .get_worker_by_id(worker_id)
             .await?
@@ -1211,7 +1358,7 @@ mod tests {
     #[tokio::test]
     async fn test_reregister_compute_node_updates_resource() -> MetaResult<()> {
         let env = MetaSrvEnv::for_test().await;
-        let cluster_ctl = ClusterController::new(env, Duration::from_secs(1)).await?;
+        let cluster_ctl = ClusterController::for_test(env, Duration::from_secs(1)).await?;
 
         let host = HostAddress {
             host: "localhost".to_owned(),

@@ -70,4 +70,8 @@ impl ElectionClient for DummyElectionClient {
     fn is_leader(&self) -> bool {
         true
     }
+
+    async fn fence(&self, _txn: &sea_orm::DatabaseTransaction) -> MetaResult<()> {
+        Ok(())
+    }
 }

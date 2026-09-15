@@ -310,6 +310,10 @@ impl NotificationManager {
             tracing::warn!("notification manager exiting.");
             return;
         }
+        // Snapshot reconciliation replaces subscriptions even when no notifications are emitted.
+        core_guard
+            .local_senders
+            .retain(|sender| !sender.is_closed());
         core_guard.local_senders.push(sender);
     }
 
