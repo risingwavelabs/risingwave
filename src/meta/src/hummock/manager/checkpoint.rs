@@ -466,10 +466,10 @@ impl HummockManager {
         };
         assert!(new_checkpoint_id > old_checkpoint_id);
         let mut archive: Option<PbHummockVersionArchive> = None;
-        // `object_sizes` is used to calculate size of stale objects.
+        // Track objects from the old checkpoint and all subsequent deltas, together with their sizes.
+        // `version_object_size_map` and `get_object_ids` enumerate the same SST and vector objects;
+        // adding each delta's objects below preserves that key set without a separate object-id set.
         let mut object_sizes = version_object_size_map(old_checkpoint_version.as_ref());
-        // The set of object ids that once exist in any hummock version
-        let mut versions_object_ids: HashSet<_> = old_checkpoint_version.get_object_ids().collect();
         for version_delta in &version_deltas {
             // DO NOT REMOVE THIS LINE
             // This is to ensure that when adding new variant to `HummockObjectId`,
@@ -490,11 +490,10 @@ impl HummockManager {
                 )
             {
                 object_sizes.insert(object_id, file_size);
-                versions_object_ids.insert(object_id);
             }
         }
 
-        // Object ids that once exist in any hummock version but not exist in the latest hummock version
+        // Objects referenced by the current version or its change logs must remain live.
         let current_version_object_ids = current_version
             .get_object_ids()
             .chain(
@@ -502,21 +501,18 @@ impl HummockManager {
                     .values()
                     .flat_map(|l| l.get_object_ids()),
             )
-            .collect();
-        let removed_object_ids = &versions_object_ids - &current_version_object_ids;
-        let total_file_size = removed_object_ids
-            .iter()
-            .map(|t| {
-                object_sizes.get(t).copied().unwrap_or_else(|| {
-                    warn!(object_id = ?t, "unable to get size of removed object id");
-                    0
-                })
-            })
-            .sum::<u64>();
+            .collect::<HashSet<_>>();
+        // Stale objects = objects seen since the old checkpoint - objects still referenced.
+        // Consume the difference directly, retaining each object's size for accounting.
+        let removed_objects = object_sizes
+            .into_iter()
+            .filter(|(object_id, _)| !current_version_object_ids.contains(object_id));
         stale_objects.insert(current_version.id, {
+            let mut total_file_size = 0;
             let mut sst_ids = vec![];
             let mut vector_files = vec![];
-            for object_id in removed_object_ids {
+            for (object_id, file_size) in removed_objects {
+                total_file_size += file_size;
                 match object_id {
                     HummockObjectId::Sstable(sst_id) => sst_ids.push(sst_id),
                     HummockObjectId::VectorFile(vector_file_id) => {
