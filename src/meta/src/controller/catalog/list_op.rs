@@ -32,19 +32,19 @@ impl CatalogController {
         Ok(RefreshJob::find().all(&inner.db).await?)
     }
 
-    pub async fn get_refresh_job_state_by_table_id(
+    /// The refresh state of a table, or `None` if the table is not refreshable.
+    pub async fn get_refresh_job_state(
         &self,
         table_id: TableId,
-    ) -> MetaResult<RefreshState> {
+    ) -> MetaResult<Option<RefreshState>> {
         let inner = self.inner.read().await;
-        let (refresh_job_state,): (RefreshState,) = RefreshJob::find_by_id(table_id)
+        let state: Option<(RefreshState,)> = RefreshJob::find_by_id(table_id)
             .select_only()
             .select_column(refresh_job::Column::CurrentStatus)
             .into_tuple()
             .one(&inner.db)
-            .await?
-            .ok_or_else(|| MetaError::catalog_id_not_found("refresh_job", table_id))?;
-        Ok(refresh_job_state)
+            .await?;
+        Ok(state.map(|(state,)| state))
     }
 
     pub async fn list_refreshable_table_ids(&self) -> MetaResult<Vec<TableId>> {

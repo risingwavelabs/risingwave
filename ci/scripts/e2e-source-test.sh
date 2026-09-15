@@ -43,17 +43,21 @@ risedev slt './e2e_test/source_inline/fs/parquet_duplicate_field_names.slt'
 risedev slt './e2e_test/source_inline/fs/parquet_nested_smallint.slt'
 risedev slt './e2e_test/source_inline/refresh/refresh_table.slt'
 risedev slt './e2e_test/source_inline/refresh/refresh_table_delete_readd.slt'
+risedev slt './e2e_test/source_inline/refresh/refresh_table_recovery.slt.serial'
+risedev slt './e2e_test/source_inline/refresh/refresh_table_reschedule.slt'
 risedev slt './e2e_test/source_inline/vault/vault_secret_ddl.slt'
 
 echo "--- Run webhook source tests"
 sleep 5
 risedev slt 'e2e_test/webhook/webhook_source.slt'
 risedev slt 'e2e_test/webhook/websocket_ingest.slt'
+risedev slt './e2e_test/source_inline/refresh/refresh_table_restart_before.slt'
 
 risedev kill
 risedev dev ci-1cn-1fe-with-recovery
 sleep 20
 risedev slt 'e2e_test/webhook/webhook_source_recovery.slt'
+risedev slt './e2e_test/source_inline/refresh/refresh_table_restart_after.slt'
 
 echo "--- Kill cluster"
 risedev ci-kill

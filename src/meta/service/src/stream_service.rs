@@ -712,10 +712,7 @@ impl StreamManagerService for StreamServiceImpl {
 
         tracing::info!("Refreshing table with id: {}", req.table_id);
 
-        let response = self
-            .refresh_manager
-            .trigger_manual_refresh(req, self.env.shared_actor_infos())
-            .await?;
+        let response = self.refresh_manager.trigger_manual_refresh(req).await?;
 
         Ok(Response::new(response))
     }

@@ -67,7 +67,7 @@ use crate::model::{
 };
 use crate::stream::cdc::parallel_cdc_table_backfill_fragment;
 use crate::stream::{
-    GlobalActorIdGen, ReplaceJobSplitPlan, SourceManager, SplitAssignment,
+    GlobalActorIdGen, RefreshCycleActors, ReplaceJobSplitPlan, SourceManager, SplitAssignment,
     fill_snapshot_backfill_epoch,
 };
 use crate::{MetaError, MetaResult};
@@ -1462,9 +1462,28 @@ impl DatabaseCheckpointControl {
             Some(Command::Refresh {
                 table_id,
                 associated_source_id,
+                staging_table_id,
+                trigger_time,
             }) => {
                 let mutation = Some(Command::refresh_to_mutation(table_id, associated_source_id));
-                self.apply_simple_command(mutation, "Refresh")
+                let actors = RefreshCycleActors::from_fragments(
+                    self.database_info.job_fragment_infos(table_id.as_job_id()),
+                );
+                let (table_ids, node_actors) = self.collect_base_info();
+                (
+                    mutation,
+                    table_ids,
+                    None,
+                    node_actors,
+                    PostCollectCommand::RefreshStarted {
+                        table_id,
+                        database_id: self.database_info.database_id,
+                        associated_source_id,
+                        staging_table_id,
+                        trigger_time,
+                        actors,
+                    },
+                )
             }
 
             Some(Command::ListFinish {
@@ -1481,6 +1500,25 @@ impl DatabaseCheckpointControl {
             }) => {
                 let mutation = Some(Command::load_finish_to_mutation(associated_source_id));
                 self.apply_simple_command(mutation, "LoadFinish")
+            }
+
+            Some(Command::FinishRefresh {
+                table_id,
+                trigger_time,
+                aborted,
+            }) => {
+                let (table_ids, node_actors) = self.collect_base_info();
+                (
+                    None,
+                    table_ids,
+                    None,
+                    node_actors,
+                    PostCollectCommand::FinishRefresh {
+                        table_id,
+                        trigger_time,
+                        aborted,
+                    },
+                )
             }
 
             Some(Command::ResetSource { source_id }) => {
