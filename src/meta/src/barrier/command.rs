@@ -41,7 +41,7 @@ use risingwave_pb::stream_plan::sink_schema_change::Op as PbSinkSchemaChangeOp;
 use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
 use risingwave_pb::stream_plan::update_mutation::{DispatcherUpdate, MergeUpdate};
 use risingwave_pb::stream_plan::{
-    AddMutation, ConnectorPropsChangeMutation, Dispatcher, Dispatchers, DropSubscriptionsMutation,
+    AddMutation, ConnectorPropsChangeMutation, Dispatcher, DropSubscriptionsMutation,
     ListFinishMutation, LoadFinishMutation, PauseMutation, PbSinkAddColumnsOp, PbSinkDropColumnsOp,
     PbSinkSchemaChange, PbStreamNode, PbUpstreamSinkInfo, ResumeMutation,
     SourceChangeSplitMutation, StartFragmentBackfillMutation, StopMutation,
@@ -63,9 +63,9 @@ use crate::controller::utils::StreamingJobExtraInfo;
 use crate::hummock::NewTableFragmentInfo;
 use crate::manager::{StreamingJob, StreamingJobType};
 use crate::model::{
-    ActorId, ActorUpstreams, DispatcherId, FragmentActorDispatchers, FragmentDownstreamRelation,
-    FragmentId, FragmentReplaceUpstream, StreamActor, StreamActorWithDispatchers,
-    StreamJobActorsToCreate, StreamJobFragments, StreamJobFragmentsToCreate, SubscriptionId,
+    ActorId, ActorUpstreams, DispatcherId, FragmentDownstreamRelation, FragmentId,
+    FragmentReplaceUpstream, StreamActor, StreamActorWithDispatchers, StreamJobActorsToCreate,
+    StreamJobFragments, StreamJobFragmentsToCreate, SubscriptionId,
 };
 use crate::stream::{
     AutoRefreshSchemaSinkContext, ConnectorPropsChange, ExtendedFragmentBackfillOrder,
