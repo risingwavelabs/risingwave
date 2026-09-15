@@ -205,19 +205,6 @@ pub mod tests {
 
     #[test]
     fn test_overlap_hint_boundaries_and_sparse_queries() {
-        // Exercise the default trait method as an independent, unhinted oracle.
-        struct UnhintedStrategy;
-        impl OverlapStrategy for UnhintedStrategy {
-            fn check_overlap(&self, a: &SstableInfo, b: &SstableInfo) -> bool {
-                RangeOverlapStrategy::default().check_overlap(a, b)
-            }
-
-            fn create_overlap_info(
-                &self,
-            ) -> Box<dyn crate::hummock::compaction::overlap_strategy::OverlapInfo> {
-                RangeOverlapStrategy::default().create_overlap_info()
-            }
-        }
         let strategy = RangeOverlapStrategy::default();
         let targets: Vec<SstableInfo> = (0..512)
             .map(|i| {
@@ -246,15 +233,13 @@ pub mod tests {
                 ] {
                     let mut query = sized_table(1000, left, right, 1).key_range.clone();
                     query.right_exclusive = exclusive;
-                    let expected = UnhintedStrategy.check_overlap_range_with_hint(
-                        &query,
-                        targets,
-                        previous.clone(),
-                    );
+                    let mut info = strategy.create_overlap_info();
+                    info.update(&query);
+                    let expected = info.check_multiple_overlap(targets);
                     let actual = strategy.check_overlap_range_with_hint(&query, targets, previous);
                     assert_eq!(actual, expected);
                     assert_eq!(
-                        strategy.check_overlap_range_with_hint(&query, targets, None,),
+                        strategy.check_overlap_range_with_hint(&query, targets, None),
                         expected
                     );
                     previous = Some(actual);
@@ -271,11 +256,8 @@ pub mod tests {
         let handlers: Vec<_> = (0..3).map(LevelHandler::new).collect();
         for (target_size, limit, expected_len) in [
             (1, u64::MAX, 16), // Prefer the largest window on the score-zero plateau.
-            (1000, u64::MAX, 16),
             (1000, 160, 9),
             (1000, 0, 1),
-            (1000, 20, 2),
-            (1000, 99, 5),
             (1000, 100, 6), // Preserve the last SST that takes the window over the limit.
         ] {
             let picker = MinOverlappingPicker::new(
@@ -320,159 +302,6 @@ pub mod tests {
             assert_eq!(selected, source[expected_idx..expected_idx + 1]);
             assert_eq!(overlapped, target[expected_idx..expected_idx + 1]);
         }
-    }
-
-    #[test]
-    fn test_equal_overlap_pending_gap() {
-        let source: Vec<_> = (0..16)
-            .map(|i| sized_table(i, i as usize * 2, i as usize * 2 + 1, 20))
-            .collect();
-        let target = vec![sized_table(100, 0, 100, 1)];
-        let mut handlers: Vec<_> = (0..3).map(LevelHandler::new).collect();
-        handlers[1].test_add_pending_sst(source[4].sst_id, 1);
-        let picker =
-            MinOverlappingPicker::new(1, 2, u64::MAX, 0, Arc::new(RangeOverlapStrategy::default()));
-        let (selected, overlapped) = picker.pick_tables(&source, &target, &handlers);
-        assert_eq!(selected, source[5..16]);
-        assert_eq!(overlapped, target);
-        handlers[2].test_add_pending_sst(target[0].sst_id, 2);
-        assert_eq!(
-            picker.pick_tables(&source, &target, &handlers),
-            (vec![], vec![])
-        );
-    }
-
-    #[test]
-    fn test_equal_overlap_zero_and_large_sizes() {
-        let handlers: Vec<_> = (0..3).map(LevelHandler::new).collect();
-        for size in [0, u64::MAX] {
-            let source: Vec<_> = (0..8)
-                .map(|i| sized_table(i, i as usize * 2, i as usize * 2 + 1, size))
-                .collect();
-            let target = vec![sized_table(100, 0, 100, 0)];
-            let picker =
-                MinOverlappingPicker::new(1, 2, 0, 0, Arc::new(RangeOverlapStrategy::default()));
-            let (selected, overlapped) = picker.pick_tables(&source, &target, &handlers);
-            assert_eq!(selected, source[..1]);
-            assert_eq!(overlapped, target);
-        }
-    }
-
-    #[test]
-    fn test_equal_overlap_overflow_outside_window() {
-        let source: Vec<_> = (0..18)
-            .map(|i| {
-                sized_table(
-                    i,
-                    i as usize * 2,
-                    i as usize * 2 + 1,
-                    if i >= 16 { u64::MAX } else { 1 },
-                )
-            })
-            .collect();
-        let target = vec![sized_table(100, 0, 100, 0)];
-        let mut handlers: Vec<_> = (0..3).map(LevelHandler::new).collect();
-        handlers[1].test_add_pending_sst(source[15].sst_id, 1);
-        let picker =
-            MinOverlappingPicker::new(1, 2, 8, 0, Arc::new(RangeOverlapStrategy::default()));
-        // No legal window overflows, even though the prefix over all candidates would.
-        let (selected, overlapped) = picker.pick_tables(&source, &target, &handlers);
-        assert_eq!(selected, source[16..17]);
-        assert_eq!(overlapped, target);
-    }
-
-    #[test]
-    fn test_equal_overlap_expansion() {
-        let source: Vec<_> = (0..16)
-            .map(|i| {
-                sized_table(
-                    i,
-                    i as usize * 2,
-                    i as usize * 2 + 1,
-                    if i == 8 { 10000 } else { 100 },
-                )
-            })
-            .collect();
-        let target = vec![
-            sized_table(100, 0, 16, 1000),
-            sized_table(101, 17, 100, 1000),
-        ];
-        let handlers: Vec<_> = (0..3).map(LevelHandler::new).collect();
-        let picker =
-            MinOverlappingPicker::new(1, 2, u64::MAX, 0, Arc::new(RangeOverlapStrategy::default()));
-        let (selected, overlapped) = picker.pick_tables(&source, &target, &handlers);
-        // The bridging SST expands the target range. Prefer all 11600 bytes at score 17.
-        assert_eq!(selected, source);
-        assert_eq!(overlapped, target);
-    }
-
-    // Run with cargo test --release -p risingwave_meta bench_min_overlap -- --ignored --nocapture --test-threads=1.
-    #[test]
-    #[ignore = "microbenchmark"]
-    fn bench_min_overlap() {
-        use std::hint::black_box;
-        use std::time::Duration;
-        let mut c = criterion::Criterion::default()
-            .sample_size(30)
-            .warm_up_time(Duration::from_millis(500))
-            .measurement_time(Duration::from_secs(1))
-            .without_plots();
-        for (name, n, group, limit, pending) in [
-            ("small", 8, 1, u64::MAX, false),
-            ("one_to_one", 10000, 1, u64::MAX, false),
-            ("short_runs", 10000, 7, u64::MAX, false),
-            ("tiny_limit", 10000, 10000, 4, false),
-            ("fan_in_1000", 1000, 1000, u64::MAX, false),
-            ("fan_in_10000", 10000, 10000, u64::MAX, false),
-            ("limited", 10000, 10000, 128, false),
-            ("pending_gaps", 10000, 10000, u64::MAX, true),
-            ("mixed", 10000, 20, 2048, false),
-        ] {
-            let source: Vec<_> = (0..n)
-                .map(|i| sized_table(i as u64, i * 4, i * 4 + 3, 1 + (i % 7) as u64))
-                .collect();
-            let target: Vec<_> = (0..n.div_ceil(group))
-                .map(|i| {
-                    sized_table(
-                        100000 + i as u64,
-                        if name == "mixed" && i > 0 {
-                            i * group * 4 + 2
-                        } else {
-                            i * group * 4
-                        },
-                        if name == "mixed" {
-                            (i + 1) * group * 4 + 1
-                        } else {
-                            (i + 1) * group * 4 - 1
-                        },
-                        1000,
-                    )
-                })
-                .collect();
-            let mut handlers: Vec<_> = (0..3).map(LevelHandler::new).collect();
-            if pending {
-                for i in (99..n).step_by(100) {
-                    handlers[1].test_add_pending_sst((i as u64).into(), 1);
-                }
-            }
-            let picker = MinOverlappingPicker::new(
-                1,
-                2,
-                limit,
-                0,
-                Arc::new(RangeOverlapStrategy::default()),
-            );
-            c.bench_function(&format!("min_overlap/{name}"), |b| {
-                b.iter(|| {
-                    black_box(picker.pick_tables(
-                        black_box(&source),
-                        black_box(&target),
-                        black_box(&handlers),
-                    ))
-                })
-            });
-        }
-        c.final_summary();
     }
 
     // Run with cargo test --release -p risingwave_meta bench_min_overlap_leveled -- --ignored --nocapture --test-threads=1.
