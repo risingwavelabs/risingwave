@@ -940,40 +940,21 @@ impl PartialGraphRecoverer<'_> {
 
         let control_stream_manager = self.control_stream_manager();
         let mut builder = FragmentEdgeBuilder::empty();
-        builder.add_new_fragments(
-            database_jobs
-                .values()
-                .flat_map(|job| {
-                    let partial_graph_id = to_partial_graph_id(database_id, None);
-                    job.fragment_infos().map(move |info| {
-                        (
-                            info.fragment_id,
-                            EdgeBuilderFragmentInfo::from_inflight(
-                                info,
-                                partial_graph_id,
-                                control_stream_manager,
-                            ),
-                        )
-                    })
-                })
-                .chain(ongoing_snapshot_backfill_jobs.iter().flat_map(
-                    |(job_id, (fragments, ..))| {
-                        let partial_graph_id = to_partial_graph_id(database_id, Some(*job_id));
-                        fragments.values().map(move |fragment| {
-                            (
-                                fragment.fragment_id,
-                                EdgeBuilderFragmentInfo::from_inflight(
-                                    fragment,
-                                    partial_graph_id,
-                                    control_stream_manager,
-                                ),
-                            )
-                        })
-                    },
-                )),
-        );
+        builder.add_new_fragments(database_jobs.values().flat_map(|job| {
+            let partial_graph_id = to_partial_graph_id(database_id, None);
+            job.fragment_infos().map(move |info| {
+                (
+                    info.fragment_id,
+                    EdgeBuilderFragmentInfo::from_inflight(
+                        info,
+                        partial_graph_id,
+                        control_stream_manager,
+                    ),
+                )
+            })
+        }));
         let mut builder = builder.finish_fragments();
-        builder.add_relations(fragment_relations);
+        builder.add_relations(fragment_relations)?;
         let mut edges = builder.build();
 
         {
@@ -1052,20 +1033,6 @@ impl PartialGraphRecoverer<'_> {
         for (job_id, (info, upstream_table_ids, committed_epoch, snapshot_epoch)) in
             ongoing_snapshot_backfill_jobs
         {
-            let node_actors = edges.collect_actors_to_create(info.values().map(|fragment_infos| {
-                (
-                    fragment_infos.fragment_id,
-                    &fragment_infos.nodes,
-                    fragment_infos.actors.iter().map(move |(actor_id, actor)| {
-                        (
-                            stream_actors.get(actor_id).expect("should exist"),
-                            actor.worker_id,
-                        )
-                    }),
-                    vec![], // no subscribers for backfilling jobs,
-                )
-            }));
-
             let database_job_source_splits =
                 collect_source_splits(database_jobs.values().flatten(), source_splits);
             assert!(
@@ -1105,7 +1072,7 @@ impl PartialGraphRecoverer<'_> {
                 job_backfill_orders,
                 fragment_relations,
                 hummock_version_stats,
-                node_actors,
+                stream_actors,
                 mutation.clone(),
                 &term_id,
                 self,

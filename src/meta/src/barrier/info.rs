@@ -417,19 +417,6 @@ impl InflightStreamingJobInfo {
         self.fragment_infos.values()
     }
 
-    pub fn snapshot_backfill_actor_ids(
-        fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
-    ) -> impl Iterator<Item = ActorId> + '_ {
-        fragment_infos
-            .values()
-            .filter(|fragment| {
-                fragment
-                    .fragment_type_mask
-                    .contains(FragmentTypeFlag::SnapshotBackfillStreamScan)
-            })
-            .flat_map(|fragment| fragment.actors.keys().copied())
-    }
-
     pub fn tracking_progress_actor_ids(
         fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
     ) -> Vec<(ActorId, BackfillUpstreamType)> {
@@ -1188,13 +1175,13 @@ impl InflightDatabaseInfo {
 
     pub(super) fn build_edge(
         &self,
-        info: Option<(&CreateStreamingJobCommandInfo, bool)>,
+        info: Option<&CreateStreamingJobCommandInfo>,
         replace_job: Option<&ReplaceStreamJobPlan>,
         new_upstream_sink: Option<&UpstreamSinkInfo>,
         control_stream_manager: &ControlStreamManager,
         stream_actors: &HashMap<FragmentId, Vec<StreamActor>>,
         actor_location: &HashMap<ActorId, WorkerId>,
-    ) -> FragmentEdgeBuildResult {
+    ) -> MetaResult<FragmentEdgeBuildResult> {
         // `existing_fragment_ids` consists of
         //  - keys of `info.upstream_fragment_downstreams`, which are the `fragment_id` the upstream fragment of the newly created job
         //  - keys of `replace_job.upstream_fragment_downstreams`, which are the `fragment_id` of upstream fragment of replace_job,
@@ -1204,13 +1191,13 @@ impl InflightDatabaseInfo {
         //  - should contain the `fragment_id` of the downstream table.
         let existing_fragment_ids = info
             .into_iter()
-            .flat_map(|(info, _)| info.upstream_fragment_downstreams.keys())
+            .flat_map(|info| info.upstream_fragment_downstreams.keys())
             .chain(replace_job.into_iter().flat_map(|replace_job| {
                 replace_job
                     .upstream_fragment_downstreams
                     .keys()
                     .filter(|fragment_id| {
-                        info.map(|(info, _)| {
+                        info.map(|info| {
                             !info
                                 .stream_job_fragments
                                 .fragments
@@ -1229,11 +1216,8 @@ impl InflightDatabaseInfo {
         // Collect new fragments with their partial graph IDs
         let new_fragments = info
             .into_iter()
-            .flat_map(|(info, is_snapshot_backfill)| {
-                let partial_graph_id = to_partial_graph_id(
-                    self.database_id,
-                    is_snapshot_backfill.then_some(info.streaming_job.id()),
-                );
+            .flat_map(|info| {
+                let partial_graph_id = to_partial_graph_id(self.database_id, None);
                 info.stream_job_fragments
                     .fragments
                     .values()
@@ -1285,18 +1269,18 @@ impl InflightDatabaseInfo {
             )
         }));
         let mut builder = builder.finish_fragments();
-        if let Some((info, _)) = info {
-            builder.add_relations(&info.upstream_fragment_downstreams);
-            builder.add_relations(&info.stream_job_fragments.downstreams);
+        if let Some(info) = info {
+            builder.add_relations(&info.upstream_fragment_downstreams)?;
+            builder.add_relations(&info.stream_job_fragments.downstreams)?;
         }
         if let Some(replace_job) = replace_job {
-            builder.add_relations(&replace_job.upstream_fragment_downstreams);
-            builder.add_relations(&replace_job.new_fragments.downstreams);
+            builder.add_relations(&replace_job.upstream_fragment_downstreams)?;
+            builder.add_relations(&replace_job.new_fragments.downstreams)?;
         }
         if let Some(new_upstream_sink) = new_upstream_sink {
             let sink_fragment_id = new_upstream_sink.sink_fragment_id;
             let new_sink_downstream = &new_upstream_sink.new_sink_downstream;
-            builder.add_edge(sink_fragment_id, new_sink_downstream);
+            builder.add_edge(sink_fragment_id, new_sink_downstream)?;
         }
         if let Some(replace_job) = replace_job {
             for (fragment_id, fragment_replacement) in &replace_job.replace_upstream {
@@ -1311,7 +1295,7 @@ impl InflightDatabaseInfo {
                 }
             }
         }
-        builder.build()
+        Ok(builder.build())
     }
 
     /// Post-apply reschedule: remove actors that were marked for removal.

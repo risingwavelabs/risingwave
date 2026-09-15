@@ -44,7 +44,8 @@ use crate::executor::monitor::StreamingMetrics;
 use crate::executor::subtask::SubtaskHandle;
 use crate::executor::{
     Actor, ActorContext, ActorContextRef, DispatchExecutor, Execute, Executor, ExecutorInfo,
-    SnapshotBackfillExecutor, SyncLogStoreDispatchExecutor, TroublemakerExecutor, WrapperExecutor,
+    MergeExecutorInput, SnapshotBackfillExecutor, SyncLogStoreDispatchExecutor,
+    TroublemakerExecutor, WrapperExecutor,
 };
 use crate::from_proto::{MergeExecutorBuilder, create_executor};
 use crate::task::{
@@ -109,6 +110,30 @@ impl StreamActorManager {
         }
     }
 
+    async fn create_merge_executor_allow_empty_upstream(
+        &self,
+        stream_node: &StreamNode,
+        actor_context: &ActorContextRef,
+        local_barrier_manager: &LocalBarrierManager,
+    ) -> StreamResult<MergeExecutorInput> {
+        let info = Self::get_executor_info(
+            stream_node,
+            Self::get_executor_id(actor_context, stream_node),
+        );
+        let NodeBody::Merge(merge_node) = stream_node.get_node_body()? else {
+            bail!("expected Merge input, got {}", stream_node.get_identity());
+        };
+        MergeExecutorBuilder::new_input_allow_empty_upstream(
+            local_barrier_manager.clone(),
+            self.streaming_metrics.clone(),
+            actor_context.clone(),
+            info,
+            merge_node,
+            actor_context.config.developer.chunk_size,
+        )
+        .await
+    }
+
     async fn create_snapshot_backfill_node(
         &self,
         stream_node: &StreamNode,
@@ -120,25 +145,13 @@ impl StreamActorManager {
     ) -> StreamResult<Executor> {
         let [upstream_node, _]: &[_; 2] = stream_node.input.as_slice().try_into().unwrap();
         let chunk_size = actor_context.config.developer.chunk_size;
-
-        let upstream_info = Self::get_executor_info(
-            upstream_node,
-            Self::get_executor_id(actor_context, upstream_node),
-        );
-
-        let NodeBody::Merge(upstream_merge) = upstream_node.get_node_body()? else {
-            bail!("expect Merge as input of SnapshotBackfill");
-        };
-
-        let upstream = MergeExecutorBuilder::new_input(
-            local_barrier_manager.clone(),
-            self.streaming_metrics.clone(),
-            actor_context.clone(),
-            upstream_info,
-            upstream_merge,
-            chunk_size,
-        )
-        .await?;
+        let upstream = self
+            .create_merge_executor_allow_empty_upstream(
+                upstream_node,
+                actor_context,
+                local_barrier_manager,
+            )
+            .await?;
 
         let table_desc = node.get_table_desc()?;
 
@@ -162,8 +175,6 @@ impl StreamActorManager {
         let progress = local_barrier_manager.register_create_mview_progress(actor_context);
 
         let vnodes = vnode_bitmap.map(Arc::new);
-        let barrier_rx = local_barrier_manager.subscribe_barrier(actor_context.id);
-
         let upstream_table =
             BatchTable::new_partial(state_store.clone(), column_ids, vnodes.clone(), table_desc);
 
@@ -184,7 +195,6 @@ impl StreamActorManager {
             progress,
             chunk_size,
             node.rate_limit.into(),
-            barrier_rx,
             self.streaming_metrics.clone(),
             node.snapshot_backfill_epoch,
         )?
@@ -250,6 +260,44 @@ impl StreamActorManager {
                 )
                 .await
             })?
+        } else if matches!(
+            node.get_node_body().unwrap(),
+            NodeBody::IcebergWithPkIndexWriter(_)
+        ) {
+            // Compaction alternates between the normal and resolver inputs, so both merge
+            // executors must remain alive while temporarily disconnected.
+            let [first_merge_node, second_merge_node] = node.input.as_slice() else {
+                bail!("IcebergWithPkIndexWriter requires exactly two Merge inputs");
+            };
+            let merge_nodes = [first_merge_node, second_merge_node];
+            let mut input = Vec::with_capacity(merge_nodes.len());
+            for merge_node in merge_nodes {
+                let merge_input = self
+                    .create_merge_executor_allow_empty_upstream(
+                        merge_node,
+                        actor_context,
+                        local_barrier_manager,
+                    )
+                    .await?;
+                let merge_executor = merge_input.into_executor();
+                input.push(Self::wrap_executor(
+                    merge_executor,
+                    actor_context,
+                    has_stateful || is_stateful,
+                    subtasks,
+                ));
+            }
+            self.generate_executor_from_inputs(
+                fragment_id,
+                node,
+                env,
+                store,
+                actor_context,
+                vnode_bitmap,
+                local_barrier_manager,
+                input,
+            )
+            .await?
         } else {
             // Create the input executor before creating itself
             let mut input = Vec::with_capacity(node.input.iter().len());
