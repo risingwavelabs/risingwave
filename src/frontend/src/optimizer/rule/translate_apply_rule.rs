@@ -71,21 +71,22 @@ impl FallibleRule<Logical> for TranslateApplyRule {
         // First try to rewrite the left side of the apply.
         // TODO: remove the rewrite and always use the general way to calculate the domain
         //      after we support DAG.
-        let rewritten_left = Self::rewrite(
-            &left,
-            correlated_indices.clone(),
-            0,
-            &mut index_mapping,
-            &mut data_types,
-            &mut index,
-        )
-        .filter(|plan| {
-            // Rewriting removes Filter nodes, but a Scan can still contain a pushed-down
-            // impure predicate. Such a domain must share the outer evaluation as well.
-            let mut impurity = ImpureAnalyzer::default();
-            plan.visit_exprs_recursive(&mut impurity);
-            impurity.impure_expr_desc().is_none()
-        });
+        let rewritten_left = self
+            .rewrite(
+                &left,
+                correlated_indices.clone(),
+                0,
+                &mut index_mapping,
+                &mut data_types,
+                &mut index,
+            )
+            .filter(|plan| {
+                // Rewriting removes Filter nodes, but a Scan can still contain a pushed-down
+                // impure predicate. Such a domain must share the outer evaluation as well.
+                let mut impurity = ImpureAnalyzer::default();
+                plan.visit_exprs_recursive(&mut impurity);
+                impurity.impure_expr_desc().is_none()
+            });
         let domain: PlanRef = if let Some(rewritten_left) = rewritten_left {
             // This `LogicalProject` is used to make sure that after `LogicalApply`'s left was
             // rewritten, the new index of `correlated_index` is always at its position in
@@ -119,6 +120,17 @@ impl FallibleRule<Logical> for TranslateApplyRule {
                             format!(
                                 "correlated subquery would evaluate the impure outer expression ({expr}) more than once"
                             ),
+                            "Store the outer query result in a table before running this correlated subquery."
+                                .into(),
+                        )
+                        .into(),
+                    );
+                }
+                if Self::has_row_limit(&left) {
+                    return ApplyResult::Err(
+                        ErrorCode::NotSupported(
+                            "correlated subquery would evaluate an outer LIMIT or TopN more than once"
+                                .into(),
                             "Store the outer query result in a table before running this correlated subquery."
                                 .into(),
                         )
@@ -177,11 +189,22 @@ impl TranslateApplyRule {
         Box::new(TranslateApplyRule { enable_share_plan })
     }
 
+    fn has_row_limit(plan: &PlanRef) -> bool {
+        // Even pure plans can select different rows: LIMIT has no ordering guarantee,
+        // and TopN may have ties. Do not duplicate them without proving determinism.
+        plan.as_logical_limit().is_some()
+            || plan.as_logical_top_n().is_some()
+            || plan.inputs().iter().any(Self::has_row_limit)
+    }
+
     /// Rewrite `LogicalApply`'s left according to `correlated_indices`.
     ///
-    /// Assumption: only `LogicalJoin`, `LogicalScan`, `LogicalProject` and `LogicalFilter` are in
-    /// the left.
+    /// The rewritten domain may be a superset of the correlated keys. In particular, filters
+    /// and row limits can be removed, so that sampling is only evaluated on the outer side.
+    /// Only traverse projections and row limits when Share is unavailable; otherwise, share
+    /// the outer result instead of potentially expanding the domain to the entire input.
     fn rewrite(
+        &self,
         plan: &PlanRef,
         correlated_indices: Vec<usize>,
         offset: usize,
@@ -190,7 +213,7 @@ impl TranslateApplyRule {
         index: &mut usize,
     ) -> Option<PlanRef> {
         if let Some(join) = plan.as_logical_join() {
-            Self::rewrite_join(
+            self.rewrite_join(
                 join,
                 correlated_indices,
                 offset,
@@ -199,7 +222,7 @@ impl TranslateApplyRule {
                 index,
             )
         } else if let Some(apply) = plan.as_logical_apply() {
-            Self::rewrite_apply(
+            self.rewrite_apply(
                 apply,
                 correlated_indices,
                 offset,
@@ -217,7 +240,7 @@ impl TranslateApplyRule {
                 index,
             )
         } else if let Some(filter) = plan.as_logical_filter() {
-            Self::rewrite(
+            self.rewrite(
                 &filter.input(),
                 correlated_indices,
                 offset,
@@ -225,6 +248,47 @@ impl TranslateApplyRule {
                 data_types,
                 index,
             )
+        } else if self.enable_share_plan {
+            None
+        } else if let Some(limit) = plan.as_logical_limit() {
+            self.rewrite(
+                &limit.input(),
+                correlated_indices,
+                offset,
+                index_mapping,
+                data_types,
+                index,
+            )
+        } else if let Some(top_n) = plan.as_logical_top_n() {
+            self.rewrite(
+                &top_n.input(),
+                correlated_indices,
+                offset,
+                index_mapping,
+                data_types,
+                index,
+            )
+        } else if let Some(project) = plan.as_logical_project() {
+            // Only the correlated columns matter. An unused random() ordering expression
+            // must not prevent us from deriving the domain from the underlying scan.
+            let input_indices = correlated_indices
+                .iter()
+                .map(|&i| project.exprs()[i].as_input_ref().map(|r| r.index()))
+                .collect::<Option<Vec<_>>>()?;
+            let mut input_mapping =
+                ColIndexMapping::empty(project.input().schema().len(), index_mapping.target_size());
+            let rewritten = self.rewrite(
+                &project.input(),
+                input_indices.clone(),
+                0,
+                &mut input_mapping,
+                data_types,
+                index,
+            )?;
+            for (output, input) in correlated_indices.into_iter().zip(input_indices) {
+                index_mapping.put(output + offset, Some(input_mapping.map(input)));
+            }
+            Some(rewritten)
         } else {
             // TODO: better to return an error.
             None
@@ -232,6 +296,7 @@ impl TranslateApplyRule {
     }
 
     fn rewrite_join(
+        &self,
         join: &LogicalJoin,
         required_col_idx: Vec<usize>,
         mut offset: usize,
@@ -250,7 +315,7 @@ impl TranslateApplyRule {
                     indices.iter_mut().for_each(|index| *index -= left_len);
                     offset += left_len;
                 }
-                Self::rewrite(&plan, indices, offset, index_mapping, data_types, index)
+                self.rewrite(&plan, indices, offset, index_mapping, data_types, index)
             };
         match (left_idxs.is_empty(), right_idxs.is_empty()) {
             (true, false) => {
@@ -320,6 +385,7 @@ impl TranslateApplyRule {
     /// We use a top-down apply order to rewrite the apply, so that we don't need to handle operator like project and aggregation generated by the domain calculation.
     /// As a cost, we need to add a flag `translated` to the apply operator to remind `translate_apply_rule` that the apply has been translated.
     fn rewrite_apply(
+        &self,
         apply: &LogicalApply,
         required_col_idx: Vec<usize>,
         offset: usize,
@@ -342,7 +408,7 @@ impl TranslateApplyRule {
                 | JoinType::AsofInner
                 | JoinType::AsofLeftOuter => {
                     let plan = apply.left();
-                    Self::rewrite(&plan, left_idxs, offset, index_mapping, data_types, index)
+                    self.rewrite(&plan, left_idxs, offset, index_mapping, data_types, index)
                 }
                 JoinType::RightOuter
                 | JoinType::RightAnti

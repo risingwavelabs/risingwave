@@ -74,6 +74,19 @@ LEFT JOIN LATERAL (
 3 NULL
 NULL NULL
 
+# Broadening the domain must preserve duplicate and NULL outer keys.
+query III rowsort
+SELECT s.id,
+  (SELECT count(*) FROM correlated_aggregate_facts f WHERE f.id = s.id),
+  (SELECT sum(f.amount) FROM correlated_aggregate_facts f WHERE f.id = s.id)
+FROM (SELECT id FROM correlated_aggregate_outer ORDER BY id LIMIT 5) s;
+----
+1 2 30
+1 2 30
+2 1 5
+3 0 NULL
+NULL 0 NULL
+
 # The same rewrite must preserve streaming empty groups as matches appear and disappear.
 statement ok
 CREATE MATERIALIZED VIEW correlated_aggregate_mv AS
@@ -171,11 +184,80 @@ FROM (
 ----
 50 50 5 5
 
-# COUNT still needs general decorrelation. Reject repeated random sampling instead of wrong results.
-statement error correlated subquery would evaluate the impure outer expression
-SELECT s.id, (SELECT count(*) FROM correlated_aggregate_facts f WHERE f.id = s.id)
-FROM (SELECT id FROM correlated_aggregate_outer ORDER BY random() LIMIT 50) s;
+# COUNT still needs general decorrelation, but its domain can come from before sampling.
+query IIII
+SELECT count(*), count(n), min(n), max(n)
+FROM (
+  SELECT s.id,
+    (SELECT count(*) FROM correlated_aggregate_facts f WHERE f.id = s.id) AS n
+  FROM (SELECT id FROM correlated_aggregate_outer ORDER BY random() LIMIT 50) s
+) q;
+----
+50 50 2 2
 
+statement ok
+SET query_mode TO local;
+
+query IIII
+SELECT count(*), count(n), min(n), max(n)
+FROM (
+  SELECT s.id,
+    (SELECT count(*) FROM correlated_aggregate_facts f WHERE f.id = s.id) AS n
+  FROM (SELECT id FROM correlated_aggregate_outer ORDER BY random() LIMIT 50) s
+) q;
+----
+50 50 2 2
+
+statement ok
+SET query_mode TO distributed;
+
+# SUM uses aggregate pull-up while COUNT uses the broadened domain.
+query IIIII
+SELECT count(*), count(total), min(total), count(n), min(n)
+FROM (
+  SELECT s.id,
+    (SELECT sum(f.amount) FROM correlated_aggregate_facts f WHERE f.id = s.id) AS total,
+    (SELECT count(*) FROM correlated_aggregate_facts f WHERE f.id = s.id) AS n
+  FROM (SELECT id FROM correlated_aggregate_outer ORDER BY random() LIMIT 50) s
+) q;
+----
+50 50 5 50 2
+
+# Empty matches still produce COUNT = 0 rather than NULL.
+query IIII
+SELECT count(*), count(n), min(n), max(n)
+FROM (
+  SELECT s.id,
+    (SELECT count(*) FROM correlated_aggregate_facts f WHERE f.id = s.id AND f.amount < 0) AS n
+  FROM (SELECT id FROM correlated_aggregate_outer ORDER BY random() LIMIT 50) s
+) q;
+----
+50 50 0 0
+
+query IIII
+SELECT count(*), count(n), min(n), max(n)
+FROM (
+  SELECT s.id,
+    (SELECT count(*) FROM correlated_aggregate_facts f WHERE f.id = s.id) AS n
+  FROM (SELECT id FROM correlated_aggregate_outer LIMIT 50 OFFSET 10) s
+) q;
+----
+50 50 2 2
+
+query IB
+SELECT count(*),
+       bool_and(q.n IS NOT DISTINCT FROM CASE WHEN q.x = q.id THEN 2::bigint ELSE 4::bigint END)
+FROM (
+  SELECT s.x, u.id,
+    (SELECT count(*) FROM correlated_aggregate_facts f
+     WHERE f.id = s.x OR f.id = s.y OR f.id = u.id) AS n
+  FROM (SELECT id AS x, id AS y FROM correlated_aggregate_outer ORDER BY random() LIMIT 5) s
+  CROSS JOIN (SELECT id FROM correlated_aggregate_outer LIMIT 5) u
+) q;
+----
+25 t
+
+# Impure scan predicates cannot be independently re-evaluated.
 statement error correlated subquery would evaluate the impure outer expression
 SELECT s.id, (SELECT count(*) FROM correlated_aggregate_facts f WHERE f.id = s.id)
 FROM (SELECT id FROM correlated_aggregate_outer WHERE random() < 0.5 LIMIT 50) s;
@@ -193,6 +275,18 @@ FROM (
 ) q;
 ----
 50 2 2
+
+statement error correlated subquery would evaluate an outer LIMIT or TopN more than once
+SELECT s.max_id, (SELECT count(*) FROM correlated_aggregate_facts f WHERE f.id = s.max_id)
+FROM (SELECT max(id) AS max_id FROM (SELECT id FROM correlated_aggregate_outer LIMIT 5) t) s;
+
+statement error correlated subquery would evaluate an outer LIMIT or TopN more than once
+SELECT s.max_id, (SELECT count(*) FROM correlated_aggregate_outer t WHERE t.id = s.max_id)
+FROM (
+  SELECT max(id) AS max_id FROM (
+    SELECT id FROM correlated_aggregate_facts ORDER BY amount LIMIT 5
+  ) t
+) s;
 
 statement ok
 SET query_mode TO auto;
