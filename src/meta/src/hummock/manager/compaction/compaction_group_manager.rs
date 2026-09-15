@@ -476,7 +476,7 @@ impl HummockManager {
         version_stats: &HummockVersionStats,
         id_to_config: &BTreeMap<CompactionGroupId, CompactionGroup>,
     ) -> Vec<CompactionGroupStatistic> {
-        let mut infos = vec![];
+        let mut infos = Vec::with_capacity(current_version.levels.len());
         for group_id in current_version.levels.keys() {
             let compaction_group_config = id_to_config
                 .get(group_id)
@@ -484,8 +484,9 @@ impl HummockManager {
                 .clone();
             let mut group_info = CompactionGroupStatistic {
                 group_id: *group_id,
+                group_size: 0,
+                table_statistic: BTreeMap::new(),
                 compaction_group_config,
-                ..Default::default()
             };
 
             for table_id in current_version
