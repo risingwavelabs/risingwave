@@ -282,7 +282,7 @@ fn fail_pk_index_report(
     tracing::warn!(
         %error,
         task_id = %report.task_id,
-        sink_id = report.sink_id,
+        sink_id = %report.sink_id,
         "Failed to build {field_name}; failing pk-index compaction report"
     );
     report.pk_index_result = None;
@@ -300,7 +300,7 @@ pub(crate) fn build_iceberg_task_report(
 ) -> IcebergTaskReport {
     subscribe_iceberg_compaction_event_request::ReportTask {
         task_id,
-        sink_id,
+        sink_id: sink_id.into(),
         status: if error_message.is_some() {
             subscribe_iceberg_compaction_event_request::report_task::Status::Failed as i32
         } else {
@@ -338,7 +338,7 @@ pub(crate) fn send_iceberg_task_report(
             iceberg_operation = "report_task",
             error = %e.as_report(),
             task_id = %report_event.task_id,
-            sink_id = report_event.sink_id,
+            sink_id = %report_event.sink_id,
             "iceberg_compaction_task_report_send_failed",
         );
         return Err(report_event);

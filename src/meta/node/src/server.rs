@@ -458,7 +458,7 @@ pub async fn start_service_as_election_leader(
         env.meta_store_ref().conn.clone(),
         hummock_manager.clone(),
         metadata_manager.clone(),
-        iceberg_compaction_stat_tx,
+        iceberg_compaction_stat_tx.clone(),
         env.await_tree_reg().clone(),
     );
     tracing::info!("SinkCoordinatorManager started");
@@ -474,8 +474,10 @@ pub async fn start_service_as_election_leader(
         env.session_params_manager_impl_ref(),
     ));
 
-    let iceberg_pk_index_sink_manager =
-        IcebergPkIndexSinkManager::new(env.meta_store_ref().conn.clone());
+    let iceberg_pk_index_sink_manager = IcebergPkIndexSinkManager::new(
+        env.meta_store_ref().conn.clone(),
+        iceberg_compaction_stat_tx,
+    );
     tracing::info!("IcebergPkIndexSinkManager started");
 
     let iceberg_compactor_manager = Arc::new(IcebergCompactorManager::new());
@@ -486,6 +488,7 @@ pub async fn start_service_as_election_leader(
         metadata_manager.clone(),
         iceberg_compactor_manager.clone(),
         meta_metrics.clone(),
+        barrier_scheduler.clone(),
     );
 
     sub_tasks.push(IcebergCompactionManager::compaction_stat_loop(
