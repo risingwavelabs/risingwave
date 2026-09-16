@@ -256,6 +256,8 @@ message Barrier {
   map<string, string> tracing_context = 2;
   // The kind of the barrier.
   BarrierKind kind = 9;
+  // The configured interval for barriers in this database.
+  optional uint32 barrier_interval_ms = 10;
 }
 
 message Watermark {

@@ -135,6 +135,7 @@ mod tests {
             )),
             span: tracing::Span::none(),
             checkpoint: false,
+            barrier_interval_ms: 1000,
         };
 
         let result =
@@ -1182,6 +1183,9 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         } = rendered_info;
                         recoverer.inject_database_initial_barrier(
                             database_id,
+                            recovery_context.fragment_context.database_map[&database_id]
+                                .barrier_interval_ms
+                                .map(|interval| interval as u32),
                             job_infos,
                             &recovery_context.job_extra_info,
                             &mut state_table_committed_epochs,

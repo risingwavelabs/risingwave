@@ -44,6 +44,7 @@ fn new_fake_barrier(
     prev_epoch_fake_physical_time: &mut u64,
     pending_non_checkpoint_barriers: &mut Vec<u64>,
     kind: PbBarrierKind,
+    barrier_interval_ms: Option<u32>,
 ) -> BarrierInfo {
     let prev_epoch = TracedEpoch::new(Epoch::from_physical_time(*prev_epoch_fake_physical_time));
     *prev_epoch_fake_physical_time += 1;
@@ -67,6 +68,7 @@ fn new_fake_barrier(
         prev_epoch,
         curr_epoch,
         kind,
+        barrier_interval_ms,
     }
 }
 

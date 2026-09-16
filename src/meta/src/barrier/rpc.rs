@@ -619,6 +619,7 @@ impl PartialGraphRecoverer<'_> {
     pub(super) fn inject_database_initial_barrier(
         &mut self,
         database_id: DatabaseId,
+        barrier_interval_ms: Option<u32>,
         jobs: HashMap<JobId, HashMap<FragmentId, InflightFragmentInfo>>,
         job_extra_info: &HashMap<JobId, StreamingJobExtraInfo>,
         state_table_committed_epochs: &mut HashMap<TableId, u64>,
@@ -797,6 +798,7 @@ impl PartialGraphRecoverer<'_> {
             prev_epoch,
             curr_epoch,
             kind: BarrierKind::Initial,
+            barrier_interval_ms,
         };
 
         let mut ongoing_snapshot_backfill_jobs: HashMap<JobId, _> = HashMap::new();
@@ -1181,6 +1183,7 @@ impl PartialGraphRecoverer<'_> {
                 upstream_table_ids,
                 snapshot_epoch,
                 committed_epoch,
+                barrier_info.barrier_interval_ms,
                 job_backfill_orders,
                 hummock_version_stats,
                 mutation,
@@ -1309,6 +1312,7 @@ impl ControlStreamManager {
                         tracing_context: TracingContext::from_span(barrier_info.curr_epoch.span())
                             .to_protobuf(),
                         kind: barrier_info.kind.to_protobuf() as i32,
+                        barrier_interval_ms: barrier_info.barrier_interval_ms,
                     };
 
                     node.handle
