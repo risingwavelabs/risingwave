@@ -15,27 +15,296 @@
 use std::collections::{HashMap, HashSet};
 use std::mem::take;
 
-use risingwave_common::catalog::TableId;
+use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::id::JobId;
 use risingwave_common::util::epoch::Epoch;
-use risingwave_pb::id::{FragmentId, PartialGraphId};
-use risingwave_pb::stream_plan::PbSubscriptionUpstreamInfo;
+use risingwave_meta_model::WorkerId;
+use risingwave_pb::hummock::HummockVersionStats;
+use risingwave_pb::id::{ActorId, FragmentId, PartialGraphId};
+use risingwave_pb::source::ConnectorSplits;
 use risingwave_pb::stream_plan::barrier::PbBarrierKind;
+use risingwave_pb::stream_plan::barrier_mutation::Mutation;
+use risingwave_pb::stream_plan::{
+    AddMutation, PbSubscriptionUpstreamInfo, StartFragmentBackfillMutation,
+};
+use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgress;
 
 pub(crate) mod batch_refresh_job;
 pub(crate) mod creating_job;
-
 pub(crate) use batch_refresh_job::{
     BatchRefreshJobCheckpointControl, BatchRefreshJobTriggerContext, BatchRefreshLogicalFragments,
     BatchRefreshRenderResult,
 };
 pub(crate) use creating_job::CreatingStreamingJobControl;
 
+use crate::MetaResult;
+use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
+use crate::barrier::command::{CreateStreamingJobCommandInfo, ThrottleConfigMap};
+use crate::barrier::context::CreateIndependentStreamingJobCommandInfo;
 use crate::barrier::info::BarrierInfo;
 use crate::barrier::notifier::{CollectionNotifier, NotifierStarter};
-use crate::barrier::partial_graph::{CollectedBarrier, PartialGraphManager};
-use crate::barrier::{BackfillProgress, BarrierKind, FragmentBackfillProgress, TracedEpoch};
+use crate::barrier::partial_graph::{
+    CollectedBarrier, PartialGraphAdder, PartialGraphBarrierInfo, PartialGraphManager,
+};
+use crate::barrier::progress::CreateMviewProgressTracker;
+use crate::barrier::rpc::to_partial_graph_id;
+use crate::barrier::{
+    BackfillOrderState, BackfillProgress, BarrierKind, FragmentBackfillProgress, TracedEpoch,
+};
 use crate::controller::fragment::InflightFragmentInfo;
+use crate::manager::MetaOpts;
+use crate::model::StreamJobActorsToCreate;
+use crate::stream::ExtendedFragmentBackfillOrder;
+
+#[derive(Debug)]
+pub(crate) struct SnapshotPhaseControl {
+    /// Duplicated from `IndependentJobInfo` so snapshot-phase transitions are self-contained.
+    pub(crate) snapshot_epoch: u64,
+    pub(crate) prev_epoch_fake_physical_time: u64,
+    pub(crate) version_stats: HummockVersionStats,
+    pub(crate) create_mview_tracker: CreateMviewProgressTracker,
+    pub(crate) pending_non_checkpoint_barriers: Vec<u64>,
+}
+
+impl SnapshotPhaseControl {
+    pub(crate) fn for_new_job(
+        snapshot_epoch: u64,
+        fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
+        create_info: &CreateStreamingJobCommandInfo,
+        version_stats: &HummockVersionStats,
+    ) -> (Self, BarrierInfo) {
+        let job_id = create_info.stream_job_fragments.stream_job_id();
+        let backfill_order_state = BackfillOrderState::new(
+            &create_info.fragment_backfill_ordering,
+            fragment_infos,
+            create_info.locality_fragment_state_table_mapping.clone(),
+        );
+        let create_mview_tracker = CreateMviewProgressTracker::recover(
+            job_id,
+            fragment_infos,
+            backfill_order_state,
+            version_stats,
+        );
+        let mut snapshot = Self {
+            snapshot_epoch,
+            prev_epoch_fake_physical_time: 0,
+            version_stats: version_stats.clone(),
+            create_mview_tracker,
+            pending_non_checkpoint_barriers: vec![],
+        };
+        let initial_barrier_info = new_fake_barrier(
+            &mut snapshot.prev_epoch_fake_physical_time,
+            &mut snapshot.pending_non_checkpoint_barriers,
+            PbBarrierKind::Checkpoint,
+        );
+        assert!(snapshot.pending_non_checkpoint_barriers.is_empty());
+        (snapshot, initial_barrier_info)
+    }
+
+    pub(crate) fn for_recovery(
+        job_id: JobId,
+        snapshot_epoch: u64,
+        committed_epoch: u64,
+        fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
+        backfill_order: &ExtendedFragmentBackfillOrder,
+        version_stats: &HummockVersionStats,
+    ) -> (Self, BarrierInfo) {
+        let backfill_order_state =
+            BackfillOrderState::recover_from_fragment_infos(backfill_order, fragment_infos);
+        let create_mview_tracker = CreateMviewProgressTracker::recover(
+            job_id,
+            fragment_infos,
+            backfill_order_state,
+            version_stats,
+        );
+        let mut snapshot = Self {
+            snapshot_epoch,
+            prev_epoch_fake_physical_time: Epoch(committed_epoch).physical_time(),
+            version_stats: version_stats.clone(),
+            create_mview_tracker,
+            pending_non_checkpoint_barriers: vec![],
+        };
+        let initial_barrier_info = new_fake_barrier(
+            &mut snapshot.prev_epoch_fake_physical_time,
+            &mut snapshot.pending_non_checkpoint_barriers,
+            PbBarrierKind::Initial,
+        );
+        assert!(snapshot.pending_non_checkpoint_barriers.is_empty());
+        (snapshot, initial_barrier_info)
+    }
+
+    pub(crate) fn apply_progress<'a>(
+        &mut self,
+        progress: impl IntoIterator<Item = &'a CreateMviewProgress>,
+    ) -> bool {
+        for progress in progress {
+            self.create_mview_tracker
+                .apply_progress(progress, &self.version_stats);
+        }
+        self.create_mview_tracker.is_finished()
+    }
+
+    pub(crate) fn take_start_backfill_mutation(&mut self) -> Option<Mutation> {
+        let fragment_ids = self
+            .create_mview_tracker
+            .take_pending_backfill_nodes()
+            .collect::<Vec<_>>();
+        (!fragment_ids.is_empty()).then_some(Mutation::StartFragmentBackfill(
+            StartFragmentBackfillMutation { fragment_ids },
+        ))
+    }
+
+    pub(crate) fn next_fake_barrier(&mut self, upstream_kind: &BarrierKind) -> BarrierInfo {
+        let kind = match upstream_kind {
+            BarrierKind::Barrier => PbBarrierKind::Barrier,
+            BarrierKind::Checkpoint(_) => PbBarrierKind::Checkpoint,
+            BarrierKind::Initial => unreachable!("upstream new epoch should not be initial"),
+        };
+        new_fake_barrier(
+            &mut self.prev_epoch_fake_physical_time,
+            &mut self.pending_non_checkpoint_barriers,
+            kind,
+        )
+    }
+
+    pub(crate) fn finish_snapshot_barrier(&mut self) -> BarrierInfo {
+        self.pending_non_checkpoint_barriers
+            .push(self.snapshot_epoch);
+        BarrierInfo {
+            curr_epoch: TracedEpoch::new(Epoch(self.snapshot_epoch)),
+            prev_epoch: TracedEpoch::new(Epoch::from_physical_time(
+                self.prev_epoch_fake_physical_time,
+            )),
+            kind: BarrierKind::Checkpoint(take(&mut self.pending_non_checkpoint_barriers)),
+        }
+    }
+}
+
+pub(crate) fn build_initial_add_mutation(
+    fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
+    backfill_ordering: &ExtendedFragmentBackfillOrder,
+    actor_splits: HashMap<ActorId, ConnectorSplits>,
+) -> Mutation {
+    Mutation::Add(AddMutation {
+        actor_dispatchers: Default::default(),
+        added_actors: fragment_infos
+            .values()
+            .flat_map(|fragment| fragment.actors.keys().copied())
+            .collect(),
+        actor_splits,
+        pause: false,
+        subscriptions_to_add: Default::default(),
+        backfill_nodes_to_pause: get_nodes_with_backfill_dependencies(backfill_ordering)
+            .into_iter()
+            .collect(),
+        actor_cdc_table_snapshot_splits: None,
+        new_upstream_sinks: Default::default(),
+        dropped_actors: Default::default(),
+        sink_log_store_flush: Default::default(),
+    })
+}
+
+pub(crate) struct InitialPartialGraphRequest<'a> {
+    pub(crate) node_actors: &'a HashMap<WorkerId, HashSet<ActorId>>,
+    pub(crate) state_table_ids: &'a HashSet<TableId>,
+    pub(crate) barrier_info: BarrierInfo,
+    pub(crate) actors_to_create: StreamJobActorsToCreate,
+    pub(crate) mutation: Mutation,
+    pub(crate) notifier: Option<&'a mut NotifierStarter>,
+    pub(crate) create_info: CreateIndependentStreamingJobCommandInfo,
+}
+
+pub(crate) fn add_initial_partial_graph(
+    graph_adder: &mut PartialGraphAdder<'_>,
+    partial_graph_id: PartialGraphId,
+    request: InitialPartialGraphRequest<'_>,
+) -> MetaResult<()> {
+    let InitialPartialGraphRequest {
+        node_actors,
+        state_table_ids,
+        barrier_info,
+        actors_to_create,
+        mutation,
+        notifier,
+        create_info,
+    } = request;
+    graph_adder.manager().inject_barrier(
+        partial_graph_id,
+        Some(mutation),
+        node_actors,
+        state_table_ids.iter().copied(),
+        node_actors.keys().copied(),
+        Some(actors_to_create),
+        PartialGraphBarrierInfo::new(
+            create_info.into_post_collect(),
+            barrier_info,
+            notifier,
+            state_table_ids.clone(),
+        ),
+    )
+}
+
+fn snapshot_backfill_max_pending_barrier_num(opts: &MetaOpts) -> usize {
+    opts.in_flight_barrier_nums
+        .saturating_mul(opts.snapshot_backfill_barrier_amplification_factor.max(1))
+}
+
+#[derive(Debug)]
+pub(crate) struct IndependentJobInfo {
+    pub(crate) job_id: JobId,
+    pub(crate) partial_graph_id: PartialGraphId,
+    pub(crate) snapshot_backfill_upstream_tables: HashSet<TableId>,
+    pub(crate) snapshot_epoch: u64,
+    pub(crate) state_table_ids: HashSet<TableId>,
+}
+
+impl IndependentJobInfo {
+    pub(crate) fn from_fragment_infos<'a>(
+        database_id: DatabaseId,
+        job_id: JobId,
+        snapshot_epoch: u64,
+        snapshot_backfill_upstream_tables: HashSet<TableId>,
+        fragment_infos: impl IntoIterator<Item = &'a InflightFragmentInfo> + 'a,
+    ) -> Self {
+        Self {
+            job_id,
+            partial_graph_id: to_partial_graph_id(database_id, Some(job_id)),
+            snapshot_backfill_upstream_tables,
+            snapshot_epoch,
+            state_table_ids: InflightFragmentInfo::existing_table_ids(fragment_infos).collect(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(crate) struct IndependentJobControl {
+    /// Immutable metadata shared by every phase of the independent job.
+    pub(crate) info: IndependentJobInfo,
+    /// Latest checkpoint persisted through the common complete-barrier path.
+    pub(crate) max_committed_epoch: Option<u64>,
+}
+
+impl IndependentJobControl {
+    pub(crate) fn new(info: IndependentJobInfo) -> Self {
+        Self {
+            info,
+            max_committed_epoch: None,
+        }
+    }
+
+    pub(crate) fn recovered(info: IndependentJobInfo, committed_epoch: u64) -> Self {
+        Self {
+            info,
+            max_committed_epoch: Some(committed_epoch),
+        }
+    }
+
+    pub(crate) fn ack_completed(&mut self, completed_epoch: u64) {
+        if let Some(previous_epoch) = self.max_committed_epoch.replace(completed_epoch) {
+            assert!(completed_epoch > previous_epoch);
+        }
+    }
+}
 
 /// Build a fake `BarrierInfo` for independent partial-graph barriers.
 ///
@@ -119,6 +388,32 @@ impl IndependentCheckpointJob {
             Self::BatchRefresh(j) => j.pinned_upstream_tables(),
         }
     }
+
+    pub(crate) fn pre_apply_throttle(
+        &mut self,
+        config: &mut ThrottleConfigMap,
+    ) -> Option<Mutation> {
+        match self {
+            Self::CreatingStreamingJob(job) => job.pre_apply_throttle(config),
+            Self::BatchRefresh(job) => job.pre_apply_throttle(config),
+        }
+    }
+
+    pub(crate) fn on_new_upstream_barrier(
+        &mut self,
+        partial_graph_manager: &mut PartialGraphManager,
+        barrier_info: &BarrierInfo,
+        mutation: Option<(Mutation, Option<&mut NotifierStarter>)>,
+    ) -> MetaResult<()> {
+        match self {
+            Self::CreatingStreamingJob(job) => {
+                job.on_new_upstream_barrier(partial_graph_manager, barrier_info, mutation)
+            }
+            Self::BatchRefresh(job) => {
+                job.on_new_upstream_barrier(partial_graph_manager, barrier_info, mutation)
+            }
+        }
+    }
 }
 
 impl IndependentCheckpointJobStatus {
@@ -132,6 +427,14 @@ impl IndependentCheckpointJobStatus {
 }
 
 impl IndependentCheckpointJobControl {
+    pub(crate) fn resetting(pinned_upstream_tables: HashSet<TableId>) -> Self {
+        Self::Resetting {
+            pinned_upstream_tables,
+            subscriptions_to_drop: vec![],
+            notifiers: vec![],
+        }
+    }
+
     pub(crate) fn creating_streaming_job(
         job_id: JobId,
         partial_graph_id: PartialGraphId,
@@ -250,12 +553,16 @@ impl IndependentCheckpointJobControl {
                 status: IndependentCheckpointJobStatus::Ready,
                 job: IndependentCheckpointJob::CreatingStreamingJob(j),
                 ..
-            } => j.ack_completed(partial_graph_manager, epoch),
+            } => {
+                j.ack_completed(partial_graph_manager, epoch);
+            }
             Self::Running {
                 status: IndependentCheckpointJobStatus::Ready,
                 job: IndependentCheckpointJob::BatchRefresh(j),
                 ..
-            } => j.ack_completed(partial_graph_manager, epoch),
+            } => {
+                j.ack_completed(partial_graph_manager, epoch);
+            }
             Self::Running {
                 status: IndependentCheckpointJobStatus::Initial { .. },
                 ..

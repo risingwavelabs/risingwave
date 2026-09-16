@@ -40,8 +40,7 @@ use tracing::warn;
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::checkpoint::{
     BatchRefreshJobCheckpointControl, BatchRefreshLogicalFragments, CreatingStreamingJobControl,
-    DatabaseCheckpointControl, IndependentCheckpointJob, IndependentCheckpointJobControl,
-    IndependentCheckpointJobStatus,
+    DatabaseCheckpointControl, IndependentCheckpointJob,
 };
 use crate::barrier::command::{
     CreateStreamingJobCommandInfo, PostCollectCommand, ReschedulePlan, ThrottleConfigMap,
@@ -379,6 +378,33 @@ pub(super) fn render_actors(
         actor_location: result_actor_location,
     })
 }
+
+fn load_independent_job_fragments(
+    fragments: &StreamJobFragmentsToCreate,
+) -> HashMap<FragmentId, LoadedFragment> {
+    let job_id = fragments.stream_job_id();
+    fragments
+        .inner
+        .fragments
+        .iter()
+        .map(|(&fragment_id, fragment)| {
+            (
+                fragment_id,
+                LoadedFragment {
+                    fragment_id,
+                    job_id,
+                    fragment_type_mask: fragment.fragment_type_mask,
+                    distribution_type: fragment.distribution_type.into(),
+                    vnode_count: fragment.vnode_count(),
+                    nodes: fragment.nodes.clone(),
+                    state_table_ids: fragment.state_table_ids.iter().copied().collect(),
+                    parallelism: None,
+                },
+            )
+        })
+        .collect()
+}
+
 impl DatabaseCheckpointControl {
     fn take_pending_independent_job_subscriptions_to_drop(
         &mut self,
@@ -601,7 +627,6 @@ impl DatabaseCheckpointControl {
                         edges.actor_new_no_shuffle(),
                         &self.database_info,
                     )?;
-
                     let Entry::Vacant(entry) =
                         self.independent_checkpoint_job_controls.entry(job_id)
                     else {
@@ -725,43 +750,19 @@ impl DatabaseCheckpointControl {
 
                     // 2. Build BatchRefreshLogicalFragments (after epoch filling).
                     let logical = BatchRefreshLogicalFragments {
-                        fragments: info
-                            .stream_job_fragments
-                            .inner
-                            .fragments
-                            .iter()
-                            .map(|(&fid, fragment)| {
-                                (
-                                    fid,
-                                    LoadedFragment {
-                                        fragment_id: fid,
-                                        job_id,
-                                        fragment_type_mask: fragment.fragment_type_mask,
-                                        distribution_type: fragment.distribution_type.into(),
-                                        vnode_count: fragment.vnode_count(),
-                                        nodes: fragment.nodes.clone(),
-                                        state_table_ids: fragment
-                                            .state_table_ids
-                                            .iter()
-                                            .cloned()
-                                            .collect(),
-                                        parallelism: None,
-                                    },
-                                )
-                            })
-                            .collect(),
+                        fragments: load_independent_job_fragments(&info.stream_job_fragments),
                         downstreams: info.stream_job_fragments.downstreams.clone(),
                     };
 
                     // 3. Create BatchRefreshJobCheckpointControl. `new()` handles actor
                     //    rendering, the partial-graph initial barrier, and produces the
                     //    database-graph mutation for the main barrier.
-                    assert!(
-                        !self
-                            .independent_checkpoint_job_controls
-                            .contains_key(&job_id),
-                        "duplicated creating batch refresh job {job_id}"
-                    );
+                    let term_id = self.term_id.as_str();
+                    let Entry::Vacant(entry) =
+                        self.independent_checkpoint_job_controls.entry(job_id)
+                    else {
+                        panic!("duplicated creating batch refresh job {job_id}");
+                    };
 
                     let snapshot_backfill_info_clone = snapshot_backfill_info.clone();
 
@@ -791,6 +792,7 @@ impl DatabaseCheckpointControl {
                     });
 
                     let job = BatchRefreshJobCheckpointControl::new(
+                        entry,
                         database_id,
                         job_id,
                         CreateIndependentStreamingJobCommandInfo {
@@ -806,7 +808,7 @@ impl DatabaseCheckpointControl {
                         snapshot_backfill_upstream_tables,
                         snapshot_epoch,
                         hummock_version_stats,
-                        self.term_id(),
+                        term_id,
                         partial_graph_manager,
                         &logical,
                         worker_nodes,
@@ -819,16 +821,6 @@ impl DatabaseCheckpointControl {
                             fragment_infos.values().map(|f| (f, job_id)),
                         );
                     }
-
-                    self.independent_checkpoint_job_controls.insert(
-                        job_id,
-                        IndependentCheckpointJobControl::batch_refresh(
-                            job_id,
-                            to_partial_graph_id(self.database_id, Some(job_id)),
-                            IndependentCheckpointJobStatus::Initial { snapshot_epoch },
-                            job,
-                        ),
-                    );
 
                     // Register permanent subscriber (never unregistered until MV is dropped)
                     for upstream_mv_table_id in snapshot_backfill_info_clone
@@ -1799,35 +1791,16 @@ impl DatabaseCheckpointControl {
             let Some(job) = job.running_mut() else {
                 continue;
             };
-            match job {
-                IndependentCheckpointJob::CreatingStreamingJob(creating_job) => {
-                    if finished_snapshot_backfill_jobs.contains(job_id) {
-                        continue;
-                    }
-                    let throttle_mutation = throttle_config.as_mut().and_then(|config| {
-                        creating_job
-                            .pre_apply_throttle(config)
-                            .map(|mutation| (mutation, notifier.as_mut()))
-                    });
-                    creating_job.on_new_upstream_barrier(
-                        partial_graph_manager,
-                        &barrier_info,
-                        throttle_mutation,
-                    )?;
-                }
-                IndependentCheckpointJob::BatchRefresh(batch_refresh_job) => {
-                    let throttle_mutation = throttle_config.as_mut().and_then(|config| {
-                        batch_refresh_job
-                            .pre_apply_throttle(config)
-                            .map(|mutation| (mutation, notifier.as_mut()))
-                    });
-                    batch_refresh_job.on_new_upstream_barrier(
-                        partial_graph_manager,
-                        &barrier_info,
-                        throttle_mutation,
-                    )?;
-                }
+            if finished_snapshot_backfill_jobs.contains(job_id)
+                && matches!(job, IndependentCheckpointJob::CreatingStreamingJob(_))
+            {
+                continue;
             }
+            let throttle_mutation = throttle_config.as_mut().and_then(|config| {
+                job.pre_apply_throttle(config)
+                    .map(|mutation| (mutation, notifier.as_mut()))
+            });
+            job.on_new_upstream_barrier(partial_graph_manager, &barrier_info, throttle_mutation)?;
         }
 
         let database_notifier = if notify_database_graph {
