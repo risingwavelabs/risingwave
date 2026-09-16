@@ -40,6 +40,9 @@ WHERE t.name = 'refresh_paused_t';
 IDLE
 
 
+statement ok
+FLUSH;
+
 query II
 SELECT count(*), sum(cnt) FROM refresh_paused_mv;
 ----
@@ -59,6 +62,9 @@ WHERE t.name = 'refresh_paused_t';
 ----
 IDLE
 
+
+statement ok
+FLUSH;
 
 query II
 SELECT count(*), sum(cnt) FROM refresh_paused_mv;
