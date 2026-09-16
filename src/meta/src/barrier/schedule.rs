@@ -521,6 +521,19 @@ impl PeriodicBarriers {
         new_barrier
     }
 
+    /// Expected checkpoint period used by Hummock's throughput estimate.
+    pub(super) fn checkpoint_interval_secs(&self, database_id: DatabaseId) -> u64 {
+        let db_state = &self.databases[&database_id];
+        let interval = db_state
+            .barrier_interval
+            .unwrap_or(self.sys_barrier_interval);
+        let frequency = db_state
+            .checkpoint_frequency
+            .unwrap_or(self.sys_checkpoint_frequency);
+        // Keep the existing whole-second throughput estimate, with a one-second minimum.
+        (interval.as_millis() as u64 * frequency / 1000).max(1)
+    }
+
     /// Whether the barrier(checkpoint = true) should be injected.
     fn try_get_checkpoint(&self, database_id: DatabaseId) -> bool {
         let db_state = self.databases.get(&database_id).unwrap();
@@ -1154,6 +1167,7 @@ mod tests {
 
         let database_id = DatabaseId::new(1);
 
+        assert_eq!(periodic.checkpoint_interval_secs(database_id), 10);
         // Update existing database
         periodic.update_database_barrier(database_id, Some(2000), Some(15));
 
@@ -1162,6 +1176,7 @@ mod tests {
         assert_eq!(db_state.checkpoint_frequency, Some(15));
         assert_eq!(db_state.num_uncheckpointed_barrier, 0);
         assert!(!periodic.force_checkpoint_databases.contains(&database_id));
+        assert_eq!(periodic.checkpoint_interval_secs(database_id), 30);
 
         // Add new database
         periodic.update_database_barrier(DatabaseId::from(2), None, None);
@@ -1170,5 +1185,13 @@ mod tests {
         let db2_state = periodic.databases.get(&DatabaseId::from(2)).unwrap();
         assert_eq!(db2_state.barrier_interval, None);
         assert_eq!(db2_state.checkpoint_frequency, None);
+        assert_eq!(periodic.checkpoint_interval_secs(DatabaseId::from(2)), 10);
+
+        // Unset database options inherit system updates independently.
+        periodic.update_database_barrier(database_id, Some(2000), None);
+        periodic.set_sys_checkpoint_frequency(3);
+        periodic.set_sys_barrier_interval(Duration::from_millis(100));
+        assert_eq!(periodic.checkpoint_interval_secs(database_id), 6);
+        assert_eq!(periodic.checkpoint_interval_secs(DatabaseId::from(2)), 1);
     }
 }

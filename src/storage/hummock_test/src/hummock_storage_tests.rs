@@ -2765,6 +2765,7 @@ async fn test_commit_multi_epoch() {
                         vector_index_delta: Default::default(),
                         tables_to_commit,
                         truncate_tables: Default::default(),
+                        table_checkpoint_secs: Default::default(),
                     })
                     .await
                     .unwrap();
@@ -3091,6 +3092,7 @@ async fn test_commit_with_large_size() {
                         vector_index_delta: Default::default(),
                         tables_to_commit,
                         truncate_tables: Default::default(),
+                        table_checkpoint_secs: Default::default(),
                     })
                     .await
                     .unwrap();
@@ -3226,6 +3228,7 @@ async fn test_commit_with_truncate_tables() {
                     vector_index_delta: Default::default(),
                     tables_to_commit,
                     truncate_tables,
+                    table_checkpoint_secs: Default::default(),
                 })
                 .await
                 .unwrap();

@@ -64,6 +64,10 @@ pub struct CommitEpochInfo {
     /// `table_id` -> `committed_epoch`
     pub tables_to_commit: HashMap<TableId, u64>,
 
+    /// Effective configured checkpoint period for each table's database, in seconds.
+    /// Callers without database scheduling information use the system defaults.
+    pub table_checkpoint_secs: HashMap<TableId, u64>,
+
     pub truncate_tables: HashSet<TableId>,
 }
 
@@ -79,6 +83,7 @@ impl HummockManager {
             change_log_delta,
             vector_index_delta,
             tables_to_commit,
+            table_checkpoint_secs,
             truncate_tables,
         } = commit_info;
         let mut versioning_guard = self
@@ -355,8 +360,13 @@ impl HummockManager {
         self.gc_manager
             .add_may_delete_object_ids(may_delete_object_ids.into_iter());
 
-        if !self.env.opts.compaction_deterministic_test && !table_stats_change.is_empty() {
-            self.collect_table_write_throughput(table_stats_change)
+        if !self.env.opts.compaction_deterministic_test {
+            // A successful empty checkpoint observes zero throughput. Tables whose commits
+            // are paused are absent from tables_to_commit and receive no synthetic samples.
+            for &table_id in tables_to_commit.keys() {
+                table_stats_change.entry(table_id).or_default();
+            }
+            self.collect_table_write_throughput(table_stats_change, &table_checkpoint_secs)
                 .await;
         }
         if !modified_compaction_groups.is_empty() {
@@ -370,10 +380,14 @@ impl HummockManager {
         Ok(())
     }
 
-    async fn collect_table_write_throughput(&self, table_stats: PbTableStatsMap) {
+    async fn collect_table_write_throughput(
+        &self,
+        table_stats: PbTableStatsMap,
+        table_checkpoint_secs: &HashMap<TableId, u64>,
+    ) {
         let params = self.env.system_params_reader().await;
         let barrier_interval_ms = params.barrier_interval_ms() as u64;
-        let checkpoint_secs = std::cmp::max(
+        let default_checkpoint_secs = std::cmp::max(
             1,
             params.checkpoint_frequency() * barrier_interval_ms / 1000,
         );
@@ -383,10 +397,19 @@ impl HummockManager {
         let timestamp = chrono::Utc::now().timestamp();
 
         for (table_id, stat) in table_stats {
+            let checkpoint_secs = table_checkpoint_secs
+                .get(&table_id)
+                .copied()
+                .unwrap_or(default_checkpoint_secs)
+                .max(1);
             let throughput = ((stat.total_value_size + stat.total_key_size) as f64
                 / checkpoint_secs as f64) as u64;
-            table_throughput_statistic_manager
-                .add_table_throughput_with_ts(table_id, throughput, timestamp);
+            table_throughput_statistic_manager.add_table_throughput_with_ts(
+                table_id,
+                throughput,
+                timestamp,
+                checkpoint_secs as i64,
+            );
         }
     }
 
