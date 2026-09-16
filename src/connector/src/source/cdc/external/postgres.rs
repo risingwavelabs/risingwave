@@ -454,8 +454,7 @@ impl PostgresExternalTableReader {
         }
 
         let table = Self::get_normalized_table_name(table_name);
-        let required_order =
-            Self::get_order_key_with_collation(primary_keys, binary_collated_columns);
+        let required_order = Self::get_order_key(primary_keys, binary_collated_columns);
         Err(anyhow::anyhow!(
             "PostgreSQL CDC TEXT/VARCHAR primary-key ordering requires a valid, ready, \
              non-partial B-tree index whose leading keys are ({required_order}), but table \
@@ -624,7 +623,7 @@ impl PostgresExternalTableReader {
         primary_keys: Vec<String>,
         scan_limit: u32,
     ) {
-        let order_key = self.get_order_key(&primary_keys);
+        let order_key = Self::get_order_key(&primary_keys, &self.binary_collated_pk_columns);
         let client = self.client.lock().await;
         client.execute("set time zone '+00:00'", &[]).await?;
 
@@ -639,12 +638,13 @@ impl PostgresExternalTableReader {
                         .map(|i| self.rw_schema.fields[*i].name.clone())
                         .collect_vec();
 
-                    let order_key = self.get_order_key(&primary_keys);
+                    let order_key =
+                        Self::get_order_key(&primary_keys, &self.binary_collated_pk_columns);
                     let scan_sql = format!(
                         "SELECT {} FROM {} WHERE {} ORDER BY {} LIMIT {scan_limit}",
                         self.field_names,
                         Self::get_normalized_table_name(&table_name),
-                        self.filter_expression(&primary_keys),
+                        Self::filter_expression(&primary_keys, &self.binary_collated_pk_columns),
                         order_key,
                     );
                     client.prepare(&scan_sql).await?
@@ -689,14 +689,7 @@ impl PostgresExternalTableReader {
     }
 
     // row filter expression: (v1, v2, v3) > ($1, $2, $3)
-    fn filter_expression(&self, columns: &[String]) -> String {
-        Self::filter_expression_with_collation(columns, &self.binary_collated_pk_columns)
-    }
-
-    fn filter_expression_with_collation(
-        columns: &[String],
-        binary_collated_columns: &HashSet<String>,
-    ) -> String {
+    fn filter_expression(columns: &[String], binary_collated_columns: &HashSet<String>) -> String {
         let mut col_expr = String::new();
         let mut arg_expr = String::new();
         for (i, column) in columns.iter().enumerate() {
@@ -704,7 +697,7 @@ impl PostgresExternalTableReader {
                 col_expr.push_str(", ");
                 arg_expr.push_str(", ");
             }
-            col_expr.push_str(&Self::ordering_column_expression_with_collation(
+            col_expr.push_str(&Self::ordering_column_expression(
                 column,
                 binary_collated_columns,
             ));
@@ -715,20 +708,6 @@ impl PostgresExternalTableReader {
 
     // row filter expression: (v1, v2, v3) >= ($1, $2, $3) AND (v1, v2, v3) < ($1, $2, $3)
     fn split_filter_expression(
-        &self,
-        columns: &[String],
-        is_first_split: bool,
-        is_last_split: bool,
-    ) -> String {
-        Self::split_filter_expression_with_collation(
-            columns,
-            is_first_split,
-            is_last_split,
-            &self.binary_collated_pk_columns,
-        )
-    }
-
-    fn split_filter_expression_with_collation(
         columns: &[String],
         is_first_split: bool,
         is_last_split: bool,
@@ -745,7 +724,7 @@ impl PostgresExternalTableReader {
                     left_col_expr.push_str(", ");
                     left_arg_expr.push_str(", ");
                 }
-                left_col_expr.push_str(&Self::ordering_column_expression_with_collation(
+                left_col_expr.push_str(&Self::ordering_column_expression(
                     column,
                     binary_collated_columns,
                 ));
@@ -759,7 +738,7 @@ impl PostgresExternalTableReader {
                     right_col_expr.push_str(", ");
                     right_arg_expr.push_str(", ");
                 }
-                right_col_expr.push_str(&Self::ordering_column_expression_with_collation(
+                right_col_expr.push_str(&Self::ordering_column_expression(
                     column,
                     binary_collated_columns,
                 ));
@@ -781,19 +760,10 @@ impl PostgresExternalTableReader {
         }
     }
 
-    fn get_order_key(&self, primary_keys: &[String]) -> String {
-        Self::get_order_key_with_collation(primary_keys, &self.binary_collated_pk_columns)
-    }
-
-    fn get_order_key_with_collation(
-        primary_keys: &[String],
-        binary_collated_columns: &HashSet<String>,
-    ) -> String {
+    fn get_order_key(primary_keys: &[String], binary_collated_columns: &HashSet<String>) -> String {
         primary_keys
             .iter()
-            .map(|column| {
-                Self::ordering_column_expression_with_collation(column, binary_collated_columns)
-            })
+            .map(|column| Self::ordering_column_expression(column, binary_collated_columns))
             .join(",")
     }
 
@@ -801,11 +771,7 @@ impl PostgresExternalTableReader {
         format!("\"{}\"", column.replace('"', "\"\""))
     }
 
-    fn ordering_column_expression(&self, column: &str) -> String {
-        Self::ordering_column_expression_with_collation(column, &self.binary_collated_pk_columns)
-    }
-
-    fn ordering_column_expression_with_collation(
+    fn ordering_column_expression(
         column: &str,
         binary_collated_columns: &HashSet<String>,
     ) -> String {
@@ -821,7 +787,8 @@ impl PostgresExternalTableReader {
         &self,
         split_column: &Field,
     ) -> ConnectorResult<Option<(ScalarImpl, ScalarImpl)>> {
-        let split_column_expr = self.ordering_column_expression(&split_column.name);
+        let split_column_expr =
+            Self::ordering_column_expression(&split_column.name, &self.binary_collated_pk_columns);
         let sql = format!(
             "SELECT MIN({}), MAX({}) FROM {}",
             split_column_expr,
@@ -860,7 +827,8 @@ impl PostgresExternalTableReader {
         max_split_size: u64,
         split_column: &Field,
     ) -> ConnectorResult<Option<Datum>> {
-        let split_column_expr = self.ordering_column_expression(&split_column.name);
+        let split_column_expr =
+            Self::ordering_column_expression(&split_column.name, &self.binary_collated_pk_columns);
         let sql = format!(
             "WITH t as (SELECT {} FROM {} WHERE {} >= $1 ORDER BY {} ASC LIMIT {}) SELECT CASE WHEN MAX({}) < $2 THEN MAX({}) ELSE NULL END FROM t",
             Self::quote_column(&split_column.name),
@@ -908,7 +876,8 @@ impl PostgresExternalTableReader {
         max_value: &ScalarImpl,
         split_column: &Field,
     ) -> ConnectorResult<Option<Datum>> {
-        let split_column_expr = self.ordering_column_expression(&split_column.name);
+        let split_column_expr =
+            Self::ordering_column_expression(&split_column.name, &self.binary_collated_pk_columns);
         let sql = format!(
             "SELECT MIN({}) FROM {} WHERE {} > $1 AND {} <$2",
             split_column_expr,
@@ -979,7 +948,12 @@ impl PostgresExternalTableReader {
                 "SELECT {} FROM {} WHERE {}",
                 self.field_names,
                 Self::get_normalized_table_name(&table_name),
-                self.split_filter_expression(&split_column_names, is_first_split, is_last_split),
+                Self::split_filter_expression(
+                    &split_column_names,
+                    is_first_split,
+                    is_last_split,
+                    &self.binary_collated_pk_columns
+                ),
             );
             client.prepare(&scan_sql).await?
         };
@@ -1527,17 +1501,11 @@ mod tests {
     fn test_filter_expression() {
         let no_binary_columns = HashSet::new();
         let cols = vec!["v1".to_owned()];
-        let expr = PostgresExternalTableReader::filter_expression_with_collation(
-            &cols,
-            &no_binary_columns,
-        );
+        let expr = PostgresExternalTableReader::filter_expression(&cols, &no_binary_columns);
         assert_eq!(expr, "(\"v1\") > ($1)");
 
         let cols = vec!["v1".to_owned(), "v2".to_owned()];
-        let expr = PostgresExternalTableReader::filter_expression_with_collation(
-            &cols,
-            &no_binary_columns,
-        );
+        let expr = PostgresExternalTableReader::filter_expression(&cols, &no_binary_columns);
         assert_eq!(expr, "(\"v1\", \"v2\") > ($1, $2)");
 
         let binary_columns = HashSet::from(["v1".to_owned(), "v3".to_owned()]);
@@ -1547,8 +1515,7 @@ mod tests {
             "quote\"inside".to_owned(),
             "v3".to_owned(),
         ];
-        let expr =
-            PostgresExternalTableReader::filter_expression_with_collation(&cols, &binary_columns);
+        let expr = PostgresExternalTableReader::filter_expression(&cols, &binary_columns);
         assert_eq!(
             expr,
             "(\"v1\" COLLATE pg_catalog.\"C\", \"v2\", \"quote\"\"inside\", \"v3\" COLLATE \
@@ -1561,7 +1528,7 @@ mod tests {
     fn test_split_filter_expression() {
         let binary_columns = HashSet::from(["v1".to_owned()]);
         let cols = vec!["v1".to_owned()];
-        let expr = PostgresExternalTableReader::split_filter_expression_with_collation(
+        let expr = PostgresExternalTableReader::split_filter_expression(
             &cols,
             true,
             true,
@@ -1569,7 +1536,7 @@ mod tests {
         );
         assert_eq!(expr, "1 = 1");
 
-        let expr = PostgresExternalTableReader::split_filter_expression_with_collation(
+        let expr = PostgresExternalTableReader::split_filter_expression(
             &cols,
             true,
             false,
@@ -1577,7 +1544,7 @@ mod tests {
         );
         assert_eq!(expr, "(\"v1\" COLLATE pg_catalog.\"C\") < ($1)");
 
-        let expr = PostgresExternalTableReader::split_filter_expression_with_collation(
+        let expr = PostgresExternalTableReader::split_filter_expression(
             &cols,
             false,
             true,
@@ -1585,7 +1552,7 @@ mod tests {
         );
         assert_eq!(expr, "(\"v1\" COLLATE pg_catalog.\"C\") >= ($1)");
 
-        let expr = PostgresExternalTableReader::split_filter_expression_with_collation(
+        let expr = PostgresExternalTableReader::split_filter_expression(
             &cols,
             false,
             false,
@@ -1603,7 +1570,7 @@ mod tests {
         let cols = vec!["v1".to_owned(), "v2".to_owned(), "v3".to_owned()];
         let binary_columns = HashSet::from(["v1".to_owned(), "v3".to_owned()]);
         assert_eq!(
-            PostgresExternalTableReader::get_order_key_with_collation(&cols, &binary_columns),
+            PostgresExternalTableReader::get_order_key(&cols, &binary_columns),
             "\"v1\" COLLATE pg_catalog.\"C\",\"v2\",\"v3\" COLLATE pg_catalog.\"C\""
         );
     }
