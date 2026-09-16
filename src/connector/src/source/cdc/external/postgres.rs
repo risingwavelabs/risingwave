@@ -1814,6 +1814,102 @@ mod tests {
         );
     }
 
+    /// Requires an UTF-8 PostgreSQL database with ICU collations and
+    /// POSTGRES_TEST_CONNECTION_STRING set to a tokio-postgres connection string.
+    #[ignore]
+    #[tokio::test]
+    async fn test_postgres_cdc_ordering_index_catalog() {
+        tokio::time::timeout(std::time::Duration::from_secs(30), async {
+            let connection_string = std::env::var("POSTGRES_TEST_CONNECTION_STRING")
+                .expect("set POSTGRES_TEST_CONNECTION_STRING to run this test");
+            let (client, connection) =
+                tokio_postgres::connect(&connection_string, tokio_postgres::NoTls)
+                    .await
+                    .unwrap();
+            let connection_task = tokio::spawn(async move { connection.await.unwrap() });
+            client
+                .batch_execute(
+                    r#"CREATE TEMP TABLE cdc_ordering_index_test (
+                    tenant_id integer NOT NULL,
+                    id text COLLATE pg_catalog."en-x-icu" NOT NULL,
+                    PRIMARY KEY (tenant_id, id)
+                )"#,
+                )
+                .await
+                .unwrap();
+            let schema_name = client
+                .query_one(
+                    "SELECT nspname FROM pg_namespace WHERE oid = pg_my_temp_schema()",
+                    &[],
+                )
+                .await
+                .unwrap()
+                .get(0);
+            let table = SchemaTableName {
+                schema_name,
+                table_name: "cdc_ordering_index_test".into(),
+            };
+            let keys = vec!["tenant_id".into(), "id".into()];
+            let binary_columns = PostgresExternalTableReader::discover_binary_collated_pk_columns(
+                &client, &table, &keys, false,
+            )
+            .await
+            .unwrap();
+            assert_eq!(binary_columns, HashSet::from(["id".into()]));
+            PostgresExternalTableReader::validate_server_encoding(&client)
+                .await
+                .unwrap();
+            let error = PostgresExternalTableReader::validate_cdc_ordering_index(
+                &client,
+                &table,
+                &keys,
+                &binary_columns,
+            )
+            .await
+            .unwrap_err();
+            assert!(error.to_string().contains("has no such index"));
+            assert!(error.to_string().contains(r#"CREATE INDEX ON"#,));
+            // A partial index cannot cover the whole snapshot.
+            client
+                .batch_execute(
+                    r#"CREATE INDEX ON cdc_ordering_index_test
+                    (tenant_id, id COLLATE pg_catalog."C") WHERE tenant_id > 0"#,
+                )
+                .await
+                .unwrap();
+            assert!(
+                PostgresExternalTableReader::validate_cdc_ordering_index(
+                    &client,
+                    &table,
+                    &keys,
+                    &binary_columns,
+                )
+                .await
+                .is_err()
+            );
+            client
+                .batch_execute(
+                    r#"CREATE INDEX ON cdc_ordering_index_test
+                    (tenant_id, id COLLATE pg_catalog."C")"#,
+                )
+                .await
+                .unwrap();
+            PostgresExternalTableReader::validate_cdc_ordering_index(
+                &client,
+                &table,
+                &keys,
+                &binary_columns,
+            )
+            .await
+            .unwrap();
+            // The temporary table and indexes disappear with the connection.
+            drop(client);
+            connection_task.await.unwrap();
+        })
+        .await
+        .expect("PostgreSQL ordering-index validation timed out");
+    }
+
     // manual test
     #[ignore]
     #[tokio::test]
