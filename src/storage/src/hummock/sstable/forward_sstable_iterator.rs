@@ -17,6 +17,7 @@ use std::sync::Arc;
 
 use await_tree::{InstrumentAwait, SpanExt};
 use risingwave_hummock_sdk::key::FullKey;
+use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use sync_point::sync_point;
 use thiserror_ext::AsReport;
@@ -60,6 +61,7 @@ pub struct SstableIterator {
     // precisely inside the boundary block.
     block_start_idx_inclusive: usize,
     block_end_idx_exclusive: usize,
+    key_range: KeyRange,
 }
 
 impl SstableIterator {
@@ -181,7 +183,12 @@ impl SstableIterator {
             preload_retry_times: 0,
             block_start_idx_inclusive,
             block_end_idx_exclusive,
+            key_range: sstable_info_ref.key_range.clone(),
         }
+    }
+
+    fn block_iter_is_valid(&self) -> bool {
+        self.block_iter.as_ref().is_some_and(|iter| iter.is_valid())
     }
 
     fn init_block_prefetch_range(&mut self, start_idx: usize) {
@@ -367,7 +374,7 @@ impl HummockIterator for SstableIterator {
     }
 
     fn is_valid(&self) -> bool {
-        self.block_iter.as_ref().is_some_and(|i| i.is_valid())
+        self.block_iter_is_valid() && super::full_key_in_range(&self.key_range, self.key())
     }
 
     async fn rewind(&mut self) -> HummockResult<()> {
@@ -375,10 +382,14 @@ impl HummockIterator for SstableIterator {
             self.block_iter = None;
             return Ok(());
         }
-        self.init_block_prefetch_range(self.block_start_idx_inclusive);
-        // seek_idx will update the current block iter state
-        self.seek_idx(self.block_start_idx_inclusive, None).await?;
-        Ok(())
+        if self.key_range.left.is_empty() {
+            self.init_block_prefetch_range(self.block_start_idx_inclusive);
+            // seek_idx will update the current block iter state
+            self.seek_idx(self.block_start_idx_inclusive, None).await
+        } else {
+            let left = self.key_range.left.clone();
+            self.seek(FullKey::decode(&left)).await
+        }
     }
 
     async fn seek<'a>(&'a mut self, key: FullKey<&'a [u8]>) -> HummockResult<()> {
@@ -386,11 +397,17 @@ impl HummockIterator for SstableIterator {
             self.block_iter = None;
             return Ok(());
         }
+        let left = self.key_range.left.clone();
+        let key = if !left.is_empty() && FullKey::decode(&left).gt(&key) {
+            FullKey::decode(&left)
+        } else {
+            key
+        };
         let block_idx = self.calculate_block_idx_by_key(key);
         self.init_block_prefetch_range(block_idx);
 
         self.seek_idx(block_idx, Some(key)).await?;
-        if !self.is_valid() {
+        if !self.block_iter_is_valid() {
             // seek to next block
             sync_point!("SSTABLE_ITERATOR::SEEK::BEFORE_NEXT_BLOCK");
             self.seek_idx(block_idx + 1, None).await?;
