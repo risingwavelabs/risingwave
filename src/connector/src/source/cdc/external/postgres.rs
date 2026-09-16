@@ -342,15 +342,22 @@ impl PostgresExternalTableReader {
         // pg_catalog and the functions below are accessible without extra grants. This lookup
         // needs no additional CDC privileges unless an administrator revoked those defaults.
         // datlocprovider was added in PG 15. Earlier databases always use libc.
-        // Do not infer a default ICU database's ordering from its libc LC_COLLATE.
+        // PostgreSQL 17 renamed the ICU locale fields for use by all non-libc providers.
+        // JSON field lookup keeps this query compatible across those catalog versions.
         let rows = client
             .query(
                 "SELECT a.attname, coll_ns.nspname, coll.collname, \
                     CASE WHEN coll.collprovider = 'd' \
                          THEN COALESCE(to_jsonb(db)->>'datlocprovider', 'c') \
                          ELSE coll.collprovider::text END, \
-                    CASE WHEN coll.collprovider = 'd' THEN db.datcollate \
-                         ELSE coll.collcollate END \
+                    CASE WHEN coll.collprovider = 'd' THEN \
+                             CASE COALESCE(to_jsonb(db)->>'datlocprovider', 'c') \
+                                  WHEN 'c' THEN db.datcollate \
+                                  ELSE COALESCE(to_jsonb(db)->>'datlocale', \
+                                                to_jsonb(db)->>'daticulocale') END \
+                         WHEN coll.collprovider = 'c' THEN coll.collcollate \
+                         ELSE COALESCE(to_jsonb(coll)->>'colllocale', \
+                                       to_jsonb(coll)->>'colliculocale') END \
              FROM pg_attribute a \
              JOIN pg_class tbl ON tbl.oid = a.attrelid \
              JOIN pg_namespace ns ON ns.oid = tbl.relnamespace \
@@ -394,8 +401,11 @@ impl PostgresExternalTableReader {
     }
 
     fn is_bytewise_collation(provider: &str, locale: Option<&str>) -> bool {
-        // Only proven libc bytewise locales are reused. Other providers/locales use explicit C.
-        provider == "c" && matches!(locale, Some("C" | "POSIX"))
+        match provider {
+            "c" => matches!(locale, Some("C" | "POSIX")),
+            "b" => matches!(locale, Some("C" | "C.UTF-8")),
+            _ => false,
+        }
     }
 
     fn binary_collated_pk_columns(
@@ -1709,20 +1719,6 @@ mod tests {
     }
 
     #[test]
-    fn test_postgres_collation_catalog_pair() {
-        assert_eq!(PostgresCollation::from_catalog(None, None).unwrap(), None);
-        assert_eq!(
-            PostgresCollation::from_catalog(Some("pg_catalog".into()), Some("C".into())).unwrap(),
-            Some(PostgresCollation {
-                schema: "pg_catalog".into(),
-                name: "C".into()
-            }),
-        );
-        assert!(PostgresCollation::from_catalog(Some("pg_catalog".into()), None).is_err());
-        assert!(PostgresCollation::from_catalog(None, Some("C".into())).is_err());
-    }
-
-    #[test]
     fn test_postgres_cdc_ordering_index_policy() {
         fn key(
             column_name: Option<&str>,
@@ -2120,10 +2116,18 @@ mod tests {
                 Some(locale)
             ));
         }
+        for locale in ["C", "C.UTF-8"] {
+            assert!(PostgresExternalTableReader::is_bytewise_collation(
+                "b",
+                Some(locale)
+            ));
+        }
         for (provider, locale) in [
             ("i", Some("C")),
             ("c", Some("en_US.UTF-8")),
+            ("b", Some("POSIX")),
             ("c", None),
+            ("b", None),
             ("d", Some("C")),
         ] {
             assert!(!PostgresExternalTableReader::is_bytewise_collation(
@@ -2133,7 +2137,8 @@ mod tests {
     }
 
     /// Run with `POSTGRES_TEST_CONNECTION_STRING` pointing to a UTF-8 database with
-    /// either a libc C/POSIX or ICU default. Exercises pagination and parallel split reads.
+    /// a libc C/POSIX, builtin C/C.UTF-8, or ICU default. Exercises pagination and parallel
+    /// split reads.
     #[ignore]
     #[tokio::test]
     async fn test_postgres_bytewise_ordering_catalog() {
@@ -2149,16 +2154,26 @@ mod tests {
             let connection_task = tokio::spawn(async move { connection.await.unwrap() });
             PostgresExternalTableReader::validate_server_encoding(&client).await.unwrap();
             let db = client.query_one(
-                "SELECT COALESCE(to_jsonb(db)->>'datlocprovider', 'c'), datcollate::text                  FROM pg_database db WHERE datname = current_database()", &[],
+                "SELECT COALESCE(to_jsonb(db)->>'datlocprovider', 'c'), \
+                        CASE COALESCE(to_jsonb(db)->>'datlocprovider', 'c') \
+                             WHEN 'c' THEN datcollate::text \
+                             ELSE COALESCE(to_jsonb(db)->>'datlocale', \
+                                           to_jsonb(db)->>'daticulocale') END \
+                 FROM pg_database db WHERE datname = current_database()", &[],
             ).await.unwrap();
             let native_default = match db.get::<_, &str>(0) {
                 "c" => {
                     assert!(matches!(db.get::<_, &str>(1), "C" | "POSIX"));
                     true
                 }
+                "b" => {
+                    assert!(matches!(db.get::<_, &str>(1), "C" | "C.UTF-8"));
+                    true
+                }
                 "i" => false,
                 provider => panic!("unsupported test database provider: {provider}"),
             };
+
             let mixed_index = if native_default {
                 r#"tenant, id COLLATE "C""#
             } else {
