@@ -2049,7 +2049,7 @@ async fn test_merge_compaction_group_removes_split_group_metrics() {
         .merge_compaction_group_impl(
             right_group_id,
             left_group_id,
-            Some(HashSet::from([100.into(), 101.into(), 102.into()])),
+            HashSet::from([100.into(), 101.into(), 102.into()]),
         )
         .await
         .unwrap();
