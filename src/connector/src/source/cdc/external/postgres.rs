@@ -1422,6 +1422,7 @@ mod tests {
     use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
     use risingwave_common::row::OwnedRow;
     use risingwave_common::types::{DataType, ScalarImpl};
+    use risingwave_common::util::iter_util::ZipEqFast;
     use tokio_postgres::types::Type as PgType;
 
     use crate::connector_common::PostgresExternalTable;
@@ -1948,7 +1949,7 @@ mod tests {
     }
 
     /// Requires an UTF-8 PostgreSQL database with ICU collations and
-    /// POSTGRES_TEST_CONNECTION_STRING set to a tokio-postgres connection string.
+    /// `POSTGRES_TEST_CONNECTION_STRING` set to a tokio-postgres connection string.
     #[ignore]
     #[tokio::test]
     async fn test_postgres_cdc_ordering_index_catalog() {
@@ -2131,7 +2132,7 @@ mod tests {
         }
     }
 
-    /// Run with POSTGRES_TEST_CONNECTION_STRING pointing to a UTF-8 database with
+    /// Run with `POSTGRES_TEST_CONNECTION_STRING` pointing to a UTF-8 database with
     /// either a libc C/POSIX or ICU default. Exercises pagination and parallel split reads.
     #[ignore]
     #[tokio::test]
@@ -2206,7 +2207,7 @@ mod tests {
                 PostgresExternalTableReader::validate_cdc_ordering_index(
                     &client, &table, &keys, &mut ordering,
                 ).await.unwrap();
-                for (key, expected_native) in keys.iter().zip(&native_columns) {
+                for (key, expected_native) in keys.iter().zip_eq_fast(&native_columns) {
                     assert_eq!(ordering[key].use_native, *expected_native, "{definition}: {key}");
                 }
                 let values = "(VALUES ('B'), ('a'), ('z'), ('é'), ('中'), ('🙂')) v(id)";
