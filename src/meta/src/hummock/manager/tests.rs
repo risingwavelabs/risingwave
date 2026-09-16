@@ -91,7 +91,7 @@ fn pin_versions_sum(pin_versions: &[HummockPinnedVersion]) -> usize {
     pin_versions.iter().len()
 }
 
-fn gen_sstable_info(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> SstableInfo {
+pub(super) fn gen_sstable_info(sst_id: u64, table_ids: Vec<u32>, epoch: u64) -> SstableInfo {
     gen_sstable_info_impl(sst_id, table_ids, epoch).into()
 }
 
@@ -325,7 +325,7 @@ async fn list_pinned_version_from_meta_store(env: &MetaSrvEnv) -> Vec<HummockPin
         .collect()
 }
 
-async fn setup_compute_env_with_meta_opts(
+pub(super) async fn setup_compute_env_with_meta_opts(
     port: i32,
     opts: MetaOpts,
 ) -> (
@@ -1944,7 +1944,16 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_basic() 
 
 #[tokio::test]
 async fn test_merge_compaction_group_removes_split_group_metrics() {
-    let (_env, hummock_manager, _, worker_id) = setup_compute_env(80).await;
+    // Other managers may remove the same group labels from the global metrics concurrently.
+    let registry = Registry::new();
+    let config = CompactionConfigBuilder::new()
+        .level0_tier_compact_file_number(1)
+        .level0_max_compact_file_number(130)
+        .level0_sub_level_compact_level_count(1)
+        .level0_overlapping_sub_level_compact_level_count(1)
+        .build();
+    let (_env, hummock_manager, _, worker_id) =
+        setup_compute_env_with_metric(80, config, Some(MetaMetrics::for_test(&registry))).await;
     let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
         hummock_manager.clone(),
         worker_id as _,

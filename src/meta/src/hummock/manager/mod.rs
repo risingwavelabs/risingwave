@@ -78,7 +78,9 @@ mod worker;
 pub use commit_epoch::{CommitEpochInfo, NewTableFragmentInfo};
 pub use compaction::compaction_event_loop::*;
 use compaction::*;
-pub use compaction::{GroupState, GroupStateValidator, ManualCompactionTriggerResult};
+pub use compaction::{
+    GroupState, GroupStateValidator, ManualCompactionTriggerResult, ScheduleTrigger,
+};
 pub(crate) use utils::*;
 
 struct TableCommittedEpochNotifiers {
@@ -185,7 +187,7 @@ pub struct HummockManager {
 
     // `compaction_state` will record the types of compact tasks that can be triggered in `hummock`
     // and suggest types with a certain priority.
-    pub compaction_state: CompactionState,
+    pub(super) compaction_state: CompactionState,
     full_gc_state: Arc<FullGcState>,
     now: Mutex<u64>,
     inflight_time_travel_query: Semaphore,
