@@ -320,7 +320,7 @@ pub async fn setup_compute_env_with_metric(
 ) {
     let env = MetaSrvEnv::for_test().await;
     let cluster_ctl = Arc::new(
-        ClusterController::new(env.clone(), Duration::from_secs(1))
+        ClusterController::for_test(env.clone(), Duration::from_secs(1))
             .await
             .unwrap(),
     );

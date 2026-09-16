@@ -342,7 +342,7 @@ async fn setup_compute_env_with_meta_opts(
         .build();
     let env = MetaSrvEnv::for_test_opts(opts, |_| ()).await;
     let cluster_ctl = Arc::new(
-        ClusterController::new(env.clone(), Duration::from_secs(1))
+        ClusterController::for_test(env.clone(), Duration::from_secs(1))
             .await
             .unwrap(),
     );
@@ -389,7 +389,7 @@ async fn build_hummock_manager_for_test_env(env: MetaSrvEnv) -> HummockManagerRe
         .level0_overlapping_sub_level_compact_level_count(1)
         .build();
     let cluster_ctl = Arc::new(
-        ClusterController::new(env.clone(), Duration::from_secs(1))
+        ClusterController::for_test(env.clone(), Duration::from_secs(1))
             .await
             .unwrap(),
     );

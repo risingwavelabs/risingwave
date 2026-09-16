@@ -12,10 +12,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
 use std::fmt::{Debug, Formatter};
+use std::time::Duration;
 
 use anyhow::anyhow;
+use futures::future::BoxFuture;
 use itertools::Itertools;
 use risingwave_common::catalog::{DatabaseId, TableId, TableOption};
 use risingwave_common::id::JobId;
@@ -54,10 +56,15 @@ pub(crate) enum ActiveStreamingWorkerChange {
     Update(WorkerNode),
 }
 
+type ActiveWorkerSnapshot = (Vec<WorkerNode>, UnboundedReceiver<LocalNotification>);
+
 pub struct ActiveStreamingWorkerNodes {
     worker_nodes: HashMap<WorkerId, WorkerNode>,
     rx: UnboundedReceiver<LocalNotification>,
-    #[cfg_attr(not(debug_assertions), expect(dead_code))]
+    pending_notifications: VecDeque<LocalNotification>,
+    reconcile_interval: tokio::time::Interval,
+    // Keep SQL work alive when the barrier loop cancels `changed` to process another event.
+    reconcile_future: Option<BoxFuture<'static, MetaResult<ActiveWorkerSnapshot>>>,
     meta_manager: Option<MetadataManager>,
 }
 
@@ -74,6 +81,9 @@ impl ActiveStreamingWorkerNodes {
         Self {
             worker_nodes: Default::default(),
             rx: unbounded_channel().1,
+            pending_notifications: VecDeque::new(),
+            reconcile_interval: Self::reconcile_interval(),
+            reconcile_future: None,
             meta_manager: None,
         }
     }
@@ -88,6 +98,9 @@ impl ActiveStreamingWorkerNodes {
         Self {
             worker_nodes,
             rx,
+            pending_notifications: VecDeque::new(),
+            reconcile_interval: Self::reconcile_interval(),
+            reconcile_future: None,
             meta_manager: None,
         }
     }
@@ -98,16 +111,63 @@ impl ActiveStreamingWorkerNodes {
             .subscribe_active_streaming_compute_nodes()
             .await?;
         Ok(Self {
-            worker_nodes: nodes
-                .into_iter()
-                .filter_map(|node| {
-                    let is_streaming = node.property.as_ref().is_some_and(|p| p.is_streaming);
-                    is_streaming.then_some((node.id, node))
-                })
-                .collect(),
+            worker_nodes: Self::unique_workers(nodes),
             rx,
+            pending_notifications: VecDeque::new(),
+            reconcile_interval: Self::reconcile_interval(),
+            reconcile_future: None,
             meta_manager: Some(meta_manager),
         })
+    }
+
+    fn reconcile_interval() -> tokio::time::Interval {
+        let period = Duration::from_secs(30);
+        let mut interval = tokio::time::interval_at(tokio::time::Instant::now() + period, period);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        interval
+    }
+
+    fn unique_workers(mut nodes: Vec<WorkerNode>) -> HashMap<WorkerId, WorkerNode> {
+        // Worker IDs increase on re-registration. Prefer the newest identity for an endpoint.
+        nodes.sort_unstable_by_key(|node| std::cmp::Reverse(node.id));
+        let mut endpoints = HashSet::new();
+        nodes
+            .into_iter()
+            .filter(|node| {
+                if !node.property.as_ref().is_some_and(|p| p.is_streaming) {
+                    return false;
+                }
+                let Some(host) = &node.host else {
+                    return false;
+                };
+                if !endpoints.insert((host.host.clone(), host.port)) {
+                    warn!(?node, "ignoring duplicate streaming worker endpoint");
+                    return false;
+                }
+                true
+            })
+            .map(|node| (node.id, node))
+            .collect()
+    }
+
+    fn install_snapshot(&mut self, nodes: Vec<WorkerNode>) {
+        let nodes = Self::unique_workers(nodes);
+        self.pending_notifications.clear();
+        // Deliver removals first so the barrier manager stops reconnecting old identities
+        // before adding their replacements.
+        self.pending_notifications.extend(
+            self.worker_nodes
+                .values()
+                .filter(|node| !nodes.contains_key(&node.id))
+                .cloned()
+                .map(LocalNotification::WorkerNodeDeleted),
+        );
+        self.pending_notifications.extend(
+            nodes
+                .into_values()
+                .filter(|node| self.worker_nodes.get(&node.id) != Some(node))
+                .map(LocalNotification::WorkerNodeActivated),
+        );
     }
 
     pub(crate) fn current(&self) -> &HashMap<WorkerId, WorkerNode> {
@@ -116,14 +176,37 @@ impl ActiveStreamingWorkerNodes {
 
     pub(crate) async fn changed(&mut self) -> ActiveStreamingWorkerChange {
         loop {
-            let notification = self
-                .rx
-                .recv()
-                .await
-                .expect("notification stopped or uninitialized");
+            let notification = if let Some(notification) = self.pending_notifications.pop_front() {
+                notification
+            } else {
+                tokio::select! {
+                    biased;
+                    _ = self.reconcile_interval.tick(), if self.meta_manager.is_some() && self.reconcile_future.is_none() => {
+                        let manager = self.meta_manager.clone().unwrap();
+                        self.reconcile_future = Some(Box::pin(async move {
+                            manager.subscribe_active_streaming_compute_nodes().await
+                        }));
+                        continue;
+                    }
+                    result = async { self.reconcile_future.as_mut().unwrap().await }, if self.reconcile_future.is_some() => {
+                        self.reconcile_future = None;
+                        match result {
+                            Ok((nodes, rx)) => {
+                                // The new subscription starts at the SQL snapshot. Discard the old
+                                // receiver, whose queued notifications are already reflected in SQL.
+                                self.rx = rx;
+                                self.install_snapshot(nodes);
+                            }
+                            Err(err) => warn!(error = %err, "failed to reconcile active streaming workers"),
+                        }
+                        continue;
+                    }
+                    notification = self.rx.recv() => notification.expect("notification stopped or uninitialized"),
+                }
+            };
             fn is_target_worker_node(worker: &WorkerNode) -> bool {
                 worker.r#type == WorkerType::ComputeNode as i32
-                    && worker.property.as_ref().unwrap().is_streaming
+                    && worker.property.as_ref().is_some_and(|p| p.is_streaming)
             }
             match notification {
                 LocalNotification::WorkerNodeDeleted(worker) => {
@@ -173,6 +256,29 @@ impl ActiveStreamingWorkerNodes {
                         "not started worker added: {:?}",
                         worker
                     );
+                    if let Some(stale_id) = self
+                        .worker_nodes
+                        .values()
+                        .find(|prev| prev.id != worker.id && prev.host == worker.host)
+                        .map(|prev| prev.id)
+                    {
+                        if stale_id > worker.id {
+                            warn!(
+                                ?worker,
+                                %stale_id, "ignoring activation of an older worker identity"
+                            );
+                            continue;
+                        }
+                        let stale_worker = self.worker_nodes.remove(&stale_id).unwrap();
+                        warn!(
+                            ?stale_worker,
+                            ?worker,
+                            "replacing stale streaming worker identity"
+                        );
+                        self.pending_notifications
+                            .push_front(LocalNotification::WorkerNodeActivated(worker));
+                        break ActiveStreamingWorkerChange::Remove(stale_worker);
+                    }
                     if let Some(prev_worker) = self.worker_nodes.insert(worker.id, worker.clone()) {
                         assert_eq!(prev_worker.host, worker.host);
                         assert_eq!(prev_worker.r#type, worker.r#type);
@@ -199,34 +305,34 @@ impl ActiveStreamingWorkerNodes {
     }
 
     #[cfg(debug_assertions)]
-    pub(crate) async fn validate_change(&self) {
+    pub(crate) async fn validate_change(&mut self) {
         use risingwave_pb::common::WorkerNode;
         use thiserror_ext::AsReport;
-        let Some(meta_manager) = &self.meta_manager else {
+        let Some(meta_manager) = self.meta_manager.clone() else {
             return;
         };
+        let ignore_irrelevant_info = |node: &WorkerNode| {
+            (
+                node.id,
+                WorkerNode {
+                    id: node.id,
+                    r#type: node.r#type,
+                    host: node.host.clone(),
+                    property: node.property.clone(),
+                    resource: node.resource.clone(),
+                    ..Default::default()
+                },
+            )
+        };
+        let curr_worker_nodes: HashMap<_, _> = self
+            .current()
+            .values()
+            .map(ignore_irrelevant_info)
+            .collect();
         match meta_manager.list_active_streaming_compute_nodes().await {
             Ok(worker_nodes) => {
-                let ignore_irrelevant_info = |node: &WorkerNode| {
-                    (
-                        node.id,
-                        WorkerNode {
-                            id: node.id,
-                            r#type: node.r#type,
-                            host: node.host.clone(),
-                            property: node.property.clone(),
-                            resource: node.resource.clone(),
-                            ..Default::default()
-                        },
-                    )
-                };
                 let worker_nodes: HashMap<_, _> =
                     worker_nodes.iter().map(ignore_irrelevant_info).collect();
-                let curr_worker_nodes: HashMap<_, _> = self
-                    .current()
-                    .values()
-                    .map(ignore_irrelevant_info)
-                    .collect();
                 if worker_nodes != curr_worker_nodes {
                     warn!(
                         ?worker_nodes,
@@ -815,5 +921,158 @@ impl MetadataManager {
     pub(crate) async fn notify_finish_failed(&self, database_id: Option<DatabaseId>, err: String) {
         let mut mgr = self.catalog_controller.get_inner_write_guard().await;
         mgr.notify_finish_failed(database_id, err);
+    }
+}
+
+#[cfg(test)]
+mod active_streaming_worker_tests {
+    use super::*;
+
+    fn worker(id: u32) -> WorkerNode {
+        WorkerNode {
+            id: id.into(),
+            r#type: WorkerType::ComputeNode as i32,
+            host: Some(HostAddress {
+                host: "127.0.0.1".into(),
+                port: 1234,
+            }),
+            state: State::Running as i32,
+            property: Some(AddNodeProperty {
+                is_streaming: true,
+                ..Default::default()
+            }),
+            ..Default::default()
+        }
+    }
+
+    #[tokio::test]
+    async fn test_endpoint_replacement_removes_old_worker_first() {
+        let old = worker(1);
+        let new = worker(2);
+        let mut nodes =
+            ActiveStreamingWorkerNodes::for_test(HashMap::from([(old.id, old.clone())]));
+        let (tx, rx) = unbounded_channel();
+        nodes.rx = rx;
+        tx.send(LocalNotification::WorkerNodeActivated(new.clone()))
+            .unwrap();
+        assert!(
+            matches!(nodes.changed().await, ActiveStreamingWorkerChange::Remove(node) if node == old)
+        );
+        assert!(nodes.current().is_empty());
+        assert!(
+            matches!(nodes.changed().await, ActiveStreamingWorkerChange::Add(node) if node == new)
+        );
+        assert_eq!(nodes.current().len(), 1);
+        // A delayed activation must not restore the older identity.
+        tx.send(LocalNotification::WorkerNodeActivated(old))
+            .unwrap();
+        tx.send(LocalNotification::WorkerNodeDeleted(new.clone()))
+            .unwrap();
+        assert!(
+            matches!(nodes.changed().await, ActiveStreamingWorkerChange::Remove(node) if node == new)
+        );
+        assert!(nodes.current().is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_snapshot_reconciles_missed_deletion() {
+        let old = worker(1);
+        let new = worker(2);
+        let mut nodes =
+            ActiveStreamingWorkerNodes::for_test(HashMap::from([(old.id, old.clone())]));
+        nodes.install_snapshot(vec![new.clone()]);
+        assert!(
+            matches!(nodes.changed().await, ActiveStreamingWorkerChange::Remove(node) if node == old)
+        );
+        assert!(
+            matches!(nodes.changed().await, ActiveStreamingWorkerChange::Add(node) if node == new)
+        );
+        assert_eq!(nodes.current(), &HashMap::from([(new.id, new)]));
+    }
+
+    #[tokio::test]
+    async fn test_reconciliation_survives_changed_cancellation() {
+        use futures::FutureExt;
+
+        let old = worker(1);
+        let new = worker(2);
+        let mut nodes =
+            ActiveStreamingWorkerNodes::for_test(HashMap::from([(old.id, old.clone())]));
+        let (snapshot_tx, snapshot_rx) = oneshot::channel();
+        nodes.reconcile_future = Some(Box::pin(async move { Ok(snapshot_rx.await.unwrap()) }));
+        // The barrier loop selected another event while the SQL snapshot was pending.
+        assert!(nodes.changed().now_or_never().is_none());
+        assert!(nodes.reconcile_future.is_some());
+        let (_tx, rx) = unbounded_channel();
+        snapshot_tx.send((vec![new.clone()], rx)).unwrap();
+        assert!(
+            matches!(nodes.changed().await, ActiveStreamingWorkerChange::Remove(node) if node == old)
+        );
+        assert!(
+            matches!(nodes.changed().await, ActiveStreamingWorkerChange::Add(node) if node == new)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_periodic_reconciliation_reads_sql_and_drains_old_notifications() -> MetaResult<()>
+    {
+        use std::sync::Arc;
+
+        use risingwave_meta_model::prelude::Worker;
+        use sea_orm::EntityTrait;
+
+        use crate::controller::catalog::CatalogController;
+        use crate::controller::cluster::ClusterController;
+        use crate::manager::MetaSrvEnv;
+
+        let env = MetaSrvEnv::for_test().await;
+        let cluster =
+            Arc::new(ClusterController::for_test(env.clone(), Duration::from_secs(60)).await?);
+        let catalog = Arc::new(CatalogController::new(env.clone()).await?);
+        let template = worker(0);
+        let host = template.host.unwrap();
+        let property = template.property.unwrap();
+        let old_id = cluster
+            .add_worker(
+                WorkerType::ComputeNode,
+                host.clone(),
+                property.clone(),
+                Default::default(),
+            )
+            .await?;
+        cluster.activate_worker(old_id).await?;
+        let mut nodes = ActiveStreamingWorkerNodes::new_snapshot(MetadataManager::new(
+            cluster.clone(),
+            catalog,
+        ))
+        .await?;
+
+        // Simulate a deletion committed by another process with no local notification.
+        Worker::delete_by_id(old_id)
+            .exec(&env.meta_store_ref().conn)
+            .await?;
+        let new_id = cluster
+            .add_worker(WorkerType::ComputeNode, host, property, Default::default())
+            .await?;
+        cluster.activate_worker(new_id).await?;
+        nodes.reconcile_interval.reset_immediately();
+        assert!(
+            matches!(nodes.changed().await, ActiveStreamingWorkerChange::Remove(node) if node.id == old_id)
+        );
+        assert!(nodes.current().is_empty());
+        assert!(
+            matches!(nodes.changed().await, ActiveStreamingWorkerChange::Add(node) if node.id == new_id)
+        );
+        assert_eq!(nodes.current().len(), 1);
+        assert!(nodes.rx.try_recv().is_err());
+        Ok(())
+    }
+
+    #[test]
+    fn test_snapshot_deduplicates_endpoints() {
+        let newest = worker(3);
+        let nodes =
+            ActiveStreamingWorkerNodes::unique_workers(vec![worker(2), newest.clone(), worker(1)]);
+        assert_eq!(nodes, HashMap::from([(newest.id, newest)]));
     }
 }

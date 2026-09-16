@@ -795,7 +795,7 @@ mod tests {
         ) {
             let env = MetaSrvEnv::for_test_opts(opts, |_| ()).await;
             let cluster_ctl = Arc::new(
-                ClusterController::new(env.clone(), Duration::from_secs(1))
+                ClusterController::for_test(env.clone(), Duration::from_secs(1))
                     .await
                     .unwrap(),
             );
