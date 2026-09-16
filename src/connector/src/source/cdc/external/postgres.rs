@@ -158,11 +158,26 @@ pub struct PostgresExternalTableReader {
 #[derive(Debug, Clone)]
 struct PostgresIndexKey {
     column_name: Option<String>,
-    collation_schema: Option<String>,
-    collation_name: Option<String>,
+    collation: Option<PostgresCollation>,
     descending: bool,
     nulls_first: bool,
     default_opclass: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PostgresCollation {
+    schema: String,
+    name: String,
+}
+
+impl PostgresCollation {
+    fn from_catalog(schema: Option<String>, name: Option<String>) -> ConnectorResult<Option<Self>> {
+        match (schema, name) {
+            (Some(schema), Some(name)) => Ok(Some(Self { schema, name })),
+            (None, None) => Ok(None),
+            _ => Err(anyhow::anyhow!("incomplete PostgreSQL collation catalog metadata").into()),
+        }
+    }
 }
 
 impl ExternalTableReader for PostgresExternalTableReader {
@@ -425,8 +440,7 @@ impl PostgresExternalTableReader {
                 .or_default()
                 .push(PostgresIndexKey {
                     column_name: row.get(1),
-                    collation_schema: row.get(2),
-                    collation_name: row.get(3),
+                    collation: PostgresCollation::from_catalog(row.try_get(2)?, row.try_get(3)?)?,
                     descending: row.get(4),
                     default_opclass: row.get(5),
                     nulls_first: row.get(6),
@@ -472,8 +486,9 @@ impl PostgresExternalTableReader {
                     // Forward ASC or backward DESC must both yield ASC NULLS LAST.
                     && index_key.nulls_first == index_key.descending
                     && (!binary_collated_columns.contains(primary_key)
-                        || (index_key.collation_schema.as_deref() == Some("pg_catalog")
-                            && index_key.collation_name.as_deref() == Some("C")))
+                        || index_key.collation.as_ref().is_some_and(|collation| {
+                            collation.schema == "pg_catalog" && collation.name == "C"
+                        }))
             })
     }
 
@@ -1315,7 +1330,7 @@ mod tests {
 
     use crate::connector_common::PostgresExternalTable;
     use crate::source::cdc::external::postgres::{
-        PostgresExternalTableReader, PostgresIndexKey, PostgresOffset,
+        PostgresCollation, PostgresExternalTableReader, PostgresIndexKey, PostgresOffset,
     };
     use crate::source::cdc::external::{ExternalTableConfig, ExternalTableReader, SchemaTableName};
 
@@ -1594,6 +1609,20 @@ mod tests {
     }
 
     #[test]
+    fn test_postgres_collation_catalog_pair() {
+        assert_eq!(PostgresCollation::from_catalog(None, None).unwrap(), None);
+        assert_eq!(
+            PostgresCollation::from_catalog(Some("pg_catalog".into()), Some("C".into())).unwrap(),
+            Some(PostgresCollation {
+                schema: "pg_catalog".into(),
+                name: "C".into()
+            }),
+        );
+        assert!(PostgresCollation::from_catalog(Some("pg_catalog".into()), None).is_err());
+        assert!(PostgresCollation::from_catalog(None, Some("C".into())).is_err());
+    }
+
+    #[test]
     fn test_postgres_cdc_ordering_index_policy() {
         fn key(
             column_name: Option<&str>,
@@ -1603,8 +1632,10 @@ mod tests {
         ) -> PostgresIndexKey {
             PostgresIndexKey {
                 column_name: column_name.map(str::to_owned),
-                collation_schema: collation.map(|(schema, _)| schema.to_owned()),
-                collation_name: collation.map(|(_, name)| name.to_owned()),
+                collation: collation.map(|(schema, name)| PostgresCollation {
+                    schema: schema.to_owned(),
+                    name: name.to_owned(),
+                }),
                 descending,
                 nulls_first: descending,
                 default_opclass,
@@ -1624,7 +1655,7 @@ mod tests {
         ));
 
         let mut locale_collated = compatible.clone();
-        locale_collated[1].collation_name = Some("en-x-icu".to_owned());
+        locale_collated[1].collation.as_mut().unwrap().name = "en-x-icu".to_owned();
         assert!(!PostgresExternalTableReader::index_supports_cdc_ordering(
             &locale_collated,
             &primary_keys,
