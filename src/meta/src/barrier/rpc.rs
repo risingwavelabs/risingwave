@@ -939,7 +939,8 @@ impl PartialGraphRecoverer<'_> {
         }?;
 
         let control_stream_manager = self.control_stream_manager();
-        let mut builder = FragmentEdgeBuilder::new(
+        let mut builder = FragmentEdgeBuilder::empty();
+        builder.add_new_fragments(
             database_jobs
                 .values()
                 .flat_map(|job| {
@@ -971,6 +972,7 @@ impl PartialGraphRecoverer<'_> {
                     },
                 )),
         );
+        let mut builder = builder.finish_fragments();
         builder.add_relations(fragment_relations);
         let mut edges = builder.build();
 
