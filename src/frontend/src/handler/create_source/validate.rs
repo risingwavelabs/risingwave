@@ -90,6 +90,11 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     // support source stream job
                     Format::Plain => vec![Encode::Json],
                 ),
+                ORACLE_CDC_CONNECTOR => hashmap!(
+                    Format::Debezium => vec![Encode::Json],
+                    // support source stream job
+                    Format::Plain => vec![Encode::Json],
+                ),
                 MONGODB_CDC_CONNECTOR => hashmap!(
                     Format::DebeziumMongo => vec![Encode::Json],
                 ),
@@ -402,6 +407,7 @@ mod tests {
         for (connector, format) in [
             (MYSQL_CDC_CONNECTOR, FormatEncodeOptions::debezium_json()),
             (POSTGRES_CDC_CONNECTOR, FormatEncodeOptions::debezium_json()),
+            (ORACLE_CDC_CONNECTOR, FormatEncodeOptions::debezium_json()),
             (
                 MONGODB_CDC_CONNECTOR,
                 FormatEncodeOptions::debezium_mongo_json(),
