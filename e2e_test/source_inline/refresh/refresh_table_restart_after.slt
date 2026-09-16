@@ -35,4 +35,7 @@ SELECT count(*), sum(cnt) FROM refresh_paused_mv;
 ----
 97 1000
 
+statement ok
+DROP TABLE refresh_paused_marker;
+
 include ./drop_refresh_table_paused.slt.part

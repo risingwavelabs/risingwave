@@ -4,6 +4,8 @@
 # re-run reads different files and its merge has to delete every row the held load wrote.
 # Dropped by drop_refresh_table_paused.slt.part.
 
+control substitution on
+
 system ok
 rm -rf ./e2e_test/source_inline/refresh/refresh_paused_tmp && mkdir -p ./e2e_test/source_inline/refresh/refresh_paused_tmp
 
@@ -68,17 +70,12 @@ WHERE t.name = 'refresh_paused_t';
 ----
 REFRESHING t
 
-# Holds the trigger of the held cycle, so that a test can tell its re-run from it. System tables
-# cannot feed an INSERT directly.
-statement ok
-CREATE TABLE refresh_paused_marker (trigger_before varchar);
-
-system ok
-t=$(psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -tAc "SELECT s.last_trigger_time FROM rw_catalog.rw_refresh_table_state s JOIN rw_catalog.rw_tables t ON s.table_id = t.id WHERE t.name = 'refresh_paused_t'") && psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -v ON_ERROR_STOP=1 -c "INSERT INTO refresh_paused_marker VALUES ('$t')"
-
-# The row has to be checkpointed to survive a recovery.
-statement ok
-FLUSH;
+# The trigger of the held cycle, so that a test can tell its re-run from it.
+let trigger_before
+SELECT s.last_trigger_time
+FROM rw_catalog.rw_refresh_table_state s
+JOIN rw_catalog.rw_tables t ON s.table_id = t.id
+WHERE t.name = 'refresh_paused_t'
 
 system ok
 rm ./e2e_test/source_inline/refresh/refresh_paused_tmp/f*.csv && seq 5001 6000 | awk '{print $1","$1%97}' > ./e2e_test/source_inline/refresh/refresh_paused_tmp/g0.csv
