@@ -17,6 +17,7 @@ use std::cmp::{Ordering, max, min};
 use std::collections::HashMap;
 use std::ops::Bound;
 
+use anyhow::Context;
 use await_tree::InstrumentAwait;
 use futures::Stream;
 use futures::future::try_join_all;
@@ -363,8 +364,8 @@ pub(crate) fn cmp_cdc_pk<'a>(
 }
 
 fn sql_server_uuid_sort_key(value: &str) -> StreamExecutorResult<[u8; 16]> {
-    let uuid = uuid::Uuid::parse_str(value)
-        .map_err(|err| anyhow::anyhow!("invalid SQL Server uniqueidentifier primary key: {err}"))?;
+    let uuid =
+        uuid::Uuid::parse_str(value).context("invalid SQL Server uniqueidentifier primary key")?;
     // SqlGuid compares GUID-layout bytes in this order. to_bytes_le matches .NET
     // Guid.ToByteArray (the first three fields are little-endian), not UUID wire order.
     // https://github.com/dotnet/runtime/blob/main/src/libraries/System.Data.Common/src/System/Data/SQLTypes/SQLGuid.cs
