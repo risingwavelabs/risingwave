@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+pub mod change_reader;
 pub mod parquet_file_handler;
 pub mod planner;
 
