@@ -17,7 +17,7 @@ use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
-use prometheus::core::{AtomicF64, GenericGaugeVec};
+use prometheus::core::{AtomicF64, Collector, GenericGaugeVec, MetricVec, MetricVecBuilder};
 use prometheus::{
     GaugeVec, Histogram, HistogramVec, IntCounterVec, IntGauge, IntGaugeVec, Registry,
     exponential_buckets, histogram_opts, register_gauge_vec_with_registry,
@@ -170,6 +170,8 @@ pub struct MetaMetrics {
     pub table_change_log_min_epoch: IntGaugeVec,
     /// Latency of serving table change log requests.
     pub table_change_log_get_latency: Histogram,
+    /// Latency of truncating persisted table change logs.
+    pub table_change_log_truncate_latency: Histogram,
     /// The number of hummock version delta log.
     pub delta_log_count: IntGauge,
     /// latency of version checkpoint
@@ -242,9 +244,9 @@ pub struct MetaMetrics {
     pub merge_compaction_group_count: IntCounterVec,
 
     // ********************************** Auto Schema Change ************************************
-    pub auto_schema_change_failure_cnt: LabelGuardedIntCounterVec,
-    pub auto_schema_change_success_cnt: LabelGuardedIntCounterVec,
-    pub auto_schema_change_latency: LabelGuardedHistogramVec,
+    pub auto_schema_change_failure_cnt: IntCounterVec,
+    pub auto_schema_change_success_cnt: IntCounterVec,
+    pub auto_schema_change_latency: HistogramVec,
 
     pub time_travel_version_replay_latency: Histogram,
 
@@ -576,6 +578,13 @@ impl MetaMetrics {
         let table_change_log_get_latency =
             register_histogram_with_registry!(opts, registry).unwrap();
 
+        let table_change_log_truncate_latency = register_histogram_with_registry!(
+            "storage_table_change_log_truncate_latency",
+            "latency of truncating persisted table change logs",
+            registry
+        )
+        .unwrap();
+
         let time_travel_object_count = register_int_gauge_with_registry!(
             "storage_time_travel_object_count",
             "total number of objects that is referenced by time travel.",
@@ -691,7 +700,7 @@ impl MetaMetrics {
         let recovery_latency =
             register_histogram_vec_with_registry!(opts, &["recovery_type"], registry).unwrap();
 
-        let auto_schema_change_failure_cnt = register_guarded_int_counter_vec_with_registry!(
+        let auto_schema_change_failure_cnt = register_int_counter_vec_with_registry!(
             "auto_schema_change_failure_cnt",
             "Number of failed auto schema change",
             &["table_id", "table_name"],
@@ -699,7 +708,7 @@ impl MetaMetrics {
         )
         .unwrap();
 
-        let auto_schema_change_success_cnt = register_guarded_int_counter_vec_with_registry!(
+        let auto_schema_change_success_cnt = register_int_counter_vec_with_registry!(
             "auto_schema_change_success_cnt",
             "Number of success auto schema change",
             &["table_id", "table_name"],
@@ -712,12 +721,9 @@ impl MetaMetrics {
             "Latency of the auto schema change process",
             exponential_buckets(0.1, 1.5, 20).unwrap() // max 221s
         );
-        let auto_schema_change_latency = register_guarded_histogram_vec_with_registry!(
-            opts,
-            &["table_id", "table_name"],
-            registry
-        )
-        .unwrap();
+        let auto_schema_change_latency =
+            register_histogram_vec_with_registry!(opts, &["table_id", "table_name"], registry)
+                .unwrap();
 
         let source_is_up = register_guarded_int_gauge_vec_with_registry!(
             "source_status_is_up",
@@ -1031,6 +1037,7 @@ impl MetaMetrics {
             table_change_log_object_size,
             table_change_log_min_epoch,
             table_change_log_get_latency,
+            table_change_log_truncate_latency,
             delta_log_count,
             version_checkpoint_latency,
             current_version_id,
@@ -1142,7 +1149,7 @@ pub fn start_worker_info_monitor(
             let node_map = match metadata_manager.count_worker_node().await {
                 Ok(node_map) => node_map,
                 Err(err) => {
-                    tracing::warn!(error = %err.as_report(), "fail to count worker node");
+                    tracing::warn!(error = %err.as_report(), "failed to count worker nodes");
                     continue;
                 }
             };
@@ -1188,35 +1195,35 @@ pub async fn refresh_fragment_info_metrics(
     {
         Ok(worker_nodes) => worker_nodes,
         Err(err) => {
-            tracing::warn!(error=%err.as_report(), "fail to list worker node");
+            tracing::warn!(error=%err.as_report(), "failed to list worker nodes");
             return;
         }
     };
     let actor_locations = match catalog_controller.list_actor_locations() {
         Ok(actor_locations) => actor_locations,
         Err(err) => {
-            tracing::warn!(error=%err.as_report(), "fail to get actor locations");
+            tracing::warn!(error=%err.as_report(), "failed to get actor locations");
             return;
         }
     };
     let sink_actor_mapping = match catalog_controller.list_sink_actor_mapping().await {
         Ok(sink_actor_mapping) => sink_actor_mapping,
         Err(err) => {
-            tracing::warn!(error=%err.as_report(), "fail to get sink actor mapping");
+            tracing::warn!(error=%err.as_report(), "failed to get sink actor mappings");
             return;
         }
     };
     let fragment_state_tables = match catalog_controller.list_fragment_state_tables().await {
         Ok(fragment_state_tables) => fragment_state_tables,
         Err(err) => {
-            tracing::warn!(error=%err.as_report(), "fail to get fragment state tables");
+            tracing::warn!(error=%err.as_report(), "failed to get fragment state tables");
             return;
         }
     };
     let table_name_and_type_mapping = match catalog_controller.get_table_name_type_mapping().await {
         Ok(mapping) => mapping,
         Err(err) => {
-            tracing::warn!(error=%err.as_report(), "fail to get table name mapping");
+            tracing::warn!(error=%err.as_report(), "failed to get the table name mapping");
             return;
         }
     };
@@ -1302,7 +1309,7 @@ pub async fn refresh_relation_info_metrics(
     let table_objects = match catalog_controller.list_table_objects().await {
         Ok(table_objects) => table_objects,
         Err(err) => {
-            tracing::warn!(error=%err.as_report(), "fail to get table objects");
+            tracing::warn!(error=%err.as_report(), "failed to get table objects");
             return;
         }
     };
@@ -1310,7 +1317,7 @@ pub async fn refresh_relation_info_metrics(
     let source_objects = match catalog_controller.list_source_objects().await {
         Ok(source_objects) => source_objects,
         Err(err) => {
-            tracing::warn!(error=%err.as_report(), "fail to get source objects");
+            tracing::warn!(error=%err.as_report(), "failed to get source objects");
             return;
         }
     };
@@ -1318,7 +1325,7 @@ pub async fn refresh_relation_info_metrics(
     let sink_objects = match catalog_controller.list_sink_objects().await {
         Ok(sink_objects) => sink_objects,
         Err(err) => {
-            tracing::warn!(error=%err.as_report(), "fail to get sink objects");
+            tracing::warn!(error=%err.as_report(), "failed to get sink objects");
             return;
         }
     };
@@ -1335,7 +1342,10 @@ pub async fn refresh_relation_info_metrics(
         .streaming_table_change_log_retention_seconds
         .reset();
 
+    let mut active_table_labels = HashSet::with_capacity(table_objects.len());
     for (id, db, schema, name, resource_group, table_type) in table_objects {
+        let table_id = id.to_string();
+        active_table_labels.insert((table_id.clone(), name.clone()));
         let relation_type = match table_type {
             TableType::Table => "table",
             TableType::MaterializedView => "materialized_view",
@@ -1345,7 +1355,7 @@ pub async fn refresh_relation_info_metrics(
         meta_metrics
             .relation_info
             .with_label_values(&[
-                &id.to_string(),
+                &table_id,
                 &db,
                 &schema,
                 &name,
@@ -1354,6 +1364,19 @@ pub async fn refresh_relation_info_metrics(
             ])
             .set(1);
     }
+
+    retain_table_metric_series(
+        &meta_metrics.auto_schema_change_failure_cnt,
+        &active_table_labels,
+    );
+    retain_table_metric_series(
+        &meta_metrics.auto_schema_change_success_cnt,
+        &active_table_labels,
+    );
+    retain_table_metric_series(
+        &meta_metrics.auto_schema_change_latency,
+        &active_table_labels,
+    );
 
     for (id, db, schema, name, resource_group) in source_objects {
         meta_metrics
@@ -1400,6 +1423,41 @@ pub async fn refresh_relation_info_metrics(
     }
 }
 
+fn retain_table_metric_series<T>(
+    metric_vec: &MetricVec<T>,
+    active_table_labels: &HashSet<(String, String)>,
+) where
+    T: MetricVecBuilder,
+{
+    for (table_id, table_name) in collect_table_labels(metric_vec).difference(active_table_labels) {
+        let labels = [table_id.as_str(), table_name.as_str()];
+        metric_vec.remove_label_values(&labels).ok();
+    }
+}
+
+fn collect_table_labels(collector: &impl Collector) -> HashSet<(String, String)> {
+    collector
+        .collect()
+        .into_iter()
+        .flat_map(|mut family| family.take_metric())
+        .filter_map(|metric| {
+            let table_id = metric
+                .get_label()
+                .iter()
+                .find(|label| label.name() == "table_id")?
+                .value()
+                .to_owned();
+            let table_name = metric
+                .get_label()
+                .iter()
+                .find(|label| label.name() == "table_name")?
+                .value()
+                .to_owned();
+            Some((table_id, table_name))
+        })
+        .collect()
+}
+
 pub async fn refresh_database_info_metrics(
     catalog_controller: &CatalogControllerRef,
     meta_metrics: Arc<MetaMetrics>,
@@ -1407,7 +1465,7 @@ pub async fn refresh_database_info_metrics(
     let databases = match catalog_controller.list_databases().await {
         Ok(databases) => databases,
         Err(err) => {
-            tracing::warn!(error=%err.as_report(), "fail to get databases");
+            tracing::warn!(error=%err.as_report(), "failed to get databases");
             return;
         }
     };
@@ -1490,7 +1548,7 @@ pub async fn refresh_backfill_progress_metrics(
     let fragment_descs = match catalog_controller.list_fragment_descs_with_node(true).await {
         Ok(fragment_descs) => fragment_descs,
         Err(err) => {
-            tracing::warn!(error=%err.as_report(), "fail to list creating fragment descs");
+            tracing::warn!(error=%err.as_report(), "failed to list fragment descriptions for creating jobs");
             return;
         }
     };
@@ -1504,7 +1562,7 @@ pub async fn refresh_backfill_progress_metrics(
     let fragment_progresses = match barrier_manager.get_fragment_backfill_progress().await {
         Ok(progress) => progress,
         Err(err) => {
-            tracing::warn!(error=%err.as_report(), "fail to get fragment backfill progress");
+            tracing::warn!(error=%err.as_report(), "failed to get fragment backfill progress");
             return;
         }
     };
@@ -1534,7 +1592,7 @@ pub async fn refresh_backfill_progress_metrics(
     {
         Ok(relation_objects) => relation_objects,
         Err(err) => {
-            tracing::warn!(error=%err.as_report(), "fail to get relation objects");
+            tracing::warn!(error=%err.as_report(), "failed to get relation objects");
             return;
         }
     };

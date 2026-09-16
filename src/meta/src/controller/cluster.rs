@@ -19,12 +19,12 @@ use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use itertools::Itertools;
-use risingwave_common::RW_VERSION;
 use risingwave_common::hash::WorkerSlotId;
 use risingwave_common::util::addr::HostAddr;
 use risingwave_common::util::resource_util::cpu::total_cpu_available;
 use risingwave_common::util::resource_util::hostname;
 use risingwave_common::util::resource_util::memory::system_memory_available_bytes;
+use risingwave_common::util::version::current_rw_version;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_license::LicenseManager;
 use risingwave_meta_model::prelude::{Worker, WorkerProperty};
@@ -480,7 +480,7 @@ fn meta_node_info(host: &str, started_at: Option<u64>) -> PbWorkerNode {
         property: None,
         transactional_id: None,
         resource: Some(risingwave_pb::common::worker_node::Resource {
-            rw_version: RW_VERSION.to_owned(),
+            rw_version: current_rw_version(),
             total_memory_bytes: system_memory_available_bytes() as _,
             total_cpu_cores: total_cpu_available() as _,
             hostname: hostname(),

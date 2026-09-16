@@ -36,7 +36,7 @@ use risingwave_connector::sink::catalog::SinkId;
 use risingwave_pb::id::ExecutorId;
 
 use crate::common::log_store_impl::kv_log_store::{
-    REWIND_BACKOFF_FACTOR, REWIND_BASE_DELAY, REWIND_MAX_DELAY,
+    REWIND_BACKOFF_MULTIPLIER, REWIND_INITIAL_DELAY, REWIND_MAX_DELAY,
 };
 use crate::executor::prelude::ActorId;
 use crate::task::FragmentId;
@@ -158,6 +158,14 @@ pub struct StreamingMetrics {
     over_window_accessed_entry_count: LabelGuardedIntCounterVec,
     over_window_compute_count: LabelGuardedIntCounterVec,
     over_window_same_output_count: LabelGuardedIntCounterVec,
+    over_window_state_cleaned_row_count: LabelGuardedIntCounterVec,
+
+    // Match recognize
+    match_recognize_matches_emitted_count: LabelGuardedIntCounterVec,
+    match_recognize_evicted_rows_count: LabelGuardedIntCounterVec,
+    match_recognize_scan_budget_exhausted_count: LabelGuardedIntCounterVec,
+    match_recognize_within_deadline_overflow_count: LabelGuardedIntCounterVec,
+    match_recognize_retained_rows: LabelGuardedIntGaugeVec,
 
     /// The duration from receipt of barrier to all actors collection.
     /// The max of all nodes' `barrier_inflight_latency` for a partial graph is the latency for a
@@ -926,6 +934,55 @@ impl StreamingMetrics {
         )
         .unwrap();
 
+        let over_window_state_cleaned_row_count = register_guarded_int_counter_vec_with_registry!(
+            "stream_over_window_state_cleaned_row_count",
+            "Over window number of stale state rows deleted by watermark-driven state cleaning",
+            &["table_id", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
+        let match_recognize_matches_emitted_count =
+            register_guarded_int_counter_vec_with_registry!(
+                "stream_match_recognize_matches_emitted_count",
+                "Matches emitted by the match recognize executor",
+                &["table_id", "actor_id", "fragment_id"],
+                registry
+            )
+            .unwrap();
+
+        let match_recognize_evicted_rows_count = register_guarded_int_counter_vec_with_registry!(
+            "stream_match_recognize_evicted_rows_count",
+            "Buffered rows evicted by the match recognize executor",
+            &["table_id", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
+        let match_recognize_scan_budget_exhausted_count = register_guarded_int_counter_vec_with_registry!(
+            "stream_match_recognize_scan_budget_exhausted_count",
+            "Partition visits that exhausted the match recognize scan budget and degraded conservatively",
+            &["table_id", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
+        let match_recognize_within_deadline_overflow_count = register_guarded_int_counter_vec_with_registry!(
+            "stream_match_recognize_within_deadline_overflow_count",
+            "Buffered rows whose WITHIN deadline lies past the ORDER BY type's range, so their window never closes",
+            &["table_id", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
+        let match_recognize_retained_rows = register_guarded_int_gauge_vec_with_registry!(
+            "stream_match_recognize_retained_rows",
+            "Rows currently retained in memory by the match recognize executor, summed over the actor's partitions",
+            &["table_id", "actor_id", "fragment_id"],
+            registry
+        )
+        .unwrap();
+
         let barrier_inflight_latency = register_guarded_histogram_vec_with_registry!(
             "stream_barrier_inflight_duration_seconds",
             "barrier_inflight_latency",
@@ -1102,16 +1159,12 @@ impl StreamingMetrics {
         .unwrap();
 
         let kv_log_store_rewind_delay_opts = {
-            assert_eq!(2, REWIND_BACKOFF_FACTOR);
-            let bucket_count = (REWIND_MAX_DELAY.as_secs_f64().log2()
-                - REWIND_BASE_DELAY.as_secs_f64().log2())
-            .ceil() as usize;
-            let buckets = exponential_buckets(
-                REWIND_BASE_DELAY.as_secs_f64(),
-                REWIND_BACKOFF_FACTOR as _,
-                bucket_count,
-            )
-            .unwrap();
+            let first_delay_secs = REWIND_INITIAL_DELAY.as_secs_f64();
+            let base = REWIND_BACKOFF_MULTIPLIER as f64;
+            let bucket_count = (REWIND_MAX_DELAY.as_secs_f64() / first_delay_secs)
+                .log(base)
+                .ceil() as usize;
+            let buckets = exponential_buckets(first_delay_secs, base, bucket_count).unwrap();
             histogram_opts!(
                 "kv_log_store_rewind_delay",
                 "Kv log store rewind delay",
@@ -1404,6 +1457,12 @@ impl StreamingMetrics {
             over_window_accessed_entry_count,
             over_window_compute_count,
             over_window_same_output_count,
+            over_window_state_cleaned_row_count,
+            match_recognize_matches_emitted_count,
+            match_recognize_evicted_rows_count,
+            match_recognize_scan_budget_exhausted_count,
+            match_recognize_within_deadline_overflow_count,
+            match_recognize_retained_rows,
             barrier_inflight_latency,
             barrier_sync_latency,
             barrier_batch_size,
@@ -1776,6 +1835,39 @@ impl StreamingMetrics {
             over_window_same_output_count: self
                 .over_window_same_output_count
                 .with_guarded_label_values(label_list),
+            over_window_state_cleaned_row_count: self
+                .over_window_state_cleaned_row_count
+                .with_guarded_label_values(label_list),
+        }
+    }
+
+    pub fn new_match_recognize_metrics(
+        &self,
+        table_id: TableId,
+        actor_id: ActorId,
+        fragment_id: FragmentId,
+    ) -> MatchRecognizeMetrics {
+        let label_list: &[&str; 3] = &[
+            &table_id.to_string(),
+            &actor_id.to_string(),
+            &fragment_id.to_string(),
+        ];
+        MatchRecognizeMetrics {
+            match_recognize_matches_emitted_count: self
+                .match_recognize_matches_emitted_count
+                .with_guarded_label_values(label_list),
+            match_recognize_evicted_rows_count: self
+                .match_recognize_evicted_rows_count
+                .with_guarded_label_values(label_list),
+            match_recognize_scan_budget_exhausted_count: self
+                .match_recognize_scan_budget_exhausted_count
+                .with_guarded_label_values(label_list),
+            match_recognize_within_deadline_overflow_count: self
+                .match_recognize_within_deadline_overflow_count
+                .with_guarded_label_values(label_list),
+            match_recognize_retained_rows: self
+                .match_recognize_retained_rows
+                .with_guarded_label_values(label_list),
         }
     }
 
@@ -1942,6 +2034,18 @@ pub struct OverWindowMetrics {
     pub over_window_accessed_entry_count: LabelGuardedIntCounter,
     pub over_window_compute_count: LabelGuardedIntCounter,
     pub over_window_same_output_count: LabelGuardedIntCounter,
+    pub over_window_state_cleaned_row_count: LabelGuardedIntCounter,
+}
+
+pub struct MatchRecognizeMetrics {
+    pub match_recognize_matches_emitted_count: LabelGuardedIntCounter,
+    pub match_recognize_evicted_rows_count: LabelGuardedIntCounter,
+    pub match_recognize_scan_budget_exhausted_count: LabelGuardedIntCounter,
+    pub match_recognize_within_deadline_overflow_count: LabelGuardedIntCounter,
+    /// Rows currently retained in memory across the actor's partitions. Retention is bounded only
+    /// by match liveness and `WITHIN`, so this gauge is the one signal of a partition set growing
+    /// toward memory exhaustion (a pattern whose closer never arrives retains its rows forever).
+    pub match_recognize_retained_rows: LabelGuardedIntGauge,
 }
 
 #[derive(Clone)]

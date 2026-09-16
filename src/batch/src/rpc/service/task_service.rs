@@ -68,6 +68,9 @@ impl TaskService for BatchServiceImpl {
         &self,
         request: Request<CreateTaskRequest>,
     ) -> Result<Response<Self::CreateTaskStream>, Status> {
+        #[cfg(madsim)]
+        crate::rpc::service::madsim_test_utils::record_create_task();
+
         let CreateTaskRequest {
             task_id,
             plan,

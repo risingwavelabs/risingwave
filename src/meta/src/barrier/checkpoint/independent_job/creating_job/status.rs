@@ -22,16 +22,16 @@ use risingwave_common::hash::ActorId;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::id::{FragmentId, PartialGraphId};
+use risingwave_pb::stream_plan::StartFragmentBackfillMutation;
 use risingwave_pb::stream_plan::barrier::PbBarrierKind;
 use risingwave_pb::stream_plan::barrier_mutation::Mutation;
-use risingwave_pb::stream_plan::{PbStreamNode, StartFragmentBackfillMutation};
 use risingwave_pb::stream_service::barrier_complete_response::{
     CreateMviewProgress, PbCreateMviewProgress,
 };
 use tracing::warn;
 
 use crate::barrier::checkpoint::independent_job::creating_job::CreatingJobInfo;
-use crate::barrier::notifier::Notifier;
+use crate::barrier::command::{ThrottleConfigMap, extract_throttle_config};
 use crate::barrier::partial_graph::PartialGraphManager;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
 use crate::barrier::{BarrierInfo, BarrierKind, TracedEpoch};
@@ -131,7 +131,6 @@ pub(super) enum CreatingStreamingJobStatus {
     /// will be finished when all previously injected barriers have been collected
     /// Store the `prev_epoch` that will finish at.
     Finishing(u64, TrackingJob),
-    Resetting(Vec<Notifier>),
     PlaceHolder,
 }
 
@@ -201,8 +200,7 @@ impl CreatingStreamingJobStatus {
             } => {
                 log_store_progress_tracker.update(create_mview_progress);
             }
-            CreatingStreamingJobStatus::Finishing(..)
-            | CreatingStreamingJobStatus::Resetting(..) => {}
+            CreatingStreamingJobStatus::Finishing(..) => {}
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
             }
@@ -232,9 +230,6 @@ impl CreatingStreamingJobStatus {
             }
             CreatingStreamingJobStatus::Finishing { .. } => {
                 unreachable!("should not start consuming upstream for a job again")
-            }
-            CreatingStreamingJobStatus::Resetting(..) => {
-                unreachable!("unlikely to start consume upstream when resetting")
             }
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
@@ -300,16 +295,20 @@ impl CreatingStreamingJobStatus {
             }
             CreatingStreamingJobStatus::ConsumingLogStore {
                 pending_barriers, ..
-            } => drain_pending_barriers(
-                pending_barriers,
-                barrier_info.clone(),
-                resolve_initial_barrier_num_to_inject(),
-            )
-            .into_iter()
-            .map(|barrier_info| (barrier_info, None))
-            .collect(),
-            CreatingStreamingJobStatus::Finishing { .. }
-            | CreatingStreamingJobStatus::Resetting(..) => vec![],
+            } => {
+                // Throttle has no effect on the snapshot executor after it starts consuming the
+                // log store. The updated fragment plan is kept for the actors created on merge,
+                // so the mutation does not need to be forwarded in this phase.
+                drain_pending_barriers(
+                    pending_barriers,
+                    barrier_info.clone(),
+                    resolve_initial_barrier_num_to_inject(),
+                )
+                .into_iter()
+                .map(|barrier_info| (barrier_info, None))
+                .collect()
+            }
+            CreatingStreamingJobStatus::Finishing { .. } => vec![],
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
             }
@@ -334,35 +333,36 @@ impl CreatingStreamingJobStatus {
             | CreatingStreamingJobStatus::ConsumingLogStore { info, .. } => {
                 Some(&info.fragment_infos)
             }
-            CreatingStreamingJobStatus::Finishing(..)
-            | CreatingStreamingJobStatus::Resetting(..) => None,
+            CreatingStreamingJobStatus::Finishing(..) => None,
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
             }
         }
     }
 
-    pub(super) fn pre_apply_throttle<'a>(
+    pub(super) fn pre_apply_throttle(
         &mut self,
-        fragment_nodes: impl IntoIterator<Item = (FragmentId, &'a PbStreamNode)>,
-    ) {
+        config: &mut ThrottleConfigMap,
+    ) -> Option<Mutation> {
         let fragment_infos = match self {
             CreatingStreamingJobStatus::ConsumingSnapshot { info, .. }
             | CreatingStreamingJobStatus::ConsumingLogStore { info, .. } => {
                 &mut info.fragment_infos
             }
-            CreatingStreamingJobStatus::Finishing(..)
-            | CreatingStreamingJobStatus::Resetting(..) => return,
+            CreatingStreamingJobStatus::Finishing(..) => return None,
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
             }
         };
 
-        for (fragment_id, stream_node) in fragment_nodes {
+        extract_throttle_config(config, |fragment_id, stream_node| {
             if let Some(fragment_info) = fragment_infos.get_mut(&fragment_id) {
                 fragment_info.nodes = stream_node.clone();
+                true
+            } else {
+                false
             }
-        }
+        })
     }
 }
 
@@ -378,6 +378,8 @@ fn drain_pending_barriers(
 
 #[cfg(test)]
 mod tests {
+    use risingwave_pb::stream_plan::PbStreamNode;
+
     use super::*;
 
     fn barrier(prev_epoch: u64, curr_epoch: u64) -> BarrierInfo {
@@ -435,20 +437,64 @@ mod tests {
         assert!(pending_barriers.is_empty());
     }
 
-    #[tokio::test]
-    async fn test_resetting_skips_barrier_capacity_lookup() {
-        let mut status = CreatingStreamingJobStatus::Resetting(vec![]);
-        let partial_graph_manager =
-            PartialGraphManager::uninitialized(crate::manager::MetaSrvEnv::for_test().await);
+    #[test]
+    fn test_pre_apply_throttle_before_merge() {
+        let job_id = risingwave_common::id::JobId::new(1);
+        let fragment_id = FragmentId::new(1);
+        let old_node = PbStreamNode {
+            identity: "old".to_owned(),
+            ..Default::default()
+        };
+        let new_node = PbStreamNode {
+            identity: "new".to_owned(),
+            ..Default::default()
+        };
+        let fragment_infos = HashMap::from([(
+            fragment_id,
+            InflightFragmentInfo {
+                fragment_id,
+                distribution_type: risingwave_meta_model::fragment::DistributionType::Single,
+                fragment_type_mask: Default::default(),
+                vnode_count: 1,
+                nodes: old_node,
+                actors: Default::default(),
+                state_table_ids: Default::default(),
+            },
+        )]);
+        let mut status = CreatingStreamingJobStatus::ConsumingLogStore {
+            tracking_job: TrackingJob::recovered(job_id, &fragment_infos),
+            info: CreatingJobInfo {
+                fragment_infos,
+                upstream_fragment_downstreams: Default::default(),
+                downstreams: Default::default(),
+                snapshot_backfill_upstream_tables: Default::default(),
+                stream_actors: Default::default(),
+            },
+            log_store_progress_tracker: CreateMviewLogStoreProgressTracker::new(
+                std::iter::empty(),
+                0,
+            ),
+            pending_barriers: Default::default(),
+        };
+        let mut config = HashMap::from([(
+            fragment_id,
+            (
+                risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig {
+                    rate_limit: Some(1_000),
+                    throttle_type: Default::default(),
+                },
+                new_node.clone(),
+            ),
+        )]);
 
-        let injected = status.on_new_upstream_epoch(
-            &partial_graph_manager,
-            PartialGraphId::new(1),
-            10,
-            &barrier(1, 2),
-            None,
-        );
+        assert!(status.pre_apply_throttle(&mut config).is_some());
+        assert!(config.is_empty());
 
-        assert!(injected.is_empty());
+        let info = status.start_consume_upstream(&BarrierInfo {
+            prev_epoch: TracedEpoch::new(Epoch(1)),
+            curr_epoch: TracedEpoch::new(Epoch(2)),
+            kind: BarrierKind::Checkpoint(vec![1]),
+        });
+        assert_eq!(info.fragment_infos[&fragment_id].nodes, new_node);
     }
 }
