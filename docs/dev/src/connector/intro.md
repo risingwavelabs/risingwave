@@ -245,11 +245,21 @@ case/accent handling agrees with the snapshot query. PostgreSQL matching B-tree 
 must provide `ASC NULLS LAST` for every leading primary-key column, either by a forward
 scan of `ASC NULLS LAST` keys or a backward scan of `DESC NULLS FIRST` keys.
 
+For PostgreSQL TEXT/VARCHAR keys, collation identity must match between the query and
+the index, even when different collations have identical sorting behavior. Native libc
+C/POSIX columns keep their collation, so an ordinary primary-key index in a default-C
+database is sufficient. Columns with other locale rules still require explicit C
+ordering and a matching index. Selection is per column, including composite keys;
+existing explicit-C secondary indexes remain usable. The database provider is checked
+before treating its default locale as bytewise (an ICU database's libc locale is not
+its actual ordering).
+
 A CDC table can opt out with `WITH (bypass_pk_order_validation = 'true')` (default:
 `false`). This bypasses primary-key ordering checks, including PostgreSQL's encoding
-and matching-index checks, and logs a warning. It preserves PostgreSQL TEXT/VARCHAR
-`COLLATE pg_catalog."C"` expressions in snapshot queries. Connection, schema, and value
-decoding errors remain errors. The option applies to both serial snapshot readers and
+and matching-index checks, and logs a warning. PostgreSQL TEXT/VARCHAR snapshot
+expressions still use bytewise ordering: native libc C/POSIX column collations (including
+a database default with those semantics), or explicit `COLLATE pg_catalog."C"` otherwise.
+Connection, schema, and value decoding errors remain errors. The option applies to both serial snapshot readers and
 parallel snapshot split generation/readers.
 
 Bypassing validation does not make incompatible orders equivalent: snapshot/CDC merging
