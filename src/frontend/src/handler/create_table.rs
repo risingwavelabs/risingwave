@@ -35,6 +35,7 @@ use risingwave_common::catalog::{
 use risingwave_common::config::MetaBackend;
 use risingwave_common::global_jvm::Jvm;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
+use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::{bail, bail_not_implemented};
@@ -1816,6 +1817,27 @@ fn build_iceberg_engine_sink_options(
 
     let config = IcebergConfig::from_btreemap(sink_options.clone())?;
 
+    // Both MOR and COW initialize an equality-delete writer for ordinary upserts.
+    // Reject unsupported key types before creating the remote Iceberg table.
+    if !table.append_only && !config.enable_pk_index {
+        for pk in table.pk() {
+            let column = &table.columns()[pk.column_index];
+            let data_type = column.data_type();
+            if data_type.is_composite()
+                || matches!(data_type, DataType::Float32 | DataType::Float64)
+            {
+                return Err(ErrorCode::NotSupported(
+                    format!(
+                        "Iceberg engine table primary key column \"{}\" has unsupported type {} for equality deletes",
+                        column.name(), data_type
+                    ),
+                    "Use non-floating-point scalar primary key columns.".to_owned(),
+                )
+                .into());
+            }
+        }
+    }
+
     // Engine tables own their Iceberg maintenance policy, so enable manifest rewrites by default
     // whenever the table format supports them. Keep V3 disabled until rewrites preserve row lineage.
     if config.table_format_version() < FormatVersion::V3 {
@@ -2598,7 +2620,7 @@ mod tests {
     use risingwave_common::catalog::{
         DEFAULT_DATABASE_NAME, ROW_ID_COLUMN_NAME, RW_TIMESTAMP_COLUMN_NAME,
     };
-    use risingwave_common::types::{DataType, StructType};
+    use risingwave_common::types::StructType;
 
     use super::*;
     use crate::test_utils::{LocalFrontend, PROTO_FILE_DATA, create_proto_file};
@@ -2612,6 +2634,92 @@ mod tests {
 
     fn pk_names() -> Vec<String> {
         vec!["plan_id".to_owned(), "site_id".to_owned()]
+    }
+
+    #[tokio::test]
+    async fn test_iceberg_engine_primary_key_types() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        for (primary_key, append_only, pk_index, supported) in [
+            ("id, period", false, false, false),
+            ("id, items", false, false, false),
+            ("id, mapping", false, false, false),
+            ("id, f", false, false, false),
+            ("id, d", false, false, false),
+            ("id", false, false, true),
+            ("id, ts", false, false, true),
+            ("", false, false, true),
+            ("id, period", true, false, true),
+            ("id, period", false, true, true),
+        ] {
+            let pk_clause = if primary_key.is_empty() {
+                String::new()
+            } else {
+                format!(", PRIMARY KEY ({primary_key})")
+            };
+            frontend
+                .run_sql(&format!(
+                    "CREATE TABLE t (id INT, period STRUCT<start_ts TIMESTAMPTZ, end_ts TIMESTAMPTZ>, \
+                     items INT[], mapping MAP(INT, INT), f REAL, d DOUBLE PRECISION, ts TIMESTAMPTZ \
+                     {pk_clause}) {}",
+                    if append_only { "APPEND ONLY" } else { "" }
+                ))
+                .await
+                .unwrap();
+            let session = frontend.session_ref();
+            let table = session
+                .env()
+                .catalog_reader()
+                .read_guard()
+                .get_created_table_by_name(
+                    DEFAULT_DATABASE_NAME,
+                    SchemaPath::Name(DEFAULT_SCHEMA_NAME),
+                    "t",
+                )
+                .unwrap()
+                .0
+                .clone();
+            let pks = table
+                .pk_column_names()
+                .into_iter()
+                .map(str::to_owned)
+                .collect_vec();
+            for write_mode in ["merge-on-read", "copy-on-write"] {
+                if write_mode == "copy-on-write" && (append_only || pk_index) {
+                    continue;
+                }
+                let options = BTreeMap::from([
+                    ("connector".to_owned(), "iceberg".to_owned()),
+                    ("catalog.type".to_owned(), "storage".to_owned()),
+                    (
+                        "warehouse.path".to_owned(),
+                        "s3://test/warehouse".to_owned(),
+                    ),
+                    ("database.name".to_owned(), "public".to_owned()),
+                    ("table.name".to_owned(), "t".to_owned()),
+                    ("write_mode".to_owned(), write_mode.to_owned()),
+                    ("enable_pk_index".to_owned(), pk_index.to_string()),
+                ]);
+                let result = build_iceberg_engine_sink_options(
+                    options,
+                    &WithOptions::default(),
+                    &table,
+                    &pks,
+                );
+                if supported {
+                    result.unwrap();
+                } else {
+                    let err = result.unwrap_err().to_report_string();
+                    let column = primary_key.split(", ").last().unwrap();
+                    assert!(
+                        err.contains(&format!(
+                            "Iceberg engine table primary key column \"{column}\" has unsupported type"
+                        )),
+                        "{write_mode}: {err}"
+                    );
+                }
+            }
+            frontend.run_sql("DROP TABLE t").await.unwrap();
+        }
     }
 
     #[tokio::test]
