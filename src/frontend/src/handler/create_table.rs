@@ -1817,7 +1817,7 @@ fn build_iceberg_engine_sink_options(
 
     let config = IcebergConfig::from_btreemap(sink_options.clone())?;
 
-    // Both MOR and COW initialize an equality-delete writer for ordinary upserts.
+    // Both merge-on-read and copy-on-write initialize an equality-delete writer for upserts.
     // Reject unsupported key types before creating the remote Iceberg table.
     if !table.append_only && !config.enable_pk_index {
         for pk in table.pk() {
