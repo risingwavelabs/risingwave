@@ -338,6 +338,9 @@ impl PostgresExternalTableReader {
             return Ok(HashMap::new());
         }
 
+        // With PostgreSQL's default privileges, these catalogs are readable by PUBLIC and
+        // pg_catalog and the functions below are accessible without extra grants. This lookup
+        // needs no additional CDC privileges unless an administrator revoked those defaults.
         // datlocprovider was added in PG 15. Earlier databases always use libc.
         // Do not infer a default ICU database's ordering from its libc LC_COLLATE.
         let rows = client
