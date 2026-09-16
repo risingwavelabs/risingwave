@@ -169,6 +169,34 @@ public class OracleValidatorTest {
                         + "WHERE ID = 1",
                 heartbeatTable.actionQuery());
 
+        var fullSetup =
+                heartbeatTable.manualSetupSql(
+                        "FREEPDB1",
+                        "C##RW_VALIDATOR",
+                        OracleHeartbeatTable.ManualSetup.TABLE_AND_SEED_ROW);
+        assertTrue(fullSetup.contains("CREATE TABLE APP.RW_HEARTBEAT"));
+        assertTrue(fullSetup.contains("INSERT INTO APP.RW_HEARTBEAT"));
+        assertFalse(fullSetup.contains("GRANT SELECT"));
+        assertTrue(fullSetup.contains("GRANT UPDATE (HEARTBEAT) ON APP.RW_HEARTBEAT"));
+        assertFalse(fullSetup.contains("GRANT CREATE"));
+        assertFalse(fullSetup.contains("GRANT INSERT"));
+
+        var seedSetup =
+                heartbeatTable.manualSetupSql(
+                        "FREEPDB1", "C##RW_VALIDATOR", OracleHeartbeatTable.ManualSetup.SEED_ROW);
+        assertFalse(seedSetup.contains("CREATE TABLE"));
+        assertTrue(seedSetup.contains("INSERT INTO APP.RW_HEARTBEAT"));
+
+        var grantsOnly =
+                heartbeatTable.manualSetupSql(
+                        "FREEPDB1",
+                        "C##RW_VALIDATOR",
+                        OracleHeartbeatTable.ManualSetup.ACCESS_GRANTS);
+        assertFalse(grantsOnly.contains("CREATE TABLE"));
+        assertFalse(grantsOnly.contains("INSERT INTO"));
+        assertFalse(grantsOnly.contains("GRANT SELECT"));
+        assertTrue(grantsOnly.contains("GRANT UPDATE (HEARTBEAT)"));
+
         assertThrows(RuntimeException.class, () -> OracleHeartbeatTable.parse("RW_HEARTBEAT"));
         assertThrows(
                 RuntimeException.class,

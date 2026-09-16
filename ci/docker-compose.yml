@@ -235,6 +235,8 @@ services:
   source-cdc-test-env:
     image: public.ecr.aws/w1p7b4n3/rw-build-env:${BUILD_ENV_VERSION:?}
     depends_on:
+      oracle:
+        condition: service_started
       mysql:
         condition: service_started
       sqlserver-server:
@@ -613,6 +615,15 @@ services:
       interval: 5s
       timeout: 5s
       retries: 30
+
+  oracle:
+    image: container-registry.oracle.com/database/free:23.9.0.0
+    ports:
+      - "1521"
+    environment:
+      ORACLE_PWD: "OracleTest123"
+      ENABLE_ARCHIVELOG: "true"
+    shm_size: 1g
 
   sqlserver-server:
     image: mcr.microsoft.com/mssql/server:2022-latest

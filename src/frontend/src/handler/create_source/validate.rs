@@ -167,6 +167,51 @@ pub(crate) fn validate_cdc_heartbeat_interval(
     Ok(())
 }
 
+fn validate_heartbeat_table_auto_initialize(
+    connector: &str,
+    props: &BTreeMap<String, String>,
+) -> Result<()> {
+    const AUTO_INITIALIZE_KEY: &str = "heartbeat.table.auto.initialize";
+    let Some(value) = props.get(AUTO_INITIALIZE_KEY) else {
+        return Ok(());
+    };
+    let enabled = value.parse::<bool>().map_err(|_| {
+        ErrorCode::InvalidParameterValue(format!(
+            "'{AUTO_INITIALIZE_KEY}' must be 'true' or 'false'"
+        ))
+    })?;
+    if !enabled {
+        return Ok(());
+    }
+    if connector != ORACLE_CDC_CONNECTOR {
+        return Err(ErrorCode::InvalidParameterValue(format!(
+            "'{AUTO_INITIALIZE_KEY}=true' is not supported for connector '{connector}'"
+        ))
+        .into());
+    }
+
+    let heartbeat_enabled = props
+        .get("debezium.heartbeat.interval.ms")
+        .and_then(|value| value.parse::<i32>().ok())
+        .is_some_and(|interval| interval > 0);
+    if !heartbeat_enabled {
+        return Err(ErrorCode::InvalidParameterValue(format!(
+            "'{AUTO_INITIALIZE_KEY}' requires a positive 'debezium.heartbeat.interval.ms'"
+        ))
+        .into());
+    }
+    if !props
+        .get("heartbeat.table.name")
+        .is_some_and(|value| !value.trim().is_empty())
+    {
+        return Err(ErrorCode::InvalidParameterValue(format!(
+            "'{AUTO_INITIALIZE_KEY}' requires 'heartbeat.table.name'"
+        ))
+        .into());
+    }
+    Ok(())
+}
+
 pub fn validate_compatibility(
     format_encode: &FormatEncodeOptions,
     props: &mut BTreeMap<String, String>,
@@ -317,7 +362,8 @@ pub fn validate_compatibility(
         .into());
     }
 
-    validate_cdc_heartbeat_interval(&connector, props)
+    validate_cdc_heartbeat_interval(&connector, props)?;
+    validate_heartbeat_table_auto_initialize(&connector, props)
 }
 
 #[cfg(test)]
@@ -399,6 +445,67 @@ mod tests {
                     result.unwrap();
                 }
             }
+        }
+    }
+
+    #[test]
+    fn test_heartbeat_table_auto_initialize() {
+        const KEY: &str = "heartbeat.table.auto.initialize";
+        for connector in [
+            MYSQL_CDC_CONNECTOR,
+            POSTGRES_CDC_CONNECTOR,
+            MONGODB_CDC_CONNECTOR,
+            SQL_SERVER_CDC_CONNECTOR,
+            CITUS_CDC_CONNECTOR,
+        ] {
+            let props = BTreeMap::from([(KEY.to_owned(), "true".to_owned())]);
+            let err = validate_heartbeat_table_auto_initialize(connector, &props).unwrap_err();
+            assert!(err.to_string().contains("is not supported"), "{err}");
+        }
+
+        for value in ["TRUE", "False", "1", ""] {
+            let props = BTreeMap::from([(KEY.to_owned(), value.to_owned())]);
+            let err =
+                validate_heartbeat_table_auto_initialize(ORACLE_CDC_CONNECTOR, &props).unwrap_err();
+            assert!(err.to_string().contains("must be 'true' or 'false'"));
+        }
+
+        for interval in [None, Some("0")] {
+            let mut props = BTreeMap::from([
+                (KEY.to_owned(), "true".to_owned()),
+                (
+                    "heartbeat.table.name".to_owned(),
+                    "APP.RW_HEARTBEAT".to_owned(),
+                ),
+            ]);
+            if let Some(interval) = interval {
+                props.insert(
+                    "debezium.heartbeat.interval.ms".to_owned(),
+                    interval.to_owned(),
+                );
+            }
+            let err =
+                validate_heartbeat_table_auto_initialize(ORACLE_CDC_CONNECTOR, &props).unwrap_err();
+            assert!(err.to_string().contains("requires a positive"));
+        }
+
+        let mut props = BTreeMap::from([
+            (KEY.to_owned(), "true".to_owned()),
+            ("debezium.heartbeat.interval.ms".to_owned(), "1".to_owned()),
+        ]);
+        let err =
+            validate_heartbeat_table_auto_initialize(ORACLE_CDC_CONNECTOR, &props).unwrap_err();
+        assert!(err.to_string().contains("requires 'heartbeat.table.name'"));
+
+        props.insert(
+            "heartbeat.table.name".to_owned(),
+            "APP.RW_HEARTBEAT".to_owned(),
+        );
+        validate_heartbeat_table_auto_initialize(ORACLE_CDC_CONNECTOR, &props).unwrap();
+
+        for connector in [KAFKA_CONNECTOR, ORACLE_CDC_CONNECTOR] {
+            let props = BTreeMap::from([(KEY.to_owned(), "false".to_owned())]);
+            validate_heartbeat_table_auto_initialize(connector, &props).unwrap();
         }
     }
 

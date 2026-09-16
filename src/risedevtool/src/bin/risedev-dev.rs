@@ -32,9 +32,10 @@ use risedev::{
     DummyService, ElasticSearchService, EnsureStopService, ExecuteContext, FrontendService,
     GrafanaService, KafkaService, LakekeeperService, MetaNodeService, MinioService, MoatService,
     MongoDbService, MongoDbSetupTask, MotoService, MqttService, MySqlService, NatsService,
-    OpenSearchService, PostgresService, PrometheusService, PubsubService, PulsarService,
-    RISEDEV_NAME, RedisService, SchemaRegistryService, ServiceConfig, SqlServerService,
-    SqliteConfig, Task, TaskGroup, TempoService, generate_risedev_env, preflight_check,
+    OpenSearchService, OracleService, PostgresService, PrometheusService, PubsubService,
+    PulsarService, RISEDEV_NAME, RedisService, SchemaRegistryService, ServiceConfig,
+    SqlServerService, SqliteConfig, Task, TaskGroup, TempoService, generate_risedev_env,
+    preflight_check,
 };
 use sqlx::mysql::MySqlConnectOptions;
 use sqlx::postgres::PgConnectOptions;
@@ -344,6 +345,24 @@ fn task_main(
                     task.execute(&mut ctx)?;
                     ctx.pb
                         .set_message(format!("postgres {}:{}", c.address, c.port));
+                }
+                ServiceConfig::Oracle(c) => {
+                    OracleService::new(c.clone()).execute(&mut ctx)?;
+                    if c.user_managed {
+                        let mut task = risedev::TcpReadyCheckTask::new(
+                            c.address.clone(),
+                            c.port,
+                            c.user_managed,
+                        )?;
+                        task.execute(&mut ctx)?;
+                    } else {
+                        let mut task =
+                            risedev::LogReadyCheckTask::new("DATABASE IS READY TO USE!")?
+                                .with_timeout(Duration::from_secs(600));
+                        task.execute(&mut ctx)?;
+                    }
+                    ctx.pb
+                        .set_message(format!("oracle {}:{}", c.address, c.port));
                 }
                 ServiceConfig::SqlServer(c) => {
                     // only `c.password` will be used in `SqlServerService` as the password for user `sa`.
