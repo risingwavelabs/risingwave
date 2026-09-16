@@ -1303,9 +1303,7 @@ impl DatabaseCheckpointControl {
         };
 
         if let Some(Command::CreateStreamingJob {
-            job_type:
-                CreateStreamingJobType::SnapshotBackfill { .. }
-                | CreateStreamingJobType::BatchRefresh(_),
+            job_type: CreateStreamingJobType::Independent { .. },
             ..
         }) = &command
             && self.state.is_paused()

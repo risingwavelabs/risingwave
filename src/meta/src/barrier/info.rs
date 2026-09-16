@@ -630,8 +630,7 @@ impl InflightDatabaseInfo {
                         info!(%job_id, "newly create job get cancelled before first barrier is collected")
                     }
                 }
-                CreateStreamingJobType::SnapshotBackfill { .. }
-                | CreateStreamingJobType::BatchRefresh(_) => {
+                CreateStreamingJobType::Independent { .. } => {
                     // The progress of SnapshotBackfill/BatchRefresh won't be tracked here
                 }
             }
