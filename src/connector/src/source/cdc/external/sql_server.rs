@@ -191,14 +191,16 @@ impl SqlServerExternalTable {
     }
 
     /// Discover only comparison metadata for explicit-schema and replacement plans.
-    /// Resolve the base system type so aliases of uniqueidentifier have the same ordering.
+    /// Check the base system type so aliases of uniqueidentifier have the same ordering.
     pub async fn discover_pk_column_comparisons(
         config: &ExternalTableConfig,
         pk_names: &[String],
     ) -> ConnectorResult<Vec<CdcKeyComparison>> {
         let mut client = Self::connect_client(config).await?;
         let mut query = Query::new(
-            "SELECT c.name, TYPE_NAME(c.system_type_id)
+            "SELECT c.name,
+                    CAST(CASE WHEN c.system_type_id = TYPE_ID('uniqueidentifier')
+                              THEN 1 ELSE 0 END AS bit)
              FROM sys.columns AS c
              JOIN sys.tables AS t ON t.object_id = c.object_id
              JOIN sys.schemas AS s ON s.schema_id = t.schema_id
@@ -213,8 +215,17 @@ impl SqlServerExternalTable {
         let mut column_comparisons = vec![];
         while let Some(row) = rows.try_next().await? {
             let name: &str = row.try_get(0)?.context("missing SQL Server column name")?;
-            let ty: &str = row.try_get(1)?.context("missing SQL Server column type")?;
-            column_comparisons.push((name.to_owned(), key_comparison(ty)));
+            // Only UUID ordering needs special treatment. Resolving every type name
+            // would reject unrelated CLR columns, for which TYPE_NAME returns NULL.
+            let is_uuid: bool = row
+                .try_get(1)?
+                .context("missing SQL Server UUID comparison flag")?;
+            let comparison = if is_uuid {
+                CdcKeyComparison::SqlServerUniqueidentifier
+            } else {
+                CdcKeyComparison::Native
+            };
+            column_comparisons.push((name.to_owned(), comparison));
         }
         if column_comparisons.is_empty() {
             bail!(

@@ -113,6 +113,45 @@ explicit 1 EEEEEEEE-0000-0000-0000-000000000002 1 22
 inferred 1 00000000-0000-0000-0000-000000000003 1 30
 inferred 1 EEEEEEEE-0000-0000-0000-000000000002 1 22
 
+# Explicit schemas may omit CLR columns whose TYPE_NAME(system_type_id) is NULL.
+# Cover both UUID aliases and native keys without requiring the CLR column's type name.
+system ok
+sqlcmd -C -d rw_uuid_ordering -b -Q "CREATE TYPE dbo.uuid_alias FROM uniqueidentifier NOT NULL;"
+
+system ok
+sqlcmd -C -d rw_uuid_ordering -b -Q "CREATE TABLE dbo.uuid_extra_types (id dbo.uuid_alias PRIMARY KEY, value int, location geometry); CREATE TABLE dbo.int_extra_types (id int PRIMARY KEY, value int, location geometry); EXEC sys.sp_cdc_enable_table @source_schema=N'dbo', @source_name=N'uuid_extra_types', @role_name=NULL; EXEC sys.sp_cdc_enable_table @source_schema=N'dbo', @source_name=N'int_extra_types', @role_name=NULL; INSERT INTO dbo.uuid_extra_types VALUES ('FFFFFFFF-0000-0000-0000-000000000001',10,NULL); INSERT INTO dbo.int_extra_types VALUES (1,20,NULL);"
+
+statement ok
+CREATE TABLE uuid_omitted_clr (id varchar PRIMARY KEY, value int)
+FROM uuid_order_source TABLE 'dbo.uuid_extra_types';
+
+statement ok
+CREATE TABLE int_omitted_clr (id int PRIMARY KEY, value int)
+FROM uuid_order_source TABLE 'dbo.int_extra_types';
+
+query TI retry 30 backoff 1s
+SELECT upper(id),value FROM uuid_omitted_clr;
+----
+FFFFFFFF-0000-0000-0000-000000000001 10
+
+query II retry 30 backoff 1s
+SELECT id,value FROM int_omitted_clr;
+----
+1 20
+
+system ok
+sqlcmd -C -d rw_uuid_ordering -b -Q "UPDATE dbo.uuid_extra_types SET value=11; UPDATE dbo.int_extra_types SET value=21;"
+
+query TI retry 30 backoff 1s
+SELECT upper(id),value FROM uuid_omitted_clr;
+----
+FFFFFFFF-0000-0000-0000-000000000001 11
+
+query II retry 30 backoff 1s
+SELECT id,value FROM int_omitted_clr;
+----
+1 21
+
 statement ok
 DROP SOURCE uuid_order_source CASCADE;
 
