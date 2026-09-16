@@ -19,7 +19,7 @@ use risingwave_common::hash::HashKey;
 use risingwave_common::row::{RowDeserializer, RowExt};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_common::util::iter_util::ZipEqDebug;
-use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_common::util::sort_util::{ColumnOrder, topn_watermark_forwardable_order_key};
 
 use super::group_top_n::GroupTopNCache;
 use super::top_n_cache::AppendOnlyTopNCacheTrait;
@@ -83,6 +83,9 @@ pub struct InnerAppendOnlyGroupTopNExecutor<K: HashKey, S: StateStore, const WIT
     /// which column we used to group the data.
     group_by: Vec<usize>,
 
+    /// The `ORDER BY` column whose watermarks can be forwarded, if any.
+    watermark_order_key: Option<usize>,
+
     /// group key -> cache for this group
     caches: GroupTopNCache<K, WITH_TIES>,
 
@@ -130,6 +133,7 @@ impl<K: HashKey, S: StateStore, const WITH_TIES: bool>
             limit: offset_and_limit.1,
             managed_state,
             storage_key_indices: storage_key.into_iter().map(|op| op.column_index).collect(),
+            watermark_order_key: topn_watermark_forwardable_order_key(&order_by),
             group_by,
             caches: GroupTopNCache::new(watermark_epoch, metrics_info),
             cache_key_serde,
@@ -235,10 +239,136 @@ where
 
     async fn handle_watermark(&mut self, watermark: Watermark) -> Option<Watermark> {
         if watermark.col_idx == self.group_by[0] {
+            // The state table is ordered by the first group key column, so the watermark on it can
+            // also be used to clean up the states of the groups below it.
             self.managed_state.update_watermark(watermark.val.clone());
-            Some(watermark)
-        } else {
-            None
+        }
+        // A row can only change the output of its own group, so watermarks on group key columns
+        // can always be forwarded. Watermarks on the first `ORDER BY` column can be forwarded if
+        // it's ordered `ASC NULLS LAST`. See `topn_watermark_forwardable_order_key` for the
+        // reasoning.
+        (self.group_by.contains(&watermark.col_idx)
+            || Some(watermark.col_idx) == self.watermark_order_key)
+            .then_some(watermark)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::AtomicU64;
+
+    use risingwave_common::array::stream_chunk::StreamChunkTestExt;
+    use risingwave_common::catalog::Field;
+    use risingwave_common::hash::SerializedKey;
+    use risingwave_common::util::epoch::test_epoch;
+    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_storage::memory::MemoryStateStore;
+
+    use super::*;
+    use crate::executor::test_utils::top_n_executor::create_in_memory_state_table;
+    use crate::executor::test_utils::{MockSource, StreamExecutorTestExt};
+
+    /// Same as `GroupTopNExecutor`: watermarks on group key columns are always forwarded (the
+    /// first one also cleans the state), and the watermark on the first `ORDER BY` column is
+    /// forwarded only when it's ordered `ASC NULLS LAST`.
+    #[tokio::test]
+    async fn test_watermark_forwarding() {
+        let asc = OrderType::ascending();
+        let desc = OrderType::descending();
+        // (group_by, order_by, storage_key, forwarded watermark columns)
+        let cases = [
+            (
+                vec![1],
+                vec![ColumnOrder::new(2, asc)],
+                vec![
+                    ColumnOrder::new(1, asc),
+                    ColumnOrder::new(2, asc),
+                    ColumnOrder::new(0, asc),
+                ],
+                vec![1, 2],
+            ),
+            (
+                vec![1],
+                vec![ColumnOrder::new(2, desc)],
+                vec![
+                    ColumnOrder::new(1, asc),
+                    ColumnOrder::new(2, desc),
+                    ColumnOrder::new(0, asc),
+                ],
+                vec![1],
+            ),
+            (
+                vec![1, 2],
+                vec![ColumnOrder::new(0, asc)],
+                vec![
+                    ColumnOrder::new(1, asc),
+                    ColumnOrder::new(2, asc),
+                    ColumnOrder::new(0, asc),
+                ],
+                vec![0, 1, 2],
+            ),
+        ];
+        for (group_by, order_by, storage_key, forwarded) in cases {
+            let schema = Schema {
+                fields: vec![
+                    Field::unnamed(DataType::Int64),
+                    Field::unnamed(DataType::Int64),
+                    Field::unnamed(DataType::Int64),
+                ],
+            };
+            let mut messages = vec![
+                Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
+                Message::Chunk(StreamChunk::from_pretty(
+                    "  I I I
+                    + 10 9 1
+                    +  8 8 2
+                    +  7 8 2
+                    +  9 1 1
+                    + 10 1 1
+                    +  8 1 3",
+                )),
+            ];
+            messages.extend((0..3).map(|col_idx| {
+                Message::Watermark(Watermark::new(
+                    col_idx,
+                    DataType::Int64,
+                    ScalarImpl::Int64(5),
+                ))
+            }));
+            messages.push(Message::Barrier(Barrier::new_test_barrier(test_epoch(2))));
+            let source =
+                MockSource::with_messages(messages).into_executor(schema.clone(), vec![1, 2, 0]);
+            let state_table = create_in_memory_state_table(
+                &[DataType::Int64, DataType::Int64, DataType::Int64],
+                &storage_key.iter().map(|o| o.order_type).collect::<Vec<_>>(),
+                &storage_key
+                    .iter()
+                    .map(|o| o.column_index)
+                    .collect::<Vec<_>>(),
+            )
+            .await;
+            let top_n = AppendOnlyGroupTopNExecutor::<SerializedKey, MemoryStateStore, false>::new(
+                source,
+                ActorContext::for_test(0),
+                schema,
+                storage_key,
+                (0, 2),
+                order_by,
+                group_by,
+                state_table,
+                Arc::new(AtomicU64::new(0)),
+            )
+            .unwrap();
+            let mut top_n = top_n.boxed().execute();
+
+            top_n.expect_barrier().await;
+            top_n.expect_chunk().await;
+            for col_idx in forwarded {
+                let watermark = top_n.expect_watermark().await;
+                assert_eq!(watermark.col_idx, col_idx);
+                assert_eq!(watermark.val, ScalarImpl::Int64(5));
+            }
+            top_n.expect_barrier().await;
         }
     }
 }

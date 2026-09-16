@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use pretty_xmlish::XmlNode;
+use risingwave_common::util::sort_util::topn_watermark_forwardable_order_key;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::generic::{DistillUnit, TopNLimit};
@@ -44,13 +45,17 @@ impl StreamGroupTopN {
 
         let input = &core.input;
 
-        // NOTE: The executor only forwards watermarks on the first group-by column.
-        // Keep the optimizer in sync so EOWC won't be enabled on unsupported plans.
-        //
-        // TODO: Actually it's also safe to forward watermarks on
-        // - other group key columns,
-        // - ascending ORDER BY columns on append-only input.
-        let watermark_columns = input.watermark_columns().retain_clone(&[core.group_key[0]]);
+        // The executor forwards watermarks on group key columns, and on the first `ORDER BY`
+        // column if it's ordered `ASC NULLS LAST`. Keep the optimizer in sync so EOWC won't be
+        // enabled on unsupported plans. See `topn_watermark_forwardable_order_key` for the
+        // reasoning.
+        let watermark_columns = {
+            let mut cols = core.group_key.clone();
+            cols.extend(topn_watermark_forwardable_order_key(
+                &core.order.column_orders,
+            ));
+            input.watermark_columns().retain_clone(&cols)
+        };
 
         let mut stream_key = core
             .stream_key()
