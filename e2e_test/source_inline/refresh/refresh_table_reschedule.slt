@@ -1,74 +1,73 @@
 # A table cannot be rescheduled or replaced while it is being refreshed; both go through once the
 # cycle ends, and the next cycle runs on the new actors.
 
-include ./refresh_table_200k.slt.part
-
-statement ok
-REFRESH TABLE refresh_200k_t;
+include ./refresh_table_paused.slt.part
 
 statement error is being refreshed
-ALTER TABLE refresh_200k_t SET PARALLELISM = 1;
+ALTER TABLE refresh_paused_t SET PARALLELISM = 1;
 
 statement error is being refreshed
-ALTER TABLE refresh_200k_t ADD COLUMN extra int;
+ALTER TABLE refresh_paused_t ADD COLUMN extra int;
 
 # Rescheduling a single fragment of the table is refused as well.
 system ok
-fragment_id=$(psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -tAc "SELECT f.fragment_id FROM rw_fragments f JOIN rw_tables t ON f.table_id = t.id WHERE t.name = 'refresh_200k_t' AND 'MVIEW' = ANY(f.flags)") && psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -c "ALTER FRAGMENT $fragment_id SET PARALLELISM = 1" 2>&1 | grep -q 'is being refreshed'
+fragment_id=$(psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -tAc "SELECT f.fragment_id FROM rw_fragments f JOIN rw_tables t ON f.table_id = t.id WHERE t.name = 'refresh_paused_t' AND 'MVIEW' = ANY(f.flags)") && psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -c "ALTER FRAGMENT $fragment_id SET PARALLELISM = 1" 2>&1 | grep -q 'is being refreshed'
 
-query T retry 12 backoff 5s
+statement ok
+ALTER TABLE refresh_paused_t SET SOURCE_RATE_LIMIT TO DEFAULT;
+
+query T retry 10 backoff 2s
 SELECT s.current_status
 FROM rw_catalog.rw_refresh_table_state s
 JOIN rw_catalog.rw_tables t ON s.table_id = t.id
-WHERE t.name = 'refresh_200k_t';
+WHERE t.name = 'refresh_paused_t';
 ----
 IDLE
 
 
 statement ok
-ALTER TABLE refresh_200k_t SET PARALLELISM = 1;
+ALTER TABLE refresh_paused_t SET PARALLELISM = 1;
 
-# From here on a single actor reloads all 200k rows, which takes about a minute on CI.
 statement ok retry 3 backoff 5s
-REFRESH TABLE refresh_200k_t;
+REFRESH TABLE refresh_paused_t;
 
-query T retry 30 backoff 5s
+query T retry 10 backoff 2s
 SELECT s.current_status
 FROM rw_catalog.rw_refresh_table_state s
 JOIN rw_catalog.rw_tables t ON s.table_id = t.id
-WHERE t.name = 'refresh_200k_t';
+WHERE t.name = 'refresh_paused_t';
 ----
 IDLE
 
 
 query II
-SELECT count(*), sum(cnt) FROM refresh_200k_mv;
+SELECT count(*), sum(cnt) FROM refresh_paused_mv;
 ----
-97 200000
+97 1000
 
 statement ok
-ALTER TABLE refresh_200k_t ADD COLUMN extra int;
+ALTER TABLE refresh_paused_t ADD COLUMN extra int;
 
 statement ok retry 3 backoff 5s
-REFRESH TABLE refresh_200k_t;
+REFRESH TABLE refresh_paused_t;
 
-query T retry 30 backoff 5s
+query T retry 10 backoff 2s
 SELECT s.current_status
 FROM rw_catalog.rw_refresh_table_state s
 JOIN rw_catalog.rw_tables t ON s.table_id = t.id
-WHERE t.name = 'refresh_200k_t';
+WHERE t.name = 'refresh_paused_t';
 ----
 IDLE
 
 
 query II
-SELECT count(*), sum(cnt) FROM refresh_200k_mv;
+SELECT count(*), sum(cnt) FROM refresh_paused_mv;
 ----
-97 200000
+97 1000
 
 query I
-SELECT count(*) FROM refresh_200k_t WHERE extra IS NULL;
+SELECT count(*) FROM refresh_paused_t WHERE extra IS NULL;
 ----
-200000
+1000
 
-include ./drop_refresh_table_200k.slt.part
+include ./drop_refresh_table_paused.slt.part

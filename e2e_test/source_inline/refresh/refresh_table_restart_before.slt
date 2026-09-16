@@ -1,27 +1,4 @@
 # Leaves a refresh in flight for the cluster restart in the CI script; the checks are in
 # refresh_table_restart_after.slt.
 
-include ./refresh_table_200k.slt.part
-
-# Holds the trigger of the interrupted cycle so refresh_table_restart_after.slt can check that the
-# restart started a new cycle instead of finishing this one.
-statement ok
-CREATE TABLE refresh_restart_marker (trigger_before varchar);
-
-statement ok
-REFRESH TABLE refresh_200k_t;
-
-query T
-SELECT s.current_status
-FROM rw_catalog.rw_refresh_table_state s
-JOIN rw_catalog.rw_tables t ON s.table_id = t.id
-WHERE t.name = 'refresh_200k_t';
-----
-REFRESHING
-
-# System tables cannot feed an INSERT directly.
-system ok
-t=$(psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -tAc "SELECT s.last_trigger_time FROM rw_catalog.rw_refresh_table_state s JOIN rw_catalog.rw_tables t ON s.table_id = t.id WHERE t.name = 'refresh_200k_t'") && psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -v ON_ERROR_STOP=1 -c "INSERT INTO refresh_restart_marker VALUES ('$t')"
-
-statement ok
-FLUSH;
+include ./refresh_table_paused.slt.part
