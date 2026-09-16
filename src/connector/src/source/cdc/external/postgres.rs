@@ -257,7 +257,7 @@ impl PostgresExternalTableReader {
 
         let column_type_oids = client
             .query(
-                "SELECT a.attname, a.atttypid, typ.typtype::text, typ.typcategory::text \
+                "SELECT a.attname, a.atttypid, typ.typtype::text, typ.typcategory::text, typ.typname \
                  FROM pg_attribute a \
                  JOIN pg_type typ ON typ.oid = a.atttypid \
                  JOIN pg_class tbl ON tbl.oid = a.attrelid \
@@ -275,6 +275,7 @@ impl PostgresExternalTableReader {
                         row.get::<_, u32>(1),
                         row.get::<_, String>(2),
                         row.get::<_, String>(3),
+                        row.get::<_, String>(4),
                     ),
                 )
             })
@@ -289,14 +290,14 @@ impl PostgresExternalTableReader {
     }
 
     fn binary_collated_pk_columns(
-        column_types: &HashMap<String, (u32, String, String)>,
+        column_types: &HashMap<String, (u32, String, String, String)>,
         table_name: &SchemaTableName,
         primary_keys: &[String],
         bypass_pk_order_validation: bool,
     ) -> ConnectorResult<HashSet<String>> {
         let mut binary_collated_columns = HashSet::new();
         for column_name in primary_keys {
-            let (type_oid, type_kind, type_category) = column_types.get(column_name).ok_or_else(|| {
+            let (type_oid, type_kind, type_category, type_name) = column_types.get(column_name).ok_or_else(|| {
                 anyhow::anyhow!(
                     "PostgreSQL system catalog did not return primary-key column `{column_name}` \
                      from table {}",
@@ -310,7 +311,7 @@ impl PostgresExternalTableReader {
             }
             if !bypass_pk_order_validation
                 && let Some(reason) =
-                    Self::unsupported_pk_type_reason(*type_oid, type_kind, type_category)
+                    Self::unsupported_pk_type_reason(*type_oid, type_kind, type_category, type_name)
             {
                 return Err(anyhow::anyhow!(
                     "PostgreSQL CDC primary-key column `{column_name}` has type OID {type_oid}, \
@@ -332,7 +333,12 @@ impl PostgresExternalTableReader {
         type_oid: u32,
         type_kind: &str,
         type_category: &str,
+        type_name: &str,
     ) -> Option<&'static str> {
+        // Extension OIDs vary across databases. Match the name just as the string decoder does.
+        if type_name == "citext" {
+            return Some("citext case-insensitive ordering does not match decoded string ordering");
+        }
         if type_kind == "e" {
             return Some("enum declaration order does not match decoded string ordering");
         }
@@ -1704,10 +1710,16 @@ mod tests {
         let columns = HashMap::from([
             (
                 "text_key".into(),
-                (PgType::TEXT.oid(), "b".into(), "S".into()),
+                (PgType::TEXT.oid(), "b".into(), "S".into(), "text".into()),
             ),
-            ("enum_key".into(), (u32::MAX, "e".into(), "E".into())),
-            ("unknown_key".into(), (u32::MAX - 1, "b".into(), "U".into())),
+            (
+                "enum_key".into(),
+                (u32::MAX, "e".into(), "E".into(), "my_enum".into()),
+            ),
+            (
+                "unknown_key".into(),
+                (u32::MAX - 1, "b".into(), "U".into(), "unknown".into()),
+            ),
         ]);
         let keys = vec!["text_key".into(), "enum_key".into(), "unknown_key".into()];
         assert!(
@@ -1756,23 +1768,54 @@ mod tests {
             u32::MAX,
         ] {
             assert!(
-                PostgresExternalTableReader::unsupported_pk_type_reason(oid, "b", "U").is_none()
+                PostgresExternalTableReader::unsupported_pk_type_reason(oid, "b", "U", "unknown")
+                    .is_none()
             );
         }
         for oid in [PgType::BPCHAR.oid(), PgType::JSONB.oid()] {
             assert!(
-                PostgresExternalTableReader::unsupported_pk_type_reason(oid, "b", "U").is_some()
+                PostgresExternalTableReader::unsupported_pk_type_reason(oid, "b", "U", "unknown")
+                    .is_some()
             );
         }
         // Catalog metadata catches enums and arrays even when their OID is not built in.
         assert!(
-            PostgresExternalTableReader::unsupported_pk_type_reason(u32::MAX, "e", "E").is_some()
+            PostgresExternalTableReader::unsupported_pk_type_reason(u32::MAX, "e", "E", "unknown")
+                .is_some()
         );
         assert!(
-            PostgresExternalTableReader::unsupported_pk_type_reason(u32::MAX, "b", "A").is_some()
+            PostgresExternalTableReader::unsupported_pk_type_reason(u32::MAX, "b", "A", "unknown")
+                .is_some()
         );
         assert!(
-            PostgresExternalTableReader::unsupported_pk_type_reason(u32::MAX, "d", "U").is_none()
+            PostgresExternalTableReader::unsupported_pk_type_reason(u32::MAX, "d", "U", "unknown")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn test_citext_pk_requires_explicit_bypass() {
+        let table = SchemaTableName {
+            schema_name: "public".into(),
+            table_name: "t".into(),
+        };
+        let columns = HashMap::from([(
+            "id".into(),
+            (u32::MAX, "b".into(), "S".into(), "citext".into()),
+        )]);
+        let keys = vec!["id".into()];
+        let error =
+            PostgresExternalTableReader::binary_collated_pk_columns(&columns, &table, &keys, false)
+                .unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("citext case-insensitive ordering")
+        );
+        assert!(
+            PostgresExternalTableReader::binary_collated_pk_columns(&columns, &table, &keys, true,)
+                .unwrap()
+                .is_empty()
         );
     }
 
