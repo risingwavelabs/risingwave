@@ -389,8 +389,6 @@ CREATE TABLE parallelized_cdc.text_pk_binary_ordering_test (
     payload TEXT,
     PRIMARY KEY (id, seq)
 );
-CREATE INDEX ON parallelized_cdc.text_pk_binary_ordering_test
-    (id COLLATE \"C\", seq);
 INSERT INTO parallelized_cdc.text_pk_binary_ordering_test VALUES
     ('B', 1, 'uppercase'),
     ('a', 2, 'lowercase'),
@@ -453,6 +451,38 @@ SELECT COUNT(*) FROM pg_parallelized_cdc_backfill_test_table_2
 # A locale-aware PostgreSQL PK order differs from RisingWave's UTF-8 byte order.
 # Serial pagination and parallel split generation/scans must nevertheless use the
 # explicit C/binary contract.
+statement error PostgreSQL CDC TEXT/VARCHAR primary-key ordering requires.*has no such index
+CREATE TABLE pg_text_pk_binary_ordering_serial (
+    id TEXT,
+    seq INT,
+    payload TEXT,
+    PRIMARY KEY (id, seq)
+)
+WITH (
+    snapshot.batch_size='2'
+)
+FROM pg_source TABLE 'parallelized_cdc.text_pk_binary_ordering_test';
+
+statement error PostgreSQL CDC TEXT/VARCHAR primary-key ordering requires.*has no such index
+CREATE TABLE pg_text_pk_binary_ordering_parallel (
+    id TEXT,
+    seq INT,
+    payload TEXT,
+    PRIMARY KEY (id, seq)
+)
+WITH (
+    backfill.num_rows_per_split='2',
+    backfill.parallelism='3',
+    backfill.as_even_splits='false'
+)
+FROM pg_source TABLE 'parallelized_cdc.text_pk_binary_ordering_test';
+
+system ok
+psql -c "
+CREATE INDEX ON parallelized_cdc.text_pk_binary_ordering_test
+    (id COLLATE \"C\", seq);
+"
+
 statement ok
 CREATE TABLE pg_text_pk_binary_ordering_serial (
     id TEXT,
