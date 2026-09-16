@@ -3135,11 +3135,11 @@ async fn test_normalize_overlapping_compaction_groups_refreshes_write_limits() {
     ));
 
     hummock_manager
-        .register_table_ids_for_test(&[(64, 2.into()), (80, 2.into())])
+        .register_table_ids_for_test(&[(64, 2), (80, 2)])
         .await
         .unwrap();
     hummock_manager
-        .register_table_ids_for_test(&[(65, 3.into())])
+        .register_table_ids_for_test(&[(65, 3)])
         .await
         .unwrap();
 
