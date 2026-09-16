@@ -1505,7 +1505,6 @@ impl DatabaseCheckpointControl {
             Some(Command::FinishRefresh {
                 table_id,
                 trigger_time,
-                aborted,
             }) => {
                 let (table_ids, node_actors) = self.collect_base_info();
                 (
@@ -1516,7 +1515,6 @@ impl DatabaseCheckpointControl {
                     PostCollectCommand::FinishRefresh {
                         table_id,
                         trigger_time,
-                        aborted,
                     },
                 )
             }

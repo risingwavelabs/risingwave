@@ -420,6 +420,15 @@ impl MetadataManager {
         self.catalog_controller.list_refresh_jobs().await
     }
 
+    pub async fn list_refreshing_jobs(
+        &self,
+        database_id: Option<DatabaseId>,
+    ) -> MetaResult<Vec<refresh_job::Model>> {
+        self.catalog_controller
+            .list_refreshing_jobs(database_id)
+            .await
+    }
+
     pub async fn list_refreshable_table_ids(&self) -> MetaResult<Vec<TableId>> {
         self.catalog_controller.list_refreshable_table_ids().await
     }

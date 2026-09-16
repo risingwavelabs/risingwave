@@ -86,10 +86,11 @@ impl RefreshCycleActors {
 
 /// Owns the refresh cycles. The `refresh_job` row is the source of truth: a cycle is its
 /// `last_trigger_time`, and both transitions are the post-collect of a barrier (`RefreshStart` moves
-/// the job to `Refreshing`, `FinishRefresh` back to `Idle`). The in-memory tracker of a cycle is
-/// installed by the same barrier that started it, before the row moves, so a job that is not idle
-/// and has no tracker of its cycle was abandoned by a recovery and is finished as such by the
-/// scheduler.
+/// the job to `Refreshing`, `FinishRefresh` back to `Idle`). A recovery kills every cycle of the
+/// databases it re-initializes and moves their rows back to `Idle` before those databases accept
+/// commands again (`abandon_cycles`), so nothing has to infer an abandoned cycle afterwards. The
+/// in-memory tracker of a cycle is installed by the same barrier that started it, before the row
+/// moves.
 pub struct GlobalRefreshManager {
     metadata_manager: MetadataManager,
     barrier_scheduler: BarrierScheduler,
@@ -101,9 +102,6 @@ pub struct GlobalRefreshManager {
 #[derive(Default)]
 struct Cycles {
     trackers: HashMap<TableId, CycleTracker>,
-    /// Cycles whose `FinishRefresh` barrier is scheduled but not yet collected, with the
-    /// database the barrier belongs to.
-    pending_finish: HashMap<TableId, (DatabaseId, NaiveDateTime)>,
     /// Tables whose `RefreshStart` barrier is being scheduled.
     starting: HashSet<TableId>,
     retry: HashMap<TableId, RetryState>,
@@ -252,7 +250,7 @@ impl GlobalRefreshManager {
             .is_some_and(|tracker| tracker.trigger_time == trigger_time)
         {
             return Err(anyhow!(
-                "refresh of table {} did not start, the table was dropped",
+                "refresh of table {} is not running: the table was dropped or a recovery abandoned the cycle",
                 table_id
             )
             .into());
@@ -333,13 +331,23 @@ impl GlobalRefreshManager {
                 associated_source_id,
             },
             RefreshStage::Mview => {
-                cycles.schedule_finish(
-                    &self.barrier_scheduler,
+                let command = Command::FinishRefresh {
                     table_id,
-                    database_id,
                     trigger_time,
-                    false,
-                );
+                };
+                // The queue only refuses a command while the database is recovering, and that
+                // recovery abandons the cycle itself.
+                match self
+                    .barrier_scheduler
+                    .run_command_no_wait(database_id, command)
+                {
+                    Ok(()) => {
+                        tracing::info!(%table_id, %trigger_time, "FinishRefresh command scheduled")
+                    }
+                    Err(err) => {
+                        tracing::warn!(%table_id, error = %err.as_report(), "failed to schedule FinishRefresh, the recovery in progress abandons the cycle")
+                    }
+                }
                 return Ok(());
             }
         };
@@ -359,20 +367,12 @@ impl GlobalRefreshManager {
         &self,
         table_id: TableId,
         trigger_time: NaiveDateTime,
-        aborted: bool,
     ) -> MetaResult<()> {
         let finished = self
             .metadata_manager
-            .finish_refresh_job(table_id, trigger_time, !aborted)
+            .finish_refresh_job(table_id, trigger_time, true)
             .await?;
         let mut cycles = self.cycles.lock();
-        if cycles
-            .pending_finish
-            .get(&table_id)
-            .is_some_and(|(_, pending)| *pending == trigger_time)
-        {
-            cycles.pending_finish.remove(&table_id);
-        }
         let tracker = cycles
             .trackers
             .get(&table_id)
@@ -380,53 +380,62 @@ impl GlobalRefreshManager {
             .then(|| cycles.trackers.remove(&table_id))
             .flatten();
         if !finished {
-            tracing::warn!(%table_id, %trigger_time, aborted, "FinishRefresh collected for a cycle that is no longer current");
+            tracing::warn!(%table_id, %trigger_time, "FinishRefresh collected for a cycle that is no longer current");
             return Ok(());
         }
-        tracing::info!(%table_id, %trigger_time, aborted, "refresh cycle finished");
-        let duration = tracker.map_or_else(
-            || u64::try_from((Utc::now().naive_utc() - trigger_time).num_seconds()).unwrap_or(0),
-            |tracker| tracker.start_time.elapsed().as_secs(),
-        );
+        tracing::info!(%table_id, %trigger_time, aborted = false, "refresh cycle finished");
         cycles.record_finished(
             table_id,
-            if aborted { "aborted" } else { "success" },
-            duration,
+            "success",
+            cycle_duration_secs(tracker.as_ref(), trigger_time),
         );
-        if !aborted {
-            cycles.retry.remove(&table_id);
-        } else {
-            match cycles.retry.get(&table_id) {
-                None => {
-                    cycles.retry.insert(table_id, RetryState::Owed);
-                    self.scheduler_wakeup.notify_one();
-                }
-                Some(RetryState::Owed) => {}
-                Some(RetryState::Used) => {
-                    tracing::warn!(%table_id, "abandoned refresh was already re-run once, waiting for the next trigger");
-                }
-            }
-        }
+        cycles.retry.remove(&table_id);
         Ok(())
     }
 
-    /// Called by recovery; the cycles of the database are then finished as abandoned.
-    pub fn clear_trackers(&self, database_id: Option<DatabaseId>) {
-        let mut cycles = self.cycles.lock();
-        match database_id {
-            None => {
-                cycles.trackers.clear();
-                cycles.pending_finish.clear();
-            }
-            Some(database_id) => {
-                cycles
-                    .trackers
-                    .retain(|_, tracker| tracker.database_id != database_id);
-                cycles
-                    .pending_finish
-                    .retain(|_, (pending_db, _)| *pending_db != database_id);
+    /// Called while a recovery re-initializes the database(s), before they accept commands again:
+    /// every cycle of theirs is dead, so its row moves back to `Idle` here and it is re-run once.
+    pub async fn abandon_cycles(&self, database_id: Option<DatabaseId>) -> MetaResult<()> {
+        let jobs = self
+            .metadata_manager
+            .list_refreshing_jobs(database_id)
+            .await?;
+        let mut abandoned = Vec::with_capacity(jobs.len());
+        for job in jobs {
+            let Some(trigger_time) = job.last_trigger_time.map(millis_to_datetime) else {
+                tracing::error!(table_id = %job.table_id, status = ?job.current_status, "refresh job is not idle but has no trigger time");
+                continue;
+            };
+            if self
+                .metadata_manager
+                .finish_refresh_job(job.table_id, trigger_time, false)
+                .await?
+            {
+                abandoned.push((job.table_id, trigger_time));
             }
         }
+        let mut cycles = self.cycles.lock();
+        for (table_id, trigger_time) in abandoned {
+            let tracker = cycles.trackers.remove(&table_id);
+            tracing::info!(%table_id, %trigger_time, aborted = true, "refresh cycle finished");
+            cycles.record_finished(
+                table_id,
+                "aborted",
+                cycle_duration_secs(tracker.as_ref(), trigger_time),
+            );
+            if cycles.retry.get(&table_id) == Some(&RetryState::Used) {
+                tracing::warn!(%table_id, "abandoned refresh was already re-run once, waiting for the next trigger");
+            } else {
+                cycles.retry.insert(table_id, RetryState::Owed);
+            }
+        }
+        match database_id {
+            None => cycles.trackers.clear(),
+            Some(database_id) => cycles
+                .trackers
+                .retain(|_, tracker| tracker.database_id != database_id),
+        }
+        Ok(())
     }
 
     /// Called when the table is dropped; `status` labels the metrics of an interrupted cycle.
@@ -435,7 +444,6 @@ impl GlobalRefreshManager {
         if let Some(tracker) = cycles.trackers.remove(&table_id) {
             cycles.record_finished(table_id, status, tracker.start_time.elapsed().as_secs());
         }
-        cycles.pending_finish.remove(&table_id);
         cycles.retry.remove(&table_id);
     }
 
@@ -490,15 +498,11 @@ impl GlobalRefreshManager {
                 .metrics
                 .retain(|table_id, _| active.contains(table_id));
             cycles.retry.retain(|table_id, _| active.contains(table_id));
-            cycles
-                .pending_finish
-                .retain(|table_id, _| active.contains(table_id));
         }
         for job in &jobs {
             let table_id = job.table_id;
             let cron_due = cron_due(job, created_at.get(&table_id).copied());
             if job.current_status != RefreshState::Idle {
-                self.finish_pending(job).await;
                 if cron_due {
                     let mut cycles = self.cycles.lock();
                     cycles.job_metrics(table_id).cron_miss_count.inc();
@@ -529,66 +533,6 @@ impl GlobalRefreshManager {
         }
     }
 
-    /// Schedules `FinishRefresh` for a cycle whose merge is complete or which was abandoned;
-    /// failures are retried on the next tick.
-    async fn finish_pending(&self, job: &refresh_job::Model) {
-        let table_id = job.table_id;
-        let Some(trigger_time) = job.last_trigger_time.map(millis_to_datetime) else {
-            tracing::error!(%table_id, status = ?job.current_status, "refresh job is not idle but has no trigger time");
-            return;
-        };
-        let tracked = {
-            let cycles = self.cycles.lock();
-            if cycles
-                .pending_finish
-                .get(&table_id)
-                .is_some_and(|(_, pending)| *pending == trigger_time)
-            {
-                return;
-            }
-            cycles.trackers.contains_key(&table_id)
-        };
-        // The database of an abandoned cycle is not in memory; it is looked up before the
-        // decision, so that the decision and the scheduling happen under one lock.
-        let abandoned_database_id = if tracked {
-            None
-        } else {
-            match self
-                .metadata_manager
-                .catalog_controller
-                .get_object_database_id(table_id)
-                .await
-            {
-                Ok(database_id) => Some(database_id),
-                Err(err) if err.is_catalog_id_not_found("object") => return,
-                Err(err) => {
-                    tracing::warn!(%table_id, error = %err.as_report(), "failed to locate abandoned refresh, will retry");
-                    return;
-                }
-            }
-        };
-        let mut cycles = self.cycles.lock();
-        let (database_id, aborted) = match cycles.trackers.get(&table_id) {
-            Some(tracker) => {
-                if tracker.trigger_time != trigger_time || !tracker.mview.is_complete() {
-                    return;
-                }
-                (tracker.database_id, false)
-            }
-            None => match abandoned_database_id {
-                Some(database_id) => (database_id, true),
-                None => return,
-            },
-        };
-        cycles.schedule_finish(
-            &self.barrier_scheduler,
-            table_id,
-            database_id,
-            trigger_time,
-            aborted,
-        );
-    }
-
     async fn created_at_millis(&self, table_ids: &[TableId]) -> MetaResult<HashMap<TableId, i64>> {
         if table_ids.is_empty() {
             return Ok(HashMap::new());
@@ -612,38 +556,6 @@ impl GlobalRefreshManager {
 }
 
 impl Cycles {
-    fn schedule_finish(
-        &mut self,
-        barrier_scheduler: &BarrierScheduler,
-        table_id: TableId,
-        database_id: DatabaseId,
-        trigger_time: NaiveDateTime,
-        aborted: bool,
-    ) {
-        if self
-            .pending_finish
-            .get(&table_id)
-            .is_some_and(|(_, pending)| *pending == trigger_time)
-        {
-            return;
-        }
-        let command = Command::FinishRefresh {
-            table_id,
-            trigger_time,
-            aborted,
-        };
-        match barrier_scheduler.run_command_no_wait(database_id, command) {
-            Ok(()) => {
-                self.pending_finish
-                    .insert(table_id, (database_id, trigger_time));
-                tracing::info!(%table_id, %trigger_time, aborted, "FinishRefresh command scheduled");
-            }
-            Err(err) => {
-                tracing::warn!(%table_id, error = %err.as_report(), "failed to schedule FinishRefresh, will retry");
-            }
-        }
-    }
-
     fn record_finished(&mut self, table_id: TableId, status: &str, duration_secs: u64) {
         let finished = self
             .job_metrics(table_id)
@@ -684,6 +596,15 @@ fn cron_due(job: &refresh_job::Model, created_at_millis: Option<i64>) -> bool {
 /// Truncated to the millisecond precision of the persisted trigger time.
 fn now_millis() -> NaiveDateTime {
     millis_to_datetime(Utc::now().timestamp_millis())
+}
+
+/// Wall-clock length of a cycle; falls back to the trigger time when the tracker did not survive a
+/// meta restart.
+fn cycle_duration_secs(tracker: Option<&CycleTracker>, trigger_time: NaiveDateTime) -> u64 {
+    tracker.map_or_else(
+        || u64::try_from((Utc::now().naive_utc() - trigger_time).num_seconds()).unwrap_or(0),
+        |tracker| tracker.start_time.elapsed().as_secs(),
+    )
 }
 
 fn millis_to_datetime(millis: i64) -> NaiveDateTime {
@@ -800,9 +721,5 @@ impl StageProgress {
             )
             .into())
         }
-    }
-
-    fn is_complete(&self) -> bool {
-        !self.expected.is_empty() && self.finished == self.expected
     }
 }

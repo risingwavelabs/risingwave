@@ -574,12 +574,10 @@ pub enum Command {
         table_id: TableId,
         associated_source_id: SourceId,
     },
-    /// Ends the refresh cycle `trigger_time` of a table once the barrier is committed. `aborted`
-    /// marks a cycle abandoned by a recovery.
+    /// Ends the refresh cycle `trigger_time` of a table once the barrier is committed.
     FinishRefresh {
         table_id: TableId,
         trigger_time: NaiveDateTime,
-        aborted: bool,
     },
 
     /// `ResetSource` command generates a barrier to reset CDC source offset to latest.
@@ -687,12 +685,7 @@ impl std::fmt::Display for Command {
             Command::FinishRefresh {
                 table_id,
                 trigger_time,
-                aborted,
-            } => write!(
-                f,
-                "FinishRefresh: {} (cycle: {}, aborted: {})",
-                table_id, trigger_time, aborted
-            ),
+            } => write!(f, "FinishRefresh: {} (cycle: {})", table_id, trigger_time),
             Command::ResetSource { source_id } => write!(f, "ResetSource: {source_id}"),
             Command::ResumeBackfill { target } => match target {
                 ResumeBackfillTarget::Job(job_id) => {
@@ -770,7 +763,6 @@ pub enum PostCollectCommand {
     FinishRefresh {
         table_id: TableId,
         trigger_time: NaiveDateTime,
-        aborted: bool,
     },
 }
 

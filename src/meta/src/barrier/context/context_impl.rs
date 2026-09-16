@@ -184,7 +184,7 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         if is_global {
             self.set_status(BarrierManagerStatus::Running);
         }
-        // The refresh worker finishes the cycles abandoned by the recovery.
+        // The scheduler re-runs the cycles abandoned by the recovery.
         self.refresh_manager.notify_scheduler();
     }
 
@@ -645,11 +645,10 @@ impl PostCollectCommand {
             PostCollectCommand::FinishRefresh {
                 table_id,
                 trigger_time,
-                aborted,
             } => {
                 barrier_manager_context
                     .refresh_manager
-                    .complete_refresh(table_id, trigger_time, aborted)
+                    .complete_refresh(table_id, trigger_time)
                     .await?;
             }
             PostCollectCommand::ConnectorPropsChange(obj_id_map_props) => {
