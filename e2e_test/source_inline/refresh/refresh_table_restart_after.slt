@@ -22,6 +22,9 @@ WHERE t.name = 'refresh_paused_t';
 ----
 IDLE t t
 
+statement ok
+FLUSH;
+
 query III
 SELECT min(id), max(id), count(*) FROM refresh_paused_t;
 ----

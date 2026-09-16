@@ -33,6 +33,10 @@ WHERE t.name = 'refresh_paused_t';
 IDLE
 
 
+# The frontend's read snapshot can lag the commit that ended the cycle.
+statement ok
+FLUSH;
+
 query II
 SELECT count(*), sum(cnt) FROM refresh_paused_mv;
 ----
