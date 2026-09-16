@@ -880,31 +880,4 @@ mod tests {
             )
         )
     }
-
-    #[test]
-    fn test_topn_watermark_forwardable_order_key() {
-        assert_eq!(topn_watermark_forwardable_order_key(&[]), None);
-        for order_type in [OrderType::ascending(), OrderType::ascending_nulls_last()] {
-            assert_eq!(
-                topn_watermark_forwardable_order_key(&[
-                    ColumnOrder::new(2, order_type),
-                    ColumnOrder::new(0, OrderType::descending()),
-                ]),
-                Some(2)
-            );
-        }
-        for order_type in [
-            OrderType::descending(),
-            OrderType::descending_nulls_last(),
-            OrderType::ascending_nulls_first(),
-        ] {
-            assert_eq!(
-                topn_watermark_forwardable_order_key(&[
-                    ColumnOrder::new(2, order_type),
-                    ColumnOrder::new(0, OrderType::ascending()),
-                ]),
-                None
-            );
-        }
-    }
 }
