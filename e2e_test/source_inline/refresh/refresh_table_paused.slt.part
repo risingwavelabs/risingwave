@@ -1,0 +1,80 @@
+# A refreshable table with a refresh cycle held open in the middle of a file. After a complete load,
+# a second cycle reads a new file set at one row per second until its first rows are visible, and a
+# limit of 0 then holds it. The file set is replaced once more while the cycle is held, so that a
+# re-run reads different files and its merge has to delete every row the held load wrote.
+# Dropped by drop_refresh_table_paused.slt.part.
+
+system ok
+rm -rf ./e2e_test/source_inline/refresh/refresh_paused_tmp && mkdir -p ./e2e_test/source_inline/refresh/refresh_paused_tmp
+
+system ok
+for i in 0 1 2 3; do seq $((i*500+1)) $(((i+1)*500)) | awk '{print $1","$1%97}' > ./e2e_test/source_inline/refresh/refresh_paused_tmp/f$i.csv; done
+
+statement ok
+CREATE TABLE refresh_paused_t (id int, grp int, PRIMARY KEY (id)) WITH (
+    connector = '__for_testing_only_batch_posix_fs',
+    batch_posix_fs.root = './e2e_test/source_inline/refresh/refresh_paused_tmp',
+    refresh_mode = 'FULL_RELOAD',
+    match_pattern = '*.csv'
+) FORMAT PLAIN ENCODE CSV (without_header = 'true', delimiter = ',');
+
+statement ok
+CREATE MATERIALIZED VIEW refresh_paused_mv AS SELECT grp, count(*) AS cnt FROM refresh_paused_t GROUP BY grp;
+
+statement ok retry 3 backoff 5s
+REFRESH TABLE refresh_paused_t;
+
+query T retry 10 backoff 2s
+SELECT s.current_status
+FROM rw_catalog.rw_refresh_table_state s
+JOIN rw_catalog.rw_tables t ON s.table_id = t.id
+WHERE t.name = 'refresh_paused_t';
+----
+IDLE
+
+
+query II
+SELECT count(*), sum(cnt) FROM refresh_paused_mv;
+----
+97 2000
+
+
+system ok
+for i in 0 1 2 3; do seq $((2000+i*500+1)) $((2000+(i+1)*500)) | awk '{print $1","$1%97}' > ./e2e_test/source_inline/refresh/refresh_paused_tmp/f$i.csv; done
+
+statement ok
+ALTER TABLE refresh_paused_t SET SOURCE_RATE_LIMIT TO 1;
+
+statement ok
+REFRESH TABLE refresh_paused_t;
+
+query B retry 30 backoff 1s
+SELECT count(*) > 2000 FROM refresh_paused_t;
+----
+t
+
+statement ok
+ALTER TABLE refresh_paused_t SET SOURCE_RATE_LIMIT TO 0;
+
+query TB
+SELECT s.current_status, (SELECT count(*) FROM refresh_paused_t) < 4000
+FROM rw_catalog.rw_refresh_table_state s
+JOIN rw_catalog.rw_tables t ON s.table_id = t.id
+WHERE t.name = 'refresh_paused_t';
+----
+REFRESHING t
+
+# Holds the trigger of the held cycle, so that a test can tell its re-run from it. System tables
+# cannot feed an INSERT directly.
+statement ok
+CREATE TABLE refresh_paused_marker (trigger_before varchar);
+
+system ok
+t=$(psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -tAc "SELECT s.last_trigger_time FROM rw_catalog.rw_refresh_table_state s JOIN rw_catalog.rw_tables t ON s.table_id = t.id WHERE t.name = 'refresh_paused_t'") && psql -h "$SLT_HOST" -p "$SLT_PORT" -d "$SLT_DB" -U root -v ON_ERROR_STOP=1 -c "INSERT INTO refresh_paused_marker VALUES ('$t')"
+
+# The row has to be checkpointed to survive a recovery.
+statement ok
+FLUSH;
+
+system ok
+rm ./e2e_test/source_inline/refresh/refresh_paused_tmp/f*.csv && seq 5001 6000 | awk '{print $1","$1%97}' > ./e2e_test/source_inline/refresh/refresh_paused_tmp/g0.csv

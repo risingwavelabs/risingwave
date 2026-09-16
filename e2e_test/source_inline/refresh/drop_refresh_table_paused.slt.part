@@ -1,0 +1,8 @@
+statement ok
+DROP TABLE refresh_paused_t CASCADE;
+
+statement ok
+DROP TABLE refresh_paused_marker;
+
+system ok
+rm -rf ./e2e_test/source_inline/refresh/refresh_paused_tmp
