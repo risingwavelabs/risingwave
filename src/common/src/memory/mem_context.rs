@@ -186,3 +186,51 @@ impl Drop for MemoryContextInner {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Verifies that memory already in use is counted in both the child and parent even above
+    /// their limits, while a rejected request for more memory leaves both counts unchanged.
+    /// Releasing memory and dropping the child remove its charges from the parent.
+    #[test]
+    fn test_unchecked_accounting_propagates_and_preserves_admission_checks() {
+        let parent = MemoryContext::root(TrAdderAtomic::new(0), 100);
+        let child =
+            MemoryContext::new_with_mem_limit(Some(parent.clone()), TrAdderAtomic::new(0), 10);
+        child.add_unchecked(80);
+        assert_eq!(child.get_bytes_used(), 80);
+        assert_eq!(parent.get_bytes_used(), 80);
+        assert!(!child.check_memory_usage());
+        assert!(parent.check_memory_usage());
+        child.add_unchecked(30);
+        assert_eq!(child.get_bytes_used(), 110);
+        assert_eq!(parent.get_bytes_used(), 110);
+        assert!(!parent.check_memory_usage());
+        assert!(!child.add(1));
+        assert_eq!(child.get_bytes_used(), 110);
+        assert_eq!(parent.get_bytes_used(), 110);
+        child.add_unchecked(-20);
+        assert_eq!(child.get_bytes_used(), 90);
+        assert_eq!(parent.get_bytes_used(), 90);
+        drop(child);
+        assert_eq!(parent.get_bytes_used(), 0);
+    }
+
+    /// Verifies that freeing some memory lowers both counts even if the parent stays over budget.
+    /// Dropping the child removes its remaining charges without changing other users' counts.
+    #[test]
+    fn test_release_memory_while_parent_is_over_limit() {
+        let parent = MemoryContext::root(TrAdderAtomic::new(200), 100);
+        let child = MemoryContext::new(Some(parent.clone()), TrAdderAtomic::new(100));
+        assert!(child.add(-10));
+        assert_eq!(child.get_bytes_used(), 90);
+        assert_eq!(parent.get_bytes_used(), 190);
+        assert!(!child.add(1));
+        drop(child);
+        assert_eq!(parent.get_bytes_used(), 100);
+        assert!(parent.add(-100));
+        assert_eq!(parent.get_bytes_used(), 0);
+    }
+}

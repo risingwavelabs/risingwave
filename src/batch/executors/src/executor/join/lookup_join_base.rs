@@ -243,3 +243,160 @@ impl<K: HashKey, B: LookupExecutorBuilder> LookupJoinBase<K, B> {
         }
     }
 }
+
+#[cfg(test)]
+mod memory_budget {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    use risingwave_common::array::DataChunkTestExt;
+    use risingwave_common::catalog::Field;
+    use risingwave_common::hash::KeySerialized;
+    use risingwave_common::metrics::LabelGuardedIntGauge;
+    use risingwave_common::types::Datum;
+
+    use super::*;
+    use crate::error::Result;
+    use crate::executor::test_utils::MockExecutor;
+    use crate::executor::test_utils::memory_cleanup::{self, Exit};
+
+    /// Use an in-memory build-side fixture while exercising the real lookup/hash-join execution.
+    struct AccountingLookupBuilder {
+        schema: Schema,
+        chunk: DataChunk,
+        child: MemoryContext,
+        parent: MemoryContext,
+        rounds: Arc<AtomicUsize>,
+        exit: Option<Exit>,
+    }
+
+    impl LookupExecutorBuilder for AccountingLookupBuilder {
+        fn reset(&mut self) {
+            // The shared context stays alive across rounds and executions.
+            assert_eq!(self.child.get_bytes_used(), 0);
+            assert_eq!(self.parent.get_bytes_used(), 16);
+            self.rounds.fetch_add(1, Ordering::Relaxed);
+        }
+
+        async fn add_scan_range(&mut self, _key_datums: Vec<Datum>) -> Result<()> {
+            Ok(())
+        }
+
+        async fn build_executor(&mut self) -> Result<BoxedExecutor> {
+            let input: BoxedExecutor = Box::new(MockExecutor::with_chunk(
+                self.chunk.clone(),
+                self.schema.clone(),
+            ));
+            Ok(match self.exit {
+                Some(exit) => memory_cleanup::input(input, exit, self.child.clone()),
+                None => input,
+            })
+        }
+    }
+
+    /// Verifies that a lookup round must record its retained build memory even above budget, then
+    /// release those charges before the next round starts. A build-input error or dropping the
+    /// stream while waiting for build input or after an output also releases the round's charges.
+    ///
+    /// Equivalent query: `SELECT o.k, i.k FROM outer_rows o JOIN inner_rows i ON o.k = i.k`.
+    /// Input: two outer chunks, each with 512 rows `(K)`, and one inner row `(K)`.
+    /// `K` is a string of 128 `x` characters.
+    /// Expected output: 512 rows `(K, K)` per lookup round, or 1,024 rows across both rounds.
+    /// Interrupted cases fail or wait at the first build EOF, or drop after the first 512-row output.
+    #[tokio::test]
+    async fn test_over_budget_lookup_join_accounting_memory_across_lookup_rounds() {
+        let parent = MemoryContext::root(LabelGuardedIntGauge::test_int_gauge::<4>(), 64);
+        assert!(parent.add(16));
+        let child = MemoryContext::new_with_mem_limit(
+            Some(parent.clone()),
+            LabelGuardedIntGauge::test_int_gauge::<4>(),
+            0,
+        );
+        let schema = Schema::new(vec![Field::unnamed(DataType::Varchar)]);
+        let key = "x".repeat(128);
+        let inner = DataChunk::from_pretty(&format!("T\n{key}"));
+        let keys = <KeySerialized as HashKey>::build_many(&[0], &inner);
+        let key_size = keys[0].estimated_heap_size() as i64;
+        assert!(key_size > 0);
+        let manual_charge = inner.estimated_heap_size() as i64 + key_size;
+        let outer = DataChunk::from_pretty(&format!(
+            "T\n{}",
+            format!("{key}\n").repeat(AT_LEAST_OUTER_SIDE_ROWS)
+        ));
+        for exit in [
+            None,
+            Some(Exit::InputError),
+            Some(Exit::PendingInput),
+            Some(Exit::Output),
+        ] {
+            let mut input = MockExecutor::new(schema.clone());
+            // Each chunk fills batch_read's threshold, forcing two independent build/release rounds.
+            input.add(outer.clone());
+            input.add(outer.clone());
+            let rounds = Arc::new(AtomicUsize::new(0));
+            let output_schema = Schema::new(vec![
+                Field::unnamed(DataType::Varchar),
+                Field::unnamed(DataType::Varchar),
+            ]);
+            let exec = LookupJoinBase::<KeySerialized, _> {
+                join_type: JoinType::Inner,
+                condition: None,
+                outer_side_input: Box::new(input),
+                outer_side_data_types: schema.data_types(),
+                outer_side_key_idxs: vec![0],
+                inner_side_builder: AccountingLookupBuilder {
+                    schema: schema.clone(),
+                    chunk: inner.clone(),
+                    child: child.clone(),
+                    parent: parent.clone(),
+                    rounds: rounds.clone(),
+                    exit,
+                },
+                inner_side_key_types: schema.data_types(),
+                inner_side_key_idxs: vec![0],
+                null_safe: vec![false],
+                lookup_prefix_len: 1,
+                chunk_builder: DataChunkBuilder::new(
+                    output_schema.data_types(),
+                    AT_LEAST_OUTER_SIDE_ROWS,
+                ),
+                schema: output_schema,
+                output_indices: vec![0, 1],
+                chunk_size: AT_LEAST_OUTER_SIDE_ROWS,
+                asof_desc: None,
+                identity: "accounting-test".into(),
+                shutdown_rx: ShutdownToken::empty(),
+                mem_ctx: child.clone(),
+                _phantom: PhantomData,
+            };
+            let expected = matches!(exit, None | Some(Exit::Output)).then(|| {
+                DataChunk::from_pretty(&format!(
+                    "T T\n{}",
+                    format!("{key} {key}\n").repeat(AT_LEAST_OUTER_SIDE_ROWS)
+                ))
+            });
+            let mut output = Box::new(exec).do_execute();
+            if let Some(exit) = exit {
+                memory_cleanup::assert_released(output, exit, expected.as_ref(), &child, &parent)
+                    .await;
+                assert_eq!(rounds.load(Ordering::Relaxed), 1);
+                continue;
+            }
+            let expected = expected.unwrap();
+            for round in 1..=2 {
+                assert_eq!(output.next().await.unwrap().unwrap(), expected);
+                assert_eq!(rounds.load(Ordering::Relaxed), round);
+                // Alongside the manual charge, the monitored Vec/hash map have backing allocations.
+                assert!(child.get_bytes_used() > manual_charge);
+                assert_eq!(parent.get_bytes_used(), child.get_bytes_used() + 16);
+                assert!(!child.check_memory_usage());
+            }
+            assert!(output.next().await.is_none());
+            assert_eq!(child.get_bytes_used(), 0);
+            assert_eq!(parent.get_bytes_used(), 16);
+        }
+        drop(child);
+        assert_eq!(parent.get_bytes_used(), 16);
+        assert!(parent.add(-16));
+    }
+}

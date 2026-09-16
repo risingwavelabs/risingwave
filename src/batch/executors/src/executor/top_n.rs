@@ -327,6 +327,132 @@ mod tests {
 
     const CHUNK_SIZE: usize = 1024;
 
+    mod memory_budget {
+        use super::*;
+        use crate::executor::test_utils::memory_cleanup::{self, Exit};
+
+        /// Verifies that Top-N releases retained rows and sort keys above a zero-byte child budget
+        /// after input errors, cancellation while waiting for input or after an output, and EOF.
+        /// The shared contexts stay alive and unrelated parent usage is preserved.
+        ///
+        /// Equivalent query: `SELECT k FROM input ORDER BY k LIMIT 2 OFFSET 1`.
+        /// Input: `[A, B, C]`, where each value repeats its lowercase letter 128 times.
+        /// Expected output: `[B, C]` at EOF, or `[B]` before output cancellation.
+        /// Input-error and pending-input cases stop at input EOF before producing output.
+        #[tokio::test]
+        async fn test_over_budget_top_n_memory_cleanup() {
+            let (parent, child) = memory_cleanup::contexts();
+            assert_eq!(child.mem_limit(), 0);
+            for exit in [
+                Exit::InputError,
+                Exit::PendingInput,
+                Exit::Output,
+                Exit::Eof,
+            ] {
+                let (a, b, c) = ("a".repeat(128), "b".repeat(128), "c".repeat(128));
+                let input = memory_cleanup::input(
+                    Box::new(MockExecutor::with_chunk(
+                        DataChunk::from_pretty(&format!("T\n{a}\n{b}\n{c}")),
+                        Schema::new(vec![Field::unnamed(DataType::Varchar)]),
+                    )),
+                    exit,
+                    child.clone(),
+                );
+                let exec = TopNExecutor::new(
+                    input,
+                    vec![ColumnOrder::new(0, OrderType::ascending())],
+                    1,
+                    2,
+                    false,
+                    "top-n-cleanup".into(),
+                    1,
+                    child.clone(),
+                );
+                let expected = match exit {
+                    Exit::InputError | Exit::PendingInput => None,
+                    Exit::Output => Some(DataChunk::from_pretty(&format!("T\n{b}"))),
+                    Exit::Eof => Some(DataChunk::from_pretty(&format!("T\n{b}\n{c}"))),
+                };
+                memory_cleanup::assert_released(
+                    Box::new(exec).execute(),
+                    exit,
+                    expected.as_ref(),
+                    &child,
+                    &parent,
+                )
+                .await;
+            }
+        }
+
+        /// Verifies that Top-N keeps row and sort-key payloads charged above a zero-byte child
+        /// budget throughout output, including skipped and consumed rows, then releases all charges
+        /// at EOF. Each offset runs twice with the same shared contexts to check for accumulation.
+        ///
+        /// Equivalent query: `SELECT k FROM input ORDER BY k LIMIT 3 OFFSET $1`, with offsets 0, 1, 3.
+        /// Input: `[A, B, C]`, each repeating its lowercase letter 128 times.
+        /// Expected outputs: `[A, B, C]`, `[B, C]`, and no rows, respectively.
+        #[tokio::test]
+        async fn test_over_budget_top_n_accounting_during_execution() {
+            let (parent, child) = memory_cleanup::contexts();
+            assert_eq!(child.mem_limit(), 0);
+            for offset in [0, 1, 3] {
+                for _ in 0..2 {
+                    assert_eq!(child.get_bytes_used(), 0);
+                    assert_eq!(parent.get_bytes_used(), 16);
+                    let keys = ["a".repeat(128), "b".repeat(128), "c".repeat(128)];
+                    let chunk = DataChunk::from_pretty(&format!("T\n{}", keys.join("\n")));
+                    let orders = vec![ColumnOrder::new(0, OrderType::ascending())];
+                    let payload_charge = encode_chunk(&chunk, &orders)
+                        .unwrap()
+                        .into_iter()
+                        .enumerate()
+                        .map(|(row_id, encoded)| {
+                            HeapElem::new(encoded, chunk.row_at(row_id).0).estimated_heap_size()
+                                as i64
+                        })
+                        .sum::<i64>();
+                    assert!(payload_charge > 0);
+                    // Also observe live accounting at input EOF when the offset skips all rows.
+                    let input = memory_cleanup::input(
+                        Box::new(MockExecutor::with_chunk(
+                            chunk,
+                            Schema::new(vec![Field::unnamed(DataType::Varchar)]),
+                        )),
+                        Exit::Eof,
+                        child.clone(),
+                    );
+                    let exec = TopNExecutor::new(
+                        input,
+                        orders,
+                        offset,
+                        3,
+                        false,
+                        "top-n-accounting".into(),
+                        1,
+                        child.clone(),
+                    );
+                    let mut output = Box::new(exec).execute();
+                    for key in keys.iter().skip(offset) {
+                        assert_eq!(
+                            output.next().await.unwrap().unwrap(),
+                            DataChunk::from_pretty(&format!("T\n{key}"))
+                        );
+                        // All payloads stay charged until execution exits, including skipped and
+                        // consumed rows. The iterator's backing storage adds its own charge.
+                        assert!(child.get_bytes_used() > payload_charge);
+                        assert_eq!(parent.get_bytes_used(), child.get_bytes_used() + 16);
+                        assert!(!child.check_memory_usage());
+                    }
+                    assert!(output.next().await.is_none());
+                    // Check before dropping the stream or either shared context.
+                    assert_eq!(child.get_bytes_used(), 0);
+                    assert_eq!(parent.get_bytes_used(), 16);
+                    drop(output);
+                }
+            }
+        }
+    }
+
     #[tokio::test]
     async fn test_simple_top_n_executor() {
         let schema = Schema {
