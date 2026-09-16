@@ -363,6 +363,7 @@ algorithm = "Lru"
 
 [storage.data_file_cache]
 dir = ""
+direct_io = true
 capacity_mb = 1024
 file_capacity_mb = 64
 flushers = 4
@@ -392,6 +393,7 @@ max_blocking_threads = 0
 
 [storage.meta_file_cache]
 dir = ""
+direct_io = true
 capacity_mb = 1024
 file_capacity_mb = 64
 flushers = 4
