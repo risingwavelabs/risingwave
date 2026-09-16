@@ -959,17 +959,12 @@ impl PostgresExternalTableReader {
         // prepare the scan statement, since we may need to convert the RW data type to postgres data type
         // e.g. varchar to uuid
         let prepared_scan_stmt = {
-            let primary_keys = self
-                .pk_indices
-                .iter()
-                .map(|index| self.rw_schema.fields[*index].name.clone())
-                .collect_vec();
+            // Parallel backfill checkpoints whole splits, so rows within a split need no order.
             let scan_sql = format!(
-                "SELECT {} FROM {} WHERE {} ORDER BY {}",
+                "SELECT {} FROM {} WHERE {}",
                 self.field_names,
                 Self::get_normalized_table_name(&table_name),
                 self.split_filter_expression(&split_column_names, is_first_split, is_last_split),
-                self.get_order_key(&primary_keys),
             );
             client.prepare(&scan_sql).await?
         };
