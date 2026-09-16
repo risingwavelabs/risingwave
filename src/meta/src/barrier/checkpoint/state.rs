@@ -38,6 +38,7 @@ use risingwave_pb::stream_plan::{
 use tracing::warn;
 
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
+use crate::barrier::checkpoint::independent_job::IcebergV3JobCheckpointControl;
 use crate::barrier::checkpoint::{
     BatchRefreshJobCheckpointControl, BatchRefreshLogicalFragments, CreatingStreamingJobControl,
     DatabaseCheckpointControl, IndependentCheckpointJob,
@@ -701,6 +702,125 @@ impl DatabaseCheckpointControl {
                         PostCollectCommand::barrier(),
                     )
                 }
+            }
+            Some(Command::CreateStreamingJob {
+                mut info,
+                job_type:
+                    CreateStreamingJobType::Independent {
+                        mut snapshot_backfill_info,
+                        kind: IndependentStreamingJobType::IcebergV3,
+                    },
+                cross_db_snapshot_backfill_info,
+            }) => {
+                notify_database_graph = false;
+                assert!(!self.state.is_paused());
+                let snapshot_epoch = barrier_info.prev_epoch();
+                for snapshot_backfill_epoch in snapshot_backfill_info
+                    .upstream_mv_table_id_to_backfill_epoch
+                    .values_mut()
+                {
+                    assert_eq!(
+                        snapshot_backfill_epoch.replace(snapshot_epoch),
+                        None,
+                        "must not set previously"
+                    );
+                }
+                for fragment in info.stream_job_fragments.inner.fragments.values_mut() {
+                    fill_snapshot_backfill_epoch(
+                        &mut fragment.nodes,
+                        Some(&snapshot_backfill_info),
+                        &cross_db_snapshot_backfill_info,
+                    )?;
+                }
+
+                let fragments = load_independent_job_fragments(&info.stream_job_fragments);
+                let job_id = info.stream_job_fragments.stream_job_id();
+                let render_result =
+                    IcebergV3JobCheckpointControl::render_actors_and_build_job_info(
+                        &fragments,
+                        &info.stream_job_fragments.downstreams,
+                        &info.definition,
+                        partial_graph_manager
+                            .control_stream_manager()
+                            .env
+                            .actor_id_generator(),
+                        worker_nodes,
+                        &info.database_resource_group,
+                        &info.streaming_job_model,
+                        to_partial_graph_id(self.database_id, Some(job_id)),
+                    )?;
+                let snapshot_backfill_upstream_tables = snapshot_backfill_info
+                    .upstream_mv_table_id_to_backfill_epoch
+                    .keys()
+                    .copied()
+                    .collect();
+
+                let Entry::Vacant(entry) = self.independent_checkpoint_job_controls.entry(job_id)
+                else {
+                    panic!("duplicated creating Iceberg V3 job {job_id}");
+                };
+                let job = IcebergV3JobCheckpointControl::create(
+                    entry,
+                    CreateIndependentStreamingJobCommandInfo {
+                        info: info.clone(),
+                        snapshot_backfill_info: snapshot_backfill_info.clone(),
+                        cross_db_snapshot_backfill_info,
+                        resolved_split_assignment: Default::default(),
+                        kind: IndependentStreamingJobType::IcebergV3,
+                    },
+                    notifier.as_mut(),
+                    snapshot_backfill_upstream_tables,
+                    snapshot_epoch,
+                    hummock_version_stats,
+                    partial_graph_manager,
+                    render_result,
+                )?;
+                self.database_info.shared_actor_infos.upsert(
+                    self.database_id,
+                    job.fragment_infos()
+                        .values()
+                        .chain(std::iter::once(job.resolver_fragment_info()))
+                        .map(|fragment| (fragment, job_id)),
+                );
+                for upstream_mv_table_id in snapshot_backfill_info
+                    .upstream_mv_table_id_to_backfill_epoch
+                    .keys()
+                {
+                    self.database_info.register_subscriber(
+                        upstream_mv_table_id.as_job_id(),
+                        info.streaming_job.id().as_subscriber_id(),
+                        SubscriberType::SnapshotBackfill,
+                    );
+                }
+
+                let subscriber_id = job_id.as_subscriber_id();
+                let mutation = Mutation::Add(AddMutation {
+                    actor_dispatchers: Default::default(),
+                    added_actors: Default::default(),
+                    actor_splits: Default::default(),
+                    pause: false,
+                    subscriptions_to_add: snapshot_backfill_info
+                        .upstream_mv_table_id_to_backfill_epoch
+                        .keys()
+                        .map(|table_id| PbSubscriptionUpstreamInfo {
+                            subscriber_id,
+                            upstream_mv_table_id: *table_id,
+                        })
+                        .collect(),
+                    backfill_nodes_to_pause: Default::default(),
+                    actor_cdc_table_snapshot_splits: None,
+                    new_upstream_sinks: Default::default(),
+                    dropped_actors: Default::default(),
+                    sink_log_store_flush: Default::default(),
+                });
+                let (table_ids, node_actors) = self.collect_base_info();
+                (
+                    Some(mutation),
+                    table_ids,
+                    None,
+                    node_actors,
+                    PostCollectCommand::barrier(),
+                )
             }
             Some(Command::CreateStreamingJob {
                 mut info,
