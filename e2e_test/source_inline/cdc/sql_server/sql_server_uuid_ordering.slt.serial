@@ -1,0 +1,123 @@
+# Serial because this test recovers the cluster during an unfinished CDC snapshot.
+control substitution on
+
+statement ok
+DROP SOURCE IF EXISTS uuid_order_source CASCADE;
+
+system ok
+sqlcmd -C -d master -b -Q "IF DB_ID('rw_uuid_ordering') IS NOT NULL BEGIN ALTER DATABASE rw_uuid_ordering SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE rw_uuid_ordering; END; CREATE DATABASE rw_uuid_ordering;"
+
+system ok
+sqlcmd -C -d rw_uuid_ordering -b -Q "SET NOCOUNT ON; EXEC sys.sp_cdc_enable_db; CREATE TABLE dbo.uuid_keys (tenant int NOT NULL, id uniqueidentifier NOT NULL, seq int NOT NULL, value int NOT NULL, PRIMARY KEY(tenant,id,seq)); EXEC sys.sp_cdc_enable_table @source_schema=N'dbo', @source_name=N'uuid_keys', @role_name=NULL; INSERT INTO dbo.uuid_keys VALUES (1,'FFFFFFFF-0000-0000-0000-000000000001',1,10),(1,'EEEEEEEE-0000-0000-0000-000000000002',1,20),(1,'00000000-0000-0000-0000-000000000003',1,30); WITH n AS (SELECT 100 AS i UNION ALL SELECT i+1 FROM n WHERE i<1099) INSERT INTO dbo.uuid_keys SELECT 1,CAST('00000000-0000-0000-0000-'+RIGHT('000000000000'+CAST(i AS varchar(12)),12) AS uniqueidentifier),1,i FROM n OPTION(MAXRECURSION 0);"
+
+statement ok
+CREATE SOURCE uuid_order_source WITH (
+    connector = 'sqlserver-cdc',
+    hostname = '${SQLCMDSERVER:sqlserver-server}',
+    port = '${SQLCMDPORT:1433}',
+    username = '${SQLCMDUSER:SA}',
+    password = '${SQLCMDPASSWORD}',
+    database.name = 'rw_uuid_ordering'
+);
+
+statement ok
+SET backfill_rate_limit = 1;
+
+# Both metadata discovery paths must preserve UUID ordering within a composite key.
+statement ok
+CREATE TABLE uuid_explicit (tenant int, id varchar, seq int, value int, PRIMARY KEY(tenant,id,seq))
+WITH (snapshot.batch_size = '1', snapshot.interval = '1')
+FROM uuid_order_source TABLE 'dbo.uuid_keys';
+
+statement ok
+CREATE TABLE uuid_inferred (*)
+WITH (snapshot.batch_size = '1', snapshot.interval = '1')
+FROM uuid_order_source TABLE 'dbo.uuid_keys';
+
+# Seeing B ensures that A and U have been scanned. The large tail keeps backfill open.
+query II retry 30 backoff 1s
+SELECT (SELECT count(*) FROM uuid_explicit WHERE upper(id) = '00000000-0000-0000-0000-000000000003'), (SELECT count(*) FROM uuid_inferred WHERE upper(id) = '00000000-0000-0000-0000-000000000003');
+----
+1 1
+
+query ??
+SELECT (SELECT count(*) < 1003 FROM uuid_explicit), (SELECT count(*) < 1003 FROM uuid_inferred);
+----
+t t
+
+# A and U are textually greater than the cursor but precede it in SQL Server order.
+# The inserted D also belongs to the scanned prefix and cannot be supplied by later pages.
+system ok
+sqlcmd -C -d rw_uuid_ordering -b -Q "DELETE FROM dbo.uuid_keys WHERE id='FFFFFFFF-0000-0000-0000-000000000001'; UPDATE dbo.uuid_keys SET value=21 WHERE id='EEEEEEEE-0000-0000-0000-000000000002'; INSERT INTO dbo.uuid_keys VALUES(1,'DDDDDDDD-0000-0000-0000-000000000000',1,40);"
+
+query TII rowsort retry 30 backoff 1s
+SELECT upper(id),seq,value FROM uuid_explicit WHERE upper(id) IN ('FFFFFFFF-0000-0000-0000-000000000001','EEEEEEEE-0000-0000-0000-000000000002','DDDDDDDD-0000-0000-0000-000000000000');
+----
+DDDDDDDD-0000-0000-0000-000000000000 1 40
+EEEEEEEE-0000-0000-0000-000000000002 1 21
+
+query TII rowsort retry 30 backoff 1s
+SELECT upper(id),seq,value FROM uuid_inferred WHERE upper(id) IN ('FFFFFFFF-0000-0000-0000-000000000001','EEEEEEEE-0000-0000-0000-000000000002','DDDDDDDD-0000-0000-0000-000000000000');
+----
+DDDDDDDD-0000-0000-0000-000000000000 1 40
+EEEEEEEE-0000-0000-0000-000000000002 1 21
+
+query ??
+SELECT (SELECT count(*) < 1003 FROM uuid_explicit), (SELECT count(*) < 1003 FROM uuid_inferred);
+----
+t t
+
+statement ok
+FLUSH;
+
+statement ok
+RECOVER;
+
+system ok
+sqlcmd -C -d rw_uuid_ordering -b -Q "DELETE FROM dbo.uuid_keys WHERE id='DDDDDDDD-0000-0000-0000-000000000000'; UPDATE dbo.uuid_keys SET value=22 WHERE id='EEEEEEEE-0000-0000-0000-000000000002';"
+
+query TII rowsort retry 30 backoff 1s
+SELECT upper(id),seq,value FROM uuid_explicit WHERE upper(id) IN ('FFFFFFFF-0000-0000-0000-000000000001','EEEEEEEE-0000-0000-0000-000000000002','DDDDDDDD-0000-0000-0000-000000000000');
+----
+EEEEEEEE-0000-0000-0000-000000000002 1 22
+
+query TII rowsort retry 30 backoff 1s
+SELECT upper(id),seq,value FROM uuid_inferred WHERE upper(id) IN ('FFFFFFFF-0000-0000-0000-000000000001','EEEEEEEE-0000-0000-0000-000000000002','DDDDDDDD-0000-0000-0000-000000000000');
+----
+EEEEEEEE-0000-0000-0000-000000000002 1 22
+
+statement ok
+ALTER TABLE uuid_explicit SET backfill_rate_limit = 10000;
+
+statement ok
+ALTER TABLE uuid_inferred SET backfill_rate_limit = 10000;
+
+query II retry 30 backoff 1s
+SELECT (SELECT count(*) FROM uuid_explicit), (SELECT count(*) FROM uuid_inferred);
+----
+1002 1002
+
+# Verify every tail row's key, value and composite-key components, not just row counts.
+query II
+SELECT (SELECT count(*) FROM uuid_explicit WHERE tenant=1 AND seq=1 AND value BETWEEN 100 AND 1099 AND id='00000000-0000-0000-0000-' || lpad(value::varchar,12,'0')), (SELECT count(*) FROM uuid_inferred WHERE tenant=1 AND seq=1 AND value BETWEEN 100 AND 1099 AND id='00000000-0000-0000-0000-' || lpad(value::varchar,12,'0'));
+----
+1000 1000
+
+query TITII rowsort
+SELECT 'explicit',tenant,upper(id),seq,value FROM uuid_explicit WHERE value NOT BETWEEN 100 AND 1099
+UNION ALL
+SELECT 'inferred',tenant,upper(id),seq,value FROM uuid_inferred WHERE value NOT BETWEEN 100 AND 1099;
+----
+explicit 1 00000000-0000-0000-0000-000000000003 1 30
+explicit 1 EEEEEEEE-0000-0000-0000-000000000002 1 22
+inferred 1 00000000-0000-0000-0000-000000000003 1 30
+inferred 1 EEEEEEEE-0000-0000-0000-000000000002 1 22
+
+statement ok
+DROP SOURCE uuid_order_source CASCADE;
+
+statement ok
+SET backfill_rate_limit = DEFAULT;
+
+system ok
+sqlcmd -C -d master -b -Q "ALTER DATABASE rw_uuid_ordering SET SINGLE_USER WITH ROLLBACK IMMEDIATE; DROP DATABASE rw_uuid_ordering;"

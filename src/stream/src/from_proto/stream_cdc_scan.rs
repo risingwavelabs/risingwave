@@ -294,7 +294,7 @@ mod tests {
                     },
                     Column {
                         pk_col_idx: 1,
-                        comparison: Comparison::Native as i32,
+                        comparison: Comparison::SqlServerUniqueidentifier as i32,
                     },
                 ],
             }),
@@ -311,7 +311,7 @@ mod tests {
             comparisons,
             Some(vec![
                 CdcKeyComparison::UnsignedInt64,
-                CdcKeyComparison::Native,
+                CdcKeyComparison::SqlServerUniqueidentifier,
             ])
         );
         assert_eq!(indices, vec![3, 1]);
