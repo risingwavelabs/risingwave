@@ -1314,6 +1314,21 @@ profile:
       - use: compactor
       - use: redis
 
+  local-cassandra-sink-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+        id: minio-local-cassandra-sink-test
+      - use: sqlite
+        id: sqlite-local-cassandra-sink-test
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: cassandra
+
   local-clickhouse-sink-test:
     config-path: src/config/ci.toml
     steps:
@@ -1857,6 +1872,23 @@ template:
     image: "redis:7.2.14"
 
     persist-data: false
+
+  # Cassandra service backed by Docker.
+  cassandra:
+    id: cassandra
+
+    address: "127.0.0.1"
+    port: 9042
+    datacenter: datacenter1
+
+    user-managed: false
+
+    # Only effective when NOT user managed
+    image: "cassandra:4.0"
+    persist-data: false
+
+    # Path to the local cqlsh executable when user-managed (defaults to PATH lookup).
+    cqlsh: null
 
   # ClickHouse service backed by Docker.
   clickhouse:
