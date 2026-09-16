@@ -25,6 +25,7 @@ use risingwave_common::array::stream_record::Record;
 use risingwave_common::array::{DataChunk, Op, StreamChunk};
 use risingwave_common::bail;
 use risingwave_common::bitmap::BitmapBuilder;
+use risingwave_common::catalog::CdcKeyComparison;
 use risingwave_common::hash::{VirtualNode, VnodeBitmapExt};
 use risingwave_common::row::{OwnedRow, Row, RowExt};
 use risingwave_common::types::{DataType, Datum, DatumRef, ScalarRefImpl};
@@ -303,7 +304,7 @@ pub(crate) fn mark_cdc_chunk(
     current_pos: &OwnedRow,
     pk_in_output_indices: &[usize],
     pk_order: &[OrderType],
-    pk_needs_unsigned_i64_compare: &[bool],
+    pk_comparisons: &[CdcKeyComparison],
     last_cdc_offset: Option<CdcOffset>,
 ) -> StreamExecutorResult<StreamChunk> {
     let chunk = chunk.compact_vis();
@@ -314,49 +315,61 @@ pub(crate) fn mark_cdc_chunk(
         last_cdc_offset,
         pk_in_output_indices,
         pk_order,
-        pk_needs_unsigned_i64_compare,
+        pk_comparisons,
     )
 }
 
-/// Compare two primary-key rows column by column, recovering the upstream unsigned order
-/// for `BIGINT UNSIGNED` pk columns.
-///
-/// `pk_needs_unsigned_i64_compare[i]` is true only for upstream `BIGINT UNSIGNED`. Frontend
-/// up-casts narrower unsigned integers so they stay non-negative in RisingWave, and unsigned
-/// float/double/decimal types must keep their native comparison semantics. Only `BIGINT UNSIGNED`
-/// can overflow into a negative `i64`, so we reinterpret both sides as `u64` to restore upstream
-/// MySQL ordering. The `ScalarRefImpl::Int64` match below is a defensive guard for that contract.
-pub(crate) fn cmp_pk_unsigned_aware<'a>(
+/// Compare CDC primary keys using the same per-column ordering as the upstream snapshot.
+/// The stored values remain unchanged; only range checks use these comparison semantics.
+pub(crate) fn cmp_cdc_pk<'a>(
     lhs: impl Iterator<Item = DatumRef<'a>>,
     rhs: impl Iterator<Item = DatumRef<'a>>,
     pk_order: &[OrderType],
-    pk_needs_unsigned_i64_compare: &[bool],
-) -> Ordering {
-    for (((l, r), order), &needs_unsigned_i64_compare) in lhs
+    pk_comparisons: &[CdcKeyComparison],
+) -> StreamExecutorResult<Ordering> {
+    for (((l, r), order), &comparison) in lhs
         .zip_eq_debug(rhs)
         .zip_eq_debug(pk_order.iter())
-        .zip_eq_debug(pk_needs_unsigned_i64_compare.iter())
+        .zip_eq_debug(pk_comparisons.iter())
     {
-        let ord = match (needs_unsigned_i64_compare, l, r) {
-            (true, Some(ScalarRefImpl::Int64(a)), Some(ScalarRefImpl::Int64(b))) => {
-                let ord = (a as u64).cmp(&(b as u64));
-                // Apply the column's sort direction, matching `cmp_datum`. CDC backfill always
-                // reads the snapshot ascending, so the descending branch is only for parity.
-                if order.is_descending() {
-                    ord.reverse()
-                } else {
-                    ord
-                }
+        let special_order = match (comparison, l, r) {
+            (
+                CdcKeyComparison::UnsignedInt64,
+                Some(ScalarRefImpl::Int64(a)),
+                Some(ScalarRefImpl::Int64(b)),
+            ) => Some((a as u64).cmp(&(b as u64))),
+            (
+                CdcKeyComparison::SqlServerUniqueidentifier,
+                Some(ScalarRefImpl::Utf8(a)),
+                Some(ScalarRefImpl::Utf8(b)),
+            ) => Some(sql_server_uuid_sort_key(a)?.cmp(&sql_server_uuid_sort_key(b)?)),
+            (CdcKeyComparison::SqlServerUniqueidentifier, Some(_), Some(_)) => {
+                bail!("SQL Server uniqueidentifier primary keys must be represented as varchar");
             }
-            // Signed column, NULL, up-cast unsigned integer, or non-integer unsigned column:
-            // the original comparison is already correct.
-            _ => cmp_datum(l, r, *order),
+            // NULLs and native datums use the existing null/direction rules. Unsigned
+            // values represented as Decimal also keep their native comparison.
+            _ => None,
+        };
+        let ord = match special_order {
+            Some(ord) if order.is_descending() => ord.reverse(),
+            Some(ord) => ord,
+            None => cmp_datum(l, r, *order),
         };
         if ord != Ordering::Equal {
-            return ord;
+            return Ok(ord);
         }
     }
-    Ordering::Equal
+    Ok(Ordering::Equal)
+}
+
+fn sql_server_uuid_sort_key(value: &str) -> StreamExecutorResult<[u8; 16]> {
+    let uuid = uuid::Uuid::parse_str(value)
+        .map_err(|err| anyhow::anyhow!("invalid SQL Server uniqueidentifier primary key: {err}"))?;
+    // SqlGuid compares GUID-layout bytes in this order. to_bytes_le matches .NET
+    // Guid.ToByteArray (the first three fields are little-endian), not UUID wire order.
+    // https://github.com/dotnet/runtime/blob/main/src/libraries/System.Data.Common/src/System/Data/SQLTypes/SQLGuid.cs
+    let bytes = uuid.to_bytes_le();
+    Ok([10, 11, 12, 13, 14, 15, 8, 9, 6, 7, 4, 5, 0, 1, 2, 3].map(|i| bytes[i]))
 }
 
 /// Mark chunk:
@@ -471,7 +484,7 @@ fn mark_cdc_chunk_inner(
     last_cdc_offset: Option<CdcOffset>,
     pk_in_output_indices: &[usize],
     pk_order: &[OrderType],
-    pk_needs_unsigned_i64_compare: &[bool],
+    pk_comparisons: &[CdcKeyComparison],
 ) -> StreamExecutorResult<StreamChunk> {
     let (data, ops) = chunk.into_parts();
     let mut new_visibility = BitmapBuilder::with_capacity(ops.len());
@@ -492,18 +505,12 @@ fn mark_cdc_chunk_inner(
             if in_binlog_range {
                 let lhs = row.project(pk_in_output_indices);
                 let rhs = current_pos;
-                cmp_pk_unsigned_aware(
-                    lhs.iter(),
-                    rhs.iter(),
-                    pk_order,
-                    pk_needs_unsigned_i64_compare,
-                )
-                .is_le()
+                cmp_cdc_pk(lhs.iter(), rhs.iter(), pk_order, pk_comparisons)?.is_le()
             } else {
                 false
             }
         };
-        Ok::<_, ConnectorError>(visible)
+        Ok::<_, StreamExecutorError>(visible)
     }) {
         new_visibility.append(v?);
     }
@@ -909,6 +916,83 @@ mod tests {
     use std::sync::Arc;
 
     use super::*;
+
+    #[test]
+    fn test_sql_server_uuid_ordering() {
+        let key = |s: &str| sql_server_uuid_sort_key(s).unwrap();
+        // The last six bytes dominate, unlike canonical UUID text/wire ordering.
+        let a = "FFFFFFFF-0000-0000-0000-000000000001";
+        let b = "00000000-0000-0000-0000-000000000002";
+        assert!(a > b);
+        assert!(key(a) < key(b));
+        assert_eq!(key(a), key(&a.to_lowercase()));
+        // Ties in the suffix expose the GUID little-endian fields, not just group order.
+        for (a, b) in [
+            (
+                "01000000-0000-0000-0000-000000000000",
+                "00000001-0000-0000-0000-000000000000",
+            ),
+            (
+                "00000000-0100-0000-0000-000000000000",
+                "00000000-0001-0000-0000-000000000000",
+            ),
+            (
+                "00000000-0000-0100-0000-000000000000",
+                "00000000-0000-0001-0000-000000000000",
+            ),
+            (
+                "FFFFFFFF-FFFF-FFFF-0000-000000000000",
+                "00000000-0000-0000-0001-000000000000",
+            ),
+        ] {
+            assert!(key(a) < key(b), "{a} must precede {b}");
+        }
+        assert!(sql_server_uuid_sort_key("not-a-uuid").is_err());
+    }
+
+    #[test]
+    fn test_cdc_composite_uuid_comparison() {
+        use CdcKeyComparison::{Native, SqlServerUniqueidentifier};
+        use risingwave_common::types::ScalarImpl;
+        let row = |tenant, uuid: &str, seq| {
+            OwnedRow::new(vec![
+                Some(ScalarImpl::Int32(tenant)),
+                Some(ScalarImpl::Utf8(uuid.into())),
+                Some(ScalarImpl::Int32(seq)),
+            ])
+        };
+        let a = row(1, "FFFFFFFF-0000-0000-0000-000000000001", 9);
+        let b = row(1, "00000000-0000-0000-0000-000000000002", 0);
+        let order = [OrderType::ascending(); 3];
+        let comparisons = [Native, SqlServerUniqueidentifier, Native];
+        assert_eq!(
+            cmp_cdc_pk(a.iter(), b.iter(), &order, &comparisons).unwrap(),
+            Ordering::Less
+        );
+        assert_eq!(
+            cmp_cdc_pk(a.iter(), b.iter(), &order, &[Native; 3]).unwrap(),
+            Ordering::Greater
+        );
+        let c = row(2, "00000000-0000-0000-0000-000000000000", 0);
+        assert_eq!(
+            cmp_cdc_pk(a.iter(), c.iter(), &order, &comparisons).unwrap(),
+            Ordering::Less
+        );
+        let d = row(1, "ffffffff-0000-0000-0000-000000000001", 10);
+        assert_eq!(
+            cmp_cdc_pk(a.iter(), d.iter(), &order, &comparisons).unwrap(),
+            Ordering::Less
+        );
+        let desc = [
+            OrderType::ascending(),
+            OrderType::descending(),
+            OrderType::ascending(),
+        ];
+        assert_eq!(
+            cmp_cdc_pk(a.iter(), b.iter(), &desc, &comparisons).unwrap(),
+            Ordering::Greater
+        );
+    }
 
     #[test]
     fn test_normalizing_unmatched_updates() {

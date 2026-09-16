@@ -20,7 +20,7 @@ use futures::{StreamExt, TryStreamExt, pin_mut, stream};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::bail;
-use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema};
+use risingwave_common::catalog::{CdcKeyComparison, ColumnDesc, ColumnId, Field, Schema};
 use risingwave_common::row::OwnedRow;
 use risingwave_common::types::{DataType, ScalarImpl};
 use serde::{Deserialize, Serialize};
@@ -76,30 +76,17 @@ impl SqlServerOffset {
 pub struct SqlServerExternalTable {
     column_descs: Vec<ColumnDesc>,
     pk_names: Vec<String>,
+    column_comparisons: Vec<(String, CdcKeyComparison)>,
 }
 
 impl SqlServerExternalTable {
     pub async fn connect(config: ExternalTableConfig) -> ConnectorResult<Self> {
         tracing::debug!("connect to sql server");
 
-        let mut client_config = Config::new();
-
-        client_config.host(&config.host);
-        client_config.database(&config.database);
-        client_config.port(config.port.parse::<u16>().unwrap());
-        client_config.authentication(tiberius::AuthMethod::sql_server(
-            &config.username,
-            &config.password,
-        ));
-        // TODO(kexiang): use trust_cert_ca, trust_cert is not secure
-        if config.encrypt == "true" {
-            client_config.encryption(tiberius::EncryptionLevel::Required);
-        }
-        client_config.trust_cert();
-
-        let mut client = SqlServerClient::new_with_config(client_config).await?;
+        let mut client = Self::connect_client(&config).await?;
 
         let mut column_descs = vec![];
+        let mut column_comparisons = vec![];
         let mut pk_names = vec![];
         {
             let sql = Query::new(format!(
@@ -124,6 +111,7 @@ impl SqlServerExternalTable {
                     QueryItem::Row(row) => {
                         let col_name: &str = row.try_get(0)?.unwrap();
                         let col_type: &str = row.try_get(1)?.unwrap();
+                        column_comparisons.push((col_name.to_owned(), key_comparison(col_type)));
                         column_descs.push(ColumnDesc::named(
                             col_name,
                             ColumnId::placeholder(),
@@ -176,7 +164,71 @@ impl SqlServerExternalTable {
         Ok(Self {
             column_descs,
             pk_names,
+            column_comparisons,
         })
+    }
+
+    async fn connect_client(config: &ExternalTableConfig) -> ConnectorResult<SqlServerClient> {
+        let mut client_config = Config::new();
+
+        client_config.host(&config.host);
+        client_config.database(&config.database);
+        client_config.port(config.port.parse::<u16>().unwrap());
+        client_config.authentication(tiberius::AuthMethod::sql_server(
+            &config.username,
+            &config.password,
+        ));
+        // TODO(kexiang): use trust_cert_ca, trust_cert is not secure
+        if config.encrypt == "true" {
+            client_config.encryption(tiberius::EncryptionLevel::Required);
+        }
+        client_config.trust_cert();
+
+        Ok(SqlServerClient::new_with_config(client_config).await?)
+    }
+
+    pub fn pk_column_comparisons(
+        &self,
+        pk_names: &[String],
+    ) -> ConnectorResult<Vec<CdcKeyComparison>> {
+        resolve_pk_comparisons(&self.column_comparisons, pk_names)
+    }
+
+    /// Discover only comparison metadata for explicit-schema and replacement plans.
+    /// Resolve the base system type so aliases of uniqueidentifier have the same ordering.
+    pub async fn discover_pk_column_comparisons(
+        config: &ExternalTableConfig,
+        pk_names: &[String],
+    ) -> ConnectorResult<Vec<CdcKeyComparison>> {
+        let mut client = Self::connect_client(config).await?;
+        let mut query = Query::new(
+            "SELECT c.name, TYPE_NAME(c.system_type_id)
+             FROM sys.columns AS c
+             JOIN sys.tables AS t ON t.object_id = c.object_id
+             JOIN sys.schemas AS s ON s.schema_id = t.schema_id
+             WHERE s.name = @P1 AND t.name = @P2",
+        );
+        query.bind(config.schema.as_str());
+        query.bind(config.table.as_str());
+        let mut rows = query
+            .query(&mut client.inner_client)
+            .await?
+            .into_row_stream();
+        let mut column_comparisons = vec![];
+        while let Some(row) = rows.try_next().await? {
+            let name: &str = row.try_get(0)?.context("missing SQL Server column name")?;
+            let ty: &str = row.try_get(1)?.context("missing SQL Server column type")?;
+            column_comparisons.push((name.to_owned(), key_comparison(ty)));
+        }
+        if column_comparisons.is_empty() {
+            bail!(
+                "Sql Server table '{}'.'{}' doesn't exist in '{}'",
+                config.schema,
+                config.table,
+                config.database
+            );
+        }
+        resolve_pk_comparisons(&column_comparisons, pk_names)
     }
 
     pub fn column_descs(&self) -> &Vec<ColumnDesc> {
@@ -186,6 +238,38 @@ impl SqlServerExternalTable {
     pub fn pk_names(&self) -> &Vec<String> {
         &self.pk_names
     }
+}
+
+fn key_comparison(upstream_type: &str) -> CdcKeyComparison {
+    if upstream_type.eq_ignore_ascii_case("uniqueidentifier") {
+        CdcKeyComparison::SqlServerUniqueidentifier
+    } else {
+        CdcKeyComparison::Native
+    }
+}
+
+fn resolve_pk_comparisons(
+    columns: &[(String, CdcKeyComparison)],
+    pk_names: &[String],
+) -> ConnectorResult<Vec<CdcKeyComparison>> {
+    pk_names
+        .iter()
+        .map(|name| {
+            // Prefer exact matches for case-sensitive SQL Server databases.
+            let column = columns
+                .iter()
+                .find(|(column, _)| column == name)
+                .or_else(|| {
+                    columns
+                        .iter()
+                        .find(|(column, _)| column.eq_ignore_ascii_case(name))
+                })
+                .with_context(|| {
+                    format!("primary key column `{name}` not found in upstream SQL Server schema")
+                })?;
+            Ok(column.1)
+        })
+        .collect()
 }
 
 fn mssql_type_to_rw_type(col_type: &str, col_name: &str) -> ConnectorResult<DataType> {
@@ -465,6 +549,28 @@ impl SqlServerExternalTableReader {
 #[cfg(test)]
 mod tests {
     use crate::source::cdc::external::SqlServerExternalTableReader;
+
+    #[test]
+    fn test_pk_comparisons_preserve_upstream_types_and_key_order() {
+        use risingwave_common::catalog::CdcKeyComparison::{Native, SqlServerUniqueidentifier};
+
+        use super::{key_comparison, resolve_pk_comparisons};
+        let columns = vec![
+            ("tenant".to_owned(), key_comparison("int")),
+            ("guid".to_owned(), key_comparison("UNIQUEIDENTIFIER")),
+            ("text".to_owned(), key_comparison("varchar")),
+            ("GUID".to_owned(), key_comparison("varchar")),
+        ];
+        assert_eq!(
+            resolve_pk_comparisons(
+                &columns,
+                &["guid".into(), "tenant".into(), "text".into(), "GUID".into()]
+            )
+            .unwrap(),
+            vec![SqlServerUniqueidentifier, Native, Native, Native]
+        );
+        assert!(resolve_pk_comparisons(&columns, &["missing".into()]).is_err());
+    }
 
     #[test]
     fn test_sql_server_filter_expr() {
