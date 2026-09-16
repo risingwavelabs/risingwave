@@ -401,6 +401,22 @@ def _(outer_panels: Panels):
                     ],
                 ),
                 panels.timeseries_percentage(
+                    "Backpressure Spread Across Downstream Actors",
+                    "Shape of the backpressure on each edge. Only meaningful where the panel above shows real "
+                    "backpressure; on a lightly blocked edge it is noise. 0%: a single downstream actor is the "
+                    "bottleneck, usually data skew on the distribution key. Tens of percent: the downstream fragment "
+                    "is slow as a whole. Edges with one downstream actor are omitted.",
+                    [
+                        panels.target(
+                            f"clamp_min((sum(rate({metric('stream_actor_output_channel_blocking_duration_ns')}[$__rate_interval])) by (fragment_id, downstream_fragment_id) > 0) \
+                                / sum(rate({metric('stream_actor_output_buffer_blocking_duration_ns')}[$__rate_interval])) by (fragment_id, downstream_fragment_id) - 1, 0) \
+                                / on (downstream_fragment_id) group_left () \
+                                (sum by (downstream_fragment_id) (label_replace({metric('stream_actor_count')}, \"downstream_fragment_id\", \"$1\", \"fragment_id\", \"(.*)\")) - 1 > 0)",
+                            "fragment {{fragment_id}}->{{downstream_fragment_id}}",
+                        ),
+                    ],
+                ),
+                panels.timeseries_percentage(
                     "Actor Input Blocking Rate (Upstream Backpressure)",
                     "The rate that an actor is blocked by its upstream.",
                     [

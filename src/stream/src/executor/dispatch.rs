@@ -110,6 +110,16 @@ impl DispatchExecutorMetrics {
             dispatcher,
         }
     }
+
+    fn channel_blocking_metric(&self, dispatcher_id: DispatcherId) -> LabelGuardedIntCounter {
+        self.metrics
+            .actor_output_channel_blocking_duration_ns
+            .with_guarded_label_values(&[
+                self.actor_id_str.as_str(),
+                self.fragment_id_str.as_str(),
+                dispatcher_id.to_string().as_str(),
+            ])
+    }
 }
 
 pub struct DispatchExecutorInner {
@@ -124,14 +134,16 @@ pub struct DispatchExecutorInner {
 impl DispatchExecutorInner {
     async fn collect_outputs(
         &mut self,
+        dispatcher_id: DispatcherId,
         downstream_actors: &[ActorId],
     ) -> StreamResult<Vec<Output>> {
-        fn resolve_output(downstream_actor: ActorId, request: NewOutputRequest) -> Output {
+        let channel_blocking_ns = self.metrics.channel_blocking_metric(dispatcher_id);
+        let resolve_output = |downstream_actor: ActorId, request: NewOutputRequest| {
             let tx = match request {
                 NewOutputRequest::Local(tx) | NewOutputRequest::Remote(tx) => tx,
             };
-            Output::new(downstream_actor, tx)
-        }
+            Output::new(downstream_actor, tx, channel_blocking_ns.clone())
+        };
         let mut outputs = Vec::with_capacity(downstream_actors.len());
         for &downstream_actor in downstream_actors {
             let output =
@@ -267,7 +279,7 @@ impl DispatchExecutorInner {
     ) -> StreamResult<()> {
         for dispatcher in new_dispatchers {
             let outputs = self
-                .collect_outputs(&dispatcher.downstream_actor_id)
+                .collect_outputs(dispatcher.dispatcher_id, &dispatcher.downstream_actor_id)
                 .await?;
             let dispatcher = DispatcherImpl::new(outputs, dispatcher)?;
             let dispatcher = self.metrics.monitor_dispatcher(dispatcher);
@@ -297,7 +309,7 @@ impl DispatchExecutorInner {
     /// outputs.
     async fn pre_update_dispatcher(&mut self, update: &PbDispatcherUpdate) -> StreamResult<()> {
         let outputs = self
-            .collect_outputs(&update.added_downstream_actor_id)
+            .collect_outputs(update.dispatcher_id, &update.added_downstream_actor_id)
             .await?;
 
         let Some(dispatcher) = self.find_dispatcher(update.dispatcher_id) else {
@@ -420,7 +432,7 @@ impl DispatchExecutor {
         let inner = &mut executor.inner;
         for dispatcher in dispatchers {
             let outputs = inner
-                .collect_outputs(&dispatcher.downstream_actor_id)
+                .collect_outputs(dispatcher.dispatcher_id, &dispatcher.downstream_actor_id)
                 .await?;
             let dispatcher = DispatcherImpl::new(outputs, &dispatcher)?;
             let dispatcher = inner.metrics.monitor_dispatcher(dispatcher);
@@ -1294,7 +1306,7 @@ mod tests {
         let outputs = output_tx_vecs
             .into_iter()
             .enumerate()
-            .map(|(actor_id, tx)| Output::new(ActorId::new(actor_id as u32 + 1), tx))
+            .map(|(actor_id, tx)| Output::for_test(ActorId::new(actor_id as u32 + 1), tx))
             .collect::<Vec<_>>();
         let mut hash_mapping = (1..num_outputs + 1)
             .flat_map(|id| vec![ActorId::new(id as u32); VirtualNode::COUNT_FOR_TEST / num_outputs])
@@ -1543,7 +1555,7 @@ mod tests {
         let outputs = output_tx_vecs
             .into_iter()
             .enumerate()
-            .map(|(actor_id, tx)| Output::new(ActorId::new(1 + actor_id as u32), tx))
+            .map(|(actor_id, tx)| Output::for_test(ActorId::new(1 + actor_id as u32), tx))
             .collect::<Vec<_>>();
         let mut hash_mapping = (1..num_outputs + 1)
             .flat_map(|id| vec![ActorId::new(id as _); VirtualNode::COUNT_FOR_TEST / num_outputs])
@@ -1691,7 +1703,7 @@ mod tests {
         );
 
         let (output_tx, _output_rx) = channel_for_test();
-        let outputs = vec![Output::new(ActorId::new(1), output_tx)];
+        let outputs = vec![Output::for_test(ActorId::new(1), output_tx)];
         let hash_mapping = vec![ActorId::new(1); VirtualNode::COUNT_FOR_TEST];
         let mut hash_dispatcher = HashDataDispatcher::new(
             outputs,
@@ -1750,7 +1762,7 @@ mod tests {
         );
 
         let (output_tx, _output_rx) = channel_for_test();
-        let outputs = vec![Output::new(ActorId::new(1), output_tx)];
+        let outputs = vec![Output::for_test(ActorId::new(1), output_tx)];
         let hash_mapping = vec![ActorId::new(1); VirtualNode::COUNT_FOR_TEST];
         let mut hash_dispatcher = HashDataDispatcher::new(
             outputs,
@@ -1766,7 +1778,7 @@ mod tests {
     #[tokio::test]
     async fn test_hash_dispatcher_internal_projection_normalize_single_u_plus() {
         let (output_tx, mut output_rx) = channel_for_test();
-        let outputs = vec![Output::new(ActorId::new(1), output_tx)];
+        let outputs = vec![Output::for_test(ActorId::new(1), output_tx)];
         let hash_mapping = vec![ActorId::new(1); VirtualNode::COUNT_FOR_TEST];
         let mut hash_dispatcher = HashDataDispatcher::new(
             outputs,

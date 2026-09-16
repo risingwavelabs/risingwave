@@ -431,6 +431,7 @@ stream_actor_in_record_cnt	counter	actor_id,fragment_id,upstream_fragment_id	Tot
 stream_actor_input_buffer_blocking_duration_ns	counter	actor_id,fragment_id,upstream_fragment_id	Total blocking duration (ns) of input buffer		src/stream/src/executor/monitor/streaming_stats.rs
 stream_actor_out_record_cnt	counter	actor_id,fragment_id	Total number of rows actor sent		src/stream/src/executor/monitor/streaming_stats.rs
 stream_actor_output_buffer_blocking_duration_ns	counter	actor_id,fragment_id,downstream_fragment_id	Total blocking duration (ns) of output buffer		src/stream/src/executor/monitor/streaming_stats.rs
+stream_actor_output_channel_blocking_duration_ns	counter	actor_id,fragment_id,downstream_fragment_id	Total blocking duration (ns) summed over every output channel of the dispatcher		src/stream/src/executor/monitor/streaming_stats.rs
 stream_actor_poll_cnt	counter	actor_id,fragment_id	tokio's metrics		src/stream/src/executor/monitor/streaming_stats.rs
 stream_actor_poll_duration	counter	actor_id,fragment_id	tokio's metrics		src/stream/src/executor/monitor/streaming_stats.rs
 stream_actor_scheduled_cnt	counter	actor_id,fragment_id	tokio's metrics		src/stream/src/executor/monitor/streaming_stats.rs

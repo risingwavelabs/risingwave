@@ -90,7 +90,7 @@ async fn test_merger_sum_aggr() {
                     .unwrap();
             let consumer = SenderConsumer {
                 input: aggregator.boxed(),
-                channel: Output::new(233.into(), tx),
+                channel: Output::for_test(233.into(), tx),
             };
 
             let actor = Actor::new(
@@ -123,7 +123,7 @@ async fn test_merger_sum_aggr() {
         let (actor_future, channel) = make_actor(rx);
         outputs.push(channel);
         actor_futures.push(actor_future);
-        inputs.push(Output::new(233.into(), tx));
+        inputs.push(Output::for_test(233.into(), tx));
     }
 
     // create a round robin dispatcher, which dispatches messages to the actors
