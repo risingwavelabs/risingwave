@@ -181,6 +181,28 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 )
                 .unwrap();
             }
+            ServiceConfig::Oracle(c) => {
+                let host = &c.address;
+                let port = &c.port;
+                let user = &c.user;
+                let password = &c.password;
+                let database = &c.database;
+                let pdb = &c.pdb;
+                writeln!(env, r#"ORACLE_HOST="{host}""#).unwrap();
+                writeln!(env, r#"ORACLE_PORT="{port}""#).unwrap();
+                writeln!(env, r#"ORACLE_USER="{user}""#).unwrap();
+                writeln!(env, r#"ORACLE_PASSWORD="{password}""#).unwrap();
+                writeln!(env, r#"ORACLE_DATABASE="{database}""#).unwrap();
+                writeln!(env, r#"ORACLE_PDB="{pdb}""#).unwrap();
+                if !c.user_managed {
+                    writeln!(env, r#"ORACLE_CONTAINER="risedev-{}""#, c.id).unwrap();
+                }
+                writeln!(
+                    env,
+                    r#"RISEDEV_ORACLE_WITH_OPTIONS_COMMON="connector='oracle-cdc',hostname='{host}',port='{port}',username='{user}',password='{password}',database.name='{database}',database.pdb.name='{pdb}'""#,
+                )
+                .unwrap();
+            }
             ServiceConfig::SqlServer(c) => {
                 let host = &c.address;
                 let port = &c.port;
