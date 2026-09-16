@@ -21,6 +21,7 @@ use risingwave_common::catalog::{DatabaseId, TableId};
 use risingwave_common::hash::{ActorMapping, VnodeCountCompat};
 use risingwave_common::id::{JobId, SinkId, SourceId};
 use risingwave_common::must_match;
+use risingwave_connector::sink::iceberg::IcebergCommitResult;
 use risingwave_connector::source::{CdcTableSnapshotSplitRaw, SplitImpl};
 use risingwave_hummock_sdk::change_log::build_table_change_log_delta;
 use risingwave_hummock_sdk::vector_index::VectorIndexDelta;
@@ -592,6 +593,22 @@ pub enum Command {
         /// Split ID -> offset (JSON-encoded based on connector type)
         split_offsets: HashMap<String, String>,
     },
+
+    /// Apply a completed Iceberg data-file compaction to the pk-index sink graph.
+    ApplyIcebergPkIndexCompaction {
+        sink_id: SinkId,
+        task_id: risingwave_pb::id::IcebergCompactionTaskId,
+        overwrite: IcebergPkIndexCompactionOverwrite,
+    },
+}
+
+#[derive(Clone, educe::Educe)]
+#[educe(Debug)]
+pub struct IcebergPkIndexCompactionOverwrite {
+    #[educe(Debug(ignore))]
+    pub output_result: IcebergCommitResult,
+    pub input_file_paths: Vec<String>,
+    pub read_snapshot_id: i64,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -689,6 +706,12 @@ impl std::fmt::Display for Command {
                 "InjectSourceOffsets: {} ({} splits)",
                 source_id,
                 split_offsets.len()
+            ),
+            Command::ApplyIcebergPkIndexCompaction {
+                sink_id, task_id, ..
+            } => write!(
+                f,
+                "ApplyIcebergPkIndexCompaction: sink={sink_id} task={task_id}"
             ),
         }
     }

@@ -41,7 +41,7 @@ use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::checkpoint::independent_job::IcebergV3JobCheckpointControl;
 use crate::barrier::checkpoint::{
     BatchRefreshJobCheckpointControl, BatchRefreshLogicalFragments, CreatingStreamingJobControl,
-    DatabaseCheckpointControl, IndependentCheckpointJob,
+    DatabaseCheckpointControl, IndependentCheckpointJob, IndependentCheckpointJobControl,
 };
 use crate::barrier::command::{
     CreateStreamingJobCommandInfo, PostCollectCommand, ReschedulePlan, ThrottleConfigMap,
@@ -527,6 +527,7 @@ impl DatabaseCheckpointControl {
 
         let mut notify_database_graph = command.is_some();
         let mut throttle_config: Option<ThrottleConfigMap> = None;
+        let mut skip_forward_to_iceberg_job = None;
 
         // Each variant handles its own pre-apply, edge building, mutation generation,
         // collect base info, and post-apply. The match produces values consumed by the
@@ -755,6 +756,7 @@ impl DatabaseCheckpointControl {
                     .copied()
                     .collect();
 
+                let term_id = self.term_id.as_str();
                 let Entry::Vacant(entry) = self.independent_checkpoint_job_controls.entry(job_id)
                 else {
                     panic!("duplicated creating Iceberg V3 job {job_id}");
@@ -772,6 +774,7 @@ impl DatabaseCheckpointControl {
                     snapshot_backfill_upstream_tables,
                     snapshot_epoch,
                     hummock_version_stats,
+                    term_id,
                     partial_graph_manager,
                     render_result,
                 )?;
@@ -1629,6 +1632,40 @@ impl DatabaseCheckpointControl {
                 ));
                 self.apply_simple_command(mutation, "InjectSourceOffsets")
             }
+
+            Some(Command::ApplyIcebergPkIndexCompaction {
+                sink_id,
+                task_id,
+                overwrite,
+            }) => {
+                let job_id = sink_id.as_job_id();
+                let job = self
+                    .independent_checkpoint_job_controls
+                    .get_mut(&job_id)
+                    .and_then(IndependentCheckpointJobControl::running_mut)
+                    .ok_or_else(|| {
+                        anyhow::anyhow!(
+                            "Iceberg V3 independent job for sink {} is not running",
+                            sink_id
+                        )
+                    })?;
+                let IndependentCheckpointJob::IcebergV3(job) = job else {
+                    return Err(anyhow::anyhow!(
+                        "sink {} is not controlled as an Iceberg V3 independent job",
+                        sink_id
+                    )
+                    .into());
+                };
+                job.start_apply_compaction(
+                    partial_graph_manager,
+                    &barrier_info,
+                    task_id,
+                    overwrite,
+                    notifier.as_mut().expect("command has a notifier"),
+                )?;
+                skip_forward_to_iceberg_job = Some(job_id);
+                self.apply_simple_command(None, "ApplyIcebergPkIndexCompaction")
+            }
         };
 
         let mut finished_snapshot_backfill_jobs = HashSet::new();
@@ -1914,6 +1951,9 @@ impl DatabaseCheckpointControl {
             if finished_snapshot_backfill_jobs.contains(job_id)
                 && matches!(job, IndependentCheckpointJob::CreatingStreamingJob(_))
             {
+                continue;
+            }
+            if skip_forward_to_iceberg_job == Some(*job_id) {
                 continue;
             }
             let throttle_mutation = throttle_config.as_mut().and_then(|config| {
