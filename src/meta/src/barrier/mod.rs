@@ -34,7 +34,7 @@ mod command;
 pub use command::RescheduleContext;
 mod complete_task;
 pub(super) mod context;
-mod edge_builder;
+pub(crate) mod edge_builder;
 mod info;
 mod manager;
 mod notifier;
