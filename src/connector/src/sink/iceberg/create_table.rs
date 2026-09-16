@@ -177,6 +177,15 @@ pub(super) async fn create_table_if_not_exists_impl(
         }
     };
 
+    let location = default_table_location_from_namespace(
+        catalog.as_ref(),
+        &namespace,
+        &table_name,
+        location,
+        config.default_table_location_from_namespace,
+    )
+    .await?;
+
     let partition_spec = match &config.partition_by {
         Some(partition_by) => {
             let mut partition_fields = Vec::<UnboundPartitionField>::new();
@@ -268,6 +277,29 @@ pub(super) async fn create_table_if_not_exists_impl(
         .map_err(|e| SinkError::Iceberg(anyhow!(e)))
         .context("failed to create iceberg table")?;
     Ok(true)
+}
+
+async fn default_table_location_from_namespace(
+    catalog: &dyn Catalog,
+    namespace: &NamespaceIdent,
+    table_name: &str,
+    location: Option<String>,
+    enabled: bool,
+) -> Result<Option<String>> {
+    if location.is_some() || !enabled {
+        return Ok(location);
+    }
+
+    let namespace = catalog
+        .get_namespace(namespace)
+        .await
+        .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+        .context("failed to load iceberg namespace for default table location")?;
+    Ok(namespace
+        .properties()
+        .get("location")
+        .filter(|location| !location.is_empty())
+        .map(|location| format!("{}/{table_name}", location.trim_end_matches('/'))))
 }
 
 async fn create_namespace_if_not_exists(
