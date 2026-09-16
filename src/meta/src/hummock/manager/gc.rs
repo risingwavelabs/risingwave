@@ -239,6 +239,8 @@ impl HummockManager {
         let to_delete = object_ids
             .filter(|object_id| !tracked_object_ids.contains(object_id))
             .collect_vec();
+        // Even an empty batch must advance the persisted GC clock and expire old history
+        // when GC history is enabled.
         self.write_gc_history(to_delete.iter().copied()).await?;
         Ok(to_delete)
     }
@@ -497,29 +499,21 @@ impl HummockManager {
 
     /// Deletes stale objects from object store.
     ///
-    /// Returns the total count of deleted objects.
-    pub async fn delete_objects(
-        &self,
-        mut objects_to_delete: Vec<HummockObjectId>,
-    ) -> Result<usize> {
+    /// Deduplicates within each batch of at most 1,000 input IDs. On success, returns the input
+    /// count, including duplicates; deletion errors stop subsequent batches.
+    pub async fn delete_objects(&self, objects_to_delete: Vec<HummockObjectId>) -> Result<usize> {
         let total = objects_to_delete.len();
-        let mut batch_size = 1000usize;
-        while !objects_to_delete.is_empty() {
+        for objects in objects_to_delete.chunks(1000) {
             if self.env.opts.vacuum_spin_interval_ms != 0 {
                 tokio::time::sleep(Duration::from_millis(self.env.opts.vacuum_spin_interval_ms))
                     .await;
             }
-            batch_size = cmp::min(objects_to_delete.len(), batch_size);
-            if batch_size == 0 {
-                break;
-            }
-            let delete_batch: HashSet<_> = objects_to_delete.drain(..batch_size).collect();
+            let delete_batch: HashSet<_> = objects.iter().copied().collect();
             tracing::info!(?delete_batch, "Attempt to delete objects.");
-            let deleted_object_ids = delete_batch.clone();
             self.gc_manager
-                .delete_objects(delete_batch.into_iter())
+                .delete_objects(delete_batch.iter().copied())
                 .await?;
-            tracing::debug!(?deleted_object_ids, "Finish deleting objects.");
+            tracing::debug!(deleted_object_ids = ?delete_batch, "Finish deleting objects.");
         }
         Ok(total)
     }

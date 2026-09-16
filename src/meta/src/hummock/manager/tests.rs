@@ -4132,6 +4132,26 @@ async fn test_time_travel_vacuum_pins_snapshot_epoch() {
     insert_delta(&env, 3, 2).await;
     insert_version(&env, 4, None).await;
     insert_version(&env, 5, None).await;
+    for (candidates, expected) in [
+        (vec![], vec![]),
+        (vec![10], vec![]),
+        (vec![10, 9999], vec![9999]),
+    ] {
+        assert_eq!(
+            hummock_manager
+                .filter_out_objects_by_time_travel(
+                    candidates
+                        .into_iter()
+                        .map(|id| HummockObjectId::Sstable(id.into())),
+                )
+                .await
+                .unwrap(),
+            expected
+                .into_iter()
+                .map(|id| HummockObjectId::Sstable(id.into()))
+                .collect(),
+        );
+    }
     insert_epoch_mapping(&env, table_id, 100, 2).await;
     insert_epoch_mapping(&env, table_id, 150, 3).await;
     insert_epoch_mapping(&env, table_id, 175, 3).await;
