@@ -867,7 +867,7 @@ impl GlobalBarrierWorkerContextImpl {
                         .catalog_controller
                         .cleanup_dropped_tables()
                         .await;
-                    self.refresh_manager.clear_trackers(None);
+                    self.refresh_manager.abandon_cycles(None).await?;
 
                     let active_streaming_nodes =
                         ActiveStreamingWorkerNodes::new_snapshot(self.metadata_manager.clone())
@@ -1089,7 +1089,9 @@ impl GlobalBarrierWorkerContextImpl {
             reload_cdc_table_snapshot_splits(&self.env.meta_store_ref().conn, Some(database_id))
                 .await?;
 
-        self.refresh_manager.clear_trackers(Some(database_id));
+        self.refresh_manager
+            .abandon_cycles(Some(database_id))
+            .await?;
 
         Ok(DatabaseRuntimeInfoSnapshot {
             recovery_context,

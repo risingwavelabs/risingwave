@@ -32,6 +32,27 @@ impl CatalogController {
         Ok(RefreshJob::find().all(&inner.db).await?)
     }
 
+    /// The refresh jobs that are not idle, of one database or of all.
+    pub async fn list_refreshing_jobs(
+        &self,
+        database_id: Option<DatabaseId>,
+    ) -> MetaResult<Vec<refresh_job::Model>> {
+        let inner = self.inner.read().await;
+        let database_cond = database_id
+            .map(|database_id| object::Column::DatabaseId.eq(database_id))
+            .unwrap_or_else(|| SimpleExpr::from(true));
+        Ok(RefreshJob::find()
+            .join(JoinType::InnerJoin, refresh_job::Relation::Table.def())
+            .join(JoinType::InnerJoin, table::Relation::Object1.def())
+            .filter(
+                refresh_job::Column::CurrentStatus
+                    .ne(RefreshState::Idle)
+                    .and(database_cond),
+            )
+            .all(&inner.db)
+            .await?)
+    }
+
     /// The refresh state of a table, or `None` if the table is not refreshable.
     pub async fn get_refresh_job_state(
         &self,
