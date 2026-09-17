@@ -297,6 +297,55 @@ impl HummockManager {
             .collect_vec();
         assert!(combined_member_table_ids.is_sorted());
 
+        // These members and their sizes are stable under versioning. Reuse the same
+        // per-table sizes for the policy check and the returned survivor statistics.
+        let survivor_tables = combined_member_table_ids
+            .iter()
+            .map(|&&table_id| {
+                let size = versioning
+                    .version_stats
+                    .table_stats
+                    .get(&table_id)
+                    .map(|stats| (stats.total_key_size + stats.total_value_size).max(0) as u64)
+                    .unwrap_or(0);
+                (table_id, size)
+            })
+            .collect_vec();
+
+        let mut compaction_group_manager = self
+            .compaction_group_manager
+            .write_with_process_name("merge_compaction_group_impl")
+            .await;
+        if validate_policy {
+            let group = compaction_group_manager
+                .try_get_compaction_group_config(group_1)
+                .ok_or_else(|| Error::CompactionGroup(format!("invalid group {group_1}")))?;
+            let next_group = compaction_group_manager
+                .try_get_compaction_group_config(group_2)
+                .ok_or_else(|| Error::CompactionGroup(format!("invalid group {group_2}")))?;
+            let current_size = survivor_tables.iter().map(|(_, size)| size).sum();
+            // The scheduling snapshot is only a prefilter. Check all mutable policy inputs
+            // under the locks already needed to apply the merge, before scanning SSTs.
+            merge_policy::validate_group_config(&group, &next_group, current_size, &self.env.opts)?;
+            merge_policy::validate_group_levels(
+                &group,
+                &next_group,
+                &self.env.opts,
+                &versioning.current_version,
+            )?;
+            // Commit hands off to statistics before releasing versioning. This read cannot
+            // pair the new version with throughput from before its commit.
+            if !merge_policy::check_is_low_write_throughput(
+                &self.table_write_throughput_statistic_manager.read(),
+                combined_member_table_ids.iter().map(|&&table_id| table_id),
+                &self.env.opts,
+            ) {
+                return Err(Error::CompactionGroup(format!(
+                    "Cannot merge groups {group_1} and {group_2}: current throughput is not observed cold"
+                )));
+            }
+        }
+
         // check duplicated sst_id
         let mut sst_id_set = HashSet::new();
         for sst_id in versioning
@@ -356,55 +405,6 @@ impl HummockManager {
                         right_obj_id
                     )));
                 }
-            }
-        }
-
-        // These members and their sizes are stable under versioning. Reuse the same
-        // per-table sizes for the policy check and the returned survivor statistics.
-        let survivor_tables = combined_member_table_ids
-            .iter()
-            .map(|&&table_id| {
-                let size = versioning
-                    .version_stats
-                    .table_stats
-                    .get(&table_id)
-                    .map(|stats| (stats.total_key_size + stats.total_value_size).max(0) as u64)
-                    .unwrap_or(0);
-                (table_id, size)
-            })
-            .collect_vec();
-
-        let mut compaction_group_manager = self
-            .compaction_group_manager
-            .write_with_process_name("merge_compaction_group_impl")
-            .await;
-        if validate_policy {
-            let group = compaction_group_manager
-                .try_get_compaction_group_config(group_1)
-                .ok_or_else(|| Error::CompactionGroup(format!("invalid group {group_1}")))?;
-            let next_group = compaction_group_manager
-                .try_get_compaction_group_config(group_2)
-                .ok_or_else(|| Error::CompactionGroup(format!("invalid group {group_2}")))?;
-            let current_size = survivor_tables.iter().map(|(_, size)| size).sum();
-            // The scheduling snapshot is only a prefilter. Check all mutable policy inputs
-            // under the locks already needed to apply the merge, without a global rescan.
-            merge_policy::validate_group_config(&group, &next_group, current_size, &self.env.opts)?;
-            merge_policy::validate_group_levels(
-                &group,
-                &next_group,
-                &self.env.opts,
-                &versioning.current_version,
-            )?;
-            // Commit hands off to statistics before releasing versioning. This read cannot
-            // pair the new version with throughput from before its commit.
-            if !merge_policy::check_is_low_write_throughput(
-                &self.table_write_throughput_statistic_manager.read(),
-                combined_member_table_ids.iter().map(|&&table_id| table_id),
-                &self.env.opts,
-            ) {
-                return Err(Error::CompactionGroup(format!(
-                    "Cannot merge groups {group_1} and {group_2}: current throughput is not observed cold"
-                )));
             }
         }
 
@@ -573,6 +573,7 @@ mod tests {
         gen_normalize_plan,
     };
     use crate::hummock::model::CompactionGroup;
+    use crate::hummock::test_utils::advance_time;
 
     fn group(
         group_id: CompactionGroupId,
@@ -626,7 +627,7 @@ mod tests {
         ));
         // Once a successful cold sample arrives, the old peak must stop merging without
         // continuing to classify the current load as hot.
-        tokio::time::advance(std::time::Duration::from_secs(1)).await;
+        advance_time(std::time::Duration::from_secs(1)).await;
         stats.record_commit(100.into(), 0, tokio::time::Instant::now());
         assert_eq!(stats.latest_table_throughput(100.into()), Some(0));
         // Reversed custom thresholds must not admit the retained hot observations either.

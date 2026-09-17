@@ -190,6 +190,7 @@ impl TableWriteThroughputStatisticManager {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::hummock::test_utils::advance_time;
 
     #[test]
     fn test_peak_retention_at_bucket_boundaries() {
@@ -233,9 +234,9 @@ mod tests {
         let table = TableId::new(100);
         let mut stats = TableWriteThroughputStatisticManager::new(240);
         stats.record_commit(table, 0, Instant::now());
-        tokio::time::advance(Duration::from_secs(1)).await;
+        advance_time(Duration::from_secs(1)).await;
         stats.record_commit(table, 100, Instant::now());
-        tokio::time::advance(Duration::from_secs(99)).await;
+        advance_time(Duration::from_secs(99)).await;
         stats.record_commit(table, 0, Instant::now());
         // Two completions are not two equal votes: 100 bytes arrived over 100 seconds.
         assert_eq!(stats.avg_write_throughput(table), 1.0);
@@ -243,7 +244,7 @@ mod tests {
         // the metric, even if no subsequent commit arrives to close that sample.
         stats.record_commit(table, 900, Instant::now());
         assert_eq!(stats.avg_write_throughput(table), 1000.0 / 101.0);
-        tokio::time::advance(Duration::from_secs(1)).await;
+        advance_time(Duration::from_secs(1)).await;
         stats.record_commit(table, 0, Instant::now());
         assert_eq!(stats.avg_write_throughput(table), 1000.0 / 101.0);
     }
@@ -257,10 +258,10 @@ mod tests {
         // Pending ingress is visible even before the first full sample has completed.
         stats.record_commit(table, 100, Instant::now());
         assert_eq!(stats.latest_table_throughput(table), Some(100));
-        tokio::time::advance(Duration::from_secs(1)).await;
+        advance_time(Duration::from_secs(1)).await;
         stats.record_commit(table, 0, Instant::now());
         for seconds in [2, 10, 300, 1] {
-            tokio::time::advance(Duration::from_secs(seconds)).await;
+            advance_time(Duration::from_secs(seconds)).await;
             stats.record_commit(table, 100 * seconds, Instant::now());
             assert_eq!(stats.latest_table_throughput(table), Some(100));
         }
@@ -273,17 +274,17 @@ mod tests {
             stats.max_write_throughput(table, Instant::now()),
             Some(1000)
         );
-        tokio::time::advance(Duration::from_secs(1)).await;
+        advance_time(Duration::from_secs(1)).await;
         stats.record_commit(table, 0, Instant::now());
         assert_eq!(stats.latest_table_throughput(table), Some(1000));
         for _ in 0..500 {
-            tokio::time::advance(Duration::from_secs(1)).await;
+            advance_time(Duration::from_secs(1)).await;
             stats.record_commit(table, 0, Instant::now());
         }
 
         assert_eq!(stats.max_write_throughput(table, Instant::now()), Some(0));
         stats.record_commit(table, 100, Instant::now());
-        tokio::time::advance(Duration::from_secs(10)).await;
+        advance_time(Duration::from_secs(10)).await;
         stats.record_commit(table, 0, Instant::now());
         assert_eq!(stats.latest_table_throughput(table), Some(10));
         assert_eq!(
@@ -292,7 +293,7 @@ mod tests {
             "closing a sample must retain the pending rate that could already trigger split"
         );
         stats.record_commit(table, 100, Instant::now());
-        tokio::time::advance(Duration::from_secs(241)).await;
+        advance_time(Duration::from_secs(241)).await;
         assert_eq!(stats.latest_table_throughput(table), None);
         assert_eq!(stats.max_write_throughput(table, Instant::now()), None);
     }
@@ -303,25 +304,25 @@ mod tests {
         let mut stats = TableWriteThroughputStatisticManager::new(240);
         assert_eq!(stats.max_write_throughput(table, Instant::now()), None);
         stats.record_commit(table, 0, Instant::now());
-        tokio::time::advance(Duration::from_secs(300)).await;
+        advance_time(Duration::from_secs(300)).await;
         assert_eq!(stats.max_write_throughput(table, Instant::now()), None);
         stats.record_commit(table, 0, Instant::now());
         assert_eq!(stats.max_write_throughput(table, Instant::now()), Some(0));
-        tokio::time::advance(Duration::from_secs(300)).await;
+        advance_time(Duration::from_secs(300)).await;
         stats.record_commit(table, 0, Instant::now());
         // Slow successful empty commits provide evidence. A timer between them must not
         // require a shorter commit interval than the configured history window.
-        tokio::time::advance(Duration::from_secs(299)).await;
+        advance_time(Duration::from_secs(299)).await;
         assert_eq!(stats.max_write_throughput(table, Instant::now()), Some(0));
         assert_eq!(stats.latest_table_throughput(table), Some(0));
-        tokio::time::advance(Duration::from_secs(2)).await;
+        advance_time(Duration::from_secs(2)).await;
         assert_eq!(stats.max_write_throughput(table, Instant::now()), None);
         assert_eq!(stats.latest_table_throughput(table), None);
         // A successful empty commit accounts for the elapsed interval. Subsequent backlog
         // drain is real Hummock ingress and may legitimately turn the table hot again.
         stats.record_commit(table, 0, Instant::now());
         assert_eq!(stats.max_write_throughput(table, Instant::now()), Some(0));
-        tokio::time::advance(Duration::from_secs(1)).await;
+        advance_time(Duration::from_secs(1)).await;
         stats.record_commit(table, 100, Instant::now());
         assert_eq!(stats.latest_table_throughput(table), Some(100));
         assert_eq!(stats.max_write_throughput(table, Instant::now()), Some(100));
