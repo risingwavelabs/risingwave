@@ -29,8 +29,9 @@ use risingwave_sqlparser::ast::AsOf;
 
 use crate::TableCatalog;
 use crate::binder::{
-    BoundBaseTable, BoundGapFill, BoundJoin, BoundShare, BoundShareInput, BoundSource,
-    BoundSystemTable, BoundWatermark, BoundWindowTableFunction, Relation, WindowTableFunctionKind,
+    BoundBaseTable, BoundGapFill, BoundIcebergMetadataTable, BoundJoin, BoundShare,
+    BoundShareInput, BoundSource, BoundSystemTable, BoundWatermark, BoundWindowTableFunction,
+    Relation, WindowTableFunctionKind,
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::{ErrorCode, Result};
@@ -38,9 +39,9 @@ use crate::expr::{CastContext, Expr, ExprImpl, ExprType, FunctionCall, InputRef,
 use crate::optimizer::plan_node::generic::{GenericPlanRef, SourceNodeKind};
 use crate::optimizer::plan_node::utils::to_iceberg_time_travel_as_of;
 use crate::optimizer::plan_node::{
-    LogicalApply, LogicalGapFill, LogicalHopWindow, LogicalIcebergIntermediateScan, LogicalJoin,
-    LogicalPlanRef as PlanRef, LogicalProject, LogicalScan, LogicalShare, LogicalSource,
-    LogicalSysScan, LogicalTableFunction, LogicalValues,
+    LogicalApply, LogicalGapFill, LogicalHopWindow, LogicalIcebergIntermediateScan,
+    LogicalIcebergMetadataScan, LogicalJoin, LogicalPlanRef as PlanRef, LogicalProject,
+    LogicalScan, LogicalShare, LogicalSource, LogicalSysScan, LogicalTableFunction, LogicalValues,
 };
 use crate::optimizer::property::Cardinality;
 use crate::planner::{PlanFor, Planner};
@@ -54,6 +55,7 @@ impl Planner {
         match relation {
             Relation::BaseTable(t) => self.plan_base_table(&t),
             Relation::SystemTable(st) => self.plan_sys_table(*st),
+            Relation::IcebergMetadataTable(table) => self.plan_iceberg_metadata_table(*table),
             // TODO: order is ignored in the subquery
             Relation::Subquery(q) => Ok(self.plan_query(q.query)?.into_unordered_subplan()),
             Relation::Join(join) => self.plan_join(*join),
@@ -77,6 +79,19 @@ impl Planner {
             Cardinality::unknown(), // TODO(card): cardinality of system table
         )
         .into())
+    }
+
+    fn plan_iceberg_metadata_table(&mut self, table: BoundIcebergMetadataTable) -> Result<PlanRef> {
+        let timezone = self.ctx().get_session_timezone();
+        let time_travel_info = to_iceberg_time_travel_as_of(&table.as_of, &timezone)?;
+        let core = crate::optimizer::plan_node::generic::IcebergMetadataScan {
+            metadata_type: table.metadata_type,
+            properties: table.properties,
+            secret_refs: table.secret_refs,
+            time_travel_info,
+            ctx: self.ctx(),
+        };
+        Ok(LogicalIcebergMetadataScan::new(core).into())
     }
 
     pub(super) fn plan_base_table(&mut self, base_table: &BoundBaseTable) -> Result<PlanRef> {

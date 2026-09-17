@@ -1118,6 +1118,7 @@ mod stream_values;
 mod stream_watermark_filter;
 
 mod batch_file_scan;
+mod batch_iceberg_metadata_scan;
 mod batch_iceberg_scan;
 mod batch_kafka_scan;
 mod batch_postgres_query;
@@ -1126,6 +1127,7 @@ mod batch_mysql_query;
 mod derive;
 mod logical_file_scan;
 mod logical_iceberg_intermediate_scan;
+mod logical_iceberg_metadata_scan;
 mod logical_iceberg_scan;
 mod logical_postgres_query;
 
@@ -1151,6 +1153,7 @@ pub use batch_group_topn::BatchGroupTopN;
 pub use batch_hash_agg::BatchHashAgg;
 pub use batch_hash_join::BatchHashJoin;
 pub use batch_hop_window::BatchHopWindow;
+pub use batch_iceberg_metadata_scan::BatchIcebergMetadataScan;
 pub use batch_iceberg_scan::BatchIcebergScan;
 pub use batch_insert::BatchInsert;
 pub use batch_kafka_scan::BatchKafkaScan;
@@ -1190,6 +1193,7 @@ pub use logical_gap_fill::LogicalGapFill;
 pub use logical_get_channel_delta_stats::LogicalGetChannelDeltaStats;
 pub use logical_hop_window::LogicalHopWindow;
 pub use logical_iceberg_intermediate_scan::{HummockRewriteInfo, LogicalIcebergIntermediateScan};
+pub use logical_iceberg_metadata_scan::LogicalIcebergMetadataScan;
 pub use logical_iceberg_scan::LogicalIcebergScan;
 pub use logical_insert::LogicalInsert;
 pub use logical_intersect::LogicalIntersect;
@@ -1325,6 +1329,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, MaxOneRow }
             , { Logical, KafkaScan }
             , { Logical, IcebergScan }
+            , { Logical, IcebergMetadataScan }
             , { Logical, IcebergIntermediateScan }
             , { Logical, ChangeLog }
             , { Logical, FileScan }
@@ -1365,6 +1370,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, MaxOneRow }
             , { Batch, KafkaScan }
             , { Batch, IcebergScan }
+            , { Batch, IcebergMetadataScan }
             , { Batch, FileScan }
             , { Batch, PostgresQuery }
             , { Batch, MySqlQuery }
