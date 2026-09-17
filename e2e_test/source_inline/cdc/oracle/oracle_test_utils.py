@@ -20,6 +20,7 @@ IDENTIFIER = re.compile(r"^[A-Za-z][A-Za-z0-9_$#]*$")
 TABLE_IDENTIFIER = re.compile(r"^[a-z][a-z0-9_]*$")
 DDL_STATEMENT_TIMEOUT_SECONDS = 120
 PSQL_PROCESS_TIMEOUT_SECONDS = 150
+HEARTBEAT_ASSERT_TIMEOUT_SECONDS = 30
 
 ERROR_SCENARIOS = {
     "missing_oracle_schema": (
@@ -274,6 +275,26 @@ def assert_seed(owner: str, expected_value: int | None) -> None:
                 )
 
 
+def assert_heartbeat_active(owner: str) -> None:
+    pdb = identifier("ORACLE_PDB")
+    deadline = time.monotonic() + HEARTBEAT_ASSERT_TIMEOUT_SECONDS
+    while True:
+        with connect_as_sys(pdb) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    f"SELECT HEARTBEAT FROM {owner}.{HEARTBEAT_TABLE} WHERE ID = 1"
+                )
+                rows = cursor.fetchall()
+        if len(rows) == 1 and rows[0][0] in {0, 1}:
+            return
+        if time.monotonic() >= deadline:
+            raise RuntimeError(
+                f"expected an active heartbeat value of 0 or 1 in "
+                f"{owner}.{HEARTBEAT_TABLE}, got {rows}"
+            )
+        time.sleep(0.5)
+
+
 def assert_incompatible_unchanged() -> None:
     user = identifier("ORACLE_USER")
     data_type = query_one(
@@ -464,6 +485,9 @@ def main() -> None:
     seed_parser.add_argument("owner")
     seed_parser.add_argument("--expected_value", type=int)
 
+    active_parser = subparsers.add_parser("assert_heartbeat_active")
+    active_parser.add_argument("owner")
+
     subparsers.add_parser("assert_incompatible_unchanged")
 
     error_parser = subparsers.add_parser("assert_create_table_error")
@@ -486,6 +510,8 @@ def main() -> None:
         assert_empty(args.owner)
     elif args.command == "assert_seed":
         assert_seed(normalize_identifier(args.owner, "owner"), args.expected_value)
+    elif args.command == "assert_heartbeat_active":
+        assert_heartbeat_active(normalize_identifier(args.owner, "owner"))
     elif args.command == "assert_incompatible_unchanged":
         assert_incompatible_unchanged()
     elif args.command == "assert_create_table_error":
