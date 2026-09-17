@@ -49,7 +49,7 @@ declare_tool_lint! {
     /// metric.inc();
     /// ```
     pub rw::TEMPORARY_GUARDED_METRIC,
-    Allow,
+    Warn,
     "updating a temporary guarded metric"
 }
 

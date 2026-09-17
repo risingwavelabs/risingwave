@@ -1,6 +1,5 @@
 #![feature(register_tool)]
 #![register_tool(rw)]
-#![warn(rw::temporary_guarded_metric)]
 
 struct MetricVec;
 
