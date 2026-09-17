@@ -324,19 +324,17 @@ impl HummockManager {
             );
         }
         trigger_epoch_stat(&self.metrics, &versioning.current_version);
-
-        drop(versioning_guard);
-
-        // Don't trigger compactions if we enable deterministic compaction
+        // Publish candidates while the committed groups are protected from deletion.
         if !self.env.opts.compaction_deterministic_test {
-            // commit_epoch may contains SSTs from any compaction group
             for id in &modified_compaction_groups {
                 self.try_send_compaction_request(*id, compact_task::TaskType::Dynamic);
             }
-            if !table_stats_change.is_empty() {
-                self.collect_table_write_throughput(table_stats_change)
-                    .await;
-            }
+        }
+        drop(versioning_guard);
+
+        if !self.env.opts.compaction_deterministic_test && !table_stats_change.is_empty() {
+            self.collect_table_write_throughput(table_stats_change)
+                .await;
         }
         if !modified_compaction_groups.is_empty() {
             self.try_update_write_limits(&modified_compaction_groups)

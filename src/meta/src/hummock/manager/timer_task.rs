@@ -33,6 +33,7 @@ use tokio_stream::wrappers::IntervalStream;
 use tracing::warn;
 
 use crate::backup_restore::BackupManagerRef;
+use crate::hummock::manager::compaction::ScheduleTrigger;
 use crate::hummock::metrics_utils::{trigger_lsm_stat, trigger_mv_stat};
 use crate::hummock::{HummockManager, TASK_NORMAL};
 
@@ -402,8 +403,9 @@ impl HummockManager {
                                     }
 
                                     hummock_manager
-                                        .on_handle_trigger_multi_group(
+                                        .trigger_compaction_for_all_groups(
                                             compact_task::TaskType::Dynamic,
+                                            ScheduleTrigger::Periodic,
                                         )
                                         .await;
                                 }
@@ -415,15 +417,17 @@ impl HummockManager {
                                     }
 
                                     hummock_manager
-                                        .on_handle_trigger_multi_group(
+                                        .trigger_compaction_for_all_groups(
                                             compact_task::TaskType::SpaceReclaim,
+                                            ScheduleTrigger::Periodic,
                                         )
                                         .await;
 
                                     // share the same trigger with SpaceReclaim
                                     hummock_manager
-                                        .on_handle_trigger_multi_group(
+                                        .trigger_compaction_for_all_groups(
                                             compact_task::TaskType::VnodeWatermark,
+                                            ScheduleTrigger::Periodic,
                                         )
                                         .await;
                                 }
@@ -435,7 +439,10 @@ impl HummockManager {
                                     }
 
                                     hummock_manager
-                                        .on_handle_trigger_multi_group(compact_task::TaskType::Ttl)
+                                        .trigger_compaction_for_all_groups(
+                                            compact_task::TaskType::Ttl,
+                                            ScheduleTrigger::Periodic,
+                                        )
                                         .await;
                                 }
 
@@ -446,8 +453,9 @@ impl HummockManager {
                                     }
 
                                     hummock_manager
-                                        .on_handle_trigger_multi_group(
+                                        .trigger_compaction_for_all_groups(
                                             compact_task::TaskType::Tombstone,
+                                            ScheduleTrigger::Periodic,
                                         )
                                         .await;
                                 }
@@ -632,16 +640,6 @@ impl HummockManager {
     #[cfg(test)]
     pub async fn schedule_group_merge_for_test(&self) {
         self.on_handle_schedule_group_merge().await;
-    }
-
-    async fn on_handle_trigger_multi_group(&self, task_type: compact_task::TaskType) {
-        for cg_id in self.compaction_group_ids().await {
-            self.compaction_state.try_sched_compaction(
-                cg_id,
-                task_type,
-                super::compaction::ScheduleTrigger::Periodic,
-            );
-        }
     }
 
     /// Try to schedule a compaction merge for the given compaction groups.
