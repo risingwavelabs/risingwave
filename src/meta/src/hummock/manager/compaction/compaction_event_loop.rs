@@ -384,11 +384,13 @@ impl HummockCompactionEventHandler {
                 }
             };
         }
+        #[cfg(test)]
+        scheduling_tests::before_unschedule().await;
         for group in no_task_groups {
             self.hummock_manager.compaction_state.unschedule(
                 group,
                 task_type,
-                snapshot.snapshot_time(),
+                snapshot.generation(),
             );
         }
         if let Err(err) = self
@@ -797,5 +799,347 @@ impl CompactorStreamEvent for SubscribeIcebergCompactionEventRequest {
 
     fn create_at(&self) -> u64 {
         self.create_at
+    }
+}
+
+#[cfg(test)]
+mod scheduling_tests {
+    use std::time::Duration;
+
+    use risingwave_hummock_sdk::{LocalSstableInfo, SyncResult};
+    use risingwave_rpc_client::HummockMetaClient;
+
+    use super::*;
+    use crate::hummock::MockHummockMetaClient;
+    use crate::hummock::compaction::selector::default_compaction_selector;
+    use crate::hummock::manager::compaction::ScheduleTrigger;
+    use crate::hummock::manager::tests::{gen_sstable_info, setup_compute_env_with_meta_opts};
+    use crate::hummock::test_utils::setup_compute_env;
+
+    tokio::task_local! {
+        static BEFORE_UNSCHEDULE: Arc<tokio::sync::Barrier>;
+    }
+
+    pub(super) async fn before_unschedule() {
+        // Only the explicitly scoped dispatch pauses; parallel tests are unaffected.
+        if let Ok(barrier) = BEFORE_UNSCHEDULE.try_with(Arc::clone) {
+            barrier.wait().await;
+            barrier.wait().await;
+        }
+    }
+
+    // Exercise the actual candidate -> picker -> compactor stream path, without a running cluster.
+    async fn dispatch(manager: Arc<HummockManager>) -> Vec<risingwave_pb::hummock::CompactTask> {
+        let mut receiver = manager.compactor_manager.add_compactor(99.into());
+        let compactor = manager.compactor_manager.get_compactor(99.into()).unwrap();
+        let mut selectors = HashMap::from([(TaskType::Dynamic, default_compaction_selector())]);
+        HummockCompactionEventHandler::new(manager)
+            .try_dispatch_tasks(&compactor, 8, &mut selectors, 1)
+            .await;
+        let mut tasks = vec![];
+        while let Ok(event) = receiver.try_recv() {
+            if let Some(ResponseEvent::CompactTask(task)) = event.unwrap().event {
+                tasks.push(task);
+            }
+        }
+        tasks
+    }
+
+    async fn fixture(deterministic: bool) -> (Arc<HummockManager>, MockHummockMetaClient) {
+        let mut opts = MetaOpts::test(false);
+        opts.compaction_deterministic_test = deterministic;
+        let (_, manager, _, worker_id) = setup_compute_env_with_meta_opts(80, opts).await;
+        manager
+            .register_table_ids_for_test(&[(100, 2.into()), (101, 2.into())])
+            .await
+            .unwrap();
+        let client = MockHummockMetaClient::new(manager.clone(), worker_id as _);
+        commit_ssts(&client, 30, 1).await;
+        (manager, client)
+    }
+
+    async fn commit_ssts(client: &MockHummockMetaClient, epoch: u64, first_sst: u64) {
+        client
+            .commit_epoch(
+                risingwave_common::util::epoch::test_epoch(epoch),
+                SyncResult {
+                    uncommitted_ssts: (first_sst..first_sst + 4)
+                        .map(|id| LocalSstableInfo {
+                            sst_info: gen_sstable_info(
+                                id,
+                                vec![100, 101],
+                                risingwave_common::util::epoch::test_epoch(epoch - 10),
+                            ),
+                            table_stats: Default::default(),
+                            created_at: u64::MAX,
+                        })
+                        .collect(),
+                    ..Default::default()
+                },
+            )
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_commit_after_no_task_preserves_candidate() {
+        let (manager, client) = fixture(false).await;
+        // Keep all existing inputs assigned so the next real picker finds no work.
+        assert!(!dispatch(manager.clone()).await.is_empty());
+        let barrier = Arc::new(tokio::sync::Barrier::new(2));
+        let commit = async {
+            barrier.wait().await;
+            commit_ssts(&client, 40, 5).await;
+            barrier.wait().await;
+        };
+        let (old_tasks, ()) = tokio::time::timeout(Duration::from_secs(10), async {
+            tokio::join!(
+                BEFORE_UNSCHEDULE.scope(barrier.clone(), dispatch(manager.clone())),
+                commit,
+            )
+        })
+        .await
+        .expect("picker and commit must finish without holding each other's locks");
+        assert!(
+            old_tasks.is_empty(),
+            "the paused picker must have found no task"
+        );
+        assert!(
+            manager
+                .compaction_state
+                .snapshot()
+                .scheduled
+                .contains(&(2.into(), TaskType::Dynamic))
+        );
+        let tasks = dispatch(manager.clone()).await;
+        assert!(
+            tasks.iter().any(|task| task
+                .input_ssts
+                .iter()
+                .any(|level| { level.table_infos.iter().any(|sst| sst.sst_id >= 5.into()) })),
+            "the next dispatch must select the newly committed SSTs"
+        );
+        // Once the new inputs are assigned, a fresh no-task result must still cool down the group.
+        assert!(dispatch(manager.clone()).await.is_empty());
+        assert!(!manager.compaction_state.try_sched_compaction(
+            2.into(),
+            TaskType::Dynamic,
+            ScheduleTrigger::Periodic,
+        ));
+    }
+
+    #[tokio::test]
+    async fn test_split_schedules_children_without_commit_or_timer() {
+        let (manager, _) = fixture(false).await;
+        let snapshot = manager.compaction_state.snapshot();
+        manager
+            .compaction_state
+            .unschedule(2.into(), TaskType::Dynamic, snapshot.generation());
+        manager
+            .move_state_tables_to_dedicated_compaction_group(2.into(), &[100.into()], None)
+            .await
+            .unwrap();
+        let tasks = dispatch(manager.clone()).await;
+        let groups: HashSet<_> = tasks.iter().map(|task| task.compaction_group_id).collect();
+        let version = manager.get_current_version().await;
+        for table in [100, 101] {
+            let group = version.state_table_info.info()
+                [&risingwave_common::catalog::TableId::new(table)]
+                .compaction_group_id;
+            assert!(
+                groups.contains(&group),
+                "split group {group} did not reach the picker"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_merge_wakes_cooled_survivor_without_commit() {
+        let (manager, _) = fixture(false).await;
+        let (left, mapping) = manager
+            .move_state_tables_to_dedicated_compaction_group(2.into(), &[100.into()], None)
+            .await
+            .unwrap();
+        let right = *mapping.keys().find(|&&id| id != left).unwrap();
+        // Obtain a real no-task result before merge by keeping the existing left SSTs assigned.
+        let pending = manager
+            .get_compact_task(left, &mut *default_compaction_selector())
+            .await
+            .unwrap()
+            .unwrap();
+        manager.try_send_compaction_request(left, TaskType::Dynamic);
+        dispatch(manager.clone()).await;
+        assert!(
+            manager
+                .compaction_state
+                .inner
+                .lock()
+                .dynamic_cooldown
+                .contains(&left)
+        );
+        assert!(!manager.compaction_state.try_sched_compaction(
+            left,
+            TaskType::Dynamic,
+            ScheduleTrigger::Periodic
+        ));
+        manager
+            .merge_compaction_group_for_test(left, right, HashSet::from([100.into(), 101.into()]))
+            .await
+            .unwrap();
+        let tasks = dispatch(manager.clone()).await;
+        assert!(
+            tasks
+                .iter()
+                .any(|task| task.compaction_group_id == left && task.task_id != pending.task_id),
+            "merged SSTs must reach the picker without another commit"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_merge_cancellation_does_not_reschedule_deleted_group() {
+        for task_type in [TaskType::Dynamic, TaskType::Emergency] {
+            let (manager, _) = fixture(false).await;
+            let (left, mapping) = manager
+                .move_state_tables_to_dedicated_compaction_group(2.into(), &[100.into()], None)
+                .await
+                .unwrap();
+            let right = *mapping.keys().find(|&&id| id != left).unwrap();
+            let task = manager
+                .get_compact_task(right, &mut *default_compaction_selector())
+                .await
+                .unwrap()
+                .unwrap();
+            // The report path consumes the assigned task type. Keep a real assignment and inputs.
+            manager
+                .compaction
+                .write()
+                .await
+                .compact_task_assignment
+                .get_mut(&task.task_id)
+                .unwrap()
+                .compact_task
+                .task_type = task_type;
+            for kind in [
+                TaskType::Dynamic,
+                TaskType::Emergency,
+                TaskType::Ttl,
+                TaskType::SpaceReclaim,
+                TaskType::Tombstone,
+                TaskType::VnodeWatermark,
+            ] {
+                manager.compaction_state.try_sched_compaction(
+                    right,
+                    kind,
+                    ScheduleTrigger::NewData,
+                );
+            }
+            let snapshot = manager.compaction_state.snapshot();
+            manager
+                .merge_compaction_group_for_test(
+                    left,
+                    right,
+                    HashSet::from([100.into(), 101.into()]),
+                )
+                .await
+                .unwrap();
+            assert!(
+                !manager
+                    .compaction_state
+                    .snapshot()
+                    .scheduled
+                    .iter()
+                    .any(|(id, _)| *id == right)
+            );
+            // An old picker result must not recreate cooldown for the deleted group.
+            manager
+                .compaction_state
+                .unschedule(right, TaskType::Dynamic, snapshot.generation());
+            assert!(
+                !manager
+                    .compaction_state
+                    .inner
+                    .lock()
+                    .dynamic_cooldown
+                    .contains(&right)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_stale_getter_and_late_trigger_skip_missing_group() {
+        let (_, manager, _, _) = setup_compute_env(80).await;
+        let missing = 999.into();
+        let (tasks, _) = manager
+            .get_compact_tasks(vec![missing], 1, &mut *default_compaction_selector())
+            .await
+            .unwrap();
+        assert!(tasks.is_empty());
+        manager
+            .trigger_compaction_deterministic(manager.get_current_version().await.id, vec![missing])
+            .await
+            .unwrap();
+        assert!(
+            !manager
+                .compaction_state
+                .snapshot()
+                .scheduled
+                .iter()
+                .any(|(id, _)| *id == missing)
+        );
+    }
+
+    #[tokio::test]
+    async fn test_normalization_schedules_all_affected_groups() {
+        for deterministic in [false, true] {
+            let mut opts = MetaOpts::test(false);
+            opts.compaction_deterministic_test = deterministic;
+            let (_, manager, _, _) = setup_compute_env_with_meta_opts(80, opts).await;
+            manager
+                .register_table_ids_for_test(&[(100, 2.into()), (102, 2.into()), (101, 3.into())])
+                .await
+                .unwrap();
+            let old = manager.compaction_state.snapshot();
+            assert_eq!(
+                manager
+                    .normalize_overlapping_compaction_groups()
+                    .await
+                    .unwrap(),
+                1
+            );
+            let version = manager.get_current_version().await;
+            for table in [100, 102] {
+                let group = version.state_table_info.info()
+                    [&risingwave_common::catalog::TableId::new(table)]
+                    .compaction_group_id;
+                // An older no-task result cannot erase the topology notification.
+                manager
+                    .compaction_state
+                    .unschedule(group, TaskType::Dynamic, old.generation());
+                assert_eq!(
+                    manager
+                        .compaction_state
+                        .snapshot()
+                        .scheduled
+                        .contains(&(group, TaskType::Dynamic)),
+                    !deterministic
+                );
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_topology_changes_respect_deterministic_mode() {
+        let (manager, _) = fixture(true).await;
+        let (left, mapping) = manager
+            .move_state_tables_to_dedicated_compaction_group(2.into(), &[100.into()], None)
+            .await
+            .unwrap();
+        assert!(manager.compaction_state.snapshot().scheduled.is_empty());
+        let right = *mapping.keys().find(|&&id| id != left).unwrap();
+        manager
+            .merge_compaction_group_for_test(left, right, HashSet::from([100.into(), 101.into()]))
+            .await
+            .unwrap();
+        assert!(manager.compaction_state.snapshot().scheduled.is_empty());
     }
 }
