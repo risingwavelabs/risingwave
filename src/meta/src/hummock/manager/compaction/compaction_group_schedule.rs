@@ -504,6 +504,7 @@ impl HummockManager {
         self.try_update_write_limits(&[left_group_id, right_group_id])
             .await;
 
+        // Count successful merges here for both manual and automatic callers.
         self.metrics
             .merge_compaction_group_count
             .with_label_values(&[&left_group_id.to_string()])
@@ -1389,11 +1390,6 @@ impl HummockManager {
                     next_group.group_id,
                     group.group_id,
                 );
-
-                self.metrics
-                    .merge_compaction_group_count
-                    .with_label_values(&[&group.group_id.to_string()])
-                    .inc();
             }
             Err(e) => {
                 tracing::info!(
