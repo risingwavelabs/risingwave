@@ -15,6 +15,7 @@
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet};
 use std::mem::swap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use anyhow::Context;
@@ -203,21 +204,35 @@ impl SplitReader for KafkaSplitReader {
     fn into_stream(self) -> BoxSourceChunkStream {
         let parser_config = self.parser_config.clone();
         let source_context = self.source_ctx.clone();
-        let data_stream = self
-            .into_data_event_stream()
-            .try_filter_map(|event| async move {
-                Ok(match event {
-                    SourceMessageEvent::Data(batch) => Some(batch),
-                    SourceMessageEvent::SplitProgress(_) => None,
-                })
-            });
+        let data_stream =
+            Arc::new(self)
+                .into_data_event_stream()
+                .try_filter_map(|event| async move {
+                    Ok(match event {
+                        SourceMessageEvent::Data(batch) => Some(batch),
+                        SourceMessageEvent::SplitProgress(_) => None,
+                    })
+                });
         into_chunk_stream(data_stream, parser_config, source_context)
     }
 
     fn into_event_stream(self) -> BoxSourceReaderEventStream {
         let parser_config = self.parser_config.clone();
         let source_context = self.source_ctx.clone();
-        into_chunk_event_stream(self.into_data_event_stream(), parser_config, source_context)
+        let reader = Arc::new(self);
+        into_chunk_event_stream(
+            reader.clone().into_data_event_stream(),
+            parser_config,
+            source_context,
+        )
+        .map(move |item| {
+            // Keep the reader alive after an inner `try_stream` returns an error. The stream
+            // executor drops this outer stream on the blocking pool, where librdkafka can close
+            // without occupying an async runtime worker.
+            let _ = &reader;
+            item
+        })
+        .boxed()
     }
 
     fn backfill_info(&self) -> HashMap<SplitId, BackfillInfo> {
@@ -373,7 +388,7 @@ impl KafkaSplitReader {
     }
 
     #[try_stream(ok = SourceMessageEvent, error = crate::error::ConnectorError)]
-    async fn into_data_event_stream(self) {
+    async fn into_data_event_stream(self: Arc<Self>) {
         if self.offsets.values().all(|(start_offset, stop_offset)| {
             match (start_offset, stop_offset) {
                 (Some(start), Some(stop)) if (*start + 1) >= *stop => true,

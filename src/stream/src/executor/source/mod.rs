@@ -299,10 +299,8 @@ pub fn get_infinite_backoff_strategy() -> impl Iterator<Item = Duration> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::mpsc;
+    use std::sync::{Mutex, mpsc};
 
-    use futures::stream;
-    use risingwave_connector::error::ConnectorResult;
     use tokio::sync::oneshot;
 
     use super::*;
@@ -319,6 +317,11 @@ mod tests {
         }
     }
 
+    #[try_stream(ok = SourceReaderEvent, error = ConnectorError)]
+    async fn failed_source_reader(_guard: Arc<Mutex<BlockingDrop>>) {
+        return Err(ConnectorError::from(anyhow::anyhow!("test source failure")));
+    }
+
     #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
     async fn test_failed_source_reader_cleanup_does_not_block_runtime() {
         let mut cleanup_tasks = Vec::new();
@@ -328,21 +331,20 @@ mod tests {
         for _ in 0..4 {
             let (started_tx, started_rx) = oneshot::channel();
             let (finish_tx, finish_rx) = mpsc::channel();
-            let guard = BlockingDrop {
+            let guard = Arc::new(Mutex::new(BlockingDrop {
                 started: Some(started_tx),
                 finish: finish_rx,
-            };
-            let stream = stream::once(async {
-                Err::<SourceReaderEvent, _>(ConnectorError::from(anyhow::anyhow!(
-                    "test source failure"
-                )))
-            })
-            .chain(stream::pending::<ConnectorResult<SourceReaderEvent>>())
-            .map(move |item| {
-                let _ = &guard;
-                item
-            })
-            .boxed();
+            }));
+            let stream = failed_source_reader(guard.clone())
+                .map(move |item| {
+                    // A terminating `try_stream` drops its own copy of the guard before returning
+                    // the error. Model the Kafka stream's outer owner, which must retain the
+                    // resource until `apply_rate_limit_to_source_reader_event` can move it to the
+                    // blocking pool.
+                    let _ = &guard;
+                    item
+                })
+                .boxed();
             let mut stream = apply_rate_limit_to_source_reader_event(stream, None).boxed();
 
             cleanup_tasks.push(tokio::spawn(async move {
