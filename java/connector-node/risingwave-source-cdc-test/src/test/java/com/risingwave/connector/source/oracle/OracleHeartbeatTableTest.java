@@ -24,6 +24,7 @@ import java.sql.SQLException;
 import java.util.Map;
 import java.util.concurrent.CyclicBarrier;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import org.junit.AfterClass;
 import org.junit.BeforeClass;
@@ -234,15 +235,25 @@ public class OracleHeartbeatTableTest extends OracleSourceTestBase {
 
     private void runConcurrentValidations(Map<String, String> properties) throws Exception {
         var barrier = new CyclicBarrier(2);
-        try (var executor = Executors.newFixedThreadPool(2)) {
-            var first =
+        var executor =
+                Executors.newFixedThreadPool(
+                        2,
+                        runnable -> {
+                            var thread = new Thread(runnable, "oracle-validation");
+                            thread.setDaemon(true);
+                            return thread;
+                        });
+        Future<?> first = null;
+        Future<?> second = null;
+        try {
+            first =
                     executor.submit(
                             () -> {
                                 barrier.await(30, TimeUnit.SECONDS);
                                 assertValid(properties);
                                 return null;
                             });
-            var second =
+            second =
                     executor.submit(
                             () -> {
                                 barrier.await(30, TimeUnit.SECONDS);
@@ -251,6 +262,14 @@ public class OracleHeartbeatTableTest extends OracleSourceTestBase {
                             });
             first.get(45, TimeUnit.SECONDS);
             second.get(45, TimeUnit.SECONDS);
+        } finally {
+            if (first != null) {
+                first.cancel(true);
+            }
+            if (second != null) {
+                second.cancel(true);
+            }
+            executor.shutdownNow();
         }
     }
 
