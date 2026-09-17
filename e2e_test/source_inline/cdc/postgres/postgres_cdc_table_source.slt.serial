@@ -1,0 +1,213 @@
+# CDC table sources on a shared Postgres CDC source.
+#
+# Postgres tables default to REPLICA IDENTITY DEFAULT, so a DELETE only logs the primary key:
+# the other columns reach RisingWave as type defaults rather than as the real before image.
+# That is exactly why the scan is an upsert stream and not a retract one, and it is the case
+# MySQL cannot cover, because the binlog always carries the full before image.
+
+control substitution on
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+DROP SOURCE IF EXISTS ts_pg CASCADE;
+
+statement ok
+DROP SOURCE IF EXISTS s_pg CASCADE;
+
+system ok
+psql -c "
+    SELECT pg_terminate_backend(active_pid)
+    FROM pg_replication_slots
+    WHERE slot_name = 'pg_cdc_table_source_slot' AND active_pid IS NOT NULL;
+    SELECT pg_sleep(1);
+    SELECT pg_drop_replication_slot(slot_name)
+    FROM pg_replication_slots
+    WHERE slot_name = 'pg_cdc_table_source_slot';
+    DROP TABLE IF EXISTS pg_table_source CASCADE;
+    CREATE TABLE pg_table_source (id INT PRIMARY KEY, v INT NOT NULL, s VARCHAR(40) NOT NULL);
+"
+
+# Guard the premise of this file: the table keeps the default replica identity.
+system ok
+psql -t -A -c "SELECT relreplident FROM pg_class WHERE relname = 'pg_table_source';" | grep -qx d
+
+statement ok
+CREATE SOURCE s_pg WITH (
+    ${RISEDEV_POSTGRES_WITH_OPTIONS_COMMON},
+    username = '${PGUSER:$USER}',
+    password = '${PGPASSWORD:}',
+    database.name = '${PGDATABASE:postgres}',
+    schema.name = 'public',
+    slot.name = 'pg_cdc_table_source_slot'
+);
+
+sleep 2s
+
+# The declared schema is validated against the upstream table, exactly like the CREATE TABLE
+# path: both statements of each pair must be rejected for the same reason.
+statement error Incompatible data type of column id
+CREATE SOURCE bad_type (id VARCHAR, v INT, PRIMARY KEY (id))
+WITH (snapshot = 'false') FROM s_pg TABLE 'public.pg_table_source';
+
+statement error Incompatible data type of column id
+CREATE TABLE bad_type (id VARCHAR, v INT, PRIMARY KEY (id))
+FROM s_pg TABLE 'public.pg_table_source';
+
+# Postgres maps int4 to Int32 only, so widening is rejected here (unlike MySQL).
+statement error Incompatible data type of column id
+CREATE SOURCE bad_widened (id BIGINT, v INT, PRIMARY KEY (id))
+WITH (snapshot = 'false') FROM s_pg TABLE 'public.pg_table_source';
+
+statement error Incompatible data type of column id
+CREATE TABLE bad_widened (id BIGINT, v INT, PRIMARY KEY (id))
+FROM s_pg TABLE 'public.pg_table_source';
+
+statement error Primary key mismatch
+CREATE SOURCE bad_pk (id INT, v INT, PRIMARY KEY (v))
+WITH (snapshot = 'false') FROM s_pg TABLE 'public.pg_table_source';
+
+statement error Primary key mismatch
+CREATE TABLE bad_pk (id INT, v INT, PRIMARY KEY (v))
+FROM s_pg TABLE 'public.pg_table_source';
+
+statement error does not exist
+CREATE SOURCE bad_table (id INT, v INT, PRIMARY KEY (id))
+WITH (snapshot = 'false') FROM s_pg TABLE 'public.no_such_table';
+
+statement error does not exist
+CREATE TABLE bad_table (id INT, v INT, PRIMARY KEY (id))
+FROM s_pg TABLE 'public.no_such_table';
+
+# Declaring a subset of the upstream columns is allowed on both paths.
+statement ok
+CREATE SOURCE subset_src (id INT, v INT, PRIMARY KEY (id))
+WITH (snapshot = 'false') FROM s_pg TABLE 'public.pg_table_source';
+
+statement ok
+DROP SOURCE subset_src;
+
+statement ok
+CREATE SOURCE ts_pg (*)
+WITH (snapshot = 'false')
+FROM s_pg TABLE 'public.pg_table_source';
+
+statement ok
+CREATE MATERIALIZED VIEW pg_plain AS SELECT id, v, s FROM ts_pg;
+
+# The predicate is chosen so that the degraded before image of a DELETE fails it: the filter
+# must still delete the row, which is what `StreamFilter [upsert]` guarantees. A retract-style
+# filter would drop the DELETE here and leak a stale row forever.
+statement ok
+CREATE MATERIALIZED VIEW pg_big AS SELECT id, v FROM ts_pg WHERE v > 100;
+
+statement ok
+CREATE MATERIALIZED VIEW pg_changelog AS
+WITH sub AS CHANGELOG FROM ts_pg SELECT id, v, changelog_op FROM sub;
+
+# The CDC fragments of every consumer stay singleton.
+query I
+SELECT count(*)
+FROM rw_fragments f JOIN rw_materialized_views m ON f.table_id = m.id
+WHERE m.name IN ('pg_plain', 'pg_big', 'pg_changelog')
+  AND ('STREAM_CDC_SCAN' = ANY(f.flags) OR 'CDC_FILTER' = ANY(f.flags))
+  AND (f.parallelism <> 1 OR f.distribution_type <> 'SINGLE');
+----
+0
+
+sleep 2s
+
+system ok
+psql -c "
+    INSERT INTO pg_table_source VALUES (1, 2, 'a'), (2, 3, 'b'), (3, 4, 'c');
+    UPDATE pg_table_source SET v = 5, s = 'b2' WHERE id = 2;
+    DELETE FROM pg_table_source WHERE id = 3;
+"
+
+query IIT rowsort retry 20 backoff 1s
+SELECT id, v, s FROM pg_plain;
+----
+1 2 a
+2 5 b2
+
+# The DELETE event does not carry the real before image: `v` was 4 upstream.
+query III rowsort retry 20 backoff 1s
+SELECT id, v, changelog_op FROM pg_changelog WHERE changelog_op = 2;
+----
+3 0 2
+
+query I retry 20 backoff 1s
+SELECT count(*) FROM pg_changelog WHERE changelog_op = 2 AND id = 3 AND v IS DISTINCT FROM 4;
+----
+1
+
+system ok
+psql -c "INSERT INTO pg_table_source VALUES (4, 200, 'big');"
+
+query II retry 20 backoff 1s
+SELECT id, v FROM pg_big;
+----
+4 200
+
+# `0 > 100` is false for the delete event, so only an upsert-aware filter removes the row.
+system ok
+psql -c "DELETE FROM pg_table_source WHERE id = 4;"
+
+query I retry 20 backoff 1s
+SELECT count(*) FROM pg_big;
+----
+0
+
+# Rescaling leaves the singleton CDC fragments alone and loses nothing.
+statement ok
+ALTER MATERIALIZED VIEW pg_plain SET PARALLELISM = 2;
+
+query I
+SELECT count(*)
+FROM rw_fragments f JOIN rw_materialized_views m ON f.table_id = m.id
+WHERE m.name = 'pg_plain'
+  AND ('STREAM_CDC_SCAN' = ANY(f.flags) OR 'CDC_FILTER' = ANY(f.flags))
+  AND (f.parallelism <> 1 OR f.distribution_type <> 'SINGLE');
+----
+0
+
+system ok
+psql -c "
+    INSERT INTO pg_table_source VALUES (5, 6, 'e');
+    UPDATE pg_table_source SET v = 7 WHERE id = 1;
+"
+
+query IIT rowsort retry 20 backoff 1s
+SELECT id, v, s FROM pg_plain;
+----
+1 7 a
+2 5 b2
+5 6 e
+
+statement ok
+DROP MATERIALIZED VIEW pg_changelog;
+
+statement ok
+DROP MATERIALIZED VIEW pg_big;
+
+statement ok
+DROP MATERIALIZED VIEW pg_plain;
+
+statement ok
+DROP SOURCE ts_pg;
+
+statement ok
+DROP SOURCE s_pg;
+
+system ok
+psql -c "
+    SELECT pg_terminate_backend(active_pid)
+    FROM pg_replication_slots
+    WHERE slot_name = 'pg_cdc_table_source_slot' AND active_pid IS NOT NULL;
+    SELECT pg_sleep(1);
+    SELECT pg_drop_replication_slot(slot_name)
+    FROM pg_replication_slots
+    WHERE slot_name = 'pg_cdc_table_source_slot';
+    DROP TABLE pg_table_source CASCADE;
+"
