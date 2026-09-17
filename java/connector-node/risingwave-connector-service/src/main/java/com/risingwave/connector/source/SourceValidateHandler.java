@@ -142,6 +142,7 @@ public class SourceValidateHandler {
                 break;
             case MONGODB:
             case CITUS:
+            case ORACLE:
                 heartbeatRequired = false;
                 break;
             default:
