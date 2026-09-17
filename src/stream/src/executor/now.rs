@@ -141,7 +141,7 @@ impl<S: StateStore> NowExecutor<S> {
             for barrier in barriers {
                 let curr_epoch = barrier.get_curr_epoch();
                 let new_timestamp = curr_epoch.as_timestamptz();
-                // Barriers sent by older meta nodes do not include the database-specific value.
+                // Barriers sent by older meta nodes do not include the effective interval.
                 let current_barrier_interval_ms = barrier
                     .barrier_interval_ms
                     .unwrap_or(fallback_barrier_interval_ms);

@@ -404,7 +404,9 @@ pub struct BarrierInner<M> {
     pub mutation: M,
     pub kind: BarrierKind,
 
-    /// The configured interval for barriers in this database.
+    /// The effective barrier interval for this database.
+    ///
+    /// `None` is accepted for backward compatibility with older meta nodes.
     pub barrier_interval_ms: Option<u32>,
 
     /// Tracing context for the **current** epoch of this barrier.
