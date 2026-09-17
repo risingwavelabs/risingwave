@@ -188,7 +188,7 @@ final class OracleExternalTable {
         try (var statement =
                 connection.prepareStatement(
                         "SELECT COLUMN_NAME, DATA_TYPE, DATA_PRECISION, DATA_SCALE, NULLABLE "
-                                + "FROM ALL_TAB_COLUMNS "
+                                + "FROM ALL_TAB_COLS "
                                 + "WHERE OWNER = ? AND TABLE_NAME = ? AND HIDDEN_COLUMN = 'NO' "
                                 + "ORDER BY COLUMN_ID")) {
             statement.setString(1, schemaName);
