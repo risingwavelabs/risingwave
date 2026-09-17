@@ -202,6 +202,66 @@ struct CachedPuffinReader {
     reader: PuffinReader,
 }
 
+/// Metadata-only source checks, shared by planning (including compaction) and replay reads.
+/// Returns the validated blob range for Puffin, or `None` for Parquet.
+pub(crate) fn validate_position_delete_descriptor(
+    delete: &FileScanTaskDeleteFile,
+    data_file_path: &str,
+) -> Result<Option<(u64, u64)>> {
+    ensure!(
+        delete.file_type == DataContentType::PositionDeletes,
+        "expected file-scoped position deletes"
+    );
+    ensure!(
+        delete.equality_ids.is_none(),
+        "equality IDs on a position-delete artifact"
+    );
+    ensure!(
+        delete.key_metadata.is_none(),
+        "encrypted delete artifacts are not supported by the update reader"
+    );
+    ensure!(
+        delete.referenced_data_file.as_deref() == Some(data_file_path),
+        "delete artifact references a different or unspecified data file"
+    );
+    ensure!(
+        delete.record_count.is_some(),
+        "delete artifact is missing record_count"
+    );
+    match delete.file_format {
+        DataFileFormat::Puffin => {
+            let offset = u64::try_from(
+                delete
+                    .content_offset
+                    .context("DV is missing content_offset")?,
+            )
+            .context("negative DV offset")?;
+            let length = u64::try_from(
+                delete
+                    .content_size_in_bytes
+                    .context("DV is missing content_size_in_bytes")?,
+            )
+            .context("negative DV length")?;
+            ensure!(
+                length > 0
+                    && offset
+                        .checked_add(length)
+                        .is_some_and(|end| end <= delete.file_size_in_bytes),
+                "DV range is outside its Puffin file"
+            );
+            Ok(Some((offset, length)))
+        }
+        DataFileFormat::Parquet => {
+            ensure!(
+                delete.content_offset.is_none() && delete.content_size_in_bytes.is_none(),
+                "Parquet position deletes must not specify a DV range"
+            );
+            Ok(None)
+        }
+        _ => anyhow::bail!("unsupported position-delete format"),
+    }
+}
+
 /// Shared decoder with at most one cached Puffin reader/footer. Callers may reuse it across
 /// sequential tasks for the same table/FileIO. Decoded bitmaps are never cached by path.
 /// Puffin paths must identify immutable files; drop the reader to release its cache.
@@ -218,7 +278,8 @@ impl PositionDeleteReader {
         }
     }
 
-    /// Strict file-scoped source entry point. Reject unsupported descriptors before opening files.
+    /// Strict source entry: validate descriptors, every Parquet path/position and Puffin metadata.
+    /// Reuse this reader across calls to retain its footer cache.
     pub(crate) async fn read_file_scoped(
         &mut self,
         data_file_path: &str,
@@ -232,29 +293,7 @@ impl PositionDeleteReader {
         let Some(delete) = deletes.first() else {
             return Ok(DeleteVector::default());
         };
-        ensure!(
-            delete.file_type == DataContentType::PositionDeletes,
-            "expected file-scoped position deletes"
-        );
-        ensure!(
-            delete.equality_ids.is_none(),
-            "equality IDs on a position-delete artifact"
-        );
-        ensure!(
-            delete.key_metadata.is_none(),
-            "encrypted delete artifacts are not supported by the change reader"
-        );
-        ensure!(
-            delete.referenced_data_file.as_deref() == Some(data_file_path),
-            "delete artifact references a different or unspecified data file"
-        );
-        ensure!(
-            matches!(
-                delete.file_format,
-                DataFileFormat::Parquet | DataFileFormat::Puffin
-            ),
-            "unsupported position-delete format"
-        );
+        let blob_range = validate_position_delete_descriptor(delete, data_file_path)?;
         let validation = PositionDeleteValidation {
             data_file_path,
             data_record_count,
@@ -263,38 +302,12 @@ impl PositionDeleteReader {
                 .record_count
                 .context("delete artifact is missing record_count")?,
         };
-        match delete.file_format {
-            DataFileFormat::Puffin => {
-                let offset = u64::try_from(
-                    delete
-                        .content_offset
-                        .context("DV is missing content_offset")?,
-                )
-                .context("negative DV offset")?;
-                let length = u64::try_from(
-                    delete
-                        .content_size_in_bytes
-                        .context("DV is missing content_size_in_bytes")?,
-                )
-                .context("negative DV length")?;
-                ensure!(
-                    length > 0
-                        && offset
-                            .checked_add(length)
-                            .is_some_and(|end| end <= validation.file_size),
-                    "DV range is outside its Puffin file"
-                );
+        match blob_range {
+            Some((offset, length)) => {
                 self.read_dv(&delete.file_path, offset, length, Some(validation))
                     .await
             }
-            DataFileFormat::Parquet => {
-                ensure!(
-                    delete.content_offset.is_none() && delete.content_size_in_bytes.is_none(),
-                    "Parquet position deletes must not specify a DV range"
-                );
-                self.read_parquet(&delete.file_path, Some(validation)).await
-            }
-            _ => unreachable!("format checked above"),
+            None => self.read_parquet(&delete.file_path, Some(validation)).await,
         }
     }
 
@@ -313,19 +326,9 @@ impl PositionDeleteReader {
             // Release the previous footer before opening a different artifact.
             self.puffin = None;
             let input = self.file_io.new_input(file_path)?;
-            let file_size = if let Some(validation) = validation {
-                let size = input.metadata().await?.size;
-                ensure!(
-                    size == validation.file_size,
-                    "delete artifact size differs from its descriptor"
-                );
-                Some(size)
-            } else {
-                None
-            };
             self.puffin = Some(CachedPuffinReader {
                 path: file_path.to_owned(),
-                file_size,
+                file_size: None,
                 reader: PuffinReader::new(input).await?,
             });
         }

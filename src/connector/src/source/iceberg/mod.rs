@@ -12,9 +12,11 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-pub mod change_reader;
 pub mod parquet_file_handler;
 pub mod planner;
+pub mod update_planner;
+pub mod update_reader;
+pub mod update_state;
 
 pub mod metrics;
 use std::collections::{HashMap, HashSet};

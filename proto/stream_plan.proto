@@ -311,6 +311,9 @@ message StreamSource {
   optional Columns downstream_columns = 11;
   plan_common.SourceRefreshMode refresh_mode = 12;
   optional uint32 associated_table_id = 13;
+  // Update List reads this Fetch state table at a committed checkpoint before advancing phases.
+  // The binding and file read contracts travel in checkpointed List state and assignment rows.
+  optional plan_common.StorageTableDesc iceberg_fetch_state_table = 14;
 }
 
 // copy contents from StreamSource to prevent compatibility issues in the future

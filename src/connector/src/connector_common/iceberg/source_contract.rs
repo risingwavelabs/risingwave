@@ -56,6 +56,28 @@ impl IcebergSourceContract {
         &self.key_field_ids
     }
 
+    pub fn validate_projection(&self, schema: &Schema, field_ids: &[i32]) -> Result<()> {
+        self.validate_schema(schema)?;
+        let mut ids = HashSet::new();
+        for id in field_ids {
+            ensure!(
+                ids.insert(*id)
+                    && !iceberg::metadata_columns::is_metadata_field(*id)
+                    && schema
+                        .as_struct()
+                        .fields()
+                        .iter()
+                        .any(|field| field.id == *id),
+                "update projection requires unique stored top-level fields, not virtual metadata"
+            );
+        }
+        ensure!(
+            self.key_field_ids.iter().all(|id| ids.contains(id)),
+            "update projection must retain the complete sink key"
+        );
+        Ok(())
+    }
+
     pub fn validate_schema(&self, schema: &Schema) -> Result<()> {
         ensure!(
             !self.key_field_ids.is_empty(),

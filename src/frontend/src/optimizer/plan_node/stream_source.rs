@@ -123,6 +123,7 @@ impl StreamNode for StreamSource {
                 }),
                 refresh_mode: source_catalog.refresh_mode,
                 associated_table_id: None, // fill the actual associated table id in `BuildingFragment::fill_job`
+                iceberg_fetch_state_table: None,
             }
         });
         PbNodeBody::Source(Box::new(SourceNode { source_inner }))

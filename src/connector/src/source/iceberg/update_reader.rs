@@ -12,17 +12,15 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-//! Per-file change reads for the PK-index source contract. The snapshot planner, not the reader's
+//! Per-file updates (Insert and Delete) for the PK-index source contract. The planner, not the reader's
 //! local history, determines whether a file is new or retained. This does not schedule phases or
 //! commit progress: callers must checkpoint cursors with output and enforce Delete-before-Insert.
-
-use std::collections::HashSet;
 
 use anyhow::{Context, Result, ensure};
 use futures::StreamExt;
 use futures_async_stream::try_stream;
 use iceberg::delete_vector::DeleteVector;
-use iceberg::metadata_columns::{RESERVED_FIELD_ID_POS, is_metadata_field};
+use iceberg::metadata_columns::RESERVED_FIELD_ID_POS;
 use iceberg::scan::{FileScanTask, FileScanTaskDeleteFile};
 use iceberg::spec::DataFileFormat;
 use iceberg::table::Table;
@@ -36,7 +34,7 @@ use crate::sink::iceberg::PositionDeleteReader;
 
 /// The planner must retain this classification and the parent descriptors across replay.
 #[derive(Clone)]
-pub enum IcebergChangeReadMode {
+pub enum IcebergUpdateReadMode {
     /// Bootstrap or newly added file: current deletes only filter Inserts.
     Insert,
     /// A file present in both snapshots: retract only the new deleted positions.
@@ -46,23 +44,9 @@ pub enum IcebergChangeReadMode {
 }
 
 /// An empty chunk still carries read progress. EOF, not the last nonempty chunk, completes a task.
-pub struct IcebergChangeBatch {
+pub struct IcebergUpdateBatch {
     pub chunk: StreamChunk,
     pub next_position: u64,
-}
-
-/// Strict decoding for the source boundary. Unlike the sink's trusted-file helper, this checks
-/// every Parquet path and position and validates Puffin blob metadata against the descriptor.
-/// Reuse the caller's reader to retain its Puffin footer cache across calls.
-pub async fn read_deleted_positions(
-    delete_reader: &mut PositionDeleteReader,
-    data_file_path: &str,
-    data_record_count: u64,
-    deletes: &[FileScanTaskDeleteFile],
-) -> Result<DeleteVector> {
-    delete_reader
-        .read_file_scoped(data_file_path, data_record_count, deletes)
-        .await
 }
 
 pub fn newly_deleted_positions(
@@ -82,76 +66,47 @@ pub fn newly_deleted_positions(
 /// Resume rereads from the beginning; seeking is an optimization, not part of the cursor contract.
 /// The caller supplies a reader for this table's `FileIO` and controls its cache lifetime. Sequential
 /// tasks can reuse it after dropping the returned stream; parallel tasks need separate readers.
-#[try_stream(boxed, ok = IcebergChangeBatch, error = anyhow::Error)]
-pub async fn read_file_changes(
+#[try_stream(boxed, ok = IcebergUpdateBatch, error = anyhow::Error)]
+pub async fn read_file_updates(
     table: Table,
     delete_reader: &mut PositionDeleteReader,
     mut task: FileScanTask,
     contract: IcebergSourceContract,
-    mode: IcebergChangeReadMode,
+    mode: IcebergUpdateReadMode,
     chunk_size: usize,
     resume_position: u64,
 ) {
-    ensure!(chunk_size > 0, "change reader batch size must be positive");
+    ensure!(chunk_size > 0, "update reader batch size must be positive");
     ensure!(
         task.data_file_format == DataFileFormat::Parquet,
-        "change reader requires Parquet data files"
+        "update reader requires Parquet data files"
     );
     ensure!(
         task.key_metadata.is_none(),
-        "encrypted data files are not supported by the change reader"
+        "encrypted data files are not supported by the update reader"
     );
     ensure!(
         task.start == 0 && task.length == task.file_size_in_bytes && task.predicate.is_none(),
-        "change reader requires a whole-file task without predicate pushdown"
+        "update reader requires a whole-file task without predicate pushdown"
     );
     let record_count = task
         .record_count
-        .context("change task is missing data record_count")?;
+        .context("update task is missing data record_count")?;
     ensure!(
         record_count <= i64::MAX as u64 && resume_position <= record_count,
-        "invalid change task position"
+        "invalid update task position"
     );
-    contract.validate_schema(&task.schema)?;
-    let mut projected = HashSet::new();
-    for id in &task.project_field_ids {
-        ensure!(
-            projected.insert(*id)
-                && !is_metadata_field(*id)
-                && task
-                    .schema
-                    .as_struct()
-                    .fields()
-                    .iter()
-                    .any(|field| field.id == *id),
-            "change reader projection must contain unique stored top-level fields, not virtual metadata"
-        );
-    }
-    ensure!(
-        contract
-            .key_field_ids()
-            .iter()
-            .all(|id| projected.contains(id)),
-        "change reader projection must retain the complete sink key"
-    );
+    contract.validate_projection(&task.schema, &task.project_field_ids)?;
 
-    let current = read_deleted_positions(
-        delete_reader,
-        &task.data_file_path,
-        record_count,
-        &task.deletes,
-    )
-    .await?;
+    let current = delete_reader
+        .read_file_scoped(&task.data_file_path, record_count, &task.deletes)
+        .await?;
     let (op, positions) = match mode {
-        IcebergChangeReadMode::Insert => (Op::Insert, current),
-        IcebergChangeReadMode::Delete { parent_deletes } => {
-            let parent = read_deleted_positions(
-                delete_reader,
-                &task.data_file_path,
-                record_count,
-                &parent_deletes,
-            )
-            .await?;
+        IcebergUpdateReadMode::Insert => (Op::Insert, current),
+        IcebergUpdateReadMode::Delete { parent_deletes } => {
+            let parent = delete_reader
+                .read_file_scoped(&task.data_file_path, record_count, &parent_deletes)
+                .await?;
             (Op::Delete, newly_deleted_positions(&parent, current)?)
         }
     };
@@ -171,7 +126,7 @@ pub async fn read_file_changes(
         let batch = batch?;
         ensure!(
             batch.num_columns() == logical_column_count + 1,
-            "unexpected change reader output schema"
+            "unexpected update reader output schema"
         );
         let row_positions = batch
             .column(logical_column_count)
@@ -208,17 +163,17 @@ pub async fn read_file_changes(
         }
         let mut chunk = IcebergArrowConvert.chunk_from_record_batch(&projected_batch)?;
         chunk.set_visibility(visibility);
-        yield IcebergChangeBatch {
+        yield IcebergUpdateBatch {
             chunk: StreamChunk::from_parts(vec![op; chunk.capacity()], chunk),
             next_position,
         };
     }
     ensure!(
         next_position == record_count,
-        "data row count differs from the change task"
+        "data row count differs from the update task"
     );
 }
 
 #[cfg(test)]
-#[path = "change_reader_test.rs"]
+#[path = "update_reader_test.rs"]
 mod tests;

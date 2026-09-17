@@ -34,7 +34,7 @@ use crate::executor::TroublemakerExecutor;
 use crate::executor::source::{
     BatchAdbcSnowflakeListExecutor, BatchIcebergListExecutor, BatchOpendalFsListExecutor,
     BatchPosixFsListExecutor, DummySourceExecutor, FsListExecutor, IcebergListExecutor,
-    SourceExecutor, SourceStateTableHandler, StreamSourceCore,
+    IcebergUpdateListExecutor, SourceExecutor, SourceStateTableHandler, StreamSourceCore,
 };
 use crate::from_proto::source::is_full_reload_refresh;
 
@@ -185,6 +185,27 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     .map(|column| column.column_id)
                     .collect();
 
+                let is_iceberg_update = source.with_properties.is_iceberg_connector()
+                    && !is_full_reload_refresh
+                    && params.info.stream_kind
+                        == risingwave_pb::stream_plan::stream_node::StreamKind::Retract;
+                if source.iceberg_fetch_state_table.is_some() && !is_iceberg_update {
+                    bail!("Iceberg update List requires a retracting Iceberg graph");
+                }
+                if is_iceberg_update {
+                    crate::executor::source::validate_update_state_table(
+                        source.get_state_table()?,
+                        true,
+                    )?;
+                    if params.info.schema.data_types()
+                        != vec![
+                            risingwave_common::types::DataType::Varchar,
+                            risingwave_common::types::DataType::Jsonb,
+                        ]
+                    {
+                        bail!("Iceberg update List requires an assignment-key/JSON output schema");
+                    }
+                }
                 let state_table_handler = SourceStateTableHandler::from_table_catalog(
                     source.state_table.as_ref().unwrap(),
                     store.clone(),
@@ -254,7 +275,27 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                     )
                     .boxed()
                 } else if source.with_properties.is_iceberg_connector() {
-                    if is_full_reload_refresh {
+                    if is_iceberg_update {
+                        if source.rate_limit.is_some() || source.row_id_index.is_some() {
+                            bail!(
+                                "Iceberg update source cannot use refresh, generated row IDs, or rate limiting"
+                            );
+                        }
+                        IcebergUpdateListExecutor::new(
+                            stream_source_core,
+                            source
+                                .get_downstream_columns()?
+                                .columns
+                                .iter()
+                                .cloned()
+                                .map(Into::into)
+                                .collect(),
+                            source.get_iceberg_fetch_state_table()?.clone(),
+                            store.clone(),
+                            barrier_receiver,
+                        )
+                        .boxed()
+                    } else if is_full_reload_refresh {
                         BatchIcebergListExecutor::new(
                             params.actor_context.clone(),
                             stream_source_core,

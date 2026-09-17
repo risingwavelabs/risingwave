@@ -119,6 +119,11 @@ impl BuildingFragment {
         table_id_gen: GlobalTableIdGen,
     ) {
         let fragment_id = fragment.fragment_id;
+        stream_graph_visitor::visit_iceberg_completion_tables(fragment, |table| {
+            table.table_id = table_id_gen
+                .to_global_id(table.table_id.as_raw_id())
+                .as_global_id();
+        });
         stream_graph_visitor::visit_internal_tables(fragment, |table, table_type_name| {
             table.id = table_id_gen
                 .to_global_id(table.id.as_raw_id())
@@ -1056,6 +1061,9 @@ impl StreamFragmentGraph {
     /// `create_internal_table_catalog`.
     pub fn refill_internal_table_ids(&mut self, table_id_map: HashMap<TableId, TableId>) {
         for fragment in self.fragments.values_mut() {
+            stream_graph_visitor::visit_iceberg_completion_tables(&mut fragment.inner, |table| {
+                table.table_id = table_id_map[&table.table_id];
+            });
             stream_graph_visitor::visit_internal_tables(
                 &mut fragment.inner,
                 |table, _table_type_name| {
@@ -1097,6 +1105,9 @@ impl StreamFragmentGraph {
         // TODO(alter-mv): unify this with `fit_internal_table_ids_with_mapping` after we
         // confirm the behavior is the same.
         for fragment in self.fragments.values_mut() {
+            stream_graph_visitor::visit_iceberg_completion_tables(&mut fragment.inner, |table| {
+                table.table_id = internal_table_id_map[&table.table_id].id;
+            });
             stream_graph_visitor::visit_internal_tables(
                 &mut fragment.inner,
                 |table, _table_type_name| {
@@ -1112,6 +1123,11 @@ impl StreamFragmentGraph {
 
     /// Fit the internal tables' `table_id`s according to the given mapping.
     pub fn fit_internal_table_ids_with_mapping(&mut self, mut matches: HashMap<TableId, Table>) {
+        for fragment in self.fragments.values_mut() {
+            stream_graph_visitor::visit_iceberg_completion_tables(&mut fragment.inner, |table| {
+                table.table_id = matches[&table.table_id].id;
+            });
+        }
         for fragment in self.fragments.values_mut() {
             stream_graph_visitor::visit_internal_tables(
                 &mut fragment.inner,

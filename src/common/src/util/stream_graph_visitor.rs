@@ -100,6 +100,23 @@ pub fn visit_fragment(fragment: &StreamFragment, f: impl FnMut(&NodeBody)) {
     visit_stream_node_body(fragment.node.as_ref().unwrap(), f)
 }
 
+/// Visit references to the Fetch completion table, not additional owned internal tables.
+pub fn visit_iceberg_completion_tables(
+    fragment: &mut StreamFragment,
+    mut f: impl FnMut(&mut risingwave_pb::plan_common::StorageTableDesc),
+) {
+    visit_fragment_mut(fragment, |body| {
+        if let NodeBody::Source(node) = body
+            && let Some(table) = node
+                .source_inner
+                .as_mut()
+                .and_then(|source| source.iceberg_fetch_state_table.as_mut())
+        {
+            f(table);
+        }
+    });
+}
+
 /// Visit the tables of a [`StreamNode`].
 pub fn visit_stream_node_tables_inner<F>(
     stream_node: &mut StreamNode,
@@ -400,4 +417,62 @@ where
     F: FnMut(&mut Table, &str),
 {
     visit_stream_node_tables(fragment.node.as_mut().unwrap(), f)
+}
+
+#[cfg(test)]
+mod iceberg_completion_tests {
+    use risingwave_pb::plan_common::StorageTableDesc;
+    use risingwave_pb::stream_plan::{SourceNode, StreamFsFetch, StreamFsFetchNode, StreamSource};
+
+    use super::*;
+
+    #[test]
+    fn completion_references_are_remapped_without_owning_extra_tables() {
+        let completion_table = StorageTableDesc {
+            table_id: 7.into(),
+            ..Default::default()
+        };
+        let mut fragment = StreamFragment {
+            node: Some(StreamNode {
+                node_body: Some(NodeBody::StreamFsFetch(Box::new(StreamFsFetchNode {
+                    node_inner: Some(StreamFsFetch {
+                        state_table: Some(Table {
+                            id: 7.into(),
+                            ..Default::default()
+                        }),
+                        ..Default::default()
+                    }),
+                }))),
+                input: vec![StreamNode {
+                    node_body: Some(NodeBody::Source(Box::new(SourceNode {
+                        source_inner: Some(StreamSource {
+                            iceberg_fetch_state_table: Some(completion_table),
+                            state_table: Some(Table {
+                                id: 8.into(),
+                                ..Default::default()
+                            }),
+                            ..Default::default()
+                        }),
+                    }))),
+                    ..Default::default()
+                }],
+                ..Default::default()
+            }),
+            ..Default::default()
+        };
+        for (from, to) in [(7, 70), (70, 700)] {
+            let mut references = 0;
+            visit_iceberg_completion_tables(&mut fragment, |table| {
+                assert_eq!(table.table_id.as_raw_id(), from);
+                table.table_id = to.into();
+                table.maybe_vnode_count = Some(16);
+                references += 1;
+            });
+            assert_eq!(references, 1);
+        }
+        let mut owned = vec![];
+        visit_internal_tables(&mut fragment, |table, _| owned.push(table.id.as_raw_id()));
+        owned.sort();
+        assert_eq!(owned, vec![7, 8]);
+    }
 }

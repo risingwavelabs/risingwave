@@ -158,24 +158,24 @@ async fn write_deletes(
     Ok(descriptor(file))
 }
 
-async fn collect_changes(
+async fn collect_updates(
     table: &Table,
     task: FileScanTask,
-    mode: IcebergChangeReadMode,
+    mode: IcebergUpdateReadMode,
     resume: u64,
 ) -> Result<(Vec<(Op, i64, i64)>, Vec<u64>)> {
     let mut reader = PositionDeleteReader::new(table.file_io());
-    collect_changes_with_reader(table, &mut reader, task, mode, resume).await
+    collect_updates_with_reader(table, &mut reader, task, mode, resume).await
 }
 
-async fn collect_changes_with_reader(
+async fn collect_updates_with_reader(
     table: &Table,
     reader: &mut PositionDeleteReader,
     task: FileScanTask,
-    mode: IcebergChangeReadMode,
+    mode: IcebergUpdateReadMode,
     resume: u64,
 ) -> Result<(Vec<(Op, i64, i64)>, Vec<u64>)> {
-    let mut batches = read_file_changes(
+    let mut batches = read_file_updates(
         table.clone(),
         reader,
         task,
@@ -217,7 +217,7 @@ async fn v2_v3_insert_filters_same_commit_deletes_and_reports_empty_progress() -
         task.deletes =
             vec![write_deletes(&table, "partial", &task.data_file_path, [1, 3, 7]).await?];
         let (rows, cursors) =
-            collect_changes(&table, task.clone(), IcebergChangeReadMode::Insert, 0).await?;
+            collect_updates(&table, task.clone(), IcebergUpdateReadMode::Insert, 0).await?;
         assert_eq!(
             rows,
             [0, 2, 4, 5, 6, 8, 9].map(|i| (Op::Insert, i, 100 + i))
@@ -225,7 +225,7 @@ async fn v2_v3_insert_filters_same_commit_deletes_and_reports_empty_progress() -
         assert_eq!(cursors.last(), Some(&10));
         task.deletes = vec![write_deletes(&table, "all", &task.data_file_path, 0..10).await?];
         let (rows, cursors) =
-            collect_changes(&table, task, IcebergChangeReadMode::Insert, 0).await?;
+            collect_updates(&table, task, IcebergUpdateReadMode::Insert, 0).await?;
         assert!(rows.is_empty());
         assert_eq!(cursors.last(), Some(&10));
     }
@@ -241,13 +241,13 @@ async fn v2_v3_retracts_only_new_positions_and_resumes_without_duplicate_rows() 
         let parent = write_deletes(&table, "parent", &task.data_file_path, [1, 3]).await?;
         task.deletes =
             vec![write_deletes(&table, "current", &task.data_file_path, [1, 3, 4, 7, 9]).await?];
-        let mode = IcebergChangeReadMode::Delete {
+        let mode = IcebergUpdateReadMode::Delete {
             parent_deletes: vec![parent],
         };
-        let (rows, cursors) = collect_changes(&table, task.clone(), mode.clone(), 0).await?;
+        let (rows, cursors) = collect_updates(&table, task.clone(), mode.clone(), 0).await?;
         assert_eq!(rows, [4, 7, 9].map(|i| (Op::Delete, i, 100 + i)));
         for cursor in cursors {
-            let (resumed, _) = collect_changes(&table, task.clone(), mode.clone(), cursor).await?;
+            let (resumed, _) = collect_updates(&table, task.clone(), mode.clone(), cursor).await?;
             assert_eq!(
                 resumed,
                 rows.iter()
@@ -257,7 +257,7 @@ async fn v2_v3_retracts_only_new_positions_and_resumes_without_duplicate_rows() 
             );
         }
         task.deletes.clear();
-        assert!(collect_changes(&table, task, mode, 0).await.is_err());
+        assert!(collect_updates(&table, task, mode, 0).await.is_err());
     }
     Ok(())
 }
@@ -269,14 +269,14 @@ async fn v2_v3_compacted_file_preserves_full_logical_before_image() -> Result<()
         let table = table(&temp, version)?;
         let original = write_data(&table, "original").await?;
         let (inserted, _) =
-            collect_changes(&table, original, IcebergChangeReadMode::Insert, 0).await?;
+            collect_updates(&table, original, IcebergUpdateReadMode::Insert, 0).await?;
         let mut compacted = write_data(&table, "compacted").await?;
         compacted.deletes =
             vec![write_deletes(&table, "delete", &compacted.data_file_path, [2, 8]).await?];
-        let (deleted, _) = collect_changes(
+        let (deleted, _) = collect_updates(
             &table,
             compacted,
-            IcebergChangeReadMode::Delete {
+            IcebergUpdateReadMode::Delete {
                 parent_deletes: vec![],
             },
             0,
@@ -303,7 +303,8 @@ async fn strict_descriptors_reject_unsupported_inputs_before_io() -> Result<()> 
     let io = FileIO::new_with_fs();
     let mut reader = PositionDeleteReader::new(&io);
     assert!(
-        read_deleted_positions(&mut reader, "data", 10, &[base.clone(), base.clone()])
+        reader
+            .read_file_scoped("data", 10, &[base.clone(), base.clone()])
             .await
             .is_err()
     );
@@ -331,7 +332,8 @@ async fn strict_descriptors_reject_unsupported_inputs_before_io() -> Result<()> 
             6 => invalid.equality_ids = Some(vec![1]),
             _ => invalid.key_metadata = Some(Box::new([])),
         }
-        let error = read_deleted_positions(&mut reader, "data", 10, &[invalid])
+        let error = reader
+            .read_file_scoped("data", 10, &[invalid])
             .await
             .unwrap_err();
         assert!(error.to_string().contains(message), "{error:#}");
@@ -342,7 +344,8 @@ async fn strict_descriptors_reject_unsupported_inputs_before_io() -> Result<()> 
         invalid.content_offset = Some(offset);
         invalid.content_size_in_bytes = Some(length);
         assert!(
-            read_deleted_positions(&mut reader, "data", 10, &[invalid])
+            reader
+                .read_file_scoped("data", 10, &[invalid])
                 .await
                 .is_err()
         );
@@ -420,9 +423,9 @@ async fn parquet_checks_every_path_position_and_physical_row_count() -> Result<(
         }
         let descriptor = descriptor(file);
         let mut reader = PositionDeleteReader::new(table.file_io());
-        let result =
-            read_deleted_positions(&mut reader, "data", 10, std::slice::from_ref(&descriptor))
-                .await;
+        let result = reader
+            .read_file_scoped("data", 10, std::slice::from_ref(&descriptor))
+            .await;
         if let Some(message) = expected_error {
             assert!(result.unwrap_err().to_string().contains(message));
         } else {
@@ -430,7 +433,8 @@ async fn parquet_checks_every_path_position_and_physical_row_count() -> Result<(
             let mut invalid_count = descriptor;
             invalid_count.record_count = Some(1);
             assert!(
-                read_deleted_positions(&mut reader, "data", 10, &[invalid_count])
+                reader
+                    .read_file_scoped("data", 10, &[invalid_count])
                     .await
                     .is_err()
             );
@@ -470,7 +474,8 @@ async fn puffin_checks_blob_path_cardinality_and_position_bounds() -> Result<()>
             .with_record_count(Some(cardinality.parse()?))
             .build();
         let mut reader = PositionDeleteReader::new(table.file_io());
-        let error = read_deleted_positions(&mut reader, "data", 10, &[delete])
+        let error = reader
+            .read_file_scoped("data", 10, &[delete])
             .await
             .unwrap_err();
         assert!(error.to_string().contains(message), "{error:#}");
@@ -492,7 +497,7 @@ async fn reader_rejects_virtual_metadata_missing_key_and_partial_file_tasks() ->
             _ => invalid.record_count = Some(11),
         }
         assert!(
-            collect_changes(&table, invalid, IcebergChangeReadMode::Insert, 0)
+            collect_updates(&table, invalid, IcebergUpdateReadMode::Insert, 0)
                 .await
                 .is_err()
         );
@@ -538,10 +543,10 @@ async fn puffin_same_file_different_blobs_keep_distinct_delete_sets() -> Result<
         })
         .collect();
     task.deletes = vec![deletes[1].clone()];
-    let (rows, _) = collect_changes(
+    let (rows, _) = collect_updates(
         &table,
         task.clone(),
-        IcebergChangeReadMode::Delete {
+        IcebergUpdateReadMode::Delete {
             parent_deletes: vec![deletes[0].clone()],
         },
         0,
@@ -555,34 +560,33 @@ async fn puffin_same_file_different_blobs_keep_distinct_delete_sets() -> Result<
         (&deletes[0], DeleteVector::from([1])),
     ] {
         assert_eq!(
-            read_deleted_positions(
-                &mut reader,
-                &task.data_file_path,
-                10,
-                std::slice::from_ref(delete)
-            )
-            .await?,
+            reader
+                .read_file_scoped(&task.data_file_path, 10, std::slice::from_ref(delete))
+                .await?,
             expected
         );
     }
     let mut invalid = deletes[0].clone();
     invalid.content_offset = invalid.content_offset.map(|offset| offset + 1);
     assert!(
-        read_deleted_positions(&mut reader, &task.data_file_path, 10, &[invalid])
+        reader
+            .read_file_scoped(&task.data_file_path, 10, &[invalid])
             .await
             .is_err()
     );
     let mut invalid = deletes[0].clone();
     invalid.file_size_in_bytes += 1;
     assert!(
-        read_deleted_positions(&mut reader, &task.data_file_path, 10, &[invalid])
+        reader
+            .read_file_scoped(&task.data_file_path, 10, &[invalid])
             .await
             .is_err()
     );
     let mut invalid = deletes[0].clone();
     invalid.record_count = Some(2);
     assert!(
-        read_deleted_positions(&mut reader, &task.data_file_path, 10, &[invalid])
+        reader
+            .read_file_scoped(&task.data_file_path, 10, &[invalid])
             .await
             .is_err()
     );
@@ -590,7 +594,7 @@ async fn puffin_same_file_different_blobs_keep_distinct_delete_sets() -> Result<
 }
 
 #[tokio::test]
-async fn puffin_cache_survives_change_reader_api_calls() -> Result<()> {
+async fn puffin_cache_survives_update_reader_api_calls() -> Result<()> {
     use std::io::{Seek, SeekFrom, Write};
 
     let temp = tempfile::tempdir()?;
@@ -599,7 +603,9 @@ async fn puffin_cache_survives_change_reader_api_calls() -> Result<()> {
     task.deletes = vec![write_deletes(&table, "delete", &task.data_file_path, [1, 7]).await?];
     let mut reader = PositionDeleteReader::new(table.file_io());
     assert_eq!(
-        read_deleted_positions(&mut reader, &task.data_file_path, 10, &task.deletes).await?,
+        reader
+            .read_file_scoped(&task.data_file_path, 10, &task.deletes)
+            .await?,
         DeleteVector::from([1, 7])
     );
 
@@ -614,20 +620,23 @@ async fn puffin_cache_survives_change_reader_api_calls() -> Result<()> {
     }
     let mut fresh = PositionDeleteReader::new(table.file_io());
     assert!(
-        read_deleted_positions(&mut fresh, &task.data_file_path, 10, &task.deletes)
+        fresh
+            .read_file_scoped(&task.data_file_path, 10, &task.deletes)
             .await
             .is_err()
     );
     assert_eq!(
-        read_deleted_positions(&mut reader, &task.data_file_path, 10, &task.deletes).await?,
+        reader
+            .read_file_scoped(&task.data_file_path, 10, &task.deletes)
+            .await?,
         DeleteVector::from([1, 7])
     );
     for resume in [0, 4] {
-        let (rows, cursors) = collect_changes_with_reader(
+        let (rows, cursors) = collect_updates_with_reader(
             &table,
             &mut reader,
             task.clone(),
-            IcebergChangeReadMode::Delete {
+            IcebergUpdateReadMode::Delete {
                 parent_deletes: vec![],
             },
             resume,
@@ -645,7 +654,8 @@ async fn puffin_cache_survives_change_reader_api_calls() -> Result<()> {
     }
     let mut invalid = task.deletes[0].clone();
     invalid.file_size_in_bytes += 1;
-    let error = read_deleted_positions(&mut reader, &task.data_file_path, 10, &[invalid])
+    let error = reader
+        .read_file_scoped(&task.data_file_path, 10, &[invalid])
         .await
         .unwrap_err();
     assert!(error.to_string().contains("size differs"), "{error:#}");
@@ -662,7 +672,7 @@ async fn v2_v3_insert_resume_keeps_filtering_without_retractions() -> Result<()>
             vec![write_deletes(&table, "delete", &task.data_file_path, [0, 2, 4, 6, 8]).await?];
         for cursor in 0..=10 {
             let (rows, _) =
-                collect_changes(&table, task.clone(), IcebergChangeReadMode::Insert, cursor)
+                collect_updates(&table, task.clone(), IcebergUpdateReadMode::Insert, cursor)
                     .await?;
             let expected: Vec<_> = (cursor as i64..10)
                 .filter(|i| i % 2 == 1)
@@ -702,16 +712,16 @@ async fn v2_v3_preserves_null_keys_and_reordered_projection() -> Result<()> {
         let mut deleted = vec![];
         let mut reader = PositionDeleteReader::new(table.file_io());
         for (task, mode, rows) in [
-            (original, IcebergChangeReadMode::Insert, &mut inserted),
+            (original, IcebergUpdateReadMode::Insert, &mut inserted),
             (
                 compacted,
-                IcebergChangeReadMode::Delete {
+                IcebergUpdateReadMode::Delete {
                     parent_deletes: vec![],
                 },
                 &mut deleted,
             ),
         ] {
-            let mut batches = read_file_changes(
+            let mut batches = read_file_updates(
                 table.clone(),
                 &mut reader,
                 task,

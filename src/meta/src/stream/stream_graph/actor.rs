@@ -18,7 +18,7 @@ use assert_matches::assert_matches;
 use risingwave_common::bail;
 use risingwave_common::hash::{IsSingleton, VnodeCount, VnodeCountCompat};
 use risingwave_common::util::iter_util::ZipEqFast;
-use risingwave_common::util::stream_graph_visitor::visit_tables;
+use risingwave_common::util::stream_graph_visitor::{visit_fragment, visit_tables};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     DispatchStrategy, DispatcherType, MergeNode, StreamNode, StreamScanType,
@@ -469,6 +469,7 @@ impl ActorGraphBuilder {
 
         // Fill the vnode count for each internal table, based on schedule result.
         let mut fragment_graph = fragment_graph;
+        let mut fetch_tables = HashMap::new();
         for (id, fragment) in fragment_graph.building_fragments_mut() {
             let mut error = None;
             let fragment_vnode_count = distributions[id].vnode_count();
@@ -508,6 +509,48 @@ impl ActorGraphBuilder {
             });
             if let Some(error) = error {
                 bail!(error);
+            }
+            visit_fragment(fragment, |body| {
+                if let NodeBody::StreamFsFetch(node) = body
+                    && let Some(table) = node
+                        .node_inner
+                        .as_ref()
+                        .and_then(|source| source.state_table.as_ref())
+                {
+                    fetch_tables.insert(table.id, table.clone());
+                }
+            });
+        }
+        for fragment in fragment_graph.building_fragments_mut().values_mut() {
+            let mut invalid = None;
+            risingwave_common::util::stream_graph_visitor::visit_iceberg_completion_tables(
+                fragment,
+                |table| {
+                    if let Some(fetch) = fetch_tables.get(&table.table_id) {
+                        if table.pk != fetch.pk
+                            || table.value_indices != vec![0, 1]
+                            || table.dist_key_in_pk_indices != vec![0]
+                            || fetch.value_indices != vec![0, 1]
+                            || fetch.distribution_key != vec![0]
+                            || table.columns
+                                != fetch
+                                    .columns
+                                    .iter()
+                                    .filter_map(|column| column.column_desc.clone())
+                                    .collect::<Vec<_>>()
+                        {
+                            invalid = Some(table.table_id);
+                        }
+                        table.maybe_vnode_count = fetch.maybe_vnode_count;
+                    } else {
+                        invalid = Some(table.table_id);
+                    }
+                },
+            );
+            if let Some(id) = invalid {
+                bail!(
+                    "Iceberg completion table {id} must match a Fetch state table in this ingestion graph"
+                );
             }
         }
 
