@@ -12,6 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::sync::Arc;
+
 use itertools::Itertools;
 use risingwave_common::array::Op;
 use risingwave_common::row;
@@ -25,8 +27,9 @@ use risingwave_expr::expr_context::TIME_ZONE;
 use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
+use crate::executor::monitor::StreamingMetrics;
 use crate::executor::prelude::*;
-use crate::task::ActorEvalErrorReport;
+use crate::task::{ActorEvalErrorReport, FragmentId};
 
 pub struct NowExecutor<S: StateStore> {
     data_types: Vec<DataType>,
@@ -42,6 +45,10 @@ pub struct NowExecutor<S: StateStore> {
     progress_ratio: Option<f32>,
 
     barrier_interval_ms: u32,
+
+    /// Metrics for observing the streaming `NOW()` clock and its drift from wall time.
+    metrics: Arc<StreamingMetrics>,
+    fragment_id: FragmentId,
 }
 
 pub enum NowMode {
@@ -64,6 +71,7 @@ enum ModeVars {
 }
 
 impl<S: StateStore> NowExecutor<S> {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         data_types: Vec<DataType>,
         mode: NowMode,
@@ -72,6 +80,8 @@ impl<S: StateStore> NowExecutor<S> {
         state_table: StateTable<S>,
         progress_ratio: Option<f32>,
         barrier_interval_ms: u32,
+        streaming_metrics: Arc<StreamingMetrics>,
+        fragment_id: FragmentId,
     ) -> Self {
         Self {
             data_types,
@@ -81,6 +91,8 @@ impl<S: StateStore> NowExecutor<S> {
             state_table,
             progress_ratio,
             barrier_interval_ms,
+            metrics: streaming_metrics,
+            fragment_id,
         }
     }
 
@@ -94,7 +106,11 @@ impl<S: StateStore> NowExecutor<S> {
             mut state_table,
             progress_ratio,
             barrier_interval_ms,
+            metrics,
+            fragment_id,
         } = self;
+
+        let mut executor_metrics = None;
 
         info!(
             "NowExecutor started. progress_ratio: {:?}, barrier_interval_ms: {:?}",
@@ -132,6 +148,9 @@ impl<S: StateStore> NowExecutor<S> {
             UnboundedReceiverStream::new(barrier_receiver).ready_chunks(MAX_MERGE_BARRIER_SIZE)
         {
             let mut curr_timestamp_datum: Datum = None;
+            // Wall-clock reference derived from the most recently processed barrier's epoch.
+            // Used to observe how far the streaming NOW() lags real time.
+            let mut last_barrier_wall_ms: Option<i64> = None;
             if barriers.len() > 1 {
                 warn!(
                     "handle multiple barriers at once in now executor: {}",
@@ -141,6 +160,7 @@ impl<S: StateStore> NowExecutor<S> {
             for barrier in barriers {
                 let curr_epoch = barrier.get_curr_epoch();
                 let new_timestamp = curr_epoch.as_timestamptz();
+                last_barrier_wall_ms = Some(new_timestamp.timestamp_millis());
                 let pause_mutation =
                     barrier
                         .mutation
@@ -292,10 +312,36 @@ impl<S: StateStore> NowExecutor<S> {
                 _ => unreachable!(),
             }
 
+            let curr_timestamp_datum = curr_timestamp_datum.unwrap();
+
+            if let Some(wall_ms) = last_barrier_wall_ms
+                && let ScalarImpl::Timestamptz(ts) = &curr_timestamp_datum
+            {
+                let streaming_now_ms = ts.timestamp_millis();
+                let (streaming_clock_ms, wall_clock_drift_ms) = executor_metrics
+                    .get_or_insert_with(|| {
+                        // A NOW fragment has only one actor, and recovery starts its replacement
+                        // only after the old actor stops. Therefore, on this node, fragment_id
+                        // uniquely identifies the gauge writer. If multiple actors wrote with the
+                        // same fragment_id concurrently, the last gauge update would win.
+                        let label = fragment_id.to_string();
+                        (
+                            metrics
+                                .now_streaming_clock_ms
+                                .with_guarded_label_values(&[&label]),
+                            metrics
+                                .now_wall_clock_drift_ms
+                                .with_guarded_label_values(&[&label]),
+                        )
+                    });
+                streaming_clock_ms.set(streaming_now_ms);
+                wall_clock_drift_ms.set(wall_ms.saturating_sub(streaming_now_ms));
+            }
+
             yield Message::Watermark(Watermark::new(
                 0,
                 DataType::Timestamptz,
-                curr_timestamp_datum.unwrap(),
+                curr_timestamp_datum,
             ));
         }
     }
@@ -934,11 +980,11 @@ mod tests {
         MemoryStateStore::new()
     }
 
-    async fn create_executor_with_progress_ratio(
+    async fn build_executor(
         mode: NowMode,
         state_store: &MemoryStateStore,
         progress_ratio: Option<f32>,
-    ) -> (UnboundedSender<Barrier>, BoxedMessageStream) {
+    ) -> (UnboundedSender<Barrier>, NowExecutor<MemoryStateStore>) {
         let table_id = TableId::new(1);
         let column_descs = vec![ColumnDesc::unnamed(ColumnId::new(0), DataType::Timestamptz)];
         let state_table = StateTable::from_table_catalog(
@@ -963,8 +1009,19 @@ mod tests {
             state_table,
             progress_ratio,
             barrier_interval_ms,
+            Arc::new(StreamingMetrics::unused()),
+            0.into(),
         );
-        (sender, now_executor.boxed().execute())
+        (sender, now_executor)
+    }
+
+    async fn create_executor_with_progress_ratio(
+        mode: NowMode,
+        state_store: &MemoryStateStore,
+        progress_ratio: Option<f32>,
+    ) -> (UnboundedSender<Barrier>, BoxedMessageStream) {
+        let (sender, executor) = build_executor(mode, state_store, progress_ratio).await;
+        (sender, executor.boxed().execute())
     }
 
     async fn create_executor(
