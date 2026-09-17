@@ -192,6 +192,9 @@ impl ExecutorBuilder for SourceExecutorBuilder {
                 if source.iceberg_fetch_state_table.is_some() && !is_iceberg_update {
                     bail!("Iceberg update List requires a retracting Iceberg graph");
                 }
+                if source.with_properties.is_iceberg_update_source() != is_iceberg_update {
+                    bail!("Iceberg streaming_updates requires a retracting, non-refresh graph");
+                }
                 if is_iceberg_update {
                     crate::executor::source::validate_update_state_table(
                         source.get_state_table()?,

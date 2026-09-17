@@ -16,7 +16,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::rc::Rc;
 use std::sync::LazyLock;
 
-use anyhow::{Context, anyhow};
+use anyhow::Context;
 use either::Either;
 use external_schema::debezium::extract_debezium_avro_table_pk_columns;
 use external_schema::nexmark::check_nexmark_schema;
@@ -517,6 +517,14 @@ pub(crate) async fn bind_source_pk(
     sql_defined_pk_names: Vec<String>,
     with_properties: &WithOptionsSecResolved,
 ) -> Result<Vec<String>> {
+    if with_properties.is_iceberg_update_source() {
+        if !sql_defined_pk_names.is_empty() {
+            return Err(InvalidInputSyntax("Iceberg update source keys are inferred from the writer contract; do not specify PRIMARY KEY".to_owned()).into());
+        }
+        return external_schema::iceberg::extract_iceberg_key(with_properties, columns)
+            .await
+            .map_err(|error| ProtocolError(error.to_report_string()).into());
+    }
     let sql_defined_pk = !sql_defined_pk_names.is_empty();
     let include_key_column_name: Option<String> = {
         // iter columns to check if contains additional columns from key part
@@ -901,6 +909,20 @@ pub async fn bind_create_source_or_table_with_connector(
         session.get_database_and_schema_id_for_create(schema_name.clone())?;
 
     let is_create_source = create_source_type != CreateSourceType::Table;
+    if with_properties.is_iceberg_update_source()
+        && (create_source_type != CreateSourceType::NonShared
+            || matches!(
+                refresh_mode.refresh_mode,
+                Some(risingwave_pb::plan_common::source_refresh_mode::RefreshMode::FullReload(_))
+            )
+            || source_rate_limit.is_some()
+            || !include_column_options.is_empty()
+            || !source_watermarks.is_empty())
+    {
+        return Err(InvalidInputSyntax(
+            "Iceberg streaming_updates requires a non-shared CREATE SOURCE without refresh, INCLUDE columns, watermarks, or rate limiting".to_owned()
+        ).into());
+    }
 
     if is_create_source {
         // reject refreshable batch source
@@ -936,7 +958,10 @@ pub async fn bind_create_source_or_table_with_connector(
     let sql_pk_names = bind_sql_pk_names(sql_columns_defs, bind_table_constraints(&constraints)?)?;
 
     if with_properties.is_iceberg_connector() {
-        if is_create_source && !sql_pk_names.is_empty() {
+        if is_create_source
+            && !with_properties.is_iceberg_update_source()
+            && !sql_pk_names.is_empty()
+        {
             return Err(ErrorCode::NotSupported(
                 "PRIMARY KEY is not supported for Iceberg CREATE SOURCE in continuous ingestion mode."
                     .to_owned(),
@@ -1154,6 +1179,7 @@ HINT: use `CREATE TABLE <name> WITH (...)` instead of `CREATE TABLE <name> (<col
         rate_limit: source_rate_limit,
         refresh_mode: Some(refresh_mode),
     };
+    source.validate_iceberg_update_source()?;
     Ok(source)
 }
 
@@ -1294,6 +1320,10 @@ pub(super) fn generate_stream_graph_for_source(
     let graph = build_graph(stream_plan, Some(GraphJobType::Source))?;
     Ok(graph)
 }
+
+#[cfg(all(test, not(madsim)))]
+#[path = "create_source/iceberg_update_test.rs"]
+mod iceberg_update_tests;
 
 #[cfg(test)]
 pub mod tests {

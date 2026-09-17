@@ -142,9 +142,18 @@ impl FallibleRule<Logical> for IcebergIntermediateScanRule {
                 }
             }
 
+            // Batch V2 delete anti-joins still need physical positions internally. Do not put
+            // these columns in the update source catalog: the binder must never expose them.
+            // The final projection below removes them before returning the query's rows.
+            let internal_metadata = if catalog.is_iceberg_update_source() {
+                ColumnCatalog::iceberg_hidden_cols().to_vec()
+            } else {
+                vec![]
+            };
             let column_catalog_map: HashMap<&str, &ColumnCatalog> = catalog
                 .columns
                 .iter()
+                .chain(&internal_metadata)
                 .map(|c| (c.column_desc.name.as_str(), c))
                 .collect();
             if !equality_delete_files.is_empty() {

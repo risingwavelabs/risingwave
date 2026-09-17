@@ -353,6 +353,7 @@ pub struct IcebergUpdateFetchExecutor<S: StateStore> {
     upstream: Executor,
     chunk_size: usize,
     output_columns: Vec<ColumnCatalog>,
+    key_indices: Vec<usize>,
     #[cfg(test)]
     table: Option<tokio::sync::watch::Receiver<iceberg::table::Table>>,
 }
@@ -364,6 +365,7 @@ impl<S: StateStore> IcebergUpdateFetchExecutor<S> {
         upstream: Executor,
         chunk_size: usize,
         output_columns: Vec<ColumnCatalog>,
+        key_indices: Vec<usize>,
     ) -> Self {
         Self {
             actor,
@@ -371,6 +373,7 @@ impl<S: StateStore> IcebergUpdateFetchExecutor<S> {
             upstream,
             chunk_size,
             output_columns,
+            key_indices,
             #[cfg(test)]
             table: None,
         }
@@ -406,6 +409,7 @@ impl<S: StateStore> IcebergUpdateFetchExecutor<S> {
             job_id.as_raw_id(),
             limits.page_size,
             &self.output_columns,
+            &self.key_indices,
         )
         .await?;
         let mut busy = !tasks.is_empty();
@@ -428,6 +432,7 @@ impl<S: StateStore> IcebergUpdateFetchExecutor<S> {
                             job_id.as_raw_id(),
                             limits.page_size,
                             &self.output_columns,
+                            &self.key_indices,
                         )
                         .await?;
                         busy = !tasks.is_empty();
@@ -449,7 +454,9 @@ impl<S: StateStore> IcebergUpdateFetchExecutor<S> {
                             assignment.job_id == job_id.as_raw_id() && assignment.key()? == key,
                             "Iceberg assignment belongs to another job/generation"
                         );
-                        assignment.task.validate_columns(&self.output_columns)?;
+                        assignment
+                            .task
+                            .validate_key(&self.output_columns, &self.key_indices)?;
                         match (op, state_table.get(key).await?) {
                             (Op::Insert, None) => {
                                 state_table
@@ -512,6 +519,7 @@ async fn pending_tasks<S: StateStore>(
     job_id: u32,
     limit: usize,
     columns: &[ColumnCatalog],
+    key_indices: &[usize],
 ) -> StreamExecutorResult<Vec<IcebergUpdateFetchState>> {
     let table = state.state_table();
     let mut tasks = vec![];
@@ -530,7 +538,7 @@ async fn pending_tasks<S: StateStore>(
                 task.assignment.job_id == job_id,
                 "Iceberg task belongs to another ingestion job"
             );
-            task.assignment.task.validate_columns(columns)?;
+            task.assignment.task.validate_key(columns, key_indices)?;
             if !task.finished {
                 tasks.push(task);
             }

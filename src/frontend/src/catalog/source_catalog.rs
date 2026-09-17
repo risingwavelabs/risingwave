@@ -112,6 +112,47 @@ impl SourceCatalog {
         self.with_properties.is_iceberg_connector()
     }
 
+    pub fn is_iceberg_update_source(&self) -> bool {
+        self.with_properties.is_iceberg_update_source()
+    }
+
+    /// Also checked when binding a restored catalog, not just during CREATE SOURCE.
+    pub fn validate_iceberg_update_source(&self) -> Result<()> {
+        if !self.is_iceberg_update_source() {
+            return Ok(());
+        }
+        let stored_columns = self.columns.iter().all(|column| {
+            !column.is_iceberg_hidden_column()
+                && !column.is_generated()
+                && !column.is_connector_additional_column()
+        });
+        let has_key = !self.pk_col_ids.is_empty()
+            && self
+                .pk_col_ids
+                .iter()
+                .all(|id| self.columns.iter().any(|column| column.column_id() == *id));
+        let refresh = self.refresh_mode.as_ref().is_some_and(|mode| {
+            matches!(
+                mode.refresh_mode,
+                Some(risingwave_pb::plan_common::source_refresh_mode::RefreshMode::FullReload(_))
+            )
+        });
+        if !stored_columns
+            || !has_key
+            || self.append_only
+            || self.row_id_index.is_some()
+            || self.info.is_shared()
+            || refresh
+            || self.rate_limit.is_some()
+            || self.associated_table_id.is_some()
+        {
+            return Err(crate::error::ErrorCode::BindError(
+                "invalid Iceberg update source catalog: requires stored logical columns and the complete writer key, without generated row IDs, shared ingestion, refresh, or rate limiting".to_owned()
+            ).into());
+        }
+        Ok(())
+    }
+
     /// If this source is an iceberg source, returns the corresponding iceberg table name.
     pub fn iceberg_table_name(&self) -> Option<String> {
         if self.name.starts_with(ICEBERG_SOURCE_PREFIX) {
@@ -132,9 +173,9 @@ impl SourceCatalog {
     ///
     /// Returns error if it's invalid.
     pub fn create_sql_ast_purified(&self) -> Result<ast::Statement> {
-        if self.with_properties.is_cdc_connector() {
-            // For CDC sources, we should not purify the SQL definition to add column definitions
-            // or constraints.
+        if self.with_properties.is_cdc_connector() || self.is_iceberg_update_source() {
+            // These sources infer their schema/key. Adding SQL columns or constraints would
+            // produce a definition that their CREATE path rejects.
             return self.create_sql_ast();
         }
 

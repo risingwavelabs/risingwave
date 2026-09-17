@@ -271,6 +271,20 @@ impl IcebergUpdateTask {
         self.binding.validate_columns(columns)
     }
 
+    pub fn validate_key(&self, columns: &[ColumnCatalog], key_indices: &[usize]) -> Result<()> {
+        self.validate_columns(columns)?;
+        ensure!(
+            key_indices
+                .iter()
+                .map(|index| self.binding.project_field_ids.get(*index).copied())
+                .collect::<Option<Vec<_>>>()
+                .as_deref()
+                == Some(self.binding.contract.key_field_ids()),
+            "Iceberg writer key differs from the planned source key"
+        );
+        Ok(())
+    }
+
     pub fn record_count(&self) -> u64 {
         self.file.record_count
     }

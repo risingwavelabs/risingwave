@@ -59,9 +59,14 @@ use crate::source::{
     SplitEnumerator, SplitId, SplitMetaData, SplitReader, UnknownFields,
 };
 pub const ICEBERG_CONNECTOR: &str = "iceberg";
+pub const STREAMING_UPDATES_KEY: &str = "streaming_updates";
 
 #[derive(Clone, Debug, Deserialize, with_options::WithOptions)]
 pub struct IcebergProperties {
+    /// Opt in to Insert/Delete ingestion of a versioned RisingWave PK-index writer contract.
+    #[serde(default, deserialize_with = "crate::deserialize_bool_from_string")]
+    pub streaming_updates: bool,
+
     #[serde(flatten)]
     pub common: IcebergCommon,
 

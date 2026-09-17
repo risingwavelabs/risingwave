@@ -111,6 +111,7 @@ impl LogicalSource {
         ctx: OptimizerContextRef,
         as_of: Option<AsOf>,
     ) -> Result<Self> {
+        source_catalog.validate_iceberg_update_source()?;
         let column_catalogs = source_catalog.columns.clone();
         let row_id_index = source_catalog.row_id_index;
         if !source_catalog.append_only {
@@ -182,6 +183,9 @@ impl LogicalSource {
     }
 
     fn create_non_shared_source_plan(core: generic::Source) -> Result<StreamPlanRef> {
+        if core.is_iceberg_update_source() && core.as_of.is_some() {
+            bail!("Iceberg streaming_updates does not support time travel in streaming queries");
+        }
         let mut plan;
         if core.is_new_fs_connector() {
             // Streaming file sources list objects repeatedly and need a persistent
@@ -209,17 +213,33 @@ impl LogicalSource {
 
     /// `StreamSource` (list) -> shuffle -> (optional) `StreamDedup`
     fn create_list_plan(core: generic::Source, dedup: bool) -> Result<StreamPlanRef> {
+        let updates = core.is_iceberg_update_source();
         let downstream_columns = core.column_catalog.clone();
         let logical_source = generic::Source::file_list_node(core);
-        let mut list_plan: StreamPlanRef = StreamSource {
-            base: PlanBase::new_stream_with_core(
-                &logical_source,
+        let base = if updates {
+            PlanBase::new_stream(
+                logical_source.ctx.clone(),
+                super::generic::GenericPlanNode::schema(&logical_source),
+                Some(vec![0]),
+                crate::optimizer::property::FunctionalDependencySet::with_key(2, &[0]),
                 Distribution::Single,
-                StreamKind::AppendOnly, // `list` will keep listing all objects, it must be append-only
+                StreamKind::Retract,
                 false,
                 WatermarkColumns::new(),
                 MonotonicityMap::new(),
-            ),
+            )
+        } else {
+            PlanBase::new_stream_with_core(
+                &logical_source,
+                Distribution::Single,
+                StreamKind::AppendOnly,
+                false,
+                WatermarkColumns::new(),
+                MonotonicityMap::new(),
+            )
+        };
+        let mut list_plan: StreamPlanRef = StreamSource {
+            base,
             core: logical_source,
             downstream_columns: Some(downstream_columns),
         }
@@ -378,7 +398,10 @@ impl Distill for LogicalSource {
 impl ColPrunable for LogicalSource {
     fn prune_col(&self, required_cols: &[usize], _ctx: &mut ColumnPruningContext) -> PlanRef {
         // For refreshable iceberg table, we do not expose iceberg hidden columns to the user.
-        if self.core.is_iceberg_connector() && !Self::is_full_reload_refresh(&self.core) {
+        if self.core.is_iceberg_connector()
+            && !self.core.is_iceberg_update_source()
+            && !Self::is_full_reload_refresh(&self.core)
+        {
             self.prune_col_for_iceberg_source(required_cols)
         } else {
             // For other sources, use a LogicalProject to prune columns

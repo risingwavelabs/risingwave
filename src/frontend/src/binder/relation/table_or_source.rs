@@ -564,6 +564,7 @@ impl Binder {
         as_of: Option<&AsOf>,
         is_temporary: bool,
     ) -> Result<(Relation, Vec<(bool, Field)>)> {
+        source_catalog.validate_iceberg_update_source()?;
         debug_assert_column_ids_distinct(&source_catalog.columns);
         if !is_temporary {
             self.check_privilege(

@@ -82,6 +82,14 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
             && !is_full_reload_refresh
             && params.info.stream_kind
                 == risingwave_pb::stream_plan::stream_node::StreamKind::Retract;
+        if let ConnectorProperties::Iceberg(properties) = &properties
+            && properties.streaming_updates != is_iceberg_update
+        {
+            return Err(anyhow::anyhow!(
+                "Iceberg streaming_updates requires a retracting, non-refresh graph"
+            )
+            .into());
+        }
         if is_iceberg_update {
             crate::executor::source::validate_update_state_table(source.get_state_table()?, false)?;
         }
@@ -166,6 +174,7 @@ impl ExecutorBuilder for FsFetchExecutorBuilder {
                         upstream,
                         params.config.developer.chunk_size,
                         output_columns,
+                        params.info.stream_key.clone(),
                     )
                     .boxed()
                 } else if is_full_reload_refresh {

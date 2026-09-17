@@ -212,7 +212,7 @@ async fn rescaled_fetch_owners_restore_only_their_vnode_cursors() -> anyhow::Res
         owner
             .init_epoch(EpochPair::new_test_epoch(test_epoch(2)))
             .await?;
-        let tasks = pending_tasks(&owner, 42, 32, &output_columns()).await?;
+        let tasks = pending_tasks(&owner, 42, 32, &output_columns(), &[0]).await?;
         if owns_task {
             assert_eq!(tasks, vec![progress.clone()]);
         } else {
@@ -325,12 +325,22 @@ async fn task_cursor_and_gc_recover_at_the_same_epoch_as_list_state() -> anyhow:
     let mut fetch =
         SourceStateTableHandler::from_table_catalog(&fetch_catalog, store.clone()).await;
     fetch.init_epoch(epoch(2)).await?;
-    let restored = pending_tasks(&fetch, 42, 32, &output_columns()).await?;
+    let restored = pending_tasks(&fetch, 42, 32, &output_columns(), &[0]).await?;
     assert_eq!(restored.len(), 1);
     assert_eq!(restored[0].next_position, 4);
-    assert!(pending_tasks(&fetch, 42, 32, &[]).await.is_err());
+    assert!(pending_tasks(&fetch, 42, 32, &[], &[0]).await.is_err());
     assert!(
-        pending_tasks(&fetch, 99, 32, &output_columns())
+        pending_tasks(&fetch, 42, 32, &output_columns(), &[])
+            .await
+            .is_err()
+    );
+    assert!(
+        pending_tasks(&fetch, 42, 32, &output_columns(), &[1])
+            .await
+            .is_err()
+    );
+    assert!(
+        pending_tasks(&fetch, 99, 32, &output_columns(), &[0])
             .await
             .is_err()
     );
@@ -339,7 +349,7 @@ async fn task_cursor_and_gc_recover_at_the_same_epoch_as_list_state() -> anyhow:
     fetch.commit(epoch(3)).await?;
     listing.commit(epoch(3)).await?;
     assert!(
-        pending_tasks(&fetch, 42, 32, &output_columns())
+        pending_tasks(&fetch, 42, 32, &output_columns(), &[0])
             .await?
             .is_empty()
     );
@@ -542,6 +552,7 @@ async fn test_core<S: StateStore>(
             [
                 ("connector".to_owned(), "iceberg".to_owned()),
                 ("table.name".to_owned(), "unused".to_owned()),
+                ("streaming_updates".to_owned(), "true".to_owned()),
             ]
             .into(),
         ),
@@ -596,6 +607,7 @@ async fn pipeline(
         upstream,
         1,
         output_columns(),
+        vec![0],
     );
     fetch.table = Some(table_rx);
     Ok((tx, fetch.boxed().execute()))

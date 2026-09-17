@@ -78,6 +78,9 @@ pub async fn handle_alter_streaming_rate_limit(
             let (source, schema_name) =
                 reader.get_source_by_name(db_name, schema_path, &real_table_name)?;
             session.check_privilege_for_drop_alter(schema_name, &**source)?;
+            if source.is_iceberg_update_source() {
+                bail!("Iceberg streaming_updates does not support rate limiting");
+            }
             (StatementType::ALTER_SOURCE, source.id.as_raw_id())
         }
         (PbThrottleTarget::Table, PbThrottleType::Dml) => {

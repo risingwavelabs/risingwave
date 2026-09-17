@@ -63,7 +63,7 @@ impl StreamSource {
     }
 
     fn infer_internal_table_catalog(&self) -> TableCatalog {
-        if !self.core.is_iceberg_connector() {
+        if !self.core.is_iceberg_connector() || self.core.is_iceberg_update_source() {
             generic::Source::infer_internal_table_catalog(false)
         } else {
             // iceberg list node (singleton) stores last_snapshot (just 1 row, no pk)

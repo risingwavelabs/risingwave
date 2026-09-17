@@ -192,6 +192,130 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_iceberg_update_fragment_throttle_is_not_persisted() -> MetaResult<()> {
+        use risingwave_pb::common::ThrottleType;
+        use risingwave_pb::stream_plan::{
+            SourceNode, StreamFsFetch, StreamFsFetchNode, StreamSource,
+        };
+
+        let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
+        let inner = mgr.inner.write().await;
+        let txn = inner.db.begin().await?;
+        let (job_id, _, _) = insert_test_streaming_job(&txn, "iceberg_updates", true, None).await?;
+        let fragment_id = FragmentId::new(100);
+        insert_test_fragment(&txn, fragment_id, job_id, TableIdArray::default()).await?;
+        txn.commit().await?;
+        drop(inner);
+
+        let properties = std::collections::BTreeMap::from([
+            ("connector".to_owned(), "iceberg".to_owned()),
+            ("streaming_updates".to_owned(), "true".to_owned()),
+        ]);
+        let legacy_source = PbStreamNode {
+            node_body: Some(PbNodeBody::Source(Box::new(SourceNode {
+                source_inner: Some(StreamSource::default()),
+            }))),
+            ..Default::default()
+        };
+        for body in [
+            PbNodeBody::Source(Box::new(SourceNode {
+                source_inner: Some(StreamSource {
+                    with_properties: properties.clone(),
+                    ..Default::default()
+                }),
+            })),
+            PbNodeBody::StreamFsFetch(Box::new(StreamFsFetchNode {
+                node_inner: Some(StreamFsFetch {
+                    with_properties: properties.clone(),
+                    ..Default::default()
+                }),
+            })),
+        ] {
+            // Ordinary nodes before and after the update node must not mask rejection.
+            let original = PbStreamNode {
+                node_body: Some(PbNodeBody::Union(Default::default())),
+                input: vec![
+                    legacy_source.clone(),
+                    PbStreamNode {
+                        node_body: Some(body),
+                        ..Default::default()
+                    },
+                    legacy_source.clone(),
+                ],
+                ..Default::default()
+            };
+            fragment::ActiveModel {
+                fragment_id: Set(fragment_id),
+                stream_node: Set(StreamNode::from(&original)),
+                ..Default::default()
+            }
+            .update(&mgr.inner.read().await.db)
+            .await?;
+            for rate_limit in [None, Some(0), Some(100)] {
+                let error = mgr
+                    .update_fragment_rate_limit_by_fragment_id(
+                        fragment_id,
+                        ThrottleType::Source,
+                        rate_limit,
+                    )
+                    .await
+                    .expect_err("update sources cannot be throttled");
+                assert!(error.to_string().contains("streaming_updates"));
+                let persisted = risingwave_meta_model::prelude::Fragment::find_by_id(fragment_id)
+                    .one(&mgr.inner.read().await.db)
+                    .await?
+                    .unwrap();
+                assert_eq!(persisted.stream_node.to_protobuf(), original);
+            }
+        }
+        fragment::ActiveModel {
+            fragment_id: Set(fragment_id),
+            stream_node: Set(StreamNode::from(&legacy_source)),
+            ..Default::default()
+        }
+        .update(&mgr.inner.read().await.db)
+        .await?;
+        let updated = mgr
+            .update_fragment_rate_limit_by_fragment_id(fragment_id, ThrottleType::Source, Some(100))
+            .await?;
+        let Some(PbNodeBody::Source(source)) = updated.node_body else {
+            unreachable!()
+        };
+        assert_eq!(source.source_inner.unwrap().rate_limit, Some(100));
+
+        // The source-ID API must also roll back its catalog update on rejection.
+        mgr.create_source(
+            PbSource {
+                schema_id: TEST_SCHEMA_ID,
+                database_id: TEST_DATABASE_ID,
+                name: "iceberg_update_source".to_owned(),
+                owner: TEST_OWNER_ID as _,
+                with_properties: properties,
+                info: Some(StreamSourceInfo::default()),
+                ..Default::default()
+            },
+            None,
+        )
+        .await?;
+        let source = Source::find()
+            .filter(source::Column::Name.eq("iceberg_update_source"))
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+        let error = mgr
+            .update_source_rate_limit_by_source_id(source.source_id, Some(100))
+            .await
+            .expect_err("source-ID throttling must also fail");
+        assert!(error.to_string().contains("streaming_updates"));
+        let persisted = Source::find_by_id(source.source_id)
+            .one(&mgr.inner.read().await.db)
+            .await?
+            .unwrap();
+        assert_eq!(persisted, source);
+        Ok(())
+    }
+
+    #[tokio::test]
     async fn test_cancel_creating_job_includes_belonging_streaming_jobs() -> MetaResult<()> {
         let mgr = CatalogController::new(MetaSrvEnv::for_test().await).await?;
         let mut inner = mgr.inner.write().await;

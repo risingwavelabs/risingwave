@@ -33,6 +33,53 @@ pub struct MockCatalog;
 impl MockCatalog {
     const RANGE_TABLE: &'static str = "range_table";
     const SPARSE_TABLE: &'static str = "sparse_table";
+
+    fn updates_table(name: &str, version: iceberg::spec::FormatVersion) -> Table {
+        let schema = Schema::builder()
+            .with_fields(vec![
+                NestedField::optional(10, "id", Type::Primitive(PrimitiveType::Int)).into(),
+                NestedField::optional(20, "value", Type::Primitive(PrimitiveType::Long)).into(),
+                NestedField::optional(30, "_row_id", Type::Primitive(PrimitiveType::Long)).into(),
+            ])
+            .build()
+            .unwrap();
+        let metadata = TableMetadataBuilder::new(
+            schema,
+            UnboundPartitionSpec::builder().build(),
+            iceberg::spec::SortOrder::unsorted_order(),
+            "memory://updates".to_owned(),
+            version,
+            HashMap::new(),
+        )
+        .unwrap()
+        .build()
+        .unwrap()
+        .metadata;
+        // Table creation assigns the final field IDs. Publish the actual key against those IDs.
+        let properties = super::source_contract::IcebergSourceContract::from_key_indices(
+            metadata.current_schema(),
+            &[2, 0],
+        )
+        .unwrap()
+        .to_properties();
+        let metadata = metadata
+            .into_builder(None)
+            .set_properties(properties)
+            .unwrap()
+            .build()
+            .unwrap()
+            .metadata;
+        Table::builder()
+            .identifier(TableIdent::new(
+                NamespaceIdent::new("mock_namespace".to_owned()),
+                name.to_owned(),
+            ))
+            .file_io(FileIO::new_with_memory())
+            .runtime(Runtime::try_current().unwrap())
+            .metadata(metadata)
+            .build()
+            .unwrap()
+    }
 }
 
 impl MockCatalog {
@@ -218,6 +265,14 @@ impl CatalogV2 for MockCatalog {
     /// Load table from the catalog.
     async fn load_table(&self, table: &TableIdent) -> iceberg::Result<Table> {
         match table.name.as_ref() {
+            "updates_v2" => Ok(Self::updates_table(
+                table.name(),
+                iceberg::spec::FormatVersion::V2,
+            )),
+            "updates_v3" => Ok(Self::updates_table(
+                table.name(),
+                iceberg::spec::FormatVersion::V3,
+            )),
             Self::SPARSE_TABLE => Ok(Self::sparse_table()),
             Self::RANGE_TABLE => Ok(Self::range_table()),
             _ => unimplemented!("table {} not found", table.name()),
@@ -236,6 +291,7 @@ impl CatalogV2 for MockCatalog {
     /// Check if a table exists in the catalog.
     async fn table_exists(&self, table: &TableIdent) -> iceberg::Result<bool> {
         match table.name.as_ref() {
+            "updates_v2" | "updates_v3" => Ok(true),
             Self::SPARSE_TABLE => Ok(true),
             Self::RANGE_TABLE => Ok(true),
             _ => Ok(false),
