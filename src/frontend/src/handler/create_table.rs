@@ -2251,9 +2251,11 @@ mod tests {
             Some("false")
         );
         assert!(table_source.with_properties.as_secret().is_empty());
+        // The descriptor carries the resolved connect properties so that meta can validate it
+        // against the upstream table; meta clears them before persisting the catalog, which is
+        // covered by `test_create_cdc_table_source_dependency`.
         let external_table = table_source.info.external_table.as_ref().unwrap();
-        assert!(external_table.connect_properties.is_empty());
-        assert!(external_table.secret_refs.is_empty());
+        assert!(!external_table.connect_properties.is_empty());
 
         let err = frontend
             .run_sql_with_session(

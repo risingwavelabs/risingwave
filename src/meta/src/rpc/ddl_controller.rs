@@ -57,7 +57,7 @@ use risingwave_pb::ddl_service::{
     alter_swap_rename_request, streaming_job_resource_type,
 };
 use risingwave_pb::meta::table_fragments::fragment::FragmentDistributionType as PbFragmentDistributionType;
-use risingwave_pb::plan_common::PbColumnCatalog;
+use risingwave_pb::plan_common::{PbColumnCatalog, PbExternalTableDesc};
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::{
     PbDispatchOutputMapping, PbStreamFragmentGraph, PbStreamNode, PbUpstreamSinkInfo,
@@ -688,12 +688,16 @@ impl DdlController {
         source: Source,
         iceberg_table_id: Option<TableId>,
     ) -> MetaResult<NotificationVersion> {
-        if source
+        if let Some(cdc_table_desc) = source
             .info
             .as_ref()
-            .is_some_and(|info| info.external_table.is_some())
+            .and_then(|info| info.external_table.as_ref())
         {
             assert!(iceberg_table_id.is_none());
+            // A CDC table source has no streaming job, so validate the declared schema against
+            // the upstream table here, the same way `CREATE TABLE ... FROM <cdc source>` does
+            // while creating its job.
+            self.validate_cdc_table_desc(cdc_table_desc).await?;
             let (_, version) = self
                 .metadata_manager
                 .catalog_controller
@@ -1077,24 +1081,34 @@ impl DdlController {
         if let Some(NodeBody::StreamCdcScan(stream_cdc_scan)) = node_body
             && let Some(ref cdc_table_desc) = stream_cdc_scan.cdc_table_desc
         {
-            let options_with_secret = WithOptionsSecResolved::new(
-                cdc_table_desc.connect_properties.clone(),
-                cdc_table_desc.secret_refs.clone(),
-            );
-
-            let mut props = ConnectorProperties::extract(options_with_secret, true)?;
-            props.init_from_pb_cdc_table_desc(cdc_table_desc);
-
-            // Try creating a split enumerator to validate
-            let _enumerator = props
-                .create_split_enumerator(SourceEnumeratorContext::dummy().into())
-                .await?;
-
+            self.validate_cdc_table_desc(cdc_table_desc).await?;
             tracing::debug!(?table_id, "validate cdc table success");
             Ok(true)
         } else {
             Ok(false)
         }
+    }
+
+    /// Validates a CDC table descriptor against its upstream table, by creating a throw-away
+    /// split enumerator: the connector validator checks that the table exists and that the
+    /// declared columns and primary key match the upstream ones.
+    pub(crate) async fn validate_cdc_table_desc(
+        &self,
+        cdc_table_desc: &PbExternalTableDesc,
+    ) -> MetaResult<()> {
+        let options_with_secret = WithOptionsSecResolved::new(
+            cdc_table_desc.connect_properties.clone(),
+            cdc_table_desc.secret_refs.clone(),
+        );
+
+        let mut props = ConnectorProperties::extract(options_with_secret, true)?;
+        props.init_from_pb_cdc_table_desc(cdc_table_desc);
+
+        let _enumerator = props
+            .create_split_enumerator(SourceEnumeratorContext::dummy().into())
+            .await?;
+
+        Ok(())
     }
 
     pub async fn validate_table_for_sink(&self, table_id: TableId) -> MetaResult<()> {

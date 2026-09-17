@@ -1,0 +1,162 @@
+# CDC table sources must validate the declared schema against the upstream table, the same
+# way `CREATE TABLE ... FROM <shared_cdc_source> TABLE '...'` already does. Without that
+# validation a mistyped column, a wrong type or a wrong PRIMARY KEY is only discovered as
+# silently wrong data in every downstream materialized view.
+
+control substitution on
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+DROP SOURCE IF EXISTS ts_val CASCADE;
+
+statement ok
+DROP SOURCE IF EXISTS s_val CASCADE;
+
+system ok
+mysql -e "
+    CREATE DATABASE IF NOT EXISTS risedev;
+    USE risedev;
+    DROP TABLE IF EXISTS t_val;
+    CREATE TABLE t_val (id INT NOT NULL PRIMARY KEY, payload VARCHAR(50) NOT NULL) ENGINE=InnoDB;
+    DROP USER IF EXISTS 'val-cdc'@'%';
+    CREATE USER 'val-cdc'@'%' IDENTIFIED BY 'abcdef';
+    GRANT SELECT, RELOAD, REPLICATION SLAVE, REPLICATION CLIENT ON *.* TO 'val-cdc'@'%';
+    FLUSH PRIVILEGES;
+"
+
+statement ok
+CREATE SOURCE s_val WITH (
+    ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
+    username = 'val-cdc',
+    password = 'abcdef',
+    database.name = 'risedev',
+    server.id = '5402'
+);
+
+sleep 2s
+
+# A column that does not exist upstream.
+statement error not found in the upstream database
+CREATE SOURCE ts_val (id INT, payload VARCHAR, nonexistent_col INT, PRIMARY KEY (id))
+WITH (snapshot = 'false') FROM s_val TABLE 'risedev.t_val';
+
+# An incompatible column type.
+statement error Incompatible data type
+CREATE SOURCE ts_val (id VARCHAR, payload INT, PRIMARY KEY (id))
+WITH (snapshot = 'false') FROM s_val TABLE 'risedev.t_val';
+
+# A primary key that is not the upstream primary key. Without this check the downstream
+# materialized view accumulates one row per version instead of overwriting.
+statement error Primary key mismatch
+CREATE SOURCE ts_val (id INT, payload VARCHAR, PRIMARY KEY (payload))
+WITH (snapshot = 'false') FROM s_val TABLE 'risedev.t_val';
+
+# An upstream table that does not exist.
+statement error doesn't exist
+CREATE SOURCE ts_val (id INT, payload VARCHAR, PRIMARY KEY (id))
+WITH (snapshot = 'false') FROM s_val TABLE 'risedev.no_such_table';
+
+# The valid definition keeps working.
+statement ok
+CREATE SOURCE ts_val (*) WITH (snapshot = 'false') FROM s_val TABLE 'risedev.t_val';
+
+statement ok
+CREATE MATERIALIZED VIEW mv_val AS SELECT id, payload FROM ts_val;
+
+system ok
+mysql -e "
+    USE risedev;
+    INSERT INTO t_val VALUES (1, 'a');
+    UPDATE t_val SET payload = 'b' WHERE id = 1;
+"
+
+query IT retry 15 backoff 1s
+SELECT id, payload FROM mv_val;
+----
+1 b
+
+# Quoted upstream identifiers must be accepted exactly as `CREATE TABLE ... FROM` accepts
+# them: the column comparison is connector-specific (case-insensitive for MySQL), so it has
+# to be the connector validator that performs it.
+system ok
+mysql -e "
+    USE risedev;
+    DROP TABLE IF EXISTS t_case;
+    CREATE TABLE t_case (Id INT NOT NULL PRIMARY KEY, MixedCol VARCHAR(20) NOT NULL) ENGINE=InnoDB;
+"
+
+statement ok
+CREATE SOURCE ts_case ("Id" INT, "MixedCol" VARCHAR, PRIMARY KEY ("Id"))
+WITH (snapshot = 'false') FROM s_val TABLE 'risedev.t_case';
+
+statement ok
+CREATE TABLE t_case_tbl ("Id" INT, "MixedCol" VARCHAR, PRIMARY KEY ("Id"))
+FROM s_val TABLE 'risedev.t_case';
+
+statement ok
+DROP TABLE t_case_tbl;
+
+statement ok
+DROP SOURCE ts_case;
+
+system ok
+mysql -e "USE risedev; DROP TABLE t_case;"
+
+# Renaming the shared CDC source keeps working once a table source depends on it.
+statement ok
+ALTER SOURCE s_val RENAME TO s_val_renamed;
+
+query T
+SELECT definition FROM rw_sources WHERE name = 'ts_val';
+----
+CREATE SOURCE ts_val (*) WITH (snapshot = 'false') FROM s_val_renamed TABLE 'risedev.t_val'
+
+statement ok
+ALTER SOURCE s_val_renamed RENAME TO s_val;
+
+# `SWAP WITH` rewrites dependent definitions through the same code path as `RENAME TO`.
+statement ok
+CREATE SOURCE s_val_other WITH (
+    ${RISEDEV_MYSQL_WITH_OPTIONS_COMMON},
+    username = 'val-cdc',
+    password = 'abcdef',
+    database.name = 'risedev',
+    server.id = '5403'
+);
+
+statement ok
+ALTER SOURCE s_val SWAP WITH s_val_other;
+
+query T
+SELECT definition FROM rw_sources WHERE name = 'ts_val';
+----
+CREATE SOURCE ts_val (*) WITH (snapshot = 'false') FROM s_val_other TABLE 'risedev.t_val'
+
+statement ok
+ALTER SOURCE s_val_other SWAP WITH s_val;
+
+query T
+SELECT definition FROM rw_sources WHERE name = 'ts_val';
+----
+CREATE SOURCE ts_val (*) WITH (snapshot = 'false') FROM s_val TABLE 'risedev.t_val'
+
+statement ok
+DROP SOURCE s_val_other;
+
+statement ok
+DROP MATERIALIZED VIEW mv_val;
+
+statement ok
+DROP SOURCE ts_val;
+
+statement ok
+DROP SOURCE s_val;
+
+system ok
+mysql -e "
+    USE risedev;
+    DROP TABLE t_val;
+    DROP USER IF EXISTS 'val-cdc'@'%';
+"
