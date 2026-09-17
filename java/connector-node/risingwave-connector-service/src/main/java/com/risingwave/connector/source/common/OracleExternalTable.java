@@ -233,7 +233,7 @@ final class OracleExternalTable {
         return primaryKeys;
     }
 
-    static Data.DataType oracleTypeToRisingWaveType(
+    private static Data.DataType oracleTypeToRisingWaveType(
             String rawType, Integer precision, Integer scale) throws SQLException {
         var oracleType = rawType.toUpperCase(Locale.ROOT);
         var typeName =
@@ -259,6 +259,7 @@ final class OracleExternalTable {
                                     "XMLTYPE" ->
                             TypeName.VARCHAR;
                     case "RAW", "LONG RAW", "BLOB" -> TypeName.BYTEA;
+                    case "BOOLEAN" -> TypeName.BOOLEAN;
                     case "JSON" -> TypeName.JSONB;
                     case "DATE" -> TypeName.TIMESTAMP;
                     default -> {
@@ -290,7 +291,7 @@ final class OracleExternalTable {
         return TypeName.DECIMAL;
     }
 
-    static String buildSnapshotSql(
+    private static String buildSnapshotSql(
             List<String> columns,
             String schemaName,
             String tableName,
