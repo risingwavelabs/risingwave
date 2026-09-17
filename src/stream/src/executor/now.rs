@@ -40,8 +40,6 @@ pub struct NowExecutor<S: StateStore> {
     state_table: StateTable<S>,
 
     progress_ratio: Option<f32>,
-
-    fallback_barrier_interval_ms: u32,
 }
 
 pub enum NowMode {
@@ -71,7 +69,6 @@ impl<S: StateStore> NowExecutor<S> {
         barrier_receiver: UnboundedReceiver<Barrier>,
         state_table: StateTable<S>,
         progress_ratio: Option<f32>,
-        fallback_barrier_interval_ms: u32,
     ) -> Self {
         Self {
             data_types,
@@ -80,7 +77,6 @@ impl<S: StateStore> NowExecutor<S> {
             barrier_receiver,
             state_table,
             progress_ratio,
-            fallback_barrier_interval_ms,
         }
     }
 
@@ -93,13 +89,9 @@ impl<S: StateStore> NowExecutor<S> {
             barrier_receiver,
             mut state_table,
             progress_ratio,
-            fallback_barrier_interval_ms,
         } = self;
 
-        info!(
-            "NowExecutor started. progress_ratio: {:?}, fallback_barrier_interval_ms: {:?}",
-            progress_ratio, fallback_barrier_interval_ms
-        );
+        info!("NowExecutor started. progress_ratio: {:?}", progress_ratio);
 
         let max_chunk_size = crate::config::chunk_size();
 
@@ -141,10 +133,7 @@ impl<S: StateStore> NowExecutor<S> {
             for barrier in barriers {
                 let curr_epoch = barrier.get_curr_epoch();
                 let new_timestamp = curr_epoch.as_timestamptz();
-                // Barriers sent by older meta nodes do not include the effective interval.
-                let current_barrier_interval_ms = barrier
-                    .barrier_interval_ms
-                    .unwrap_or(fallback_barrier_interval_ms);
+                let current_barrier_interval_ms = barrier.barrier_interval_ms;
                 let pause_mutation =
                     barrier
                         .mutation
@@ -840,7 +829,7 @@ mod tests {
         now.next_unwrap_ready_watermark()?;
 
         let mut barrier = Barrier::with_prev_epoch_for_test(test_epoch(20000), test_epoch(1));
-        barrier.barrier_interval_ms = Some(5000);
+        barrier.barrier_interval_ms = 5000;
         let barrier = Barrier::from_protobuf(&barrier.to_protobuf())?;
         tx.send(barrier).unwrap();
 
@@ -991,7 +980,6 @@ mod tests {
             actor_context: ActorContext::for_test(123),
             identity: "NowExecutor".into(),
         };
-        let barrier_interval_ms = 1000;
         let now_executor = NowExecutor::new(
             vec![DataType::Timestamptz],
             mode,
@@ -999,7 +987,6 @@ mod tests {
             barrier_receiver,
             state_table,
             progress_ratio,
-            barrier_interval_ms,
         );
         (sender, now_executor.boxed().execute())
     }

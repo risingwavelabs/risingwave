@@ -405,9 +405,7 @@ pub struct BarrierInner<M> {
     pub kind: BarrierKind,
 
     /// The effective barrier interval for this database.
-    ///
-    /// `None` is accepted for backward compatibility with older meta nodes.
-    pub barrier_interval_ms: Option<u32>,
+    pub barrier_interval_ms: u32,
 
     /// Tracing context for the **current** epoch of this barrier.
     pub tracing_context: TracingContext,
@@ -423,7 +421,7 @@ impl<M: Default> BarrierInner<M> {
         Self {
             epoch: EpochPair::new_test_epoch(epoch),
             kind: BarrierKind::Checkpoint,
-            barrier_interval_ms: None,
+            barrier_interval_ms: 1000,
             tracing_context: TracingContext::none(),
             mutation: Default::default(),
         }
@@ -433,7 +431,7 @@ impl<M: Default> BarrierInner<M> {
         Self {
             epoch: EpochPair::new(epoch, prev_epoch),
             kind: BarrierKind::Checkpoint,
-            barrier_interval_ms: None,
+            barrier_interval_ms: 1000,
             tracing_context: TracingContext::none(),
             mutation: Default::default(),
         }

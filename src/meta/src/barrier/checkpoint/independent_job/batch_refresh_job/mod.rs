@@ -190,7 +190,7 @@ pub(crate) struct BatchRefreshJobCheckpointControl {
     snapshot_epoch: u64,
     /// Batch refresh interval in seconds. Used to determine when to trigger a refresh run.
     batch_refresh_seconds: u64,
-    barrier_interval_ms: Option<u32>,
+    barrier_interval_ms: u32,
 
     status: BatchRefreshJobStatus,
 }
@@ -470,7 +470,7 @@ impl BatchRefreshJobCheckpointControl {
         notifier: Option<&mut NotifierStarter>,
         snapshot_backfill_upstream_tables: HashSet<TableId>,
         snapshot_epoch: u64,
-        barrier_interval_ms: Option<u32>,
+        barrier_interval_ms: u32,
         version_stat: &HummockVersionStats,
         term_id: &str,
         partial_graph_manager: &mut PartialGraphManager,
@@ -585,7 +585,7 @@ impl BatchRefreshJobCheckpointControl {
         snapshot_backfill_upstream_tables: HashSet<TableId>,
         snapshot_epoch: u64,
         committed_epoch: u64,
-        barrier_interval_ms: Option<u32>,
+        barrier_interval_ms: u32,
         backfill_order: ExtendedFragmentBackfillOrder,
         version_stat: &HummockVersionStats,
         initial_mutation: Mutation,
@@ -1369,7 +1369,7 @@ impl BatchRefreshJobCheckpointControl {
         snapshot_backfill_upstream_tables: &HashSet<TableId>,
         upstream_table_log_epochs: &HashMap<TableId, Vec<(Vec<u64>, u64)>>,
         exclusive_start_log_epoch: u64,
-        barrier_interval_ms: Option<u32>,
+        barrier_interval_ms: u32,
     ) -> MetaResult<Option<(u64, Vec<BarrierInfo>)>> {
         let table_id = snapshot_backfill_upstream_tables
             .iter()

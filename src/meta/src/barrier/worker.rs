@@ -139,10 +139,7 @@ mod tests {
 
         let barrier = barrier_to_protobuf(&barrier_info, None);
 
-        assert_eq!(
-            barrier.barrier_interval_ms,
-            Some(system_barrier_interval_ms)
-        );
+        assert_eq!(barrier.barrier_interval_ms, system_barrier_interval_ms);
     }
 
     #[tokio::test]

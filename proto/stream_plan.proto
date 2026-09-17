@@ -258,7 +258,7 @@ message Barrier {
   BarrierKind kind = 9;
   // The effective barrier interval for this database: the database-specific override when set,
   // or the system-wide interval otherwise.
-  optional uint32 barrier_interval_ms = 10;
+  uint32 barrier_interval_ms = 10;
 }
 
 message Watermark {

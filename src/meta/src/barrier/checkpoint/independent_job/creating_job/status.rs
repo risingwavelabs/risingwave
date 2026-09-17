@@ -114,7 +114,7 @@ pub(super) enum CreatingStreamingJobStatus {
         create_mview_tracker: CreateMviewProgressTracker,
         snapshot_backfill_actors: HashSet<ActorId>,
         snapshot_epoch: u64,
-        barrier_interval_ms: Option<u32>,
+        barrier_interval_ms: u32,
         info: CreatingJobInfo,
         /// The `prev_epoch` of pending non checkpoint barriers
         pending_non_checkpoint_barriers: Vec<u64>,
@@ -325,7 +325,7 @@ impl CreatingStreamingJobStatus {
         prev_epoch_fake_physical_time: &mut u64,
         pending_non_checkpoint_barriers: &mut Vec<u64>,
         kind: PbBarrierKind,
-        barrier_interval_ms: Option<u32>,
+        barrier_interval_ms: u32,
     ) -> BarrierInfo {
         super::super::new_fake_barrier(
             prev_epoch_fake_physical_time,
@@ -395,7 +395,7 @@ mod tests {
             prev_epoch: TracedEpoch::new(Epoch(prev_epoch)),
             curr_epoch: TracedEpoch::new(Epoch(curr_epoch)),
             kind: BarrierKind::Barrier,
-            barrier_interval_ms: Some(1000),
+            barrier_interval_ms: 1000,
         }
     }
 
@@ -503,7 +503,7 @@ mod tests {
             prev_epoch: TracedEpoch::new(Epoch(1)),
             curr_epoch: TracedEpoch::new(Epoch(2)),
             kind: BarrierKind::Checkpoint(vec![1]),
-            barrier_interval_ms: Some(1000),
+            barrier_interval_ms: 1000,
         });
         assert_eq!(info.fragment_infos[&fragment_id].nodes, new_node);
     }

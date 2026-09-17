@@ -150,7 +150,7 @@ impl BarrierWorkerState {
             prev_epoch,
             curr_epoch,
             kind,
-            barrier_interval_ms: Some(barrier_interval_ms),
+            barrier_interval_ms,
         }
     }
 }

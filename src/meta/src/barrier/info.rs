@@ -371,7 +371,7 @@ pub(super) struct BarrierInfo {
     pub prev_epoch: TracedEpoch,
     pub curr_epoch: TracedEpoch,
     pub kind: BarrierKind,
-    pub barrier_interval_ms: Option<u32>,
+    pub barrier_interval_ms: u32,
 }
 
 impl BarrierInfo {
@@ -381,7 +381,7 @@ impl BarrierInfo {
             prev_epoch,
             curr_epoch,
             kind: BarrierKind::Initial,
-            barrier_interval_ms: Some(barrier_interval_ms),
+            barrier_interval_ms,
         }
     }
 
