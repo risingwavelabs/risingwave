@@ -1258,7 +1258,7 @@ pub mod default {
         }
 
         pub fn direct_io() -> bool {
-            true
+            false
         }
 
         pub fn capacity_mb() -> usize {
