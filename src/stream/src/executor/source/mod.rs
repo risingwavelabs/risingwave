@@ -17,6 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use await_tree::InstrumentAwait;
+use futures::StreamExt;
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::bail;
@@ -62,6 +63,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_retry::strategy::jitter;
 
 use crate::common::rate_limit::rate_limited_pieces;
+use crate::executor::actor::spawn_blocking_drop_stream;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{Barrier, Message};
 
@@ -156,7 +158,7 @@ pub async fn apply_rate_limit(stream: BoxSourceChunkStream, rate_limit_rps: Opti
 
 #[try_stream(ok = SourceReaderEvent, error = ConnectorError)]
 pub async fn apply_rate_limit_to_source_reader_event(
-    stream: BoxSourceReaderEventStream,
+    mut stream: BoxSourceReaderEventStream,
     rate_limit_rps: Option<u32>,
 ) {
     if rate_limit_rps == Some(0) {
@@ -172,19 +174,28 @@ pub async fn apply_rate_limit_to_source_reader_event(
             .into(),
     );
 
-    #[for_await]
-    for event in stream {
-        match event? {
-            SourceReaderEvent::DataChunk(chunk) => {
+    let result = loop {
+        let Some(event) = stream.next().await else {
+            break Ok(());
+        };
+        match event {
+            Err(error) => break Err(error),
+            Ok(SourceReaderEvent::DataChunk(chunk)) => {
                 yield SourceReaderEvent::DataChunk(
                     process_chunk(chunk, rate_limit_rps, &limiter).await,
                 )
             }
-            SourceReaderEvent::SplitProgress(progress) => {
+            Ok(SourceReaderEvent::SplitProgress(progress)) => {
                 yield SourceReaderEvent::SplitProgress(progress)
             }
         }
-    }
+    };
+
+    // Some source clients perform synchronous cleanup when dropped. In particular,
+    // librdkafka's consumer close may wait for broker-side timeouts. Keep that work off the
+    // actor runtime so unrelated actors and barriers remain schedulable.
+    spawn_blocking_drop_stream(stream).await;
+    result?;
 }
 
 #[try_stream(ok = StreamChunk, error = ConnectorError)]
@@ -284,4 +295,79 @@ pub fn get_infinite_backoff_strategy() -> impl Iterator<Item = Duration> {
     const BACKOFF_FACTOR: u64 = 2;
     const MAX_DELAY: Duration = Duration::from_secs(10);
     exponential_backoff(BASE_DELAY, BACKOFF_FACTOR, MAX_DELAY).map(jitter)
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::mpsc;
+
+    use futures::stream;
+    use risingwave_connector::error::ConnectorResult;
+    use tokio::sync::oneshot;
+
+    use super::*;
+
+    struct BlockingDrop {
+        started: Option<oneshot::Sender<()>>,
+        finish: mpsc::Receiver<()>,
+    }
+
+    impl Drop for BlockingDrop {
+        fn drop(&mut self) {
+            self.started.take().unwrap().send(()).unwrap();
+            self.finish.recv().unwrap();
+        }
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn test_failed_source_reader_cleanup_does_not_block_runtime() {
+        let mut cleanup_tasks = Vec::new();
+        let mut cleanup_started = Vec::new();
+        let mut cleanup_finish = Vec::new();
+
+        for _ in 0..4 {
+            let (started_tx, started_rx) = oneshot::channel();
+            let (finish_tx, finish_rx) = mpsc::channel();
+            let guard = BlockingDrop {
+                started: Some(started_tx),
+                finish: finish_rx,
+            };
+            let stream = stream::once(async {
+                Err::<SourceReaderEvent, _>(ConnectorError::from(anyhow::anyhow!(
+                    "test source failure"
+                )))
+            })
+            .chain(stream::pending::<ConnectorResult<SourceReaderEvent>>())
+            .map(move |item| {
+                let _ = &guard;
+                item
+            })
+            .boxed();
+            let mut stream = apply_rate_limit_to_source_reader_event(stream, None).boxed();
+
+            cleanup_tasks.push(tokio::spawn(async move {
+                assert!(stream.next().await.unwrap().is_err());
+            }));
+            cleanup_started.push(started_rx);
+            cleanup_finish.push(finish_tx);
+        }
+
+        for started in cleanup_started {
+            started.await.unwrap();
+        }
+
+        tokio::time::timeout(
+            Duration::from_secs(1),
+            tokio::time::sleep(Duration::from_millis(10)),
+        )
+        .await
+        .expect("the runtime worker should remain schedulable during source cleanup");
+
+        for finish in cleanup_finish {
+            finish.send(()).unwrap();
+        }
+        for task in cleanup_tasks {
+            task.await.unwrap();
+        }
+    }
 }
