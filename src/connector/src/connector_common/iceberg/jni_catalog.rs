@@ -96,6 +96,14 @@ struct ListTablesResponse {
     next_page_token: Option<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+struct GetNamespaceResponse {
+    namespace: NamespaceIdent,
+    #[serde(default)]
+    properties: HashMap<String, String>,
+}
+
 impl From<&TableCreation> for CreateTableRequest {
     fn from(value: &TableCreation) -> Self {
         Self {
@@ -203,8 +211,34 @@ impl Catalog for JniCatalog {
     }
 
     /// Get a namespace information from the catalog.
-    async fn get_namespace(&self, _namespace: &NamespaceIdent) -> iceberg::Result<Namespace> {
-        todo!()
+    async fn get_namespace(&self, namespace: &NamespaceIdent) -> iceberg::Result<Namespace> {
+        let inner = self.inner.clone();
+        let namespace = namespace.clone();
+        execute_blocking_jni(move || {
+            execute_with_jni_env(inner.jvm, |env| {
+                let namespace_str = namespace_to_string(&namespace);
+                let namespace_jstr = env.new_string(&namespace_str).unwrap();
+
+                let result_json =
+                    call_method!(env, inner.java_catalog.as_obj(), {String loadNamespaceMetadata(String)},
+                    &namespace_jstr)
+                    .with_context(|| format!("Failed to load iceberg namespace: {namespace}"))?;
+
+                let rust_json_str = jobj_to_str(env, result_json)?;
+
+                let resp: GetNamespaceResponse = serde_json::from_str(&rust_json_str)?;
+
+                Ok(Namespace::with_properties(resp.namespace, resp.properties))
+            })
+        })
+        .await
+        .map_err(|e| {
+            iceberg::Error::new(
+                iceberg::ErrorKind::Unexpected,
+                "Failed to load iceberg namespace.",
+            )
+            .with_source(e)
+        })
     }
 
     /// Check if namespace exists in catalog.
