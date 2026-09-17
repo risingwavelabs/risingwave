@@ -605,7 +605,36 @@ mod tests {
     use super::*;
     use crate::array::{ListValue, StructValue};
     use crate::row::OwnedRow;
-    use crate::types::{DataType, Datum, ScalarImpl, StructType};
+    use crate::types::{DataType, Datum, ScalarImpl, ScalarRefImpl, StructType};
+
+    #[test]
+    fn test_varchar_comparison_is_utf8_binary() {
+        let values = ["", "A", "a", "aa", "z", "é", "中", "😀"];
+        for pair in values.windows(2) {
+            let lhs = Some(ScalarRefImpl::Utf8(pair[0]));
+            let rhs = Some(ScalarRefImpl::Utf8(pair[1]));
+            assert_eq!(
+                cmp_datum(lhs, rhs, OrderType::ascending()),
+                pair[0].as_bytes().cmp(pair[1].as_bytes())
+            );
+            assert_eq!(
+                cmp_datum(lhs, rhs, OrderType::descending()),
+                pair[0].as_bytes().cmp(pair[1].as_bytes()).reverse()
+            );
+        }
+
+        // Canonically equivalent Unicode strings remain distinct under the C/binary contract.
+        let decomposed = "e\u{301}";
+        let precomposed = "é";
+        assert_eq!(
+            cmp_datum(
+                Some(ScalarRefImpl::Utf8(decomposed)),
+                Some(ScalarRefImpl::Utf8(precomposed)),
+                OrderType::ascending(),
+            ),
+            decomposed.as_bytes().cmp(precomposed.as_bytes())
+        );
+    }
 
     #[test]
     fn test_order_type() {

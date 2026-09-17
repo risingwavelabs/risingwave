@@ -239,4 +239,37 @@ and [#16514](https://github.com/risingwavelabs/risingwave/pull/16514) (Docker ba
 3. Add environment variables you want to use in the `slt` tests in `src/risedevtool/src/risedev_env.rs`.
 4. Write tests according to the style explained in the previous section.
 
-<!-- That's all?? -->
+### CDC primary-key ordering validation
+
+CDC snapshot/stream merging compares primary keys in RisingWave, so upstream snapshot
+ordering must agree with RisingWave ordering. PostgreSQL, MySQL, and SQL Server readers
+reject known incompatible key types or text collations. Unknown types are not rejected
+solely because ordering equivalence has not been established; existing schema and type
+decoding restrictions still apply.
+
+SQL Server alias types are checked using their underlying system type and the column's
+collation. Column names are resolved by SQL Server's catalog collation, so identifier
+case/accent handling agrees with the snapshot query. PostgreSQL matching B-tree indexes
+must provide `ASC NULLS LAST` for every leading primary-key column, either by a forward
+scan of `ASC NULLS LAST` keys or a backward scan of `DESC NULLS FIRST` keys.
+
+For PostgreSQL TEXT/VARCHAR keys, collation identity must match between the query and
+the index, even when different collations have identical sorting behavior. Native libc
+C/POSIX columns keep their collation, so an ordinary primary-key index in a default-C
+database is sufficient. Columns with other locale rules still require explicit C
+ordering and a matching index. Selection is per column, including composite keys;
+existing explicit-C secondary indexes remain usable. The database provider is checked
+before treating its default locale as bytewise (an ICU database's libc locale is not
+its actual ordering).
+
+A CDC table can opt out with `WITH (bypass_pk_order_validation = 'true')` (default:
+`false`). This bypasses primary-key ordering checks, including PostgreSQL's encoding
+and matching-index checks, and logs a warning. PostgreSQL TEXT/VARCHAR snapshot
+expressions still use bytewise ordering: native libc C/POSIX column collations (including
+a database default with those semantics), or explicit `COLLATE pg_catalog."C"` otherwise.
+Connection, schema, and value decoding errors remain errors. The option applies to both serial snapshot readers and
+parallel snapshot split generation/readers.
+
+Bypassing validation does not make incompatible orders equivalent: snapshot/CDC merging
+can produce incorrect results if the upstream key order differs. It also does not make
+previously persisted snapshot positions compatible with a changed ordering contract.
