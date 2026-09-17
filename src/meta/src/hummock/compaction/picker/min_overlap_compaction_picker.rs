@@ -116,7 +116,7 @@ impl MinOverlappingPicker {
                     .unwrap_or(total_file_size);
                 end_idx = idx + 1;
                 if score < min_score
-                    || (score == min_score && select_file_size < min_score_select_file_size)
+                    || (score == min_score && select_file_size > min_score_select_file_size)
                 {
                     min_score = score;
                     min_score_select_range = start_idx..end_idx;
@@ -245,6 +245,62 @@ pub mod tests {
                     previous = Some(actual);
                 }
             }
+        }
+    }
+
+    #[test]
+    fn test_equal_overlap_window_ties_and_limit() {
+        let source: Vec<_> = (0..16)
+            .map(|i| sized_table(i, i as usize * 2, i as usize * 2 + 1, 20))
+            .collect();
+        let handlers: Vec<_> = (0..3).map(LevelHandler::new).collect();
+        for (target_size, limit, expected_len) in [
+            (1, u64::MAX, 16), // Prefer the largest window on the score-zero plateau.
+            (1000, 160, 9),
+            (1000, 0, 1),
+            (1000, 100, 6), // Preserve the last SST that takes the window over the limit.
+        ] {
+            let picker = MinOverlappingPicker::new(
+                1,
+                2,
+                limit,
+                0,
+                Arc::new(RangeOverlapStrategy::default()),
+            );
+            let target = vec![sized_table(100, 0, 100, target_size)];
+            let (selected, overlapped) = picker.pick_tables(&source, &target, &handlers);
+            assert_eq!(selected, source[..expected_len]);
+            assert_eq!(overlapped, target);
+        }
+    }
+
+    #[test]
+    fn test_score_then_source_size_then_encounter_order() {
+        let handlers: Vec<_> = (0..3).map(LevelHandler::new).collect();
+        for (second_source_size, second_target_size, expected_idx) in [
+            (1000, 1009, 1), // Equal integer scores: prefer more source bytes.
+            (1000, 1010, 0), // A lower score still wins over a larger source.
+            (100, 100, 0),   // Equal score and size: preserve encounter order.
+        ] {
+            let source = vec![
+                sized_table(0, 0, 9, 100),
+                sized_table(1, 10, 19, second_source_size),
+            ];
+            let target = vec![
+                sized_table(100, 0, 9, 100),
+                sized_table(101, 10, 19, second_target_size),
+            ];
+            let picker = MinOverlappingPicker::new(
+                1,
+                2,
+                u64::MAX,
+                0,
+                Arc::new(RangeOverlapStrategy::default()),
+            );
+            let (selected, overlapped) = picker.pick_tables(&source, &target, &handlers);
+            // Adjacent disjoint target ranges remain separate candidates.
+            assert_eq!(selected, source[expected_idx..expected_idx + 1]);
+            assert_eq!(overlapped, target[expected_idx..expected_idx + 1]);
         }
     }
 
