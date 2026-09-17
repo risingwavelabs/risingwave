@@ -4515,7 +4515,15 @@ async fn test_merge_batch_uses_accumulated_size() {
         CreateType, JobStatus, StreamingParallelism, object, streaming_job,
     };
     use sea_orm::{ActiveModelTrait, Set};
-    let (env, manager, _, worker_id) = setup_compute_env(80).await;
+    let registry = Registry::new();
+    let config = CompactionConfigBuilder::new()
+        .level0_tier_compact_file_number(1)
+        .level0_max_compact_file_number(130)
+        .level0_sub_level_compact_level_count(1)
+        .level0_overlapping_sub_level_compact_level_count(1)
+        .build();
+    let (env, manager, _, worker_id) =
+        setup_compute_env_with_metric(80, config, Some(MetaMetrics::for_test(&registry))).await;
     let conn = &env.meta_store_ref().conn;
     for table in [100, 101, 102] {
         object::ActiveModel {
@@ -4689,7 +4697,19 @@ async fn test_merge_batch_uses_accumulated_size() {
         "40 + 40 may merge, but adding the third 40 exceeds the limit"
     );
     assert!(nonempty.iter().all(|g| g.group_size <= limit));
-    assert!(nonempty.iter().any(|g| g.table_statistic.len() == 2));
+    let survivor = nonempty
+        .iter()
+        .find(|g| g.table_statistic.len() == 2)
+        .unwrap();
+    assert_eq!(
+        manager
+            .metrics
+            .merge_compaction_group_count
+            .with_label_values(&[&survivor.group_id.to_string()])
+            .get(),
+        1,
+        "one successful automatic merge must be counted once"
+    );
 }
 
 #[tokio::test(start_paused = true)]
