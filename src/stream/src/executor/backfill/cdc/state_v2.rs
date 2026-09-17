@@ -25,7 +25,6 @@ use crate::executor::StreamExecutorResult;
 #[derive(Debug, Default)]
 pub struct CdcStateRecord {
     pub is_finished: bool,
-    #[expect(dead_code)]
     pub row_count: i64,
     pub cdc_offset_low: Option<CdcOffset>,
     pub cdc_offset_high: Option<CdcOffset>,
@@ -138,6 +137,25 @@ impl<S: StateStore> ParallelizedCdcBackfillState<S> {
                 self.state_table.insert(state.as_slice());
             }
         }
+        Ok(())
+    }
+
+    pub async fn init_state_if_absent(&mut self, split_id: i64) -> StreamExecutorResult<()> {
+        let key = Some(ScalarImpl::from(split_id));
+
+        if self
+            .state_table
+            .get_row(row::once(key.clone()))
+            .await?
+            .is_none()
+        {
+            let mut state = vec![None; self.state_len];
+            state[0] = key;
+            state[1] = Some(false.into());
+            state[2] = Some(0_i64.into());
+            self.state_table.insert(state.as_slice());
+        }
+
         Ok(())
     }
 
