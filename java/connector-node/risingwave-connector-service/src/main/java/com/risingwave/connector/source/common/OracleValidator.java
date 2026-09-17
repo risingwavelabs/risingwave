@@ -46,6 +46,8 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
     private static final Set<String> REQUIRED_ROLES =
             Set.of("SELECT_CATALOG_ROLE", "EXECUTE_CATALOG_ROLE");
 
+    private static final int ORA_CONTAINER_DOES_NOT_EXIST = 65011;
+
     private final Connection jdbcConnection;
     private final String pdbName;
     private final String schemaName;
@@ -129,6 +131,15 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
     }
 
     private void validatePdb() throws SQLException {
+        try {
+            switchToPdb();
+        } catch (SQLException e) {
+            if (e.getErrorCode() == ORA_CONTAINER_DOES_NOT_EXIST) {
+                throw ValidatorUtils.invalidArgument(
+                        String.format("Oracle PDB '%s' does not exist", pdbName));
+            }
+            throw e;
+        }
         try (var stmt =
                 jdbcConnection.prepareStatement(
                         "SELECT OPEN_MODE FROM V$PDBS WHERE UPPER(NAME) = ?")) {

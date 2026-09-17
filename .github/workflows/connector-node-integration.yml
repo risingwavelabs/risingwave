@@ -7,8 +7,8 @@ permissions:
 on:
   push:
     branches: [ main ]
+  # Temporarily run on stacked PRs whose base branch is not main.
   pull_request:
-    branches: [ main ]
   merge_group:
     types: [ checks_requested ]
 
@@ -50,7 +50,7 @@ jobs:
           sudo apt-get install -y make build-essential cmake protobuf-compiler \
             libssl-dev libsasl2-dev libcurl4-openssl-dev pkg-config \
             lld libopenblas-dev liblapack-dev
-      - name: Pre-pull Oracle validator test image
+      - name: Pre-pull Oracle source test image
         if: steps.filter.outputs.java == 'true' || steps.filter.outputs.proto == 'true'
         timeout-minutes: 10
         run: docker pull "$ORACLE_TEST_IMAGE"
@@ -65,4 +65,4 @@ jobs:
           cd ${RISINGWAVE_ROOT}/java
           # Build with Rust to support OpendalSchemaHistory in MySQL CDC integration tests
           mvn --batch-mode --update-snapshots clean package -Dapi.version=1.44 \
-            -Doracle.validator.integration=true -Doracle.test.image="$ORACLE_TEST_IMAGE"
+            -Doracle.test.image="$ORACLE_TEST_IMAGE"
