@@ -1,0 +1,185 @@
+# Manual real-writer acceptance. See README.md for the silver profile and environment.
+# No compaction, expiration, synthetic row files, or patched snapshot markers.
+control substitution on
+
+statement ok
+SET streaming_parallelism = 2;
+
+system ok
+"${ICEBERG_TEST_PYTHON}" e2e_test/iceberg/manual/streaming_updates_catalog.py prepare
+
+statement ok
+CREATE CONNECTION update_e2e_catalog WITH (
+    type = 'iceberg',
+    catalog.type = 'rest_rust',
+    catalog.uri = '${ICEBERG_TEST_CATALOG_URI}',
+    warehouse.path = '${ICEBERG_TEST_WAREHOUSE}',
+    s3.endpoint = '${ICEBERG_TEST_S3_ENDPOINT}',
+    s3.access.key = '${ICEBERG_TEST_S3_ACCESS_KEY}',
+    s3.secret.key = '${ICEBERG_TEST_S3_SECRET_KEY}',
+    s3.region = 'us-east-1',
+    s3.path.style.access = 'true'
+);
+
+statement ok
+CREATE TABLE update_e2e_input (id int PRIMARY KEY, label varchar, v bigint);
+
+statement ok
+CREATE SINK update_e2e_sink FROM update_e2e_input WITH (
+    connector = 'iceberg',
+    connection = update_e2e_catalog,
+    database.name = 'public',
+    table.name = '${ICEBERG_TEST_TABLE}',
+    type = 'upsert',
+    write_mode = 'merge-on-read',
+    format_version = '${ICEBERG_TEST_FORMAT_VERSION}',
+    enable_pk_index = 'true',
+    enable_compaction = 'false',
+    enable_snapshot_expiration = 'false',
+    commit_checkpoint_interval = '1'
+);
+
+statement ok
+INSERT INTO update_e2e_input VALUES (1, 'a', 10), (2, 'a', 20), (3, 'b', 30);
+
+statement ok
+FLUSH;
+
+statement ok
+CREATE SOURCE update_e2e_source WITH (
+    connector = 'iceberg',
+    connection = update_e2e_catalog,
+    database.name = 'public',
+    table.name = '${ICEBERG_TEST_TABLE}',
+    streaming_updates = 'true'
+);
+
+# The batch read proves the real sink committed before streaming bootstrap.
+query ITI rowsort retry 60 backoff 1s
+SELECT * FROM update_e2e_source;
+----
+1 a 10
+2 a 20
+3 b 30
+
+statement ok
+CREATE MATERIALIZED VIEW update_e2e_rows AS SELECT * FROM update_e2e_source;
+
+# A second independent job tests committed-completion isolation for the same source.
+statement ok
+CREATE MATERIALIZED VIEW update_e2e_groups AS
+SELECT label, count(*) AS n, sum(v) AS total FROM update_e2e_source GROUP BY label;
+
+query ITI rowsort retry 60 backoff 1s
+SELECT * FROM update_e2e_rows;
+----
+1 a 10
+2 a 20
+3 b 30
+
+query TII rowsort retry 60 backoff 1s
+SELECT * FROM update_e2e_groups;
+----
+a 2 30
+b 1 30
+
+statement ok
+UPDATE update_e2e_input SET label = 'b', v = 100 WHERE id = 1;
+
+statement ok
+FLUSH;
+
+query ITI rowsort retry 60 backoff 1s
+SELECT * FROM update_e2e_rows;
+----
+1 b 100
+2 a 20
+3 b 30
+
+query TII rowsort retry 60 backoff 1s
+SELECT * FROM update_e2e_groups;
+----
+a 1 20
+b 2 130
+
+statement ok
+DELETE FROM update_e2e_input WHERE id = 2;
+
+statement ok
+FLUSH;
+
+query ITI rowsort retry 60 backoff 1s
+SELECT * FROM update_e2e_rows;
+----
+1 b 100
+3 b 30
+
+query TII rowsort retry 60 backoff 1s
+SELECT * FROM update_e2e_groups;
+----
+b 2 130
+
+statement ok
+INSERT INTO update_e2e_input VALUES (2, 'c', 200);
+
+statement ok
+FLUSH;
+
+query ITI rowsort retry 60 backoff 1s
+SELECT * FROM update_e2e_rows;
+----
+1 b 100
+2 c 200
+3 b 30
+
+query TII rowsort retry 60 backoff 1s
+SELECT * FROM update_e2e_groups;
+----
+b 2 130
+c 1 200
+
+query B
+SELECT NOT EXISTS (
+  (SELECT * FROM update_e2e_input EXCEPT SELECT * FROM update_e2e_rows)
+  UNION ALL
+  (SELECT * FROM update_e2e_rows EXCEPT SELECT * FROM update_e2e_input)
+);
+----
+t
+
+system ok
+"${ICEBERG_TEST_PYTHON}" e2e_test/iceberg/manual/streaming_updates_catalog.py verify
+
+query B
+SELECT count(*) > 0 FROM rw_iceberg_files
+WHERE source_name = 'update_e2e_source' AND content = 'PositionDeletes'
+AND file_format = CASE ${ICEBERG_TEST_FORMAT_VERSION} WHEN 2 THEN 'parquet' ELSE 'puffin' END;
+----
+t
+
+query B
+SELECT count(*) = 0 FROM rw_iceberg_files
+WHERE source_name = 'update_e2e_source' AND content = 'EqualityDeletes';
+----
+t
+
+statement ok
+DROP MATERIALIZED VIEW update_e2e_groups;
+
+statement ok
+DROP MATERIALIZED VIEW update_e2e_rows;
+
+statement ok
+DROP SOURCE update_e2e_source;
+
+statement ok
+DROP SINK update_e2e_sink;
+
+statement ok
+DROP TABLE update_e2e_input;
+
+statement ok
+DROP CONNECTION update_e2e_catalog;
+
+system ok
+"${ICEBERG_TEST_PYTHON}" e2e_test/iceberg/manual/streaming_updates_catalog.py drop

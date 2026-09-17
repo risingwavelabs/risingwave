@@ -46,12 +46,12 @@ use crate::task::LocalBarrierManager;
 
 /// Leaf executor for the iceberg pk-index coordinated compaction.
 ///
-/// It has **no stream input**. The actor is part of the sink's static graph but only runs while a
-/// compaction is being applied. It is driven by barriers delivered directly through
+/// It has **no stream input**. Before a compaction task, the static graph forwards ordinary
+/// barriers so the writer can align both inputs. A task is driven by barriers delivered through
 /// `barrier_receiver` and produces resolved survivor rows for the downstream writer.
 ///
 /// Lifecycle:
-/// - On the first barrier: forward it (no state to init).
+/// - Forward ordinary barriers until a compaction begin barrier (no state to init).
 /// - After resolve completes, on the next barrier (the end barrier): REPORT the conflict DV
 ///   files to meta, forward the barrier, and exit.
 ///
@@ -73,11 +73,12 @@ pub struct CompactionResolverExecutor {
     meta_client: MetaClient,
 }
 
-fn resolver_task_from_initial_barrier(
+fn resolver_task_from_barrier(
     sink_id: SinkId,
     barrier: &Barrier,
-) -> StreamExecutorResult<(IcebergCompactionTaskId, ResolverTaskInput)> {
+) -> StreamExecutorResult<Option<(IcebergCompactionTaskId, ResolverTaskInput)>> {
     match barrier.iceberg_pk_index_compaction() {
+        None => Ok(None),
         Some(context)
             if barrier.is_checkpoint()
                 && context.sink_id == sink_id
@@ -90,7 +91,7 @@ fn resolver_task_from_initial_barrier(
                     context.task_id
                 ))
             })?;
-            Ok((context.task_id, task_input))
+            Ok(Some((context.task_id, task_input)))
         }
         _ => Err(StreamExecutorError::from(anyhow!(
             "compaction resolver sink {} expected initial begin barrier, got {:?}",
@@ -266,14 +267,21 @@ impl CompactionResolverExecutor {
     async fn execute_inner(mut self) {
         let actor_id = self.ctx.id;
 
-        // First barrier: forward it. There is no state table to initialize.
-        let first_barrier = self.barrier_receiver.recv().await.ok_or_else(|| {
-            StreamExecutorError::channel_closed("compaction resolver barrier receiver")
-        })?;
-        let (task_id, task_input) =
-            resolver_task_from_initial_barrier(self.sink_id, &first_barrier)?;
-        let begin_barrier = first_barrier.clone();
-        yield Message::Barrier(first_barrier);
+        let (begin_barrier, task_id, task_input) = loop {
+            let barrier = self.barrier_receiver.recv().await.ok_or_else(|| {
+                StreamExecutorError::channel_closed("compaction resolver barrier receiver")
+            })?;
+            if let Some((task_id, task_input)) = resolver_task_from_barrier(self.sink_id, &barrier)?
+            {
+                break (barrier, task_id, task_input);
+            }
+            let stop = barrier.is_stop(actor_id);
+            yield Message::Barrier(barrier);
+            if stop {
+                return Ok(());
+            }
+        };
+        yield Message::Barrier(begin_barrier.clone());
 
         let expected_snapshot = self
             .meta_client
@@ -625,8 +633,9 @@ mod tests {
         };
         let barrier = compaction_barrier(2, Phase::Begin, Some(task_input.clone()));
 
-        let (task_id, actual) =
-            resolver_task_from_initial_barrier(SinkId::new(7), &barrier).unwrap();
+        let (task_id, actual) = resolver_task_from_barrier(SinkId::new(7), &barrier)
+            .unwrap()
+            .unwrap();
         assert_eq!(task_id, IcebergCompactionTaskId::from(11));
         assert_eq!(actual, task_input);
     }
@@ -638,10 +647,24 @@ mod tests {
         validate_resolver_end_barrier(SinkId::new(7), &end, &begin, 11.into()).unwrap();
 
         let invalid_begin = compaction_barrier(2, Phase::Begin, None);
-        assert!(resolver_task_from_initial_barrier(SinkId::new(7), &invalid_begin).is_err());
+        assert!(resolver_task_from_barrier(SinkId::new(7), &invalid_begin).is_err());
         let invalid_end = compaction_barrier(3, Phase::End, Some(ResolverTaskInput::default()));
         assert!(
             validate_resolver_end_barrier(SinkId::new(7), &invalid_end, &begin, 11.into()).is_err()
         );
+    }
+
+    #[test]
+    fn test_resolver_does_not_start_task_on_ordinary_barriers() {
+        for epoch in [1, 2, 3] {
+            let barrier = Barrier::new_test_barrier(test_epoch(epoch));
+            assert!(
+                resolver_task_from_barrier(SinkId::new(7), &barrier)
+                    .unwrap()
+                    .is_none()
+            );
+        }
+        let end_without_begin = compaction_barrier(4, Phase::End, None);
+        assert!(resolver_task_from_barrier(SinkId::new(7), &end_without_begin).is_err());
     }
 }

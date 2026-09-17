@@ -195,9 +195,13 @@ impl<S: StateStore> IcebergUpdateListExecutor<S> {
         let mut state_table = self.core.split_state_store;
         let mut barriers = barrier_to_message_stream(self.barriers).boxed();
         let first = expect_first_barrier(&mut barriers).await?;
+        let first_epoch = first.epoch;
         let mut checkpoint = first.epoch.prev;
         let paused = first.is_pause_on_startup();
-        state_table.init_epoch(first.epoch).await?;
+        // Hummock initialization may wait for the creation barrier's previous epoch.
+        // Forward the barrier first so its collection can unblock initialization.
+        yield Message::Barrier(first);
+        state_table.init_epoch(first_epoch).await?;
         let restored = state_table.get(LIST_KEY).await?;
         let mut dirty = false;
         let mut state = restored
@@ -207,7 +211,6 @@ impl<S: StateStore> IcebergUpdateListExecutor<S> {
         if let Some(state) = &state {
             state.validate_columns(job_id, &self.downstream_columns)?;
         }
-        yield Message::Barrier(first);
         let mut stream =
             StreamReaderWithPause::<true, ListResult>::new(barriers, stream::pending());
         if paused {
@@ -396,9 +399,10 @@ impl<S: StateStore> IcebergUpdateFetchExecutor<S> {
         let mut state_table = self.core.split_state_store;
         let mut upstream = self.upstream.execute();
         let first = expect_first_barrier(&mut upstream).await?;
+        let first_epoch = first.epoch;
         let paused = first.is_pause_on_startup();
-        state_table.init_epoch(first.epoch).await?;
         yield Message::Barrier(first);
+        state_table.init_epoch(first_epoch).await?;
         let mut stream =
             StreamReaderWithPause::<true, FetchResult>::new(upstream, stream::pending());
         if paused {

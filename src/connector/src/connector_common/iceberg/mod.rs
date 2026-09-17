@@ -34,6 +34,7 @@ use iceberg::io::{
     GCS_DISABLE_CONFIG_LOAD, S3_DISABLE_CONFIG_LOAD, S3_PATH_STYLE_ACCESS,
 };
 use iceberg_catalog_glue::{AWS_ACCESS_KEY_ID, AWS_REGION_NAME, AWS_SECRET_ACCESS_KEY};
+use iceberg_storage_opendal::OpenDalResolvingStorageFactory;
 use moka::future::Cache as MokaCache;
 use phf::{Set, phf_set};
 use risingwave_common::bail;
@@ -442,6 +443,7 @@ impl<'a> ResolvedIcebergCatalogConfig<'a> {
             }
             CatalogBuildPlan::NativeRest(iceberg_configs) => {
                 let catalog = iceberg_catalog_rest::RestCatalogBuilder::default()
+                    .with_storage_factory(Arc::new(OpenDalResolvingStorageFactory::new()))
                     .load("rest", iceberg_configs)
                     .await
                     .map_err(|e| anyhow!(IcebergError::from(e)))?;
