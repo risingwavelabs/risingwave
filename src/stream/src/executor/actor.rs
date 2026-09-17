@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use std::cell::Cell;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, LazyLock};
@@ -340,6 +341,77 @@ where
     }
 }
 
+// A stream hierarchy can contain multiple cancellation-safe owners. Nested owners should drop
+// inline once the hierarchy is already on a blocking worker, so the outer caller still waits for
+// all cleanup to finish.
+thread_local! {
+    static IN_BLOCKING_STREAM_DROP: Cell<bool> = const { Cell::new(false) };
+}
+
+fn drop_stream_in_blocking_task<T>(stream: T) {
+    IN_BLOCKING_STREAM_DROP.with(|in_blocking_drop| {
+        struct ResetBlockingDropFlag<'a> {
+            flag: &'a Cell<bool>,
+            previous: bool,
+        }
+
+        impl Drop for ResetBlockingDropFlag<'_> {
+            fn drop(&mut self) {
+                self.flag.set(self.previous);
+            }
+        }
+
+        let previous = in_blocking_drop.replace(true);
+        let _reset = ResetBlockingDropFlag {
+            flag: in_blocking_drop,
+            previous,
+        };
+        drop(stream);
+    });
+}
+
+fn spawn_blocking_drop_stream_detached<T: Send + 'static>(stream: T) {
+    if IN_BLOCKING_STREAM_DROP.with(Cell::get) {
+        drop(stream);
+    } else if let Ok(handle) = tokio::runtime::Handle::try_current() {
+        let _ = handle.spawn_blocking(move || drop_stream_in_blocking_task(stream));
+    } else {
+        // There is no async runtime worker to protect.
+        drop(stream);
+    }
+}
+
+/// Owns a value whose destructor must not block an async runtime worker.
+///
+/// Explicit completion can recover the value with [`Self::into_inner`] and await
+/// [`spawn_blocking_drop_stream`]. If the owner is cancelled instead, [`Drop`] schedules the
+/// destructor on the blocking pool without waiting for it.
+pub(crate) struct DropOnBlockingThread<T: Send + 'static> {
+    value: Option<T>,
+}
+
+impl<T: Send + 'static> DropOnBlockingThread<T> {
+    pub(crate) fn new(value: T) -> Self {
+        Self { value: Some(value) }
+    }
+
+    pub(crate) fn get_mut(&mut self) -> &mut T {
+        self.value.as_mut().expect("value should be present")
+    }
+
+    pub(crate) fn into_inner(mut self) -> T {
+        self.value.take().expect("value should be present")
+    }
+}
+
+impl<T: Send + 'static> Drop for DropOnBlockingThread<T> {
+    fn drop(&mut self) {
+        if let Some(value) = self.value.take() {
+            spawn_blocking_drop_stream_detached(value);
+        }
+    }
+}
+
 /// Drop the stream in a blocking task to avoid interfering with other actors.
 ///
 /// Logically the actor is dropped after we send the barrier with `Drop` mutation to the
@@ -348,7 +420,7 @@ where
 /// be a CPU-intensive task. This may lead to the runtime being unable to schedule other actors if
 /// the `drop` is called on the current thread.
 pub async fn spawn_blocking_drop_stream<T: Send + 'static>(stream: T) {
-    let _ = tokio::task::spawn_blocking(move || drop(stream))
+    let _ = tokio::task::spawn_blocking(move || drop_stream_in_blocking_task(stream))
         .instrument_await("drop_stream")
         .await;
 }

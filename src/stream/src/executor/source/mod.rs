@@ -63,7 +63,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_retry::strategy::jitter;
 
 use crate::common::rate_limit::rate_limited_pieces;
-use crate::executor::actor::spawn_blocking_drop_stream;
+use crate::executor::actor::{DropOnBlockingThread, spawn_blocking_drop_stream};
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{Barrier, Message};
 
@@ -158,9 +158,11 @@ pub async fn apply_rate_limit(stream: BoxSourceChunkStream, rate_limit_rps: Opti
 
 #[try_stream(ok = SourceReaderEvent, error = ConnectorError)]
 pub async fn apply_rate_limit_to_source_reader_event(
-    mut stream: BoxSourceReaderEventStream,
+    stream: BoxSourceReaderEventStream,
     rate_limit_rps: Option<u32>,
 ) {
+    let mut stream = DropOnBlockingThread::new(stream);
+
     if rate_limit_rps == Some(0) {
         // block the stream until the rate limit is reset
         let future = futures::future::pending::<()>();
@@ -175,7 +177,7 @@ pub async fn apply_rate_limit_to_source_reader_event(
     );
 
     let result = loop {
-        let Some(event) = stream.next().await else {
+        let Some(event) = stream.get_mut().next().await else {
             break Ok(());
         };
         match event {
@@ -194,7 +196,7 @@ pub async fn apply_rate_limit_to_source_reader_event(
     // Some source clients perform synchronous cleanup when dropped. In particular,
     // librdkafka's consumer close may wait for broker-side timeouts. Keep that work off the
     // actor runtime so unrelated actors and barriers remain schedulable.
-    spawn_blocking_drop_stream(stream).await;
+    spawn_blocking_drop_stream(stream.into_inner()).await;
     result?;
 }
 
@@ -300,7 +302,10 @@ pub fn get_infinite_backoff_strategy() -> impl Iterator<Item = Duration> {
 #[cfg(test)]
 mod tests {
     use std::sync::{Mutex, mpsc};
+    use std::time::Instant;
 
+    use futures::stream;
+    use risingwave_connector::error::ConnectorResult;
     use tokio::sync::oneshot;
 
     use super::*;
@@ -314,6 +319,19 @@ mod tests {
         fn drop(&mut self) {
             self.started.take().unwrap().send(()).unwrap();
             self.finish.recv().unwrap();
+        }
+    }
+
+    struct SleepingDrop {
+        started: Option<oneshot::Sender<()>>,
+        finished: Option<oneshot::Sender<()>>,
+    }
+
+    impl Drop for SleepingDrop {
+        fn drop(&mut self) {
+            let _ = self.started.take().unwrap().send(());
+            std::thread::sleep(Duration::from_secs(1));
+            let _ = self.finished.take().unwrap().send(());
         }
     }
 
@@ -371,5 +389,54 @@ mod tests {
         for task in cleanup_tasks {
             task.await.unwrap();
         }
+    }
+
+    async fn assert_cancelled_source_reader_cleanup_does_not_block_runtime(
+        rate_limit_rps: Option<u32>,
+    ) {
+        let (cleanup_started_tx, cleanup_started_rx) = oneshot::channel();
+        let (cleanup_finished_tx, cleanup_finished_rx) = oneshot::channel();
+        let guard = SleepingDrop {
+            started: Some(cleanup_started_tx),
+            finished: Some(cleanup_finished_tx),
+        };
+        let stream = stream::pending::<ConnectorResult<SourceReaderEvent>>()
+            .map(move |item| {
+                let _ = &guard;
+                item
+            })
+            .boxed();
+        let mut stream = apply_rate_limit_to_source_reader_event(stream, rate_limit_rps).boxed();
+        let (poll_started_tx, poll_started_rx) = oneshot::channel();
+        let stream_task = tokio::spawn(async move {
+            poll_started_tx.send(()).unwrap();
+            stream.next().await
+        });
+
+        // The send and first stream poll happen in the same task poll, so receiving this signal
+        // means the source wrapper is suspended in either `stream.next()` or the zero-rate branch.
+        poll_started_rx.await.unwrap();
+        let cancel_started_at = Instant::now();
+        stream_task.abort();
+        let join_error = tokio::time::timeout(Duration::from_millis(500), stream_task)
+            .await
+            .expect("cancelling the source stream should not block the runtime worker")
+            .unwrap_err();
+        assert!(join_error.is_cancelled());
+        assert!(
+            cancel_started_at.elapsed() < Duration::from_millis(500),
+            "cancelling the source stream waited for its blocking destructor"
+        );
+
+        cleanup_started_rx.await.unwrap();
+        cleanup_finished_rx.await.unwrap();
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 1)]
+    async fn test_cancelled_source_reader_cleanup_does_not_block_runtime() {
+        tokio::join!(
+            assert_cancelled_source_reader_cleanup_does_not_block_runtime(None),
+            assert_cancelled_source_reader_cleanup_does_not_block_runtime(Some(0)),
+        );
     }
 }
