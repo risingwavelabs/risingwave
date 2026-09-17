@@ -1,0 +1,132 @@
+# Test `default_table_location_from_namespace` for the Iceberg sink.
+# Some REST catalogs (e.g. the AWS Glue Iceberg REST endpoint) do not assign a table location
+# server-side. With the option enabled, RisingWave derives `<namespace location>/<table name>`
+# from the namespace's `location` property when creating the table.
+# Lakekeeper always exposes a `location` property on namespaces and assigns
+# `<namespace location>/<table uuid>` by default, so the derived location is distinguishable.
+
+control substitution on
+
+statement ok
+create secret lakekeeper_secret_default_location with (
+  backend = 'meta'
+) as 'hummockadmin';
+
+statement ok
+create connection lakekeeper_conn_default_location
+with (
+    type = 'iceberg',
+    catalog.type = 'rest',
+    catalog.uri = 'http://127.0.0.1:8181/catalog/',
+    warehouse.path = 'risingwave-warehouse',
+    s3.access.key = secret lakekeeper_secret_default_location,
+    s3.secret.key = secret lakekeeper_secret_default_location,
+    s3.path.style.access = 'true',
+    s3.endpoint = 'http://127.0.0.1:9301',
+    s3.region = 'us-east-1'
+);
+
+statement ok
+create table t_default_location (id int primary key, v int);
+
+statement ok
+insert into t_default_location values (1, 10), (2, 20);
+
+statement ok
+FLUSH;
+
+# The table location is derived from the namespace location: `<namespace location>/t_derived_location`.
+statement ok
+create sink sink_derived_location from t_default_location
+with (
+    connector = 'iceberg',
+    type = 'upsert',
+    primary_key = 'id',
+    database.name = 'ns_default_location',
+    table.name = 't_derived_location',
+    connection = lakekeeper_conn_default_location,
+    create_table_if_not_exists = 'true',
+    default_table_location_from_namespace = 'true',
+    commit_checkpoint_interval = 1
+);
+
+# Without the option, the catalog keeps assigning the table location.
+statement ok
+create sink sink_server_location from t_default_location
+with (
+    connector = 'iceberg',
+    type = 'upsert',
+    primary_key = 'id',
+    database.name = 'ns_default_location',
+    table.name = 't_server_location',
+    connection = lakekeeper_conn_default_location,
+    create_table_if_not_exists = 'true',
+    commit_checkpoint_interval = 1
+);
+
+statement ok
+create source src_derived_location
+with (
+    connector = 'iceberg',
+    connection = lakekeeper_conn_default_location,
+    database.name = 'ns_default_location',
+    table.name = 't_derived_location'
+);
+
+statement ok
+create source src_server_location
+with (
+    connector = 'iceberg',
+    connection = lakekeeper_conn_default_location,
+    database.name = 'ns_default_location',
+    table.name = 't_server_location'
+);
+
+query II rowsort retry 10 backoff 1s
+select * from src_derived_location;
+----
+1 10
+2 20
+
+query II rowsort retry 10 backoff 1s
+select * from src_server_location;
+----
+1 10
+2 20
+
+# Data files of the derived-location table live under `<namespace location>/t_derived_location/`.
+query I
+select count(*) > 0 and bool_and(file_path like '%/risingwave-lakekeeper/%/t_derived_location/data/%')
+from rw_iceberg_files
+where source_name = 'src_derived_location';
+----
+t
+
+# The server-assigned location does not contain the table name.
+query I
+select count(*) > 0 and bool_and(file_path not like '%/t_server_location/%')
+from rw_iceberg_files
+where source_name = 'src_server_location';
+----
+t
+
+statement ok
+drop source src_server_location;
+
+statement ok
+drop source src_derived_location;
+
+statement ok
+drop sink sink_server_location;
+
+statement ok
+drop sink sink_derived_location;
+
+statement ok
+drop table t_default_location;
+
+statement ok
+drop connection lakekeeper_conn_default_location;
+
+statement ok
+drop secret lakekeeper_secret_default_location;

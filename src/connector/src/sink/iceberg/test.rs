@@ -377,6 +377,7 @@ fn test_parse_iceberg_config() {
                 .collect(),
             commit_checkpoint_interval: ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL,
             create_table_if_not_exists: false,
+            default_table_location_from_namespace: false,
             is_exactly_once: Some(true),
             commit_retry_num: 8,
             enable_compaction: true,

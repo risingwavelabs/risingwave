@@ -334,6 +334,16 @@ pub struct IcebergConfig {
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub create_table_if_not_exists: bool,
 
+    /// Some catalogs (e.g. the AWS Glue Iceberg REST endpoint) do not assign a table location
+    /// server-side and reject `CreateTable` requests without one. When enabled and no location
+    /// can be derived from `warehouse.path`, the table location is derived from the namespace's
+    /// `location` property as `<namespace location>/<table name>` (matching Java's
+    /// `GlueCatalog.defaultWarehouseLocation`). Only takes effect together with
+    /// `create_table_if_not_exists`. Default is false.
+    #[serde(default, deserialize_with = "deserialize_bool_from_string")]
+    #[with_option(iceberg_engine)]
+    pub default_table_location_from_namespace: bool,
+
     /// Whether it is `exactly_once`, the default is true.
     #[serde(default = "default_some_true")]
     #[serde_as(as = "Option<DisplayFromStr>")]

@@ -700,6 +700,18 @@ IcebergConfig:
     field_type: bool
     required: false
     default: Default::default
+  - name: default_table_location_from_namespace
+    field_type: bool
+    comments: |-
+      Some catalogs (e.g. the AWS Glue Iceberg REST endpoint) do not assign a table location
+      server-side and reject `CreateTable` requests without one. When enabled and no location
+      can be derived from `warehouse.path`, the table location is derived from the namespace's
+      `location` property as `<namespace location>/<table name>` (matching Java's
+      `GlueCatalog.defaultWarehouseLocation`). Only takes effect together with
+      `create_table_if_not_exists`. Default is false.
+    required: false
+    default: Default::default
+    iceberg_engine: true
   - name: is_exactly_once
     field_type: bool
     comments: Whether it is `exactly_once`, the default is true.

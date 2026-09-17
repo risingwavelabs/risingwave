@@ -176,6 +176,13 @@ pub(super) async fn create_table_if_not_exists_impl(
             None => None,
         }
     };
+    let location = match location {
+        Some(location) => Some(location),
+        None if config.default_table_location_from_namespace => {
+            default_table_location_from_namespace(catalog.as_ref(), &namespace, &table_name).await?
+        }
+        None => None,
+    };
 
     let partition_spec = match &config.partition_by {
         Some(partition_by) => {
@@ -268,6 +275,34 @@ pub(super) async fn create_table_if_not_exists_impl(
         .map_err(|e| SinkError::Iceberg(anyhow!(e)))
         .context("failed to create iceberg table")?;
     Ok(true)
+}
+
+/// Derive the table location from the namespace's `location` property, i.e.
+/// `<namespace location>/<table name>`. Returns `None` if the namespace has no `location`
+/// property, in which case the catalog is left to assign the location as before.
+async fn default_table_location_from_namespace(
+    catalog: &dyn Catalog,
+    namespace: &NamespaceIdent,
+    table_name: &str,
+) -> Result<Option<String>> {
+    let namespace = catalog
+        .get_namespace(namespace)
+        .await
+        .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+        .with_context(|| format!("failed to get iceberg namespace: {namespace}"))?;
+    Ok(namespace
+        .properties()
+        .get("location")
+        .filter(|location| !location.is_empty())
+        .map(|location| join_table_location(location, table_name)))
+}
+
+fn join_table_location(namespace_location: &str, table_name: &str) -> String {
+    format!(
+        "{}/{}",
+        namespace_location.trim_end_matches('/'),
+        table_name
+    )
 }
 
 async fn create_namespace_if_not_exists(
@@ -610,4 +645,26 @@ fn build_sort_order(order_key: &str, schema: &iceberg::spec::Schema) -> Result<S
     builder
         .build(schema)
         .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::join_table_location;
+
+    #[test]
+    fn test_join_table_location() {
+        assert_eq!(
+            join_table_location("s3://bucket/ns", "t"),
+            "s3://bucket/ns/t"
+        );
+        // Trailing slashes on the namespace location are trimmed.
+        assert_eq!(
+            join_table_location("s3://bucket/ns/", "t"),
+            "s3://bucket/ns/t"
+        );
+        assert_eq!(
+            join_table_location("s3://bucket/ns//", "t"),
+            "s3://bucket/ns/t"
+        );
+    }
 }
