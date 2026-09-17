@@ -36,7 +36,7 @@ impl DockerServiceConfig for OracleConfig {
     }
 
     fn ports(&self) -> Vec<(String, String)> {
-        vec![(self.port.to_string(), "1521".to_owned())]
+        vec![(format!("{}:{}", self.address, self.port), "1521".to_owned())]
     }
 
     fn data_path(&self) -> Option<String> {
