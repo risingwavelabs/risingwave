@@ -125,15 +125,18 @@ fn validate_license(connector: &str) -> Result<()> {
 
 /// Keep this policy in sync with Java's `SourceValidateHandler.validateHeartbeatInterval`.
 /// Validates user-supplied options, not the final Debezium configuration. On CREATE, an omitted
-/// interval uses the connector default (300000 ms for PostgreSQL/Citus); on ALTER, omission leaves
+/// interval uses the connector default (300000 ms for PostgreSQL); on ALTER, omission leaves
 /// the existing interval unchanged. Unrelated connector heartbeat mechanisms are not checked here.
 pub(crate) fn validate_cdc_heartbeat_interval(
     connector: &str,
     props: &BTreeMap<String, String>,
 ) -> Result<()> {
+    // MySQL/SQL Server need an initial offset before shared-source creation can complete,
+    // even when no captured data changes. PostgreSQL also needs heartbeat-driven WAL progress.
+    // Debezium accepting zero does not make it safe for these source lifecycles.
     let heartbeat_required = match connector {
-        POSTGRES_CDC_CONNECTOR | CITUS_CDC_CONNECTOR => true,
-        MYSQL_CDC_CONNECTOR | SQL_SERVER_CDC_CONNECTOR | MONGODB_CDC_CONNECTOR => false,
+        POSTGRES_CDC_CONNECTOR | MYSQL_CDC_CONNECTOR | SQL_SERVER_CDC_CONNECTOR => true,
+        MONGODB_CDC_CONNECTOR | CITUS_CDC_CONNECTOR => false,
         _ => return Ok(()),
     };
     let Some(value) = props.get("debezium.heartbeat.interval.ms") else {
@@ -152,7 +155,7 @@ pub(crate) fn validate_cdc_heartbeat_interval(
         })?;
     if heartbeat_required && interval == 0 {
         return Err(ErrorCode::InvalidParameterValue(
-            "'debezium.heartbeat.interval.ms' must be greater than 0 for PostgreSQL and Citus CDC: heartbeats are required for replication-slot progress and WAL reclamation".to_owned(),
+            "'debezium.heartbeat.interval.ms' must be greater than 0 for PostgreSQL, MySQL and SQL Server CDC: heartbeats are required for initialization and recovery safety".to_owned(),
         )
         .into());
     }
@@ -378,9 +381,12 @@ mod tests {
                     value.to_owned(),
                 );
                 let result = validate_cdc_heartbeat_interval(connector, &props);
-                if matches!(connector, POSTGRES_CDC_CONNECTOR | CITUS_CDC_CONNECTOR) {
+                if matches!(
+                    connector,
+                    POSTGRES_CDC_CONNECTOR | MYSQL_CDC_CONNECTOR | SQL_SERVER_CDC_CONNECTOR
+                ) {
                     let err = result.unwrap_err();
-                    assert!(err.to_string().contains("WAL reclamation"), "{err}");
+                    assert!(err.to_string().contains("must be greater than 0"), "{err}");
                 } else {
                     result.unwrap();
                 }

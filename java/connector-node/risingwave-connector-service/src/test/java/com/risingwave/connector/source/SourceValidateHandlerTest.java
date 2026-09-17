@@ -88,18 +88,20 @@ public class SourceValidateHandlerTest {
     }
 
     @Test
-    public void zeroDisablesHeartbeatExceptForPostgresAndCitus() {
+    public void zeroDisablesHeartbeatForMongoDbAndCitus() {
         for (String value : new String[] {"0", "+0", "-0"}) {
             var props = Map.of(HEARTBEAT_INTERVAL, value);
-            if (sourceType == SourceType.POSTGRES || sourceType == SourceType.CITUS) {
+            if (sourceType == SourceType.POSTGRES
+                    || sourceType == SourceType.MYSQL
+                    || sourceType == SourceType.SQL_SERVER) {
                 var error =
                         assertThrows(
                                 StatusRuntimeException.class,
                                 () ->
                                         SourceValidateHandler.validateHeartbeatInterval(
                                                 props, sourceType));
-                assertTrue(error.getMessage().contains("WAL reclamation"));
-                assertRejectedBeforeDatabaseValidation(props, "WAL reclamation");
+                assertTrue(error.getMessage().contains("must be greater than 0"));
+                assertRejectedBeforeDatabaseValidation(props, "must be greater than 0");
             } else {
                 SourceValidateHandler.validateHeartbeatInterval(props, sourceType);
             }
