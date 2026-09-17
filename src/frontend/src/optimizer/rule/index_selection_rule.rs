@@ -20,7 +20,7 @@
 //! |In         | 10  | 8  | 5  | 5  | 5  | take the minimum value with actual in number |
 //! |Range(Two) | 600 | 50 | 20 | 10 | 10 | `RangeTwoSideBound` like a between 1 and 2 |
 //! |Range(One) | 1400| 70 | 25 | 15 | 10 | `RangeOneSideBound` like a > 1, a >= 1, a < 1|
-//! |All        | 4000| 100| 30 | 20 | 10 | |
+//! |All        | 4000| 100| 30 | 20 | 20 | |
 //!
 //! ```text
 //! index cost = cost(match type of 0 idx)
@@ -34,7 +34,7 @@
 //!
 //! - For `a = 1 and b = 1 and c = 1`, its cost is 1 = Equal0 * Equal1 * Equal2 = 1
 //! - For `a in (xxx) and b = 1 and c = 1`, its cost is In0 * Equal1 * Equal2 = 10
-//! - For `a = 1 and b in (xxx)`, its cost is Equal0 * In1 * All2 = 1 * 8 * 50 = 400
+//! - For `a = 1 and b in (xxx)`, its cost is Equal0 * In1 * All2 = 1 * 8 * 30 = 240
 //! - For `a between xxx and yyy`, its cost is Range(Two)0 = 600
 //! - For `a = 1 and b between xxx and yyy`, its cost is Equal0 * Range(Two)1 = 50
 //! - For `a = 1 and b > 1`, its cost is Equal0 * Range(One)1 = 70
@@ -117,14 +117,14 @@ impl Rule<Logical> for IndexSelectionRule {
                     TableScanIoEstimator::estimate_row_size(&index_scan),
                 );
 
-                if index_cost.le(&min_cost) {
+                if index_cost.strictly_cheaper_than(&min_cost) {
                     min_cost = index_cost;
                     final_plan = index_scan.into();
                 }
             } else {
                 // non-covering index selection
                 let (index_lookup, lookup_cost) = self.gen_index_lookup(logical_scan, index);
-                if lookup_cost.le(&min_cost) {
+                if lookup_cost.strictly_cheaper_than(&min_cost) {
                     min_cost = lookup_cost;
                     final_plan = index_lookup;
                 }
@@ -132,7 +132,7 @@ impl Rule<Logical> for IndexSelectionRule {
         }
 
         if let Some((merge_index, merge_index_cost)) = self.index_merge_selection(logical_scan)
-            && merge_index_cost.le(&min_cost)
+            && merge_index_cost.strictly_cheaper_than(&min_cost)
         {
             min_cost = merge_index_cost;
             final_plan = merge_index;
@@ -966,7 +966,7 @@ impl IndexCost {
         )
     }
 
-    pub(crate) fn le(&self, other: &IndexCost) -> bool {
+    pub(crate) fn strictly_cheaper_than(&self, other: &IndexCost) -> bool {
         self.cost < other.cost
     }
 }

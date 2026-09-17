@@ -86,7 +86,7 @@ impl StreamingIndexSelectionRule {
                     &index_scan,
                     TableScanIoEstimator::estimate_row_size(&index_scan),
                 );
-                if index_cost.le(&min_cost) {
+                if index_cost.strictly_cheaper_than(&min_cost) {
                     min_cost = index_cost;
                     best_scan = Some(index_scan);
                 }
