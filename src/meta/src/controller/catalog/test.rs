@@ -14,6 +14,8 @@
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
+
     use risingwave_common::catalog::{FragmentTypeFlag, FragmentTypeMask};
     use risingwave_common::hash::VirtualNode;
     use risingwave_meta_model::FragmentId;
@@ -2075,6 +2077,10 @@ mod tests {
                         external_table: Some(ExternalTableDesc {
                             source_id: shared_source_id,
                             table_name: "mydb.orders".to_owned(),
+                            connect_properties: BTreeMap::from([(
+                                "hostname".to_owned(),
+                                "mysql-host".to_owned(),
+                            )]),
                             ..Default::default()
                         }),
                         ..Default::default()
@@ -2097,6 +2103,9 @@ mod tests {
             .unwrap();
         assert_eq!(external_table.source_id, shared_source_id);
         assert_eq!(external_table.table_id, table_source_id.as_cdc_table_id());
+        // Connect properties are only used to validate the descriptor, never persisted.
+        assert!(external_table.connect_properties.is_empty());
+        assert!(external_table.secret_refs.is_empty());
 
         let dependency_count = ObjectDependency::find()
             .filter(object_dependency::Column::Oid.eq(shared_source_id.as_object_id()))

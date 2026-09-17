@@ -257,6 +257,12 @@ impl CatalogController {
             .and_then(|info| info.external_table.as_mut())
         {
             external_table.table_id = source_id.as_cdc_table_id();
+            // The connect properties were only needed to validate the descriptor. Consumers
+            // resolve them from the upstream shared source when they are planned, so persisting
+            // a copy here would only make credentials and secret references stale after
+            // `ALTER SOURCE`.
+            external_table.connect_properties.clear();
+            external_table.secret_refs.clear();
         }
         let source: source::ActiveModel = pb_source.clone().into();
         Source::insert(source).exec(&txn).await?;

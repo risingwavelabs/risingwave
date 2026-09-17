@@ -1415,6 +1415,7 @@ async fn handle_create_cdc_table_source(
         bind_pk_and_row_id_on_relation(columns, pk_names, false)?;
     debug_assert!(row_id_index.is_none());
 
+    let (connect_properties, secret_refs) = cdc_with_options.into_parts();
     let id_to_index = columns
         .iter()
         .enumerate()
@@ -1440,10 +1441,12 @@ async fn handle_create_cdc_table_source(
             .map(|column| column.column_desc.clone())
             .collect(),
         stream_key,
-        // Consumers resolve these fields from `source_id` when they are planned. Persisting a
-        // copy here would make credentials and secret references stale after `ALTER SOURCE`.
-        connect_properties: BTreeMap::new(),
-        secret_refs: BTreeMap::new(),
+        // Meta validates this descriptor against the upstream table with these properties and
+        // then clears them before persisting the catalog: consumers resolve them from
+        // `source_id` when they are planned, so a persisted copy would only go stale after
+        // `ALTER SOURCE`.
+        connect_properties,
+        secret_refs,
     };
 
     let mut source_info = upstream_source.info.clone();
