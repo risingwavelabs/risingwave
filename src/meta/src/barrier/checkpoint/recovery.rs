@@ -370,6 +370,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
         self,
         runtime_info: DatabaseRuntimeInfoSnapshot,
         rendered_info: RenderedDatabaseRuntimeInfo,
+        barrier_interval_ms: u32,
         partial_graph_manager: &mut PartialGraphManager,
     ) {
         let database_status = self
@@ -404,9 +405,6 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             batch_refresh,
         } = rendered_info;
         let mut recoverer = partial_graph_manager.start_recover();
-        let barrier_interval_ms = recovery_context.fragment_context.database_map[&self.database_id]
-            .barrier_interval_ms
-            .map(|interval| interval as u32);
         let result: MetaResult<_> = try {
             recoverer.inject_database_initial_barrier(
                 self.database_id,

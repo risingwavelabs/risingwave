@@ -525,7 +525,7 @@ impl PeriodicBarriers {
         new_barrier
     }
 
-    fn barrier_interval_ms(&self, database_id: DatabaseId) -> u32 {
+    pub(super) fn barrier_interval_ms(&self, database_id: DatabaseId) -> u32 {
         self.databases[&database_id]
             .barrier_interval
             .unwrap_or(self.sys_barrier_interval)
