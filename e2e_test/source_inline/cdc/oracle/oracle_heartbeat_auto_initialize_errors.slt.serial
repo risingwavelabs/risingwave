@@ -1,8 +1,8 @@
 control substitution on
 
-# TODO: Replace this direct Oracle CDC table validation POC (`FORMAT DEBEZIUM ENCODE JSON`)
-# with shared-source coverage (`CREATE SOURCE ... FORMAT PLAIN ENCODE JSON` followed by
-# `CREATE TABLE ... FROM SOURCE`) once Oracle shared-source implementation is complete.
+# TODO: Replace the direct Oracle CDC table validation below with
+# `CREATE SOURCE ... FORMAT PLAIN ENCODE JSON` once Oracle shared-source implementation is
+# complete. Cover `CREATE TABLE ... FROM SOURCE` separately in shared-source ingestion tests.
 
 statement ok
 DROP TABLE IF EXISTS missing_oracle_schema;
