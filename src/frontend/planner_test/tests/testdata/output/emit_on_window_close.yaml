@@ -222,8 +222,8 @@
       ON s1.id = s2.id and s1.ts >= s2.ts   and s1.ts - INTERVAL '1' MINUTE <= s2.ts
     );
   stream_plan: |-
-    StreamMaterialize { columns: [id1, value1, id2, value2, ts1, ts2, s1._row_id(hidden), s2._row_id(hidden), count], stream_key: [s1._row_id, s2._row_id, id1, value2], pk_columns: [s1._row_id, s2._row_id, id1, value2], pk_conflict: NoCheck }
-    └─StreamOverWindow { window_functions: [count() OVER(PARTITION BY s2.value ORDER BY s2.ts ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+    StreamMaterialize { columns: [id1, value1, id2, value2, ts1, ts2, s1._row_id(hidden), s2._row_id(hidden), count], stream_key: [s1._row_id, s2._row_id, id1, value2], pk_columns: [s1._row_id, s2._row_id, id1, value2], pk_conflict: NoCheck, watermark_columns: [ts2] }
+    └─StreamOverWindow { window_functions: [count() OVER(PARTITION BY s2.value ORDER BY s2.ts ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)], output_watermarks: [[s2.ts]] }
       └─StreamExchange { dist: HashShard(s2.value) }
         └─StreamHashJoin [interval, append_only] { type: Inner, predicate: s1.id = s2.id AND (s1.ts >= s2.ts) AND ($expr1 <= s2.ts), conditions_to_clean_left_state_table: (s1.ts >= s2.ts), conditions_to_clean_right_state_table: ($expr1 <= s2.ts), output_watermarks: [[s1.ts], [s2.ts]], output: [s1.id, s1.value, s2.id, s2.value, s1.ts, s2.ts, s1._row_id, s2._row_id] }
           ├─StreamExchange { dist: HashShard(s1.id) }
