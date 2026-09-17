@@ -294,17 +294,6 @@ impl HummockManager {
             return Ok(());
         }
 
-        {
-            // Remove table write throughput statistics
-            // The Caller acquires `Send`, so we should safely use `write` lock before the await point.
-            // The table write throughput statistic accepts data inconsistencies (unregister table ids fail), so we can clean it up in advance.
-            let mut table_write_throughput_statistic_manager =
-                self.table_write_throughput_statistic_manager.write();
-            for &table_id in table_ids.iter().unique() {
-                table_write_throughput_statistic_manager.remove_table(table_id);
-            }
-        }
-
         let mut versioning_guard = self
             .versioning
             .write_with_process_name("unregister_table_ids")
@@ -327,7 +316,7 @@ impl HummockManager {
         }
         let mut group_changes: HashMap<CompactionGroupId, UnregisterGroupChange> = HashMap::new();
         // Remove member tables
-        for table_id in table_ids.into_iter().unique() {
+        for table_id in table_ids.iter().copied().unique() {
             let version = new_version_delta.latest_version();
             let Some(info) = version.state_table_info.info().get(&table_id) else {
                 continue;
@@ -399,6 +388,15 @@ impl HummockManager {
 
         for group_id in removed_groups {
             self.compaction_state.remove_compaction_group(group_id);
+        }
+
+        // Serialize removal with commit's statistics publication. Cleaning up before taking
+        // versioning could let an in-flight commit recreate a deleted table's history.
+        let mut stats = self.table_write_throughput_statistic_manager.write();
+        drop(compaction_group_manager);
+        drop(versioning_guard);
+        for table_id in table_ids {
+            stats.remove_table(table_id);
         }
 
         // No need to handle DeltaType::GroupDestroy during time travel.

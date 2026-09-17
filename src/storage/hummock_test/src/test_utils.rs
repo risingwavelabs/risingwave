@@ -260,7 +260,6 @@ impl HummockTestEnv {
                     VectorIndexDelta::Init(init_config),
                 )]),
                 tables_to_commit: HashMap::from_iter([(table_id, init_epoch)]),
-                table_checkpoint_secs: Default::default(),
                 truncate_tables: HashSet::new(),
             })
             .await

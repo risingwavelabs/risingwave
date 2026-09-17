@@ -326,10 +326,7 @@ impl HummockManager {
             use_new_object_prefix_strategy,
         );
 
-        let max_table_statistic_expired_time = std::cmp::max(
-            env.opts.table_stat_throuput_window_seconds_for_split,
-            env.opts.table_stat_throuput_window_seconds_for_merge,
-        ) as i64;
+        let table_statistic_retention = env.opts.table_write_throughput_retention_seconds;
 
         let iceberg_compactor_manager = Arc::new(IcebergCompactorManager::new());
 
@@ -369,7 +366,7 @@ impl HummockManager {
             version_archive_dir,
             pause_version_checkpoint: AtomicBool::new(false),
             table_write_throughput_statistic_manager: parking_lot::RwLock::new(
-                TableWriteThroughputStatisticManager::new(max_table_statistic_expired_time),
+                TableWriteThroughputStatisticManager::new(table_statistic_retention),
             ),
             table_committed_epoch_notifiers: parking_lot::Mutex::new(
                 TableCommittedEpochNotifiers {

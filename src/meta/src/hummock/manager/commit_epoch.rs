@@ -19,7 +19,6 @@ use itertools::Itertools;
 use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::meta::default::compaction_config;
-use risingwave_common::system_param::reader::SystemParamsRead;
 use risingwave_hummock_sdk::change_log::EpochNewChangeLog;
 use risingwave_hummock_sdk::compaction_group::group_split::split_sst_with_table_ids;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -64,10 +63,6 @@ pub struct CommitEpochInfo {
     /// `table_id` -> `committed_epoch`
     pub tables_to_commit: HashMap<TableId, u64>,
 
-    /// Effective configured checkpoint period for each table's database, in seconds.
-    /// Callers without database scheduling information use the system defaults.
-    pub table_checkpoint_secs: HashMap<TableId, u64>,
-
     pub truncate_tables: HashSet<TableId>,
 }
 
@@ -83,7 +78,6 @@ impl HummockManager {
             change_log_delta,
             vector_index_delta,
             tables_to_commit,
-            table_checkpoint_secs,
             truncate_tables,
         } = commit_info;
         let mut versioning_guard = self
@@ -354,21 +348,31 @@ impl HummockManager {
                 self.try_send_compaction_request(*id, compact_task::TaskType::Dynamic);
             }
         }
-        drop(versioning_guard);
+        {
+            // Hand off publication from versioning to statistics. A merge that sees the
+            // committed version must wait for its load observations, but the per-table
+            // sampling work itself runs after releasing the version lock.
+            let stats = (!self.env.opts.compaction_deterministic_test)
+                .then(|| self.table_write_throughput_statistic_manager.write());
+            drop(versioning_guard);
+            if let Some(mut stats) = stats {
+                // Commit membership is authoritative: raw SST statistics can still mention
+                // dropped tables. Empty commits for live tables are real zero observations.
+                let now = tokio::time::Instant::now();
+                for &table_id in tables_to_commit.keys() {
+                    let bytes = table_stats_change.get(&table_id).map_or(0, |stat| {
+                        (stat.total_value_size + stat.total_key_size).max(0) as u64
+                    });
+                    stats.record_commit(table_id, bytes, now);
+                }
+            }
+        }
+        drop(table_stats_change);
         let may_delete_object_ids =
             &table_change_log_object_ids_before_commit - &table_change_log_object_ids_after_commit;
         self.gc_manager
             .add_may_delete_object_ids(may_delete_object_ids.into_iter());
 
-        if !self.env.opts.compaction_deterministic_test {
-            // A successful empty checkpoint observes zero throughput. Tables whose commits
-            // are paused are absent from tables_to_commit and receive no synthetic samples.
-            for &table_id in tables_to_commit.keys() {
-                table_stats_change.entry(table_id).or_default();
-            }
-            self.collect_table_write_throughput(table_stats_change, &table_checkpoint_secs)
-                .await;
-        }
         if !modified_compaction_groups.is_empty() {
             self.try_update_write_limits(&modified_compaction_groups)
                 .await;
@@ -378,39 +382,6 @@ impl HummockManager {
             self.check_state_consistency().await;
         }
         Ok(())
-    }
-
-    async fn collect_table_write_throughput(
-        &self,
-        table_stats: PbTableStatsMap,
-        table_checkpoint_secs: &HashMap<TableId, u64>,
-    ) {
-        let params = self.env.system_params_reader().await;
-        let barrier_interval_ms = params.barrier_interval_ms() as u64;
-        let default_checkpoint_secs = std::cmp::max(
-            1,
-            params.checkpoint_frequency() * barrier_interval_ms / 1000,
-        );
-
-        let mut table_throughput_statistic_manager =
-            self.table_write_throughput_statistic_manager.write();
-        let timestamp = chrono::Utc::now().timestamp();
-
-        for (table_id, stat) in table_stats {
-            let checkpoint_secs = table_checkpoint_secs
-                .get(&table_id)
-                .copied()
-                .unwrap_or(default_checkpoint_secs)
-                .max(1);
-            let throughput = ((stat.total_value_size + stat.total_key_size) as f64
-                / checkpoint_secs as f64) as u64;
-            table_throughput_statistic_manager.add_table_throughput_with_ts(
-                table_id,
-                throughput,
-                timestamp,
-                checkpoint_secs as i64,
-            );
-        }
     }
 
     async fn correct_commit_ssts(

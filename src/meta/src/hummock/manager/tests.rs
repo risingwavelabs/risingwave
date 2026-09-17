@@ -52,6 +52,7 @@ use risingwave_pb::hummock::{HummockPinnedVersion, PbLevelType, StateTableInfo};
 use risingwave_rpc_client::HummockMetaClient;
 use sea_orm::{ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect};
 use thiserror_ext::AsReport;
+use tokio::time::Instant;
 
 use crate::controller::catalog::CatalogController;
 use crate::controller::cluster::ClusterController;
@@ -2049,7 +2050,8 @@ async fn test_merge_compaction_group_removes_split_group_metrics() {
         .merge_compaction_group_impl(
             right_group_id,
             left_group_id,
-            Some(HashSet::from([100.into(), 101.into(), 102.into()])),
+            Some(&HashSet::from([100.into(), 101.into(), 102.into()])),
+            false,
         )
         .await
         .unwrap();
@@ -3417,10 +3419,10 @@ async fn test_try_merge_compaction_group_error_propagation() {
     let mv_stat = group_infos.iter().find(|g| g.group_id == mv_id).unwrap();
 
     let mut throughput_manager = TableWriteThroughputStatisticManager::new(240);
-    let now = chrono::Utc::now().timestamp();
-    for age in (0..240).rev() {
+    let now = Instant::now();
+    for age in (0..=240).rev() {
         for table in [100, 200, 201, 202] {
-            throughput_manager.add_table_throughput_with_ts(table.into(), 0, now - age, 1);
+            throughput_manager.record_commit(table.into(), 0, now - Duration::from_secs(age));
         }
     }
     let created_tables: HashSet<TableId> =
@@ -3866,15 +3868,14 @@ async fn test_schedule_group_split_does_not_normalize_overlap_when_enabled() {
         .table_write_throughput_statistic_manager
         .write()
         .remove_table(200.into());
-    hummock_manager
-        .table_write_throughput_statistic_manager
-        .write()
-        .add_table_throughput_with_ts(
-            200.into(),
-            opts.table_high_write_throughput_threshold + 1,
-            chrono::Utc::now().timestamp(),
-            1,
-        );
+    record_table_throughput(
+        &mut hummock_manager
+            .table_write_throughput_statistic_manager
+            .write(),
+        200.into(),
+        opts.table_high_write_throughput_threshold + 1,
+        Instant::now(),
+    );
 
     assert_eq!(
         get_compaction_group_id_by_table_id(hummock_manager.clone(), 200).await,
@@ -4472,6 +4473,21 @@ async fn test_huge_split_revalidates_snapshot() {
         "scheduling was disabled"
     );
 
+    // The hot-table branch must enforce the same current disable as the size branch.
+    // Isolating the first table has a no-op first step; an interior table needs both steps.
+    for table in [100, 101] {
+        let mut hot = TableWriteThroughputStatisticManager::new(240);
+        record_table_throughput(&mut hot, table.into(), u64::MAX / 2, Instant::now());
+        manager
+            .try_split_compaction_group(&hot, group.clone())
+            .await;
+        assert_eq!(
+            manager.get_current_version().await.id,
+            before,
+            "hot splitting was disabled for table {table}"
+        );
+    }
+
     // Re-enable scheduling, but shrink the group below the split threshold.
     manager
         .update_compaction_config(
@@ -4518,9 +4534,21 @@ async fn test_huge_split_revalidates_snapshot() {
         group_101, group_102,
         "the refreshed prefix must be split in this round"
     );
+    // A manual operation remains available when automatic scheduling is disabled.
+    manager
+        .update_compaction_config(
+            &[group_100],
+            &[MutableConfig::DisableAutoGroupScheduling(true)],
+        )
+        .await
+        .unwrap();
+    manager
+        .move_state_tables_to_dedicated_compaction_group(group_100, &[100.into()], None)
+        .await
+        .unwrap();
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_split_multiple_hot_tables_uses_current_parent() {
     let (_, manager, _, _) = setup_compute_env(80).await;
     manager
@@ -4534,9 +4562,38 @@ async fn test_split_multiple_hot_tables_uses_current_parent() {
         .unwrap();
     {
         let mut stats = manager.table_write_throughput_statistic_manager.write();
-        let now = chrono::Utc::now().timestamp();
+        let now = Instant::now();
         for table in [100, 101, 102] {
-            stats.add_table_throughput_with_ts(table.into(), u64::MAX / 2, now, 1);
+            for age in (2..=241).rev() {
+                stats.record_commit(table.into(), 0, now - Duration::from_secs(age));
+            }
+            stats.record_commit(
+                table.into(),
+                manager.env.opts.table_high_write_throughput_threshold + 1,
+                now - Duration::from_secs(1),
+            );
+            stats.record_commit(table.into(), 0, now);
+        }
+    }
+    // A completed burst followed by observed zero must not cause a delayed hot split.
+    let before = manager.get_current_version().await.id;
+    manager.schedule_group_split_for_test().await;
+    assert_eq!(manager.get_current_version().await.id, before);
+    tokio::time::advance(Duration::from_secs(1)).await;
+    {
+        let mut stats = manager.table_write_throughput_statistic_manager.write();
+        let now = Instant::now();
+        // New hot ingress must not be diluted by the older cold history. The last
+        // table's burst is still pending, with no later commit to close its sample.
+        for table in [100, 101, 102] {
+            if table == 102 {
+                stats.record_commit(table.into(), 0, now);
+            }
+            stats.record_commit(
+                table.into(),
+                manager.env.opts.table_high_write_throughput_threshold + 1,
+                now,
+            );
         }
     }
     manager.schedule_group_split_for_test().await;
@@ -4556,14 +4613,14 @@ async fn test_split_multiple_hot_tables_uses_current_parent() {
     }
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_merge_batch_uses_accumulated_size() {
     use risingwave_meta_model::{
         CreateType, JobStatus, StreamingParallelism, object, streaming_job,
     };
     use sea_orm::{ActiveModelTrait, Set};
     let registry = Registry::new();
-    let (env, manager, _, _) = setup_compute_env_with_metric(
+    let (env, manager, _, worker_id) = setup_compute_env_with_metric(
         80,
         CompactionConfigBuilder::new().build(),
         Some(MetaMetrics::for_test(&registry)),
@@ -4620,7 +4677,7 @@ async fn test_merge_batch_uses_accumulated_size() {
         * env.opts.split_group_size_ratio) as u64;
     {
         let mut versioning = manager.versioning.write().await;
-        let now = chrono::Utc::now().timestamp();
+        let now = Instant::now();
         let mut stats = manager.table_write_throughput_statistic_manager.write();
         for table in [100, 101, 102] {
             versioning.version_stats.table_stats.insert(
@@ -4630,9 +4687,28 @@ async fn test_merge_batch_uses_accumulated_size() {
                     ..Default::default()
                 },
             );
-            for age in (0..240).rev() {
-                stats.add_table_throughput_with_ts(table.into(), 0, now - age, 1);
+            for age in (0..=env.opts.table_write_throughput_retention_seconds as u64).rev() {
+                let bytes = if age == 120 {
+                    env.opts.table_high_write_throughput_threshold + 1
+                } else {
+                    0
+                };
+                stats.record_commit(table.into(), bytes, now - Duration::from_secs(age));
             }
+        }
+    }
+    // A past hotspot must still prevent merging after current ingress turns cold. The old
+    // majority-cold rule would merge here, despite the hot sample in the longer history.
+    let version_before = manager.get_current_version().await.id;
+    manager.schedule_group_merge_for_test().await;
+    assert_eq!(manager.get_current_version().await.id, version_before);
+    // Age out the history including its boundary bucket without depending on bucket width.
+    let cold_interval = 2 * env.opts.table_write_throughput_retention_seconds as u64 + 1;
+    tokio::time::advance(Duration::from_secs(cold_interval)).await;
+    {
+        let mut stats = manager.table_write_throughput_statistic_manager.write();
+        for table in [100, 101, 102] {
+            stats.record_commit(table.into(), 0, Instant::now());
         }
     }
     let global_statistics = manager
@@ -4642,6 +4718,136 @@ async fn test_merge_batch_uses_accumulated_size() {
             "calculate_compaction_group_statistic",
             "hummock_manager::versioning",
         ]);
+    // The scheduler may wait for locks after taking its cold throughput snapshot.
+    // A successful hot commit in that gap must veto the merge at apply time.
+    let stale_stats = manager
+        .table_write_throughput_statistic_manager
+        .read()
+        .clone();
+    let groups = manager.calculate_compaction_group_statistic().await;
+    let created_tables = HashSet::from([100.into(), 101.into(), 102.into()]);
+    let left = groups
+        .iter()
+        .find(|g| g.table_statistic.contains_key(&TableId::new(100)))
+        .unwrap();
+    let right = groups
+        .iter()
+        .find(|g| g.table_statistic.contains_key(&TableId::new(101)))
+        .unwrap();
+    manager
+        .update_compaction_config(
+            &[left.group_id],
+            &[MutableConfig::DisableAutoGroupScheduling(true)],
+        )
+        .await
+        .unwrap();
+    assert!(
+        manager
+            .try_merge_compaction_group(&stale_stats, left, right, &created_tables,)
+            .await
+            .is_err(),
+        "a scheduling snapshot must not override a newer disable-auto setting"
+    );
+    manager
+        .update_compaction_config(
+            &[left.group_id],
+            &[MutableConfig::DisableAutoGroupScheduling(false)],
+        )
+        .await
+        .unwrap();
+    // Current size can also change after the batch snapshot was built.
+    {
+        let mut versioning = manager.versioning.write().await;
+        versioning
+            .version_stats
+            .table_stats
+            .get_mut(&TableId::new(100))
+            .unwrap()
+            .total_value_size = limit as i64;
+    }
+    let error = manager
+        .try_merge_compaction_group(&stale_stats, left, right, &created_tables)
+        .await
+        .err()
+        .expect("the current merge policy must reject this stale snapshot");
+    assert!(error.to_string().contains("Cannot merge huge"));
+    {
+        let mut versioning = manager.versioning.write().await;
+        versioning
+            .version_stats
+            .table_stats
+            .get_mut(&TableId::new(100))
+            .unwrap()
+            .total_value_size = (limit * 4 / 10) as i64;
+    }
+    let mut sst = LocalSstableInfo::for_test(
+        generate_test_sstables_with_table_id(test_epoch(30), 100, get_sst_ids(&manager, 1).await)
+            .pop()
+            .unwrap(),
+    );
+    sst.table_stats.insert(
+        100.into(),
+        TableStats {
+            total_value_size: (env.opts.table_high_write_throughput_threshold * 2) as i64,
+            ..Default::default()
+        },
+    );
+    manager
+        .commit_epoch(super::commit_epoch::CommitEpochInfo {
+            sst_to_context: HashMap::from([(sst.sst_info.object_id, worker_id as _)]),
+            sstables: vec![sst],
+            tables_to_commit: HashMap::from([(100.into(), test_epoch(30))]),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    assert!(
+        manager
+            .try_merge_compaction_group(&stale_stats, left, right, &created_tables,)
+            .await
+            .is_err(),
+        "a stale cold snapshot must not merge a newly hot table"
+    );
+    // Complete the burst sample, then observe another full cold history. All three groups
+    // must be eligible again so the batch still exercises the cumulative size cap.
+    for seconds in [1, cold_interval] {
+        tokio::time::advance(Duration::from_secs(seconds)).await;
+        let mut stats = manager.table_write_throughput_statistic_manager.write();
+        for table in [100, 101, 102] {
+            stats.record_commit(table.into(), 0, Instant::now());
+        }
+    }
+    // A newly tightened L0 limit must use current config and levels, even with the
+    // original scheduling snapshot. Table 100's actual commit above added an L0 SST.
+    let cold_stats = manager
+        .table_write_throughput_statistic_manager
+        .read()
+        .clone();
+    manager
+        .update_compaction_config(
+            &[left.group_id, right.group_id],
+            &[MutableConfig::Level0StopWriteThresholdMaxSstCount(0)],
+        )
+        .await
+        .unwrap();
+    let error = manager
+        .try_merge_compaction_group(&cold_stats, left, right, &created_tables)
+        .await
+        .err()
+        .expect("the current merge policy must reject this stale snapshot");
+    assert!(error.to_string().contains("write limit"));
+    manager
+        .update_compaction_config(
+            &[left.group_id, right.group_id],
+            &[MutableConfig::Level0StopWriteThresholdMaxSstCount(
+                left.compaction_group_config
+                    .compaction_config
+                    .level0_stop_write_threshold_max_sst_count
+                    .unwrap(),
+            )],
+        )
+        .await
+        .unwrap();
     let statistics_before = global_statistics.get_sample_count();
     manager.schedule_group_merge_for_test().await;
     assert_eq!(
@@ -4663,38 +4869,29 @@ async fn test_merge_batch_uses_accumulated_size() {
     assert!(nonempty.iter().any(|g| g.table_statistic.len() == 2));
 }
 
-#[tokio::test]
+#[tokio::test(start_paused = true)]
 async fn test_empty_commits_observe_only_committed_tables() {
     let (_, manager, _, worker_id) = setup_compute_env(80).await;
     manager
         .register_table_ids_for_test(&[(100, 2.into()), (101, 2.into())])
         .await
         .unwrap();
-    // Only table 100 commits; table 101 has no observation yet.
     manager
         .commit_epoch(super::commit_epoch::CommitEpochInfo {
             tables_to_commit: HashMap::from([(100.into(), test_epoch(30))]),
-            table_checkpoint_secs: HashMap::from([(100.into(), 10)]),
             ..Default::default()
         })
         .await
         .unwrap();
-    {
-        let stats = manager.table_write_throughput_statistic_manager.read();
-        let samples = stats
-            .get_table_throughput_descending(100.into(), 240)
-            .collect_vec();
-        assert_eq!(samples.len(), 1);
-        assert_eq!((samples[0].throughput, samples[0].interval_secs), (0, 10));
-        assert!(
-            stats
-                .get_table_throughput_descending(101.into(), 240)
-                .next()
-                .is_none()
-        );
-    }
-
-    // Commit both databases: table 100 writes 100 bytes; resumed table 101 is idle.
+    // A first commit establishes a baseline. Table 101 has not committed at all.
+    assert_eq!(
+        manager
+            .table_write_throughput_statistic_manager
+            .read()
+            .latest_table_throughput(100.into()),
+        None
+    );
+    tokio::time::advance(Duration::from_secs(2)).await;
     let sst =
         generate_test_sstables_with_table_id(test_epoch(31), 100, get_sst_ids(&manager, 1).await)
             .pop()
@@ -4716,22 +4913,97 @@ async fn test_empty_commits_observe_only_committed_tables() {
                 (100.into(), test_epoch(31)),
                 (101.into(), test_epoch(31)),
             ]),
-            table_checkpoint_secs: HashMap::from([(100.into(), 10), (101.into(), 2)]),
             ..Default::default()
         })
         .await
         .unwrap();
-    let stats = manager.table_write_throughput_statistic_manager.read();
-    for (table, count, throughput, seconds) in [(100, 2, 10, 10), (101, 1, 0, 2)] {
-        let samples = stats
-            .get_table_throughput_descending(table.into(), 240)
-            .collect_vec();
-        assert_eq!(samples.len(), count);
-        assert_eq!(
-            (samples[0].throughput, samples[0].interval_secs),
-            (throughput, seconds)
-        );
+    {
+        let stats = manager.table_write_throughput_statistic_manager.read();
+        // Epochs are only 1 ms apart; neither epochs nor configured periods are the denominator.
+        assert_eq!(stats.latest_table_throughput(100.into()), Some(50));
+        assert_eq!(stats.latest_table_throughput(101.into()), None);
     }
+    for epoch in 32..34 {
+        tokio::time::advance(Duration::from_secs(300)).await;
+        manager
+            .commit_epoch(super::commit_epoch::CommitEpochInfo {
+                tables_to_commit: HashMap::from([
+                    (100.into(), test_epoch(epoch)),
+                    (101.into(), test_epoch(epoch)),
+                ]),
+                ..Default::default()
+            })
+            .await
+            .unwrap();
+    }
+    tokio::time::advance(Duration::from_secs(299)).await;
+    {
+        let stats = manager.table_write_throughput_statistic_manager.read();
+        for table in [100, 101] {
+            assert_eq!(
+                stats.max_write_throughput(table.into(), Instant::now()),
+                Some(0)
+            );
+        }
+    }
+
+    // Queue commit before unregister on versioning. Unregister must not clear the
+    // history early and then let the in-flight commit recreate it after deletion.
+    let versioning = manager.versioning.write().await;
+    let commit = manager.commit_epoch(super::commit_epoch::CommitEpochInfo {
+        tables_to_commit: HashMap::from([(100.into(), test_epoch(34))]),
+        ..Default::default()
+    });
+    let unregister = manager.unregister_table_ids([100.into()]);
+    tokio::pin!(commit, unregister);
+    assert!(futures::poll!(commit.as_mut()).is_pending());
+    assert!(futures::poll!(unregister.as_mut()).is_pending());
+    drop(versioning);
+    let (committed, unregistered) = tokio::join!(commit, unregister);
+    committed.unwrap();
+    unregistered.unwrap();
+    // Reverse the ordering too: a later commit may contain a dropped table's SST.
+    // Version correction discards it, and statistics must not recreate its history.
+    let mut late_sst = LocalSstableInfo::for_test(
+        generate_test_sstables_with_table_id(test_epoch(35), 100, get_sst_ids(&manager, 1).await)
+            .pop()
+            .unwrap(),
+    );
+    late_sst.table_stats.insert(
+        100.into(),
+        TableStats {
+            total_value_size: 100,
+            ..Default::default()
+        },
+    );
+    manager
+        .commit_epoch(super::commit_epoch::CommitEpochInfo {
+            sst_to_context: HashMap::from([(late_sst.sst_info.object_id, worker_id as _)]),
+            sstables: vec![late_sst],
+            tables_to_commit: HashMap::from([(101.into(), test_epoch(35))]),
+            ..Default::default()
+        })
+        .await
+        .unwrap();
+    // Probe the resulting snapshot through its public API: a new observation must
+    // establish a baseline, rather than resume a deleted table's old history.
+    let mut stats = manager
+        .table_write_throughput_statistic_manager
+        .read()
+        .clone();
+    tokio::time::advance(Duration::from_secs(1)).await;
+    stats.record_commit(100.into(), 100, Instant::now());
+    assert_eq!(stats.latest_table_throughput(100.into()), None);
+}
+
+fn record_table_throughput(
+    stats: &mut TableWriteThroughputStatisticManager,
+    table: TableId,
+    throughput: u64,
+    now: Instant,
+) {
+    stats.record_commit(table, 0, now - Duration::from_secs(1));
+    stats.record_commit(table, throughput, now);
 }
 
 #[tokio::test]
@@ -4755,15 +5027,17 @@ async fn test_vnode_partition_ignores_expired_throughput() {
         }],
         ..Default::default()
     };
-    let now = chrono::Utc::now().timestamp();
+    let now = Instant::now();
     for (timestamp, expected) in [
-        (now - 3600, 1),
+        (now - Duration::from_secs(3600), 1),
         (now, manager.env.opts.hybrid_partition_node_count),
     ] {
-        manager
-            .table_write_throughput_statistic_manager
-            .write()
-            .add_table_throughput_with_ts(table, u64::MAX / 2, timestamp, 1);
+        record_table_throughput(
+            &mut manager.table_write_throughput_statistic_manager.write(),
+            table,
+            u64::MAX / 2,
+            timestamp,
+        );
         manager.calculate_vnode_partition(&mut task, &config, &[table]);
         assert_eq!(task.table_vnode_partition[&table], expected);
     }
@@ -4801,10 +5075,12 @@ async fn test_huge_split_refreshes_children_after_hot_table_split() {
             );
         }
     }
-    manager
-        .table_write_throughput_statistic_manager
-        .write()
-        .add_table_throughput_with_ts(100.into(), u64::MAX / 2, chrono::Utc::now().timestamp(), 1);
+    record_table_throughput(
+        &mut manager.table_write_throughput_statistic_manager.write(),
+        100.into(),
+        u64::MAX / 2,
+        Instant::now(),
+    );
     manager.schedule_group_split_for_test().await;
     let groups = manager.calculate_compaction_group_statistic().await;
     let nonempty = groups

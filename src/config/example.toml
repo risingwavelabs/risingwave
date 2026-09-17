@@ -69,6 +69,7 @@ table_stat_high_write_throughput_ratio_for_split = 0.5
 table_stat_low_write_throughput_ratio_for_merge = 0.7
 table_stat_throuput_window_seconds_for_split = 60
 table_stat_throuput_window_seconds_for_merge = 240
+table_write_throughput_retention_seconds = 300
 compact_task_table_size_partition_threshold_low = 134217728
 compact_task_table_size_partition_threshold_high = 536870912
 periodic_scheduling_compaction_group_split_interval_sec = 10

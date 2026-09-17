@@ -814,7 +814,6 @@ mod scheduling_tests {
     use crate::hummock::compaction::selector::default_compaction_selector;
     use crate::hummock::manager::compaction::ScheduleTrigger;
     use crate::hummock::manager::tests::{gen_sstable_info, setup_compute_env_with_meta_opts};
-    use crate::hummock::test_utils::setup_compute_env;
 
     tokio::task_local! {
         static BEFORE_UNSCHEDULE: Arc<tokio::sync::Barrier>;
@@ -967,7 +966,6 @@ mod scheduling_tests {
             .await
             .unwrap()
             .unwrap();
-        manager.try_send_compaction_request(left, TaskType::Dynamic);
         dispatch(manager.clone()).await;
         assert!(
             manager
@@ -1062,30 +1060,28 @@ mod scheduling_tests {
                     .dynamic_cooldown
                     .contains(&right)
             );
+            // A getter or explicit trigger using the deleted group must also leave it absent.
+            let (tasks, _) = manager
+                .get_compact_tasks(vec![right], 1, &mut *default_compaction_selector())
+                .await
+                .unwrap();
+            assert!(tasks.is_empty());
+            manager
+                .trigger_compaction_deterministic(
+                    manager.get_current_version().await.id,
+                    vec![right],
+                )
+                .await
+                .unwrap();
+            assert!(
+                !manager
+                    .compaction_state
+                    .snapshot()
+                    .scheduled
+                    .iter()
+                    .any(|(id, _)| *id == right)
+            );
         }
-    }
-
-    #[tokio::test]
-    async fn test_stale_getter_and_late_trigger_skip_missing_group() {
-        let (_, manager, _, _) = setup_compute_env(80).await;
-        let missing = 999.into();
-        let (tasks, _) = manager
-            .get_compact_tasks(vec![missing], 1, &mut *default_compaction_selector())
-            .await
-            .unwrap();
-        assert!(tasks.is_empty());
-        manager
-            .trigger_compaction_deterministic(manager.get_current_version().await.id, vec![missing])
-            .await
-            .unwrap();
-        assert!(
-            !manager
-                .compaction_state
-                .snapshot()
-                .scheduled
-                .iter()
-                .any(|(id, _)| *id == missing)
-        );
     }
 
     #[tokio::test]

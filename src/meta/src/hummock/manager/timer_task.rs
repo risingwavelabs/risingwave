@@ -472,11 +472,6 @@ impl HummockManager {
             .compaction_group_count
             .set(compaction_group_count as i64);
 
-        let max_statistic_expired_time = std::cmp::max(
-            self.env.opts.table_stat_throuput_window_seconds_for_split,
-            self.env.opts.table_stat_throuput_window_seconds_for_merge,
-        );
-
         for (group_id, group_levels) in &current_version.levels {
             let Some(compaction_group_config) = id_to_config.get(group_id) else {
                 warn!(
@@ -514,9 +509,8 @@ impl HummockManager {
 
             let mut avg_throughput = 0;
             for table_id in member_table_ids {
-                avg_throughput += table_write_throughput_statistic_manager
-                    .avg_write_throughput(*table_id, max_statistic_expired_time as i64)
-                    as u64;
+                avg_throughput +=
+                    table_write_throughput_statistic_manager.avg_write_throughput(*table_id) as u64;
             }
 
             self.metrics

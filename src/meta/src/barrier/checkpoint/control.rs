@@ -184,19 +184,6 @@ impl CheckpointControl {
                 &self.hummock_version_stats,
             );
         }
-        if let Some(task) = &mut task {
-            // A completion can combine databases and independent graphs. Preserve each
-            // table's effective configured period instead of using one system-wide value.
-            for (&partial_graph_id, info) in &task.epoch_infos {
-                let (database_id, _) = from_partial_graph_id(partial_graph_id);
-                let seconds = periodic_barriers.checkpoint_interval_secs(database_id);
-                task.commit_info.table_checkpoint_secs.extend(
-                    info.table_ids_to_commit
-                        .iter()
-                        .map(|&table_id| (table_id, seconds)),
-                );
-            }
-        }
         task
     }
 

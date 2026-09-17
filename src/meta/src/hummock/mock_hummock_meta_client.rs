@@ -219,7 +219,6 @@ impl HummockMetaClient for MockHummockMetaClient {
                     .map(|table_id| (table_id, epoch))
                     .collect(),
                 truncate_tables: HashSet::new(),
-                table_checkpoint_secs: Default::default(),
             })
             .await
             .map_err(mock_err)?;

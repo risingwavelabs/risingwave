@@ -13,18 +13,15 @@
 // limitations under the License.
 
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
-use std::ops::{Deref, DerefMut};
+use std::ops::DerefMut;
 use std::sync::Arc;
 
 use bytes::Bytes;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::monitor::MonitoredRwLock;
 use risingwave_hummock_sdk::compact_task::{ReportTask, is_compaction_task_expired};
-use risingwave_hummock_sdk::compaction_group::{
-    StateTableId, StaticCompactionGroupId, group_split,
-};
+use risingwave_hummock_sdk::compaction_group::{StateTableId, group_split};
 use risingwave_hummock_sdk::version::{GroupDelta, GroupDeltas, HummockVersion};
 use risingwave_hummock_sdk::{CompactionGroupId, can_concat};
 use risingwave_pb::hummock::compact_task::{TaskStatus, TaskType};
@@ -34,18 +31,14 @@ use risingwave_pb::hummock::{
 };
 use thiserror_ext::AsReport;
 
+use super::CompactionGroupStatistic;
 use super::compaction_group_manager::CompactionGroupManager;
-use super::{CompactionGroupStatistic, GroupStateValidator};
 use crate::hummock::error::{Error, Result};
 use crate::hummock::manager::transaction::HummockVersionTransaction;
-use crate::hummock::manager::versioning::Versioning;
 use crate::hummock::manager::{HummockManager, commit_multi_var};
 use crate::hummock::metrics_utils::remove_compaction_group_metrics;
 use crate::hummock::sequence::{next_compaction_group_id, next_sstable_id};
-use crate::hummock::table_write_throughput_statistic::{
-    TableWriteThroughputStatistic, TableWriteThroughputStatisticManager,
-};
-use crate::manager::MetaOpts;
+use crate::hummock::table_write_throughput_statistic::TableWriteThroughputStatisticManager;
 
 #[derive(Debug, PartialEq, Eq)]
 struct NormalizePlan {
@@ -173,7 +166,7 @@ impl HummockManager {
         group_1: CompactionGroupId,
         group_2: CompactionGroupId,
     ) -> Result<()> {
-        self.merge_compaction_group_impl(group_1, group_2, None)
+        self.merge_compaction_group_impl(group_1, group_2, None, false)
             .await
             .map(|_| ())
     }
@@ -184,7 +177,7 @@ impl HummockManager {
         group_2: CompactionGroupId,
         created_tables: HashSet<TableId>,
     ) -> Result<()> {
-        self.merge_compaction_group_impl(group_1, group_2, Some(created_tables))
+        self.merge_compaction_group_impl(group_1, group_2, Some(&created_tables), false)
             .await
             .map(|_| ())
     }
@@ -193,18 +186,18 @@ impl HummockManager {
         &self,
         group_1: CompactionGroupId,
         group_2: CompactionGroupId,
-        created_tables: Option<HashSet<TableId>>,
+        created_tables: Option<&HashSet<TableId>>,
+        validate_policy: bool,
     ) -> Result<CompactionGroupStatistic> {
         // Catalog access can wait for DDL or the database. Do it before taking Hummock write
         // locks, then conservatively check this snapshot against the current group members.
+        let fetched_created_tables;
         let created_tables = if let Some(created_tables) = created_tables {
-            #[expect(clippy::assertions_on_constants)]
-            {
-                assert!(cfg!(debug_assertions));
-            }
+            // Reuse the batch snapshot; a newly added table is conservatively rejected by
+            // the current-membership check below, without another catalog query per merge.
             created_tables
         } else {
-            match self.metadata_manager.get_created_table_ids().await {
+            fetched_created_tables = match self.metadata_manager.get_created_table_ids().await {
                 Ok(created_tables) => HashSet::from_iter(created_tables),
                 Err(err) => {
                     tracing::warn!(error = %err.as_report(), "failed to fetch created table ids");
@@ -213,7 +206,8 @@ impl HummockManager {
                         group_1, group_2
                     )));
                 }
-            }
+            };
+            &fetched_created_tables
         };
         let compaction_guard = self
             .compaction
@@ -265,18 +259,11 @@ impl HummockManager {
         assert!(member_table_ids_1.is_sorted());
         assert!(member_table_ids_2.is_sorted());
 
-        fn contains_creating_table(
-            table_ids: &Vec<TableId>,
-            created_tables: &HashSet<TableId>,
-        ) -> bool {
-            table_ids
-                .iter()
-                .any(|table_id| !created_tables.contains(table_id))
-        }
-
-        // do not merge the compaction group which is creating
-        if contains_creating_table(&member_table_ids_1, &created_tables)
-            || contains_creating_table(&member_table_ids_2, &created_tables)
+        // Do not merge a group containing a table that is still being created.
+        if member_table_ids_1
+            .iter()
+            .chain(&member_table_ids_2)
+            .any(|table_id| !created_tables.contains(table_id))
         {
             return Err(Error::CompactionGroup(format!(
                 "Cannot merge creating group {} next_group {} member_table_ids_1 {:?} member_table_ids_2 {:?}",
@@ -372,6 +359,55 @@ impl HummockManager {
             }
         }
 
+        // These members and their sizes are stable under versioning. Reuse the same
+        // per-table sizes for the policy check and the returned survivor statistics.
+        let survivor_tables = combined_member_table_ids
+            .iter()
+            .map(|&&table_id| {
+                let size = versioning
+                    .version_stats
+                    .table_stats
+                    .get(&table_id)
+                    .map(|stats| (stats.total_key_size + stats.total_value_size).max(0) as u64)
+                    .unwrap_or(0);
+                (table_id, size)
+            })
+            .collect_vec();
+
+        let mut compaction_group_manager = self
+            .compaction_group_manager
+            .write_with_process_name("merge_compaction_group_impl")
+            .await;
+        if validate_policy {
+            let group = compaction_group_manager
+                .try_get_compaction_group_config(group_1)
+                .ok_or_else(|| Error::CompactionGroup(format!("invalid group {group_1}")))?;
+            let next_group = compaction_group_manager
+                .try_get_compaction_group_config(group_2)
+                .ok_or_else(|| Error::CompactionGroup(format!("invalid group {group_2}")))?;
+            let current_size = survivor_tables.iter().map(|(_, size)| size).sum();
+            // The scheduling snapshot is only a prefilter. Check all mutable policy inputs
+            // under the locks already needed to apply the merge, without a global rescan.
+            merge_policy::validate_group_config(&group, &next_group, current_size, &self.env.opts)?;
+            merge_policy::validate_group_levels(
+                &group,
+                &next_group,
+                &self.env.opts,
+                &versioning.current_version,
+            )?;
+            // Commit hands off to statistics before releasing versioning. This read cannot
+            // pair the new version with throughput from before its commit.
+            if !merge_policy::check_is_low_write_throughput(
+                &self.table_write_throughput_statistic_manager.read(),
+                combined_member_table_ids.iter().map(|&&table_id| table_id),
+                &self.env.opts,
+            ) {
+                return Err(Error::CompactionGroup(format!(
+                    "Cannot merge groups {group_1} and {group_2}: current throughput is not observed cold"
+                )));
+            }
+        }
+
         let mut version = HummockVersionTransaction::new(
             &mut versioning.current_version,
             &mut versioning.hummock_version_deltas,
@@ -422,11 +458,7 @@ impl HummockManager {
             }
         });
 
-        let (survivor_config, survivor_tables) = {
-            let mut compaction_group_manager = self
-                .compaction_group_manager
-                .write_with_process_name("merge_compaction_group_impl")
-                .await;
+        let survivor_config = {
             let mut compaction_groups_txn = compaction_group_manager.start_compaction_groups_txn();
 
             // for metrics reclaim
@@ -463,27 +495,12 @@ impl HummockManager {
             // remove right_group_id
             compaction_groups_txn.remove(right_group_id);
             commit_multi_var!(self.meta_store_ref(), version, compaction_groups_txn)?;
-            let config = compaction_group_manager
+            compaction_group_manager
                 .try_get_compaction_group_config(left_group_id)
-                .expect("merged group config should exist");
-            let tables = versioning
-                .current_version
-                .state_table_info
-                .compaction_group_member_table_ids(left_group_id)
-                .iter()
-                .map(|table_id| {
-                    let size = versioning
-                        .version_stats
-                        .table_stats
-                        .get(table_id)
-                        .map(|stats| stats.total_key_size + stats.total_value_size)
-                        .unwrap_or(0)
-                        .max(0) as u64;
-                    (*table_id, size)
-                })
-                .collect_vec();
-            (config, tables)
+                .expect("merged group config should exist")
         };
+
+        drop(compaction_group_manager);
 
         // Update candidates only after commit, while versioning still protects group membership.
         self.compaction_state
@@ -547,6 +564,7 @@ impl HummockManager {
 mod tests {
     use std::collections::BTreeMap;
 
+    use risingwave_common::catalog::TableId;
     use risingwave_hummock_sdk::CompactionGroupId;
     use risingwave_pb::hummock::CompactionConfig;
 
@@ -577,78 +595,89 @@ mod tests {
         }
     }
 
-    #[test]
-    fn test_merge_rejects_recent_hot_and_unobserved_tables() {
-        use std::sync::Arc;
-
-        use super::{GroupMergeValidator, TableWriteThroughputStatisticManager};
+    #[tokio::test(start_paused = true)]
+    async fn test_merge_rejects_recent_hot_and_unobserved_tables() {
+        use super::{TableWriteThroughputStatisticManager, merge_policy};
         use crate::manager::MetaOpts;
-        let opts = Arc::new(MetaOpts::test(false));
-        let group = group(10.into(), &[100], false);
-        let now = chrono::Utc::now().timestamp();
+        let mut opts = MetaOpts::test(false);
+        let table_ids = [TableId::new(100)];
+        let now = tokio::time::Instant::now();
         let mut stats = TableWriteThroughputStatisticManager::new(240);
-        for age in (0..240).rev() {
+        for age in (0..=240).rev() {
             let throughput = if age < 60 {
                 opts.table_high_write_throughput_threshold + 1
             } else {
                 0
             };
-            stats.add_table_throughput_with_ts(100.into(), throughput, now - age, 1);
+            stats.record_commit(
+                100.into(),
+                throughput,
+                now - std::time::Duration::from_secs(age),
+            );
         }
-        assert!(GroupMergeValidator::is_table_high_write_throughput(
-            stats.get_table_throughput_descending(100.into(), 60),
-            opts.table_high_write_throughput_threshold,
-            opts.table_stat_high_write_throughput_ratio_for_split
-        ));
         assert!(
-            !GroupMergeValidator::check_is_low_write_throughput_compaction_group(
-                &stats, &group, &opts
-            ),
-            "a group that would split immediately must not merge"
+            stats.latest_table_throughput(100.into()).unwrap()
+                > opts.table_high_write_throughput_threshold
         );
+        assert!(!merge_policy::check_is_low_write_throughput(
+            &stats,
+            table_ids.into_iter(),
+            &opts
+        ));
+        // Once a successful cold sample arrives, the old peak must stop merging without
+        // continuing to classify the current load as hot.
+        tokio::time::advance(std::time::Duration::from_secs(1)).await;
+        stats.record_commit(100.into(), 0, tokio::time::Instant::now());
+        assert_eq!(stats.latest_table_throughput(100.into()), Some(0));
+        // Reversed custom thresholds must not admit the retained hot observations either.
+        opts.table_low_write_throughput_threshold = opts.table_high_write_throughput_threshold + 1;
+        assert!(!merge_policy::check_is_low_write_throughput(
+            &stats,
+            table_ids.into_iter(),
+            &opts
+        ));
     }
 
     #[test]
     fn test_merge_requires_observed_cold_window() {
-        use std::sync::Arc;
-
-        use super::{GroupMergeValidator, TableWriteThroughputStatisticManager};
+        use super::{TableWriteThroughputStatisticManager, merge_policy};
         use crate::manager::MetaOpts;
-        let opts = Arc::new(MetaOpts::test(false));
-        let group = group(10.into(), &[100, 101], false);
-        let now = chrono::Utc::now().timestamp();
+        let mut opts = MetaOpts::test(false);
+        let table_ids = [TableId::new(100), TableId::new(101)];
+        let now = tokio::time::Instant::now();
         let mut stats = TableWriteThroughputStatisticManager::new(240);
-        for age in (0..240).rev() {
-            stats.add_table_throughput_with_ts(100.into(), 0, now - age, 1);
+        for age in (0..=240).rev() {
+            stats.record_commit(100.into(), 0, now - std::time::Duration::from_secs(age));
         }
         assert!(
-            !GroupMergeValidator::check_is_low_write_throughput_compaction_group(
-                &stats, &group, &opts
-            ),
+            !merge_policy::check_is_low_write_throughput(&stats, table_ids.into_iter(), &opts),
             "every member needs observations"
         );
-        stats.add_table_throughput_with_ts(101.into(), 0, now, 1);
+        stats.record_commit(101.into(), 0, now);
         assert!(
-            !GroupMergeValidator::check_is_low_write_throughput_compaction_group(
-                &stats, &group, &opts
-            ),
+            !merge_policy::check_is_low_write_throughput(&stats, table_ids.into_iter(), &opts),
             "one commit after a pause is insufficient"
         );
         let mut stats = TableWriteThroughputStatisticManager::new(240);
-        for (table, seconds) in [(100, 1), (101, 10)] {
-            for age in (0_usize..240).step_by(seconds).rev() {
-                stats.add_table_throughput_with_ts(
+        // Both fast commits and commits farther apart than the history window prove idleness.
+        for (table, seconds) in [(100, 1), (101, 300)] {
+            for age in (0..=240_u64.div_ceil(seconds)).rev() {
+                stats.record_commit(
                     table.into(),
                     0,
-                    now - age as i64,
-                    seconds as i64,
+                    now - std::time::Duration::from_secs(age * seconds),
                 );
             }
         }
+        assert!(merge_policy::check_is_low_write_throughput(
+            &stats,
+            table_ids.into_iter(),
+            &opts
+        ));
+        opts.table_high_write_throughput_threshold = 0;
         assert!(
-            GroupMergeValidator::check_is_low_write_throughput_compaction_group(
-                &stats, &group, &opts
-            )
+            merge_policy::check_is_low_write_throughput(&stats, table_ids.into_iter(), &opts),
+            "zero throughput is still idle when the split threshold is zero"
         );
     }
 
@@ -730,6 +759,7 @@ impl HummockManager {
         table_id_to_split: StateTableId,
         vnode_to_split: VirtualNode,
         partition_vnode_count: Option<u32>,
+        validate_policy: bool,
     ) -> Result<Vec<(CompactionGroupId, Vec<StateTableId>)>> {
         let mut result = vec![];
         let compaction_guard = self
@@ -885,6 +915,20 @@ impl HummockManager {
                 .compaction_group_manager
                 .write_with_process_name("split_compaction_group_impl")
                 .await;
+            // Check automatic policy at each committed step, while config changes are
+            // excluded by the same write guard used to create the child group.
+            if validate_policy
+                && compaction_group_manager
+                    .try_get_compaction_group_config(parent_group_id)
+                    .expect("current parent config should exist")
+                    .compaction_config
+                    .disable_auto_group_scheduling
+                    .unwrap_or(false)
+            {
+                return Err(Error::CompactionGroup(format!(
+                    "group {parent_group_id} disables automatic splitting"
+                )));
+            }
             let mut compaction_groups_txn = compaction_group_manager.start_compaction_groups_txn();
             compaction_groups_txn
                 .create_compaction_groups(new_compaction_group_id, Arc::new(config));
@@ -978,6 +1022,25 @@ impl HummockManager {
         CompactionGroupId,
         BTreeMap<CompactionGroupId, Vec<StateTableId>>,
     )> {
+        self.move_state_tables_to_dedicated_compaction_group_impl(
+            parent_group_id,
+            table_ids,
+            partition_vnode_count,
+            false,
+        )
+        .await
+    }
+
+    async fn move_state_tables_to_dedicated_compaction_group_impl(
+        &self,
+        parent_group_id: CompactionGroupId,
+        table_ids: &[StateTableId],
+        partition_vnode_count: Option<u32>,
+        validate_policy: bool,
+    ) -> Result<(
+        CompactionGroupId,
+        BTreeMap<CompactionGroupId, Vec<StateTableId>>,
+    )> {
         if table_ids.is_empty() {
             return Err(Error::CompactionGroup(
                 "table_ids must not be empty".to_owned(),
@@ -1056,6 +1119,7 @@ impl HummockManager {
                 table_id_to_split,
                 VirtualNode::ZERO,
                 partition_vnode_count,
+                validate_policy,
             )
             .await?;
         assert!(result_vec.len() <= 2);
@@ -1088,6 +1152,7 @@ impl HummockManager {
                 table_id_to_split,
                 VirtualNode::MAX_REPRESENTABLE,
                 partition_vnode_count,
+                validate_policy,
             )
             .await?;
         assert!(result_vec.len() <= 2);
@@ -1342,16 +1407,9 @@ impl HummockManager {
             .keys()
             .copied()
             .filter(|&table_id| {
-                GroupMergeValidator::is_table_high_write_throughput(
-                    table_write_throughput_statistic_manager.get_table_throughput_descending(
-                        table_id,
-                        self.env.opts.table_stat_throuput_window_seconds_for_split as i64,
-                    ),
-                    self.env.opts.table_high_write_throughput_threshold,
-                    self.env
-                        .opts
-                        .table_stat_high_write_throughput_ratio_for_split,
-                )
+                table_write_throughput_statistic_manager
+                    .latest_table_throughput(table_id)
+                    .is_some_and(|rate| rate > self.env.opts.table_high_write_throughput_threshold)
             })
             .peekable();
         let group_max_size = (group.compaction_group_config.max_estimated_group_size() as f64
@@ -1410,10 +1468,11 @@ impl HummockManager {
         };
 
         let ret = self
-            .move_state_tables_to_dedicated_compaction_group(
+            .move_state_tables_to_dedicated_compaction_group_impl(
                 parent_group_id,
                 &[table_id],
                 Some(self.env.opts.partition_vnode_count),
+                true,
             )
             .await;
         match ret {
@@ -1456,10 +1515,11 @@ impl HummockManager {
                     && table_ids.len() < group.table_statistic.len()
                 {
                     let ret = self
-                        .move_state_tables_to_dedicated_compaction_group(
+                        .move_state_tables_to_dedicated_compaction_group_impl(
                             group.group_id,
                             &table_ids,
                             None,
+                            true,
                         )
                         .await;
                     match ret {
@@ -1497,18 +1557,21 @@ impl HummockManager {
         next_group: &CompactionGroupStatistic,
         created_tables: &HashSet<TableId>,
     ) -> Result<CompactionGroupStatistic> {
-        GroupMergeValidator::validate_group_merge(
+        merge_policy::validate_group_merge(
             group,
             next_group,
             created_tables,
             table_write_throughput_statistic_manager,
             &self.env.opts,
-            &self.versioning,
-        )
-        .await?;
+        )?;
 
         let result = self
-            .merge_compaction_group_impl(group.group_id, next_group.group_id, None)
+            .merge_compaction_group_impl(
+                group.group_id,
+                next_group.group_id,
+                Some(created_tables),
+                true,
+            )
             .await;
 
         match &result {
@@ -1534,120 +1597,100 @@ impl HummockManager {
     }
 }
 
-#[derive(Debug, Default)]
-struct GroupMergeValidator {}
+// Snapshot filtering and apply-time checks share these rules. Locking and topology
+// mutations belong to HummockManager; policy only reads the supplied state.
+mod merge_policy {
+    use risingwave_hummock_sdk::compaction_group::StaticCompactionGroupId;
 
-impl GroupMergeValidator {
-    /// Check if two groups have compatible compaction configs for merging.
-    /// Ignores `split_weight_by_vnode` since it's per-table and will be reset after merge.
-    fn is_merge_compatible_by_semantics(
-        group: &CompactionGroupStatistic,
-        next_group: &CompactionGroupStatistic,
-    ) -> bool {
-        let (mut left, mut right) = (
-            group
-                .compaction_group_config
-                .compaction_config
-                .as_ref()
-                .clone(),
-            next_group
-                .compaction_group_config
-                .compaction_config
-                .as_ref()
-                .clone(),
-        );
-        left.split_weight_by_vnode = 0;
-        right.split_weight_by_vnode = 0;
-        left == right
-    }
+    use super::{CompactionGroupStatistic, Error, HashSet, HummockVersion, Result, TableId};
+    use crate::hummock::manager::compaction::GroupStateValidator;
+    use crate::hummock::model::CompactionGroup;
+    use crate::hummock::table_write_throughput_statistic::TableWriteThroughputStatisticManager;
+    use crate::manager::MetaOpts;
 
-    /// Check if the table is high write throughput with the given threshold and ratio.
-    pub fn is_table_high_write_throughput(
-        table_throughput: impl Iterator<Item = &TableWriteThroughputStatistic>,
-        threshold: u64,
-        high_write_throughput_ratio: f64,
-    ) -> bool {
-        let mut sample_size = 0;
-        let mut high_write_throughput_count = 0;
-        for statistic in table_throughput {
-            sample_size += 1;
-            if statistic.throughput > threshold {
-                high_write_throughput_count += 1;
-            }
-        }
-
-        high_write_throughput_count as f64 > sample_size as f64 * high_write_throughput_ratio
-    }
-
-    pub fn is_table_low_write_throughput(
-        table_throughput: impl Iterator<Item = &TableWriteThroughputStatistic>,
-        threshold: u64,
-        low_write_throughput_ratio: f64,
-    ) -> bool {
-        let mut sample_size = 0;
-        let mut low_write_throughput_count = 0;
-        for statistic in table_throughput {
-            sample_size += 1;
-            if statistic.throughput <= threshold {
-                low_write_throughput_count += 1;
-            }
-        }
-
-        low_write_throughput_count as f64 > sample_size as f64 * low_write_throughput_ratio
-    }
-
-    fn check_is_low_write_throughput_compaction_group(
+    pub(super) fn check_is_low_write_throughput(
         table_write_throughput_statistic_manager: &TableWriteThroughputStatisticManager,
-        group: &CompactionGroupStatistic,
-        opts: &Arc<MetaOpts>,
+        mut table_ids: impl Iterator<Item = TableId>,
+        opts: &MetaOpts,
     ) -> bool {
-        let now = chrono::Utc::now().timestamp();
-        let merge_window = opts.table_stat_throuput_window_seconds_for_merge as i64;
-        group.table_statistic.keys().all(|&table_id| {
-            // Reuse the split predicate: long-window coldness cannot override a current hotspot.
-            !Self::is_table_high_write_throughput(
-                table_write_throughput_statistic_manager.get_table_throughput_descending_at(
-                    table_id,
-                    opts.table_stat_throuput_window_seconds_for_split as i64,
-                    now,
-                ),
-                opts.table_high_write_throughput_threshold,
-                opts.table_stat_high_write_throughput_ratio_for_split,
-            ) && table_write_throughput_statistic_manager.observed_window_secs(
-                table_id,
-                merge_window,
-                now,
-            ) as f64
-                > merge_window as f64 * opts.table_stat_low_write_throughput_ratio_for_merge
-                && Self::is_table_low_write_throughput(
-                    table_write_throughput_statistic_manager.get_table_throughput_descending_at(
-                        table_id,
-                        merge_window,
-                        now,
-                    ),
-                    opts.table_low_write_throughput_threshold,
-                    opts.table_stat_low_write_throughput_ratio_for_merge,
-                )
+        let now = tokio::time::Instant::now();
+        let threshold = opts
+            .table_low_write_throughput_threshold
+            .min(opts.table_high_write_throughput_threshold);
+        table_ids.all(|table_id| {
+            // The peak dominates the current rate used by split. Require both thresholds so
+            // custom threshold orderings cannot make a table simultaneously hot and cold.
+            table_write_throughput_statistic_manager
+                .max_write_throughput(table_id, now)
+                .is_some_and(|peak| peak <= threshold)
         })
     }
 
-    fn check_is_creating_compaction_group(
-        group: &CompactionGroupStatistic,
-        created_tables: &HashSet<TableId>,
-    ) -> bool {
-        group
-            .table_statistic
-            .keys()
-            .any(|table_id| !created_tables.contains(table_id))
-    }
-
-    async fn validate_group_merge(
+    pub(super) fn validate_group_merge(
         group: &CompactionGroupStatistic,
         next_group: &CompactionGroupStatistic,
         created_tables: &HashSet<TableId>,
         table_write_throughput_statistic_manager: &TableWriteThroughputStatisticManager,
-        opts: &Arc<MetaOpts>,
-        versioning: &MonitoredRwLock<Versioning>,
+        opts: &MetaOpts,
+    ) -> Result<()> {
+        if group.table_statistic.is_empty() || next_group.table_statistic.is_empty() {
+            return Err(Error::CompactionGroup(format!(
+                "group-{} or group-{} is empty",
+                group.group_id, next_group.group_id
+            )));
+        }
+
+        // BTreeMap keys already provide sorted endpoints; no allocation or sorting is needed.
+        let mut left = &group.table_statistic;
+        let mut right = &next_group.table_statistic;
+        if left.first_key_value().unwrap().0 > right.first_key_value().unwrap().0 {
+            std::mem::swap(&mut left, &mut right);
+        }
+        if left.last_key_value().unwrap().0 >= right.first_key_value().unwrap().0 {
+            return Err(Error::CompactionGroup(format!(
+                "group-{} and group-{} have overlapping table id ranges, not mergeable",
+                group.group_id, next_group.group_id
+            )));
+        }
+
+        validate_group_config(
+            &group.compaction_group_config,
+            &next_group.compaction_group_config,
+            group.group_size.saturating_add(next_group.group_size),
+            opts,
+        )?;
+
+        for candidate in [group, next_group] {
+            if candidate
+                .table_statistic
+                .keys()
+                .any(|table_id| !created_tables.contains(table_id))
+            {
+                return Err(Error::CompactionGroup(format!(
+                    "Cannot merge groups {} and {}: group {} contains creating tables",
+                    group.group_id, next_group.group_id, candidate.group_id
+                )));
+            }
+            if !check_is_low_write_throughput(
+                table_write_throughput_statistic_manager,
+                candidate.table_statistic.keys().copied(),
+                opts,
+            ) {
+                return Err(Error::CompactionGroup(format!(
+                    "Cannot merge groups {} and {}: group {} without sufficiently observed low throughput",
+                    group.group_id, next_group.group_id, candidate.group_id
+                )));
+            }
+        }
+
+        Ok(())
+    }
+
+    pub(super) fn validate_group_config(
+        group: &CompactionGroup,
+        next_group: &CompactionGroup,
+        combined_size: u64,
+        opts: &MetaOpts,
     ) -> Result<()> {
         // TODO: remove this check after refactor group id
         if (group.group_id == StaticCompactionGroupId::StateDefault
@@ -1661,41 +1704,11 @@ impl GroupMergeValidator {
             )));
         }
 
-        if group.table_statistic.is_empty() || next_group.table_statistic.is_empty() {
-            return Err(Error::CompactionGroup(format!(
-                "group-{} or group-{} is empty",
-                group.group_id, next_group.group_id
-            )));
-        }
-
-        // Check non-overlapping table ids early to avoid acquiring heavyweight write locks
-        // in merge_compaction_group_impl only to fail at the overlap check.
-        // Sort both sides and ensure table_ids_1 has the smaller first element,
-        // then reject if table_ids_1's last element >= table_ids_2's first element (overlap).
-        {
-            let mut table_ids_1: Vec<TableId> = group.table_statistic.keys().cloned().collect_vec();
-            let mut table_ids_2: Vec<TableId> =
-                next_group.table_statistic.keys().cloned().collect_vec();
-            table_ids_1.sort();
-            table_ids_2.sort();
-            if table_ids_1.first().unwrap() > table_ids_2.first().unwrap() {
-                std::mem::swap(&mut table_ids_1, &mut table_ids_2);
-            }
-            if table_ids_1.last().unwrap() >= table_ids_2.first().unwrap() {
-                return Err(Error::CompactionGroup(format!(
-                    "group-{} and group-{} have overlapping table id ranges, not mergeable",
-                    group.group_id, next_group.group_id
-                )));
-            }
-        }
-
         if group
-            .compaction_group_config
             .compaction_config
             .disable_auto_group_scheduling
             .unwrap_or(false)
             || next_group
-                .compaction_group_config
                 .compaction_config
                 .disable_auto_group_scheduling
                 .unwrap_or(false)
@@ -1706,14 +1719,14 @@ impl GroupMergeValidator {
             )));
         }
 
-        // Keep merge compatibility as a feature, but ignore split_weight_by_vnode, because it is
-        // only used for per-table split behavior and will be reset after merge.
-        if !Self::is_merge_compatible_by_semantics(group, next_group) {
-            let left_config = group.compaction_group_config.compaction_config.as_ref();
-            let right_config = next_group
-                .compaction_group_config
-                .compaction_config
-                .as_ref();
+        // This per-table setting is reset after merge; every other config field must match.
+        let mut left = group.compaction_config.as_ref().clone();
+        let mut right = next_group.compaction_config.as_ref().clone();
+        left.split_weight_by_vnode = 0;
+        right.split_weight_by_vnode = 0;
+        if left != right {
+            let left_config = group.compaction_config.as_ref();
+            let right_config = next_group.compaction_config.as_ref();
 
             tracing::warn!(
                 group_id = %group.group_id,
@@ -1729,172 +1742,101 @@ impl GroupMergeValidator {
             )));
         }
 
-        // do not merge the compaction group which is creating
-        if Self::check_is_creating_compaction_group(group, created_tables) {
+        let size_limit =
+            (group.max_estimated_group_size() as f64 * opts.split_group_size_ratio) as u64;
+        if combined_size > size_limit {
             return Err(Error::CompactionGroup(format!(
-                "Cannot merge creating group {} next_group {}",
-                group.group_id, next_group.group_id
+                "Cannot merge huge groups {} and {}: combined_size {} size_limit {}",
+                group.group_id, next_group.group_id, combined_size, size_limit
             )));
         }
+        Ok(())
+    }
 
-        // do not merge high throughput group
-        if !Self::check_is_low_write_throughput_compaction_group(
-            table_write_throughput_statistic_manager,
-            group,
-            opts,
+    pub(super) fn validate_group_levels(
+        group: &CompactionGroup,
+        next_group: &CompactionGroup,
+        opts: &MetaOpts,
+        version: &HummockVersion,
+    ) -> Result<()> {
+        let group_levels = version.levels.get(&group.group_id).ok_or_else(|| {
+            Error::CompactionGroup(format!(
+                "cannot merge compaction group {} because it does not exist",
+                group.group_id
+            ))
+        })?;
+        let next_group_levels = version.levels.get(&next_group.group_id).ok_or_else(|| {
+            Error::CompactionGroup(format!(
+                "cannot merge compaction group {} because it does not exist",
+                next_group.group_id
+            ))
+        })?;
+        for (candidate, levels) in [(group, group_levels), (next_group, next_group_levels)] {
+            let state = GroupStateValidator::group_state(levels, &candidate.compaction_config);
+            if state.is_write_stop() || state.is_emergency() {
+                return Err(Error::CompactionGroup(format!(
+                    "Cannot merge groups {} and {}: write limit on group {}",
+                    group.group_id, next_group.group_id, candidate.group_id
+                )));
+            }
+        }
+
+        // check whether the group is in the write stop state after merge
+        let l0_sub_level_count_after_merge =
+            group_levels.l0.sub_levels.len() + next_group_levels.l0.sub_levels.len();
+        if GroupStateValidator::write_stop_sub_level_count(
+            (l0_sub_level_count_after_merge as f64
+                * opts.compaction_group_merge_dimension_threshold) as usize,
+            &group.compaction_config,
         ) {
             return Err(Error::CompactionGroup(format!(
-                "Cannot merge group {} next_group {} without sufficiently observed low throughput",
+                "Cannot merge write limit group {} next group {}, will trigger write stop after merge",
                 group.group_id, next_group.group_id
             )));
         }
 
-        let size_limit = (group.compaction_group_config.max_estimated_group_size() as f64
-            * opts.split_group_size_ratio) as u64;
-
-        if (group.group_size + next_group.group_size) > size_limit {
-            return Err(Error::CompactionGroup(format!(
-                "Cannot merge huge group {} group_size {} next_group {} next_group_size {} size_limit {}",
-                group.group_id,
-                group.group_size,
-                next_group.group_id,
-                next_group.group_size,
-                size_limit
-            )));
-        }
-
-        if Self::check_is_creating_compaction_group(next_group, created_tables) {
-            return Err(Error::CompactionGroup(format!(
-                "Cannot merge creating group {} next group {}",
-                group.group_id, next_group.group_id
-            )));
-        }
-
-        if !Self::check_is_low_write_throughput_compaction_group(
-            table_write_throughput_statistic_manager,
-            next_group,
-            opts,
+        let l0_file_count_after_merge = group_levels
+            .l0
+            .sub_levels
+            .iter()
+            .chain(next_group_levels.l0.sub_levels.iter())
+            .map(|level| level.table_infos.len())
+            .sum::<usize>();
+        if GroupStateValidator::write_stop_l0_file_count(
+            (l0_file_count_after_merge as f64 * opts.compaction_group_merge_dimension_threshold)
+                as usize,
+            &group.compaction_config,
         ) {
             return Err(Error::CompactionGroup(format!(
-                "Cannot merge group {} next group {} without sufficiently observed low throughput",
-                group.group_id, next_group.group_id
+                "Cannot merge write limit next group {} group {}, will trigger write stop after merge",
+                next_group.group_id, group.group_id
             )));
         }
 
-        {
-            // Avoid merge when the group is in emergency state
-            let versioning_guard = versioning
-                .read_with_process_name("validate_group_merge")
-                .await;
-            let levels = &versioning_guard.current_version.levels;
-            if !levels.contains_key(&group.group_id) {
-                return Err(Error::CompactionGroup(format!(
-                    "cannot merge compaction group {} because it does not exist",
-                    group.group_id
-                )));
-            }
+        let l0_size_after_merge =
+            group_levels.l0.total_file_size + next_group_levels.l0.total_file_size;
 
-            if !levels.contains_key(&next_group.group_id) {
-                return Err(Error::CompactionGroup(format!(
-                    "cannot merge next compaction group {} because it does not exist",
-                    next_group.group_id
-                )));
-            }
-
-            let group_levels = versioning_guard
-                .current_version
-                .get_compaction_group_levels(group.group_id);
-
-            let next_group_levels = versioning_guard
-                .current_version
-                .get_compaction_group_levels(next_group.group_id);
-
-            let group_state = GroupStateValidator::group_state(
-                group_levels,
-                group.compaction_group_config.compaction_config().deref(),
-            );
-
-            if group_state.is_write_stop() || group_state.is_emergency() {
-                return Err(Error::CompactionGroup(format!(
-                    "Cannot merge write limit group {} next group {}",
-                    group.group_id, next_group.group_id
-                )));
-            }
-
-            let next_group_state = GroupStateValidator::group_state(
-                next_group_levels,
-                next_group
-                    .compaction_group_config
-                    .compaction_config()
-                    .deref(),
-            );
-
-            if next_group_state.is_write_stop() || next_group_state.is_emergency() {
-                return Err(Error::CompactionGroup(format!(
-                    "Cannot merge write limit next group {} group {}",
-                    next_group.group_id, group.group_id
-                )));
-            }
-
-            // check whether the group is in the write stop state after merge
-            let l0_sub_level_count_after_merge =
-                group_levels.l0.sub_levels.len() + next_group_levels.l0.sub_levels.len();
-            if GroupStateValidator::write_stop_sub_level_count(
-                (l0_sub_level_count_after_merge as f64
-                    * opts.compaction_group_merge_dimension_threshold) as usize,
-                group.compaction_group_config.compaction_config().deref(),
-            ) {
-                return Err(Error::CompactionGroup(format!(
-                    "Cannot merge write limit group {} next group {}, will trigger write stop after merge",
-                    group.group_id, next_group.group_id
-                )));
-            }
-
-            let l0_file_count_after_merge = group_levels
-                .l0
-                .sub_levels
-                .iter()
-                .chain(next_group_levels.l0.sub_levels.iter())
-                .map(|level| level.table_infos.len())
-                .sum::<usize>();
-            if GroupStateValidator::write_stop_l0_file_count(
-                (l0_file_count_after_merge as f64 * opts.compaction_group_merge_dimension_threshold)
-                    as usize,
-                group.compaction_group_config.compaction_config().deref(),
-            ) {
-                return Err(Error::CompactionGroup(format!(
-                    "Cannot merge write limit next group {} group {}, will trigger write stop after merge",
-                    next_group.group_id, group.group_id
-                )));
-            }
-
-            let l0_size_after_merge =
-                group_levels.l0.total_file_size + next_group_levels.l0.total_file_size;
-
-            if GroupStateValidator::write_stop_l0_size(
-                (l0_size_after_merge as f64 * opts.compaction_group_merge_dimension_threshold)
-                    as u64,
-                group.compaction_group_config.compaction_config().deref(),
-            ) {
-                return Err(Error::CompactionGroup(format!(
-                    "Cannot merge write limit next group {} group {}, will trigger write stop after merge",
-                    next_group.group_id, group.group_id
-                )));
-            }
-
-            // check whether the group is in the emergency state after merge
-            if GroupStateValidator::emergency_l0_file_count(
-                (l0_file_count_after_merge as f64 * opts.compaction_group_merge_dimension_threshold)
-                    as usize,
-                group.compaction_group_config.compaction_config().deref(),
-            ) {
-                return Err(Error::CompactionGroup(format!(
-                    "Cannot merge emergency group {} next group {}, will trigger emergency after merge",
-                    group.group_id, next_group.group_id
-                )));
-            }
+        if GroupStateValidator::write_stop_l0_size(
+            (l0_size_after_merge as f64 * opts.compaction_group_merge_dimension_threshold) as u64,
+            &group.compaction_config,
+        ) {
+            return Err(Error::CompactionGroup(format!(
+                "Cannot merge write limit next group {} group {}, will trigger write stop after merge",
+                next_group.group_id, group.group_id
+            )));
         }
 
+        // check whether the group is in the emergency state after merge
+        if GroupStateValidator::emergency_l0_file_count(
+            (l0_file_count_after_merge as f64 * opts.compaction_group_merge_dimension_threshold)
+                as usize,
+            &group.compaction_config,
+        ) {
+            return Err(Error::CompactionGroup(format!(
+                "Cannot merge emergency group {} next group {}, will trigger emergency after merge",
+                group.group_id, next_group.group_id
+            )));
+        }
         Ok(())
     }
 }

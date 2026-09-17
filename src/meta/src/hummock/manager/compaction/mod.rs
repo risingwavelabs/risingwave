@@ -1560,6 +1560,7 @@ impl CompactionState {
             match trigger {
                 ScheduleTrigger::NewData => {
                     guard.dynamic_cooldown.remove(&compaction_group);
+                    // A coalesced request still invalidates an older picker's no-task result.
                     guard.generation += 1;
                     let generation = guard.generation;
                     guard
