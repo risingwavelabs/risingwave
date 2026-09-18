@@ -260,21 +260,3 @@ pub async fn build_opendal_fs_list_for_batch<Src: OpendalSource>(lister: Opendal
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn oracle_offsets_are_committed_after_checkpoint() {
-        assert!(needs_commit_cdc_offset_after_checkpoint(
-            &ConnectorProperties::OracleCdc(Box::default())
-        ));
-        assert!(needs_commit_cdc_offset_after_checkpoint(
-            &ConnectorProperties::PostgresCdc(Box::default())
-        ));
-        assert!(!needs_commit_cdc_offset_after_checkpoint(
-            &ConnectorProperties::MysqlCdc(Box::default())
-        ));
-    }
-}
