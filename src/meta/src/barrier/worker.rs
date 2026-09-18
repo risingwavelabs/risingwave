@@ -61,6 +61,38 @@ use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::{GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef};
 use crate::{MetaError, MetaResult};
 
+fn resolve_initial_barrier_interval_ms(
+    database_barrier_interval_ms: Option<i32>,
+    system_barrier_interval_ms: u32,
+) -> u32 {
+    database_barrier_interval_ms
+        .map(|interval| interval as u32)
+        .unwrap_or(system_barrier_interval_ms)
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::util::epoch::Epoch;
+
+    use super::*;
+    use crate::barrier::TracedEpoch;
+    use crate::barrier::info::BarrierInfo;
+    use crate::barrier::rpc::barrier_to_protobuf;
+
+    #[test]
+    fn test_initial_barrier_uses_system_interval_without_database_override() {
+        let system_barrier_interval_ms = 500;
+        let barrier_interval_ms =
+            resolve_initial_barrier_interval_ms(None, system_barrier_interval_ms);
+        let barrier_info =
+            BarrierInfo::new_initial(TracedEpoch::new(Epoch(1)), barrier_interval_ms);
+
+        let barrier = barrier_to_protobuf(&barrier_info, None);
+
+        assert_eq!(barrier.barrier_interval_ms, system_barrier_interval_ms);
+    }
+}
+
 /// [`crate::barrier::worker::GlobalBarrierWorker`] sends barriers to all registered compute nodes and
 /// collect them, with monotonic increasing epoch numbers. On compute nodes, `LocalBarrierManager`
 /// in `risingwave_stream` crate will serve these requests and dispatch them to source actors.
@@ -435,9 +467,13 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 };
                                 match result {
                                     Ok(Some((runtime_info, rendered_info))) => {
+                                        let barrier_interval_ms = self
+                                            .periodic_barriers
+                                            .barrier_interval_ms(database_id);
                                         entering_initializing.enter(
                                             runtime_info,
                                             rendered_info,
+                                            barrier_interval_ms,
                                             &mut self.control_stream_manager,
                                         );
                                     }
@@ -832,6 +868,10 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 mut cdc_table_snapshot_splits,
             } = runtime_info_snapshot;
 
+            let reader = self.env.system_params_reader().await;
+            let checkpoint_frequency = reader.checkpoint_frequency();
+            let system_barrier_interval_ms = reader.barrier_interval_ms();
+
             let term_id = Uuid::new_v4().to_string();
 
 
@@ -880,6 +920,11 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         } = rendered_info;
                         control_stream_manager.inject_database_initial_barrier(
                             database_id,
+                            resolve_initial_barrier_interval_ms(
+                                recovery_context.fragment_context.database_map[&database_id]
+                                    .barrier_interval_ms,
+                                system_barrier_interval_ms,
+                            ),
                             job_infos,
                             &recovery_context.job_extra_info,
                             &mut state_table_committed_epochs,
@@ -994,9 +1039,8 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     self.env.clone(),
                 );
 
-                let reader = self.env.system_params_reader().await;
-                let checkpoint_frequency = reader.checkpoint_frequency();
-                let barrier_interval = Duration::from_millis(reader.barrier_interval_ms() as u64);
+                let barrier_interval =
+                    Duration::from_millis(system_barrier_interval_ms as u64);
                 let periodic_barriers = PeriodicBarriers::new(
                     barrier_interval,
                     checkpoint_frequency,
