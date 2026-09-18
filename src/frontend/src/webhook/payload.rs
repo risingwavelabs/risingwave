@@ -109,7 +109,6 @@ fn json_properties_from_headers(headers: &HeaderMap) -> Result<JsonProperties> {
         time_handling,
         bigint_unsigned_handling,
         handle_toast_columns,
-        numeric_string_parsing: false,
     })
 }
 
