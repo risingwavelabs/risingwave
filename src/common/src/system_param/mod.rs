@@ -449,11 +449,11 @@ for_all_params!(impl_system_params_for_test);
 pub struct OverrideValidate;
 impl Validate for OverrideValidate {
     fn barrier_interval_ms(v: &u32) -> Result<()> {
-        Self::expect_range(*v, 50..)
+        Self::expect_range(*v, 50..=i32::MAX as u32)
     }
 
     fn checkpoint_frequency(v: &u64) -> Result<()> {
-        Self::expect_range(*v, 1..)
+        Self::expect_range(*v, 1..=i64::MAX as u64)
     }
 
     fn backup_storage_directory(v: &String) -> Result<()> {
@@ -558,6 +558,19 @@ mod tests {
         assert!(validate_init_system_params(&p).is_err());
         p.barrier_interval_ms = Some(1000);
         assert!(validate_init_system_params(&p).is_ok());
+    }
+
+    #[test]
+    fn test_database_param_storage_bounds() {
+        assert!(OverrideValidate::barrier_interval_ms(&50).is_ok());
+        assert!(OverrideValidate::barrier_interval_ms(&(i32::MAX as u32)).is_ok());
+        assert!(OverrideValidate::barrier_interval_ms(&49).is_err());
+        assert!(OverrideValidate::barrier_interval_ms(&(i32::MAX as u32 + 1)).is_err());
+
+        assert!(OverrideValidate::checkpoint_frequency(&1).is_ok());
+        assert!(OverrideValidate::checkpoint_frequency(&(i64::MAX as u64)).is_ok());
+        assert!(OverrideValidate::checkpoint_frequency(&0).is_err());
+        assert!(OverrideValidate::checkpoint_frequency(&(i64::MAX as u64 + 1)).is_err());
     }
 
     // Test that we always redact the value of the license key when displaying it, but when it comes to

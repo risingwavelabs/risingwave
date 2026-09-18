@@ -38,9 +38,11 @@ pub use self::ddl::{
 pub use self::legacy_source::{CompatibleFormatEncode, get_delimiter};
 pub use self::operator::{BinaryOperator, QualifiedOperator, UnaryOperator};
 pub use self::query::{
-    Corresponding, Cte, CteInner, Distinct, Fetch, Join, JoinConstraint, JoinOperator, LateralView,
-    NamedWindow, OrderByExpr, Query, Select, SelectItem, SetExpr, SetOperator, TableAlias,
-    TableFactor, TableWithJoins, Top, Values, With,
+    AfterMatchSkip, Corresponding, Cte, CteInner, Distinct, Fetch, Join, JoinConstraint,
+    JoinOperator, LateralView, MatchRecognizePattern, MatchRecognizeSymbol, Measure, NamedWindow,
+    OrderByExpr, Query, RepetitionQuantifier, RowsPerMatch, Select, SelectItem, SetExpr,
+    SetOperator, SubsetDefinition, SymbolDefinition, TableAlias, TableFactor, TableWithJoins, Top,
+    Values, With,
 };
 pub use self::statement::*;
 pub use self::value::{
@@ -1261,6 +1263,13 @@ pub enum WaitTarget {
     Index(ObjectName),
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum FileCacheType {
+    Meta,
+    Data,
+    All,
+}
+
 /// A top-level statement (SELECT, INSERT, CREATE, etc.)
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -1700,6 +1709,10 @@ pub enum Statement {
     AlterSystem {
         param: Ident,
         value: SetVariableValue,
+    },
+    /// ALTER SYSTEM CLEAR FILE CACHE [META | DATA | ALL]
+    AlterSystemClearFileCache {
+        cache_type: FileCacheType,
     },
     /// FLUSH the current barrier.
     ///
@@ -2476,6 +2489,14 @@ impl Statement {
             Statement::AlterSystem { param, value } => {
                 f.write_str("ALTER SYSTEM SET ")?;
                 write!(f, "{param} = {value}",)
+            }
+            Statement::AlterSystemClearFileCache { cache_type } => {
+                f.write_str("ALTER SYSTEM CLEAR FILE CACHE ")?;
+                match cache_type {
+                    FileCacheType::Meta => f.write_str("META"),
+                    FileCacheType::Data => f.write_str("DATA"),
+                    FileCacheType::All => f.write_str("ALL"),
+                }
             }
             Statement::Flush => {
                 write!(f, "FLUSH")
@@ -3891,6 +3912,10 @@ impl fmt::Display for SetVariableValueSingle {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum AsOf {
     ProcessTime,
+    /// Internal marker for a process-time temporal join whose lookup side is broadcast to all join
+    /// actors. It stays on the lookup relation so optimizer rewrites cannot detach the strategy
+    /// from that relation; [`crate::ast::Join`]'s `Display` renders the modifier in join position.
+    ProcessTimeBroadcast,
     // used by time travel
     ProcessTimeWithInterval((String, DateTimeField)),
     // the number of seconds that have elapsed since the Unix epoch, which is January 1, 1970 at 00:00:00 Coordinated Universal Time (UTC).
@@ -3904,7 +3929,9 @@ impl fmt::Display for AsOf {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use AsOf::*;
         match self {
-            ProcessTime => write!(f, " FOR SYSTEM_TIME AS OF PROCTIME()"),
+            ProcessTime | ProcessTimeBroadcast => {
+                write!(f, " FOR SYSTEM_TIME AS OF PROCTIME()")
+            }
             ProcessTimeWithInterval((value, leading_field)) => write!(
                 f,
                 " FOR SYSTEM_TIME AS OF NOW() - '{}' {}",

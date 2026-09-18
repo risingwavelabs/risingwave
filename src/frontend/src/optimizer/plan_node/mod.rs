@@ -1044,6 +1044,7 @@ mod logical_join;
 mod logical_kafka_scan;
 mod logical_limit;
 mod logical_locality_provider;
+mod logical_match_recognize;
 mod logical_max_one_row;
 mod logical_multi_join;
 mod logical_now;
@@ -1082,6 +1083,7 @@ mod stream_iceberg_with_pk_index_writer;
 mod stream_join_common;
 mod stream_local_approx_percentile;
 mod stream_locality_provider;
+mod stream_match_recognize;
 mod stream_materialize;
 mod stream_materialized_exprs;
 mod stream_now;
@@ -1190,6 +1192,7 @@ pub use logical_join::LogicalJoin;
 pub use logical_kafka_scan::LogicalKafkaScan;
 pub use logical_limit::LogicalLimit;
 pub use logical_locality_provider::LogicalLocalityProvider;
+pub use logical_match_recognize::LogicalMatchRecognize;
 pub use logical_max_one_row::LogicalMaxOneRow;
 pub use logical_mssql_query::LogicalMssqlQuery;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
@@ -1235,6 +1238,7 @@ pub use stream_iceberg_with_pk_index_writer::StreamIcebergWithPkIndexWriter;
 use stream_join_common::StreamJoinCommon;
 pub use stream_local_approx_percentile::StreamLocalApproxPercentile;
 pub use stream_locality_provider::StreamLocalityProvider;
+pub use stream_match_recognize::StreamMatchRecognize;
 pub use stream_materialize::StreamMaterialize;
 pub use stream_materialized_exprs::StreamMaterializedExprs;
 pub use stream_now::StreamNow;
@@ -1314,6 +1318,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, Dedup }
             , { Logical, Intersect }
             , { Logical, Except }
+            , { Logical, MatchRecognize }
             , { Logical, MaxOneRow }
             , { Logical, KafkaScan }
             , { Logical, IcebergScan }
@@ -1397,6 +1402,7 @@ macro_rules! for_all_plan_nodes {
             , { Stream, Dedup }
             , { Stream, EowcOverWindow }
             , { Stream, EowcSort }
+            , { Stream, MatchRecognize }
             , { Stream, OverWindow }
             , { Stream, FsFetch }
             , { Stream, ChangeLog }

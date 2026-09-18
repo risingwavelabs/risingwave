@@ -1,0 +1,126 @@
+# SOURCE_RATE_LIMIT applies to a FULL_RELOAD refresh: a limit of 0 holds the cycle open until the
+# limit is lifted, whether it is set before the load starts or while a file is being read.
+
+system ok
+rm -rf ./e2e_test/source_inline/refresh/refresh_rate_limit_tmp && mkdir -p ./e2e_test/source_inline/refresh/refresh_rate_limit_tmp
+
+system ok
+seq 1 2000 | awk '{print $1","$1%97}' > ./e2e_test/source_inline/refresh/refresh_rate_limit_tmp/f0.csv
+
+statement ok
+CREATE TABLE refresh_rl_t (id int, grp int, PRIMARY KEY (id)) WITH (
+    connector = '__for_testing_only_batch_posix_fs',
+    batch_posix_fs.root = './e2e_test/source_inline/refresh/refresh_rate_limit_tmp',
+    refresh_mode = 'FULL_RELOAD',
+    match_pattern = '*.csv',
+    source_rate_limit = 0
+) FORMAT PLAIN ENCODE CSV (without_header = 'true', delimiter = ',');
+
+statement ok
+CREATE MATERIALIZED VIEW refresh_rl_mv AS SELECT grp, count(*) AS cnt FROM refresh_rl_t GROUP BY grp;
+
+statement ok
+REFRESH TABLE refresh_rl_t;
+
+# An unthrottled load of this table finishes in about a second, so the wait has to outlast that.
+sleep 10s
+
+query TI
+SELECT s.current_status, (SELECT count(*) FROM refresh_rl_t)
+FROM rw_catalog.rw_refresh_table_state s
+JOIN rw_catalog.rw_tables t ON s.table_id = t.id
+WHERE t.name = 'refresh_rl_t';
+----
+REFRESHING 0
+
+statement ok
+ALTER TABLE refresh_rl_t SET SOURCE_RATE_LIMIT TO DEFAULT;
+
+query T retry 10 backoff 2s
+SELECT s.current_status
+FROM rw_catalog.rw_refresh_table_state s
+JOIN rw_catalog.rw_tables t ON s.table_id = t.id
+WHERE t.name = 'refresh_rl_t';
+----
+IDLE
+
+query II
+SELECT count(*), sum(cnt) FROM refresh_rl_mv;
+----
+97 2000
+
+
+# A finite limit paces the load without stalling it.
+statement ok
+ALTER TABLE refresh_rl_t SET SOURCE_RATE_LIMIT TO 500;
+
+statement ok
+REFRESH TABLE refresh_rl_t;
+
+query T retry 20 backoff 2s
+SELECT s.current_status
+FROM rw_catalog.rw_refresh_table_state s
+JOIN rw_catalog.rw_tables t ON s.table_id = t.id
+WHERE t.name = 'refresh_rl_t';
+----
+IDLE
+
+query II
+SELECT count(*), sum(cnt) FROM refresh_rl_mv;
+----
+97 2000
+
+
+# Pausing a load that is already reading a file holds that file until the limit is lifted.
+system ok
+seq 2001 4000 | awk '{print $1","$1%97}' > ./e2e_test/source_inline/refresh/refresh_rate_limit_tmp/f0.csv
+
+statement ok
+ALTER TABLE refresh_rl_t SET SOURCE_RATE_LIMIT TO 1;
+
+statement ok
+REFRESH TABLE refresh_rl_t;
+
+# At one row per second the file is still being read once its first rows are visible.
+query B retry 30 backoff 1s
+SELECT count(*) > 2000 FROM refresh_rl_t;
+----
+t
+
+statement ok
+ALTER TABLE refresh_rl_t SET SOURCE_RATE_LIMIT TO 0;
+
+query TB
+SELECT s.current_status, (SELECT count(*) FROM refresh_rl_t) < 4000
+FROM rw_catalog.rw_refresh_table_state s
+JOIN rw_catalog.rw_tables t ON s.table_id = t.id
+WHERE t.name = 'refresh_rl_t';
+----
+REFRESHING t
+
+statement ok
+ALTER TABLE refresh_rl_t SET SOURCE_RATE_LIMIT TO DEFAULT;
+
+query T retry 10 backoff 2s
+SELECT s.current_status
+FROM rw_catalog.rw_refresh_table_state s
+JOIN rw_catalog.rw_tables t ON s.table_id = t.id
+WHERE t.name = 'refresh_rl_t';
+----
+IDLE
+
+query II
+SELECT min(id), max(id) FROM refresh_rl_t;
+----
+2001 4000
+
+query II
+SELECT count(*), sum(cnt) FROM refresh_rl_mv;
+----
+97 2000
+
+statement ok
+DROP TABLE refresh_rl_t CASCADE;
+
+system ok
+rm -rf ./e2e_test/source_inline/refresh/refresh_rate_limit_tmp
