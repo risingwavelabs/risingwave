@@ -25,7 +25,7 @@ use crate::parser::unified::json::{
     BigintUnsignedHandlingMode, JsonAccess, JsonParseOptions, NumericHandling, TimeHandling,
     TimestampHandling, TimestamptzHandling,
 };
-use crate::parser::{AccessBuilder, JsonProperties, MongoProperties};
+use crate::parser::{AccessBuilder, MongoProperties};
 
 #[derive(Debug)]
 pub struct DebeziumJsonAccessBuilder {
@@ -34,26 +34,24 @@ pub struct DebeziumJsonAccessBuilder {
 }
 
 impl DebeziumJsonAccessBuilder {
-    pub fn new(config: JsonProperties) -> ConnectorResult<Self> {
-        let mut json_parse_options = JsonParseOptions::new_for_debezium(
-            config
-                .timestamptz_handling
-                .unwrap_or(TimestamptzHandling::GuessNumberUnit),
-            config
-                .timestamp_handling
-                .unwrap_or(TimestampHandling::GuessNumberUnit),
-            config.time_handling.unwrap_or(TimeHandling::Micro),
-            config
-                .bigint_unsigned_handling
-                .unwrap_or(BigintUnsignedHandlingMode::Long),
-            config.handle_toast_columns,
-        );
-        json_parse_options.numeric_handling = NumericHandling::Relax {
-            string_parsing: config.numeric_string_parsing,
-        };
+    pub fn new(
+        timestamptz_handling: TimestamptzHandling,
+        timestamp_handling: TimestampHandling,
+        time_handling: TimeHandling,
+        numeric_handling: NumericHandling,
+        bigint_unsigned_handling: BigintUnsignedHandlingMode,
+        handle_toast_columns: bool,
+    ) -> ConnectorResult<Self> {
         Ok(Self {
             value: None,
-            json_parse_options,
+            json_parse_options: JsonParseOptions::new_for_debezium(
+                timestamptz_handling,
+                timestamp_handling,
+                time_handling,
+                numeric_handling,
+                bigint_unsigned_handling,
+                handle_toast_columns,
+            ),
         })
     }
 
@@ -104,6 +102,9 @@ impl DebeziumMongoJsonAccessBuilder {
                 TimestamptzHandling::GuessNumberUnit,
                 TimestampHandling::GuessNumberUnit,
                 TimeHandling::Micro,
+                NumericHandling::Relax {
+                    string_parsing: false,
+                },
                 BigintUnsignedHandlingMode::Long,
                 false,
             ),
@@ -174,7 +175,6 @@ mod tests {
                 time_handling: None,
                 bigint_unsigned_handling: None,
                 handle_toast_columns: false,
-                numeric_string_parsing: false,
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };
