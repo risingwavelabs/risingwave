@@ -93,8 +93,7 @@ create source mysql_validate_src with (
  username = 'root',
  password = '123456',
  database.name = 'my@db',
- server.id = '5801',
- debezium.decimal.handling.mode = 'string'
+ server.id = '5801'
 );
 
 # upstream table does not exist
