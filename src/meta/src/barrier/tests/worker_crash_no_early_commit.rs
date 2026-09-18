@@ -158,9 +158,11 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
         unimplemented!()
     }
 
-    async fn handle_refresh_finished_table_ids(
+    async fn handle_refresh_finished_actors(
         &self,
-        _refresh_finished_table_ids: Vec<JobId>,
+        _refresh_finished_actors: Vec<
+            risingwave_pb::stream_service::barrier_complete_response::PbRefreshFinishedActor,
+        >,
     ) -> MetaResult<()> {
         unimplemented!()
     }
