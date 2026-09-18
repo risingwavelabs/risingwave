@@ -80,8 +80,6 @@ public class DbzConnectorConfig {
     public static final String ORACLE_PDB_NAME = "database.pdb.name";
     public static final String ORACLE_SCHEMA_NAME = "schema.name";
     public static final String ORACLE_HEARTBEAT_TABLE_NAME = "heartbeat.table.name";
-    public static final String ORACLE_SNAPSHOT_MODE = "snapshot.mode";
-    public static final String ORACLE_DECIMAL_HANDLING_MODE = "decimal.handling.mode";
 
     /* RisingWave configs */
     private static final String DBZ_CONFIG_FILE = "debezium.properties";
@@ -399,11 +397,11 @@ public class DbzConnectorConfig {
             // for Oracle sources; remove the implicit Debezium `initial` snapshot fallback then.
             if (isCdcBackfill) {
                 if (null != startOffset && !startOffset.isBlank()) {
-                    oracleProps.setProperty(ORACLE_SNAPSHOT_MODE, "recovery");
+                    oracleProps.setProperty("snapshot.mode", "recovery");
                     oracleProps.setProperty(
                             ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE, startOffset);
                 } else {
-                    oracleProps.setProperty(ORACLE_SNAPSHOT_MODE, "no_data");
+                    oracleProps.setProperty("snapshot.mode", "no_data");
                 }
             }
             if (isHeartbeatEnabled(userProps)) {
@@ -414,10 +412,6 @@ public class DbzConnectorConfig {
                         heartbeatTable.actionQuery());
             }
             dbzProps.putAll(oracleProps);
-            // RisingWave omits Kafka Connect schemas from CDC events and decodes values using the
-            // table schema known by the CDC executor. Serialize Oracle NUMBER values as text so
-            // every NUMBER variant has the same schema-independent JSON representation.
-            dbzProps.setProperty(ORACLE_DECIMAL_HANDLING_MODE, "string");
             if (isCdcSourceJob) {
                 // A shared Oracle source captures tables from multiple schemas in one PDB.
                 LOG.info("Disable table filtering for the shared Oracle source");
