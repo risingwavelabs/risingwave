@@ -20,51 +20,33 @@ use std::sync::{Arc, atomic};
 use std::time::Instant;
 
 use await_tree::{InstrumentAwait, SpanExt};
-use fail::fail_point;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::KeyComparator;
 use risingwave_hummock_sdk::key::FullKey;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
-use crate::hummock::block_stream::BlockDataStream;
+use crate::hummock::compactor::block_stream::SstableBlockStream;
 use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::iterator::{Forward, HummockIterator, ValueMeta};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{BlockHolder, BlockIterator, BlockMeta, HummockResult, TableHolder};
+use crate::hummock::{Block, BlockHolder, BlockIterator, BlockMeta, HummockResult, TableHolder};
 use crate::monitor::StoreLocalStatistic;
 
 const PROGRESS_KEY_INTERVAL: usize = 100;
 
-/// Iterates over the KV-pairs of an SST while downloading it.
-/// `SstableStreamIterator` encapsulates operations on `sstables`, constructing block streams and accessing the corresponding data via `block_metas`.
-///  Note that a `block_meta` does not necessarily correspond to the entire sstable, but rather to a subset, which is documented via the `block_idx`.
+/// Iterates over the KV-pairs in a selected range of an SST while downloading its blocks.
 pub struct SstableStreamIterator {
-    sstable_store: SstableStoreRef,
-    sstable: TableHolder,
-    /// The range of block metas to iterate over
-    block_metas_range: Range<usize>,
-    /// The downloading stream.
-    block_stream: Option<BlockDataStream>,
-
+    block_stream: SstableBlockStream,
     /// Iterates over the KV-pairs of the current block.
     block_iter: Option<BlockIterator>,
-
-    /// Index of the current block within the range.
-    block_idx: usize,
-
     /// Counts the time used for IO.
     stats_ptr: Arc<AtomicU64>,
-
-    /// For key sanity check of divided SST and debugging
-    sstable_info: SstableInfo,
 
     /// Table ids used to decide which blocks should be read from this SST.
     read_table_ids: HashSet<TableId>,
     task_progress: Arc<TaskProgress>,
-    io_retry_times: usize,
-    max_io_retry_times: usize,
 
     // key range cache
     key_range_left: FullKey<Vec<u8>>,
@@ -73,20 +55,7 @@ pub struct SstableStreamIterator {
 }
 
 impl SstableStreamIterator {
-    // We have to handle two internal iterators.
-    //   `block_stream`: iterates over the blocks of the table.
-    //     `block_iter`: iterates over the KV-pairs of the current block.
-    // These iterators work in different ways.
-
-    // BlockIterator works as follows: After new(), we call seek(). That brings us
-    // to the first element. Calling next() then brings us to the second element and does not
-    // return anything.
-
-    // BlockStream follows a different approach. After new(), we do not seek, instead next()
-    // returns the first value.
-
-    /// Initialises a new [`SstableStreamIterator`] which iterates over the given [`BlockDataStream`].
-    /// The iterator reads at most `max_block_count` from the stream.
+    /// Restricts the selected blocks to the virtual SST's key range before streaming them.
     pub fn new(
         sstable: TableHolder,
         block_metas_range: Range<usize>,
@@ -113,47 +82,21 @@ impl SstableStreamIterator {
         let key_range_right_exclusive = sstable_info.key_range.right_exclusive;
 
         Self {
-            block_stream: None,
+            block_stream: SstableBlockStream::new(
+                sstable,
+                block_metas_range,
+                sstable_info,
+                sstable_store,
+                max_io_retry_times,
+            ),
             block_iter: None,
-            sstable,
-            block_metas_range,
-            block_idx: 0,
             stats_ptr: stats.remote_io_time.clone(),
             read_table_ids,
-            sstable_info,
-            sstable_store,
             task_progress,
-            io_retry_times: 0,
-            max_io_retry_times,
             key_range_left,
             key_range_right,
             key_range_right_exclusive,
         }
-    }
-
-    /// Returns the block metas slice for this iterator.
-    #[inline]
-    fn block_metas(&self) -> &[BlockMeta] {
-        &self.sstable.meta.block_metas[self.block_metas_range.clone()]
-    }
-
-    /// Returns the number of blocks in this iterator.
-    #[inline]
-    fn block_count(&self) -> usize {
-        self.block_metas_range.len()
-    }
-
-    async fn create_stream(&mut self) -> HummockResult<()> {
-        let block_stream = self
-            .sstable_store
-            .get_stream_for_blocks(
-                self.sstable_info.object_id,
-                &self.block_metas()[self.block_idx..],
-            )
-            .instrument_await("stream_iter_get_stream".verbose())
-            .await?;
-        self.block_stream = Some(block_stream);
-        Ok(())
     }
 
     async fn prune_from_valid_block_iter(&mut self) -> HummockResult<()> {
@@ -202,56 +145,23 @@ impl SstableStreamIterator {
         Ok(())
     }
 
-    /// Loads a new block, creates a new iterator for it, and stores that iterator in
-    /// `self.block_iter`. The created iterator points to the block's first KV-pair. If the end of
-    /// the stream is reached or `self.remaining_blocks` is zero, then the function sets
-    /// `self.block_iter` to `None`.
+    /// Loads and decodes the next block, or clears the iterator at the end of the stream.
     async fn next_block(&mut self) -> HummockResult<()> {
-        // Check if we want and if we can load the next block.
         let now = Instant::now();
         let _time_stat = scopeguard::guard(self.stats_ptr.clone(), |stats_ptr: Arc<AtomicU64>| {
             let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
             stats_ptr.fetch_add(add as u64, atomic::Ordering::Relaxed);
         });
-        if self.block_idx < self.block_count() {
-            loop {
-                let ret = match &mut self.block_stream {
-                    Some(block_stream) => block_stream.next_block().await,
-                    None => {
-                        self.create_stream().await?;
-                        continue;
-                    }
-                };
-                match ret {
-                    Ok(Some(block)) => {
-                        let mut block_iter =
-                            BlockIterator::new(BlockHolder::from_owned_block(block));
-                        block_iter.seek_to_first();
-                        self.block_idx += 1;
-                        self.block_iter = Some(block_iter);
-                        return Ok(());
-                    }
-                    Ok(None) => break,
-                    Err(e) => {
-                        if !e.is_object_error() || !self.need_recreate_io_stream() {
-                            return Err(e);
-                        }
-                        self.block_stream.take();
-                        self.io_retry_times += 1;
-                        fail_point!("create_stream_err");
-
-                        tracing::warn!(
-                            "retry create stream for sstable {} times, sstinfo={}",
-                            self.io_retry_times,
-                            self.sst_debug_info()
-                        );
-                    }
-                }
+        self.block_iter = match self.block_stream.next_block().await? {
+            Some((buf, uncompressed_size)) => {
+                // Decode errors are terminal and must not recreate the I/O stream.
+                let block = Box::new(Block::decode(buf, uncompressed_size)?);
+                let mut iter = BlockIterator::new(BlockHolder::from_owned_block(block));
+                iter.seek_to_first();
+                Some(iter)
             }
-        }
-        self.block_idx = self.block_count();
-        self.block_iter = None;
-
+            None => None,
+        };
         Ok(())
     }
 
@@ -332,17 +242,14 @@ impl SstableStreamIterator {
     }
 
     fn sst_debug_info(&self) -> String {
+        let sstable_info = &self.block_stream.sstable_info;
         format!(
             "object_id={}, sst_id={}, meta_offset={}, table_ids={:?}",
-            self.sstable_info.object_id,
-            self.sstable_info.sst_id,
-            self.sstable_info.meta_offset,
-            self.sstable_info.table_ids
+            sstable_info.object_id,
+            sstable_info.sst_id,
+            sstable_info.meta_offset,
+            sstable_info.table_ids
         )
-    }
-
-    fn need_recreate_io_stream(&self) -> bool {
-        self.io_retry_times < self.max_io_retry_times
     }
 
     fn exceed_key_range_left(&self, key: FullKey<&[u8]>) -> bool {
@@ -565,14 +472,11 @@ impl HummockIterator for ConcatSstableIterator {
 
     fn value_meta(&self) -> ValueMeta {
         let iter = self.sstable_iter.as_ref().expect("no table iter");
-        // sstable_iter's block_idx must have advanced at least one.
-        // See SstableStreamIterator::next_block.
-        assert!(iter.block_idx >= 1);
-        // block_idx is relative to block_metas_range.start, so we need to add it back
-        let absolute_block_idx = iter.block_metas_range.start + iter.block_idx - 1;
+        // The stream cursor is absolute and points past the currently decoded block.
+        assert!(iter.block_iter.is_some());
         ValueMeta {
-            object_id: Some(iter.sstable_info.object_id),
-            block_id: Some(absolute_block_idx as u64),
+            object_id: Some(iter.block_stream.sstable_info.object_id),
+            block_id: Some((iter.block_stream.next_block_index() - 1) as u64),
         }
     }
 }

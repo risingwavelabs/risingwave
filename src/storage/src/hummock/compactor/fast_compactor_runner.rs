@@ -21,7 +21,6 @@ use std::time::Instant;
 
 use await_tree::{InstrumentAwait, SpanExt};
 use bytes::Bytes;
-use fail::fail_point;
 use itertools::Itertools;
 use risingwave_common::catalog::TableId;
 use risingwave_hummock_sdk::compact_task::CompactTask;
@@ -33,7 +32,7 @@ use risingwave_hummock_sdk::{EpochWithGap, LocalSstableInfo, can_concat, compact
 use risingwave_pb::hummock::PbSstableFilterLayout;
 
 use crate::compaction_catalog_manager::CompactionCatalogAgentRef;
-use crate::hummock::block_stream::BlockDataStream;
+use crate::hummock::compactor::block_stream::SstableBlockStream;
 use crate::hummock::compactor::compaction_utils::{
     blocked_xor_filter_key_count_threshold, estimate_output_key_count_for_task,
 };
@@ -56,41 +55,17 @@ use crate::hummock::{
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 
-/// Iterates over the KV-pairs of an SST while downloading it.
+/// Streams physical SST blocks for raw copy or decoded compaction.
 pub struct BlockStreamIterator {
-    /// The downloading stream.
-    block_stream: Option<BlockDataStream>,
-
-    next_block_index: usize,
-
-    /// For key sanity check of divided SST and debugging
-    sstable: TableHolder,
+    block_stream: SstableBlockStream,
+    /// When present, this is the decoded block immediately before the stream cursor.
+    /// Otherwise the next block is still eligible for raw copy, or the SST is exhausted.
     iter: Option<BlockIterator>,
     task_progress: Arc<TaskProgress>,
-
-    // For block stream recreate
-    sstable_store: SstableStoreRef,
-    sstable_info: SstableInfo,
-    io_retry_times: usize,
-    max_io_retry_times: usize,
     stats_ptr: Arc<AtomicU64>,
 }
 
 impl BlockStreamIterator {
-    // We have to handle two internal iterators.
-    //   `block_stream`: iterates over the blocks of the table.
-    //     `block_iter`: iterates over the KV-pairs of the current block.
-    // These iterators work in different ways.
-
-    // BlockIterator works as follows: After new(), we call seek(). That brings us
-    // to the first element. Calling next() then brings us to the second element and does not
-    // return anything.
-
-    // BlockStream follows a different approach. After new(), we do not seek, instead next()
-    // returns the first value.
-
-    /// Initialises a new [`BlockStreamIterator`] which iterates over the given [`BlockDataStream`].
-    /// The iterator reads at most `max_block_count` from the stream.
     pub fn new(
         sstable: TableHolder,
         task_progress: Arc<TaskProgress>,
@@ -99,92 +74,49 @@ impl BlockStreamIterator {
         max_io_retry_times: usize,
         stats_ptr: Arc<AtomicU64>,
     ) -> Self {
+        // Fast compaction streams the physical SST. The executor decides whether each block
+        // can be copied or needs decoding, including table-id pruning.
+        let block_count = sstable.meta.block_metas.len();
         Self {
-            block_stream: None,
-            next_block_index: 0,
-            sstable,
+            block_stream: SstableBlockStream::new(
+                sstable,
+                0..block_count,
+                sstable_info,
+                sstable_store,
+                max_io_retry_times,
+            ),
             iter: None,
             task_progress,
-            sstable_store,
-            sstable_info,
-            io_retry_times: 0,
-            max_io_retry_times,
             stats_ptr,
         }
     }
 
-    async fn create_stream(&mut self) -> HummockResult<()> {
-        // Fast compaction streams the physical SST blocks directly. Table-id pruning is handled
-        // later by `CompactTaskExecutor` before raw block copy or decoded block compaction.
-        let block_stream = self
-            .sstable_store
-            .get_stream_for_blocks(
-                self.sstable_info.object_id,
-                &self.sstable.meta.block_metas[self.next_block_index..],
-            )
-            .instrument_await("stream_iter_get_stream".verbose())
-            .await?;
-        self.block_stream = Some(block_stream);
-        Ok(())
-    }
-
-    /// Wrapper function for `self.block_stream.next()` which allows us to measure the time needed.
-    pub(crate) async fn download_next_block(
-        &mut self,
-    ) -> HummockResult<Option<(Bytes, Vec<u8>, BlockMeta)>> {
+    pub(crate) async fn download_next_block(&mut self) -> HummockResult<Option<(Bytes, usize)>> {
         let now = Instant::now();
         let _time_stat = scopeguard::guard(self.stats_ptr.clone(), |stats_ptr: Arc<AtomicU64>| {
             let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
             stats_ptr.fetch_add(add as u64, atomic::Ordering::Relaxed);
         });
-        loop {
-            let ret = match &mut self.block_stream {
-                Some(block_stream) => block_stream.next_block_impl().await,
-                None => {
-                    self.create_stream().await?;
-                    continue;
-                }
-            };
-            match ret {
-                Ok(Some((data, _))) => {
-                    let meta = self.sstable.meta.block_metas[self.next_block_index].clone();
-                    let filter_block = self
-                        .sstable
-                        .filter_reader
-                        .get_block_raw_filter(self.next_block_index);
-                    self.next_block_index += 1;
-                    return Ok(Some((data, filter_block, meta)));
-                }
-
-                Ok(None) => break,
-
-                Err(e) => {
-                    if !e.is_object_error() || self.io_retry_times >= self.max_io_retry_times {
-                        return Err(e);
-                    }
-
-                    self.block_stream.take();
-                    self.io_retry_times += 1;
-                    fail_point!("create_stream_err");
-
-                    tracing::warn!(
-                        "fast compact retry create stream for sstable {} times, sstinfo={}",
-                        self.io_retry_times,
-                        format!(
-                            "object_id={}, sst_id={}, meta_offset={}, table_ids={:?}",
-                            self.sstable_info.object_id,
-                            self.sstable_info.sst_id,
-                            self.sstable_info.meta_offset,
-                            self.sstable_info.table_ids
-                        )
-                    );
-                }
-            }
+        let block = self.block_stream.next_block().await?;
+        if block.is_none() {
+            self.iter = None;
         }
+        Ok(block)
+    }
 
-        self.next_block_index = self.sstable.meta.block_metas.len();
-        self.iter.take();
-        Ok(None)
+    /// Materialize writer metadata only when copying the most recently downloaded block.
+    /// Decoded compaction uses the uncompressed size returned by `download_next_block` instead.
+    fn current_block_raw_metadata(&self) -> (Vec<u8>, BlockMeta) {
+        let block_index = self.block_stream.next_block_index() - 1;
+        let sstable = &self.block_stream.sstable;
+        (
+            sstable.filter_reader.get_block_raw_filter(block_index),
+            sstable.meta.block_metas[block_index].clone(),
+        )
+    }
+
+    fn has_decoded_block(&self) -> bool {
+        self.iter.is_some()
     }
 
     pub(crate) fn init_block_iter(
@@ -200,25 +132,33 @@ impl BlockStreamIterator {
     }
 
     fn next_block_smallest(&self) -> &[u8] {
-        self.sstable.meta.block_metas[self.next_block_index]
+        self.block_stream.sstable.meta.block_metas[self.block_stream.next_block_index()]
             .smallest_key
             .as_ref()
     }
 
-    fn next_block_largest(&self) -> &[u8] {
-        if self.next_block_index + 1 < self.sstable.meta.block_metas.len() {
-            self.sstable.meta.block_metas[self.next_block_index + 1]
+    /// Upper bound used to decide whether the unread block precedes the other input.
+    /// The next block's first key is exclusive; the SST's largest key is inclusive.
+    /// Callers must compare user keys strictly to avoid copying across versions of one key.
+    fn next_block_upper_bound(&self) -> &[u8] {
+        let sstable = &self.block_stream.sstable;
+        let next_block_index = self.block_stream.next_block_index();
+        if next_block_index + 1 < sstable.meta.block_metas.len() {
+            sstable.meta.block_metas[next_block_index + 1]
                 .smallest_key
                 .as_ref()
         } else {
-            self.sstable.meta.largest_key.as_ref()
+            sstable.meta.largest_key.as_ref()
         }
     }
 
+    /// Builder boundary for the just-downloaded block, not necessarily its last stored key.
     fn current_block_largest(&self) -> Vec<u8> {
-        if self.next_block_index < self.sstable.meta.block_metas.len() {
+        let sstable = &self.block_stream.sstable;
+        let next_block_index = self.block_stream.next_block_index();
+        if self.block_stream.has_next_block() {
             let mut largest_key = FullKey::decode(
-                self.sstable.meta.block_metas[self.next_block_index]
+                sstable.meta.block_metas[next_block_index]
                     .smallest_key
                     .as_ref(),
             );
@@ -226,23 +166,19 @@ impl BlockStreamIterator {
             largest_key.epoch_with_gap = EpochWithGap::new_max_epoch();
             largest_key.encode()
         } else {
-            self.sstable.meta.largest_key.clone()
+            sstable.meta.largest_key.clone()
         }
     }
 
     fn key(&self) -> FullKey<&[u8]> {
         match self.iter.as_ref() {
             Some(iter) => iter.key(),
-            None => FullKey::decode(
-                self.sstable.meta.block_metas[self.next_block_index]
-                    .smallest_key
-                    .as_ref(),
-            ),
+            None => FullKey::decode(self.next_block_smallest()),
         }
     }
 
     pub(crate) fn is_valid(&self) -> bool {
-        self.iter.is_some() || self.next_block_index < self.sstable.meta.block_metas.len()
+        self.iter.is_some() || self.block_stream.has_next_block()
     }
 
     #[cfg(test)]
@@ -309,17 +245,6 @@ impl ConcatSstableIterator {
 
     pub fn current_sstable(&mut self) -> &mut BlockStreamIterator {
         self.sstable_iter.as_mut().unwrap()
-    }
-
-    pub async fn init_block_iter(&mut self) -> HummockResult<()> {
-        if let Some(sstable) = self.sstable_iter.as_mut() {
-            if sstable.iter.is_some() {
-                return Ok(());
-            }
-            let (buf, _, meta) = sstable.download_next_block().await?.unwrap();
-            sstable.init_block_iter(buf, meta.uncompressed_size as usize)?;
-        }
-        Ok(())
     }
 
     pub fn is_valid(&self) -> bool {
@@ -495,146 +420,8 @@ impl<B: FilterBuilder, C: CompactionFilter> CompactorRunner<B, C> {
     pub async fn run(mut self) -> HummockResult<(Vec<LocalSstableInfo>, CompactionStatistics)> {
         self.left.rewind().await?;
         self.right.rewind().await?;
-        let mut skip_raw_block_count = 0;
-        let mut skip_raw_block_size = 0;
-        while self.left.is_valid() && self.right.is_valid() {
-            let ret = self
-                .left
-                .current_sstable()
-                .key()
-                .cmp(&self.right.current_sstable().key());
-            let (first, second) = if ret == Ordering::Less {
-                (&mut self.left, &mut self.right)
-            } else {
-                (&mut self.right, &mut self.left)
-            };
-            assert!(
-                ret != Ordering::Equal,
-                "sst range overlap equal_key {:?}",
-                self.left.current_sstable().key()
-            );
-            if first.current_sstable().iter.is_none() {
-                let right_key = second.current_sstable().key();
-                while first.current_sstable().is_valid() && !self.executor.builder.need_flush() {
-                    let full_key = FullKey::decode(first.current_sstable().next_block_largest());
-                    // the full key may be either Excluded key or Included key, so we do not allow
-                    // they equals.
-                    if full_key.user_key.ge(&right_key.user_key) {
-                        break;
-                    }
-                    let smallest_key =
-                        FullKey::decode(first.current_sstable().next_block_smallest());
-                    if !self.executor.shall_copy_raw_block(&smallest_key) {
-                        break;
-                    }
-                    let smallest_key = smallest_key.to_vec();
-
-                    let (mut block, filter_data, mut meta) = first
-                        .current_sstable()
-                        .download_next_block()
-                        .await?
-                        .unwrap();
-                    let algorithm = Block::get_algorithm(&block)?;
-                    if algorithm == CompressionAlgorithm::None
-                        && algorithm != self.compression_algorithm
-                    {
-                        block = BlockBuilder::compress_block(block, self.compression_algorithm)?;
-                        meta.len = block.len() as u32;
-                    }
-
-                    let largest_key = first.current_sstable().current_block_largest();
-                    let block_len = block.len() as u64;
-                    let block_key_count = meta.total_key_count;
-
-                    if self
-                        .executor
-                        .builder
-                        .add_raw_block(block, filter_data, smallest_key, largest_key, meta)
-                        .await?
-                    {
-                        skip_raw_block_size += block_len;
-                        skip_raw_block_count += 1;
-                    }
-                    self.executor.may_report_process_key(block_key_count);
-                    self.executor.clear();
-                }
-                if !first.current_sstable().is_valid() {
-                    first.next_sstable().await?;
-                    continue;
-                }
-                first.init_block_iter().await?;
-            }
-
-            let target_key = second.current_sstable().key();
-            let iter = first.sstable_iter.as_mut().unwrap().iter.as_mut().unwrap();
-            self.executor.reset_watermark();
-            self.executor.run(iter, target_key).await?;
-            if !iter.is_valid() {
-                first.sstable_iter.as_mut().unwrap().iter.take();
-                if !first.current_sstable().is_valid() {
-                    first.next_sstable().await?;
-                }
-            }
-        }
-        let rest_data = if !self.left.is_valid() {
-            &mut self.right
-        } else {
-            &mut self.left
-        };
-        if rest_data.is_valid() {
-            // compact rest keys of the current block.
-            let sstable_iter = rest_data.sstable_iter.as_mut().unwrap();
-            let target_key = FullKey::decode(&sstable_iter.sstable.meta.largest_key);
-            if let Some(iter) = sstable_iter.iter.as_mut() {
-                self.executor.reset_watermark();
-                self.executor.run(iter, target_key).await?;
-                assert!(
-                    !iter.is_valid(),
-                    "iter should not be valid key {:?}",
-                    iter.key()
-                );
-            }
-            sstable_iter.iter.take();
-        }
-
-        while rest_data.is_valid() {
-            let mut sstable_iter = rest_data.sstable_iter.take().unwrap();
-            while sstable_iter.is_valid() {
-                let smallest_key = FullKey::decode(sstable_iter.next_block_smallest()).to_vec();
-                let (block, filter_data, block_meta) =
-                    sstable_iter.download_next_block().await?.unwrap();
-                // If the last key is tombstone and it was deleted, the first key of this block must be deleted. So we can not move this block directly.
-                let need_deleted = self.executor.last_key.user_key.eq(&smallest_key.user_key)
-                    && self.executor.last_key_is_delete;
-                if self.executor.builder.need_flush()
-                    || need_deleted
-                    || !self.executor.shall_copy_raw_block(&smallest_key.to_ref())
-                {
-                    let largest_key = sstable_iter.sstable.meta.largest_key.clone();
-                    let target_key = FullKey::decode(&largest_key);
-                    sstable_iter.init_block_iter(block, block_meta.uncompressed_size as usize)?;
-                    let mut iter = sstable_iter.iter.take().unwrap();
-                    self.executor.reset_watermark();
-                    self.executor.run(&mut iter, target_key).await?;
-                } else {
-                    let largest_key = sstable_iter.current_block_largest();
-                    let block_len = block.len() as u64;
-                    let block_key_count = block_meta.total_key_count;
-                    if self
-                        .executor
-                        .builder
-                        .add_raw_block(block, filter_data, smallest_key, largest_key, block_meta)
-                        .await?
-                    {
-                        skip_raw_block_count += 1;
-                        skip_raw_block_size += block_len;
-                    }
-                    self.executor.may_report_process_key(block_key_count);
-                    self.executor.clear();
-                }
-            }
-            rest_data.next_sstable().await?;
-        }
+        self.merge_inputs().await?;
+        self.drain_remaining().await?;
         let mut total_read_bytes = 0;
         for sst in &self.left.sstables {
             total_read_bytes += sst.sst_size;
@@ -644,12 +431,12 @@ impl<B: FilterBuilder, C: CompactionFilter> CompactorRunner<B, C> {
         }
         self.metrics
             .compact_fast_runner_bytes
-            .inc_by(skip_raw_block_size);
+            .inc_by(self.executor.skip_raw_block_size);
         tracing::info!(
             "OPTIMIZATION: skip {} blocks for task-{}, optimize {}% data compression",
-            skip_raw_block_count,
+            self.executor.skip_raw_block_count,
             self.task_id,
-            skip_raw_block_size * 100 / total_read_bytes,
+            self.executor.skip_raw_block_size * 100 / total_read_bytes,
         );
 
         let statistic = self.executor.take_statistics();
@@ -667,6 +454,116 @@ impl<B: FilterBuilder, C: CompactionFilter> CompactorRunner<B, C> {
         assert!(can_concat(&sst_infos));
         Ok((output_ssts, statistic))
     }
+
+    /// Merge while both inputs have data, retaining partially consumed decoded blocks.
+    async fn merge_inputs(&mut self) -> HummockResult<()> {
+        while self.left.is_valid() && self.right.is_valid() {
+            let ret = self
+                .left
+                .current_sstable()
+                .key()
+                .cmp(&self.right.current_sstable().key());
+            let (first, second) = if ret == Ordering::Less {
+                (&mut self.left, &mut self.right)
+            } else {
+                (&mut self.right, &mut self.left)
+            };
+            assert!(
+                ret != Ordering::Equal,
+                "sst range overlap equal_key {:?}",
+                self.left.current_sstable().key()
+            );
+            if !first.current_sstable().has_decoded_block() {
+                let right_key = second.current_sstable().key();
+                while first.current_sstable().is_valid() && !self.executor.builder.need_flush() {
+                    let full_key =
+                        FullKey::decode(first.current_sstable().next_block_upper_bound());
+                    // Equality may hide more versions of the other input's user key.
+                    // Only a strictly smaller upper bound is safe for raw copy.
+                    if full_key.user_key.ge(&right_key.user_key) {
+                        break;
+                    }
+                    let smallest_key =
+                        FullKey::decode(first.current_sstable().next_block_smallest());
+                    if !self.executor.shall_copy_raw_block(&smallest_key) {
+                        break;
+                    }
+                    let smallest_key = smallest_key.to_vec();
+
+                    let (mut block, _) = first
+                        .current_sstable()
+                        .download_next_block()
+                        .await?
+                        .unwrap();
+                    let (filter_data, mut meta) =
+                        first.current_sstable().current_block_raw_metadata();
+                    let algorithm = Block::get_algorithm(&block)?;
+                    if algorithm == CompressionAlgorithm::None
+                        && algorithm != self.compression_algorithm
+                    {
+                        block = BlockBuilder::compress_block(block, self.compression_algorithm)?;
+                        meta.len = block.len() as u32;
+                    }
+
+                    let largest_key = first.current_sstable().current_block_largest();
+                    self.executor
+                        .append_raw_block(block, filter_data, smallest_key, largest_key, meta)
+                        .await?;
+                }
+                if !first.current_sstable().is_valid() {
+                    first.next_sstable().await?;
+                    continue;
+                }
+            }
+
+            let target_key = second.current_sstable().key();
+            self.executor
+                .compact_block(first.current_sstable(), Some(target_key))
+                .await?;
+            if !first.current_sstable().is_valid() {
+                first.next_sstable().await?;
+            }
+        }
+        Ok(())
+    }
+
+    /// Finish the remaining input after the two-way merge, including any decoded suffix.
+    async fn drain_remaining(&mut self) -> HummockResult<()> {
+        let rest_data = if !self.left.is_valid() {
+            &mut self.right
+        } else {
+            &mut self.left
+        };
+        // The stream cursor may already be at EOF while the current decoded block still
+        // has rows. Consume those rows before asking for another block or SST.
+        if rest_data.is_valid() && rest_data.current_sstable().has_decoded_block() {
+            self.executor
+                .compact_block(rest_data.current_sstable(), None)
+                .await?;
+        }
+
+        while rest_data.is_valid() {
+            let sstable_iter = rest_data.current_sstable();
+            while sstable_iter.is_valid() {
+                let smallest_key = FullKey::decode(sstable_iter.next_block_smallest()).to_vec();
+                let (block, uncompressed_size) = sstable_iter.download_next_block().await?.unwrap();
+                if self.executor.builder.need_flush()
+                    || !self.executor.shall_copy_raw_block(&smallest_key.to_ref())
+                {
+                    sstable_iter.init_block_iter(block, uncompressed_size)?;
+                    self.executor.compact_block(sstable_iter, None).await?;
+                } else {
+                    let (filter_data, block_meta) = sstable_iter.current_block_raw_metadata();
+                    let largest_key = sstable_iter.current_block_largest();
+                    self.executor
+                        .append_raw_block(block, filter_data, smallest_key, largest_key, block_meta)
+                        .await?;
+                }
+            }
+            rest_data.next_sstable().await?;
+        }
+        Ok(())
+    }
 }
 
 pub struct CompactTaskExecutor<F: TableBuilderFactory, C: CompactionFilter> {
@@ -680,6 +577,8 @@ pub struct CompactTaskExecutor<F: TableBuilderFactory, C: CompactionFilter> {
     pk_prefix_skip_watermark_state: PkPrefixSkipWatermarkState,
     last_key_is_delete: bool,
     progress_key_num: u32,
+    skip_raw_block_count: u64,
+    skip_raw_block_size: u64,
     non_pk_prefix_skip_watermark_state: NonPkPrefixSkipWatermarkState,
     value_skip_watermark_state: ValueSkipWatermarkState,
     compaction_filter: C,
@@ -708,6 +607,8 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
             task_progress,
             pk_prefix_skip_watermark_state,
             progress_key_num: 0,
+            skip_raw_block_count: 0,
+            skip_raw_block_size: 0,
             non_pk_prefix_skip_watermark_state,
             value_skip_watermark_state,
             compaction_filter,
@@ -724,11 +625,34 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
         std::mem::take(&mut self.compaction_statistics)
     }
 
-    fn clear(&mut self) {
+    /// Commit a raw block and its bookkeeping together. The builder may decode and merge
+    /// the block into a small pending block; only an actual raw copy counts as skipped work.
+    async fn append_raw_block(
+        &mut self,
+        block: Bytes,
+        filter_data: Vec<u8>,
+        smallest_key: FullKey<Vec<u8>>,
+        largest_key: Vec<u8>,
+        meta: BlockMeta,
+    ) -> HummockResult<()> {
+        let block_len = block.len() as u64;
+        let key_count = meta.total_key_count;
+        if self
+            .builder
+            .add_raw_block(block, filter_data, smallest_key, largest_key, meta)
+            .await?
+        {
+            self.skip_raw_block_count += 1;
+            self.skip_raw_block_size += block_len;
+        }
+        self.may_report_process_key(key_count);
+        // Decoded-key state precedes this block and must not affect subsequent rows.
+        // Raw-copy eligibility has already ruled out a deleted key crossing into it.
         if !self.last_key.is_empty() {
             self.last_key = FullKey::default();
         }
         self.last_key_is_delete = false;
+        Ok(())
     }
 
     fn reset_watermark(&mut self) {
@@ -751,6 +675,37 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
                 .inc_progress_key(self.progress_key_num as u64);
             self.progress_key_num = 0;
         }
+    }
+
+    /// Decode on demand and compact the current block up to `target_key`. With no target,
+    /// consume the whole block. Keep a partially consumed block for the next merge step.
+    async fn compact_block(
+        &mut self,
+        sstable_iter: &mut BlockStreamIterator,
+        target_key: Option<FullKey<&[u8]>>,
+    ) -> HummockResult<()> {
+        if sstable_iter.iter.is_none() {
+            let (buf, uncompressed_size) = sstable_iter.download_next_block().await?.unwrap();
+            sstable_iter.init_block_iter(buf, uncompressed_size)?;
+        }
+        let consume_whole_block = target_key.is_none();
+        let target_key = target_key.unwrap_or_else(|| {
+            FullKey::decode(&sstable_iter.block_stream.sstable.meta.largest_key)
+        });
+        let iter = sstable_iter.iter.as_mut().unwrap();
+        self.reset_watermark();
+        self.run(iter, target_key).await?;
+        if consume_whole_block {
+            assert!(
+                !iter.is_valid(),
+                "iter should not be valid key {:?}",
+                iter.key()
+            );
+        }
+        if !iter.is_valid() {
+            sstable_iter.iter = None;
+        }
+        Ok(())
     }
 
     pub async fn run(
