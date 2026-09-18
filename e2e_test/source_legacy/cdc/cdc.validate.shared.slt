@@ -1,9 +1,8 @@
-# CDC frontend validation tests using shared sources.
+# CDC validation tests, primarily using shared sources.
 #
-# These tests verify that the frontend correctly rejects bad CDC source
-# definitions (at `CREATE SOURCE`) and bad CDC table definitions (at
-# `CREATE TABLE ... FROM <source> TABLE '<db>.<table>'`) before any
-# streaming pipeline is created.
+# These tests verify that invalid CDC source and table definitions are rejected
+# during creation. Oracle temporarily uses direct CDC tables until shared-source
+# support is available.
 
 control substitution on
 
@@ -47,6 +46,49 @@ create source mysql_invalid_heartbeat_non_integer with (
  server.id = '5804',
  debezium.heartbeat.interval.ms = 'invalid'
 );
+
+
+############################################################
+# Oracle: connector configuration errors fire at `CREATE TABLE`.
+############################################################
+
+# TODO: Replace both direct Oracle CDC tables below with `CREATE SOURCE` once Oracle
+# shared-source support is ready in a later PR. Use implicit `FORMAT PLAIN ENCODE JSON`
+# like the MySQL cases, removing the explicit columns and table.name.
+# Both errors must be reported by Java validation before connecting to Oracle.
+
+statement error 'debezium.heartbeat.action.query' is generated internally; configure 'heartbeat.table.name' instead
+create table oracle_user_provided_heartbeat_action (
+ id INT PRIMARY KEY
+) with (
+ connector = 'oracle-cdc',
+ hostname = 'oracle',
+ port = '1521',
+ username = 'C##RW_VALIDATOR',
+ password = 'secret',
+ database.name = 'FREE',
+ database.pdb.name = 'FREEPDB1',
+ schema.name = 'APP',
+ table.name = 'CUSTOMERS',
+ heartbeat.table.name = 'APP.RW_HEARTBEAT',
+ debezium.heartbeat.action.query = 'UPDATE APP.RW_HEARTBEAT SET HEARTBEAT = 1 WHERE ID = 1'
+) FORMAT DEBEZIUM ENCODE JSON;
+
+statement error 'database.pdb.name' must be an unquoted Oracle identifier
+create table oracle_invalid_pdb_identifier (
+ id INT PRIMARY KEY
+) with (
+ connector = 'oracle-cdc',
+ hostname = 'oracle',
+ port = '1521',
+ username = 'C##RW_VALIDATOR',
+ password = 'secret',
+ database.name = 'FREE',
+ database.pdb.name = 'FREEPDB1; DROP TABLE APP.CUSTOMERS',
+ schema.name = 'APP',
+ table.name = 'CUSTOMERS',
+ heartbeat.table.name = 'APP.RW_HEARTBEAT'
+) FORMAT DEBEZIUM ENCODE JSON;
 
 
 ############################################################

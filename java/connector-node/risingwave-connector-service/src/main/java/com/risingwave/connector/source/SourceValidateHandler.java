@@ -242,15 +242,7 @@ public class SourceValidateHandler {
                 ensureRequiredProps(props, isCdcSourceJob);
                 ensurePropNotBlank(props, DbzConnectorConfig.ORACLE_PDB_NAME);
                 ensurePropNotBlank(props, DbzConnectorConfig.ORACLE_SCHEMA_NAME);
-                if (DbzConnectorConfig.isHeartbeatEnabled(props)) {
-                    ensurePropNotBlank(props, DbzConnectorConfig.ORACLE_HEARTBEAT_TABLE_NAME);
-                } else if (props.containsKey(DbzConnectorConfig.ORACLE_HEARTBEAT_TABLE_NAME)) {
-                    throw ValidatorUtils.invalidArgument(
-                            String.format(
-                                    "'%s' requires a positive '%s'",
-                                    DbzConnectorConfig.ORACLE_HEARTBEAT_TABLE_NAME,
-                                    DbzConnectorConfig.HEARTBEAT_INTERVAL_KEY));
-                }
+                ensurePropNotBlank(props, DbzConnectorConfig.ORACLE_HEARTBEAT_TABLE_NAME);
                 if (props.containsKey(DbzConnectorConfig.HEARTBEAT_ACTION_QUERY_KEY)) {
                     throw ValidatorUtils.invalidArgument(
                             String.format(

@@ -90,6 +90,11 @@ abstract class OracleSourceTestBase {
                 .validateSource(ConnectorServiceProto.SourceType.ORACLE, properties);
     }
 
+    /**
+     * Asserts successful validation without {@code CONTAINER_DATA=ALL} for the fixture's connector
+     * user. This also verifies that the validator switches to the configured PDB before checking
+     * its metadata.
+     */
     protected void assertValid(Map<String, String> properties) {
         assertEquals("", validate(properties).getError().getErrorMessage());
     }

@@ -23,7 +23,6 @@ import java.sql.SQLException;
 import java.util.HashSet;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 
@@ -52,19 +51,15 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
     private final String pdbName;
     private final String schemaName;
     private final String tableName;
-    private final Optional<OracleHeartbeatTable> heartbeatTable;
+    private final OracleHeartbeatTable heartbeatTable;
     private final boolean isCdcSourceJob;
 
     public OracleValidator(Map<String, String> userProps, boolean isCdcSourceJob)
             throws SQLException {
         this.pdbName = normalizePdbName(userProps.get(DbzConnectorConfig.ORACLE_PDB_NAME));
         this.heartbeatTable =
-                DbzConnectorConfig.isHeartbeatEnabled(userProps)
-                        ? Optional.of(
-                                OracleHeartbeatTable.parse(
-                                        userProps.get(
-                                                DbzConnectorConfig.ORACLE_HEARTBEAT_TABLE_NAME)))
-                        : Optional.empty();
+                OracleHeartbeatTable.parse(
+                        userProps.get(DbzConnectorConfig.ORACLE_HEARTBEAT_TABLE_NAME));
         var jdbcUrl =
                 ValidatorUtils.getJdbcUrl(
                         SourceTypeE.ORACLE,
@@ -84,7 +79,7 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
     @Override
     public void validateAll() {
         super.validateAll();
-        heartbeatTable.ifPresent(this::validateHeartbeatTable);
+        validateHeartbeatTable(heartbeatTable);
     }
 
     @Override
@@ -114,7 +109,7 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
         }
     }
 
-    static void validateLoggingConfiguration(
+    private static void validateLoggingConfiguration(
             String logMode, String forceLogging, String supplementalLogDataMin) {
         if (!"ARCHIVELOG".equalsIgnoreCase(logMode)) {
             throw ValidatorUtils.failedPrecondition(
@@ -188,7 +183,7 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
         return values;
     }
 
-    static void validateRequiredGrants(
+    private static void validateRequiredGrants(
             String grantType, Set<String> required, Set<String> granted) {
         var missing = new HashSet<>(required);
         missing.removeAll(granted);
@@ -228,18 +223,13 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
             stmt.setString(2, table);
             try (var result = stmt.executeQuery()) {
                 result.next();
-                validateTableExists(description, owner, table, pdbName, result.getInt(1));
+                if (result.getInt(1) == 0) {
+                    throw ValidatorUtils.invalidArgument(
+                            String.format(
+                                    "%s '%s.%s' does not exist in PDB '%s'",
+                                    description, owner, table, pdbName));
+                }
             }
-        }
-    }
-
-    static void validateTableExists(
-            String description, String owner, String table, String pdbName, int tableCount) {
-        if (tableCount == 0) {
-            throw ValidatorUtils.invalidArgument(
-                    String.format(
-                            "%s '%s.%s' does not exist in PDB '%s'",
-                            description, owner, table, pdbName));
         }
     }
 
@@ -368,7 +358,7 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
         }
     }
 
-    static boolean hasHeartbeatUpdatePrivilege(
+    private static boolean hasHeartbeatUpdatePrivilege(
             String sessionUser,
             String owner,
             Set<String> sessionPrivileges,

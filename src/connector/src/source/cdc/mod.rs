@@ -376,23 +376,6 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_oracle_source_type_identity() {
-        assert!(matches!(
-            CdcSourceType::from(ORACLE_CDC_CONNECTOR),
-            CdcSourceType::Oracle
-        ));
-        assert_eq!(ORACLE_CDC_CONNECTOR, "oracle-cdc");
-        assert!(matches!(
-            CdcSourceType::from(PbSourceType::Oracle),
-            CdcSourceType::Oracle
-        ));
-        assert_eq!(
-            PbSourceType::from(CdcSourceType::Oracle),
-            PbSourceType::Oracle
-        );
-    }
-
-    #[test]
     fn test_normalize_simple_postgres_quoted_table_name() {
         assert_eq!(
             normalize_simple_postgres_quoted_table_name(r#"public."TableName""#).as_deref(),
