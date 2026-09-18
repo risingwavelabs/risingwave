@@ -99,6 +99,7 @@ impl BarrierWorkerState {
         &mut self,
         is_checkpoint: bool,
         curr_epoch: TracedEpoch,
+        barrier_interval_ms: u32,
     ) -> BarrierInfo {
         assert!(
             self.in_flight_prev_epoch.value() < curr_epoch.value(),
@@ -120,6 +121,7 @@ impl BarrierWorkerState {
             prev_epoch,
             curr_epoch,
             kind,
+            barrier_interval_ms,
         }
     }
 }
@@ -202,6 +204,7 @@ impl DatabaseCheckpointControl {
                         take(notifiers),
                         snapshot_backfill_upstream_tables,
                         snapshot_epoch,
+                        barrier_info.barrier_interval_ms,
                         hummock_version_stats,
                         control_stream_manager,
                         edges.as_mut().expect("should exist"),
