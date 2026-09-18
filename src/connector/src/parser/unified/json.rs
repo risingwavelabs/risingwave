@@ -250,6 +250,7 @@ impl JsonParseOptions {
         timestamptz_handling: TimestamptzHandling,
         timestamp_handling: TimestampHandling,
         time_handling: TimeHandling,
+        numeric_handling: NumericHandling,
         bigint_unsigned_handling: BigintUnsignedHandlingMode,
         handle_toast_columns: bool,
     ) -> Self {
@@ -259,9 +260,7 @@ impl JsonParseOptions {
             timestamp_handling,
             timestamptz_handling,
             json_value_handling: JsonValueHandling::AsString,
-            numeric_handling: NumericHandling::Relax {
-                string_parsing: false,
-            },
+            numeric_handling,
             boolean_handling: BooleanHandling::Relax {
                 string_parsing: false,
                 string_integer_parsing: false,
