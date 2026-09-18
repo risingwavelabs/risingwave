@@ -12,7 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::ops::DerefMut;
 use std::sync::Arc;
 
@@ -294,17 +294,6 @@ impl HummockManager {
             return Ok(());
         }
 
-        {
-            // Remove table write throughput statistics
-            // The Caller acquires `Send`, so we should safely use `write` lock before the await point.
-            // The table write throughput statistic accepts data inconsistencies (unregister table ids fail), so we can clean it up in advance.
-            let mut table_write_throughput_statistic_manager =
-                self.table_write_throughput_statistic_manager.write();
-            for &table_id in table_ids.iter().unique() {
-                table_write_throughput_statistic_manager.remove_table(table_id);
-            }
-        }
-
         let mut versioning_guard = self
             .versioning
             .write_with_process_name("unregister_table_ids")
@@ -327,7 +316,7 @@ impl HummockManager {
         }
         let mut group_changes: HashMap<CompactionGroupId, UnregisterGroupChange> = HashMap::new();
         // Remove member tables
-        for table_id in table_ids.into_iter().unique() {
+        for table_id in table_ids.iter().copied().unique() {
             let version = new_version_delta.latest_version();
             let Some(info) = version.state_table_info.info().get(&table_id) else {
                 continue;
@@ -399,6 +388,15 @@ impl HummockManager {
 
         for group_id in removed_groups {
             self.compaction_state.remove_compaction_group(group_id);
+        }
+
+        // Serialize removal with commit's statistics publication. Cleaning up before taking
+        // versioning could let an in-flight commit recreate a deleted table's history.
+        let mut stats = self.table_write_throughput_statistic_manager.write();
+        drop(compaction_group_manager);
+        drop(versioning_guard);
+        for table_id in table_ids {
+            stats.remove_table(table_id);
         }
 
         // No need to handle DeltaType::GroupDestroy during time travel.
@@ -521,6 +519,68 @@ impl HummockManager {
             &versioning_guard.version_stats,
             &manager.compaction_groups,
         )
+    }
+
+    pub(crate) async fn calculate_compaction_group_statistic_for_tables(
+        &self,
+        table_ids: &[TableId],
+    ) -> Vec<CompactionGroupStatistic> {
+        let groups = {
+            let versioning = self
+                .versioning
+                .read_with_process_name("calculate_compaction_group_statistic_for_tables")
+                .await;
+            let manager = self
+                .compaction_group_manager
+                .read_with_process_name("calculate_compaction_group_statistic_for_tables")
+                .await;
+            let version = &versioning.current_version;
+            let group_ids: BTreeSet<_> = table_ids
+                .iter()
+                .filter_map(|table_id| {
+                    version
+                        .state_table_info
+                        .info()
+                        .get(table_id)
+                        .map(|info| info.compaction_group_id)
+                })
+                .collect();
+            group_ids
+                .into_iter()
+                .map(|group_id| {
+                    let config = manager
+                        .try_get_compaction_group_config(group_id)
+                        .expect("current group config should exist");
+                    let tables = version
+                        .state_table_info
+                        .compaction_group_member_table_ids(group_id)
+                        .iter()
+                        .map(|table_id| {
+                            let size = versioning
+                                .version_stats
+                                .table_stats
+                                .get(table_id)
+                                .map(|stats| stats.total_key_size + stats.total_value_size)
+                                .unwrap_or(0)
+                                .max(0) as u64;
+                            (*table_id, size)
+                        })
+                        .collect_vec();
+                    (group_id, config, tables)
+                })
+                .collect_vec()
+        };
+        groups
+            .into_iter()
+            .map(
+                |(group_id, compaction_group_config, tables)| CompactionGroupStatistic {
+                    group_id,
+                    group_size: tables.iter().map(|(_, size)| size).sum(),
+                    table_statistic: tables.into_iter().collect(),
+                    compaction_group_config,
+                },
+            )
+            .collect()
     }
 
     pub(crate) async fn initial_compaction_group_config_after_load(

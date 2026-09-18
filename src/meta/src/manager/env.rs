@@ -261,17 +261,8 @@ pub struct MetaOpts {
     /// The interval in seconds for the refresh scheduler to check and trigger scheduled refreshes.
     pub refresh_scheduler_interval_sec: u64,
 
-    /// To split the compaction group when the high throughput statistics of the group exceeds the threshold.
-    pub table_stat_high_write_throughput_ratio_for_split: f64,
-
-    /// To merge the compaction group when the low throughput statistics of the group exceeds the threshold.
-    pub table_stat_low_write_throughput_ratio_for_merge: f64,
-
-    /// The window seconds of table throughput statistic history for split compaction group.
-    pub table_stat_throuput_window_seconds_for_split: usize,
-
-    /// The window seconds of table throughput statistic history for merge compaction group.
-    pub table_stat_throuput_window_seconds_for_merge: usize,
+    /// Retention of successful commit throughput observations for automatic group scheduling.
+    pub table_write_throughput_retention_seconds: usize,
 
     /// The configuration of the object store
     pub object_store_config: ObjectStoreConfig,
@@ -407,10 +398,7 @@ impl MetaOpts {
             actor_cnt_per_worker_parallelism_hard_limit: usize::MAX,
             actor_cnt_per_worker_parallelism_soft_limit: usize::MAX,
             split_group_size_ratio: 0.9,
-            table_stat_high_write_throughput_ratio_for_split: 0.5,
-            table_stat_low_write_throughput_ratio_for_merge: 0.7,
-            table_stat_throuput_window_seconds_for_split: 60,
-            table_stat_throuput_window_seconds_for_merge: 240,
+            table_write_throughput_retention_seconds: 300,
             periodic_scheduling_compaction_group_merge_interval_sec: 60 * 10,
             compaction_group_merge_dimension_threshold: 1.2,
             license_key_path: None,
