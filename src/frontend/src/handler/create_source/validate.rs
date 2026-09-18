@@ -90,6 +90,11 @@ static CONNECTORS_COMPATIBLE_FORMATS: LazyLock<HashMap<String, HashMap<Format, V
                     // support source stream job
                     Format::Plain => vec![Encode::Json],
                 ),
+                ORACLE_CDC_CONNECTOR => hashmap!(
+                    Format::Debezium => vec![Encode::Json],
+                    // support source stream job
+                    Format::Plain => vec![Encode::Json],
+                ),
                 MONGODB_CDC_CONNECTOR => hashmap!(
                     Format::DebeziumMongo => vec![Encode::Json],
                 ),
@@ -136,7 +141,7 @@ pub(crate) fn validate_cdc_heartbeat_interval(
     // Debezium accepting zero does not make it safe for these source lifecycles.
     let heartbeat_required = match connector {
         POSTGRES_CDC_CONNECTOR | MYSQL_CDC_CONNECTOR | SQL_SERVER_CDC_CONNECTOR => true,
-        MONGODB_CDC_CONNECTOR | CITUS_CDC_CONNECTOR => false,
+        MONGODB_CDC_CONNECTOR | CITUS_CDC_CONNECTOR | ORACLE_CDC_CONNECTOR => false,
         _ => return Ok(()),
     };
     let Some(value) = props.get("debezium.heartbeat.interval.ms") else {
@@ -283,7 +288,8 @@ pub fn validate_compatibility(
         || connector == POSTGRES_CDC_CONNECTOR
         || connector == CITUS_CDC_CONNECTOR
         || connector == MONGODB_CDC_CONNECTOR
-        || connector == SQL_SERVER_CDC_CONNECTOR)
+        || connector == SQL_SERVER_CDC_CONNECTOR
+        || connector == ORACLE_CDC_CONNECTOR)
         && let Some(timeout_value) = props.get("cdc.source.wait.streaming.start.timeout")
         && timeout_value.parse::<u32>().is_err()
     {
@@ -299,7 +305,8 @@ pub fn validate_compatibility(
         || connector == POSTGRES_CDC_CONNECTOR
         || connector == CITUS_CDC_CONNECTOR
         || connector == MONGODB_CDC_CONNECTOR
-        || connector == SQL_SERVER_CDC_CONNECTOR)
+        || connector == SQL_SERVER_CDC_CONNECTOR
+        || connector == ORACLE_CDC_CONNECTOR)
         && let Some(queue_size_value) = props.get("debezium.max.queue.size")
         && queue_size_value.parse::<u32>().is_err()
     {
@@ -340,6 +347,7 @@ mod tests {
             MONGODB_CDC_CONNECTOR,
             POSTGRES_CDC_CONNECTOR,
             CITUS_CDC_CONNECTOR,
+            ORACLE_CDC_CONNECTOR,
         ] {
             let mut props = BTreeMap::new();
             assert!(validate_cdc_heartbeat_interval(connector, &props).is_ok());
@@ -399,6 +407,7 @@ mod tests {
         for (connector, format) in [
             (MYSQL_CDC_CONNECTOR, FormatEncodeOptions::debezium_json()),
             (POSTGRES_CDC_CONNECTOR, FormatEncodeOptions::debezium_json()),
+            (ORACLE_CDC_CONNECTOR, FormatEncodeOptions::debezium_json()),
             (
                 MONGODB_CDC_CONNECTOR,
                 FormatEncodeOptions::debezium_mongo_json(),
@@ -432,6 +441,7 @@ mod tests {
             MONGODB_CDC_CONNECTOR,
             SQL_SERVER_CDC_CONNECTOR,
             CITUS_CDC_CONNECTOR,
+            ORACLE_CDC_CONNECTOR,
         ] {
             for value in HEARTBEAT_INTERVAL_CASES {
                 let mut props = BTreeMap::new();
