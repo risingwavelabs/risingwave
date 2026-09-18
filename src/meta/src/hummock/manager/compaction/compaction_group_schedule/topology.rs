@@ -250,11 +250,11 @@ impl HummockManager {
         {
             let left_levels = versioning
                 .current_version
-                .get_compaction_group_levels(group_1);
+                .get_compaction_group_levels(left_group_id);
 
             let right_levels = versioning
                 .current_version
-                .get_compaction_group_levels(group_2);
+                .get_compaction_group_levels(right_group_id);
 
             // we can not check the l0 sub level, because the sub level id will be rewritten when merge
             // This check will ensure that other non-overlapping level ssts can be concat and that the key_range is correct.
