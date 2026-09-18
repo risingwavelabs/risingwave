@@ -700,6 +700,15 @@ IcebergConfig:
     field_type: bool
     required: false
     default: Default::default
+  - name: default_table_location_from_namespace
+    field_type: bool
+    comments: |-
+      For REST catalogs such as AWS Glue, derive a missing table location from the
+      namespace's `location` property. Defaults to false. An existing location
+      derived from `warehouse.path` takes precedence; a missing or empty namespace
+      location leaves server-side location assignment unchanged.
+    required: false
+    default: Default::default
   - name: is_exactly_once
     field_type: bool
     comments: Whether it is `exactly_once`, the default is true.
