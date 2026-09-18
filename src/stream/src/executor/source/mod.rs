@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 use await_tree::InstrumentAwait;
@@ -56,9 +57,11 @@ pub(crate) use source_backfill_state_table::BackfillStateTableHandler;
 
 pub mod state_table_handler;
 use futures_async_stream::try_stream;
+use risingwave_common::util::retry::exponential_backoff;
 use tokio::sync::mpsc::UnboundedReceiver;
-use tokio_retry::strategy::{ExponentialBackoff, jitter};
+use tokio_retry::strategy::jitter;
 
+use crate::common::rate_limit::rate_limited_pieces;
 use crate::executor::error::StreamExecutorError;
 use crate::executor::{Barrier, Message};
 
@@ -195,6 +198,28 @@ pub async fn source_reader_event_to_chunk_stream(stream: BoxSourceReaderEventStr
     }
 }
 
+/// Pace a file source reader with a limiter shared with its executor, so that a `Throttle`
+/// mutation also applies to the file that is already being read.
+#[try_stream(ok = Option<StreamChunk>, error = ConnectorError)]
+pub async fn apply_shared_rate_limit_to_file_source_reader(
+    stream: BoxStreamingFileSourceChunkStream,
+    limiter: Arc<RateLimiter>,
+) {
+    #[for_await]
+    for chunk in stream {
+        match chunk? {
+            Some(chunk) =>
+            {
+                #[for_await]
+                for piece in rate_limited_pieces(&limiter, chunk) {
+                    yield Some(piece);
+                }
+            }
+            None => yield None,
+        }
+    }
+}
+
 #[try_stream(ok = Option<StreamChunk>, error = ConnectorError)]
 pub async fn apply_rate_limit_with_for_streaming_file_source_reader(
     stream: BoxStreamingFileSourceChunkStream,
@@ -258,8 +283,5 @@ pub fn get_infinite_backoff_strategy() -> impl Iterator<Item = Duration> {
     const BASE_DELAY: Duration = Duration::from_secs(1);
     const BACKOFF_FACTOR: u64 = 2;
     const MAX_DELAY: Duration = Duration::from_secs(10);
-    ExponentialBackoff::from_millis(BASE_DELAY.as_millis() as u64)
-        .factor(BACKOFF_FACTOR)
-        .max_delay(MAX_DELAY)
-        .map(jitter)
+    exponential_backoff(BASE_DELAY, BACKOFF_FACTOR, MAX_DELAY).map(jitter)
 }

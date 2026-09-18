@@ -608,6 +608,7 @@ pub async fn start_service_as_election_leader(
     let telemetry_srv = TelemetryInfoServiceImpl::new(env.meta_store());
     let system_params_srv = SystemParamsServiceImpl::new(
         env.system_params_manager_impl_ref(),
+        metadata_manager.clone(),
         env.opts.license_key_path.is_some(),
     );
     let session_params_srv = SessionParamsServiceImpl::new(env.session_params_manager_impl_ref());
@@ -668,6 +669,22 @@ pub async fn start_service_as_election_leader(
         hummock_manager.clone(),
         backup_manager.clone(),
         &env.opts,
+        {
+            let catalog_controller = metadata_manager.catalog_controller.clone();
+            Box::new(move || {
+                let catalog_controller = catalog_controller.clone();
+                Box::pin(async move {
+                    catalog_controller
+                        .get_table_change_log_truncate_info()
+                        .await
+                        .map(Some)
+                        .unwrap_or_else(|e| {
+                            tracing::warn!(err = %e.as_report(), "failed to collect table change log retention metadata");
+                            None
+                        })
+                })
+            })
+        },
         {
             let catalog_controller = metadata_manager.catalog_controller.clone();
             Box::new(move || {

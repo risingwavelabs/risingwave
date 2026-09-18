@@ -188,9 +188,8 @@ pub struct MetaNodeOpts {
     pub license_key_path: Option<PathBuf>,
 
     /// 128-bit AES key for secret store in HEX format.
-    #[educe(Debug(ignore))] // TODO: use newtype to redact debug impl
     #[clap(long, hide = true, env = "RW_SECRET_STORE_PRIVATE_KEY_HEX")]
-    pub secret_store_private_key_hex: Option<String>,
+    pub secret_store_private_key_hex: Option<Secret<String>>,
 
     /// The path of the temp secret file directory.
     #[clap(
@@ -317,7 +316,7 @@ pub fn start(
 
         let secret_store_private_key = opts
             .secret_store_private_key_hex
-            .map(|key| hex::decode(key).unwrap());
+            .map(|key| hex::decode(key.expose_secret()).unwrap());
         let max_heartbeat_interval =
             Duration::from_secs(config.meta.max_heartbeat_interval_secs as u64);
         let max_idle_ms = config.meta.dangerous_max_idle_secs.unwrap_or(0) * 1000;
@@ -472,9 +471,6 @@ pub fn start(
                 enable_committed_sst_sanity_check: config.meta.enable_committed_sst_sanity_check,
                 periodic_compaction_interval_sec: config.meta.periodic_compaction_interval_sec,
                 node_num_monitor_interval_sec: config.meta.node_num_monitor_interval_sec,
-                protect_drop_table_with_incoming_sink: config
-                    .meta
-                    .protect_drop_table_with_incoming_sink,
                 prometheus_endpoint: opts.prometheus_endpoint,
                 prometheus_selector: opts.prometheus_selector,
                 vpc_id: opts.vpc_id,
@@ -579,6 +575,10 @@ pub fn start(
                     .meta
                     .developer
                     .table_change_log_delete_batch_size,
+                table_change_log_truncate_interval_sec: config
+                    .meta
+                    .developer
+                    .table_change_log_truncate_interval_sec,
                 license_key_path: opts.license_key_path,
                 compute_client_config: config.meta.developer.compute_client_config.clone(),
                 stream_client_config: config.meta.developer.stream_client_config.clone(),

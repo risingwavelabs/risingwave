@@ -22,6 +22,7 @@ use futures::stream::{self, StreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::id::TableId;
 use risingwave_common::types::{JsonbVal, ScalarRef};
+use risingwave_common_rate_limit::RateLimiter;
 use risingwave_connector::parser::{ByteStreamSourceParserImpl, CommonParserConfig, ParserConfig};
 use risingwave_connector::source::filesystem::OpendalFsSplit;
 use risingwave_connector::source::filesystem::opendal_source::OpendalPosixFs;
@@ -29,6 +30,7 @@ use risingwave_connector::source::{
     ConnectorProperties, SourceChunkStream, SourceContext, SourceCtrlOpts, SourceMessage,
     SourceMessageEvent, SourceMeta, SourceReaderEvent, SplitMetaData,
 };
+use risingwave_pb::common::ThrottleType;
 use thiserror_ext::AsReport;
 use tokio::fs;
 
@@ -77,6 +79,9 @@ pub struct BatchPosixFsFetchExecutor<S: StateStore> {
     /// Optional rate limit in rows/s to control data ingestion speed
     rate_limit_rps: Option<u32>,
 
+    /// Shared with the running reader, so a `Throttle` mutation applies to the file being read.
+    rate_limiter: Arc<RateLimiter>,
+
     /// Local barrier manager for reporting load finished
     barrier_manager: LocalBarrierManager,
 
@@ -88,14 +93,8 @@ pub struct BatchPosixFsFetchExecutor<S: StateStore> {
     associated_table_id: TableId,
 }
 
-/// Fetched data from a file, along with file path for logging
-struct FileData {
-    /// The actual data chunks read from the file
-    chunks: Vec<StreamChunk>,
-
-    /// Path to the data file
-    file_path: String,
-}
+/// A chunk read from a file, or `None` to mark that a file has been fully read.
+type FileData = Option<StreamChunk>;
 
 impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
     pub fn new(
@@ -112,6 +111,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
             stream_source_core: Some(stream_source_core),
             upstream: Some(upstream),
             rate_limit_rps,
+            rate_limiter: Arc::new(RateLimiter::new(rate_limit_rps.into())),
             barrier_manager,
             file_queue: VecDeque::new(),
             associated_table_id: associated_table_id.unwrap(),
@@ -127,6 +127,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
         properties: ConnectorProperties,
         parser_config: ParserConfig,
         source_ctx: Arc<SourceContext>,
+        rate_limiter: Arc<RateLimiter>,
     ) -> StreamExecutorResult<()> {
         // Pop up to BATCH_SIZE files from the queue to process
         let mut batch = Vec::with_capacity(BATCH_SIZE);
@@ -145,8 +146,13 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
             stream.replace_data_stream(stream::pending().boxed());
         } else {
             *files_in_progress += batch.len();
-            let batch_reader =
-                Self::build_batched_stream_reader(batch, properties, parser_config, source_ctx);
+            let batch_reader = Self::build_batched_stream_reader(
+                batch,
+                properties,
+                parser_config,
+                source_ctx,
+                rate_limiter,
+            );
             stream.replace_data_stream(batch_reader.boxed());
         }
 
@@ -160,6 +166,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
         properties: ConnectorProperties,
         parser_config: ParserConfig,
         source_ctx: Arc<SourceContext>,
+        rate_limiter: Arc<RateLimiter>,
     ) {
         let ConnectorProperties::BatchPosixFs(batch_posix_fs_properties) = properties else {
             unreachable!()
@@ -186,14 +193,9 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
 
             if content.is_empty() {
                 // Empty file, skip it
-                yield FileData {
-                    chunks: vec![],
-                    file_path,
-                };
+                yield None;
                 continue;
             }
-
-            let mut chunks = vec![];
 
             // Process the file line by line
             for line in content.lines() {
@@ -222,11 +224,14 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
 
                 #[for_await]
                 for chunk in chunk_stream {
-                    chunks.push(chunk?);
+                    let chunk = chunk?;
+                    rate_limiter.wait(chunk.rate_limit_permits()).await;
+                    yield Some(chunk);
                 }
             }
 
-            yield FileData { chunks, file_path };
+            tracing::debug!(file_path, "Processed file");
+            yield None;
         }
     }
 
@@ -277,20 +282,24 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
         let actor_ctx = self.actor_ctx.clone();
         let barrier_manager = self.barrier_manager.clone();
         let rate_limit_rps = &mut self.rate_limit_rps;
+        let rate_limiter = self.rate_limiter.clone();
 
-        let source_ctx = Arc::new(SourceContext::new(
-            actor_ctx.id,
-            core.source_id,
-            actor_ctx.fragment_id,
-            core.source_name.clone(),
-            source_desc.metrics.clone(),
-            SourceCtrlOpts {
-                chunk_size: limited_chunk_size(*rate_limit_rps),
-                split_txn: rate_limit_rps.is_some(),
-            },
-            source_desc.source.config.clone(),
-            None,
-        ));
+        let make_source_ctx = |rate_limit_rps: Option<u32>| {
+            Arc::new(SourceContext::new(
+                actor_ctx.id,
+                core.source_id,
+                actor_ctx.fragment_id,
+                core.source_name.clone(),
+                source_desc.metrics.clone(),
+                SourceCtrlOpts {
+                    chunk_size: limited_chunk_size(rate_limit_rps),
+                    split_txn: rate_limit_rps.is_some(),
+                },
+                source_desc.source.config.clone(),
+                None,
+            ))
+        };
+        let mut source_ctx = make_source_ctx(*rate_limit_rps);
 
         while let Some(msg) = stream.next().await {
             match msg {
@@ -306,6 +315,22 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
 
                             if let Some(mutation) = barrier.mutation.as_deref() {
                                 match mutation {
+                                    Mutation::Throttle(fragment_to_apply) => {
+                                        if let Some(entry) =
+                                            fragment_to_apply.get(&actor_ctx.fragment_id)
+                                            && entry.throttle_type() == ThrottleType::Source
+                                            && entry.rate_limit != *rate_limit_rps
+                                        {
+                                            tracing::info!(
+                                                "updating rate limit from {:?} to {:?}",
+                                                *rate_limit_rps,
+                                                entry.rate_limit
+                                            );
+                                            *rate_limit_rps = entry.rate_limit;
+                                            rate_limiter.update(entry.rate_limit.into());
+                                            source_ctx = make_source_ctx(*rate_limit_rps);
+                                        }
+                                    }
                                     Mutation::Pause => stream.pause_stream(),
                                     Mutation::Resume => stream.resume_stream(),
                                     Mutation::RefreshStart {
@@ -386,7 +411,9 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                             yield Message::Barrier(barrier);
 
                             // Rebuild reader when all current files are processed
-                            if files_in_progress == 0 || need_rebuild_reader {
+                            if (files_in_progress == 0 || need_rebuild_reader)
+                                && *rate_limit_rps != Some(0)
+                            {
                                 Self::replace_with_new_batch_reader(
                                     &mut files_in_progress,
                                     &mut file_queue,
@@ -394,6 +421,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                                     properties.clone(),
                                     parser_config.clone(),
                                     source_ctx.clone(),
+                                    rate_limiter.clone(),
                                 )?;
                             }
                         }
@@ -415,23 +443,16 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                         Message::Watermark(_) => unreachable!(),
                     },
                     // Data from file reader
-                    Either::Right(FileData { chunks, file_path }) => {
-                        // Decrement counter after processing a file
-                        files_in_progress -= 1;
-                        tracing::debug!(
-                            file_path = ?file_path,
-                            "Processed file"
+                    Either::Right(Some(chunk)) => {
+                        let chunk = prune_additional_cols(
+                            &chunk,
+                            &[split_idx, offset_idx],
+                            &source_desc.columns,
                         );
-
-                        // Yield all chunks from the file
-                        for chunk in chunks {
-                            let chunk = prune_additional_cols(
-                                &chunk,
-                                &[split_idx, offset_idx],
-                                &source_desc.columns,
-                            );
-                            yield Message::Chunk(chunk);
-                        }
+                        yield Message::Chunk(chunk);
+                    }
+                    Either::Right(None) => {
+                        files_in_progress -= 1;
                     }
                 },
             }

@@ -23,6 +23,7 @@ pub(super) use control::{
 };
 pub(crate) use independent_job::{
     BatchRefreshJobCheckpointControl, BatchRefreshLogicalFragments, BatchRefreshRenderResult,
-    CreatingStreamingJobControl, IndependentCheckpointJobControl,
+    CreatingStreamingJobControl, IndependentCheckpointJob, IndependentCheckpointJobControl,
+    IndependentCheckpointJobStatus,
 };
 pub(super) use state::BarrierWorkerState;

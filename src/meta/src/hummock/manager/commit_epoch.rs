@@ -20,7 +20,7 @@ use risingwave_common::bail;
 use risingwave_common::catalog::TableId;
 use risingwave_common::config::meta::default::compaction_config;
 use risingwave_common::system_param::reader::SystemParamsRead;
-use risingwave_hummock_sdk::change_log::ChangeLogDelta;
+use risingwave_hummock_sdk::change_log::EpochNewChangeLog;
 use risingwave_hummock_sdk::compaction_group::group_split::split_sst_with_table_ids;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use risingwave_hummock_sdk::table_stats::{
@@ -59,7 +59,7 @@ pub struct CommitEpochInfo {
     pub new_table_watermarks: HashMap<TableId, TableWatermarks>,
     pub sst_to_context: HashMap<HummockSstableObjectId, HummockContextId>,
     pub new_table_fragment_infos: Vec<NewTableFragmentInfo>,
-    pub change_log_delta: HashMap<TableId, ChangeLogDelta>,
+    pub change_log_delta: HashMap<TableId, EpochNewChangeLog>,
     pub vector_index_delta: HashMap<TableId, VectorIndexDelta>,
     /// `table_id` -> `committed_epoch`
     pub tables_to_commit: HashMap<TableId, u64>,
@@ -343,22 +343,21 @@ impl HummockManager {
             .values()
             .flat_map(|l| l.get_object_ids())
             .collect::<HashSet<_>>();
+        // Publish candidates while the committed groups are protected from deletion.
+        if !self.env.opts.compaction_deterministic_test {
+            for id in &modified_compaction_groups {
+                self.try_send_compaction_request(*id, compact_task::TaskType::Dynamic);
+            }
+        }
         drop(versioning_guard);
         let may_delete_object_ids =
             &table_change_log_object_ids_before_commit - &table_change_log_object_ids_after_commit;
         self.gc_manager
             .add_may_delete_object_ids(may_delete_object_ids.into_iter());
 
-        // Don't trigger compactions if we enable deterministic compaction
-        if !self.env.opts.compaction_deterministic_test {
-            // commit_epoch may contains SSTs from any compaction group
-            for id in &modified_compaction_groups {
-                self.try_send_compaction_request(*id, compact_task::TaskType::Dynamic);
-            }
-            if !table_stats_change.is_empty() {
-                self.collect_table_write_throughput(table_stats_change)
-                    .await;
-            }
+        if !self.env.opts.compaction_deterministic_test && !table_stats_change.is_empty() {
+            self.collect_table_write_throughput(table_stats_change)
+                .await;
         }
         if !modified_compaction_groups.is_empty() {
             self.try_update_write_limits(&modified_compaction_groups)
