@@ -89,6 +89,7 @@ pub(crate) struct CreatingStreamingJobControl {
 }
 
 impl CreatingStreamingJobControl {
+    #[expect(clippy::too_many_arguments)]
     pub(crate) fn new<'a>(
         entry: hash_map::VacantEntry<'a, JobId, IndependentCheckpointJobControl>,
         create_info: CreateSnapshotBackfillJobCommandInfo,
