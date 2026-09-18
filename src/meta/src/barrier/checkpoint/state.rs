@@ -46,7 +46,7 @@ use crate::barrier::checkpoint::{
 use crate::barrier::command::{
     CreateStreamingJobCommandInfo, PostCollectCommand, ReschedulePlan, ThrottleConfigMap,
 };
-use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
+use crate::barrier::context::CreateIndependentStreamingJobCommandInfo;
 use crate::barrier::edge_builder::{EdgeBuilderFragmentInfo, FragmentEdgeBuilder};
 use crate::barrier::info::{
     BarrierInfo, CreateStreamingJobStatus, InflightDatabaseInfo, InflightStreamingJobInfo,
@@ -55,7 +55,9 @@ use crate::barrier::info::{
 use crate::barrier::notifier::NotifierStarter;
 use crate::barrier::partial_graph::{PartialGraphBarrierInfo, PartialGraphManager};
 use crate::barrier::rpc::to_partial_graph_id;
-use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
+use crate::barrier::{
+    BarrierKind, Command, CreateStreamingJobType, IndependentStreamingJobType, TracedEpoch,
+};
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::scale::{
     ComponentFragmentAligner, EnsembleActorTemplate, LoadedFragment, NoShuffleEnsemble,
@@ -513,9 +515,9 @@ impl DatabaseCheckpointControl {
             Some(Command::CreateStreamingJob {
                 mut info,
                 job_type:
-                    CreateStreamingJobType::SnapshotBackfill {
+                    CreateStreamingJobType::Independent {
                         mut snapshot_backfill_info,
-                        since_epoch,
+                        kind: IndependentStreamingJobType::SnapshotBackfill { since_epoch },
                     },
                 cross_db_snapshot_backfill_info,
             }) => {
@@ -609,12 +611,14 @@ impl DatabaseCheckpointControl {
                     let term_id = self.term_id.as_str();
                     let job = CreatingStreamingJobControl::new(
                         entry,
-                        CreateSnapshotBackfillJobCommandInfo {
+                        CreateIndependentStreamingJobCommandInfo {
                             info: info.clone(),
                             snapshot_backfill_info: snapshot_backfill_info.clone(),
                             cross_db_snapshot_backfill_info,
                             resolved_split_assignment: resolved_split_assignment.clone(),
-                            refresh_interval_sec: None,
+                            kind: IndependentStreamingJobType::SnapshotBackfill {
+                                since_epoch: None,
+                            },
                         },
                         notifier.as_mut(),
                         snapshot_backfill_upstream_tables,
@@ -646,12 +650,13 @@ impl DatabaseCheckpointControl {
                         );
                     }
 
+                    let create_job_type = CreateStreamingJobType::Independent {
+                        snapshot_backfill_info,
+                        kind: IndependentStreamingJobType::SnapshotBackfill { since_epoch },
+                    };
                     let mutation = Command::create_streaming_job_to_mutation(
                         &info,
-                        &CreateStreamingJobType::SnapshotBackfill {
-                            snapshot_backfill_info,
-                            since_epoch,
-                        },
+                        &create_job_type,
                         [],
                         self.state.is_paused(),
                         &mut edges,
@@ -674,7 +679,14 @@ impl DatabaseCheckpointControl {
             }
             Some(Command::CreateStreamingJob {
                 mut info,
-                job_type: CreateStreamingJobType::BatchRefresh(mut batch_refresh_info),
+                job_type:
+                    CreateStreamingJobType::Independent {
+                        mut snapshot_backfill_info,
+                        kind:
+                            IndependentStreamingJobType::BatchRefresh {
+                                refresh_interval_sec,
+                            },
+                    },
                 cross_db_snapshot_backfill_info,
             }) => {
                 notify_database_graph = false;
@@ -687,7 +699,6 @@ impl DatabaseCheckpointControl {
                     let database_id = info.streaming_job.database_id();
 
                     // 1. Fill snapshot backfill epochs.
-                    let snapshot_backfill_info = &mut batch_refresh_info.snapshot_backfill_info;
                     for snapshot_backfill_epoch in snapshot_backfill_info
                         .upstream_mv_table_id_to_backfill_epoch
                         .values_mut()
@@ -701,7 +712,7 @@ impl DatabaseCheckpointControl {
                     for fragment in info.stream_job_fragments.inner.fragments.values_mut() {
                         fill_snapshot_backfill_epoch(
                             &mut fragment.nodes,
-                            Some(snapshot_backfill_info),
+                            Some(&snapshot_backfill_info),
                             &cross_db_snapshot_backfill_info,
                         )?;
                     }
@@ -752,9 +763,7 @@ impl DatabaseCheckpointControl {
                         "duplicated creating batch refresh job {job_id}"
                     );
 
-                    let snapshot_backfill_info_clone =
-                        batch_refresh_info.snapshot_backfill_info.clone();
-                    let refresh_interval_sec = batch_refresh_info.refresh_interval_sec;
+                    let snapshot_backfill_info_clone = snapshot_backfill_info.clone();
 
                     // Database-graph `Add` mutation: batch refresh has no actors in the
                     // database graph; it only needs to register snapshot-backfill
@@ -784,12 +793,14 @@ impl DatabaseCheckpointControl {
                     let job = BatchRefreshJobCheckpointControl::new(
                         database_id,
                         job_id,
-                        CreateSnapshotBackfillJobCommandInfo {
+                        CreateIndependentStreamingJobCommandInfo {
                             info: info.clone(),
                             snapshot_backfill_info: snapshot_backfill_info_clone.clone(),
                             cross_db_snapshot_backfill_info,
                             resolved_split_assignment: Default::default(),
-                            refresh_interval_sec: Some(refresh_interval_sec),
+                            kind: IndependentStreamingJobType::BatchRefresh {
+                                refresh_interval_sec,
+                            },
                         },
                         notifier.as_mut(),
                         snapshot_backfill_upstream_tables,
@@ -901,11 +912,7 @@ impl DatabaseCheckpointControl {
                     .as_ref()
                     .map(|old_sink_id| old_sink_id.as_job_id());
                 if old_sink_job_id.is_some()
-                    && matches!(
-                        job_type,
-                        CreateStreamingJobType::SnapshotBackfill { .. }
-                            | CreateStreamingJobType::BatchRefresh(_)
-                    )
+                    && matches!(job_type, CreateStreamingJobType::Independent { .. })
                 {
                     bail!("replace sink must not use snapshot backfill");
                 }

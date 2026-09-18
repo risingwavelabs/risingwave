@@ -47,7 +47,7 @@ use crate::barrier::checkpoint::independent_job::creating_job::status::CreateMvi
 use crate::barrier::command::{
     PostCollectCommand, TableLogEpochs, ThrottleConfigMap, UpstreamTableLogEpochs,
 };
-use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
+use crate::barrier::context::CreateIndependentStreamingJobCommandInfo;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
 use crate::barrier::notifier::NotifierStarter;
@@ -103,7 +103,7 @@ impl CreatingStreamingJobControl {
     #[expect(clippy::too_many_arguments)]
     pub(crate) fn new<'a>(
         entry: hash_map::VacantEntry<'a, JobId, IndependentCheckpointJobControl>,
-        create_info: CreateSnapshotBackfillJobCommandInfo,
+        create_info: CreateIndependentStreamingJobCommandInfo,
         notifier: Option<&mut NotifierStarter>,
         snapshot_backfill_upstream_tables: HashSet<TableId>,
         snapshot_epoch: u64,
@@ -833,7 +833,7 @@ impl CreatingStreamingJobControl {
         new_actors: Option<StreamJobActorsToCreate>,
         mutation: Option<Mutation>,
         notifier: Option<&mut NotifierStarter>,
-        first_create_info: Option<CreateSnapshotBackfillJobCommandInfo>,
+        first_create_info: Option<CreateIndependentStreamingJobCommandInfo>,
     ) -> MetaResult<()> {
         let (table_ids_to_sync, nodes_to_sync_table) = if !is_finishing {
             (Some(state_table_ids), Some(node_actors.keys().copied()))
@@ -850,7 +850,7 @@ impl CreatingStreamingJobControl {
             PartialGraphBarrierInfo::new(
                 first_create_info.map_or_else(
                     PostCollectCommand::barrier,
-                    CreateSnapshotBackfillJobCommandInfo::into_post_collect,
+                    CreateIndependentStreamingJobCommandInfo::into_post_collect,
                 ),
                 barrier_info,
                 notifier,
