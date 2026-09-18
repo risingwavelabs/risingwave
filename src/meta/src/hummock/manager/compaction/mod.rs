@@ -1269,14 +1269,10 @@ impl HummockManager {
         // Check latest write throughput
         let table_write_throughput_statistic_manager =
             self.table_write_throughput_statistic_manager.read();
-        let timestamp = chrono::Utc::now().timestamp();
 
         for (table_id, compact_table_size) in table_size_info {
             let write_throughput = table_write_throughput_statistic_manager
-                .get_table_throughput_descending(table_id, timestamp)
-                .peekable()
-                .peek()
-                .map(|item| item.throughput)
+                .latest_table_throughput(table_id)
                 .unwrap_or(0);
 
             if compact_table_size > compact_task_table_size_partition_threshold_high
@@ -1564,6 +1560,7 @@ impl CompactionState {
             match trigger {
                 ScheduleTrigger::NewData => {
                     guard.dynamic_cooldown.remove(&compaction_group);
+                    // A coalesced request still invalidates an older picker's no-task result.
                     guard.generation += 1;
                     let generation = guard.generation;
                     guard

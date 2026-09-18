@@ -44,8 +44,6 @@ pub struct NowExecutor<S: StateStore> {
 
     progress_ratio: Option<f32>,
 
-    barrier_interval_ms: u32,
-
     /// Metrics for observing the streaming `NOW()` clock and its drift from wall time.
     metrics: Arc<StreamingMetrics>,
     fragment_id: FragmentId,
@@ -79,7 +77,6 @@ impl<S: StateStore> NowExecutor<S> {
         barrier_receiver: UnboundedReceiver<Barrier>,
         state_table: StateTable<S>,
         progress_ratio: Option<f32>,
-        barrier_interval_ms: u32,
         streaming_metrics: Arc<StreamingMetrics>,
         fragment_id: FragmentId,
     ) -> Self {
@@ -90,7 +87,6 @@ impl<S: StateStore> NowExecutor<S> {
             barrier_receiver,
             state_table,
             progress_ratio,
-            barrier_interval_ms,
             metrics: streaming_metrics,
             fragment_id,
         }
@@ -105,17 +101,13 @@ impl<S: StateStore> NowExecutor<S> {
             barrier_receiver,
             mut state_table,
             progress_ratio,
-            barrier_interval_ms,
             metrics,
             fragment_id,
         } = self;
 
         let mut executor_metrics = None;
 
-        info!(
-            "NowExecutor started. progress_ratio: {:?}, barrier_interval_ms: {:?}",
-            progress_ratio, barrier_interval_ms
-        );
+        info!("NowExecutor started. progress_ratio: {:?}", progress_ratio);
 
         let max_chunk_size = crate::config::chunk_size();
 
@@ -160,6 +152,7 @@ impl<S: StateStore> NowExecutor<S> {
             for barrier in barriers {
                 let curr_epoch = barrier.get_curr_epoch();
                 let new_timestamp = curr_epoch.as_timestamptz();
+                let current_barrier_interval_ms = barrier.barrier_interval_ms;
                 last_barrier_wall_ms = Some(new_timestamp.timestamp_millis());
                 let pause_mutation =
                     barrier
@@ -198,7 +191,9 @@ impl<S: StateStore> NowExecutor<S> {
                     // which may cause excessive changes in downstream dynamic filter
                     let progress_timestamp = last_timestamp
                         .timestamp_millis()
-                        .checked_add((barrier_interval_ms as f32 * progress_ratio).ceil() as i64)
+                        .checked_add(
+                            (current_barrier_interval_ms as f32 * progress_ratio).ceil() as i64
+                        )
                         .expect("progress_timestamp is out of i64 range");
                     let adjusted_timestamp = if progress_timestamp
                         < new_timestamp.timestamp_millis()
@@ -208,7 +203,7 @@ impl<S: StateStore> NowExecutor<S> {
                             new_timestamp.timestamp_millis(),
                             progress_timestamp,
                             curr_epoch,
-                            barrier_interval_ms,
+                            current_barrier_interval_ms,
                             progress_ratio
                         );
                         Timestamptz::from_millis(progress_timestamp)
@@ -867,6 +862,37 @@ mod tests {
         Ok(())
     }
 
+    #[tokio::test]
+    async fn test_now_with_database_barrier_interval() -> StreamExecutorResult<()> {
+        let state_store = create_state_store();
+        let (tx, mut now) =
+            create_executor_with_progress_ratio(NowMode::UpdateCurrent, &state_store, Some(2.0))
+                .await;
+
+        tx.send(Barrier::new_test_barrier(test_epoch(1))).unwrap();
+        now.next_unwrap_ready_barrier()?;
+        now.next_unwrap_ready_chunk()?;
+        now.next_unwrap_ready_watermark()?;
+
+        let mut barrier = Barrier::with_prev_epoch_for_test(test_epoch(20000), test_epoch(1));
+        barrier.barrier_interval_ms = 5000;
+        let barrier = Barrier::from_protobuf(&barrier.to_protobuf())?;
+        tx.send(barrier).unwrap();
+
+        now.next_unwrap_ready_barrier()?;
+        let chunk = now.next_unwrap_ready_chunk()?;
+        assert_eq!(
+            chunk.compact_vis(),
+            StreamChunk::from_pretty(
+                " TZ
+                - 2021-04-01T00:00:00.001Z
+                + 2021-04-01T00:00:10.001Z"
+            )
+        );
+
+        Ok(())
+    }
+
     async fn test_now_generate_series_inner() -> StreamExecutorResult<()> {
         let start_timestamp = Timestamptz::from_secs(1617235190).unwrap(); // 2021-03-31 23:59:50 UTC
         let interval = Interval::from_millis(1000); // 1s interval
@@ -1000,7 +1026,6 @@ mod tests {
             actor_context: ActorContext::for_test(123),
             identity: "NowExecutor".into(),
         };
-        let barrier_interval_ms = 1000;
         let now_executor = NowExecutor::new(
             vec![DataType::Timestamptz],
             mode,
@@ -1008,7 +1033,6 @@ mod tests {
             barrier_receiver,
             state_table,
             progress_ratio,
-            barrier_interval_ms,
             Arc::new(StreamingMetrics::unused()),
             0.into(),
         );
