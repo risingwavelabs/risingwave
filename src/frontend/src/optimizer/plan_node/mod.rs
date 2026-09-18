@@ -1111,6 +1111,7 @@ mod batch_iceberg_scan;
 mod batch_kafka_scan;
 mod batch_postgres_query;
 
+mod batch_mssql_query;
 mod batch_mysql_query;
 mod derive;
 mod logical_file_scan;
@@ -1120,6 +1121,7 @@ mod logical_iceberg_scan;
 mod logical_postgres_query;
 
 mod batch_vector_search;
+mod logical_mssql_query;
 mod logical_mysql_query;
 mod logical_vector_search;
 mod logical_vector_search_lookup_join;
@@ -1149,6 +1151,7 @@ pub use batch_limit::BatchLimit;
 pub use batch_log_seq_scan::BatchLogSeqScan;
 pub use batch_lookup_join::BatchLookupJoin;
 pub use batch_max_one_row::BatchMaxOneRow;
+pub use batch_mssql_query::BatchMssqlQuery;
 pub use batch_mysql_query::BatchMySqlQuery;
 pub use batch_nested_loop_join::BatchNestedLoopJoin;
 pub use batch_over_window::BatchOverWindow;
@@ -1191,6 +1194,7 @@ pub use logical_limit::LogicalLimit;
 pub use logical_locality_provider::LogicalLocalityProvider;
 pub use logical_match_recognize::LogicalMatchRecognize;
 pub use logical_max_one_row::LogicalMaxOneRow;
+pub use logical_mssql_query::LogicalMssqlQuery;
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
 pub use logical_mysql_query::LogicalMySqlQuery;
 pub use logical_now::LogicalNow;
@@ -1324,6 +1328,7 @@ macro_rules! for_all_plan_nodes {
             , { Logical, FileScan }
             , { Logical, PostgresQuery }
             , { Logical, MySqlQuery }
+            , { Logical, MssqlQuery }
             , { Logical, GapFill }
             , { Logical, VectorSearch }
             , { Logical, GetChannelDeltaStats }
@@ -1363,6 +1368,7 @@ macro_rules! for_all_plan_nodes {
             , { Batch, FileScan }
             , { Batch, PostgresQuery }
             , { Batch, MySqlQuery }
+            , { Batch, MssqlQuery }
             , { Batch, GetChannelDeltaStats }
             , { Batch, VectorSearch }
             , { Stream, Project }
