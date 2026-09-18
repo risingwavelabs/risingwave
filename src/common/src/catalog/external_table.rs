@@ -32,6 +32,7 @@ pub enum CdcKeyComparison {
     #[default]
     Native,
     UnsignedInt64,
+    SqlServerUniqueidentifier,
 }
 
 impl CdcKeyComparison {
@@ -40,6 +41,7 @@ impl CdcKeyComparison {
             Comparison::Unspecified => unreachable!("comparison must be specified"),
             Comparison::Native => Self::Native,
             Comparison::UnsignedInt64 => Self::UnsignedInt64,
+            Comparison::SqlServerUniqueidentifier => Self::SqlServerUniqueidentifier,
         }
     }
 
@@ -47,6 +49,7 @@ impl CdcKeyComparison {
         match self {
             Self::Native => Comparison::Native,
             Self::UnsignedInt64 => Comparison::UnsignedInt64,
+            Self::SqlServerUniqueidentifier => Comparison::SqlServerUniqueidentifier,
         }
     }
 }
@@ -129,7 +132,10 @@ mod tests {
                 ColumnOrder::new(3, OrderType::ascending()),
                 ColumnOrder::new(1, OrderType::ascending()),
             ],
-            pk_comparisons: vec![CdcKeyComparison::UnsignedInt64, CdcKeyComparison::Native],
+            pk_comparisons: vec![
+                CdcKeyComparison::UnsignedInt64,
+                CdcKeyComparison::SqlServerUniqueidentifier,
+            ],
             columns: vec![],
             stream_key: vec![3, 1],
             connect_properties: BTreeMap::new(),
@@ -149,6 +155,9 @@ mod tests {
             Comparison::UnsignedInt64
         );
         assert_eq!(pk_columns[1].pk_col_idx, 1);
-        assert_eq!(pk_columns[1].get_comparison().unwrap(), Comparison::Native);
+        assert_eq!(
+            pk_columns[1].get_comparison().unwrap(),
+            Comparison::SqlServerUniqueidentifier
+        );
     }
 }

@@ -557,16 +557,15 @@ impl ExternalTableImpl {
     /// MySQL `BIGINT UNSIGNED` keys use `UnsignedInt64` to preserve upstream ordering
     /// when represented as signed `i64` values; other types use `Native`. MySQL names
     /// are matched case-insensitively, and missing upstream PK names return an error.
-    /// PostgreSQL and SQL Server return `Native` for every requested name.
+    /// SQL Server UUID keys use `SqlServerUniqueidentifier`; PostgreSQL uses `Native`.
     pub fn pk_column_comparisons(
         &self,
         pk_names: &[String],
     ) -> ConnectorResult<Vec<CdcKeyComparison>> {
         match self {
             ExternalTableImpl::MySql(mysql) => mysql.pk_column_comparisons(pk_names),
-            ExternalTableImpl::Postgres(_) | ExternalTableImpl::SqlServer(_) => {
-                Ok(vec![CdcKeyComparison::Native; pk_names.len()])
-            }
+            ExternalTableImpl::SqlServer(sql_server) => sql_server.pk_column_comparisons(pk_names),
+            ExternalTableImpl::Postgres(_) => Ok(vec![CdcKeyComparison::Native; pk_names.len()]),
         }
     }
 
@@ -576,8 +575,8 @@ impl ExternalTableImpl {
     ///
     /// For MySQL, queries upstream PK names and types and returns the same comparison
     /// modes in the requested `pk_names` order, with case-insensitive name matching and
-    /// an error for missing upstream PK names. Other connectors return `Native` for
-    /// every requested name without querying upstream.
+    /// an error for missing upstream PK names. SQL Server discovers native UUID ordering.
+    /// Other connectors return `Native` without querying upstream.
     pub async fn discover_pk_column_comparisons(
         config: &ExternalTableConfig,
         pk_names: &[String],
@@ -585,6 +584,9 @@ impl ExternalTableImpl {
         match CdcSourceType::from(config.connector.as_str()) {
             CdcSourceType::Mysql => {
                 MySqlExternalTable::discover_pk_column_comparisons(config, pk_names).await
+            }
+            CdcSourceType::SqlServer => {
+                SqlServerExternalTable::discover_pk_column_comparisons(config, pk_names).await
             }
             _ => Ok(vec![CdcKeyComparison::Native; pk_names.len()]),
         }
