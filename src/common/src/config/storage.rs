@@ -156,6 +156,8 @@ pub struct StorageConfig {
     pub enable_fast_compaction: bool,
     #[serde(default = "default::storage::check_compaction_result")]
     pub check_compaction_result: bool,
+    /// Legacy setting retained for configuration compatibility. This has no effect because
+    /// prefetched blocks are fully buffered before consumption.
     #[serde(default = "default::storage::max_preload_io_retry_times")]
     pub max_preload_io_retry_times: usize,
     #[serde(default = "default::storage::compactor_fast_max_compact_delete_ratio")]
