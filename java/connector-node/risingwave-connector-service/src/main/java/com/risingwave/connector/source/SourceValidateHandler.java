@@ -123,6 +123,19 @@ public class SourceValidateHandler {
         }
     }
 
+    /**
+     * Validate a user-supplied decimal handling mode. RisingWave's common Debezium configuration
+     * defaults this option to string, which preserves decimal precision in schema-less JSON.
+     */
+    private static void validateDecimalHandlingMode(Map<String, String> props) {
+        String mode = props.get("debezium.decimal.handling.mode");
+        if (mode != null && !mode.equals("string")) {
+            throw ValidatorUtils.invalidArgument(
+                    String.format(
+                            "'debezium.decimal.handling.mode' must be 'string', got: '%s'", mode));
+        }
+    }
+
     /** Validate debezium.heartbeat.interval.ms if specified. If present, it must not be 0. */
     private static void validateHeartbeatInterval(
             Map<String, String> props, boolean isCdcSourceJob) {
@@ -158,6 +171,11 @@ public class SourceValidateHandler {
                 request.getSourceId(),
                 isCdcSourceJob,
                 isBackfillTable);
+
+        // Validate before any connector-specific database access. `precise` emits binary logical
+        // decimals whose scale cannot be reconstructed from RisingWave's schema-less JSON, while
+        // `double` can lose precision.
+        validateDecimalHandlingMode(props);
 
         TableSchema tableSchema = TableSchema.fromProto(request.getTableSchema());
         switch (request.getSourceType()) {

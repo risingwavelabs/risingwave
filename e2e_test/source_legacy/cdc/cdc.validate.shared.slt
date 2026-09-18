@@ -9,6 +9,38 @@ control substitution on
 
 
 ############################################################
+# CDC: Debezium decimal handling mode validation.
+############################################################
+
+# Precise mode emits binary logical decimals that RisingWave cannot decode safely from
+# schema-less JSON.
+statement error 'debezium.decimal.handling.mode' must be 'string', got: 'precise'
+create source mysql_invalid_decimal_precise with (
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
+ database.name = 'my@db',
+ server.id = '5802',
+ debezium.decimal.handling.mode = 'precise'
+);
+
+# Double mode can lose decimal precision.
+statement error 'debezium.decimal.handling.mode' must be 'string', got: 'double'
+create source mysql_invalid_decimal_double with (
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
+ database.name = 'my@db',
+ server.id = '5803',
+ debezium.decimal.handling.mode = 'double'
+);
+
+
+############################################################
 # MySQL: connection-level errors fire at `CREATE SOURCE`.
 ############################################################
 
