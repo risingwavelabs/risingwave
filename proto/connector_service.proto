@@ -231,6 +231,9 @@ message CoordinateRequest {
   message StartCoordinationRequest {
     common.Buffer vnode_bitmap = 1;
     SinkParam param = 2;
+    // Recovery term of the partial graph that the writer belongs to. The coordinator rejects
+    // writers of a previous recovery incarnation.
+    string term_id = 3;
   }
 
   message CommitRequest {

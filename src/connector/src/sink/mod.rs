@@ -688,6 +688,9 @@ pub struct SinkWriterParam {
     pub connector: String,
     pub streaming_config: StreamingConfig,
     pub time_zone: Tz,
+    /// Recovery term of the partial graph that the sink actor belongs to. Coordinated sinks present it
+    /// to the sink coordinator, which rejects writers of a previous recovery incarnation.
+    pub term_id: String,
 }
 
 #[derive(Clone)]
@@ -789,6 +792,7 @@ impl SinkWriterParam {
             connector: "test_connector".to_owned(),
             streaming_config: StreamingConfig::default(),
             time_zone: UTC,
+            term_id: String::new(),
         }
     }
 }

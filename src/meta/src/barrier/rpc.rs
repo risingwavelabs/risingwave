@@ -390,6 +390,8 @@ impl ControlStreamManager {
 
     /// Clear all nodes and response streams in the manager.
     pub(super) fn clear(&mut self) {
+        // Every partial graph is going to be recovered under a new term.
+        self.env.sink_writer_terms().clear();
         *self = Self::new(self.env.clone());
     }
 }
@@ -1382,6 +1384,9 @@ impl ControlStreamManager {
     }
 
     pub(super) fn add_partial_graph(&mut self, partial_graph_id: PartialGraphId, term_id: &str) {
+        self.env
+            .sink_writer_terms()
+            .register(partial_graph_id, term_id);
         self.connected_workers().for_each(|(_, node)| {
             if node
                 .handle
@@ -1403,6 +1408,17 @@ impl ControlStreamManager {
     }
 
     pub(super) fn remove_partial_graphs(&mut self, partial_graph_ids: Vec<PartialGraphId>) {
+        for partial_graph_id in &partial_graph_ids {
+            let (database_id, creating_job_id) = from_partial_graph_id(*partial_graph_id);
+            let sink_writer_terms = self.env.sink_writer_terms();
+            if creating_job_id.is_some() {
+                // Actors of a finished creating job keep presenting its term. Keep admitting them
+                // until the database graph is reset.
+                sink_writer_terms.merge(*partial_graph_id, to_partial_graph_id(database_id, None));
+            } else {
+                sink_writer_terms.unregister([*partial_graph_id]);
+            }
+        }
         self.connected_workers().for_each(|(_, node)| {
             if node.handle
                 .request_sender
@@ -1426,6 +1442,11 @@ impl ControlStreamManager {
         &mut self,
         partial_graph_ids: Vec<PartialGraphId>,
     ) -> HashSet<WorkerId> {
+        // Fence the writers of the previous incarnations before their actors are reset, so that
+        // none of them can reach a sink coordinator while recovery reconciles the sink state.
+        self.env
+            .sink_writer_terms()
+            .unregister(partial_graph_ids.iter().copied());
         self.connected_workers()
             .filter_map(|(worker_id, node)| {
                 if node

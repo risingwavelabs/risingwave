@@ -40,9 +40,10 @@ impl CoordinatorStreamHandle {
         mut client: SinkCoordinationRpcClient,
         param: PbSinkParam,
         vnode_bitmap: Bitmap,
+        term_id: String,
     ) -> Result<(Self, Option<u64>), RpcError> {
         let (instance, log_store_rewind_start_epoch) =
-            Self::new_with_init_stream(param, vnode_bitmap, |rx| async move {
+            Self::new_with_init_stream(param, vnode_bitmap, term_id, |rx| async move {
                 client.coordinate(ReceiverStream::new(rx)).await
             })
             .await?;
@@ -53,6 +54,7 @@ impl CoordinatorStreamHandle {
     pub async fn new_with_init_stream<F, St, Fut>(
         param: PbSinkParam,
         vnode_bitmap: Bitmap,
+        term_id: String,
         init_stream: F,
     ) -> Result<(Self, Option<u64>), RpcError>
     where
@@ -66,6 +68,7 @@ impl CoordinatorStreamHandle {
                     StartCoordinationRequest {
                         vnode_bitmap: Some(vnode_bitmap.to_protobuf()),
                         param: Some(param),
+                        term_id,
                     },
                 )),
             },
