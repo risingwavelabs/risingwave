@@ -402,6 +402,9 @@ pub struct BarrierInner<M> {
     pub mutation: M,
     pub kind: BarrierKind,
 
+    /// The effective barrier interval for this database.
+    pub barrier_interval_ms: u32,
+
     /// Tracing context for the **current** epoch of this barrier.
     pub tracing_context: TracingContext,
     pub iceberg_pk_index_compaction: Option<IcebergPkIndexCompactionContext>,
@@ -417,6 +420,7 @@ impl<M: Default> BarrierInner<M> {
         Self {
             epoch: EpochPair::new_test_epoch(epoch),
             kind: BarrierKind::Checkpoint,
+            barrier_interval_ms: 1000,
             tracing_context: TracingContext::none(),
             mutation: Default::default(),
             iceberg_pk_index_compaction: None,
@@ -427,6 +431,7 @@ impl<M: Default> BarrierInner<M> {
         Self {
             epoch: EpochPair::new(epoch, prev_epoch),
             kind: BarrierKind::Checkpoint,
+            barrier_interval_ms: 1000,
             tracing_context: TracingContext::none(),
             mutation: Default::default(),
             iceberg_pk_index_compaction: None,
@@ -440,6 +445,7 @@ impl Barrier {
             epoch: self.epoch,
             mutation: (),
             kind: self.kind,
+            barrier_interval_ms: self.barrier_interval_ms,
             tracing_context: self.tracing_context,
             iceberg_pk_index_compaction: self.iceberg_pk_index_compaction,
         }
@@ -1180,6 +1186,7 @@ impl<M> BarrierInner<M> {
             epoch,
             mutation,
             kind,
+            barrier_interval_ms,
             tracing_context,
             iceberg_pk_index_compaction,
         } = self;
@@ -1195,6 +1202,7 @@ impl<M> BarrierInner<M> {
             tracing_context: tracing_context.to_protobuf(),
             kind: *kind as _,
             iceberg_pk_index_compaction: *iceberg_pk_index_compaction,
+            barrier_interval_ms: *barrier_interval_ms,
         }
     }
 
@@ -1210,6 +1218,7 @@ impl<M> BarrierInner<M> {
             mutation: mutation_from_pb(
                 (prost.mutation.as_ref()).and_then(|mutation| mutation.mutation.as_ref()),
             )?,
+            barrier_interval_ms: prost.barrier_interval_ms,
             tracing_context: TracingContext::from_protobuf(&prost.tracing_context),
             iceberg_pk_index_compaction: prost.iceberg_pk_index_compaction,
         })
@@ -1220,6 +1229,7 @@ impl<M> BarrierInner<M> {
             epoch: self.epoch,
             mutation: f(self.mutation),
             kind: self.kind,
+            barrier_interval_ms: self.barrier_interval_ms,
             tracing_context: self.tracing_context,
             iceberg_pk_index_compaction: self.iceberg_pk_index_compaction,
         }
