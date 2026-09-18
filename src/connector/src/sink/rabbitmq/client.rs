@@ -14,10 +14,11 @@
 
 use std::time::Duration;
 
-use anyhow::{Context, anyhow};
+use anyhow::{Context, Ok, anyhow};
 use lapin::options::ConfirmSelectOptions;
 use lapin::uri::AMQPUri;
 use lapin::{Channel, Connection, ConnectionProperties};
+use url::{Host, Url};
 
 use super::RabbitMqConfig;
 use crate::sink::{Result, SinkError};
@@ -32,9 +33,8 @@ pub struct RabbitMqClient {
 impl RabbitMqClient {
     pub async fn connect(config: &RabbitMqConfig) -> Result<Self> {
         config.validate().map_err(SinkError::Config)?;
-        let uri = connection_uri(config).map_err(SinkError::Config)?;
+        let uri = build_connection_uri(config).map_err(SinkError::Config)?;
         let connect = async {
-            // Auto-recovery is disabled by default. RisingWave owns reconnect and log replay.
             let connection = Connection::connect_uri(uri, ConnectionProperties::default())
                 .await
                 .context("failed to connect to RabbitMQ")?;
@@ -42,12 +42,11 @@ impl RabbitMqClient {
                 .create_channel()
                 .await
                 .context("failed to create RabbitMQ channel")?;
-            // Wait for SelectOk before exposing the channel to the writer.
             channel
                 .confirm_select(ConfirmSelectOptions { nowait: false })
                 .await
                 .context("failed to enable RabbitMQ publisher confirms")?;
-            anyhow::Ok(Self {
+            Ok(Self {
                 connection,
                 channel,
             })
@@ -55,19 +54,19 @@ impl RabbitMqClient {
         tokio::time::timeout(Duration::from_millis(config.connect_timeout_ms), connect)
             .await
             .context("RabbitMQ connection and confirm channel setup timed out")
-            .and_then(|result| result)
+            .flatten()
             .map_err(SinkError::RabbitMq)
     }
 }
 
-fn connection_uri(config: &RabbitMqConfig) -> anyhow::Result<AMQPUri> {
+fn build_connection_uri(config: &RabbitMqConfig) -> anyhow::Result<AMQPUri> {
     // Parse without credentials, then assign them directly to avoid escaping mistakes.
     let mut uri: AMQPUri = config
         .url
         .parse()
         .map_err(|_| anyhow!("invalid RabbitMQ AMQP URL or virtual host"))?;
-    let url = url::Url::parse(&config.url).map_err(|_| anyhow!("invalid RabbitMQ url"))?;
-    if let Some(url::Host::Ipv6(address)) = url.host() {
+    let url = Url::parse(&config.url).map_err(|_| anyhow!("invalid RabbitMQ url"))?;
+    if let Some(Host::Ipv6(address)) = url.host() {
         // AMQPUri's parser uses Url::domain(), which falls back to localhost for IPv6.
         // The transport takes a (host, port) tuple, so the address must have no brackets.
         uri.authority.host = address.to_string();
@@ -122,7 +121,7 @@ mod tests {
         assert!(error.to_string().contains("setup timed out"));
     }
 
-    /// Run with RABBITMQ_URL, RABBITMQ_USERNAME and RABBITMQ_PASSWORD set.
+    /// Run with `RABBITMQ_URL`, `RABBITMQ_USERNAME` and `RABBITMQ_PASSWORD` set.
     #[cfg(not(madsim))]
     #[tokio::test]
     #[ignore = "requires a RabbitMQ broker"]
@@ -150,7 +149,7 @@ mod tests {
         props.insert("username".into(), "user@tenant".into());
         props.insert("password".into(), "p@ss:/%?#".into());
         let config = RabbitMqConfig::from_btreemap(props).unwrap();
-        let uri = connection_uri(&config).unwrap();
+        let uri = build_connection_uri(&config).unwrap();
         assert_eq!(uri.scheme, AMQPScheme::AMQPS);
         assert_eq!(uri.authority.host, "broker");
         assert_eq!(uri.authority.port, 5671);
@@ -172,7 +171,7 @@ mod tests {
             let mut props = properties();
             props.insert("url".into(), url.into());
             let config = RabbitMqConfig::from_btreemap(props).unwrap();
-            let uri = connection_uri(&config).unwrap();
+            let uri = build_connection_uri(&config).unwrap();
             assert_eq!(uri.vhost, vhost);
             assert_eq!(uri.authority.port, port);
         }
@@ -183,7 +182,7 @@ mod tests {
         let mut props = properties();
         props.insert("url".into(), "amqp://[2001:db8::1]:5673/%2f".into());
         let config = RabbitMqConfig::from_btreemap(props).unwrap();
-        let uri = connection_uri(&config).unwrap();
+        let uri = build_connection_uri(&config).unwrap();
         assert_eq!(uri.authority.host, "2001:db8::1");
         assert_eq!(uri.authority.port, 5673);
     }

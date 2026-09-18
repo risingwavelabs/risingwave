@@ -12,18 +12,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use anyhow::{anyhow, ensure};
+
 use std::collections::{BTreeMap, HashMap};
 
-use anyhow::{anyhow, ensure};
 use phf::{Set, phf_set};
 use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
+use url::Url;
 use with_options::WithOptions;
 
 use crate::enforce_secret::EnforceSecret;
 use crate::sink::{Result, SINK_TYPE_APPEND_ONLY, SinkError};
 
 pub mod client;
+pub mod encoder;
+pub mod writer;
 
 #[serde_as]
 #[derive(Clone, Deserialize, WithOptions)]
@@ -113,7 +117,7 @@ impl RabbitMqConfig {
             "RabbitMQ sink only supports append-only mode"
         );
         // Do not include the original URL or parser error: either can contain credentials.
-        let url = url::Url::parse(&self.url).map_err(|_| anyhow!("invalid RabbitMQ url"))?;
+        let url = Url::parse(&self.url).map_err(|_| anyhow!("invalid RabbitMQ url"))?;
         ensure!(
             matches!(url.scheme(), "amqp" | "amqps") && url.host_str().is_some(),
             "RabbitMQ url must use amqp:// or amqps:// and include a host"
