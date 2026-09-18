@@ -899,6 +899,7 @@ mod tests {
                 prev_epoch: TracedEpoch::new(Epoch(prev_epoch)),
                 curr_epoch: TracedEpoch::new(Epoch(curr_epoch)),
                 kind: BarrierKind::Barrier,
+                barrier_interval_ms: 1000,
             },
             None,
             HashSet::new(),

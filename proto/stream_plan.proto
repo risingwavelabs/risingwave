@@ -248,6 +248,9 @@ message Barrier {
   // The kind of the barrier.
   BarrierKind kind = 9;
   optional IcebergPkIndexCompactionContext iceberg_pk_index_compaction = 10;
+  // The effective barrier interval for this database: the database-specific override when set,
+  // or the system-wide interval otherwise.
+  uint32 barrier_interval_ms = 11;
 }
 
 message Watermark {
