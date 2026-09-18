@@ -15,11 +15,7 @@ strip_ansi() {
 # Run the command and log the output to both the terminal and the log file.
 # - CLICOLOR_FORCE=1: force color output, see https://bixense.com/clicolors/
 # -           tee -i: ignore interrupts in tee
-if [[ -n "${RISEDEV_PROXYCHAINS_BIN:-}" ]]; then
-  CLICOLOR_FORCE=1 "${RISEDEV_PROXYCHAINS_BIN}" -q -f "${RISEDEV_PROXYCHAINS_CONFIG}" "${@:3}" 2>&1 | tee -i >(strip_ansi > "$1")
-else
-  CLICOLOR_FORCE=1 "${@:3}" 2>&1 | tee -i >(strip_ansi > "$1")
-fi
+CLICOLOR_FORCE=1 "${@:3}" 2>&1 | tee -i >(strip_ansi > "$1")
 
 # Retrieve the return status.
 RET_STATUS="${PIPESTATUS[0]}"
