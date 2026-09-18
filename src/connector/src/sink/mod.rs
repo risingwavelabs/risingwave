@@ -44,6 +44,7 @@ pub mod mqtt;
 pub mod nats;
 pub mod postgres;
 pub mod pulsar;
+pub mod rabbitmq;
 pub mod redis;
 pub mod remote;
 pub mod snowflake_redshift;
@@ -1087,6 +1088,12 @@ pub type Result<T> = std::result::Result<T, SinkError>;
 
 #[derive(Error, Debug)]
 pub enum SinkError {
+    #[error("RabbitMQ error: {0}")]
+    RabbitMq(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("Kafka error: {0}")]
     Kafka(#[from] rdkafka::error::KafkaError),
     #[error("Kinesis error: {0}")]

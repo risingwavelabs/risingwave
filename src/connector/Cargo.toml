@@ -102,6 +102,11 @@ jni = { workspace = true }
 lance = { workspace = true, optional = true }
 lance-table = { workspace = true, optional = true }
 lancedb = { workspace = true, optional = true }
+lapin = { version = "=4.0.3", default-features = false, features = [
+    "default-runtime",
+    "rustls--ring",
+    "rustls-native-certs",
+] }
 maplit = "1.0.2"
 moka = { version = "0.12.10", features = ["future"] }
 mongodb = "3.5.1"

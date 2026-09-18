@@ -1686,6 +1686,64 @@ PulsarConfig:
     - pulsar.properties.routing.mode
     - pulsar.properties.routing_mode
     allow_alter_on_fly: true
+RabbitMqConfig:
+  fields:
+  - name: url
+    field_type: String
+    comments: |-
+      AMQP(S) URL with an optional percent-encoded vhost; no credentials, query or fragment.
+      TLS uses the system trust store.
+    required: true
+  - name: username
+    field_type: String
+    comments: Broker username.
+    required: true
+  - name: password
+    field_type: String
+    comments: Broker password.
+    required: true
+  - name: exchange
+    field_type: String
+    comments: Target exchange; empty for the default exchange.
+    required: true
+  - name: routing_key
+    field_type: String
+    comments: Routing key; queue name when using the default exchange.
+    required: true
+  - name: r#type
+    field_type: String
+    comments: Sink type; only append-only is supported.
+    required: true
+  - name: connect_timeout_ms
+    field_type: u64
+    comments: Connection, channel and confirm setup timeout in milliseconds.
+    required: false
+    default: 10_000
+  - name: publish_timeout_ms
+    field_type: u64
+    comments: Publish submission timeout in milliseconds.
+    required: false
+    default: 30_000
+  - name: confirm_timeout_ms
+    field_type: u64
+    comments: Publisher confirm timeout in milliseconds.
+    required: false
+    default: 30_000
+  - name: max_inflight_messages
+    field_type: usize
+    comments: Maximum messages awaiting confirmation.
+    required: false
+    default: '1024'
+  - name: max_message_size
+    field_type: usize
+    comments: Maximum encoded message size in bytes.
+    required: false
+    default: 1_048_576
+  - name: heartbeat
+    field_type: u16
+    comments: Heartbeat timeout in seconds; zero accepts the broker's value.
+    required: false
+    default: '30'
 RedShiftConfig:
   fields:
   - name: jdbc.url
