@@ -35,7 +35,7 @@ use crate::parser::utils::log_error;
 static LOG_SUPPRESSOR: LazyLock<LogSuppressor> = LazyLock::new(LogSuppressor::default);
 
 pub fn sql_server_row_to_owned_row(row: &mut Row, schema: &Schema) -> OwnedRow {
-    let money_fields = sql_server_money_fields(row);
+    let money_indices = sql_server_money_field_indices(row);
     let mut datums = Vec::with_capacity(schema.fields.len());
     for (i, rw_field) in schema.fields.iter().enumerate() {
         let name = rw_field.name.as_str();
@@ -44,7 +44,7 @@ pub fn sql_server_row_to_owned_row(row: &mut Row, schema: &Schema) -> OwnedRow {
             i,
             name,
             &rw_field.data_type,
-            money_fields.contains(name),
+            money_indices.contains(&i),
         ) {
             Ok(datum) => datum,
             Err(err) => {
@@ -64,7 +64,7 @@ pub fn sql_server_row_to_owned_row_with_strict_pk(
     schema: &Schema,
     pk_indices: &[usize],
 ) -> anyhow::Result<OwnedRow> {
-    let money_fields = sql_server_money_fields(row);
+    let money_indices = sql_server_money_field_indices(row);
     super::decode_row_with_strict_pk(
         "SQL Server",
         schema,
@@ -75,22 +75,28 @@ pub fn sql_server_row_to_owned_row_with_strict_pk(
                 index,
                 &field.name,
                 &field.data_type,
-                money_fields.contains(&field.name),
+                money_indices.contains(&index),
             )
         },
         |name, err| log_error!(name, err, "parse column failed"),
     )
 }
 
-fn sql_server_money_fields(row: &Row) -> HashSet<String> {
-    let mut money_fields = HashSet::new();
+/// Return the set of column indices whose wire type is SQL Server `MONEY`.
+/// Indexed by ordinal rather than by wire name because Tiberius reports an
+/// empty name for unnamed columns (e.g. `SELECT CAST(1 AS MONEY)` produces a
+/// column with no name, while RisingWave's `describe_mssql_query` assigns
+/// it the synthetic `column_1`). Looking money columns up by ordinal
+/// guarantees the money-to-Decimal conversion runs regardless of name.
+fn sql_server_money_field_indices(row: &Row) -> HashSet<usize> {
+    let mut money_indices = HashSet::new();
     // Special handling of the money field, as the third-party library Tiberius converts the money type to i64.
-    for (column, _) in row.cells() {
+    for (i, (column, _)) in row.cells().enumerate() {
         if column.column_type() == tiberius::ColumnType::Money {
-            money_fields.insert(column.name().to_owned());
+            money_indices.insert(i);
         }
     }
-    money_fields
+    money_indices
 }
 
 fn sql_server_cell_to_rw_datum(
@@ -166,6 +172,52 @@ mod tests {
     fn test_non_upcast_keeps_original() {
         let v = coerce_scalar_to_target_type(ScalarImpl::Int32(7), &DataType::Int32);
         assert_eq!(v, ScalarImpl::Int32(7));
+    }
+
+    /// `MONEY` / `SMALLMONEY` are stored by SQL Server / Tiberius as a
+    /// scaled `i64` with a factor of 10000. The decoder must divide by
+    /// 10000 to land the value in the RisingWave `Decimal` builder.
+    /// Covers the common cases used by the SLT suite.
+    #[test]
+    fn test_money_i64_to_decimal() {
+        let decimal = try_convert_money_i64_to_type(10000, &DataType::Decimal).unwrap();
+        assert_eq!(decimal, ScalarImpl::Decimal(Decimal::from(1)));
+
+        // $1.23 -> 12300 cents of 1/10000 -> 1.23
+        let decimal = try_convert_money_i64_to_type(12300, &DataType::Decimal).unwrap();
+        assert_eq!(
+            decimal,
+            ScalarImpl::Decimal(Decimal::from(123) / Decimal::from(100))
+        );
+
+        // $1234.56 -> 12345600 -> 1234.56
+        let decimal = try_convert_money_i64_to_type(12345600, &DataType::Decimal).unwrap();
+        assert_eq!(
+            decimal,
+            ScalarImpl::Decimal(Decimal::from(123456) / Decimal::from(100))
+        );
+
+        // 0 must not panic.
+        let decimal = try_convert_money_i64_to_type(0, &DataType::Decimal).unwrap();
+        assert_eq!(decimal, ScalarImpl::Decimal(Decimal::from(0)));
+    }
+
+    /// Money columns must not be coerced into non-Decimal targets: that
+    /// would silently throw away the scaled i64 instead of producing a
+    /// value with the right scale.
+    #[test]
+    fn test_money_i64_to_unsupported_type_errors() {
+        for unsupported in [
+            DataType::Int32,
+            DataType::Int64,
+            DataType::Float64,
+            DataType::Varchar,
+        ] {
+            assert!(
+                try_convert_money_i64_to_type(12345600, &unsupported).is_err(),
+                "expected error for money -> {unsupported:?}"
+            );
+        }
     }
 }
 macro_rules! impl_tiberius_wrapper {

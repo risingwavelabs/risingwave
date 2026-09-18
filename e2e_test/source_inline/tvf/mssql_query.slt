@@ -18,19 +18,21 @@ CREATE TABLE test (
     v_decimal DECIMAL(10, 2),
     v_date DATE,
     v_time TIME,
-    v_datetime2 DATETIME2
+    v_datetime2 DATETIME2,
+    v_money MONEY,
+    v_smallmoney SMALLMONEY
 );
 INSERT INTO test VALUES
-    (1,  100,  1000000000,  'varchar1',  N'nvarchar1',  1, 100,    '2021-01-01', '12:00:00', '2021-01-01 12:00:00'),
-    (2,  200,  2000000000,  'varchar2',  N'nvarchar2',  0, 200,    '2022-02-02', '13:00:00', '2022-02-02 13:00:00'),
-    (3,  300,  3000000000,  'varchar3',  N'nvarchar3',  1, 300,    '2023-03-03', '14:00:00', '2023-03-03 14:00:00'),
-    (4,  400,  4000000000,  'varchar4',  N'nvarchar4',  0, 400,    '2024-04-04', '15:00:00', '2024-04-04 15:00:00'),
-    (5,  500,  5000000000,  'varchar5',  N'nvarchar5',  1, 500,    '2025-05-05', '16:00:00', '2025-05-05 16:00:00'),
-    (6,  600,  6000000000,  'varchar6',  N'nvarchar6',  0, 600,    '2026-06-06', '17:00:00', '2026-06-06 17:00:00'),
-    (7,  700,  7000000000,  'varchar7',  N'nvarchar7',  1, 700,    '2027-07-07', '18:00:00', '2027-07-07 18:00:00'),
-    (8,  800,  8000000000,  'varchar8',  N'nvarchar8',  0, 800,    '2028-08-08', '19:00:00', '2028-08-08 19:00:00'),
-    (9,  900,  9000000000,  'varchar9',  N'nvarchar9',  1, 900,    '2029-09-09', '20:00:00', '2029-09-09 20:00:00'),
-    (10, 1000, 10000000000, 'varchar10', N'nvarchar10', 0, 1000,   '2030-10-10', '21:00:00', '2030-10-10 21:00:00');
+    (1,  100,  1000000000,  'varchar1',  N'nvarchar1',  1, 100,    '2021-01-01', '12:00:00', '2021-01-01 12:00:00',  $1234.56,  12.34),
+    (2,  200,  2000000000,  'varchar2',  N'nvarchar2',  0, 200,    '2022-02-02', '13:00:00', '2022-02-02 13:00:00',  $2345.67,  23.45),
+    (3,  300,  3000000000,  'varchar3',  N'nvarchar3',  1, 300,    '2023-03-03', '14:00:00', '2023-03-03 14:00:00',  $3456.78,  34.56),
+    (4,  400,  4000000000,  'varchar4',  N'nvarchar4',  0, 400,    '2024-04-04', '15:00:00', '2024-04-04 15:00:00',  $4567.89,  45.67),
+    (5,  500,  5000000000,  'varchar5',  N'nvarchar5',  1, 500,    '2025-05-05', '16:00:00', '2025-05-05 16:00:00',  $5678.90,  56.78),
+    (6,  600,  6000000000,  'varchar6',  N'nvarchar6',  0, 600,    '2026-06-06', '17:00:00', '2026-06-06 17:00:00',  $6789.01,  67.89),
+    (7,  700,  7000000000,  'varchar7',  N'nvarchar7',  1, 700,    '2027-07-07', '18:00:00', '2027-07-07 18:00:00',  $7890.12,  78.90),
+    (8,  800,  8000000000,  'varchar8',  N'nvarchar8',  0, 800,    '2028-08-08', '19:00:00', '2028-08-08 19:00:00',  $8901.23,  89.01),
+    (9,  900,  9000000000,  'varchar9',  N'nvarchar9',  1, 900,    '2029-09-09', '20:00:00', '2029-09-09 20:00:00',  $9012.34,  90.12),
+    (10, 1000, 10000000000, 'varchar10', N'nvarchar10', 0, 1000,   '2030-10-10', '21:00:00', '2030-10-10 21:00:00', $10123.45, 101.23);
 " -b
 
 # Enable CDC on the database (required before any sqlserver-cdc source can be created in RisingWave)
@@ -123,7 +125,7 @@ SELECT * FROM mssql_query(
     'true'
 );
 ----
-1 t 100 1000000000 100 2021-01-01 12:00:00 2021-01-01 12:00:00 varchar1 nvarchar1
+1 t 100 1000000000 100.00 2021-01-01 12:00:00 2021-01-01 12:00:00 varchar1 nvarchar1
 
 # ------------ 8-arg direct form: arbitrary WHERE expressions ------------
 # Different operator + outer-side projection
@@ -185,6 +187,46 @@ SELECT * FROM mssql_query(
 );
 ----
 10
+
+# ------------ 8-arg direct form: MONEY columns (named) ------------
+# `MONEY`/`SMALLMONEY` come back from `sp_describe_first_result_set` as
+# `money`/`smallmoney` and we map them to `DECIMAL` in RisingWave. Tiberius
+# returns them as a scaled `i64`; the executor must convert that back to a
+# `Decimal` so the value lands in the Decimal builder as `1234.56`, not the
+# raw scaled `123456`.
+query II
+SELECT * FROM mssql_query(
+    '${SQLCMDSERVER:sqlserver-server}',
+    '${SQLCMDPORT:1433}',
+    '${SQLCMDUSER:SA}',
+    '${SQLCMDPASSWORD}',
+    'mssql_tvf_test',
+    'SELECT v_money, v_smallmoney FROM test WHERE id = 1',
+    'false',
+    'true'
+);
+----
+1234.56 12.34
+
+# ------------ 8-arg direct form: unnamed MONEY expression ------------
+# The synthetic `column_1` name produced by `describe_mssql_query` for
+# `CAST(1 AS MONEY)` (no alias) used to break the wire-name → schema-name
+# lookup in the money decoder — the empty wire name didn't match
+# `column_1`, so the scaled `i64` reached the Decimal builder and the
+# executor panicked. The fix tracks money columns by ordinal, not by name.
+query TT
+SELECT * FROM mssql_query(
+    '${SQLCMDSERVER:sqlserver-server}',
+    '${SQLCMDPORT:1433}',
+    '${SQLCMDUSER:SA}',
+    '${SQLCMDPASSWORD}',
+    'mssql_tvf_test',
+    'SELECT CAST(1 AS MONEY), CAST(2 AS SMALLMONEY)',
+    'false',
+    'true'
+);
+----
+1.0 2.0
 
 # ------------ cleanup stage ------------
 statement ok

@@ -86,7 +86,7 @@ fn mask_sql_for_validation(s: &str) -> String {
             // Quoted identifier "..." (T-SQL). Only valid at a word
             // boundary; in any other position `"` would not appear.
             let prev = if i > 0 { bytes[i - 1] } else { b' ' };
-            if matches!(prev, b'\n' | b' ' | b'\t' | b'(' | b',' | b'.') {
+            if b"\n \t(,.".contains(&prev) {
                 out.push(' ');
                 i += 1;
                 while i < bytes.len() && bytes[i] != b'"' {
@@ -182,7 +182,17 @@ fn is_ident_char(b: u8) -> bool {
 ///  - `WITH cte AS (...) DELETE FROM t` — CTE followed by a write,
 ///  - `SELECT ... INTO new_table FROM src` — `INTO` is a write in T-SQL,
 ///  - semicolon-delimited multi-statement batches (`tiberius::Client::query`
-///    would happily run every statement against the source credentials).
+///    would happily run every statement against the source credentials),
+///  - **semicolon-free** multi-statement batches such as
+///    `SELECT 1 AS x UPDATE dbo.t SET v = 2` — T-SQL does not require `;`
+///    between statements, and `Client::query` would execute the trailing
+///    `UPDATE` using the source credentials,
+///  - **multiple top-level SELECTs** like `SELECT 1 SELECT 2`, whose result
+///    sets are flattened by `into_row_stream`,
+///  - CTEs with an explicit column list such as
+///    `WITH cte(x) AS (SELECT 1) SELECT x FROM cte` — the optional
+///    `(<columns>)` after the CTE name must be skipped when locating the
+///    end of the CTE definition.
 ///
 /// This is a lexical scan, not a full parser; the production source-
 /// reference form should be paired with a read-only SQL Server principal.
@@ -193,7 +203,7 @@ fn validate_read_only_query(query: &str) -> Result<(), BatchError> {
         .split(|c: char| c.is_whitespace() || c == '(' || c == ';')
         .find(|tok| !tok.is_empty())
         .map(|tok| {
-            tok.trim_end_matches(|c: char| matches!(c, ')' | ',' | '.'))
+            tok.trim_end_matches(|c: char| ",.)".contains(c))
                 .to_ascii_lowercase()
         })
         .unwrap_or_default();
@@ -207,42 +217,66 @@ fn validate_read_only_query(query: &str) -> Result<(), BatchError> {
 
     if first_token == "with" {
         // Find the end of the CTE clause. A CTE clause is one or more
-        // comma-separated `name AS (subquery)` definitions followed by a
-        // single main statement (`SELECT`/`INSERT`/`UPDATE`/`DELETE`/`MERGE`).
-        // We find every top-level close paren and pick the FIRST one whose
-        // next non-whitespace token at depth 0 is not `,` — that's where
-        // the CTE list ends and the main statement begins. Using the
-        // last close paren instead breaks for `WITH c AS (...) SELECT *
-        // FROM t WHERE x IN (SELECT 1)`, where the trailing subquery's
-        // close paren would be misidentified as the CTE boundary.
-        let mut top_close_parens: Vec<usize> = Vec::new();
+        // comma-separated `name [(column_list)] AS (subquery)` definitions
+        // followed by a single main statement (`SELECT`/`INSERT`/`UPDATE`/
+        // `DELETE`/`MERGE`). We walk the query tracking paren depth,
+        // skipping over the optional `(<column_list>)` that may follow
+        // a CTE name (otherwise the close-paren of the column list is
+        // mistaken for the close-paren of the CTE body). We then pick
+        // the FIRST top-level close-paren whose next non-whitespace
+        // token at depth 0 is not `,` — that's where the CTE list
+        // ends and the main statement begins. Using the last close
+        // paren instead breaks for
+        // `WITH c AS (...) SELECT * FROM t WHERE x IN (SELECT 1)`,
+        // where the trailing subquery's close paren would be
+        // misidentified as the CTE boundary.
+        let bytes = masked.as_bytes();
         let mut depth: i32 = 0;
-        for (idx, c) in masked.char_indices() {
-            match c {
-                '(' => depth += 1,
-                ')' => {
-                    depth -= 1;
-                    if depth == 0 {
-                        top_close_parens.push(idx);
+        let mut cte_end: Option<usize> = None;
+        let mut i: usize = 0;
+        while i < bytes.len() {
+            let b = bytes[i];
+            if b == b'(' {
+                // Distinguish a column list `name(...)` from a CTE body
+                // `AS (...)`: a column list is glued directly to the
+                // preceding identifier (no whitespace). CTE bodies are
+                // always preceded by whitespace + `AS`. Skip past the
+                // matching `)` so it isn't recorded as a top-level
+                // close-paren below.
+                let prev_is_ident =
+                    i > 0 && is_ident_char(bytes[i - 1]) && depth == 0;
+                if prev_is_ident {
+                    let mut inner: i32 = 1;
+                    i += 1;
+                    while i < bytes.len() && inner > 0 {
+                        match bytes[i] {
+                            b'(' => inner += 1,
+                            b')' => inner -= 1,
+                            _ => {}
+                        }
+                        i += 1;
+                    }
+                    continue;
+                }
+                depth += 1;
+            } else if b == b')' {
+                depth -= 1;
+                if depth == 0 {
+                    let rest = masked[i + 1..].trim_start();
+                    if !rest.starts_with(',') {
+                        cte_end = Some(i + 1);
+                        break;
                     }
                 }
-                _ => {}
             }
-        }
-        let mut cte_end: Option<usize> = None;
-        for pos in top_close_parens {
-            let rest = masked[pos + 1..].trim_start();
-            if !rest.starts_with(',') {
-                cte_end = Some(pos + 1);
-                break;
-            }
+            i += 1;
         }
         let after_cte = masked[cte_end.unwrap_or(masked.len())..].trim_start();
         let next_token = after_cte
             .split(|c: char| c.is_whitespace() || c == '(' || c == ';')
             .find(|tok| !tok.is_empty())
             .map(|tok| {
-                tok.trim_end_matches(|c: char| matches!(c, ')' | ',' | '.'))
+                tok.trim_end_matches(|c: char| ",.)".contains(c))
                     .to_ascii_lowercase()
             })
             .unwrap_or_default();
@@ -262,12 +296,69 @@ fn validate_read_only_query(query: &str) -> Result<(), BatchError> {
         )));
     }
 
+    // Top-level DML / DDL / control-of-flow keywords. T-SQL treats any
+    // of these at depth 0 as the start of a write (or otherwise
+    // non-read-only) statement, even when no `;` precedes them. The
+    // existing `has_top_level_keyword` helper enforces paren depth 0
+    // and word boundaries, so identifiers like `update_log` are not
+    // matched.
+    for forbidden in [
+        "INSERT",
+        "UPDATE",
+        "DELETE",
+        "MERGE",
+        "CREATE",
+        "ALTER",
+        "DROP",
+        "TRUNCATE",
+        "EXEC",
+        "EXECUTE",
+        "GRANT",
+        "REVOKE",
+        "DENY",
+    ] {
+        if has_top_level_keyword(&masked, forbidden) {
+            return Err(BatchError::from(anyhow::anyhow!(
+                "mssql_query does not allow `{forbidden}` at the top level \
+                 (writes / DDL are not permitted)"
+            )));
+        }
+    }
+
     for forbidden in ["openquery", "openrowset", "opendatasource"] {
         if masked.to_ascii_lowercase().contains(forbidden) {
             return Err(BatchError::from(anyhow::anyhow!(
                 "mssql_query does not allow `{forbidden}`; \
                  pass-through statements cannot be validated as read-only"
             )));
+        }
+    }
+
+    // Multiple top-level SELECT statements must be connected by a set
+    // operator (`UNION [ALL|DISTINCT]`, `EXCEPT [ALL]`, `INTERSECT [ALL]`)
+    // — otherwise they are concatenated batches that `Client::query`
+    // would execute one after another, flattening the result sets
+    // through `into_row_stream`. `SELECT 1 SELECT 2` would otherwise
+    // pass the first-token check above.
+    let select_positions = collect_top_level_keyword_positions(&masked, "SELECT");
+    if select_positions.len() > 1 {
+        for w in select_positions.windows(2) {
+            let gap = masked[w[0] + 6..w[1]].trim();
+            let gap_upper = gap.to_ascii_uppercase();
+            let connected = gap_upper.ends_with("UNION")
+                || gap_upper.ends_with("UNION ALL")
+                || gap_upper.ends_with("UNION DISTINCT")
+                || gap_upper.ends_with("EXCEPT")
+                || gap_upper.ends_with("EXCEPT ALL")
+                || gap_upper.ends_with("INTERSECT")
+                || gap_upper.ends_with("INTERSECT ALL");
+            if !connected {
+                return Err(BatchError::from(anyhow::anyhow!(
+                    "mssql_query does not allow multiple top-level SELECT \
+                     statements without a set operator; pass a single \
+                     SELECT (or use UNION / EXCEPT / INTERSECT to combine)"
+                )));
+            }
         }
     }
 
@@ -287,6 +378,35 @@ fn validate_read_only_query(query: &str) -> Result<(), BatchError> {
     }
 
     Ok(())
+}
+
+/// Return the byte offsets of every occurrence of `keyword` at depth 0
+/// with proper word boundaries. Used to enumerate all top-level
+/// statement-start positions for a given keyword (e.g. `SELECT`).
+fn collect_top_level_keyword_positions(masked: &str, keyword: &str) -> Vec<usize> {
+    let bytes = masked.as_bytes();
+    let kw = keyword.as_bytes();
+    let kw_len = kw.len();
+    let mut depth: i32 = 0;
+    let mut out = Vec::new();
+    let mut i = 0;
+    while i + kw_len <= bytes.len() {
+        match bytes[i] {
+            b'(' => depth += 1,
+            b')' => depth -= 1,
+            _ => {
+                if depth == 0
+                    && bytes[i..i + kw_len].eq_ignore_ascii_case(kw)
+                    && (i == 0 || !is_ident_char(bytes[i - 1]))
+                    && (i + kw_len >= bytes.len() || !is_ident_char(bytes[i + kw_len]))
+                {
+                    out.push(i);
+                }
+            }
+        }
+        i += 1;
+    }
+    out
 }
 
 /// `MssqlQuery` executor. Runs a query against a SQL Server database via `tiberius`.
@@ -632,5 +752,109 @@ mod tests {
         .unwrap();
         // `INTO` inside parentheses is not top level.
         validate_read_only_query("SELECT 1 AS [INTO] FROM t").unwrap();
+    }
+
+    /// Bypass #3: a semicolon-free batch `SELECT 1 AS x UPDATE ... SET ...`.
+    /// T-SQL does not require `;` between statements; `Client::query` would
+    /// execute the trailing `UPDATE`. The validator must reject any
+    /// top-level DML/DDL keyword regardless of the presence of `;`.
+    #[test]
+    fn validate_read_only_query_rejects_semicolon_free_update() {
+        let q = "SELECT 1 AS x UPDATE dbo.review_probe SET value = 2";
+        let err = validate_read_only_query(q).unwrap_err();
+        assert!(
+            err.to_string().contains("UPDATE"),
+            "expected UPDATE rejection for {q:?}, got: {err}"
+        );
+    }
+
+    /// Bypass #4: semicolon-free DDL after a SELECT.
+    #[test]
+    fn validate_read_only_query_rejects_semicolon_free_ddl() {
+        for q in [
+            "SELECT 1 DROP TABLE test",
+            "SELECT 1; DROP TABLE test", // already caught by `;` check
+            "SELECT 1 AS x TRUNCATE TABLE test",
+            "SELECT 1 EXEC sp_helpdb",
+        ] {
+            let err = validate_read_only_query(q).unwrap_err();
+            assert!(
+                err.to_string().contains("not allowed")
+                    || err.to_string().contains("semicolon-delimited"),
+                "expected rejection for {q:?}, got: {err}"
+            );
+        }
+    }
+
+    /// Bypass #5: multiple top-level SELECTs concatenated without a
+    /// semicolon. `Client::query` would run them in sequence and
+    /// `into_row_stream` would flatten the result sets, hiding the
+    /// second statement from the caller.
+    #[test]
+    fn validate_read_only_query_rejects_multiple_top_level_selects() {
+        let q = "SELECT 1 AS x SELECT 2 AS x";
+        let err = validate_read_only_query(q).unwrap_err();
+        assert!(
+            err.to_string().contains("multiple top-level SELECT"),
+            "expected multiple-SELECTs rejection for {q:?}, got: {err}"
+        );
+    }
+
+    /// Set operators (`UNION [ALL|DISTINCT]`, `EXCEPT`, `INTERSECT`) are
+    /// valid between SELECTs and must NOT be rejected.
+    #[test]
+    fn validate_read_only_query_allows_set_operators_between_selects() {
+        validate_read_only_query("SELECT 1 UNION SELECT 2").unwrap();
+        validate_read_only_query("SELECT 1 UNION ALL SELECT 2").unwrap();
+        validate_read_only_query("SELECT 1 UNION DISTINCT SELECT 2").unwrap();
+        validate_read_only_query("SELECT 1 EXCEPT SELECT 2").unwrap();
+        validate_read_only_query("SELECT 1 EXCEPT ALL SELECT 2").unwrap();
+        validate_read_only_query("SELECT 1 INTERSECT SELECT 2").unwrap();
+        validate_read_only_query("SELECT 1 INTERSECT ALL SELECT 2").unwrap();
+        // Three-way, mixed.
+        validate_read_only_query(
+            "SELECT a FROM t1 UNION SELECT b FROM t2 EXCEPT SELECT c FROM t3",
+        )
+        .unwrap();
+    }
+
+    /// A DML keyword that is part of an identifier (e.g. table named
+    /// `update_log`) must not trigger a false positive.
+    #[test]
+    fn validate_read_only_query_allows_dml_substring_as_identifier() {
+        validate_read_only_query("SELECT * FROM update_log").unwrap();
+        validate_read_only_query("SELECT * FROM inserted_rows WHERE id = 1").unwrap();
+        validate_read_only_query("WITH cte AS (SELECT * FROM deleted_log) SELECT * FROM cte").unwrap();
+    }
+
+    /// CTEs with an explicit column list — `WITH cte(x) AS (...)` — must
+    /// be accepted. The optional `(<columns>)` after the CTE name is
+    /// skipped when locating the CTE definition's close paren.
+    #[test]
+    fn validate_read_only_query_accepts_cte_with_column_list() {
+        validate_read_only_query("WITH cte(x) AS (SELECT 1) SELECT x FROM cte").unwrap();
+        validate_read_only_query(
+            "WITH cte(a, b) AS (SELECT 1, 2) SELECT a + b AS s FROM cte",
+        )
+        .unwrap();
+        // Multiple CTEs, each with an explicit column list.
+        validate_read_only_query(
+            "WITH cte1(a) AS (SELECT 1), cte2(b) AS (SELECT 2) SELECT a + b FROM cte1, cte2",
+        )
+        .unwrap();
+    }
+
+    /// DML after a CTE with an explicit column list is still rejected.
+    /// (Coverage for the interaction between the column-list skip and
+    /// the post-CTE token check.)
+    #[test]
+    fn validate_read_only_query_rejects_cte_with_column_list_followed_by_write() {
+        let q = "WITH cte(x) AS (SELECT 1) DELETE FROM test";
+        let err = validate_read_only_query(q).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("WITH clause must end with a SELECT"),
+            "expected WITH ... SELECT error for {q:?}, got: {err}"
+        );
     }
 }

@@ -21,8 +21,8 @@ use crate::optimizer::property::FunctionalDependencySet;
 
 /// Generic (logical) plan node for the `mssql_query` table function.
 /// Carries the connection parameters, the pre-discovered schema, and the
-/// user query. This is the shared body used by both [`LogicalMssalQuery`]
-/// and [`BatchMssalQuery`] via the convention-generic `GenericPlanNode` trait.
+/// user query. This is the shared body used by both [`LogicalMssqlQuery`]
+/// and [`BatchMssqlQuery`] via the convention-generic `GenericPlanNode` trait.
 #[derive(Debug, Clone, Educe)]
 #[educe(PartialEq, Eq, Hash)]
 pub struct MssqlQuery {
@@ -72,7 +72,7 @@ impl GenericPlanNode for MssqlQuery {
 }
 
 impl MssqlQuery {
-    /// Build the [`ColumnDesc`] list consumed by `BatchMssalQuery::to_batch_prost_body`.
+    /// Build the [`ColumnDesc`] list consumed by `BatchMssqlQuery::to_batch_prost_body`.
     /// Column ids are placeholder-based — the executor does not depend on them.
     pub fn columns(&self) -> Vec<ColumnDesc> {
         self.schema

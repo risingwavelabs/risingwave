@@ -27,7 +27,7 @@ use crate::optimizer::plan_node::expr_visitable::ExprVisitable;
 use crate::optimizer::property::{Distribution, Order};
 
 /// Batch plan node for the `mssql_query` table function. The actual
-/// SQL Server round-trip is performed by `MssalQueryExecutor`; this node
+/// SQL Server round-trip is performed by `MssqlQueryExecutor`; this node
 /// only carries the connection parameters, the pre-discovered column
 /// schema (from `describe_mssql_query`), and the user query.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -37,7 +37,7 @@ pub struct BatchMssqlQuery {
 }
 
 impl BatchMssqlQuery {
-    /// Build a new `BatchMssalQuery` plan node. The plan runs on a
+    /// Build a new `BatchMssqlQuery` plan node. The plan runs on a
     /// single fragment (`Distribution::Single`) with no specific row
     /// order; the executor returns whatever order SQL Server produces.
     pub fn new(core: generic::MssqlQuery) -> Self {

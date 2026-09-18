@@ -22,7 +22,7 @@ use crate::optimizer::plan_node::generic::GenericPlanRef;
 use crate::optimizer::plan_node::{LogicalMssqlQuery, LogicalTableFunction};
 
 /// Optimizer rule that rewrites a `LogicalTableFunction` of type
-/// `MSSQL_QUERY` into a `LogicalMssalQuery` plan node. Registered in the
+/// `MSSQL_QUERY` into a `LogicalMssqlQuery` plan node. Registered in the
 /// `TABLE_FUNCTION_TO_MSSQL_QUERY` stage of the logical optimization
 /// pipeline (after the equivalent `postgres_query` and `mysql_query`
 /// rules). Validates that exactly 8 arguments were supplied; the 2-arg
@@ -30,7 +30,7 @@ use crate::optimizer::plan_node::{LogicalMssqlQuery, LogicalTableFunction};
 pub struct TableFunctionToMssqlQueryRule {}
 impl Rule<Logical> for TableFunctionToMssqlQueryRule {
     /// Apply the rewrite: if the plan is a `LogicalTableFunction` of
-    /// type `MSSQL_QUERY`, build a `LogicalMssalQuery` from its 8 inline
+    /// type `MSSQL_QUERY`, build a `LogicalMssqlQuery` from its 8 inline
     /// arguments. Returns `None` for any other plan.
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
         let logical_table_function: &LogicalTableFunction = plan.as_logical_table_function()?;

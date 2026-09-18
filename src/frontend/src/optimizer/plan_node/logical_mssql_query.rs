@@ -41,7 +41,7 @@ pub struct LogicalMssqlQuery {
 }
 
 impl LogicalMssqlQuery {
-    /// Build a `LogicalMssalQuery` from the pre-discovered schema, the
+    /// Build a `LogicalMssqlQuery` from the pre-discovered schema, the
     /// connection parameters, and the optimizer context. The eight inline
     /// form fields are all required; the 2-arg source-reference form
     /// instead reuses connection parameters from the named source.
@@ -78,7 +78,7 @@ impl LogicalMssqlQuery {
 
 impl_plan_tree_node_for_leaf! { Logical, LogicalMssqlQuery}
 impl Distill for LogicalMssqlQuery {
-    /// Pretty-print the node as `LogicalMssalQuery { columns: [...] }` for
+    /// Pretty-print the node as `LogicalMssqlQuery { columns: [...] }` for
     /// `EXPLAIN` output.
     fn distill<'a>(&self) -> XmlNode<'a> {
         let fields = vec![("columns", column_names_pretty(self.schema()))];
@@ -114,8 +114,8 @@ impl PredicatePushdown for LogicalMssqlQuery {
 }
 
 impl ToBatch for LogicalMssqlQuery {
-    /// Lower to a [`BatchMssalQuery`] plan node that the batch executor
-    /// (`MssalQueryExecutor`) will consume.
+    /// Lower to a [`BatchMssqlQuery`] plan node that the batch executor
+    /// (`MssqlQueryExecutor`) will consume.
     fn to_batch(&self) -> Result<crate::optimizer::plan_node::BatchPlanRef> {
         Ok(BatchMssqlQuery::new(self.core.clone()).into())
     }
