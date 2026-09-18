@@ -20,7 +20,7 @@ use bytes::{Bytes, BytesMut};
 use fail::fail_point;
 use risingwave_object_store::object::{MonitoredStreamingReader, ObjectError};
 
-use super::{Block, BlockMeta};
+use super::BlockMeta;
 use crate::hummock::{BlockHolder, HummockResult};
 
 pub struct MemoryUsageTracker {
@@ -46,7 +46,7 @@ pub struct BlockDataStream {
     buf_reader: MonitoredStreamingReader,
 
     /// The index of the next block. Note that `block_idx` is relative to the start index of the
-    /// stream (and is compatible with `block_size_vec`); it is not relative to the corresponding
+    /// stream (and is compatible with `block_sizes`); it is not relative to the corresponding
     /// SST. That is, if streaming starts at block 2 of a given SST `T`, then `block_idx = 0`
     /// refers to the third block of `T`.
     block_idx: usize,
@@ -56,7 +56,7 @@ pub struct BlockDataStream {
     /// not contain the size of blocks which precede the first streamed block. That is, if
     /// streaming starts at block 2 of a given SST, then the list does not contain information
     /// about block 0 and block 1.
-    block_metas: Vec<BlockMeta>,
+    block_sizes: Vec<(u32, u32)>,
 
     buf: Bytes,
 
@@ -66,16 +66,20 @@ pub struct BlockDataStream {
 impl BlockDataStream {
     /// Reads the blocks described by `block_metas` from a byte stream positioned at their start.
     /// The block index is relative to this slice, not to the full SST.
+    /// Only retain the lengths needed to frame and decode blocks, without cloning their keys.
     pub fn new(
         // The stream that provides raw data.
         byte_stream: MonitoredStreamingReader,
         // Meta data of the SST that is streamed.
-        block_metas: Vec<BlockMeta>,
+        block_metas: &[BlockMeta],
     ) -> Self {
         Self {
             buf_reader: byte_stream,
             block_idx: 0,
-            block_metas,
+            block_sizes: block_metas
+                .iter()
+                .map(|meta| (meta.len, meta.uncompressed_size))
+                .collect(),
             buf: Bytes::default(),
             buff_offset: 0,
         }
@@ -83,20 +87,20 @@ impl BlockDataStream {
 
     /// Reads the next block from the stream and returns it. Returns `None` if there are no blocks
     /// left to read.
-    pub async fn next_block_impl(&mut self) -> HummockResult<Option<(Bytes, usize)>> {
-        if self.block_idx >= self.block_metas.len() {
+    pub async fn next_block(&mut self) -> HummockResult<Option<(Bytes, usize)>> {
+        if self.block_idx >= self.block_sizes.len() {
             return Ok(None);
         }
 
-        let block_meta = &self.block_metas[self.block_idx];
+        let (compressed_size, uncompressed_size) = self.block_sizes[self.block_idx];
         fail_point!("stream_read_err", |_| Err(ObjectError::internal(
             "stream read error"
         )
         .into()));
-        let uncompressed_size = block_meta.uncompressed_size as usize;
-        let end = self.buff_offset + block_meta.len as usize;
+        let uncompressed_size = uncompressed_size as usize;
+        let end = self.buff_offset + compressed_size as usize;
         let data = if end > self.buf.len() {
-            let current_block = self.read_next_buf(block_meta.len as usize).await?;
+            let current_block = self.read_next_buf(compressed_size as usize).await?;
             self.buff_offset = 0;
             current_block
         } else {
@@ -134,19 +138,6 @@ impl BlockDataStream {
         }
         self.buf = Bytes::default();
         Ok(read_buf.freeze())
-    }
-
-    pub fn next_block_index(&self) -> usize {
-        self.block_idx
-    }
-
-    pub async fn next_block(&mut self) -> HummockResult<Option<Box<Block>>> {
-        match self.next_block_impl().await? {
-            None => Ok(None),
-            Some((buf, uncompressed_size)) => {
-                Ok(Some(Box::new(Block::decode(buf, uncompressed_size)?)))
-            }
-        }
     }
 }
 
@@ -201,7 +192,7 @@ impl PrefetchBlockStream {
 mod tests {
     use super::*;
     use crate::hummock::test_utils::test_key_of;
-    use crate::hummock::{BlockBuilder, BlockBuilderOptions};
+    use crate::hummock::{Block, BlockBuilder, BlockBuilderOptions};
 
     fn test_blocks() -> Vec<Arc<Block>> {
         (10..14)
