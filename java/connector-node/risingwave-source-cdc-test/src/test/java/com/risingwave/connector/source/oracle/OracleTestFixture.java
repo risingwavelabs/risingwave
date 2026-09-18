@@ -37,6 +37,7 @@ final class OracleTestFixture implements AutoCloseable {
     static final String PDB = "FREEPDB1";
     static final String SOURCE_SCHEMA = "APP";
     static final String SOURCE_TABLE = "CUSTOMERS";
+    static final String HEARTBEAT_TABLE = "RW_HEARTBEAT";
     static final String CONNECTOR_USER = "C##RW_VALIDATOR";
     static final String PASSWORD = "RwTestPass123";
 
@@ -112,6 +113,16 @@ final class OracleTestFixture implements AutoCloseable {
                             + " QUOTA UNLIMITED ON USERS");
             SourceTestClient.performQuery(
                     pdb, "ALTER USER " + CONNECTOR_USER + " QUOTA UNLIMITED ON USERS");
+            SourceTestClient.performQuery(
+                    pdb,
+                    "CREATE TABLE "
+                            + CONNECTOR_USER
+                            + "."
+                            + HEARTBEAT_TABLE
+                            + " (ID NUMBER(1) PRIMARY KEY, HEARTBEAT NUMBER(1) NOT NULL)");
+            SourceTestClient.performQuery(
+                    pdb,
+                    "INSERT INTO " + CONNECTOR_USER + "." + HEARTBEAT_TABLE + " VALUES (1, 0)");
             SourceTestClient.performQuery(pdb, "CREATE ROLE HEARTBEAT_WRITER");
             SourceTestClient.performQuery(pdb, "GRANT HEARTBEAT_WRITER TO " + CONNECTOR_USER);
         }
@@ -160,6 +171,9 @@ final class OracleTestFixture implements AutoCloseable {
         properties.put(DbzConnectorConfig.ORACLE_PDB_NAME, PDB);
         properties.put(DbzConnectorConfig.ORACLE_SCHEMA_NAME, SOURCE_SCHEMA);
         properties.put(DbzConnectorConfig.TABLE_NAME, tableName);
+        properties.put(
+                DbzConnectorConfig.ORACLE_HEARTBEAT_TABLE_NAME,
+                CONNECTOR_USER + "." + HEARTBEAT_TABLE);
         return properties;
     }
 

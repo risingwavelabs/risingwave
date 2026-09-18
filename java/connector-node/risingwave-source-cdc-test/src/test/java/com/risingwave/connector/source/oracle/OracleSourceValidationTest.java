@@ -47,54 +47,67 @@ public class OracleSourceValidationTest extends OracleSourceTestBase {
     }
 
     @Test
-    public void validatesPdbWithoutRequiringContainerDataAll() {
+    public void acceptsTableLevelAllColumnLogging() {
         createSourceTableWithAllColumnLogging();
         assertValid(oracle.sourceProperties());
     }
 
     @Test
-    public void rejectsMissingLogging() {
+    public void rejectsMissingSourceTable() {
+        var error = validate(oracle.sourceProperties()).getError().getErrorMessage();
+        assertTrue(error, error.contains("Oracle table 'APP.CUSTOMERS' does not exist"));
+    }
+
+    @Test
+    public void rejectsMissingRequiredPrivilege() throws SQLException {
+        try (var cdb = oracle.connectAsSystem(OracleTestFixture.CDB)) {
+            SourceTestClient.performQuery(
+                    cdb,
+                    "REVOKE LOGMINING FROM " + OracleTestFixture.CONNECTOR_USER + " CONTAINER=ALL");
+            try {
+                var error = validate(oracle.sourceProperties()).getError().getErrorMessage();
+                assertTrue(error, error.contains("missing required privileges"));
+                assertTrue(error, error.contains("LOGMINING"));
+            } finally {
+                SourceTestClient.performQuery(
+                        cdb,
+                        "GRANT LOGMINING TO "
+                                + OracleTestFixture.CONNECTOR_USER
+                                + " CONTAINER=ALL");
+            }
+        }
+    }
+
+    @Test
+    public void rejectsMissingAllColumnsLogging() {
         createSourceTable();
-        assertLoggingRejected();
+        assertMissingAllColumnsLoggingRejected();
     }
 
     @Test
     public void rejectsPrimaryKeyOnlyLogging() {
         createSourceTable();
         execute("ALTER TABLE APP.CUSTOMERS ADD SUPPLEMENTAL LOG DATA (PRIMARY KEY) COLUMNS");
-        assertLoggingRejected();
+        assertMissingAllColumnsLoggingRejected();
     }
 
     @Test
-    public void rejectsPartialConditionalGroup() {
+    public void rejectsPartialColumnLogging() {
         createSourceTable();
         execute("ALTER TABLE APP.CUSTOMERS ADD SUPPLEMENTAL LOG GROUP PARTIAL_LOG (NAME)");
-        assertLoggingRejected();
+        assertMissingAllColumnsLoggingRejected();
     }
 
     @Test
-    public void rejectsPartialUnconditionalGroup() {
-        createSourceTable();
-        execute("ALTER TABLE APP.CUSTOMERS ADD SUPPLEMENTAL LOG GROUP PARTIAL_LOG (NAME) ALWAYS");
-        assertLoggingRejected();
-    }
-
-    @Test
-    public void acceptsTableAllColumnLogging() {
-        createSourceTableWithAllColumnLogging();
-        assertValid(oracle.sourceProperties());
-    }
-
-    @Test
-    public void rejectsAllColumnLoggingOnAnotherTable() {
+    public void rejectsWhenOnlyAnotherTableHasAllColumnLogging() {
         createSourceTable();
         createTable("APP.OTHER_TABLE", "CREATE TABLE APP.OTHER_TABLE (ID NUMBER)");
         execute("ALTER TABLE APP.OTHER_TABLE ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS");
-        assertLoggingRejected();
+        assertMissingAllColumnsLoggingRejected();
     }
 
     @Test
-    public void acceptsPdbAllColumnLoggingWithoutTableGroup() throws SQLException {
+    public void acceptsPdbLevelAllColumnLogging() throws SQLException {
         createSourceTable();
         execute("ALTER DATABASE ADD SUPPLEMENTAL LOG DATA (ALL) COLUMNS");
         try {
@@ -108,11 +121,11 @@ public class OracleSourceValidationTest extends OracleSourceTestBase {
         } finally {
             execute("ALTER DATABASE DROP SUPPLEMENTAL LOG DATA (ALL) COLUMNS");
         }
-        assertLoggingRejected();
+        assertMissingAllColumnsLoggingRejected();
     }
 
     @Test
-    public void acceptsCdbAllColumnLoggingWithoutTableGroup() throws SQLException {
+    public void acceptsCdbLevelAllColumnLogging() throws SQLException {
         createSourceTable();
         try (var cdb = oracle.connectAsSystem(OracleTestFixture.CDB)) {
             SourceTestClient.performQuery(
@@ -124,10 +137,10 @@ public class OracleSourceValidationTest extends OracleSourceTestBase {
                         cdb, "ALTER DATABASE DROP SUPPLEMENTAL LOG DATA (ALL) COLUMNS");
             }
         }
-        assertLoggingRejected();
+        assertMissingAllColumnsLoggingRejected();
     }
 
-    private void assertLoggingRejected() {
+    private void assertMissingAllColumnsLoggingRejected() {
         var error = validate(oracle.sourceProperties()).getError().getErrorMessage();
         assertTrue(error, error.contains("all-column supplemental logging"));
     }

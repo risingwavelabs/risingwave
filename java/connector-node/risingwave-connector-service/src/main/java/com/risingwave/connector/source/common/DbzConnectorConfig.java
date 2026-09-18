@@ -22,7 +22,6 @@ import com.risingwave.connector.cdc.debezium.internal.ConfigurableOffsetBackingS
 import com.risingwave.connector.cdc.debezium.internal.OpendalSchemaHistory;
 import io.debezium.connector.mongodb.MongoDbConnectorConfig;
 import io.debezium.heartbeat.DatabaseHeartbeatImpl;
-import io.debezium.heartbeat.Heartbeat;
 import java.io.IOException;
 import java.io.StringReader;
 import java.nio.charset.StandardCharsets;
@@ -91,8 +90,6 @@ public class DbzConnectorConfig {
 
     private static final String DBZ_PROPERTY_PREFIX = "debezium.";
 
-    public static final String HEARTBEAT_INTERVAL_KEY =
-            DBZ_PROPERTY_PREFIX + Heartbeat.HEARTBEAT_INTERVAL_PROPERTY_NAME;
     public static final String HEARTBEAT_ACTION_QUERY_KEY =
             DBZ_PROPERTY_PREFIX + DatabaseHeartbeatImpl.HEARTBEAT_ACTION_QUERY_PROPERTY_NAME;
 
@@ -388,13 +385,11 @@ public class DbzConnectorConfig {
             }
         } else if (source == SourceTypeE.ORACLE) {
             var oracleProps = initiateDbConfig(ORACLE_CONFIG_FILE, substitutor);
-            if (isHeartbeatEnabled(userProps)) {
-                var heartbeatTable =
-                        OracleHeartbeatTable.parse(userProps.get(ORACLE_HEARTBEAT_TABLE_NAME));
-                oracleProps.setProperty(
-                        DatabaseHeartbeatImpl.HEARTBEAT_ACTION_QUERY_PROPERTY_NAME,
-                        heartbeatTable.actionQuery());
-            }
+            var heartbeatTable =
+                    OracleHeartbeatTable.parse(userProps.get(ORACLE_HEARTBEAT_TABLE_NAME));
+            oracleProps.setProperty(
+                    DatabaseHeartbeatImpl.HEARTBEAT_ACTION_QUERY_PROPERTY_NAME,
+                    heartbeatTable.actionQuery());
             dbzProps.putAll(oracleProps);
             if (isCdcSourceJob) {
                 // A shared Oracle source captures tables from multiple schemas in one PDB.
@@ -426,11 +421,6 @@ public class DbzConnectorConfig {
         this.resolvedDbzProps = dbzProps;
         this.isBackfillSource = isCdcBackfill;
         this.waitStreamingStartTimeout = waitStreamingStartTimeout;
-    }
-
-    public static boolean isHeartbeatEnabled(Map<String, String> userProps) {
-        var interval = userProps.get(HEARTBEAT_INTERVAL_KEY);
-        return interval != null && Integer.parseInt(interval) > 0;
     }
 
     private static Optional<String> inferMongoDatabaseList(String collectionList) {
