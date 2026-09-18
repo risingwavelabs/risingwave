@@ -20,6 +20,10 @@ use super::simd_json_parser::DebeziumJsonAccessBuilder;
 use super::{DebeziumAvroAccessBuilder, DebeziumAvroParserConfig};
 use crate::error::ConnectorResult;
 use crate::parser::unified::debezium::DebeziumChangeEvent;
+use crate::parser::unified::json::{
+    BigintUnsignedHandlingMode, NumericHandling, TimeHandling, TimestampHandling,
+    TimestamptzHandling,
+};
 use crate::parser::unified::util::apply_row_operation_on_stream_chunk_writer;
 use crate::parser::{
     AccessBuilderImpl, ByteStreamSourceParser, EncodingProperties, EncodingType, ParseResult,
@@ -59,6 +63,7 @@ impl DebeziumProps {
 async fn build_accessor_builder(
     config: EncodingProperties,
     encoding_type: EncodingType,
+    numeric_handling: NumericHandling,
 ) -> ConnectorResult<AccessBuilderImpl> {
     match config {
         EncodingProperties::Avro(_) => {
@@ -68,7 +73,20 @@ async fn build_accessor_builder(
             ))
         }
         EncodingProperties::Json(json_config) => Ok(AccessBuilderImpl::DebeziumJson(
-            DebeziumJsonAccessBuilder::new(json_config)?,
+            DebeziumJsonAccessBuilder::new(
+                json_config
+                    .timestamptz_handling
+                    .unwrap_or(TimestamptzHandling::GuessNumberUnit),
+                json_config
+                    .timestamp_handling
+                    .unwrap_or(TimestampHandling::GuessNumberUnit),
+                json_config.time_handling.unwrap_or(TimeHandling::Micro),
+                numeric_handling,
+                json_config
+                    .bigint_unsigned_handling
+                    .unwrap_or(BigintUnsignedHandlingMode::Long),
+                json_config.handle_toast_columns,
+            )?,
         )),
         _ => bail!("unsupported encoding for Debezium"),
     }
@@ -80,10 +98,26 @@ impl DebeziumParser {
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
     ) -> ConnectorResult<Self> {
-        let key_builder =
-            build_accessor_builder(props.encoding_config.clone(), EncodingType::Key).await?;
+        // Oracle uses `NUMBER(precision, scale)` for both integral and decimal values. We force
+        // `decimal.handling.mode=string` to preserve precision because `precise` is not supported
+        // and `double` is lossy, so Debezium emits even integral `NUMBER` values as JSON strings.
+        // Since schema discovery maps scale-zero `NUMBER` columns to RisingWave integer types,
+        // allow those types to parse numeric strings for Oracle CDC.
+        let numeric_handling = NumericHandling::Relax {
+            string_parsing: matches!(
+                &source_ctx.connector_props,
+                crate::source::ConnectorProperties::OracleCdc(_)
+            ),
+        };
+        let key_builder = build_accessor_builder(
+            props.encoding_config.clone(),
+            EncodingType::Key,
+            numeric_handling.clone(),
+        )
+        .await?;
         let payload_builder =
-            build_accessor_builder(props.encoding_config, EncodingType::Value).await?;
+            build_accessor_builder(props.encoding_config, EncodingType::Value, numeric_handling)
+                .await?;
         let debezium_props = if let ProtocolProperties::Debezium(props) = props.protocol_config {
             props
         } else {
@@ -112,7 +146,6 @@ impl DebeziumParser {
                 time_handling: None,
                 bigint_unsigned_handling: None,
                 handle_toast_columns: false,
-                numeric_string_parsing: false,
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };
@@ -221,7 +254,6 @@ mod tests {
                 time_handling: None,
                 bigint_unsigned_handling: None,
                 handle_toast_columns: false,
-                numeric_string_parsing: false,
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };
@@ -289,7 +321,6 @@ mod tests {
                 time_handling: None,
                 bigint_unsigned_handling: None,
                 handle_toast_columns: false,
-                numeric_string_parsing: true,
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };
@@ -379,7 +410,6 @@ mod tests {
                 time_handling: None,
                 bigint_unsigned_handling: None,
                 handle_toast_columns: false,
-                numeric_string_parsing: false,
             }),
             protocol_config: ProtocolProperties::Debezium(DebeziumProps::default()),
         };

@@ -137,7 +137,7 @@ public class OracleValidatorTest {
     }
 
     @Test
-    public void startsSharedOracleSourceWithoutDataSnapshot() {
+    public void usesNoDataSnapshotModeForSharedOracleSourceCreation() {
         var userProps = oracleProperties();
         userProps.put("debezium.snapshot.mode", "rw_cdc_backfill");
         var config = new DbzConnectorConfig(SourceTypeE.ORACLE, 42, null, userProps, false, true);
@@ -146,7 +146,7 @@ public class OracleValidatorTest {
     }
 
     @Test
-    public void recoversSharedOracleSourceFromOpaqueOffset() {
+    public void usesRecoverySnapshotModeAndOpaqueOffsetForSharedOracleSourceRecovery() {
         var userProps = oracleProperties();
         userProps.put("debezium.snapshot.mode", "rw_cdc_backfill");
         userProps.put("debezium.decimal.handling.mode", "precise");
