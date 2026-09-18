@@ -23,6 +23,7 @@ import com.risingwave.connector.source.common.JniOracleExternalTable;
 import com.risingwave.proto.ConnectorServiceProto;
 import com.risingwave.proto.Data.DataType.TypeName;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -32,6 +33,10 @@ import org.junit.BeforeClass;
 import org.junit.Test;
 
 public class OracleExternalTableTest extends OracleSourceTestBase {
+    // Oracle can briefly reject flashback reads after creating the test table.
+    private static final Duration FLASHBACK_READ_TIMEOUT = Duration.ofSeconds(30);
+    private static final Duration FLASHBACK_RETRY_INTERVAL = Duration.ofMillis(250);
+
     private static OracleTestFixture oracle;
 
     @BeforeClass
@@ -281,23 +286,35 @@ public class OracleExternalTableTest extends OracleSourceTestBase {
             ConnectorServiceProto.OracleExternalTableRequest catalogRequest,
             ConnectorServiceProto.OracleExternalTableRequest.Builder snapshotRequest)
             throws Exception {
-        String lastError = null;
-        for (int attempt = 0; attempt < 20; attempt++) {
+        var deadline = System.nanoTime() + FLASHBACK_READ_TIMEOUT.toNanos();
+        var attempts = 0;
+        while (true) {
+            attempts++;
             var currentScn =
                     successfulResponse(
                                     JniOracleExternalTable.currentScn(catalogRequest.toByteArray()))
                             .getSnapshotScn();
             snapshotRequest.setSnapshotScn(currentScn);
             var response = snapshotReadResponse(snapshotRequest.build());
-            lastError = response.getError().getErrorMessage();
-            if (lastError.isEmpty()) {
+            var error = response.getError().getErrorMessage();
+            if (error.isEmpty()) {
                 return response;
             }
-            assertTrue(lastError, lastError.contains("ORA-01466"));
-            Thread.sleep(100);
+            assertTrue(error, error.contains("ORA-01466"));
+            if (System.nanoTime() >= deadline) {
+                throw new AssertionError(
+                        String.format(
+                                "Oracle table '%s.%s' did not become available for flashback reads "
+                                        + "within %d seconds after %d attempts; last SCN %d: %s",
+                                catalogRequest.getPropertiesOrDefault("schema.name", "<unknown>"),
+                                catalogRequest.getPropertiesOrDefault("table.name", "<unknown>"),
+                                FLASHBACK_READ_TIMEOUT.toSeconds(),
+                                attempts,
+                                currentScn,
+                                error));
+            }
+            Thread.sleep(FLASHBACK_RETRY_INTERVAL.toMillis());
         }
-        throw new AssertionError(
-                "Oracle table did not become available for flashback reads: " + lastError);
     }
 
     private static ConnectorServiceProto.OracleExternalTableResponse successfulResponse(
