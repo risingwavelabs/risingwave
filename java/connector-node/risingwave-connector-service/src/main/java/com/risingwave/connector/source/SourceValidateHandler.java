@@ -28,8 +28,6 @@ import org.slf4j.LoggerFactory;
 
 public class SourceValidateHandler {
     static final Logger LOG = LoggerFactory.getLogger(SourceValidateHandler.class);
-    private static final String USER_DEBEZIUM_DECIMAL_HANDLING_MODE =
-            "debezium.decimal.handling.mode";
     private final StreamObserver<ConnectorServiceProto.ValidateSourceResponse> responseObserver;
 
     public SourceValidateHandler(
@@ -130,12 +128,12 @@ public class SourceValidateHandler {
      * defaults this option to string, which preserves decimal precision in schema-less JSON.
      */
     private static void validateDecimalHandlingMode(Map<String, String> props) {
-        String mode = props.get(USER_DEBEZIUM_DECIMAL_HANDLING_MODE);
+        String mode = props.get("debezium.decimal.handling.mode");
         if (mode != null && !mode.equals("string")) {
             throw ValidatorUtils.invalidArgument(
                     String.format(
-                            "'%s' must be 'string', got: '%s'",
-                            USER_DEBEZIUM_DECIMAL_HANDLING_MODE, mode));
+                            "'debezium.decimal.handling.mode' must be 'string', got: '%s'",
+                            mode));
         }
     }
 
