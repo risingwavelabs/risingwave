@@ -1271,33 +1271,31 @@ impl InflightDatabaseInfo {
                     })
             }));
 
-        let mut builder = FragmentEdgeBuilder::new(
-            // Existing fragments
-            existing_fragment_ids
-                .map(|fragment_id| {
-                    (
-                        fragment_id,
-                        EdgeBuilderFragmentInfo::from_inflight(
-                            self.fragment(fragment_id),
-                            to_partial_graph_id(self.database_id, None),
-                            control_stream_manager,
-                        ),
-                    )
-                })
-                // New fragments from create/replace jobs
-                .chain(new_fragments.map(|(partial_graph_id, fragment)| {
-                    (
-                        fragment.fragment_id,
-                        EdgeBuilderFragmentInfo::from_fragment(
-                            fragment,
-                            stream_actors,
-                            actor_location,
-                            partial_graph_id,
-                            control_stream_manager,
-                        ),
-                    )
-                })),
-        );
+        let mut builder = FragmentEdgeBuilder::from_existing_fragments(existing_fragment_ids.map(
+            |fragment_id| {
+                (
+                    fragment_id,
+                    EdgeBuilderFragmentInfo::from_inflight(
+                        self.fragment(fragment_id),
+                        to_partial_graph_id(self.database_id, None),
+                        control_stream_manager,
+                    ),
+                )
+            },
+        ));
+        builder.add_new_fragments(new_fragments.map(|(partial_graph_id, fragment)| {
+            (
+                fragment.fragment_id,
+                EdgeBuilderFragmentInfo::from_fragment(
+                    fragment,
+                    stream_actors,
+                    actor_location,
+                    partial_graph_id,
+                    control_stream_manager,
+                ),
+            )
+        }));
+        let mut builder = builder.finish_fragments();
         if let Some((info, _)) = info {
             builder.add_relations(&info.upstream_fragment_downstreams);
             builder.add_relations(&info.stream_job_fragments.downstreams);
