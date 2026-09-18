@@ -123,27 +123,56 @@ public class SourceValidateHandler {
         }
     }
 
-    /** Validate debezium.heartbeat.interval.ms if specified. If present, it must not be 0. */
-    private static void validateHeartbeatInterval(
-            Map<String, String> props, boolean isCdcSourceJob) {
+    /**
+     * Validates user-supplied options, not the final Debezium configuration. If the interval is
+     * omitted, DbzConnectorConfig supplies the connector default (300000 ms for PostgreSQL). Keep
+     * this policy in sync with Rust's validate_cdc_heartbeat_interval (CREATE and ALTER).
+     */
+    static void validateHeartbeatInterval(
+            Map<String, String> props, ConnectorServiceProto.SourceType sourceType) {
+        // MySQL/SQL Server need an initial offset before shared-source creation can complete,
+        // even when no captured data changes. PostgreSQL also needs heartbeat-driven WAL progress.
+        // Debezium accepting zero does not make it safe for these source lifecycles.
+        boolean heartbeatRequired;
+        switch (sourceType) {
+            case POSTGRES:
+            case MYSQL:
+            case SQL_SERVER:
+                heartbeatRequired = true;
+                break;
+            case MONGODB:
+            case CITUS:
+                heartbeatRequired = false;
+                break;
+            default:
+                return;
+        }
         String intervalStr = props.get("debezium.heartbeat.interval.ms");
         if (intervalStr == null) {
             return; // Not specified, use default
         }
 
-        long interval;
+        int interval;
         try {
-            interval = Long.parseLong(intervalStr);
+            // Match Rust's ASCII integer syntax; Integer.parseInt also accepts Unicode digits.
+            if (!intervalStr.matches("[+-]?[0-9]+")) {
+                throw new NumberFormatException();
+            }
+            // Debezium's heartbeat field is INT with a nonnegative-integer validator, not LONG.
+            interval = Integer.parseInt(intervalStr);
+            if (interval < 0) {
+                throw new NumberFormatException();
+            }
         } catch (NumberFormatException e) {
             throw ValidatorUtils.invalidArgument(
                     String.format(
-                            "'debezium.heartbeat.interval.ms' must be a valid number, got: '%s'",
+                            "'debezium.heartbeat.interval.ms' must be an integer between 0 and 2147483647, got: '%s'",
                             intervalStr));
         }
 
-        // Validate interval is not 0
-        if (interval == 0) {
-            throw ValidatorUtils.invalidArgument("'debezium.heartbeat.interval.ms' must not be 0");
+        if (heartbeatRequired && interval == 0) {
+            throw ValidatorUtils.invalidArgument(
+                    "'debezium.heartbeat.interval.ms' must be greater than 0 for PostgreSQL, MySQL and SQL Server CDC: heartbeats are required for initialization and recovery safety");
         }
     }
 
@@ -159,6 +188,7 @@ public class SourceValidateHandler {
                 isCdcSourceJob,
                 isBackfillTable);
 
+        validateHeartbeatInterval(props, request.getSourceType());
         TableSchema tableSchema = TableSchema.fromProto(request.getTableSchema());
         switch (request.getSourceType()) {
             case POSTGRES:
@@ -207,7 +237,6 @@ public class SourceValidateHandler {
                 ensureRequiredProps(props, isCdcSourceJob);
                 ensurePropNotBlank(props, DbzConnectorConfig.MYSQL_SERVER_ID);
                 validateQueueMemoryRatio(props);
-                validateHeartbeatInterval(props, isCdcSourceJob);
                 try (var validator =
                         new MySqlValidator(props, tableSchema, isCdcSourceJob, isBackfillTable)) {
                     validator.validateAll();
@@ -225,7 +254,6 @@ public class SourceValidateHandler {
                 ensureRequiredProps(props, isCdcSourceJob);
                 ensurePropNotBlank(props, DbzConnectorConfig.SQL_SERVER_SCHEMA_NAME);
                 validateQueueMemoryRatio(props);
-                validateHeartbeatInterval(props, isCdcSourceJob);
                 try (var sqlServerValidator =
                         new SqlServerValidator(props, tableSchema, isCdcSourceJob)) {
                     sqlServerValidator.validateAll();
