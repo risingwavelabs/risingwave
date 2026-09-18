@@ -22,7 +22,6 @@ use futures::stream::BoxStream;
 use futures::{FutureExt, StreamExt};
 use itertools::Itertools;
 use risingwave_hummock_sdk::CompactionGroupId;
-use risingwave_hummock_sdk::compaction_group::hummock_version_ext::get_compaction_group_ids;
 use risingwave_pb::hummock::compact_task::{self, TaskStatus};
 use risingwave_pb::hummock::level_handler::RunningCompactTask;
 use rw_futures_util::select_all;
@@ -237,126 +236,7 @@ impl HummockManager {
                                 }
 
                                 HummockTimerEvent::Report => {
-                                    let (current_version, id_to_config, version_stats) = {
-                                        let versioning_guard =
-                                            hummock_manager.versioning.read().await;
-
-                                        let configs =
-                                            hummock_manager.get_compaction_group_map().await;
-                                        let versioning_deref = versioning_guard;
-                                        (
-                                            versioning_deref.current_version.clone(),
-                                            configs,
-                                            versioning_deref.version_stats.clone(),
-                                        )
-                                    };
-
-                                    if let Some(mv_id_to_all_table_ids) = hummock_manager
-                                        .metadata_manager
-                                        .get_job_id_to_internal_table_ids_mapping()
-                                        .await
-                                    {
-                                        trigger_mv_stat(
-                                            &hummock_manager.metrics,
-                                            &version_stats,
-                                            mv_id_to_all_table_ids,
-                                        );
-                                    }
-
-                                    for compaction_group_id in
-                                        get_compaction_group_ids(&current_version)
-                                    {
-                                        let compaction_group_config =
-                                            &id_to_config[&compaction_group_id];
-
-                                        let group_levels = current_version
-                                            .get_compaction_group_levels(
-                                                compaction_group_config.group_id(),
-                                            );
-
-                                        trigger_lsm_stat(
-                                            &hummock_manager.metrics,
-                                            compaction_group_config.compaction_config(),
-                                            group_levels,
-                                            compaction_group_config.group_id(),
-                                        )
-                                    }
-
-                                    {
-                                        let group_infos = hummock_manager
-                                            .calculate_compaction_group_statistic()
-                                            .await;
-                                        let compaction_group_count = group_infos.len();
-                                        hummock_manager
-                                            .metrics
-                                            .compaction_group_count
-                                            .set(compaction_group_count as i64);
-
-                                        let table_write_throughput_statistic_manager =
-                                            hummock_manager
-                                                .table_write_throughput_statistic_manager
-                                                .read()
-                                                .clone();
-
-                                        let current_version_levels = &hummock_manager
-                                            .versioning
-                                            .read()
-                                            .await
-                                            .current_version
-                                            .levels;
-
-                                        for group_info in group_infos {
-                                            hummock_manager
-                                                .metrics
-                                                .compaction_group_size
-                                                .with_label_values(&[&group_info
-                                                    .group_id
-                                                    .to_string()])
-                                                .set(group_info.group_size as _);
-                                            // accumulate the throughput of all tables in the group
-                                            let mut avg_throuput = 0;
-                                            let max_statistic_expired_time = std::cmp::max(
-                                                hummock_manager
-                                                    .env
-                                                    .opts
-                                                    .table_stat_throuput_window_seconds_for_split,
-                                                hummock_manager
-                                                    .env
-                                                    .opts
-                                                    .table_stat_throuput_window_seconds_for_merge,
-                                            );
-                                            for table_id in group_info.table_statistic.keys() {
-                                                avg_throuput +=
-                                                    table_write_throughput_statistic_manager
-                                                        .avg_write_throughput(
-                                                            *table_id,
-                                                            max_statistic_expired_time as i64,
-                                                        )
-                                                        as u64;
-                                            }
-
-                                            hummock_manager
-                                                .metrics
-                                                .compaction_group_throughput
-                                                .with_label_values(&[&group_info
-                                                    .group_id
-                                                    .to_string()])
-                                                .set(avg_throuput as _);
-
-                                            if let Some(group_levels) =
-                                                current_version_levels.get(&group_info.group_id)
-                                            {
-                                                let file_count = group_levels.count_ssts();
-                                                hummock_manager
-                                                    .metrics
-                                                    .compaction_group_file_count
-                                                    .with_label_values(&[&group_info
-                                                        .group_id
-                                                        .to_string()])
-                                                    .set(file_count as _);
-                                            }
-                                        }
-                                    }
+                                    hummock_manager.handle_timer_report().await;
                                 }
 
                                 HummockTimerEvent::CompactionHeartBeatExpiredCheck => {
@@ -491,6 +371,89 @@ impl HummockManager {
             }
         });
         (join_handle, shutdown_tx)
+    }
+
+    async fn handle_timer_report(&self) {
+        let mv_id_to_all_table_ids = self
+            .metadata_manager
+            .get_job_id_to_internal_table_ids_mapping()
+            .await;
+        let table_write_throughput_statistic_manager =
+            self.table_write_throughput_statistic_manager.read().clone();
+        let id_to_config = self.get_compaction_group_map().await;
+
+        // Clone the in-memory snapshot while holding locks, then emit metrics outside the locks.
+        // This keeps the report lane from blocking writers on `versioning` or
+        // `compaction_group_manager` while doing potentially heavy metric iteration.
+        let (current_version, version_stats) = {
+            let versioning_guard = self.versioning.read().await;
+            (
+                versioning_guard.current_version.clone(),
+                versioning_guard.version_stats.clone(),
+            )
+        };
+
+        if let Some(mv_id_to_all_table_ids) = mv_id_to_all_table_ids {
+            trigger_mv_stat(&self.metrics, &version_stats, mv_id_to_all_table_ids);
+        }
+
+        let compaction_group_count = current_version.levels.len();
+        self.metrics
+            .compaction_group_count
+            .set(compaction_group_count as i64);
+
+        for (group_id, group_levels) in &current_version.levels {
+            let Some(compaction_group_config) = id_to_config.get(group_id) else {
+                warn!(
+                    compaction_group_id = %group_id,
+                    "Missing compaction group config when reporting metrics. Skip."
+                );
+                continue;
+            };
+
+            trigger_lsm_stat(
+                &self.metrics,
+                compaction_group_config.compaction_config(),
+                group_levels,
+                *group_id,
+            );
+
+            let member_table_ids = current_version
+                .state_table_info
+                .compaction_group_member_table_ids(*group_id);
+            let group_size = member_table_ids
+                .iter()
+                .map(|table_id| {
+                    version_stats
+                        .table_stats
+                        .get(table_id)
+                        .map(|stats| stats.total_key_size + stats.total_value_size)
+                        .unwrap_or(0)
+                        .max(0) as u64
+                })
+                .sum::<u64>();
+            self.metrics
+                .compaction_group_size
+                .with_label_values(&[&group_id.to_string()])
+                .set(group_size as _);
+
+            let mut avg_throughput = 0;
+            for table_id in member_table_ids {
+                avg_throughput +=
+                    table_write_throughput_statistic_manager.avg_write_throughput(*table_id) as u64;
+            }
+
+            self.metrics
+                .compaction_group_throughput
+                .with_label_values(&[&group_id.to_string()])
+                .set(avg_throughput as _);
+
+            let file_count = group_levels.count_ssts();
+            self.metrics
+                .compaction_group_file_count
+                .with_label_values(&[&group_id.to_string()])
+                .set(file_count as _);
+        }
     }
 }
 
@@ -683,7 +646,12 @@ impl HummockManager {
                 )
                 .await
             {
-                Ok(_) => candidate += 1,
+                Ok(survivor) => {
+                    // Use the actual survivor and its state at commit, including accumulated
+                    // members and the config update, without rebuilding global statistics.
+                    group_infos[base] = survivor;
+                    candidate += 1;
+                }
                 Err(e) => {
                     tracing::debug!(
                         error = %e.as_report(),
