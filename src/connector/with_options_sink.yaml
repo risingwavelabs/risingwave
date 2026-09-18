@@ -1712,8 +1712,9 @@ RabbitMqConfig:
     required: true
   - name: r#type
     field_type: String
-    comments: Sink type; only append-only is supported.
-    required: true
+    comments: Sink type; defaults to append-only, the only supported mode.
+    required: false
+    default: SINK_TYPE_APPEND_ONLY . to_owned ()
   - name: connect_timeout_ms
     field_type: u64
     comments: Connection, channel and confirm setup timeout in milliseconds.

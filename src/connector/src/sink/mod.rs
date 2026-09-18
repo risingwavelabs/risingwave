@@ -131,6 +131,7 @@ macro_rules! for_all_sinks {
                 { Redis, $crate::sink::redis::RedisSink, $crate::sink::redis::RedisConfig },
                 { Kafka, $crate::sink::kafka::KafkaSink, $crate::sink::kafka::KafkaConfig },
                 { Pulsar, $crate::sink::pulsar::PulsarSink, $crate::sink::pulsar::PulsarConfig },
+                { RabbitMq, $crate::sink::rabbitmq::RabbitMqSink, $crate::sink::rabbitmq::RabbitMqConfig },
                 { BlackHole, $crate::sink::trivial::BlackHoleSink, () },
                 { Http, $crate::sink::http::HttpSink, $crate::sink::http::HttpConfig },
                 { Turbopuffer, $crate::sink::turbopuffer::TurbopufferSink, $crate::sink::turbopuffer::TurbopufferConfig },

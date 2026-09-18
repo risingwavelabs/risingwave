@@ -12,22 +12,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use anyhow::{anyhow, ensure};
-
 use std::collections::{BTreeMap, HashMap};
+use std::fmt;
 
+use anyhow::{anyhow, ensure};
 use phf::{Set, phf_set};
+use risingwave_common::catalog::Schema;
 use serde::Deserialize;
 use serde_with::{DisplayFromStr, serde_as};
 use url::Url;
 use with_options::WithOptions;
 
+use self::client::RabbitMqClient;
+use self::encoder::RabbitMqEncoder;
+use self::writer::RabbitMqSinkWriter;
 use crate::enforce_secret::EnforceSecret;
-use crate::sink::{Result, SINK_TYPE_APPEND_ONLY, SinkError};
+use crate::sink::catalog::SinkFormatDesc;
+use crate::sink::writer::{AsyncTruncateLogSinkerOf, AsyncTruncateSinkWriterExt};
+use crate::sink::{Result, SINK_TYPE_APPEND_ONLY, Sink, SinkError, SinkParam, SinkWriterParam};
 
 pub mod client;
 pub mod encoder;
 pub mod writer;
+
+pub const RABBITMQ_SINK: &str = "rabbitmq";
 
 #[serde_as]
 #[derive(Clone, Deserialize, WithOptions)]
@@ -43,7 +51,8 @@ pub struct RabbitMqConfig {
     pub exchange: String,
     /// Routing key; queue name when using the default exchange.
     pub routing_key: String,
-    /// Sink type; only append-only is supported.
+    /// Sink type; defaults to append-only, the only supported mode.
+    #[serde(default = "default_sink_type")]
     pub r#type: String,
     /// Connection, channel and confirm setup timeout in milliseconds.
     #[serde(default = "default_connect_timeout_ms")]
@@ -71,6 +80,10 @@ pub struct RabbitMqConfig {
     pub heartbeat: u16,
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
+}
+
+fn default_sink_type() -> String {
+    SINK_TYPE_APPEND_ONLY.to_owned()
 }
 
 fn default_connect_timeout_ms() -> u64 {
@@ -179,3 +192,88 @@ impl RabbitMqConfig {
         Ok(())
     }
 }
+
+#[derive(Clone)]
+pub struct RabbitMqSink {
+    config: RabbitMqConfig,
+    schema: Schema,
+    format_desc: SinkFormatDesc,
+    schema_subject: String,
+}
+
+impl fmt::Debug for RabbitMqSink {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        // Connection and schema registry options can contain resolved secrets.
+        f.debug_struct("RabbitMqSink")
+            .field("schema", &self.schema)
+            .field("format", &self.format_desc.format)
+            .field("encode", &self.format_desc.encode)
+            .finish_non_exhaustive()
+    }
+}
+
+impl EnforceSecret for RabbitMqSink {
+    const ENFORCE_SECRET_PROPERTIES: Set<&'static str> = RabbitMqConfig::ENFORCE_SECRET_PROPERTIES;
+}
+
+impl TryFrom<SinkParam> for RabbitMqSink {
+    type Error = SinkError;
+
+    fn try_from(param: SinkParam) -> Result<Self> {
+        if !param.sink_type.is_append_only() {
+            return Err(SinkError::Config(anyhow!(
+                "RabbitMQ sink only supports append-only mode"
+            )));
+        }
+        let schema = param.schema();
+        let config = RabbitMqConfig::from_btreemap(param.properties)?;
+        let format_desc = param
+            .format_desc
+            .ok_or_else(|| SinkError::Config(anyhow!("missing FORMAT ... ENCODE ...")))?;
+        // Use the routing key as the topic-equivalent schema registry subject. An empty
+        // routing key is valid (e.g. for fanout exchanges), so fall back to the sink name.
+        let schema_subject = if config.routing_key.is_empty() {
+            param.sink_name
+        } else {
+            config.routing_key.clone()
+        };
+        Ok(Self {
+            config,
+            schema,
+            format_desc,
+            schema_subject,
+        })
+    }
+}
+
+impl RabbitMqSink {
+    async fn build_encoder(&self) -> Result<RabbitMqEncoder> {
+        RabbitMqEncoder::new(self.schema.clone(), &self.format_desc, &self.schema_subject).await
+    }
+}
+
+impl Sink for RabbitMqSink {
+    type LogSinker = AsyncTruncateLogSinkerOf<RabbitMqSinkWriter>;
+
+    const SINK_NAME: &'static str = RABBITMQ_SINK;
+
+    crate::impl_validate_sink_unknown_fields!();
+
+    async fn validate(&self) -> Result<()> {
+        self.validate_unknown_fields()?;
+        // Validate encoding and schema before making any broker connection.
+        self.build_encoder().await?;
+        let _client = RabbitMqClient::connect(&self.config).await?;
+        Ok(())
+    }
+
+    async fn new_log_sinker(&self, _writer_param: SinkWriterParam) -> Result<Self::LogSinker> {
+        let encoder = self.build_encoder().await?;
+        Ok(RabbitMqSinkWriter::new(self.config.clone(), encoder)
+            .await?
+            .into_log_sinker(self.config.max_inflight_messages))
+    }
+}
+
+#[cfg(test)]
+mod tests;
