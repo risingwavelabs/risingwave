@@ -402,6 +402,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
             stream_actors,
             mut source_splits,
             batch_refresh,
+            iceberg_v3,
         } = rendered_info;
         let mut recoverer = partial_graph_manager.start_recover();
         let result: MetaResult<_> = try {
@@ -420,6 +421,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
                 &self.control.hummock_version_stats,
                 &mut cdc_table_snapshot_splits,
                 batch_refresh,
+                iceberg_v3,
             )?
         };
         match result {

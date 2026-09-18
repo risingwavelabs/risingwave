@@ -23,7 +23,8 @@ pub(super) use control::{
 };
 pub(crate) use independent_job::{
     BatchRefreshJobCheckpointControl, BatchRefreshLogicalFragments, BatchRefreshRenderResult,
-    CreatingStreamingJobControl, IndependentCheckpointJob, IndependentCheckpointJobControl,
-    IndependentCheckpointJobStatus,
+    CreatingStreamingJobControl, IcebergV3JobCheckpointControl, IcebergV3RenderResult,
+    IndependentCheckpointJob, IndependentCheckpointJobControl, IndependentCheckpointJobStatus,
+    is_iceberg_v3_fragment_nodes,
 };
 pub(super) use state::BarrierWorkerState;
