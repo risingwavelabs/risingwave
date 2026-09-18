@@ -50,10 +50,6 @@ impl SplitEnumerator for PubsubSplitEnumerator {
             bail!("pubsub.ack_deadline_seconds must be between 10 and 600");
         }
 
-        if properties.credentials.is_none() && properties.emulator_host.is_none() {
-            bail!("credentials must be set if not using the pubsub emulator")
-        }
-
         let sub = properties.subscription_client().await?;
         if !sub
             .exists(None)
