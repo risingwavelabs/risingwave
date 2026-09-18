@@ -427,8 +427,10 @@ GooglePubSubConfig:
   fields:
   - name: pubsub.project_id
     field_type: String
-    comments: The Google Pub/Sub Project ID
-    required: true
+    comments: |-
+      The Google Pub/Sub project ID. If omitted, the connector uses the project ID from
+      the credentials or Application Default Credentials.
+    required: false
   - name: pubsub.topic
     field_type: String
     comments: Specifies the Pub/Sub topic to publish messages
@@ -446,7 +448,9 @@ GooglePubSubConfig:
   - name: pubsub.credentials
     field_type: String
     comments: |-
-      A JSON string containing the service account credentials for authorization,
+      A JSON string containing the service account credentials for authorization. If omitted,
+      the connector uses Google Application Default Credentials (ADC) when allowed by the
+      deployment environment.
       see the [service-account](https://developers.google.com/workspace/guides/create-credentials#create_credentials_for_a_service_account) credentials guide.
       The provided account credential must have the
       `pubsub.publisher` [role](https://cloud.google.com/pubsub/docs/access-control#roles)
