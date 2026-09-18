@@ -104,9 +104,11 @@ public class OracleValidatorTest {
                                     SourceValidateHandler.validateSource(
                                             oracleValidateRequest(userProps)));
             assertEquals(Status.Code.INVALID_ARGUMENT, exception.getStatus().getCode());
-            assertEquals(
-                    "'heartbeat.table.name' requires a positive 'debezium.heartbeat.interval.ms'",
-                    exception.getStatus().getDescription());
+            var expectedMessage =
+                    interval == null
+                            ? "'heartbeat.table.name' requires a positive 'debezium.heartbeat.interval.ms'"
+                            : "'debezium.heartbeat.interval.ms' must be a positive integer, got: '0'";
+            assertEquals(expectedMessage, exception.getStatus().getDescription());
         }
     }
 
@@ -208,7 +210,7 @@ public class OracleValidatorTest {
                                             oracleValidateRequest(userProps)));
             assertEquals(Status.Code.INVALID_ARGUMENT, exception.getStatus().getCode());
             assertEquals(
-                    "'debezium.heartbeat.interval.ms' must be an integer between 0 and 2147483647, got: '"
+                    "'debezium.heartbeat.interval.ms' must be a positive integer, got: '"
                             + interval
                             + "'",
                     exception.getStatus().getDescription());
