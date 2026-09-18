@@ -132,8 +132,7 @@ public class SourceValidateHandler {
         if (mode != null && !mode.equals("string")) {
             throw ValidatorUtils.invalidArgument(
                     String.format(
-                            "'debezium.decimal.handling.mode' must be 'string', got: '%s'",
-                            mode));
+                            "'debezium.decimal.handling.mode' must be 'string', got: '%s'", mode));
         }
     }
 
