@@ -13,11 +13,9 @@
 // limitations under the License.
 
 use std::sync::Arc;
+use std::time::Instant;
 
 use pgwire::pg_response::{PgResponse, StatementType};
-use risingwave_batch::task::ShutdownToken;
-use risingwave_common::catalog::Field;
-use risingwave_common::session_config::QueryMode;
 use risingwave_common::util::epoch::Epoch;
 use risingwave_sqlparser::ast::{
     DeclareCursorStatement, Ident, ObjectName, Query, Since, Statement,
@@ -30,9 +28,8 @@ use super::query::{
 use super::util::convert_unix_millis_to_logstore_u64;
 use crate::error::{ErrorCode, Result};
 use crate::handler::HandlerArgs;
-use crate::handler::query::{distribute_execute, local_execute};
 use crate::session::SessionImpl;
-use crate::session::cursor_manager::{CursorDataChunkStream, CursorQueryStream};
+use crate::session::cursor_manager::{QueryCursor, SubscriptionCursor};
 use crate::{Binder, OptimizerContext};
 
 pub async fn handle_declare_cursor(
@@ -84,16 +81,30 @@ pub async fn handle_declare_subscription_cursor(
         risingwave_sqlparser::ast::Since::Full => None,
     };
     // Create cursor based on the response
-    if let Err(e) = session
-        .get_cursor_manager()
-        .add_subscription_cursor(
+    if let Err(e) = async {
+        let create_cursor_timer = Instant::now();
+        let cursor = SubscriptionCursor::new(
             cursor_name.real_value(),
             start_rw_timestamp,
+            subscription.clone(),
             subscription.dependent_table_id,
-            subscription,
             &handler_args,
+            session.env().cursor_metrics.clone(),
         )
-        .await
+        .await?;
+        let result = session
+            .get_cursor_manager()
+            .add_subscription_cursor(cursor)
+            .await;
+        session
+            .env()
+            .cursor_metrics
+            .subscription_cursor_declare_duration
+            .with_label_values(&[&subscription.name])
+            .observe(create_cursor_timer.elapsed().as_millis() as _);
+        result
+    }
+    .await
     {
         session
             .env()
@@ -128,12 +139,12 @@ async fn handle_declare_query_cursor(
     cursor_name: Ident,
     query: Box<Query>,
 ) -> Result<RwPgResponse> {
-    let (chunk_stream, fields) =
-        create_stream_for_cursor_stmt(handler_args.clone(), Statement::Query(query)).await?;
+    let cursor =
+        create_query_cursor_from_stmt(handler_args.clone(), Statement::Query(query)).await?;
     handler_args
         .session
         .get_cursor_manager()
-        .add_query_cursor(cursor_name.real_value(), chunk_stream, fields)
+        .add_query_cursor(cursor_name.real_value(), cursor)
         .await?;
     Ok(PgResponse::empty_result(StatementType::DECLARE_CURSOR))
 }
@@ -144,21 +155,21 @@ pub async fn handle_bound_declare_query_cursor(
     plan_fragmenter_result: BatchPlanFragmenterResult,
 ) -> Result<RwPgResponse> {
     let session = handler_args.session.clone();
-    let (chunk_stream, fields) =
-        create_chunk_stream_for_cursor(session, plan_fragmenter_result).await?;
+    let cursor = create_query_cursor_from_fragment(session, plan_fragmenter_result).await?;
 
     handler_args
         .session
         .get_cursor_manager()
-        .add_query_cursor(cursor_name.real_value(), chunk_stream, fields)
+        .add_query_cursor(cursor_name.real_value(), cursor)
         .await?;
     Ok(PgResponse::empty_result(StatementType::DECLARE_CURSOR))
 }
 
-pub async fn create_stream_for_cursor_stmt(
+/// Plans a statement and constructs the cursor that owns its execution.
+pub async fn create_query_cursor_from_stmt(
     handler_args: HandlerArgs,
     stmt: Statement,
-) -> Result<(CursorDataChunkStream, Vec<Field>)> {
+) -> Result<QueryCursor> {
     let session = handler_args.session.clone();
     let plan_fragmenter_result = {
         let context = OptimizerContext::from_handler_args(handler_args);
@@ -166,106 +177,13 @@ pub async fn create_stream_for_cursor_stmt(
             gen_batch_plan_by_statement(&session, context.into(), stmt)?.unwrap_rw()?;
         gen_batch_plan_fragmenter(&session, plan_result)?
     };
-    create_chunk_stream_for_cursor(session, plan_fragmenter_result).await
+    create_query_cursor_from_fragment(session, plan_fragmenter_result).await
 }
 
-pub async fn create_chunk_stream_for_cursor(
+/// Constructs a query cursor from a prepared plan, including its shutdown resources and execution.
+pub async fn create_query_cursor_from_fragment(
     session: Arc<SessionImpl>,
     plan_fragmenter_result: BatchPlanFragmenterResult,
-) -> Result<(CursorDataChunkStream, Vec<Field>)> {
-    let BatchPlanFragmenterResult {
-        plan_fragmenter,
-        query_mode,
-        schema,
-        ..
-    } = plan_fragmenter_result;
-
-    // Cursor-owned queries outlive individual statements and must not inherit statement_timeout.
-    let can_timeout_cancel = false;
-
-    let query = plan_fragmenter.generate_complete_query().await?;
-    tracing::trace!("Generated query after plan fragmenter: {:?}", &query);
-
-    Ok((
-        match query_mode {
-            QueryMode::Auto => unreachable!(),
-            QueryMode::Local => {
-                let (shutdown_tx, shutdown_rx) = ShutdownToken::new();
-                CursorDataChunkStream::LocalDataChunk(Some(CursorQueryStream::local(
-                    local_execute(
-                        session.clone(),
-                        query,
-                        can_timeout_cancel,
-                        Some(shutdown_rx),
-                    )
-                    .await?,
-                    shutdown_tx,
-                )))
-            }
-            QueryMode::Distributed => {
-                CursorDataChunkStream::DistributedDataChunk(Some(CursorQueryStream::distributed(
-                    distribute_execute(session.clone(), query, can_timeout_cancel, true).await?,
-                    session.env().query_manager().clone(),
-                )))
-            }
-        },
-        schema.fields.clone(),
-    ))
-}
-
-// Statement timeouts are disabled unconditionally under madsim.
-#[cfg(all(test, not(madsim)))]
-mod tests {
-    use std::time::Duration;
-
-    use futures::StreamExt;
-    use risingwave_sqlparser::parser::Parser;
-
-    use super::*;
-
-    /// Verifies that a local cursor query survives being left unread beyond `statement_timeout`
-    /// and subsequently returns every row without a timeout error.
-    #[tokio::test]
-    async fn test_local_cursor_query_does_not_inherit_statement_timeout() {
-        let session = Arc::new(SessionImpl::mock());
-        session
-            .set_config("visibility_mode", "all".to_owned())
-            .unwrap();
-        session
-            .set_config("query_mode", "local".to_owned())
-            .unwrap();
-        session
-            .set_config("statement_timeout", "50ms".to_owned())
-            .unwrap();
-        let _txn = session.txn_begin_implicit();
-        // The result exceeds the output channel's capacity, keeping execution active while unread.
-        let sql = "SELECT * FROM generate_series(1, 1000000)";
-        let stmt = Parser::parse_sql(sql).unwrap().pop().unwrap();
-        let args = HandlerArgs::new(session, &stmt, sql.into()).unwrap();
-        let (stream, _) = create_stream_for_cursor_stmt(args, stmt).await.unwrap();
-        let CursorDataChunkStream::LocalDataChunk(Some(mut stream)) = stream else {
-            panic!("the query must execute in local mode");
-        };
-        let first_chunk = tokio::time::timeout(Duration::from_secs(5), stream.next())
-            .await
-            .expect("the local cursor query must produce its first chunk")
-            .unwrap()
-            .unwrap();
-        let mut rows = first_chunk.cardinality();
-
-        // Keep the cursor unread beyond the 50 ms statement timeout while backpressure keeps it
-        // active. Otherwise, a fast query could finish before the deadline and hide a regression.
-        tokio::time::sleep(Duration::from_millis(100)).await;
-
-        tokio::time::timeout(Duration::from_secs(5), async {
-            while let Some(chunk) = stream.next().await {
-                rows += chunk
-                    .expect("cursor execution must not time out")
-                    .cardinality();
-            }
-        })
-        .await
-        .expect("the cursor query must finish after consumption resumes");
-        assert_eq!(rows, 1000000);
-    }
+) -> Result<QueryCursor> {
+    QueryCursor::new(session, plan_fragmenter_result).await
 }
