@@ -107,6 +107,7 @@ impl CreatingStreamingJobControl {
         notifier: Option<&mut NotifierStarter>,
         snapshot_backfill_upstream_tables: HashSet<TableId>,
         snapshot_epoch: u64,
+        barrier_interval_ms: u32,
         since_timestamp_upstream_log_epochs: Option<(&TableLogEpochs, PartialGraphId, u64)>,
         version_stat: &HummockVersionStats,
         term_id: &str,
@@ -173,6 +174,7 @@ impl CreatingStreamingJobControl {
                     partial_graph_manager.pending_barrier_infos(upstream_partial_graph_id),
                     snapshot_epoch,
                     new_upstream_barrier_prev_epoch,
+                    barrier_interval_ms,
                 )?;
             (initial_barrier, Some(barriers_to_inject))
         } else {
@@ -181,6 +183,7 @@ impl CreatingStreamingJobControl {
                     &mut prev_epoch_fake_physical_time,
                     &mut pending_non_checkpoint_barriers,
                     PbBarrierKind::Checkpoint,
+                    barrier_interval_ms,
                 ),
                 None,
             )
@@ -309,6 +312,7 @@ impl CreatingStreamingJobControl {
                 create_mview_tracker,
                 snapshot_backfill_actors,
                 snapshot_epoch,
+                barrier_interval_ms,
                 info: job_info,
                 pending_non_checkpoint_barriers,
             };
@@ -403,6 +407,7 @@ impl CreatingStreamingJobControl {
                     } else {
                         BarrierKind::Barrier
                     },
+                    barrier_interval_ms: upstream_barrier_info.barrier_interval_ms,
                 });
                 prev_epoch = *epoch;
             }
@@ -411,6 +416,7 @@ impl CreatingStreamingJobControl {
             prev_epoch: TracedEpoch::new(Epoch(prev_epoch)),
             curr_epoch: TracedEpoch::new(Epoch(upstream_barrier_info.curr_epoch())),
             kind: BarrierKind::Checkpoint(pending_non_checkpoint_barriers),
+            barrier_interval_ms: upstream_barrier_info.barrier_interval_ms,
         });
         Ok(ret)
     }
@@ -448,6 +454,7 @@ impl CreatingStreamingJobControl {
         pending_upstream_barriers: impl Iterator<Item = &BarrierInfo>,
         snapshot_epoch: u64,
         new_upstream_barrier_prev_epoch: u64,
+        barrier_interval_ms: u32,
     ) -> MetaResult<(BarrierInfo, Vec<BarrierInfo>)> {
         let mut initial_barrier = None;
         let mut barriers = vec![];
@@ -487,6 +494,7 @@ impl CreatingStreamingJobControl {
                         } else {
                             BarrierKind::Barrier
                         },
+                        barrier_interval_ms,
                     },
                 );
                 prev_epoch = *epoch;
@@ -507,6 +515,7 @@ impl CreatingStreamingJobControl {
                     prev_epoch: TracedEpoch::new(Epoch(prev_epoch)),
                     curr_epoch: TracedEpoch::new(Epoch(new_upstream_barrier_prev_epoch)),
                     kind: BarrierKind::Checkpoint(pending_non_checkpoint_barriers),
+                    barrier_interval_ms,
                 },
             );
         } else {
@@ -524,6 +533,7 @@ impl CreatingStreamingJobControl {
                     prev_epoch: TracedEpoch::new(Epoch(prev_epoch)),
                     curr_epoch: TracedEpoch::new(Epoch(first_pending_barrier.prev_epoch())),
                     kind: BarrierKind::Checkpoint(take(&mut pending_non_checkpoint_barriers)),
+                    barrier_interval_ms,
                 },
             );
             prev_epoch = first_pending_barrier.prev_epoch();
@@ -545,6 +555,7 @@ impl CreatingStreamingJobControl {
                         } else {
                             BarrierKind::Barrier
                         },
+                        barrier_interval_ms: pending_barrier.barrier_interval_ms,
                     },
                 );
                 prev_epoch = pending_barrier.curr_epoch();
@@ -587,6 +598,7 @@ impl CreatingStreamingJobControl {
             &mut prev_epoch_fake_physical_time,
             &mut pending_non_checkpoint_barriers,
             PbBarrierKind::Initial,
+            upstream_barrier_info.barrier_interval_ms,
         );
         Ok((
             CreatingStreamingJobStatus::ConsumingSnapshot {
@@ -605,6 +617,7 @@ impl CreatingStreamingJobControl {
                 .collect(),
                 info,
                 snapshot_epoch,
+                barrier_interval_ms: upstream_barrier_info.barrier_interval_ms,
                 pending_non_checkpoint_barriers,
             },
             barrier_info,
@@ -1135,6 +1148,7 @@ mod tests {
                 [].iter(),
                 40,
                 60,
+                1000,
             )
             .unwrap();
 
@@ -1170,11 +1184,13 @@ mod tests {
                 prev_epoch: TracedEpoch::new(Epoch(60)),
                 curr_epoch: TracedEpoch::new(Epoch(65)),
                 kind: BarrierKind::Barrier,
+                barrier_interval_ms: 1000,
             },
             BarrierInfo {
                 prev_epoch: TracedEpoch::new(Epoch(65)),
                 curr_epoch: TracedEpoch::new(Epoch(70)),
                 kind: BarrierKind::Checkpoint(vec![60, 65]),
+                barrier_interval_ms: 1000,
             },
         ];
 
@@ -1184,6 +1200,7 @@ mod tests {
                 pending_upstream_barriers.iter(),
                 40,
                 70,
+                1000,
             )
             .unwrap();
 
@@ -1219,21 +1236,25 @@ mod tests {
                 prev_epoch: TracedEpoch::new(Epoch(66)),
                 curr_epoch: TracedEpoch::new(Epoch(67)),
                 kind: BarrierKind::Barrier,
+                barrier_interval_ms: 1000,
             },
             BarrierInfo {
                 prev_epoch: TracedEpoch::new(Epoch(67)),
                 curr_epoch: TracedEpoch::new(Epoch(68)),
                 kind: BarrierKind::Barrier,
+                barrier_interval_ms: 1000,
             },
             BarrierInfo {
                 prev_epoch: TracedEpoch::new(Epoch(68)),
                 curr_epoch: TracedEpoch::new(Epoch(69)),
                 kind: BarrierKind::Barrier,
+                barrier_interval_ms: 1000,
             },
             BarrierInfo {
                 prev_epoch: TracedEpoch::new(Epoch(69)),
                 curr_epoch: TracedEpoch::new(Epoch(70)),
                 kind: BarrierKind::Barrier,
+                barrier_interval_ms: 1000,
             },
         ];
 
@@ -1243,6 +1264,7 @@ mod tests {
                 pending_upstream_barriers.iter(),
                 60,
                 70,
+                1000,
             )
             .unwrap();
 
@@ -1300,6 +1322,7 @@ mod tests {
                 [].iter(),
                 60,
                 66,
+                1000,
             )
             .unwrap();
 
