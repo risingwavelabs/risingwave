@@ -139,7 +139,11 @@ impl crate::source::UnknownFields for PubsubProperties {
 }
 
 impl PubsubProperties {
-    pub(crate) async fn subscription_client(&self) -> ConnectorResult<Subscription> {
+    async fn client_environment(&self) -> ConnectorResult<(Environment, Option<String>)> {
+        if let Some(emulator_host) = &self.emulator_host {
+            return Ok((Environment::Emulator(emulator_host.clone()), None));
+        }
+
         let auth_config = project::Config::default()
             .with_audience(apiv1::conn_pool::AUDIENCE)
             .with_scopes(&apiv1::conn_pool::SCOPES);
@@ -155,8 +159,6 @@ impl PubsubProperties {
             .context("failed to initialize Google Cloud Pub/Sub token source")?;
             let project_id = provider.project_id.clone();
             (Environment::GoogleCloud(Box::new(provider)), project_id)
-        } else if let Some(emulator_host) = &self.emulator_host {
-            (Environment::Emulator(emulator_host.clone()), None)
         } else {
             if env_var_is_true(DISABLE_DEFAULT_CREDENTIAL) {
                 bail!(
@@ -172,6 +174,12 @@ impl PubsubProperties {
             let project_id = provider.project_id.clone();
             (Environment::GoogleCloud(Box::new(provider)), project_id)
         };
+
+        Ok((environment, detected_project_id))
+    }
+
+    pub(crate) async fn subscription_client(&self) -> ConnectorResult<Subscription> {
+        let (environment, detected_project_id) = self.client_environment().await?;
 
         let project_id = resolve_pubsub_project_id(
             self.project_id.as_deref(),
@@ -191,5 +199,38 @@ impl PubsubProperties {
             .context("error initializing pubsub client")?;
 
         Ok(client.subscription(&self.subscription))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    fn parse_pubsub_properties(extra: serde_json::Value) -> PubsubProperties {
+        let mut value = json!({
+            "pubsub.subscription": "projects/test/subscriptions/test",
+            "pubsub.emulator_host": "localhost:8900",
+        });
+        value
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[tokio::test]
+    async fn test_emulator_takes_precedence_over_credentials() {
+        let properties = parse_pubsub_properties(json!({
+            "pubsub.credentials": "invalid credentials",
+        }));
+
+        let (environment, detected_project_id) = properties.client_environment().await.unwrap();
+        let Environment::Emulator(emulator_host) = environment else {
+            panic!("expected Pub/Sub emulator environment");
+        };
+        assert_eq!(emulator_host, "localhost:8900");
+        assert_eq!(detected_project_id, None);
     }
 }
