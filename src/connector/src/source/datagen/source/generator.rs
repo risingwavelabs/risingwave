@@ -281,7 +281,6 @@ mod tests {
                     time_handling: None,
                     bigint_unsigned_handling: None,
                     handle_toast_columns: false,
-                    numeric_string_parsing: false,
                 }),
             },
             data_types,
