@@ -465,6 +465,10 @@ pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::dir")]
     pub dir: String,
 
+    /// Whether to use direct I/O for file cache reads and writes on Linux.
+    #[serde(default = "default::file_cache::direct_io")]
+    pub direct_io: bool,
+
     #[serde(default = "default::file_cache::capacity_mb")]
     pub capacity_mb: usize,
 
@@ -1251,6 +1255,10 @@ pub mod default {
 
         pub fn dir() -> String {
             "".to_owned()
+        }
+
+        pub fn direct_io() -> bool {
+            false
         }
 
         pub fn capacity_mb() -> usize {
