@@ -28,6 +28,8 @@ import org.slf4j.LoggerFactory;
 
 public class SourceValidateHandler {
     static final Logger LOG = LoggerFactory.getLogger(SourceValidateHandler.class);
+    private static final String USER_DEBEZIUM_DECIMAL_HANDLING_MODE =
+            "debezium.decimal.handling.mode";
     private final StreamObserver<ConnectorServiceProto.ValidateSourceResponse> responseObserver;
 
     public SourceValidateHandler(
@@ -123,6 +125,20 @@ public class SourceValidateHandler {
         }
     }
 
+    /**
+     * Validate a user-supplied decimal handling mode. RisingWave's common Debezium configuration
+     * defaults this option to string, which preserves decimal precision in schema-less JSON.
+     */
+    private static void validateDecimalHandlingMode(Map<String, String> props) {
+        String mode = props.get(USER_DEBEZIUM_DECIMAL_HANDLING_MODE);
+        if (mode != null && !mode.equals("string")) {
+            throw ValidatorUtils.invalidArgument(
+                    String.format(
+                            "'%s' must be 'string', got: '%s'",
+                            USER_DEBEZIUM_DECIMAL_HANDLING_MODE, mode));
+        }
+    }
+
     /** Validate debezium.heartbeat.interval.ms if specified. If present, it must not be 0. */
     private static void validateHeartbeatInterval(
             Map<String, String> props, boolean isCdcSourceJob) {
@@ -158,6 +174,11 @@ public class SourceValidateHandler {
                 request.getSourceId(),
                 isCdcSourceJob,
                 isBackfillTable);
+
+        // Validate before any connector-specific database access. `precise` emits binary logical
+        // decimals whose scale cannot be reconstructed from RisingWave's schema-less JSON, while
+        // `double` can lose precision.
+        validateDecimalHandlingMode(props);
 
         TableSchema tableSchema = TableSchema.fromProto(request.getTableSchema());
         switch (request.getSourceType()) {

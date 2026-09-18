@@ -123,6 +123,18 @@ fn validate_license(connector: &str) -> Result<()> {
     Ok(())
 }
 
+fn validate_decimal_handling_mode(connector: &str, props: &BTreeMap<String, String>) -> Result<()> {
+    if connector.contains("-cdc")
+        && let Some(mode) = props.get("debezium.decimal.handling.mode")
+        && mode != "string"
+    {
+        return Err(RwError::from(ProtocolError(format!(
+            "'debezium.decimal.handling.mode' must be 'string', got: '{mode}'"
+        ))));
+    }
+    Ok(())
+}
+
 pub fn validate_compatibility(
     format_encode: &FormatEncodeOptions,
     props: &mut BTreeMap<String, String>,
@@ -155,6 +167,11 @@ pub fn validate_compatibility(
                 CONNECTORS_COMPATIBLE_FORMATS.keys()
             )))
         })?;
+
+    // RisingWave consumes schema-less JSON from Debezium and cannot reconstruct the scale of
+    // binary logical decimals emitted by `precise`. `double` can lose precision, so an explicit
+    // override must retain the common `string` default from `debezium.properties`.
+    validate_decimal_handling_mode(&connector, props)?;
 
     validate_license(&connector)?;
     if connector != KAFKA_CONNECTOR {
