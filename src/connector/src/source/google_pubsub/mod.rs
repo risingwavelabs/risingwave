@@ -15,8 +15,15 @@
 use std::collections::HashMap;
 
 use anyhow::Context;
+use google_cloud_gax::conn::Environment;
+use google_cloud_pubsub::apiv1;
+use google_cloud_pubsub::client::google_cloud_auth::credentials::CredentialsFile;
+use google_cloud_pubsub::client::google_cloud_auth::project;
+use google_cloud_pubsub::client::google_cloud_auth::token::DefaultTokenSourceProvider;
 use google_cloud_pubsub::client::{Client, ClientConfig};
 use google_cloud_pubsub::subscription::Subscription;
+use risingwave_common::bail;
+use risingwave_common::util::env_var::env_var_is_true;
 use serde::Deserialize;
 
 pub mod enumerator;
@@ -30,6 +37,7 @@ pub use source::*;
 pub use split::*;
 use with_options::WithOptions;
 
+use crate::connector_common::{DISABLE_DEFAULT_CREDENTIAL, resolve_pubsub_project_id};
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 use crate::source::SourceProperties;
@@ -43,6 +51,11 @@ pub const GOOGLE_PUBSUB_CONNECTOR: &str = "google_pubsub";
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct PubsubProperties {
+    /// The Google Pub/Sub project ID. If omitted, the connector uses the project ID from
+    /// the credentials or Application Default Credentials.
+    #[serde(rename = "pubsub.project_id")]
+    pub project_id: Option<String>,
+
     /// Pub/Sub subscription to consume messages from.
     ///
     /// Note that we rely on Pub/Sub to load-balance messages between all Readers pulling from
@@ -58,7 +71,9 @@ pub struct PubsubProperties {
     #[serde(rename = "pubsub.emulator_host")]
     pub emulator_host: Option<String>,
 
-    /// `credentials` is a JSON string containing the service account credentials.
+    /// `credentials` is a JSON string containing the service account credentials. If omitted,
+    /// the connector uses Google Application Default Credentials (ADC) when allowed by the
+    /// deployment environment.
     /// See the [service-account credentials guide](https://developers.google.com/workspace/guides/create-credentials#create_credentials_for_a_service_account).
     /// The service account must have the `pubsub.subscriber` [role](https://cloud.google.com/pubsub/docs/access-control#roles).
     #[serde(rename = "pubsub.credentials")]
@@ -125,21 +140,52 @@ impl crate::source::UnknownFields for PubsubProperties {
 
 impl PubsubProperties {
     pub(crate) async fn subscription_client(&self) -> ConnectorResult<Subscription> {
-        // initialize env
-        {
-            tracing::debug!("setting pubsub environment variables");
-            if let Some(emulator_host) = &self.emulator_host {
-                // safety: only read in the same thread below in with_auth
-                unsafe { std::env::set_var("PUBSUB_EMULATOR_HOST", emulator_host) };
+        let auth_config = project::Config::default()
+            .with_audience(apiv1::conn_pool::AUDIENCE)
+            .with_scopes(&apiv1::conn_pool::SCOPES);
+        let (environment, detected_project_id) = if let Some(credentials) = &self.credentials {
+            let credentials = CredentialsFile::new_from_str(credentials)
+                .await
+                .context("failed to parse Google Cloud Pub/Sub credentials")?;
+            let provider = DefaultTokenSourceProvider::new_with_credentials(
+                auth_config,
+                Box::new(credentials),
+            )
+            .await
+            .context("failed to initialize Google Cloud Pub/Sub token source")?;
+            let project_id = provider.project_id.clone();
+            (Environment::GoogleCloud(Box::new(provider)), project_id)
+        } else if let Some(emulator_host) = &self.emulator_host {
+            (Environment::Emulator(emulator_host.clone()), None)
+        } else {
+            if env_var_is_true(DISABLE_DEFAULT_CREDENTIAL) {
+                bail!(
+                    "Google Application Default Credentials are disabled; configure `pubsub.credentials` or `pubsub.emulator_host`"
+                );
             }
-            if let Some(credentials) = &self.credentials {
-                // safety: only read in the same thread below in with_auth
-                unsafe { std::env::set_var("GOOGLE_APPLICATION_CREDENTIALS_JSON", credentials) };
-            }
+
+            let provider = DefaultTokenSourceProvider::new(auth_config)
+                .await
+                .context(
+                    "failed to initialize Google Cloud Pub/Sub ADC; provide `pubsub.credentials`, configure ADC, or use `pubsub.emulator_host`",
+                )?;
+            let project_id = provider.project_id.clone();
+            (Environment::GoogleCloud(Box::new(provider)), project_id)
         };
 
-        // Validate config
-        let config = ClientConfig::default().with_auth().await?;
+        let project_id = resolve_pubsub_project_id(
+            self.project_id.as_deref(),
+            detected_project_id.as_deref(),
+            matches!(&environment, Environment::Emulator(_)),
+        )
+        .context(
+            "Google Cloud Pub/Sub project ID is unavailable; configure `pubsub.project_id` or provide credentials/ADC with a project ID",
+        )?;
+        let config = ClientConfig {
+            environment,
+            project_id: Some(project_id),
+            ..Default::default()
+        };
         let client = Client::new(config)
             .await
             .context("error initializing pubsub client")?;
