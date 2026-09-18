@@ -488,12 +488,12 @@ async fn test_failpoints_fast_compactor_iterator_recreate() {
 
     let mut cnt = 0;
     while sstable_iter.is_valid() {
-        let (buf, _, meta) = match sstable_iter.download_next_block().await.unwrap() {
+        let (buf, uncompressed_size) = match sstable_iter.download_next_block().await.unwrap() {
             Some(x) => x,
             None => break,
         };
         sstable_iter
-            .init_block_iter(buf, meta.uncompressed_size as usize)
+            .init_block_iter(buf, uncompressed_size)
             .unwrap();
 
         let block_iter = sstable_iter.iter_mut();

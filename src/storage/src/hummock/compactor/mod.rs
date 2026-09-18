@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+mod block_stream;
 mod compaction_executor;
 mod compaction_filter;
 pub mod compaction_utils;

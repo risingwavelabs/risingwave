@@ -67,8 +67,9 @@ pub(crate) mod tests {
     };
     use risingwave_storage::hummock::iterator::test_utils::mock_sstable_store;
     use risingwave_storage::hummock::iterator::{
-        ConcatIterator, NonPkPrefixSkipWatermarkIterator, NonPkPrefixSkipWatermarkState,
-        PkPrefixSkipWatermarkIterator, PkPrefixSkipWatermarkState, UserIterator,
+        ConcatIterator, HummockIterator, NonPkPrefixSkipWatermarkIterator,
+        NonPkPrefixSkipWatermarkState, PkPrefixSkipWatermarkIterator, PkPrefixSkipWatermarkState,
+        UserIterator,
     };
     use risingwave_storage::hummock::sstable_store::SstableStoreRef;
     use risingwave_storage::hummock::test_utils::{ReadOptions, *};
@@ -1382,6 +1383,222 @@ pub(crate) mod tests {
         inner.table_ids = table_ids;
         sst.set_inner(inner);
         sst
+    }
+
+    #[tokio::test]
+    async fn test_fast_compact_block_transitions() {
+        // Fixed physical boundaries and an independent output oracle make lost suffixes,
+        // resurrected versions, and raw-copy bookkeeping mistakes observable.
+        for value_size in [16, 600] {
+            for compression in [
+                CompressionAlgorithm::None,
+                CompressionAlgorithm::Lz4,
+                CompressionAlgorithm::Zstd,
+            ] {
+                let options = SstableBuilderOptions {
+                    capacity: 256 * 1024,
+                    block_capacity: 2048,
+                    compression_algorithm: compression,
+                    ..Default::default()
+                };
+                let key = |index: u8, epoch| {
+                    let mut table_key = VirtualNode::ZERO.to_be_bytes().to_vec();
+                    table_key.push(index);
+                    FullKey::for_test(TableId::new(1), table_key, test_epoch(epoch))
+                };
+                let put = |index, epoch| {
+                    (
+                        key(index, epoch),
+                        HummockValue::put(vec![index; value_size]),
+                    )
+                };
+                // Include both input orders: the runner must not assume that the left side
+                // owns newer versions or is the side that survives the merge.
+                let cases = vec![
+                    (
+                        "inclusive_upper_bound_with_newer_tombstone",
+                        vec![
+                            vec![vec![put(10, 200), put(20, 200)]],
+                            vec![vec![(key(20, 300), HummockValue::delete()), put(30, 300)]],
+                        ],
+                        1,
+                        vec![(10, 200), (30, 300)],
+                        false,
+                    ),
+                    (
+                        "raw_decode_sst_transitions",
+                        vec![
+                            vec![
+                                vec![put(1, 300), put(2, 300)],
+                                vec![
+                                    put(10, 300),
+                                    (key(20, 300), HummockValue::delete()),
+                                    put(30, 300),
+                                ],
+                                vec![put(40, 300), put(41, 300)],
+                            ],
+                            vec![vec![put(60, 300)]],
+                            vec![
+                                vec![put(15, 200), put(20, 200), put(25, 200)],
+                                vec![put(50, 200)],
+                            ],
+                            vec![vec![put(70, 200), put(80, 200)]],
+                        ],
+                        2,
+                        vec![
+                            (1, 300),
+                            (2, 300),
+                            (10, 300),
+                            (15, 200),
+                            (25, 200),
+                            (30, 300),
+                            (40, 300),
+                            (41, 300),
+                            (50, 200),
+                            (60, 300),
+                            (70, 200),
+                            (80, 200),
+                        ],
+                        true,
+                    ),
+                    (
+                        "decoded_tail_then_raw_or_coalesced_block",
+                        vec![
+                            vec![
+                                vec![put(10, 300), put(30, 300)],
+                                vec![put(40, 300), put(50, 300)],
+                            ],
+                            vec![vec![put(20, 200)]],
+                        ],
+                        1,
+                        vec![(10, 300), (20, 200), (30, 300), (40, 300), (50, 300)],
+                        value_size == 600,
+                    ),
+                ];
+                for (case, inputs, split_at, expected, expect_raw_copy) in cases {
+                    for swap_inputs in [false, true] {
+                        let store = mock_sstable_store().await;
+                        let catalog = CompactionCatalogAgent::for_test(vec![1]);
+                        // `unused()` clones global counters; use a private counter so earlier
+                        // cases and concurrently running tests cannot satisfy this assertion.
+                        let metrics = Arc::new(CompactorMetrics {
+                            compact_fast_runner_bytes: prometheus::IntCounter::new(
+                                "test_fast_runner_bytes",
+                                "Bytes actually copied by this fixture",
+                            )
+                            .unwrap(),
+                            ..CompactorMetrics::unused()
+                        });
+                        let context = CompactorContext::new_local_compact_context(
+                            Arc::new(StorageOpts {
+                                // Match input/output block sizes so 16-byte values trigger
+                                // coalescing while 600-byte values allow an actual raw copy.
+                                block_size_kb: 2,
+                                ..Default::default()
+                            }),
+                            store.clone(),
+                            metrics.clone(),
+                            None,
+                        );
+                        let mut ssts = vec![];
+                        for (index, blocks) in inputs.iter().cloned().enumerate() {
+                            let block_count = blocks.len();
+                            let info = build_test_sstable_with_blocks(
+                                (index + 1) as u64,
+                                blocks,
+                                options.clone(),
+                                store.clone(),
+                                catalog.clone(),
+                            )
+                            .await;
+                            let table = store
+                                .sstable(&info, &mut StoreLocalStatistic::default())
+                                .await
+                                .unwrap();
+                            assert_eq!(table.meta.block_metas.len(), block_count);
+                            ssts.push(info);
+                        }
+                        let mut right = ssts.split_off(split_at);
+                        assert!(can_concat(&ssts), "{case}: overlapping left input");
+                        assert!(can_concat(&right), "{case}: overlapping right input");
+                        if swap_inputs {
+                            std::mem::swap(&mut ssts, &mut right);
+                        }
+                        let task = CompactTask {
+                            input_ssts: vec![
+                                InputLevel {
+                                    level_idx: 5,
+                                    level_type: risingwave_pb::hummock::LevelType::Nonoverlapping,
+                                    table_infos: ssts,
+                                },
+                                InputLevel {
+                                    level_idx: 6,
+                                    level_type: risingwave_pb::hummock::LevelType::Nonoverlapping,
+                                    table_infos: right,
+                                },
+                            ],
+                            existing_table_ids: vec![TableId::new(1)],
+                            task_id: 1,
+                            splits: vec![KeyRange::inf()],
+                            target_level: 6,
+                            target_file_size: options.capacity as u64,
+                            compression_algorithm: 1,
+                            gc_delete_keys: true,
+                            ..Default::default()
+                        };
+                        let (normal, fast) =
+                            run_fast_and_normal_runner(context, task, catalog).await;
+                        // Compare physical output keys to an independent expected sequence, not only to
+                        // the normal compactor (which shares the same streaming reader).
+                        let mut count = 0;
+                        for info in &fast {
+                            let table = store
+                                .sstable(info, &mut StoreLocalStatistic::default())
+                                .await
+                                .unwrap();
+                            let mut iter = ConcatIterator::new(
+                                vec![info.clone()],
+                                store.clone(),
+                                Arc::new(SstableIteratorReadOptions::default()),
+                            );
+                            iter.rewind().await.unwrap();
+                            while iter.is_valid() {
+                                let &(index, epoch) = expected.get(count).unwrap_or_else(|| {
+                                    panic!("{case}: unexpected extra key {:?}", iter.key())
+                                });
+                                assert_eq!(iter.key(), key(index, epoch).to_ref(), "{case}");
+                                assert_eq!(
+                                    iter.value(),
+                                    HummockValue::put(vec![index; value_size]).as_slice()
+                                );
+                                let user_key = iter.key().user_key;
+                                let hash = Sstable::hash_for_filter(&user_key.encode(), 1);
+                                assert!(table.may_match_hash(
+                                    &(Bound::Included(user_key), Bound::Included(user_key)),
+                                    hash,
+                                ));
+                                count += 1;
+                                iter.next().await.unwrap();
+                            }
+                        }
+                        assert_eq!(count, expected.len(), "{case}");
+                        check_compaction_result(
+                            store.clone(),
+                            normal,
+                            fast.clone(),
+                            options.capacity as u64,
+                        )
+                        .await;
+
+                        assert_eq!(
+                            metrics.compact_fast_runner_bytes.get() > 0,
+                            expect_raw_copy,
+                            "{case}: value_size={value_size}, compression={compression:?}, swap={swap_inputs}"
+                        );
+                    }
+                }
+            }
+        }
     }
 
     async fn test_fast_compact_impl(data: Vec<Vec<KeyValue>>) {
