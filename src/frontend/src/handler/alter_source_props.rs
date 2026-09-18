@@ -16,7 +16,7 @@ use risingwave_common::id::{ConnectionId, SourceId};
 use risingwave_pb::catalog::connection::Info::ConnectionParams;
 
 use super::RwPgResponse;
-use super::create_source::validate_cdc_heartbeat_interval;
+use super::create_source::validate_heartbeat_interval;
 use crate::catalog::catalog_service::CatalogReadGuard;
 use crate::catalog::root_catalog::SchemaPath;
 use crate::error::{ErrorCode, Result};
@@ -38,7 +38,7 @@ pub async fn handle_alter_table_connector_props(
     let user_name = &session.user_name();
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-    let (source_id, connector) = {
+    let source_id = {
         let reader = session.env().catalog_reader().read_guard();
         let (table, schema_name) =
             reader.get_any_table_by_name(db_name, schema_path, &real_table_name)?;
@@ -67,19 +67,18 @@ pub async fn handle_alter_table_connector_props(
             associate_source_id
         );
 
-        (associate_source_id, source_catalog.connector_name())
+        associate_source_id
     };
 
-    handle_alter_source_props_inner(&session, alter_props, source_id, &connector).await?;
+    handle_alter_source_props_inner(&session, alter_props, source_id).await?;
 
     Ok(RwPgResponse::empty_result(StatementType::ALTER_TABLE))
 }
 
-pub(super) async fn handle_alter_source_props_inner(
+async fn handle_alter_source_props_inner(
     session: &SessionImpl,
     alter_props: Vec<SqlOption>,
     source_id: SourceId,
-    connector: &str,
 ) -> Result<()> {
     let meta_client = session.env().meta_client();
     let (resolved_with_options, _, connector_conn_ref) = resolve_connection_ref_and_secret_ref(
@@ -117,7 +116,7 @@ pub(super) async fn handle_alter_source_props_inner(
         .into());
     }
 
-    validate_cdc_heartbeat_interval(connector, &changed_props)?;
+    validate_heartbeat_interval(&changed_props)?;
 
     meta_client
         .alter_source_connector_props(
@@ -143,7 +142,7 @@ pub async fn handle_alter_source_connector_props(
     let user_name = &session.user_name();
     let schema_path = SchemaPath::new(schema_name.as_deref(), &search_path, user_name);
 
-    let (source_id, connector) = {
+    let source_id = {
         let reader = session.env().catalog_reader().read_guard();
         let (source, schema_name) =
             reader.get_source_by_name(db_name, schema_path, &real_source_name)?;
@@ -165,10 +164,10 @@ pub async fn handle_alter_source_connector_props(
             &alter_props,
         )?;
 
-        (source.id, source.connector_name())
+        source.id
     };
 
-    handle_alter_source_props_inner(&session, alter_props, source_id, &connector).await?;
+    handle_alter_source_props_inner(&session, alter_props, source_id).await?;
 
     Ok(RwPgResponse::empty_result(StatementType::ALTER_SOURCE))
 }

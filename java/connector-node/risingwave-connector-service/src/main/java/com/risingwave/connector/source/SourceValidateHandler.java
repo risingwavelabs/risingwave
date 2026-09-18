@@ -124,29 +124,12 @@ public class SourceValidateHandler {
     }
 
     /**
-     * Validates user-supplied options, not the final Debezium configuration. If the interval is
-     * omitted, DbzConnectorConfig supplies the connector default (300000 ms for PostgreSQL). Keep
-     * this policy in sync with Rust's validate_cdc_heartbeat_interval (CREATE and ALTER).
+     * Requires an explicitly supplied heartbeat interval to be a positive signed 32-bit integer.
+     * Validates user-supplied options, not the final Debezium configuration. If omitted,
+     * DbzConnectorConfig supplies the connector default. Keep this policy in sync with Rust's
+     * validate_heartbeat_interval (CREATE and ALTER).
      */
-    static void validateHeartbeatInterval(
-            Map<String, String> props, ConnectorServiceProto.SourceType sourceType) {
-        // MySQL/SQL Server need an initial offset before shared-source creation can complete,
-        // even when no captured data changes. PostgreSQL also needs heartbeat-driven WAL progress.
-        // Debezium accepting zero does not make it safe for these source lifecycles.
-        boolean heartbeatRequired;
-        switch (sourceType) {
-            case POSTGRES:
-            case MYSQL:
-            case SQL_SERVER:
-                heartbeatRequired = true;
-                break;
-            case MONGODB:
-            case CITUS:
-                heartbeatRequired = false;
-                break;
-            default:
-                return;
-        }
+    private static void validateHeartbeatInterval(Map<String, String> props) {
         String intervalStr = props.get("debezium.heartbeat.interval.ms");
         if (intervalStr == null) {
             return; // Not specified, use default
@@ -158,21 +141,17 @@ public class SourceValidateHandler {
             if (!intervalStr.matches("[+-]?[0-9]+")) {
                 throw new NumberFormatException();
             }
-            // Debezium's heartbeat field is INT with a nonnegative-integer validator, not LONG.
+            // Debezium uses a signed 32-bit integer; RW also rejects zero to keep heartbeats
+            // enabled.
             interval = Integer.parseInt(intervalStr);
-            if (interval < 0) {
+            if (interval <= 0) {
                 throw new NumberFormatException();
             }
         } catch (NumberFormatException e) {
             throw ValidatorUtils.invalidArgument(
                     String.format(
-                            "'debezium.heartbeat.interval.ms' must be an integer between 0 and 2147483647, got: '%s'",
+                            "'debezium.heartbeat.interval.ms' must be a positive integer, got: '%s'",
                             intervalStr));
-        }
-
-        if (heartbeatRequired && interval == 0) {
-            throw ValidatorUtils.invalidArgument(
-                    "'debezium.heartbeat.interval.ms' must be greater than 0 for PostgreSQL, MySQL and SQL Server CDC: heartbeats are required for initialization and recovery safety");
         }
     }
 
@@ -188,7 +167,7 @@ public class SourceValidateHandler {
                 isCdcSourceJob,
                 isBackfillTable);
 
-        validateHeartbeatInterval(props, request.getSourceType());
+        validateHeartbeatInterval(props);
         TableSchema tableSchema = TableSchema.fromProto(request.getTableSchema());
         switch (request.getSourceType()) {
             case POSTGRES:

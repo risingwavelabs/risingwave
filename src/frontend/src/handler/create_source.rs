@@ -115,9 +115,8 @@ pub use external_schema::{
     bind_columns_from_source, get_schema_location, schema_has_schema_registry,
 };
 mod validate;
-pub(crate) use validate::validate_cdc_heartbeat_interval;
-pub use validate::validate_compatibility;
 use validate::{SOURCE_ALLOWED_CONNECTION_CONNECTOR, SOURCE_ALLOWED_CONNECTION_SCHEMA_REGISTRY};
+pub use validate::{validate_compatibility, validate_heartbeat_interval};
 mod additional_column;
 use additional_column::check_and_add_timestamp_column;
 pub use additional_column::handle_addition_columns;
