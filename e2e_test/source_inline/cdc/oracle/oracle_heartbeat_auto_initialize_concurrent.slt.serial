@@ -1,0 +1,121 @@
+control substitution on
+
+# TODO: Replace the concurrent direct Oracle CDC table creation below with concurrent
+# `CREATE SOURCE ... FORMAT PLAIN ENCODE JSON` once Oracle shared-source implementation is
+# complete. Cover `CREATE TABLE ... FROM SOURCE` separately in shared-source ingestion tests.
+
+statement ok
+DROP TABLE IF EXISTS missing_oracle_hb_1;
+
+statement ok
+DROP TABLE IF EXISTS missing_oracle_hb_2;
+
+statement ok
+DROP TABLE IF EXISTS empty_oracle_hb_1;
+
+statement ok
+DROP TABLE IF EXISTS empty_oracle_hb_2;
+
+statement ok
+DROP TABLE IF EXISTS seeded_oracle_hb_1;
+
+statement ok
+DROP TABLE IF EXISTS seeded_oracle_hb_2;
+
+# Concurrent CDC tables must converge when both initially observe a missing heartbeat table.
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py prepare missing_oracle_hb
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py create_tables_concurrently missing_oracle_hb
+
+# Wait until both connectors have returned their initial snapshot row before dropping them.
+query I retry 30 backoff 1s
+SELECT count(*) FROM missing_oracle_hb_1;
+----
+1
+
+query I retry 30 backoff 1s
+SELECT count(*) FROM missing_oracle_hb_2;
+----
+1
+
+# Runtime heartbeats may have toggled the canonical seed value, but there must be one row.
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py assert_seed C##RW_VALIDATOR
+
+statement ok
+DROP TABLE missing_oracle_hb_1;
+
+statement ok
+DROP TABLE missing_oracle_hb_2;
+
+# CDC table deletion must retain the shared upstream heartbeat table and seed row.
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py assert_seed C##RW_VALIDATOR
+
+# Concurrent CDC tables must converge when the compatible heartbeat table has no seed row.
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py prepare empty_oracle_hb
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py create_tables_concurrently empty_oracle_hb
+
+query I retry 30 backoff 1s
+SELECT count(*) FROM empty_oracle_hb_1;
+----
+1
+
+query I retry 30 backoff 1s
+SELECT count(*) FROM empty_oracle_hb_2;
+----
+1
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py assert_seed C##RW_VALIDATOR
+
+statement ok
+DROP TABLE empty_oracle_hb_1;
+
+statement ok
+DROP TABLE empty_oracle_hb_2;
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py assert_seed C##RW_VALIDATOR
+
+# Use 7 as a sentinel so a transition to 0 or 1 proves that Debezium executed its heartbeat action.
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py prepare seeded_oracle_hb
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py assert_seed C##RW_VALIDATOR --expected_value 7
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py create_tables_concurrently seeded_oracle_hb
+
+query I retry 30 backoff 1s
+SELECT count(*) FROM seeded_oracle_hb_1;
+----
+1
+
+query I retry 30 backoff 1s
+SELECT count(*) FROM seeded_oracle_hb_2;
+----
+1
+
+# A snapshot-completion heartbeat from either connector must change the sentinel to 0 or 1.
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py assert_heartbeat_active C##RW_VALIDATOR
+
+statement ok
+DROP TABLE seeded_oracle_hb_1;
+
+statement ok
+DROP TABLE seeded_oracle_hb_2;
+
+# Dropping both CDC tables must retain the heartbeat row.
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py assert_heartbeat_active C##RW_VALIDATOR
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py cleanup

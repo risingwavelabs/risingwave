@@ -20,6 +20,7 @@ import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertThrows;
 import static org.junit.Assert.assertTrue;
 
+import com.risingwave.connector.source.common.DbzConnectorConfig;
 import com.risingwave.proto.ConnectorServiceProto.SourceType;
 import com.risingwave.proto.ConnectorServiceProto.ValidateSourceRequest;
 import io.grpc.Status;
@@ -89,7 +90,47 @@ public class SourceValidateHandlerTest {
     }
 
     @Test
-    public void zeroDisablesHeartbeatForMongoDbAndCitus() {
+    public void validatesHeartbeatTableAutoInitializeOption() {
+        var key = DbzConnectorConfig.HEARTBEAT_TABLE_AUTO_INITIALIZE_KEY;
+        SourceValidateHandler.validateHeartbeatTableAutoInitialize(Map.of(), sourceType);
+        SourceValidateHandler.validateHeartbeatTableAutoInitialize(
+                Map.of(key, "false"), sourceType);
+
+        for (String value : new String[] {"TRUE", "False", "1", ""}) {
+            var error =
+                    assertThrows(
+                            StatusRuntimeException.class,
+                            () ->
+                                    SourceValidateHandler.validateHeartbeatTableAutoInitialize(
+                                            Map.of(key, value), sourceType));
+            assertTrue(error.getMessage().contains("must be 'true' or 'false'"));
+        }
+
+        var enabledProps = Map.of(key, "true", HEARTBEAT_INTERVAL, "1");
+        if (sourceType == SourceType.ORACLE) {
+            SourceValidateHandler.validateHeartbeatTableAutoInitialize(enabledProps, sourceType);
+            var error =
+                    assertThrows(
+                            StatusRuntimeException.class,
+                            () ->
+                                    SourceValidateHandler.validateHeartbeatTableAutoInitialize(
+                                            Map.of(key, "true", HEARTBEAT_INTERVAL, "0"),
+                                            sourceType));
+            assertTrue(error.getMessage().contains("requires a positive"));
+        } else {
+            var error =
+                    assertThrows(
+                            StatusRuntimeException.class,
+                            () ->
+                                    SourceValidateHandler.validateHeartbeatTableAutoInitialize(
+                                            enabledProps, sourceType));
+            assertTrue(error.getMessage().contains("is not supported for connector"));
+            assertRejectedBeforeDatabaseValidation(enabledProps, "is not supported for connector");
+        }
+    }
+
+    @Test
+    public void zeroDisablesHeartbeatForMongoDbCitusAndOracle() {
         for (String value : new String[] {"0", "+0", "-0"}) {
             var props = Map.of(HEARTBEAT_INTERVAL, value);
             if (sourceType == SourceType.POSTGRES

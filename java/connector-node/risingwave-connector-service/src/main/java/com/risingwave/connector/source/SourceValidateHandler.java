@@ -177,6 +177,41 @@ public class SourceValidateHandler {
         }
     }
 
+    static void validateHeartbeatTableAutoInitialize(
+            Map<String, String> props, ConnectorServiceProto.SourceType sourceType) {
+        var value = props.get(DbzConnectorConfig.HEARTBEAT_TABLE_AUTO_INITIALIZE_KEY);
+        if (value == null) {
+            return;
+        }
+        if (!value.equals("true") && !value.equals("false")) {
+            throw ValidatorUtils.invalidArgument(
+                    String.format(
+                            "'%s' must be 'true' or 'false'",
+                            DbzConnectorConfig.HEARTBEAT_TABLE_AUTO_INITIALIZE_KEY));
+        }
+        if (value.equals("false")) {
+            return;
+        }
+
+        switch (sourceType) {
+            case ORACLE:
+                if (!DbzConnectorConfig.isHeartbeatEnabled(props)) {
+                    throw ValidatorUtils.invalidArgument(
+                            String.format(
+                                    "'%s' requires a positive '%s'",
+                                    DbzConnectorConfig.HEARTBEAT_TABLE_AUTO_INITIALIZE_KEY,
+                                    DbzConnectorConfig.HEARTBEAT_INTERVAL_KEY));
+                }
+                break;
+            default:
+                throw ValidatorUtils.invalidArgument(
+                        String.format(
+                                "'%s=true' is not supported for connector '%s'",
+                                DbzConnectorConfig.HEARTBEAT_TABLE_AUTO_INITIALIZE_KEY,
+                                sourceType.name()));
+        }
+    }
+
     public static void validateSource(ConnectorServiceProto.ValidateSourceRequest request)
             throws Exception {
         var props = request.getPropertiesMap();
@@ -190,6 +225,7 @@ public class SourceValidateHandler {
                 isBackfillTable);
 
         validateHeartbeatInterval(props, request.getSourceType());
+        validateHeartbeatTableAutoInitialize(props, request.getSourceType());
         TableSchema tableSchema = TableSchema.fromProto(request.getTableSchema());
         switch (request.getSourceType()) {
             case POSTGRES:
