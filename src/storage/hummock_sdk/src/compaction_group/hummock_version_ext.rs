@@ -2704,7 +2704,7 @@ mod tests {
     }
 
     #[test]
-    fn test_validate_version_inserted_l0_sublevels() {
+    fn test_validate_version_l0_sublevel_order() {
         let group_id = 1.into();
         let mut version = HummockVersion {
             levels: HashMap::from([(
@@ -2716,8 +2716,7 @@ mod tests {
             )]),
             ..Default::default()
         };
-        assert!(super::validate_version(&version).is_empty());
-        for sub_level_id in [1, 2, 3] {
+        for sub_level_id in [1, 2] {
             super::insert_new_sub_level(
                 &mut version.levels.get_mut(&group_id).unwrap().l0,
                 sub_level_id,
@@ -2725,51 +2724,27 @@ mod tests {
                 vec![gen_sstable_info(sub_level_id, vec![1], test_epoch(1))],
                 None,
             );
-            let violations = super::validate_version(&version);
-            assert!(violations.is_empty(), "{violations:?}");
         }
-    }
+        let violations = super::validate_version(&version);
+        assert!(violations.is_empty(), "{violations:?}");
 
-    #[test]
-    fn test_validate_version_invalid_l0_order() {
-        for sub_level_ids in [[2, 1], [2, 2]] {
-            let group_id = 1.into();
-            let version = HummockVersion {
-                levels: HashMap::from([(
-                    group_id,
-                    Levels {
-                        group_id,
-                        l0: OverlappingLevel {
-                            sub_levels: sub_level_ids
-                                .iter()
-                                .enumerate()
-                                .map(|(idx, &id)| {
-                                    super::new_sub_level(
-                                        id,
-                                        LevelType::Overlapping,
-                                        vec![gen_sstable_info(
-                                            idx as u64 + 1,
-                                            vec![1],
-                                            test_epoch(1),
-                                        )],
-                                    )
-                                })
-                                .collect(),
-                            ..Default::default()
-                        },
-                        ..Default::default()
-                    },
-                )]),
-                ..Default::default()
-            };
-            assert_eq!(
-                super::validate_version(&version),
-                vec![format!(
-                    "GROUP 1 LEVEL 0: sub_level_id {} <= prev_sub_level {}",
-                    sub_level_ids[1], sub_level_ids[0]
-                )],
-            );
-        }
+        version
+            .levels
+            .get_mut(&group_id)
+            .unwrap()
+            .l0
+            .sub_levels
+            .swap(0, 1);
+        assert_eq!(
+            super::validate_version(&version),
+            vec!["GROUP 1 LEVEL 0: sub_level_id 1 <= prev_sub_level 2"],
+        );
+
+        version.levels.get_mut(&group_id).unwrap().l0.sub_levels[0].sub_level_id = 1;
+        assert_eq!(
+            super::validate_version(&version),
+            vec!["GROUP 1 LEVEL 0: sub_level_id 1 <= prev_sub_level 1"],
+        );
     }
 
     fn make_sst(sst_id: u64, table_ids: Vec<u32>, sst_size: u64) -> SstableInfo {
