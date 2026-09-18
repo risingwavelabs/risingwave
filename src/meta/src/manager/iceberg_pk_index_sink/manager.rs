@@ -18,10 +18,14 @@ use std::sync::Arc;
 use anyhow::anyhow;
 use parking_lot::RwLock;
 use risingwave_common::id::PartialGraphId;
+use risingwave_connector::connector_common::{
+    IcebergCommittedSnapshot, IcebergSinkCompactionUpdate,
+};
 use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::iceberg::IcebergConfig;
 use sea_orm::DatabaseConnection;
 use tokio::sync::Mutex;
+use tokio::sync::mpsc::UnboundedSender;
 use tracing::warn;
 
 use super::IcebergPkIndexPreCommitMetadata;
@@ -50,15 +54,20 @@ struct ManagerInner {
     /// every checkpoint completion via `advance_committed_epochs` (a no-op for partial graphs with no
     /// registered sink).
     committed_epochs: PartialGraphCommittedEpochs,
+    compaction_stat_tx: UnboundedSender<IcebergSinkCompactionUpdate>,
 }
 
 impl IcebergPkIndexSinkManager {
-    pub fn new(db: DatabaseConnection) -> Self {
+    pub fn new(
+        db: DatabaseConnection,
+        compaction_stat_tx: UnboundedSender<IcebergSinkCompactionUpdate>,
+    ) -> Self {
         IcebergPkIndexSinkManager {
             inner: Arc::new(ManagerInner {
                 db,
                 coordinators: RwLock::new(HashMap::new()),
                 committed_epochs: PartialGraphCommittedEpochs::default(),
+                compaction_stat_tx,
             }),
         }
     }
@@ -77,6 +86,7 @@ impl IcebergPkIndexSinkManager {
         let coordinator =
             IcebergPkIndexSinkCoordinator::init(sink_id, iceberg_config, self.inner.db.clone())
                 .await?;
+        let observed_snapshot = coordinator.latest_observed_snapshot();
 
         let prev = {
             let mut coordinators = self.inner.coordinators.write();
@@ -95,6 +105,8 @@ impl IcebergPkIndexSinkManager {
             // own `Arc` until it finishes; the snapshot_id idempotency check guards against double-commit.
             warn!(%sink_id, "iceberg pk-index sink coordinator re-registered; replacing previous instance");
         }
+        // Seed scheduling and maintenance after recovery even when no new writes arrive.
+        self.notify_compaction_scheduler(sink_id, observed_snapshot);
         Ok(())
     }
 
@@ -116,7 +128,31 @@ impl IcebergPkIndexSinkManager {
     /// committed. The barrier-complete path awaits this AFTER hummock `commit_epoch`.
     pub async fn commit_epoch(&self, sink_id: SinkId) -> anyhow::Result<()> {
         let coordinator = self.coordinator(sink_id)?;
-        coordinator.lock().await.commit().await
+        let observed_snapshot = coordinator.lock().await.commit().await?;
+        self.notify_compaction_scheduler(sink_id, observed_snapshot);
+        Ok(())
+    }
+
+    fn notify_compaction_scheduler(
+        &self,
+        sink_id: SinkId,
+        observed_snapshot: Option<IcebergCommittedSnapshot>,
+    ) {
+        let Some(observed_snapshot) = observed_snapshot else {
+            return;
+        };
+        if self
+            .inner
+            .compaction_stat_tx
+            .send(IcebergSinkCompactionUpdate {
+                sink_id,
+                force_compaction: false,
+                observed_snapshot,
+            })
+            .is_err()
+        {
+            warn!(%sink_id, "failed to notify iceberg compaction scheduler");
+        }
     }
 
     /// Advance the per-partial-graph committed epoch after a checkpoint completion.
@@ -196,5 +232,38 @@ impl IcebergPkIndexSinkManager {
                     sink_id
                 )
             })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_compaction_notification_requires_a_committed_snapshot() {
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel();
+        let manager = IcebergPkIndexSinkManager::new(DatabaseConnection::Disconnected, tx);
+        let sink_id = SinkId::new(42);
+        manager.notify_compaction_scheduler(sink_id, None);
+        assert!(matches!(
+            rx.try_recv(),
+            Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+        ));
+        manager.notify_compaction_scheduler(
+            sink_id,
+            Some(IcebergCommittedSnapshot {
+                branch: "main".to_owned(),
+                snapshot_id: 10,
+                timestamp_ms: 1000,
+                max_file_sequence_number: Some(7),
+            }),
+        );
+        let update = rx.try_recv().unwrap();
+        assert_eq!(update.sink_id, sink_id);
+        assert!(!update.force_compaction);
+        assert_eq!(update.observed_snapshot.branch, "main");
+        assert_eq!(update.observed_snapshot.snapshot_id, 10);
+        assert_eq!(update.observed_snapshot.timestamp_ms, 1000);
+        assert_eq!(update.observed_snapshot.max_file_sequence_number, Some(7));
     }
 }

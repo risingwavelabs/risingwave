@@ -564,7 +564,7 @@ pub fn start_iceberg_compactor(
                                 iceberg_component = "compaction_worker",
                                 iceberg_operation = "report_task",
                                 task_id = %completed_task_id,
-                                sink_id = sink_id,
+                                sink_id = %sink_id,
                                 admitted_plans = admitted_plans,
                                 successful_plans = successful_plans,
                                 failed_plans = failed_plans,

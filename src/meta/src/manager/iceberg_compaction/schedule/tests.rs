@@ -20,9 +20,10 @@ use risingwave_pb::iceberg_compaction::subscribe_iceberg_compaction_event_respon
 use risingwave_pb::id::IcebergCompactionTaskId;
 
 use super::*;
+use crate::barrier::BarrierScheduler;
 use crate::controller::catalog::CatalogController;
 use crate::controller::cluster::ClusterController;
-use crate::hummock::IcebergCompactorManager;
+use crate::hummock::{CompactorManager, HummockManager, IcebergCompactorManager};
 use crate::manager::MetaOpts;
 use crate::rpc::metrics::MetaMetrics;
 
@@ -39,8 +40,23 @@ async fn build_test_manager() -> Arc<IcebergCompactionManager> {
     let metadata_manager = MetadataManager::new(cluster_ctl, catalog_ctl);
     let iceberg_compactor_manager = Arc::new(IcebergCompactorManager::new());
     let metrics = Arc::new(MetaMetrics::for_test(&Registry::new()));
-    let (manager, _) =
-        IcebergCompactionManager::build(env, metadata_manager, iceberg_compactor_manager, metrics);
+    let hummock_manager = HummockManager::new(
+        env.clone(),
+        metadata_manager.clone(),
+        metrics.clone(),
+        Arc::new(CompactorManager::for_test()),
+        tokio::sync::mpsc::unbounded_channel().0,
+    )
+    .await
+    .unwrap();
+    let (barrier_scheduler, _) = BarrierScheduler::new_pair(hummock_manager);
+    let (manager, _) = IcebergCompactionManager::build(
+        env,
+        metadata_manager,
+        iceberg_compactor_manager,
+        metrics,
+        barrier_scheduler,
+    );
     manager
 }
 
@@ -55,6 +71,7 @@ fn new_track(
     CompactionTrack {
         configured_task_type: TaskType::Full,
         write_mode: IcebergWriteMode::CopyOnWrite,
+        pk_index_coordinated: false,
         trigger_interval_sec,
         trigger_snapshot_count,
         report_timeout: Duration::from_secs(30 * 60),
@@ -433,7 +450,9 @@ fn test_finish_success_clears_dispatched_baseline_and_starts_cooldown() {
             next_compaction_time,
             ..
         } => assert!(next_compaction_time >= now + Duration::from_secs(120)),
-        CompactionTrackState::PendingDispatch { .. } | CompactionTrackState::InFlight { .. } => {
+        CompactionTrackState::PendingDispatch { .. }
+        | CompactionTrackState::InFlight { .. }
+        | CompactionTrackState::Applying { .. } => {
             panic!("track should be idle")
         }
     }
@@ -511,7 +530,9 @@ fn test_finish_failed_preserves_backlog_and_allows_retry() {
             next_compaction_time,
             ..
         } => assert_eq!(next_compaction_time, now + Duration::from_secs(1)),
-        CompactionTrackState::PendingDispatch { .. } | CompactionTrackState::InFlight { .. } => {
+        CompactionTrackState::PendingDispatch { .. }
+        | CompactionTrackState::InFlight { .. }
+        | CompactionTrackState::Applying { .. } => {
             panic!("track should be idle")
         }
     }
@@ -526,7 +547,9 @@ fn test_report_timeout_starts_at_dispatch() {
 
     match track.state {
         CompactionTrackState::InFlight { .. } => {}
-        CompactionTrackState::Idle { .. } => panic!("track should remain pending"),
+        CompactionTrackState::Idle { .. } | CompactionTrackState::Applying { .. } => {
+            panic!("track should remain in flight")
+        }
         CompactionTrackState::PendingDispatch { .. } => {
             panic!("track should have been dispatched")
         }
@@ -556,7 +579,8 @@ fn test_revert_pre_dispatch_failure_requeues_after_backoff_without_losing_backlo
                 ..
             } => assert_eq!(next_compaction_time, revert_at + Duration::from_secs(1)),
             CompactionTrackState::PendingDispatch { .. }
-            | CompactionTrackState::InFlight { .. } => {
+            | CompactionTrackState::InFlight { .. }
+            | CompactionTrackState::Applying { .. } => {
                 panic!("track should be restored to idle")
             }
         }
@@ -637,7 +661,9 @@ fn test_update_interval_resets_idle_deadline() {
             next_compaction_time,
             ..
         } => assert_eq!(next_compaction_time, now + Duration::from_secs(300)),
-        CompactionTrackState::PendingDispatch { .. } | CompactionTrackState::InFlight { .. } => {
+        CompactionTrackState::PendingDispatch { .. }
+        | CompactionTrackState::InFlight { .. }
+        | CompactionTrackState::Applying { .. } => {
             panic!("track should stay idle")
         }
     }
@@ -652,7 +678,9 @@ fn test_update_interval_same_value_keeps_existing_idle_deadline() {
             next_compaction_time,
             ..
         } => next_compaction_time,
-        CompactionTrackState::PendingDispatch { .. } | CompactionTrackState::InFlight { .. } => {
+        CompactionTrackState::PendingDispatch { .. }
+        | CompactionTrackState::InFlight { .. }
+        | CompactionTrackState::Applying { .. } => {
             panic!("track should start idle")
         }
     };
@@ -664,7 +692,9 @@ fn test_update_interval_same_value_keeps_existing_idle_deadline() {
             next_compaction_time,
             ..
         } => assert_eq!(next_compaction_time, original_deadline),
-        CompactionTrackState::PendingDispatch { .. } | CompactionTrackState::InFlight { .. } => {
+        CompactionTrackState::PendingDispatch { .. }
+        | CompactionTrackState::InFlight { .. }
+        | CompactionTrackState::Applying { .. } => {
             panic!("track should stay idle")
         }
     }
@@ -682,7 +712,7 @@ fn test_update_interval_does_not_interrupt_active_attempt() {
     match track.state {
         CompactionTrackState::PendingDispatch { .. } => {}
         CompactionTrackState::Idle { .. } => panic!("active attempt should be preserved"),
-        CompactionTrackState::InFlight { .. } => {
+        CompactionTrackState::InFlight { .. } | CompactionTrackState::Applying { .. } => {
             panic!("track should remain pending dispatch")
         }
     }
@@ -778,7 +808,9 @@ async fn test_apply_sink_update_refreshes_existing_idle_track() {
             next_compaction_time,
             ..
         } => assert_eq!(next_compaction_time, refresh_at + Duration::from_secs(300)),
-        CompactionTrackState::PendingDispatch { .. } | CompactionTrackState::InFlight { .. } => {
+        CompactionTrackState::PendingDispatch { .. }
+        | CompactionTrackState::InFlight { .. }
+        | CompactionTrackState::Applying { .. } => {
             panic!("track should stay idle")
         }
     }
@@ -1169,7 +1201,7 @@ async fn test_apply_sink_update_promotes_temporary_manual_track_when_compaction_
 
     manager.handle_report_task(IcebergReportTask {
         task_id: task_id.into(),
-        sink_id: sink_id.as_raw_id(),
+        sink_id,
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
         pk_index_result: None,
@@ -1319,7 +1351,7 @@ async fn test_handle_report_task_success_consumes_backlog_and_resets_to_idle() {
 
     manager.handle_report_task(IcebergReportTask {
         task_id: 9.into(),
-        sink_id: sink_id.as_raw_id(),
+        sink_id,
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
         pk_index_result: None,
@@ -1345,7 +1377,7 @@ async fn test_handle_report_task_drained_finishes_active_round() {
 
     manager.handle_report_task(IcebergReportTask {
         task_id: 9.into(),
-        sink_id: sink_id.as_raw_id(),
+        sink_id,
         status: IcebergReportTaskStatus::Drained as i32,
         error_message: None,
         pk_index_result: None,
@@ -1375,7 +1407,7 @@ async fn test_handle_report_task_completes_manual_waiter_on_success() {
 
     manager.handle_report_task(IcebergReportTask {
         task_id: task_id.into(),
-        sink_id: sink_id.as_raw_id(),
+        sink_id,
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
         pk_index_result: None,
@@ -1406,7 +1438,7 @@ async fn test_handle_report_task_completes_manual_waiter_on_failure() {
 
     manager.handle_report_task(IcebergReportTask {
         task_id: task_id.into(),
-        sink_id: sink_id.as_raw_id(),
+        sink_id,
         status: IcebergReportTaskStatus::Failed as i32,
         error_message: Some("boom".to_owned()),
         pk_index_result: None,
@@ -1433,7 +1465,7 @@ async fn test_handle_report_task_treats_unbounded_drained_as_failure() {
 
     manager.handle_report_task(IcebergReportTask {
         task_id: task_id.into(),
-        sink_id: sink_id.as_raw_id(),
+        sink_id,
         status: IcebergReportTaskStatus::Drained as i32,
         error_message: None,
         pk_index_result: None,
@@ -1463,7 +1495,7 @@ async fn test_handle_report_task_removes_temporary_manual_track_on_success() {
 
     manager.handle_report_task(IcebergReportTask {
         task_id: task_id.into(),
-        sink_id: sink_id.as_raw_id(),
+        sink_id,
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
         pk_index_result: None,
@@ -1493,7 +1525,7 @@ async fn test_handle_report_task_removes_temporary_manual_track_on_failure() {
 
     manager.handle_report_task(IcebergReportTask {
         task_id: task_id.into(),
-        sink_id: sink_id.as_raw_id(),
+        sink_id,
         status: IcebergReportTaskStatus::Failed as i32,
         error_message: Some("boom".to_owned()),
         pk_index_result: None,
@@ -1597,7 +1629,7 @@ async fn test_manual_compaction_waiter_is_not_stolen_during_config_load() {
     }
     manager.handle_report_task(IcebergReportTask {
         task_id: task_id.into(),
-        sink_id: sink_id.as_raw_id(),
+        sink_id,
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
         pk_index_result: None,
@@ -1776,7 +1808,7 @@ async fn test_handle_report_task_failure_preserves_backlog_and_resets_to_idle() 
 
     manager.handle_report_task(IcebergReportTask {
         task_id: 9.into(),
-        sink_id: sink_id.as_raw_id(),
+        sink_id,
         status: IcebergReportTaskStatus::Failed as i32,
         error_message: Some("boom".to_owned()),
         pk_index_result: None,
@@ -1805,7 +1837,7 @@ async fn test_handle_report_task_ignores_stale_task_id() {
 
     manager.handle_report_task(IcebergReportTask {
         task_id: 10.into(),
-        sink_id: sink_id.as_raw_id(),
+        sink_id,
         status: IcebergReportTaskStatus::Success as i32,
         error_message: None,
         pk_index_result: None,
@@ -1887,4 +1919,409 @@ async fn test_pre_dispatch_failure_requeues_track_behind_overdue_candidates() {
     let handles = manager.get_top_n_iceberg_commit_sink_ids(1);
     assert_eq!(handles.len(), 1);
     assert_eq!(handles[0].sink_id, healthy);
+}
+
+fn pk_index_report(status: IcebergReportTaskStatus) -> IcebergReportTask {
+    use risingwave_connector::sink::iceberg::IcebergCommitResult;
+    use risingwave_pb::connector_service::SinkMetadata;
+    use risingwave_pb::iceberg_compaction::PkIndexCompactionResult;
+
+    IcebergReportTask {
+        task_id: 9.into(),
+        sink_id: SinkId::new(42),
+        status: status as i32,
+        error_message: None,
+        pk_index_result: Some(PkIndexCompactionResult {
+            output_files: Some(
+                SinkMetadata::try_from(&IcebergCommitResult {
+                    schema_id: 3,
+                    partition_spec_id: 4,
+                    data_files: vec![
+                        serde_json::from_value(serde_json::json!({
+                            "content": 0,
+                            "file_path": "s3://bucket/output.parquet",
+                            "file_format": "PARQUET",
+                            "partition": {},
+                            "record_count": 1,
+                            "file_size_in_bytes": 1
+                        }))
+                        .unwrap(),
+                    ],
+                })
+                .unwrap(),
+            ),
+            input_file_paths: vec!["s3://bucket/input.parquet".to_owned()],
+            read_snapshot_id: 10,
+        }),
+    }
+}
+
+fn pk_index_track(now: Instant, bounded: bool) -> CompactionTrack {
+    let mut track = new_round_track(now, 120, 10, 2);
+    track.pk_index_coordinated = true;
+    track.record_observed_snapshot(committed_snapshot(10, 1000));
+    if !bounded {
+        track.record_force_compaction(now, Some(TaskType::Full));
+    }
+    start_in_flight(&mut track, 9, now);
+    track
+}
+
+#[tokio::test]
+async fn test_pk_index_attempts_enable_coordinated_dispatch() {
+    let manager = build_test_manager().await;
+    let now = Instant::now();
+    let mut config = new_test_iceberg_config(120, 10, CompactionType::Auto);
+    config.enable_pk_index = true;
+    config.write_mode = IcebergWriteMode::MergeOnRead;
+    for manual in [false, true] {
+        let mut track = manager.create_compaction_track(&config, now);
+        track.record_observed_snapshot(committed_snapshot(10, 1000));
+        if manual {
+            track.record_force_compaction(now, Some(TaskType::Full));
+        }
+        let attempt = track.start_attempt();
+        assert!(attempt.pk_index_coordinated);
+        assert_eq!(attempt.max_file_sequence_number, (!manual).then_some(10));
+        assert_eq!(
+            attempt.task_type,
+            if manual {
+                TaskType::Full
+            } else {
+                TaskType::Auto
+            }
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_pk_index_apply_holds_waiter_and_gc_watermark() {
+    let manager = build_test_manager().await;
+    let sink_id = SinkId::new(42);
+    let now = Instant::now();
+    let (tx, mut rx) = oneshot::channel();
+    {
+        let mut guard = manager.inner.write();
+        guard
+            .sink_schedules
+            .insert(sink_id, pk_index_track(now, false));
+        guard.manual_compaction_waiters.insert(sink_id, tx);
+    }
+    let report = pk_index_report(IcebergReportTaskStatus::Success);
+    let apply = manager.prepare_report_task(report.clone()).unwrap();
+    assert_eq!(apply.overwrite.output_result.schema_id, 3);
+    assert_eq!(apply.overwrite.output_result.partition_spec_id, 4);
+    assert_eq!(apply.overwrite.output_result.data_files.len(), 1);
+    assert_eq!(apply.overwrite.read_snapshot_id, 10);
+    assert_eq!(
+        apply.overwrite.input_file_paths,
+        vec!["s3://bucket/input.parquet"]
+    );
+
+    // Duplicate success and failure reports cannot finish the accepted result.
+    manager.handle_report_task(report);
+    manager.handle_report_task(pk_index_report(IcebergReportTaskStatus::Failed));
+    assert!(matches!(
+        rx.try_recv(),
+        Err(oneshot::error::TryRecvError::Empty)
+    ));
+    {
+        let mut guard = manager.inner.write();
+        assert!(
+            IcebergCompactionManager::finish_timed_out_compaction_tasks(
+                &mut guard,
+                now + Duration::from_secs(3600),
+            )
+            .is_empty()
+        );
+        let track = guard.sink_schedules.get_mut(&sink_id).unwrap();
+        track.record_observed_snapshot(committed_snapshot(11, 2000));
+        track.record_commit();
+        assert!(!track.should_trigger(now + Duration::from_secs(3600)));
+        assert_eq!(
+            track
+                .active_attempt_gc_watermark_snapshot()
+                .flatten()
+                .unwrap()
+                .snapshot_id,
+            10
+        );
+        // The compactor has already finished; clearing need not send a cancel.
+        assert!(track.scheduled_task().is_none());
+    }
+    assert_eq!(
+        manager.list_compaction_statuses()[0].schedule_state,
+        "applying"
+    );
+    assert!(manager.get_top_n_iceberg_commit_sink_ids(1).is_empty());
+
+    manager.finish_report_task(apply.report, true);
+    assert_eq!(rx.await.unwrap().unwrap(), IcebergCompactionTaskId::new(9));
+    let guard = manager.inner.read();
+    let track = &guard.sink_schedules[&sink_id];
+    assert_eq!(track.pending_commit_count, 1);
+    assert!(track.active_attempt_gc_watermark_snapshot().is_none());
+}
+
+#[tokio::test]
+async fn test_pk_index_bounded_result_finishes_only_after_apply() {
+    let manager = build_test_manager().await;
+    let sink_id = SinkId::new(42);
+    let now = Instant::now();
+    for (reported_status, apply_failed) in [
+        (IcebergReportTaskStatus::Success, false),
+        (IcebergReportTaskStatus::Drained, false),
+        (IcebergReportTaskStatus::Drained, true),
+    ] {
+        manager
+            .inner
+            .write()
+            .sink_schedules
+            .insert(sink_id, pk_index_track(now, true));
+        let mut apply = manager
+            .prepare_report_task(pk_index_report(reported_status))
+            .unwrap();
+        {
+            let mut guard = manager.inner.write();
+            let track = guard.sink_schedules.get_mut(&sink_id).unwrap();
+            assert_eq!(track.round_max_file_sequence_number, Some(10));
+            track.record_commit();
+        }
+        if apply_failed {
+            apply.report.status = IcebergReportTaskStatus::Failed as i32;
+        }
+        manager.finish_report_task(apply.report, true);
+        let guard = manager.inner.read();
+        let track = &guard.sink_schedules[&sink_id];
+        let drained = reported_status == IcebergReportTaskStatus::Drained && !apply_failed;
+        assert_eq!(
+            track.round_max_file_sequence_number,
+            (!drained).then_some(10)
+        );
+        assert_eq!(track.pending_commit_count, 1);
+        assert!(matches!(track.state, CompactionTrackState::Idle { .. }));
+        assert_eq!(
+            track.should_trigger(Instant::now()),
+            reported_status == IcebergReportTaskStatus::Success
+        );
+    }
+}
+
+#[tokio::test]
+async fn test_pk_index_rejects_invalid_report_payloads() {
+    let manager = build_test_manager().await;
+    let sink_id = SinkId::new(42);
+    for case in 0..6 {
+        let mut track = pk_index_track(Instant::now(), false);
+        let mut report = pk_index_report(IcebergReportTaskStatus::Success);
+        let payload = report.pk_index_result.as_mut().unwrap();
+        match case {
+            0 => payload.output_files = None,
+            1 => payload.output_files.as_mut().unwrap().metadata = None,
+            2 => payload.input_file_paths.clear(),
+            3 => payload.read_snapshot_id = 0,
+            4 => {
+                // Rebuild the attempt with the uncoordinated flag.
+                track = new_track(Instant::now(), 120, 10, 2);
+                start_in_flight(&mut track, 9, Instant::now());
+            }
+            5 => report.status = IcebergReportTaskStatus::Drained as i32,
+            _ => unreachable!(),
+        }
+        let (tx, rx) = oneshot::channel();
+        {
+            let mut guard = manager.inner.write();
+            guard.sink_schedules.insert(sink_id, track);
+            guard.manual_compaction_waiters.insert(sink_id, tx);
+        }
+        assert!(manager.prepare_report_task(report).is_none());
+        let error = rx.await.unwrap().unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("invalid pk-index compaction result")
+        );
+        assert!(matches!(
+            manager.inner.read().sink_schedules[&sink_id].state,
+            CompactionTrackState::Idle { .. }
+        ));
+    }
+}
+
+#[tokio::test]
+async fn test_pk_index_no_plan_reports_need_no_barrier() {
+    let manager = build_test_manager().await;
+    let sink_id = SinkId::new(42);
+    for bounded in [false, true] {
+        manager
+            .inner
+            .write()
+            .sink_schedules
+            .insert(sink_id, pk_index_track(Instant::now(), bounded));
+        let mut report = pk_index_report(if bounded {
+            IcebergReportTaskStatus::Drained
+        } else {
+            IcebergReportTaskStatus::Success
+        });
+        report.pk_index_result = None;
+        assert!(manager.prepare_report_task(report).is_none());
+        let guard = manager.inner.read();
+        let track = &guard.sink_schedules[&sink_id];
+        assert_eq!(track.round_max_file_sequence_number, None);
+        assert_eq!(track.pending_commit_count, 0);
+        assert!(matches!(track.state, CompactionTrackState::Idle { .. }));
+    }
+}
+
+#[tokio::test]
+async fn test_pk_index_apply_failure_notifies_manual_waiter() {
+    let manager = build_test_manager().await;
+    let sink_id = SinkId::new(42);
+    let mut track = pk_index_track(Instant::now(), false);
+    track.finish_action = CompactionTrackFinishAction::RemoveTrack;
+    let (tx, rx) = oneshot::channel();
+    {
+        let mut guard = manager.inner.write();
+        guard.sink_schedules.insert(sink_id, track);
+        guard.manual_compaction_waiters.insert(sink_id, tx);
+    }
+    // The missing catalog sink causes the asynchronous application to fail.
+    manager.handle_report_task(pk_index_report(IcebergReportTaskStatus::Success));
+    let error = tokio::time::timeout(Duration::from_secs(10), rx)
+        .await
+        .unwrap()
+        .unwrap()
+        .unwrap_err();
+    assert!(
+        error
+            .to_string()
+            .contains("failed to apply pk-index compaction")
+    );
+    assert!(!manager.inner.read().sink_schedules.contains_key(&sink_id));
+}
+
+#[tokio::test]
+async fn test_pk_index_stale_apply_completion_preserves_replacement() {
+    let manager = build_test_manager().await;
+    let sink_id = SinkId::new(42);
+    manager
+        .inner
+        .write()
+        .sink_schedules
+        .insert(sink_id, pk_index_track(Instant::now(), false));
+    let apply = manager
+        .prepare_report_task(pk_index_report(IcebergReportTaskStatus::Success))
+        .unwrap();
+    manager.clear_iceberg_maintenance_by_sink_id(sink_id);
+    let mut replacement = new_track(Instant::now(), 120, 10, 2);
+    start_in_flight(&mut replacement, 10, Instant::now());
+    manager
+        .inner
+        .write()
+        .sink_schedules
+        .insert(sink_id, replacement);
+    manager.finish_report_task(apply.report, true);
+    assert!(manager.inner.read().sink_schedules[&sink_id].is_in_flight_task(10.into()));
+}
+
+#[tokio::test]
+async fn test_pk_index_all_deleted_input_still_requires_apply() {
+    use risingwave_connector::sink::iceberg::IcebergCommitResult;
+    use risingwave_pb::connector_service::SinkMetadata;
+
+    let manager = build_test_manager().await;
+    manager
+        .inner
+        .write()
+        .sink_schedules
+        .insert(SinkId::new(42), pk_index_track(Instant::now(), true));
+    let mut report = pk_index_report(IcebergReportTaskStatus::Drained);
+    report.pk_index_result.as_mut().unwrap().output_files =
+        Some(SinkMetadata::try_from(&IcebergCommitResult::default()).unwrap());
+    let apply = manager.prepare_report_task(report).unwrap();
+    assert!(apply.overwrite.output_result.data_files.is_empty());
+    assert!(!apply.overwrite.input_file_paths.is_empty());
+    assert!(matches!(
+        manager.inner.read().sink_schedules[&SinkId::new(42)].state,
+        CompactionTrackState::Applying { .. }
+    ));
+}
+
+#[tokio::test]
+async fn test_stale_dispatch_handle_cannot_send_or_revert_replacement() {
+    let manager = build_test_manager().await;
+    let sink_id = SinkId::new(42);
+    let now = Instant::now();
+    let mut track = new_track(now, 120, 10, 1);
+    track.record_force_compaction(now, Some(TaskType::Full));
+    manager.inner.write().sink_schedules.insert(sink_id, track);
+    let mut stale_handle = manager.get_top_n_iceberg_commit_sink_ids(1).pop().unwrap();
+    manager.clear_iceberg_maintenance_by_sink_id(sink_id);
+    let mut replacement = new_track(now, 120, 10, 1);
+    replacement.start_attempt();
+    manager
+        .inner
+        .write()
+        .sink_schedules
+        .insert(sink_id, replacement);
+    let mut events = manager.iceberg_compactor_manager.add_compactor(1.into());
+    let compactor = manager
+        .iceberg_compactor_manager
+        .get_compactor(1.into())
+        .unwrap();
+    stale_handle
+        .try_dispatch_task(
+            &compactor,
+            IcebergCompactionTask {
+                task_id: 9.into(),
+                sink_id: sink_id.as_raw_id(),
+                ..Default::default()
+            },
+        )
+        .unwrap();
+    drop(stale_handle);
+    assert!(matches!(
+        events.try_recv(),
+        Err(tokio::sync::mpsc::error::TryRecvError::Empty)
+    ));
+    assert!(matches!(
+        manager.inner.read().sink_schedules[&sink_id].state,
+        CompactionTrackState::PendingDispatch { .. }
+    ));
+}
+
+#[tokio::test]
+async fn test_disabling_compaction_retains_apply_until_completion() {
+    let manager = build_test_manager().await;
+    let sink_id = SinkId::new(42);
+    manager
+        .inner
+        .write()
+        .sink_schedules
+        .insert(sink_id, pk_index_track(Instant::now(), false));
+    let apply = manager
+        .prepare_report_task(pk_index_report(IcebergReportTaskStatus::Success))
+        .unwrap();
+    let error = manager.start_manual_compaction(sink_id).await.unwrap_err();
+    assert!(error.to_string().contains("already applying"));
+    let mut config = new_test_iceberg_config(120, 10, CompactionType::Auto);
+    config.enable_compaction = false;
+    {
+        let mut guard = manager.inner.write();
+        assert!(!manager.apply_sink_update(
+            &mut guard,
+            PreparedSinkUpdate {
+                sink_id,
+                kind: commit_update(11, 2000),
+                now: Instant::now(),
+                allow_track_initialization: false,
+                loaded_config: Some(config),
+            },
+        ));
+        let track = &guard.sink_schedules[&sink_id];
+        assert!(track.removes_track_after_finish());
+        assert!(track.active_attempt_gc_watermark_snapshot().is_some());
+    }
+    manager.finish_report_task(apply.report, true);
+    assert!(!manager.inner.read().sink_schedules.contains_key(&sink_id));
 }
