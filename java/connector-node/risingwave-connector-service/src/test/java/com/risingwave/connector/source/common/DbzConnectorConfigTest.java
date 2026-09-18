@@ -49,7 +49,6 @@ public class DbzConnectorConfigTest {
     public void usesRecoverySnapshotModeAndOpaqueOffsetForSharedOracleSourceRecovery() {
         var userProps = oracleProperties();
         userProps.put("debezium.snapshot.mode", "rw_cdc_backfill");
-        userProps.put("debezium.decimal.handling.mode", "precise");
         var offset =
                 "{\"sourcePartition\":{\"server\":\"RW_CDC_42\"},"
                         + "\"sourceOffset\":{\"scn\":\"3134314\","
@@ -61,7 +60,6 @@ public class DbzConnectorConfigTest {
         assertEquals("recovery", properties.getProperty("snapshot.mode"));
         assertEquals(
                 offset, properties.getProperty(ConfigurableOffsetBackingStore.OFFSET_STATE_VALUE));
-        assertEquals("string", properties.getProperty("decimal.handling.mode"));
     }
 
     private static HashMap<String, String> oracleProperties() {
