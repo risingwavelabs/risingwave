@@ -96,7 +96,7 @@ pub async fn do_handle_explain(
             } => {
                 let format_encode = format_encode.map(|s| s.into_v2_with_warning());
 
-                let (plan, _source, table, _job_type, _) = handle_create_table_plan(
+                let (plan, _source, table, _job_type, _) = Box::pin(handle_create_table_plan(
                     handler_args,
                     explain_options,
                     format_encode,
@@ -115,7 +115,7 @@ pub async fn do_handle_explain(
                     include_column_options,
                     webhook_info,
                     risingwave_common::catalog::Engine::Hummock,
-                )
+                ))
                 .await?;
                 let context = plan.ctx();
                 (
