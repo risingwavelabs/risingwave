@@ -43,6 +43,11 @@ ERROR_SCENARIOS = {
         "access_grants",
         f"needs UPDATE permission on heartbeat table '{SOURCE_SCHEMA}.{HEARTBEAT_TABLE}'",
     ),
+    "incompatible_oracle_hb": (
+        None,
+        "table_and_seed_row",
+        "must contain NUMBER columns named 'ID' and 'HEARTBEAT'",
+    ),
 }
 
 
@@ -324,7 +329,6 @@ CREATE TABLE {name} (
     {common_options},
     schema.name = '{SOURCE_SCHEMA}',
     table.name = '{SOURCE_TABLE}',
-    debezium.heartbeat.interval.ms = '2147483647',
     heartbeat.table.name = '{heartbeat_table}',
     heartbeat.table.auto.initialize = 'true'
 ) FORMAT DEBEZIUM ENCODE JSON;
@@ -392,6 +396,7 @@ def run_psql(sql: str, table_name: str) -> subprocess.CompletedProcess[str]:
 
 def assert_create_table_error(state: str) -> None:
     owner, setup, expected_message = ERROR_SCENARIOS[state]
+    owner = owner or identifier("ORACLE_USER")
     heartbeat_table = f"{owner}.{HEARTBEAT_TABLE}"
     result = run_psql(create_table_sql(state, heartbeat_table), state)
     if result.returncode == 0:
