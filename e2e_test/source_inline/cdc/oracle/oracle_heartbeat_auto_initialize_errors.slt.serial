@@ -1,0 +1,75 @@
+control substitution on
+
+# TODO: Replace the direct Oracle CDC table validation below with
+# `CREATE SOURCE ... FORMAT PLAIN ENCODE JSON` once Oracle shared-source implementation is
+# complete. Cover `CREATE TABLE ... FROM SOURCE` separately in shared-source ingestion tests.
+
+statement ok
+DROP TABLE IF EXISTS missing_oracle_schema;
+
+statement ok
+DROP TABLE IF EXISTS missing_app_oracle_hb;
+
+statement ok
+DROP TABLE IF EXISTS empty_app_oracle_hb;
+
+statement ok
+DROP TABLE IF EXISTS seeded_app_oracle_hb;
+
+statement ok
+DROP TABLE IF EXISTS incompatible_oracle_hb;
+
+# Initialization must not create the Oracle user that owns a missing schema.
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py prepare missing_oracle_schema
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py assert_create_table_error missing_oracle_schema
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py assert_schema_missing
+
+# APP exists, but CREATE TABLE only permits the connector to create tables in its own schema.
+# Without CREATE ANY TABLE, it cannot create the missing APP.RW_HEARTBEAT table.
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py prepare missing_app_oracle_hb
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py assert_create_table_error missing_app_oracle_hb
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py assert_table_missing APP
+
+# A DBA-created empty table remains empty when the connector lacks INSERT permission.
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py prepare empty_app_oracle_hb
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py assert_create_table_error empty_app_oracle_hb
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py assert_empty APP
+
+# Once the table and seed row exist, runtime heartbeats require only UPDATE permission.
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py prepare seeded_app_oracle_hb
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py assert_create_table_error seeded_app_oracle_hb
+
+# The fixture uses 7 as a noncanonical sentinel; failed validation must preserve it.
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py assert_seed APP --expected_value 7
+
+# Initialization must not repair or overwrite an incompatible existing table.
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py prepare incompatible_oracle_hb
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py assert_create_table_error incompatible_oracle_hb
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py assert_incompatible_unchanged
+
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py cleanup

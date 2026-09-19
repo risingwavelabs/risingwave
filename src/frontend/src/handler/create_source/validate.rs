@@ -148,6 +148,41 @@ pub fn validate_heartbeat_interval(props: &BTreeMap<String, String>) -> Result<(
     Ok(())
 }
 
+fn validate_heartbeat_table_auto_initialize(
+    connector: &str,
+    props: &BTreeMap<String, String>,
+) -> Result<()> {
+    const AUTO_INITIALIZE_KEY: &str = "heartbeat.table.auto.initialize";
+    let Some(value) = props.get(AUTO_INITIALIZE_KEY) else {
+        return Ok(());
+    };
+    let enabled = value.parse::<bool>().map_err(|_| {
+        ErrorCode::InvalidParameterValue(format!(
+            "'{AUTO_INITIALIZE_KEY}' must be 'true' or 'false'"
+        ))
+    })?;
+    if !enabled {
+        return Ok(());
+    }
+    if connector != ORACLE_CDC_CONNECTOR {
+        return Err(ErrorCode::InvalidParameterValue(format!(
+            "'{AUTO_INITIALIZE_KEY}=true' is not supported for connector '{connector}'"
+        ))
+        .into());
+    }
+
+    if !props
+        .get("heartbeat.table.name")
+        .is_some_and(|value| !value.trim().is_empty())
+    {
+        return Err(ErrorCode::InvalidParameterValue(format!(
+            "'{AUTO_INITIALIZE_KEY}' requires 'heartbeat.table.name'"
+        ))
+        .into());
+    }
+    Ok(())
+}
+
 pub fn validate_compatibility(
     format_encode: &FormatEncodeOptions,
     props: &mut BTreeMap<String, String>,
@@ -298,5 +333,6 @@ pub fn validate_compatibility(
         .into());
     }
 
-    validate_heartbeat_interval(props)
+    validate_heartbeat_interval(props)?;
+    validate_heartbeat_table_auto_initialize(&connector, props)
 }
