@@ -182,16 +182,6 @@ fn validate_heartbeat_table_auto_initialize(
         .into());
     }
 
-    let heartbeat_enabled = props
-        .get("debezium.heartbeat.interval.ms")
-        .and_then(|value| value.parse::<i32>().ok())
-        .is_some_and(|interval| interval > 0);
-    if !heartbeat_enabled {
-        return Err(ErrorCode::InvalidParameterValue(format!(
-            "'{AUTO_INITIALIZE_KEY}' requires a positive 'debezium.heartbeat.interval.ms'"
-        ))
-        .into());
-    }
     if !props
         .get("heartbeat.table.name")
         .is_some_and(|value| !value.trim().is_empty())

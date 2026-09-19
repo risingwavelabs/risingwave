@@ -50,7 +50,7 @@ python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py assert_create_tab
 system ok
 python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py assert_empty APP
 
-# A pre-seeded table requires only steady-state UPDATE permission.
+# Once the table and seed row exist, runtime heartbeats require only UPDATE permission.
 system ok
 python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py prepare seeded_app_oracle_hb
 
@@ -65,19 +65,8 @@ python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py assert_seed APP -
 system ok
 python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py prepare incompatible_oracle_hb
 
-statement error must contain NUMBER columns named 'ID' and 'HEARTBEAT'.*without overwriting its data
-CREATE TABLE incompatible_oracle_hb (
-    id DECIMAL,
-    name VARCHAR,
-    PRIMARY KEY (id)
-) WITH (
-    ${RISEDEV_ORACLE_WITH_OPTIONS_COMMON},
-    schema.name = 'APP',
-    table.name = 'CUSTOMERS',
-    debezium.heartbeat.interval.ms = '2147483647',
-    heartbeat.table.name = 'C##RW_VALIDATOR.RW_HEARTBEAT',
-    heartbeat.table.auto.initialize = 'true'
-) FORMAT DEBEZIUM ENCODE JSON;
+system ok
+python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py assert_create_table_error incompatible_oracle_hb
 
 system ok
 python3 e2e_test/source_inline/cdc/oracle/oracle_test_utils.py assert_incompatible_unchanged

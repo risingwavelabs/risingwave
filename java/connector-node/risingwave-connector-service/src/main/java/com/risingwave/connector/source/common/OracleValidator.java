@@ -251,8 +251,8 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
                 tryInitializeHeartbeatTable(heartbeatTable, sessionUser);
             } else {
                 validateHeartbeatTableExists(heartbeatTable, sessionUser);
-                validateHeartbeatColumns(heartbeatTable);
-                validateHeartbeatPrimaryKey(heartbeatTable);
+                validateHeartbeatColumns(heartbeatTable, sessionUser);
+                validateHeartbeatPrimaryKey(heartbeatTable, sessionUser);
                 validateHeartbeatTableHasRow(heartbeatTable, sessionUser);
             }
             validateHeartbeatUpdatePrivilege(heartbeatTable, sessionUser);
@@ -320,7 +320,7 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
         }
         var objectTypes = heartbeatObjectTypes(heartbeatTable);
         if (!objectTypes.isEmpty()) {
-            throw incompatibleHeartbeatObject(heartbeatTable, objectTypes);
+            throw incompatibleHeartbeatObject(heartbeatTable, objectTypes, sessionUser);
         }
         throw ValidatorUtils.invalidArgument(
                 String.format(
@@ -353,7 +353,7 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
             if (!heartbeatTableExists(heartbeatTable)) {
                 var objectTypes = heartbeatObjectTypes(heartbeatTable);
                 if (!objectTypes.isEmpty()) {
-                    throw incompatibleHeartbeatObject(heartbeatTable, objectTypes);
+                    throw incompatibleHeartbeatObject(heartbeatTable, objectTypes, sessionUser);
                 }
                 throw ValidatorUtils.failedPrecondition(
                         String.format(
@@ -364,8 +364,8 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
         }
 
         // Never seed a table until its existing structure has been validated.
-        validateHeartbeatColumns(heartbeatTable);
-        validateHeartbeatPrimaryKey(heartbeatTable);
+        validateHeartbeatColumns(heartbeatTable, sessionUser);
+        validateHeartbeatPrimaryKey(heartbeatTable, sessionUser);
         if (!heartbeatRowExists(heartbeatTable)) {
             try {
                 executeInitializationStatement(heartbeatTable.insertSeedRowSql());
@@ -426,23 +426,29 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
     }
 
     private RuntimeException incompatibleHeartbeatObject(
-            OracleHeartbeatTable heartbeatTable, Set<String> objectTypes) {
+            OracleHeartbeatTable heartbeatTable, Set<String> objectTypes, String sessionUser) {
         return ValidatorUtils.invalidArgument(
                 String.format(
                         "Oracle object '%s' already exists in PDB '%s' with type(s) %s, but a "
-                                + "heartbeat table is required. Choose another "
-                                + "'heartbeat.table.name' or have a DBA resolve the existing object",
-                        heartbeatTable.qualifiedName(), pdbName, objectTypes));
+                                + "heartbeat table is required%s",
+                        heartbeatTable.qualifiedName(),
+                        pdbName,
+                        objectTypes,
+                        incompatibleHeartbeatTableHint(heartbeatTable, sessionUser)));
     }
 
-    private String incompatibleHeartbeatTableHint(OracleHeartbeatTable heartbeatTable) {
+    private String incompatibleHeartbeatTableHint(
+            OracleHeartbeatTable heartbeatTable, String sessionUser) {
         return String.format(
-                ". Choose another 'heartbeat.table.name' or have a DBA make existing table '%s' "
-                        + "compatible without overwriting its data",
-                heartbeatTable.qualifiedName());
+                ". RisingWave will not modify the existing object. Choose another "
+                        + "'heartbeat.table.name' or have a DBA resolve it. After resolving it, "
+                        + "have a DBA run:\n%s",
+                heartbeatTable.manualSetupSql(
+                        pdbName, sessionUser, OracleHeartbeatTable.ManualSetup.TABLE_AND_SEED_ROW));
     }
 
-    private void validateHeartbeatColumns(OracleHeartbeatTable heartbeatTable) throws SQLException {
+    private void validateHeartbeatColumns(OracleHeartbeatTable heartbeatTable, String sessionUser)
+            throws SQLException {
         try (var stmt =
                 jdbcConnection.prepareStatement(
                         "SELECT COLUMN_NAME, DATA_TYPE FROM ALL_TAB_COLUMNS "
@@ -469,14 +475,14 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
                                     heartbeatTable.qualifiedName(),
                                     OracleHeartbeatTable.ID_COLUMN,
                                     OracleHeartbeatTable.HEARTBEAT_COLUMN,
-                                    incompatibleHeartbeatTableHint(heartbeatTable)));
+                                    incompatibleHeartbeatTableHint(heartbeatTable, sessionUser)));
                 }
             }
         }
     }
 
-    private void validateHeartbeatPrimaryKey(OracleHeartbeatTable heartbeatTable)
-            throws SQLException {
+    private void validateHeartbeatPrimaryKey(
+            OracleHeartbeatTable heartbeatTable, String sessionUser) throws SQLException {
         try (var stmt =
                 jdbcConnection.prepareStatement(
                         "SELECT COUNT(*) FROM ("
@@ -498,7 +504,7 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
                                             + "single-column primary key%s",
                                     heartbeatTable.qualifiedName(),
                                     OracleHeartbeatTable.ID_COLUMN,
-                                    incompatibleHeartbeatTableHint(heartbeatTable)));
+                                    incompatibleHeartbeatTableHint(heartbeatTable, sessionUser)));
                 }
             }
         }
