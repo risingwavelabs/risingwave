@@ -1,0 +1,54 @@
+// Copyright 2026 RisingWave Labs
+//
+// Licensed under the Apache License, Version 2.0 (the "License");
+// you may not use this file except in compliance with the License.
+// You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
+use super::docker_service::{DockerService, DockerServiceConfig};
+use crate::RabbitMqConfig;
+
+impl DockerServiceConfig for RabbitMqConfig {
+    fn id(&self) -> String {
+        self.id.clone()
+    }
+
+    fn is_user_managed(&self) -> bool {
+        self.user_managed
+    }
+
+    fn image(&self) -> String {
+        self.image.clone()
+    }
+
+    fn envs(&self) -> Vec<(String, String)> {
+        vec![
+            ("RABBITMQ_DEFAULT_USER".into(), self.user.clone()),
+            ("RABBITMQ_DEFAULT_PASS".into(), self.password.clone()),
+            ("RABBITMQ_DEFAULT_VHOST".into(), self.vhost.clone()),
+            // Keep the database directory stable across container recreation.
+            ("RABBITMQ_NODENAME".into(), "rabbit@localhost".into()),
+        ]
+    }
+
+    fn ports(&self) -> Vec<(String, String)> {
+        vec![
+            (self.port.to_string(), "5672".into()),
+            (self.management_port.to_string(), "15672".into()),
+        ]
+    }
+
+    fn data_path(&self) -> Option<String> {
+        self.persist_data.then(|| "/var/lib/rabbitmq".into())
+    }
+}
+
+/// Docker-backed `RabbitMQ` service with AMQP and the management plugin.
+pub type RabbitMqService = DockerService<RabbitMqConfig>;
