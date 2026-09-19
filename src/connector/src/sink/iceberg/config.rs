@@ -107,6 +107,7 @@ pub const ENABLE_COMPACTION: &str = "enable_compaction";
 pub const COMPACTION_INTERVAL_SEC: &str = "compaction_interval_sec";
 pub const ENABLE_SNAPSHOT_EXPIRATION: &str = "enable_snapshot_expiration";
 pub const WRITE_MODE: &str = "write_mode";
+pub const COMMIT_CHECKPOINT_SIZE_THRESHOLD_MB: &str = "commit_checkpoint_size_threshold_mb";
 pub const FORMAT_VERSION: &str = "format_version";
 pub const SNAPSHOT_EXPIRATION_RETAIN_LAST: &str = "snapshot_expiration_retain_last";
 pub const SNAPSHOT_EXPIRATION_MAX_AGE_MILLIS: &str = "snapshot_expiration_max_age_millis";
@@ -330,6 +331,24 @@ pub struct IcebergConfig {
     #[serde_as(as = "DisplayFromStr")]
     #[with_option(allow_alter_on_fly, iceberg_engine)]
     pub commit_checkpoint_interval: u64,
+
+    /// Commit on the next checkpoint barrier after total buffered write size across
+    /// all writers exceeds this threshold in `MiB`. The coordinator sums per-writer
+    /// byte reports and broadcasts the same commit decision to all writers, ensuring
+    /// vnode-aligned commits at the same epoch.
+    ///
+    /// Size-based commits are opt-in: leaving this unset (or setting it to `0`)
+    /// disables them, and commits are driven solely by `commit_checkpoint_interval`.
+    /// The threshold applies to the *sum* across all parallel writers, not any
+    /// single writer, so each writer's own output file will typically be around
+    /// `threshold / sink_parallelism` once the aggregate crosses the threshold.
+    /// Size accordingly to land in Iceberg's recommended on-disk file size range
+    /// (128-512 `MiB`), accounting for the ~3-10x in-memory-to-columnar-compressed
+    /// ratio and the sink's parallelism.
+    #[serde(default)]
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[with_option(allow_alter_on_fly, iceberg_engine)]
+    pub commit_checkpoint_size_threshold_mb: Option<u64>,
 
     #[serde(default, deserialize_with = "deserialize_bool_from_string")]
     pub create_table_if_not_exists: bool,

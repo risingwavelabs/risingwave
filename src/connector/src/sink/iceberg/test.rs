@@ -376,6 +376,7 @@ fn test_parse_iceberg_config() {
                 .map(|(k, v)| (k.to_owned(), v.to_owned()))
                 .collect(),
             commit_checkpoint_interval: ICEBERG_DEFAULT_COMMIT_CHECKPOINT_INTERVAL,
+            commit_checkpoint_size_threshold_mb: None,
             create_table_if_not_exists: false,
             is_exactly_once: Some(true),
             commit_retry_num: 8,
