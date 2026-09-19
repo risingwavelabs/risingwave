@@ -1,0 +1,52 @@
+- name: SQL UDF with FROM called twice
+  sql: |
+    create function g_from(j jsonb) returns varchar
+    language sql as $$ select y ->> 'k1' from (select j as y) t $$;
+    create table payloads (id int primary key, payload jsonb);
+    select id, g_from(payload) as a, g_from(payload) as b from payloads;
+  expected_outputs:
+  - logical_plan
+  - optimized_logical_plan_for_stream
+  - stream_plan
+- name: scalar SQL UDF called twice
+  sql: |
+    create function g_plain(j jsonb) returns varchar
+    language sql as $$ select j ->> 'k1' $$;
+    create table payloads (id int primary key, payload jsonb);
+    select id, g_plain(payload) as a, g_plain(payload) as b from payloads;
+  expected_outputs:
+  - stream_plan
+- name: two different SQL UDFs with FROM
+  sql: |
+    create function g_from(j jsonb) returns varchar
+    language sql as $$ select y ->> 'k1' from (select j as y) t $$;
+    create function h_from(j jsonb) returns varchar
+    language sql as $$ select y ->> 'k2' from (select j as y) t $$;
+    create table payloads (id int primary key, payload jsonb);
+    select id, g_from(payload) as a, h_from(payload) as b from payloads;
+  expected_outputs:
+  - stream_plan
+- name: SQL UDF with FROM called once
+  sql: |
+    create function g_from(j jsonb) returns varchar
+    language sql as $$ select y ->> 'k1' from (select j as y) t $$;
+    create table payloads (id int primary key, payload jsonb);
+    select id, g_from(payload) as a from payloads;
+  expected_outputs:
+  - stream_plan
+- name: SQL UDF whose FROM subquery can remove its row
+  sql: |
+    create function g_filtered(j jsonb) returns varchar
+    language sql as $$ select y ->> 'k1' from (select j as y where j is not null) t $$;
+    create table payloads (id int primary key, payload jsonb);
+    select id, g_filtered(payload) as a, g_filtered(payload) as b from payloads;
+  expected_outputs:
+  - stream_error
+- name: SQL UDF whose FROM subquery contains a shared impure expression
+  sql: |
+    create function g_impure(j jsonb) returns float8
+    language sql as $$ select v + v from (select random() as v) t $$;
+    create table payloads (id int primary key, payload jsonb);
+    select id, g_impure(payload) as a, g_impure(payload) as b from payloads;
+  expected_outputs:
+  - optimized_logical_plan_for_batch
