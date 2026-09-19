@@ -173,13 +173,6 @@ public class SourceValidateHandler {
 
         switch (sourceType) {
             case ORACLE:
-                if (!DbzConnectorConfig.isHeartbeatEnabled(props)) {
-                    throw ValidatorUtils.invalidArgument(
-                            String.format(
-                                    "'%s' requires a positive '%s'",
-                                    DbzConnectorConfig.HEARTBEAT_TABLE_AUTO_INITIALIZE_KEY,
-                                    DbzConnectorConfig.HEARTBEAT_INTERVAL_KEY));
-                }
                 break;
             default:
                 throw ValidatorUtils.invalidArgument(
