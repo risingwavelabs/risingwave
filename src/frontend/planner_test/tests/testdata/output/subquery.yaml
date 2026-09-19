@@ -442,13 +442,10 @@
                 └─LogicalProject { exprs: [1:Int32] }
                   └─LogicalValues { rows: [[]], schema: Schema { fields: [] } }
   optimized_logical_plan_for_batch: |-
-    LogicalTopN { order: [$expr2 ASC], limit: 5, offset: 0 }
-    └─LogicalProject { exprs: [t.a, (t.a + 1:Int32) as $expr1, (t.a + 1:Int32) as $expr2] }
-      └─LogicalJoin { type: LeftOuter, on: true, output: all }
-        ├─LogicalScan { table: t, columns: [t.a] }
-        └─LogicalJoin { type: FullOuter, on: true, output: all }
-          ├─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
-          └─LogicalValues { rows: [[1:Int32]], schema: Schema { fields: [1:Int32:Int32] } }
+    LogicalTopN { order: [$expr1 ASC], limit: 5, offset: 0 }
+    └─LogicalProject { exprs: [t.a, $expr1, $expr1] }
+      └─LogicalProject { exprs: [t.a, (t.a + 1:Int32) as $expr1] }
+        └─LogicalScan { table: t, columns: [t.a] }
 - name: test subquery on sources
   sql: |
     create source a (a1 int, a2 int)  with ( connector ='datagen' );
