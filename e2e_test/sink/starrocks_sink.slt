@@ -138,7 +138,24 @@ statement ok
 FLUSH;
 
 system ok retry 30 backoff 1s
-starrocks -N -B -e "SELECT * FROM ${STARROCKS_DATABASE}.demo_bhv_table WHERE v1 = 1" | awk -F '\t' '{ json = $10; gsub(/[[:space:]]/, "", json); if ($1 == 1 && $2 == 1 && $3 == 1 && $4 == 1.1 && $5 == 1.2 && $6 == "test" && $7 == "2013-01-01" && $8 == "2013-01-01 01:01:01" && $9 == 0 && json == "{\"v101\":100}" && $11 == 1.12346) found = 1 } END { exit !found }'
+starrocks -N -B -e "
+SELECT COUNT(*)
+FROM ${STARROCKS_DATABASE}.demo_bhv_table
+WHERE v1 = 1
+  AND v2 = 1
+  AND v3 = 1
+  AND ABS(v4 - 1.1) < 0.0001
+  AND ABS(v5 - 1.2) < 0.0001
+  AND v6 = 'test'
+  AND v7 = '2013-01-01'
+  AND v8 = '2013-01-01 01:01:01'
+  AND v9 = false
+  AND get_json_int(CAST(v10 AS VARCHAR), '$.v101') = 100
+  AND v11 = 1.12346;
+"
+----
+1
+
 
 statement ok
 DROP SINK s6;
@@ -170,7 +187,10 @@ statement ok
 FLUSH;
 
 system ok retry 30 backoff 1s
-test "$(starrocks -N -B -e "SELECT count(*) FROM ${STARROCKS_DATABASE}.demo_agg_table WHERE id = 1 AND value = 'v'")" = "1"
+starrocks -N -B -e "SELECT COUNT(*) FROM ${STARROCKS_DATABASE}.demo_agg_table WHERE id = 1 AND value = 'v';"
+----
+1
+
 
 statement ok
 DROP SINK sink_agg_table;
@@ -198,7 +218,10 @@ statement ok
 FLUSH;
 
 system ok retry 30 backoff 1s
-test "$(starrocks -N -B -e "SELECT count(*) FROM ${STARROCKS_DATABASE}.demo_reserved_words WHERE id = 1 AND \`order\` = 'asc' AND \`from\` = 'x'")" = "1"
+starrocks -N -B -e "SELECT COUNT(*) FROM ${STARROCKS_DATABASE}.demo_reserved_words WHERE id = 1 AND \`order\` = 'asc' AND \`from\` = 'x';"
+----
+1
+
 
 statement ok
 DROP SINK sink_reserved_words;
@@ -241,7 +264,18 @@ statement ok
 FLUSH;
 
 system ok retry 30 backoff 1s
-starrocks -N -B -e "SELECT * FROM ${STARROCKS_DATABASE}.demo_timestamptz_table WHERE id = 1" | awk -F '\t' '$1 == 1 && $2 ~ /^2018-01-27 02:30:09/ && $3 == "2018-01-27 02:30:09.000000" && $4 ~ /^2018-01-27 02:30:09.000000 *$/ && $5 == "2018-01-27 02:30:09.000000" { found = 1 } END { exit !found }'
+starrocks -N -B -e "
+SELECT COUNT(*)
+FROM ${STARROCKS_DATABASE}.demo_timestamptz_table
+WHERE id = 1
+  AND ts_datetime = '2018-01-27 02:30:09'
+  AND ts_varchar = '2018-01-27 02:30:09.000000'
+  AND TRIM(ts_char) = '2018-01-27 02:30:09.000000'
+  AND ts_string = '2018-01-27 02:30:09.000000';
+"
+----
+1
+
 
 statement ok
 DROP SINK sink_timestamptz_table;
