@@ -13,8 +13,8 @@
 // limitations under the License.
 
 use anyhow::anyhow;
-use risingwave_common::row;
-use risingwave_common::types::{JsonbVal, ScalarImpl};
+use risingwave_common::row::{self, OwnedRow, Row, RowDeserializer};
+use risingwave_common::types::{DataType, JsonbVal, ScalarImpl};
 use risingwave_common::util::epoch::EpochPair;
 use risingwave_connector::source::cdc::external::CdcOffset;
 use risingwave_storage::StateStore;
@@ -24,29 +24,36 @@ use crate::executor::StreamExecutorResult;
 
 #[derive(Debug, Default)]
 pub struct CdcStateRecord {
+    pub is_initialized: bool,
     pub is_finished: bool,
-    #[expect(dead_code)]
     pub row_count: i64,
+    pub snapshot_pk: Option<OwnedRow>,
     pub cdc_offset_low: Option<CdcOffset>,
     pub cdc_offset_high: Option<CdcOffset>,
 }
 
-/// state schema: | `split_id` | `backfill_finished` | `row_count` | `cdc_offset_low` | `cdc_offset_high` |
+/// State schema: | `split_id` | `backfill_finished` | `row_count` | `cdc_offset_low` | `cdc_offset_high` |
+///
+/// While a split is unfinished, `cdc_offset_high` stores the serialized full primary-key snapshot
+/// cursor. Once the split finishes, it stores the actual CDC high watermark. The two states are
+/// distinguished by `backfill_finished`, preserving the existing state-table schema.
 /// legacy state schema: | `split_id` | `backfill_finished` | `row_count` |
 pub struct ParallelizedCdcBackfillState<S: StateStore> {
     state_table: StateTable<S>,
     state_len: usize,
     is_legacy_state: bool,
+    pk_data_types: Vec<DataType>,
 }
 
 impl<S: StateStore> ParallelizedCdcBackfillState<S> {
-    pub fn new(state_table: StateTable<S>) -> Self {
+    pub fn new(state_table: StateTable<S>, pk_data_types: Vec<DataType>) -> Self {
         let is_legacy_state = state_table.get_data_types().len() == 3;
         let state_len = if is_legacy_state { 3 } else { 5 };
         Self {
             state_table,
             state_len,
             is_legacy_state,
+            pk_data_types,
         }
     }
 
@@ -73,29 +80,51 @@ impl<S: StateStore> ParallelizedCdcBackfillState<S> {
                     Some(ScalarImpl::Int64(val)) => val,
                     _ => return Err(anyhow!("invalid backfill state: row_count").into()),
                 };
-                let (cdc_offset_low, cdc_offset_high) = if !self.is_legacy_state {
+                let (snapshot_pk, cdc_offset_low, cdc_offset_high) = if !self.is_legacy_state {
                     let cdc_offset_low = match state[3] {
                         Some(ScalarImpl::Jsonb(ref jsonb)) => {
-                            serde_json::from_value(jsonb.clone().take()).unwrap()
+                            serde_json::from_value(jsonb.clone().take()).map_err(|error| {
+                                anyhow!("invalid backfill state: cdc_offset_low: {error}")
+                            })?
                         }
                         None => None,
                         _ => return Err(anyhow!("invalid backfill state: cdc_offset_low").into()),
                     };
-                    let cdc_offset_high = match state[4] {
-                        Some(ScalarImpl::Jsonb(ref jsonb)) => {
-                            serde_json::from_value(jsonb.clone().take()).unwrap()
+                    let (snapshot_pk, cdc_offset_high) = match (&state[4], is_finished) {
+                        (Some(ScalarImpl::Jsonb(jsonb)), false) => {
+                            let serialized_pk: Vec<u8> =
+                                serde_json::from_value(jsonb.clone().take()).map_err(|error| {
+                                    anyhow!("invalid backfill state: snapshot_pk: {error}")
+                                })?;
+                            let snapshot_pk = RowDeserializer::new(self.pk_data_types.clone())
+                                .deserialize(serialized_pk.as_slice())
+                                .map_err(|error| {
+                                    anyhow!("invalid backfill state: snapshot_pk: {error}")
+                                })?;
+                            (Some(snapshot_pk), None)
                         }
-                        None => None,
-                        _ => return Err(anyhow!("invalid backfill state: cdc_offset_high").into()),
+                        (Some(ScalarImpl::Jsonb(jsonb)), true) => {
+                            let cdc_offset_high = serde_json::from_value(jsonb.clone().take())
+                                .map_err(|error| {
+                                    anyhow!("invalid backfill state: cdc_offset_high: {error}")
+                                })?;
+                            (None, cdc_offset_high)
+                        }
+                        (None, _) => (None, None),
+                        _ => {
+                            return Err(anyhow!("invalid backfill state: cdc_offset_high").into());
+                        }
                     };
-                    (cdc_offset_low, cdc_offset_high)
+                    (snapshot_pk, cdc_offset_low, cdc_offset_high)
                 } else {
-                    (None, None)
+                    (None, None, None)
                 };
 
                 Ok(CdcStateRecord {
+                    is_initialized: true,
                     is_finished,
                     row_count,
+                    snapshot_pk,
                     cdc_offset_low,
                     cdc_offset_high,
                 })
@@ -110,6 +139,7 @@ impl<S: StateStore> ParallelizedCdcBackfillState<S> {
         split_id: i64,
         is_finished: bool,
         row_count: u64,
+        snapshot_pk: Option<OwnedRow>,
         cdc_offset_low: Option<CdcOffset>,
         cdc_offset_high: Option<CdcOffset>,
     ) -> StreamExecutorResult<()> {
@@ -124,10 +154,17 @@ impl<S: StateStore> ParallelizedCdcBackfillState<S> {
                 let json = serde_json::to_value(cdc_offset).unwrap();
                 ScalarImpl::Jsonb(JsonbVal::from(json))
             });
-            state[4] = cdc_offset_high.map(|cdc_offset| {
-                let json = serde_json::to_value(cdc_offset).unwrap();
-                ScalarImpl::Jsonb(JsonbVal::from(json))
-            });
+            state[4] = if is_finished {
+                cdc_offset_high.map(|cdc_offset| {
+                    let json = serde_json::to_value(cdc_offset).unwrap();
+                    ScalarImpl::Jsonb(JsonbVal::from(json))
+                })
+            } else {
+                snapshot_pk.map(|snapshot_pk| {
+                    let json = serde_json::to_value(snapshot_pk.value_serialize()).unwrap();
+                    ScalarImpl::Jsonb(JsonbVal::from(json))
+                })
+            };
         }
 
         match self.state_table.get_row(row::once(split_id)).await? {

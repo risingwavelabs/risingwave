@@ -636,16 +636,22 @@ impl PostgresExternalTableReader {
         let is_first_split = left[0].is_none();
         let is_last_split = right[0].is_none();
         let split_column_names = split_columns.iter().map(|c| c.name.clone()).collect_vec();
+        let primary_key_names = self
+            .pk_indices
+            .iter()
+            .map(|index| self.rw_schema.fields[*index].name.clone())
+            .collect_vec();
         let client = self.client.lock().await;
         client.execute("set time zone '+00:00'", &[]).await?;
         // prepare the scan statement, since we may need to convert the RW data type to postgres data type
         // e.g. varchar to uuid
         let prepared_scan_stmt = {
             let scan_sql = format!(
-                "SELECT {} FROM {} WHERE {}",
+                "SELECT {} FROM {} WHERE {} ORDER BY {}",
                 self.field_names,
                 Self::get_normalized_table_name(&table_name),
                 Self::split_filter_expression(&split_column_names, is_first_split, is_last_split),
+                Self::get_order_key(&primary_key_names),
             );
             client.prepare(&scan_sql).await?
         };

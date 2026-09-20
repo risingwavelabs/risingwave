@@ -14,14 +14,16 @@
 
 use std::future::Future;
 
-use futures::{Stream, pin_mut};
+use futures::{Stream, TryStreamExt, pin_mut};
 use futures_async_stream::try_stream;
 use itertools::Itertools;
 use risingwave_common::array::StreamChunk;
 use risingwave_common::catalog::{ColumnDesc, Field};
-use risingwave_common::row::OwnedRow;
+use risingwave_common::row::{OwnedRow, Row};
 use risingwave_common::types::{Scalar, ScalarImpl, Timestamptz};
 use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
+use risingwave_common::util::iter_util::ZipEqFast;
+use risingwave_common::util::sort_util::{OrderType, cmp_datum};
 use risingwave_common_rate_limit::RateLimiter;
 use risingwave_connector::source::cdc::external::{
     CdcOffset, ExternalTableReader, ExternalTableReaderImpl, SchemaTableName,
@@ -87,6 +89,8 @@ pub struct SplitSnapshotReadArgs {
     pub left_bound_inclusive: OwnedRow,
     pub right_bound_exclusive: OwnedRow,
     pub split_columns: Vec<Field>,
+    pub start_pk: Option<OwnedRow>,
+    pub pk_indices: Vec<usize>,
     pub rate_limit_rps: Option<u32>,
     pub additional_columns: Vec<ColumnDesc>,
     pub schema_table_name: SchemaTableName,
@@ -94,10 +98,13 @@ pub struct SplitSnapshotReadArgs {
 }
 
 impl SplitSnapshotReadArgs {
+    #[expect(clippy::too_many_arguments)]
     pub fn new(
         left_bound_inclusive: OwnedRow,
         right_bound_exclusive: OwnedRow,
         split_columns: Vec<Field>,
+        start_pk: Option<OwnedRow>,
+        pk_indices: Vec<usize>,
         rate_limit_rps: Option<u32>,
         additional_columns: Vec<ColumnDesc>,
         schema_table_name: SchemaTableName,
@@ -107,6 +114,8 @@ impl SplitSnapshotReadArgs {
             left_bound_inclusive,
             right_bound_exclusive,
             split_columns,
+            start_pk,
+            pk_indices,
             rate_limit_rps,
             additional_columns,
             schema_table_name,
@@ -306,6 +315,26 @@ impl UpstreamTableRead for UpstreamTableReader<ExternalStorageTable> {
             read_args.right_bound_exclusive.clone(),
             read_args.split_columns.clone(),
         );
+        let start_pk = read_args.start_pk.clone();
+        let pk_indices = read_args.pk_indices.clone();
+        let row_stream = row_stream.try_filter(move |row| {
+            futures::future::ready(start_pk.as_ref().is_none_or(|start_pk| {
+                assert_eq!(start_pk.len(), pk_indices.len());
+                pk_indices
+                    .iter()
+                    .zip_eq_fast(start_pk.iter())
+                    .map(|(pk_index, start_pk)| {
+                        cmp_datum(
+                            row.datum_at(*pk_index),
+                            start_pk,
+                            OrderType::ascending_nulls_first(),
+                        )
+                    })
+                    .find(|ordering| !ordering.is_eq())
+                    .unwrap_or(std::cmp::Ordering::Equal)
+                    .is_gt()
+            }))
+        });
 
         pin_mut!(row_stream);
         let mut builder = DataChunkBuilder::new(

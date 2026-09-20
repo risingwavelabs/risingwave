@@ -41,7 +41,9 @@ use crate::executor::backfill::cdc::upstream_table::external::ExternalStorageTab
 use crate::executor::backfill::cdc::upstream_table::snapshot::{
     SplitSnapshotReadArgs, UpstreamTableRead, UpstreamTableReader,
 };
-use crate::executor::backfill::utils::{get_cdc_chunk_last_offset, mapping_chunk, mapping_message};
+use crate::executor::backfill::utils::{
+    get_cdc_chunk_last_offset, get_new_pos, mapping_chunk, mapping_message,
+};
 use crate::executor::prelude::*;
 use crate::executor::source::get_infinite_backoff_strategy;
 use crate::task::cdc_progress::CdcProgressReporter;
@@ -106,6 +108,15 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
         assert!(!self.options.disable_backfill);
         // The indices to primary key columns
         let pk_indices = self.external_table.pk_indices().to_vec();
+        let output_pk_indices = pk_indices
+            .iter()
+            .map(|pk_index| {
+                self.output_indices
+                    .iter()
+                    .position(|output_index| output_index == pk_index)
+                    .expect("all primary key columns must be included in CDC backfill output")
+            })
+            .collect_vec();
         let table_id = self.external_table.table_id();
         let upstream_table_name = self.external_table.qualified_table_name();
         let schema_table_name = self.external_table.schema_table_name().clone();
@@ -123,6 +134,11 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
         );
         let snapshot_split_column_index =
             pk_indices[self.options.backfill_split_pk_column_index as usize];
+        let snapshot_split_output_index = self
+            .output_indices
+            .iter()
+            .position(|output_index| *output_index == snapshot_split_column_index)
+            .expect("the snapshot split column must be included in CDC backfill output");
         let cdc_table_snapshot_split_column =
             vec![self.external_table.schema().fields[snapshot_split_column_index].clone()];
 
@@ -151,7 +167,15 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
         .boxed();
         let mut next_reset_barrier = Some(first_barrier);
         let mut is_reset = false;
-        let mut state_impl = ParallelizedCdcBackfillState::new(self.state_table);
+        let pk_data_types = pk_indices
+            .iter()
+            .map(|index| {
+                self.external_table.schema().fields[*index]
+                    .data_type
+                    .clone()
+            })
+            .collect_vec();
+        let mut state_impl = ParallelizedCdcBackfillState::new(self.state_table, pk_data_types);
         // The buffered chunks have already been mapped.
         let mut upstream_chunk_buffer: Vec<StreamChunk> = vec![];
 
@@ -213,10 +237,12 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
             let mut actor_cdc_offset_low: Option<CdcOffset> = None;
             // Find next split that need backfill.
             let mut next_split_idx = actor_snapshot_splits.len();
+            let mut next_split_state = None;
             for (idx, split) in actor_snapshot_splits.iter().enumerate() {
                 let state = state_impl.restore_state(split.split_id).await?;
                 if !state.is_finished {
                     next_split_idx = idx;
+                    next_split_state = Some(state);
                     break;
                 }
                 extends_current_actor_bound(&mut current_actor_bounds, split);
@@ -239,11 +265,21 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                     }
                 }
             }
-            for split in actor_snapshot_splits.iter().skip(next_split_idx) {
+            for (idx, split) in actor_snapshot_splits
+                .iter()
+                .enumerate()
+                .skip(next_split_idx)
+            {
                 // Initialize state so that overall progress can be measured.
-                state_impl
-                    .mutate_state(split.split_id, false, 0, None, None)
-                    .await?;
+                if idx != next_split_idx
+                    || !next_split_state
+                        .as_ref()
+                        .is_some_and(|state| state.is_initialized)
+                {
+                    state_impl
+                        .mutate_state(split.split_id, false, 0, None, None, None)
+                        .await?;
+                }
             }
             let mut should_report_actor_backfill_progress = if next_split_idx > 0 {
                 Some((
@@ -297,7 +333,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                 if let Some(filtered_chunk) = filter_stream_chunk(
                                     chunk,
                                     &current_actor_bounds,
-                                    snapshot_split_column_index,
+                                    snapshot_split_output_index,
                                 ) && filtered_chunk.cardinality() > 0
                                 {
                                     yield Message::Chunk(filtered_chunk);
@@ -326,7 +362,18 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
             let offset_parse_func = upstream_table_reader.reader.get_cdc_offset_parser();
 
             // Backfill snapshot splits sequentially.
-            for split in actor_snapshot_splits.iter().skip(next_split_idx) {
+            for (split_idx, split) in actor_snapshot_splits
+                .iter()
+                .enumerate()
+                .skip(next_split_idx)
+            {
+                let restored_state = if split_idx == next_split_idx {
+                    next_split_state.take().unwrap_or_default()
+                } else {
+                    Default::default()
+                };
+                let mut row_count = u64::try_from(restored_state.row_count).unwrap_or_default();
+                let mut current_snapshot_pk = restored_state.snapshot_pk;
                 tracing::info!(
                     %table_id,
                     upstream_table_name,
@@ -341,7 +388,9 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                 ));
                 extends_current_actor_bound(&mut current_actor_bounds, split);
 
-                let split_cdc_offset_low = {
+                let split_cdc_offset_low = if restored_state.cdc_offset_low.is_some() {
+                    restored_state.cdc_offset_low
+                } else {
                     // Limit concurrent CDC connections globally to 10 using a semaphore.
                     static CDC_CONN_SEMAPHORE: tokio::sync::Semaphore =
                         tokio::sync::Semaphore::const_new(10);
@@ -365,6 +414,8 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                     split.left_bound_inclusive.clone(),
                     split.right_bound_exclusive.clone(),
                     cdc_table_snapshot_split_column.clone(),
+                    current_snapshot_pk.clone(),
+                    pk_indices.clone(),
                     self.rate_limit_rps,
                     additional_columns.clone(),
                     schema_table_name.clone(),
@@ -383,7 +434,6 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                     select_with_strategy(left_upstream, right_snapshot, |_: &mut ()| {
                         stream::PollNext::Left
                     });
-                let mut row_count: u64 = 0;
                 #[for_await]
                 for either in &mut backfill_stream {
                     match either {
@@ -391,6 +441,16 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                         Either::Left(msg) => {
                             match msg? {
                                 Message::Barrier(barrier) => {
+                                    state_impl
+                                        .mutate_state(
+                                            split.split_id,
+                                            false,
+                                            row_count,
+                                            current_snapshot_pk.clone(),
+                                            split_cdc_offset_low.clone(),
+                                            None,
+                                        )
+                                        .await?;
                                     state_impl.commit_state(barrier.epoch).await?;
                                     if let Some(mutation) = barrier.mutation.as_deref() {
                                         use crate::executor::Mutation;
@@ -440,6 +500,19 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                         }
                                         continue 'with_cdc_table_snapshot_splits;
                                     }
+                                    // Snapshot rows through `current_snapshot_pk` will become
+                                    // durable with this barrier. Emit the CDC changes for the same
+                                    // prefix before forwarding the barrier, so recovery never loses
+                                    // a correction for durable snapshot output. Changes after the
+                                    // cursor must remain buffered: emitting them now could let a
+                                    // later stale snapshot row overwrite the change.
+                                    for chunk in consume_upstream_chunk_buffer(
+                                        &mut upstream_chunk_buffer,
+                                        current_snapshot_pk.as_ref(),
+                                        &output_pk_indices,
+                                    ) {
+                                        yield Message::Chunk(chunk);
+                                    }
                                     if let Some(split_range) =
                                         should_report_actor_backfill_progress.take()
                                         && let Some(ref progress) = self.progress
@@ -479,7 +552,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                             chunk,
                                             &finished_split_bounds,
                                             &current_split_bounds,
-                                            snapshot_split_column_index,
+                                            snapshot_split_output_index,
                                         );
                                     if let Some(finished_chunk) = finished_chunk
                                         && finished_chunk.cardinality() > 0
@@ -533,6 +606,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                     break;
                                 }
                                 Some(chunk) => {
+                                    current_snapshot_pk = Some(get_new_pos(&chunk, &pk_indices));
                                     let chunk_cardinality = chunk.cardinality() as u64;
                                     row_count = row_count.saturating_add(chunk_cardinality);
                                     yield Message::Chunk(mapping_chunk(
@@ -550,6 +624,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                         split.split_id,
                         true,
                         row_count,
+                        current_snapshot_pk,
                         split_cdc_offset_low,
                         split_cdc_offset_high,
                     )
@@ -659,7 +734,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                         if let Some(filtered_chunk) = filter_stream_chunk(
                             chunk,
                             &current_actor_bounds,
-                            snapshot_split_column_index,
+                            snapshot_split_output_index,
                         ) && filtered_chunk.cardinality() > 0
                         {
                             yield Message::Chunk(filtered_chunk);
@@ -674,6 +749,80 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
             }
         }
     }
+}
+
+/// Emit buffered CDC changes whose primary key has already been reached by the snapshot, retaining
+/// changes for rows that can still be produced by the active snapshot stream.
+fn consume_upstream_chunk_buffer(
+    upstream_chunk_buffer: &mut Vec<StreamChunk>,
+    current_snapshot_pk: Option<&OwnedRow>,
+    pk_indices: &[usize],
+) -> Vec<StreamChunk> {
+    let Some(current_snapshot_pk) = current_snapshot_pk else {
+        return vec![];
+    };
+    assert_eq!(
+        current_snapshot_pk.len(),
+        pk_indices.len(),
+        "snapshot cursor must contain the full primary key"
+    );
+
+    let buffered_chunks = std::mem::take(upstream_chunk_buffer);
+    let mut emitted_chunks = Vec::with_capacity(buffered_chunks.len());
+    let mut retained_chunks = Vec::with_capacity(buffered_chunks.len());
+    for chunk in buffered_chunks {
+        let mut emitted_vis = BitmapBuilder::with_capacity(chunk.capacity());
+        let mut retained_vis = BitmapBuilder::with_capacity(chunk.capacity());
+        for (row_idx, visible) in chunk.visibility().iter().enumerate() {
+            if !visible {
+                emitted_vis.append(false);
+                retained_vis.append(false);
+                continue;
+            }
+            let row = chunk.row_at(row_idx).1;
+            let ordering = pk_indices
+                .iter()
+                .zip_eq_fast(current_snapshot_pk.iter())
+                .map(|(pk_index, current_pk)| {
+                    cmp_datum(
+                        row.datum_at(*pk_index),
+                        current_pk,
+                        OrderType::ascending_nulls_first(),
+                    )
+                })
+                .find(|ordering| !ordering.is_eq())
+                .unwrap_or(std::cmp::Ordering::Equal);
+            if ordering.is_le() {
+                emitted_vis.append(true);
+                retained_vis.append(false);
+            } else {
+                emitted_vis.append(false);
+                retained_vis.append(true);
+            }
+        }
+
+        let emitted_vis = emitted_vis.finish();
+        if emitted_vis.count_ones() > 0 {
+            emitted_chunks.push(
+                chunk
+                    .clone_with_vis(emitted_vis)
+                    .eliminate_adjacent_noop_update()
+                    .compact_vis(),
+            );
+        }
+
+        let retained_vis = retained_vis.finish();
+        if retained_vis.count_ones() > 0 {
+            retained_chunks.push(
+                chunk
+                    .clone_with_vis(retained_vis)
+                    .eliminate_adjacent_noop_update()
+                    .compact_vis(),
+            );
+        }
+    }
+    *upstream_chunk_buffer = retained_chunks;
+    emitted_chunks
 }
 
 fn split_finished_and_current_chunk(
@@ -820,8 +969,110 @@ mod tests {
     use risingwave_common::types::ScalarImpl;
 
     use crate::executor::backfill::cdc::cdc_backill_v2::{
-        filter_stream_chunk, split_finished_and_current_chunk,
+        consume_upstream_chunk_buffer, filter_stream_chunk, split_finished_and_current_chunk,
     };
+
+    #[test]
+    fn test_consume_upstream_chunk_buffer_at_snapshot_cursor() {
+        use risingwave_common::array::{Op, StreamChunkTestExt};
+
+        let mut upstream_chunk_buffer = vec![StreamChunk::from_pretty(
+            "   I I
+             +  1 10
+             -  2 20
+            U-  3 30
+            U+  8 80
+             - 10 99",
+        )];
+
+        let emitted = consume_upstream_chunk_buffer(
+            &mut upstream_chunk_buffer,
+            Some(&OwnedRow::new(vec![Some(ScalarImpl::Int64(5))])),
+            &[0],
+        );
+        assert_eq!(
+            emitted,
+            vec![StreamChunk::from_pretty(
+                "  I I
+                 + 1 10
+                 - 2 20
+                 - 3 30",
+            )]
+        );
+        assert_eq!(
+            upstream_chunk_buffer,
+            vec![StreamChunk::from_rows(
+                &[
+                    (
+                        Op::Insert,
+                        OwnedRow::new(vec![
+                            Some(ScalarImpl::Int64(8)),
+                            Some(ScalarImpl::Int64(80)),
+                        ]),
+                    ),
+                    (
+                        Op::Delete,
+                        OwnedRow::new(vec![
+                            Some(ScalarImpl::Int64(10)),
+                            Some(ScalarImpl::Int64(99)),
+                        ]),
+                    ),
+                ],
+                &[
+                    risingwave_common::types::DataType::Int64,
+                    risingwave_common::types::DataType::Int64,
+                ],
+            )]
+        );
+
+        let emitted = consume_upstream_chunk_buffer(
+            &mut upstream_chunk_buffer,
+            Some(&OwnedRow::new(vec![Some(ScalarImpl::Int64(8))])),
+            &[0],
+        );
+        assert_eq!(
+            emitted,
+            vec![StreamChunk::from_pretty(
+                "  I I
+                 + 8 80",
+            )]
+        );
+        assert_eq!(upstream_chunk_buffer[0].rows().count(), 1);
+    }
+
+    #[test]
+    fn test_consume_upstream_chunk_buffer_with_composite_pk_update() {
+        use risingwave_common::array::StreamChunkTestExt;
+
+        let mut upstream_chunk_buffer = vec![StreamChunk::from_pretty(
+            "   I I I
+            U-  5 1 10
+            U+  5 3 30",
+        )];
+        let emitted = consume_upstream_chunk_buffer(
+            &mut upstream_chunk_buffer,
+            Some(&OwnedRow::new(vec![
+                Some(ScalarImpl::Int64(5)),
+                Some(ScalarImpl::Int64(2)),
+            ])),
+            &[0, 1],
+        );
+
+        assert_eq!(
+            emitted,
+            vec![StreamChunk::from_pretty(
+                "  I I I
+                 - 5 1 10",
+            )]
+        );
+        assert_eq!(
+            upstream_chunk_buffer,
+            vec![StreamChunk::from_pretty(
+                "  I I I
+                 + 5 3 30",
+            )]
+        );
+    }
 
     #[test]
     fn test_filter_stream_chunk() {

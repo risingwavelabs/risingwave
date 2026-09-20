@@ -31,7 +31,7 @@ use risingwave_common::catalog::{
     CdcKeyComparison, ColumnDesc, ColumnId, ConflictBehavior, Field, Schema, TableId,
 };
 use risingwave_common::row::{OwnedRow, Row};
-use risingwave_common::types::{DataType, Datum, JsonbVal, ScalarImpl};
+use risingwave_common::types::{DataType, Datum, JsonbVal, ScalarImpl, ToOwnedDatum};
 use risingwave_common::util::epoch::{EpochExt, test_epoch};
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_connector::source::cdc::external::{
@@ -461,8 +461,12 @@ struct ParallelizedCdcBackfillTestContext {
 }
 
 async fn setup_parallelized_cdc_backfill_test_context() -> ParallelizedCdcBackfillTestContext {
-    let memory_state_store = MemoryStateStore::new();
+    setup_parallelized_cdc_backfill_test_context_with_store(MemoryStateStore::new()).await
+}
 
+async fn setup_parallelized_cdc_backfill_test_context_with_store(
+    memory_state_store: MemoryStateStore,
+) -> ParallelizedCdcBackfillTestContext {
     let (tx, source) = MockSource::channel();
     let source = source.into_executor(Schema::new(vec![]), vec![]);
     let cdc_source = StreamExecutor::new(
@@ -506,11 +510,15 @@ async fn setup_parallelized_cdc_backfill_test_context() -> ParallelizedCdcBackfi
         Field::with_name(DataType::Int64, "split_id"),
         Field::with_name(DataType::Boolean, "backfill_finished"),
         Field::with_name(DataType::Int64, "row_count"),
+        Field::with_name(DataType::Jsonb, "cdc_offset_low"),
+        Field::with_name(DataType::Jsonb, "cdc_offset_high"),
     ]);
     let column_descs = vec![
         ColumnDesc::unnamed(ColumnId::from(0), state_schema[0].data_type.clone()),
         ColumnDesc::unnamed(ColumnId::from(1), state_schema[1].data_type.clone()),
         ColumnDesc::unnamed(ColumnId::from(2), state_schema[2].data_type.clone()),
+        ColumnDesc::unnamed(ColumnId::from(3), state_schema[3].data_type.clone()),
+        ColumnDesc::unnamed(ColumnId::from(4), state_schema[4].data_type.clone()),
     ];
     let state_table = StateTable::from_table_catalog(
         &gen_pbtable(
@@ -726,28 +734,6 @@ async fn test_parallelized_cdc_backfill() {
     assert_mv(
         DataChunk::from_pretty(
             "I F
-            1 11.00
-            2 22.00
-            5 1.0005
-            6 1.0006
-            8 1.0008",
-        )
-        .into(),
-        &table_schema,
-        memory_state_store.clone(),
-        materialize_table_id,
-    )
-    .await;
-
-    // The backfill executor should process first WAL buffered previously.
-    assert!(matches!(
-        materialize.next().await.unwrap().unwrap(),
-        Message::Chunk(_)
-    ));
-    send_and_poll_barrier(&mut curr_epoch, &mut tx, &mut materialize).await;
-    assert_mv(
-        DataChunk::from_pretty(
-            "I F
             1 10.01
             2 22.22
             3 3.03
@@ -786,6 +772,179 @@ async fn test_parallelized_cdc_backfill() {
         .into(),
         &table_schema,
         memory_state_store.clone(),
+        materialize_table_id,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_parallelized_cdc_backfill_preserves_reached_delete_on_recovery() {
+    let ParallelizedCdcBackfillTestContext {
+        memory_state_store,
+        actor_id,
+        mut tx,
+        mut materialize,
+        materialize_table_id,
+        table_schema,
+    } = setup_parallelized_cdc_backfill_test_context().await;
+
+    let mut curr_epoch = test_epoch(11);
+    let mut source_splits = HashMap::new();
+    source_splits.insert(
+        actor_id,
+        vec![SplitImpl::PostgresCdc(DebeziumCdcSplit::new(0, None, None))],
+    );
+    let splits = [(
+        actor_id,
+        (
+            vec![CdcTableSnapshotSplitRaw {
+                split_id: 1,
+                left_bound_inclusive: OwnedRow::new(vec![Some(ScalarImpl::Int64(1))])
+                    .value_serialize(),
+                right_bound_exclusive: OwnedRow::new(vec![Some(ScalarImpl::Int64(10))])
+                    .value_serialize(),
+            }],
+            10,
+        ),
+    )]
+    .into_iter()
+    .collect();
+    tx.send_barrier(
+        Barrier::new_test_barrier(curr_epoch).with_mutation(Mutation::Add(AddMutation {
+            splits: source_splits,
+            actor_cdc_table_snapshot_splits: CdcTableSnapshotSplitAssignmentWithGeneration {
+                splits,
+            },
+            ..Default::default()
+        })),
+    );
+    assert!(matches!(
+        materialize.next().await.unwrap().unwrap(),
+        Message::Barrier(_)
+    ));
+
+    // The first snapshot chunk reaches split key 5.
+    assert!(matches!(
+        materialize.next().await.unwrap().unwrap(),
+        Message::Chunk(_)
+    ));
+
+    let delete_payloads = [
+        r#"{ "payload": { "before": { "id": 1, "price": 11.00 }, "after": null, "source": { "version": "1.9.7.Final", "connector": "postgres", "name": "RW_CDC_1002" }, "op": "d", "ts_ms": 1695277757017, "transaction": null } }"#,
+    ];
+    let delete_chunk = create_stream_chunk(
+        delete_payloads
+            .into_iter()
+            .map(|payload| Some(JsonbVal::from_str(payload).unwrap().into()))
+            .collect(),
+        &Schema::new(vec![Field::unnamed(DataType::Jsonb)]),
+    );
+    tx.push_chunk(delete_chunk);
+
+    // The checkpoint flushes the delete for key 1 before its barrier and persists the snapshot
+    // cursor for the unfinished split.
+    curr_epoch.inc_epoch();
+    tx.push_barrier(curr_epoch, false);
+    let Message::Chunk(chunk) = materialize.next().await.unwrap().unwrap() else {
+        panic!("expected reached delete before checkpoint barrier");
+    };
+    assert_eq!(
+        chunk
+            .rows()
+            .map(|(op, row)| (op, row.datum_at(0).to_owned_datum()))
+            .collect_vec(),
+        vec![(Op::Delete, Some(ScalarImpl::Int64(1)))]
+    );
+    assert!(matches!(
+        materialize.next().await.unwrap().unwrap(),
+        Message::Barrier(Barrier { epoch, .. }) if epoch.curr == curr_epoch
+    ));
+    assert_mv(
+        DataChunk::from_pretty(
+            "I F
+             2 22.00
+             5 1.0005",
+        )
+        .into(),
+        &table_schema,
+        memory_state_store.clone(),
+        materialize_table_id,
+    )
+    .await;
+
+    // Simulate recovery from the checkpoint without replaying the delete. The mock external table
+    // still contains key 1, so this would resurrect it if the unfinished split restarted from its
+    // left bound instead of the persisted full-PK cursor.
+    drop(tx);
+    drop(materialize);
+    let ParallelizedCdcBackfillTestContext {
+        actor_id: recovered_actor_id,
+        mut tx,
+        mut materialize,
+        ..
+    } = setup_parallelized_cdc_backfill_test_context_with_store(memory_state_store.clone()).await;
+    assert_eq!(recovered_actor_id, actor_id);
+
+    curr_epoch.inc_epoch();
+    let mut source_splits = HashMap::new();
+    source_splits.insert(
+        actor_id,
+        vec![SplitImpl::PostgresCdc(DebeziumCdcSplit::new(0, None, None))],
+    );
+    let splits = [(
+        actor_id,
+        (
+            vec![CdcTableSnapshotSplitRaw {
+                split_id: 1,
+                left_bound_inclusive: OwnedRow::new(vec![Some(ScalarImpl::Int64(1))])
+                    .value_serialize(),
+                right_bound_exclusive: OwnedRow::new(vec![Some(ScalarImpl::Int64(10))])
+                    .value_serialize(),
+            }],
+            10,
+        ),
+    )]
+    .into_iter()
+    .collect();
+    tx.send_barrier(
+        Barrier::new_test_barrier(curr_epoch).with_mutation(Mutation::Add(AddMutation {
+            splits: source_splits,
+            actor_cdc_table_snapshot_splits: CdcTableSnapshotSplitAssignmentWithGeneration {
+                splits,
+            },
+            ..Default::default()
+        })),
+    );
+    assert!(matches!(
+        materialize.next().await.unwrap().unwrap(),
+        Message::Barrier(Barrier { epoch, .. }) if epoch.curr == curr_epoch
+    ));
+
+    let Message::Chunk(chunk) = materialize.next().await.unwrap().unwrap() else {
+        panic!("expected snapshot to resume after the recovered cursor");
+    };
+    assert_eq!(
+        chunk
+            .rows()
+            .map(|(op, row)| (op, row.datum_at(0).to_owned_datum()))
+            .collect_vec(),
+        vec![
+            (Op::Insert, Some(ScalarImpl::Int64(6))),
+            (Op::Insert, Some(ScalarImpl::Int64(8))),
+        ]
+    );
+    send_and_poll_barrier(&mut curr_epoch, &mut tx, &mut materialize).await;
+    assert_mv(
+        DataChunk::from_pretty(
+            "I F
+             2 22.00
+             5 1.0005
+             6 1.0006
+             8 1.0008",
+        )
+        .into(),
+        &table_schema,
+        memory_state_store,
         materialize_table_id,
     )
     .await;
@@ -1001,32 +1160,7 @@ async fn test_parallelized_cdc_backfill_reschedule() {
         Message::Chunk(_)
     ));
     send_and_poll_barrier(&mut curr_epoch, &mut tx, &mut materialize).await;
-    // Rows in the active split stay buffered until that split is closed.
-    assert_mv(
-        DataChunk::from_pretty(
-            "I F
-            1 10.01
-            2 22.22
-            3 3.03
-            4 4.04
-            5 5.05
-            6 10.08
-            8 1.0008
-            400 400.1",
-        )
-        .into(),
-        &table_schema,
-        memory_state_store.clone(),
-        materialize_table_id,
-    )
-    .await;
-
-    assert!(matches!(
-        materialize.next().await.unwrap().unwrap(),
-        Message::Chunk(_)
-    ));
-    send_and_poll_barrier(&mut curr_epoch, &mut tx, &mut materialize).await;
-    // The buffered rows for split 2 have been consumed.
+    // Rows in the active split up to the snapshot cursor are flushed at the checkpoint.
     assert_mv(
         DataChunk::from_pretty(
             "I F
@@ -1056,13 +1190,16 @@ async fn send_and_poll_barrier(
 ) {
     curr_epoch.inc_epoch();
     tx.push_barrier(*curr_epoch, false);
-    assert!(matches!(
-        materialize.next().await.unwrap().unwrap(),
-        Message::Barrier(Barrier {
-            epoch,
-            ..
-        }) if epoch.curr == *curr_epoch
-    ));
+    loop {
+        match materialize.next().await.unwrap().unwrap() {
+            Message::Chunk(_) => {}
+            Message::Barrier(Barrier { epoch, .. }) => {
+                assert_eq!(epoch.curr, *curr_epoch);
+                break;
+            }
+            Message::Watermark(_) => panic!("unexpected watermark before barrier"),
+        }
+    }
 }
 
 async fn assert_mv(
