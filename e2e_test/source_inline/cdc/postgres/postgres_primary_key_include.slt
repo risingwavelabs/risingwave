@@ -1,0 +1,73 @@
+# Verify that auto schema discovery excludes INCLUDE columns from the primary key
+# while preserving the key-column order from the upstream PostgreSQL index.
+
+control substitution on
+
+statement ok
+drop source if exists postgres_primary_key_include_source cascade;
+
+system ok
+PGDATABASE=${PGDATABASE:-postgres} psql -c "
+    SELECT pg_terminate_backend(active_pid)
+    FROM pg_replication_slots
+    WHERE slot_name = 'postgres_primary_key_include_slot' AND active_pid IS NOT NULL;
+    SELECT pg_sleep(1);
+    SELECT pg_drop_replication_slot(slot_name)
+    FROM pg_replication_slots
+    WHERE slot_name = 'postgres_primary_key_include_slot';
+    DROP PUBLICATION IF EXISTS postgres_primary_key_include_pub;
+    DROP TABLE IF EXISTS public.postgres_primary_key_include CASCADE;
+    CREATE TABLE public.postgres_primary_key_include (
+        order_id int NOT NULL,
+        tenant_id int NOT NULL,
+        payload text,
+        PRIMARY KEY (tenant_id, order_id) INCLUDE (payload)
+    );
+    CREATE PUBLICATION postgres_primary_key_include_pub
+        FOR TABLE public.postgres_primary_key_include;
+"
+
+statement ok
+create source postgres_primary_key_include_source with (
+    connector = 'postgres-cdc',
+    hostname = '${PGHOST:localhost}',
+    port = '${PGPORT:5432}',
+    username = '${PGUSER:$USER}',
+    password = '${PGPASSWORD:}',
+    database.name = '${PGDATABASE:postgres}',
+    schema.name = 'public',
+    publication.name = 'postgres_primary_key_include_pub',
+    publication.create.enable = 'false',
+    slot.name = 'postgres_primary_key_include_slot'
+);
+
+statement ok
+create table postgres_primary_key_include_rw (*)
+from postgres_primary_key_include_source table 'public.postgres_primary_key_include';
+
+query TTTT
+describe postgres_primary_key_include_rw;
+----
+order_id integer false NULL
+tenant_id integer false NULL
+payload character varying false NULL
+_rw_timestamp timestamp with time zone true NULL
+primary key tenant_id, order_id NULL NULL
+distribution key tenant_id, order_id NULL NULL
+table description postgres_primary_key_include_rw NULL NULL
+
+statement ok
+drop source postgres_primary_key_include_source cascade;
+
+system ok
+PGDATABASE=${PGDATABASE:-postgres} psql -c "
+    SELECT pg_terminate_backend(active_pid)
+    FROM pg_replication_slots
+    WHERE slot_name = 'postgres_primary_key_include_slot' AND active_pid IS NOT NULL;
+    SELECT pg_sleep(1);
+    SELECT pg_drop_replication_slot(slot_name)
+    FROM pg_replication_slots
+    WHERE slot_name = 'postgres_primary_key_include_slot';
+    DROP PUBLICATION IF EXISTS postgres_primary_key_include_pub;
+    DROP TABLE IF EXISTS public.postgres_primary_key_include CASCADE;
+"

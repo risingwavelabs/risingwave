@@ -41,16 +41,20 @@ use crate::error::ConnectorResult;
 /// Match `pg_class` and `pg_namespace` by exact catalog names instead of casting a
 /// constructed string to `regclass`, as unquoted `regclass` input folds mixed-case
 /// table names to lower case.
+/// Only the first `indnkeyatts` entries in `indkey` are key attributes; later
+/// entries are non-key attributes from an `INCLUDE` clause.
 const DISCOVER_PRIMARY_KEY_QUERY: &str = r#"
     SELECT a.attname as column_name
     FROM pg_index i
     JOIN pg_class c ON c.oid = i.indrelid
     JOIN pg_namespace n ON n.oid = c.relnamespace
-    JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+    JOIN LATERAL unnest(i.indkey) WITH ORDINALITY AS key(attnum, ordinality)
+      ON key.ordinality <= i.indnkeyatts
+    JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = key.attnum
     WHERE n.nspname = $1
       AND c.relname = $2
       AND i.indisprimary = true
-    ORDER BY array_position(i.indkey, a.attnum)
+    ORDER BY key.ordinality
 "#;
 
 /// Discover pgvector columns with both `atttypmod` (dimension) and `format_type` text.
