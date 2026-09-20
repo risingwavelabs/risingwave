@@ -41,19 +41,19 @@ use crate::error::ConnectorResult;
 /// Match `pg_class` and `pg_namespace` by exact catalog names instead of casting a
 /// constructed string to `regclass`, as unquoted `regclass` input folds mixed-case
 /// table names to lower case.
-/// Only the first `indnkeyatts` entries in `indkey` are key attributes; later
-/// entries are non-key attributes from an `INCLUDE` clause.
+/// `pg_constraint.conkey` contains only the constrained columns, excluding non-key
+/// attributes from an `INCLUDE` clause, and is available on PostgreSQL 10.
 const DISCOVER_PRIMARY_KEY_QUERY: &str = r#"
     SELECT a.attname as column_name
-    FROM pg_index i
-    JOIN pg_class c ON c.oid = i.indrelid
+    FROM pg_constraint con
+    JOIN pg_class c ON c.oid = con.conrelid
     JOIN pg_namespace n ON n.oid = c.relnamespace
-    JOIN LATERAL unnest(i.indkey) WITH ORDINALITY AS key(attnum, ordinality)
-      ON key.ordinality <= i.indnkeyatts
-    JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = key.attnum
+    JOIN LATERAL unnest(con.conkey) WITH ORDINALITY AS key(attnum, ordinality)
+      ON true
+    JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = key.attnum
     WHERE n.nspname = $1
       AND c.relname = $2
-      AND i.indisprimary = true
+      AND con.contype = 'p'
     ORDER BY key.ordinality
 "#;
 

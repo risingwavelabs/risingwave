@@ -1,13 +1,16 @@
 # Verify that auto schema discovery excludes INCLUDE columns from the primary key
-# while preserving the key-column order from the upstream PostgreSQL index.
+# while preserving the key-column order from the upstream PostgreSQL constraint.
 
 control substitution on
+
+statement ok
+drop table if exists postgres_primary_key_include_rw;
 
 statement ok
 drop source if exists postgres_primary_key_include_source cascade;
 
 system ok
-PGDATABASE=${PGDATABASE:-postgres} psql -c "
+PGDATABASE=${PGDATABASE:-postgres} psql -v ON_ERROR_STOP=1 -c "
     SELECT pg_terminate_backend(active_pid)
     FROM pg_replication_slots
     WHERE slot_name = 'postgres_primary_key_include_slot' AND active_pid IS NOT NULL;
@@ -60,7 +63,7 @@ statement ok
 drop source postgres_primary_key_include_source cascade;
 
 system ok
-PGDATABASE=${PGDATABASE:-postgres} psql -c "
+PGDATABASE=${PGDATABASE:-postgres} psql -v ON_ERROR_STOP=1 -c "
     SELECT pg_terminate_backend(active_pid)
     FROM pg_replication_slots
     WHERE slot_name = 'postgres_primary_key_include_slot' AND active_pid IS NOT NULL;
