@@ -29,10 +29,10 @@ use indicatif::{MultiProgress, ProgressBar};
 use risedev::util::{begin_spin, complete_spin, fail_spin};
 use risedev::{
     ClickHouseService, CompactorService, ComputeNodeService, ConfigExpander, ConfigureTmuxTask,
-    DorisService, DummyService, ElasticSearchService, EnsureStopService, ExecuteContext,
-    FrontendService, GrafanaService, KafkaService, LakekeeperService, MetaNodeService,
-    MinioService, MoatService, MongoDbService, MongoDbSetupTask, MotoService, MqttService,
-    MySqlService, NatsService, OpenSearchService, PostgresService, PrometheusService,
+    DorisReadyCheckTask, DorisService, DummyService, ElasticSearchService, EnsureStopService,
+    ExecuteContext, FrontendService, GrafanaService, KafkaService, LakekeeperService,
+    MetaNodeService, MinioService, MoatService, MongoDbService, MongoDbSetupTask, MotoService,
+    MqttService, MySqlService, NatsService, OpenSearchService, PostgresService, PrometheusService,
     PubsubService, PulsarService, RISEDEV_NAME, RedisService, SchemaRegistryService, ServiceConfig,
     SqlServerService, SqliteConfig, Task, TaskGroup, TempoService, generate_risedev_env,
     preflight_check,

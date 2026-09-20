@@ -1872,6 +1872,25 @@ template:
 
     persist-data: false
 
+  # ClickHouse service backed by Docker.
+  clickhouse:
+    id: clickhouse
+
+    address: "127.0.0.1"
+    http-port: 8123
+    native-port: 9000
+
+    user: default
+    password: default
+    database: default
+
+    user-managed: false
+
+    # Only effective when NOT user managed
+    image: "clickhouse/clickhouse-server:25.5"
+
+    persist-data: false
+
   # Doris service backed by Docker.
   doris:
     id: doris
