@@ -504,6 +504,8 @@ impl PostgresExternalTableReader {
         primary_keys: &[String],
         pk_ordering: &mut HashMap<String, PostgresTextOrdering>,
     ) -> ConnectorResult<()> {
+        // indclass contains only key columns, excluding INCLUDE columns on PG 11+.
+        // Iterate it directly so PG 10 does not need the newer indnkeyatts catalog field.
         let rows = client
             .query(
                 "SELECT idx.indexrelid, a.attname, coll_ns.nspname, coll.collname, \
@@ -514,7 +516,7 @@ impl PostgresExternalTableReader {
                  JOIN pg_namespace ns ON ns.oid = tbl.relnamespace \
                  JOIN pg_class index_rel ON index_rel.oid = idx.indexrelid \
                  JOIN pg_am am ON am.oid = index_rel.relam \
-                 JOIN LATERAL generate_subscripts(idx.indkey, 1) AS key(pos) ON TRUE \
+                 JOIN LATERAL generate_subscripts(idx.indclass, 1) AS key(pos) ON TRUE \
                  LEFT JOIN pg_attribute a ON a.attrelid = idx.indrelid \
                    AND a.attnum = idx.indkey[key.pos] \
                  JOIN pg_opclass opc ON opc.oid = idx.indclass[key.pos] \
@@ -525,7 +527,6 @@ impl PostgresExternalTableReader {
                    AND am.amname = 'btree' \
                    AND idx.indisvalid AND idx.indisready AND idx.indislive \
                    AND idx.indpred IS NULL \
-                   AND key.pos < array_lower(idx.indkey, 1) + idx.indnkeyatts \
                  ORDER BY idx.indexrelid, key.pos",
                 &[&table_name.schema_name, &table_name.table_name],
             )
