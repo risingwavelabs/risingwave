@@ -173,7 +173,11 @@ impl SqlServerExternalTable {
 
         client_config.host(&config.host);
         client_config.database(&config.database);
-        client_config.port(config.port.parse::<u16>().unwrap());
+        let port = config
+            .port
+            .parse::<u16>()
+            .with_context(|| format!("invalid SQL Server port `{}`", config.port))?;
+        client_config.port(port);
         client_config.authentication(tiberius::AuthMethod::sql_server(
             &config.username,
             &config.password,
@@ -560,6 +564,25 @@ impl SqlServerExternalTableReader {
 #[cfg(test)]
 mod tests {
     use crate::source::cdc::external::SqlServerExternalTableReader;
+
+    #[tokio::test]
+    async fn test_pk_comparison_discovery_rejects_invalid_port() {
+        use thiserror_ext::AsReport;
+
+        use super::{ExternalTableConfig, SqlServerExternalTable};
+
+        for port in ["abc", "70000"] {
+            let config = ExternalTableConfig {
+                port: port.to_owned(),
+                ..Default::default()
+            };
+            let err =
+                SqlServerExternalTable::discover_pk_column_comparisons(&config, &["id".to_owned()])
+                    .await
+                    .unwrap_err();
+            assert!(err.to_report_string().contains("invalid SQL Server port"));
+        }
+    }
 
     #[test]
     fn test_pk_comparisons_preserve_upstream_types_and_key_order() {
