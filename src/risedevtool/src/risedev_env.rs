@@ -319,8 +319,14 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                     ("RISEDEV_RABBITMQ_VHOST", c.vhost.as_str()),
                     ("RISEDEV_RABBITMQ_WITH_OPTIONS_COMMON", options.as_str()),
                 ] {
-                    // The environment file is sourced by a shell. Preserve credentials literally.
-                    writeln!(env, "{name}='{}'", value.replace('\'', "'\"'\"'")).unwrap();
+                    // cargo-make's env-file reader only strips double quotes. Also
+                    // escape shell metacharacters for callers that source this file.
+                    let value = value
+                        .replace('\\', "\\\\")
+                        .replace('"', "\\\"")
+                        .replace('$', "\\$")
+                        .replace('`', "\\`");
+                    writeln!(env, "{name}=\"{value}\"").unwrap();
                 }
             }
             ServiceConfig::Minio(c) => {
