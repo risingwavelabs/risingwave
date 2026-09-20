@@ -94,9 +94,9 @@ use crate::error::{Result, RwError};
 use crate::expr::{Expr, ExprRewriter, SessionTimezone};
 use crate::handler::HandlerArgs;
 use crate::handler::cdc::{
-    bind_cdc_table_schema, bind_cdc_table_schema_externally, derive_with_options_for_cdc_table,
-    not_null_check_for_cdc_table, reject_pk_filtered_by_debezium_column_filter,
-    sanity_check_for_table_on_cdc_source,
+    bind_cdc_pk_comparisons_externally, bind_cdc_table_schema, bind_cdc_table_schema_externally,
+    derive_with_options_for_cdc_table, not_null_check_for_cdc_table,
+    reject_pk_filtered_by_debezium_column_filter, sanity_check_for_table_on_cdc_source,
 };
 use crate::handler::create_table::{
     ColumnIdGenerator, bind_pk_and_row_id_on_relation, bind_sql_column_constraints,
@@ -1386,9 +1386,18 @@ async fn handle_create_cdc_table_source(
         &upstream_source.with_properties,
         cdc_table_info.external_table_name.clone(),
     )?;
-    let (mut columns, pk_names) = match stmt.wildcard_idx {
+    let (mut columns, pk_names, pk_comparisons) = match stmt.wildcard_idx {
         Some(_) => bind_cdc_table_schema_externally(cdc_with_options.clone()).await?,
-        None => bind_cdc_table_schema(&stmt.columns, &stmt.constraints, false)?,
+        None => {
+            let (columns, pk_names) =
+                bind_cdc_table_schema(&stmt.columns, &stmt.constraints, false)?;
+            let pk_comparisons = Box::pin(bind_cdc_pk_comparisons_externally(
+                cdc_with_options.clone(),
+                &pk_names,
+            ))
+            .await?;
+            (columns, pk_names, pk_comparisons)
+        }
     };
     if pk_names.is_empty() {
         return Err(ErrorCode::NotSupported(
@@ -1436,6 +1445,7 @@ async fn handle_create_cdc_table_source(
         source_id: upstream_source.id,
         external_table_name,
         pk,
+        pk_comparisons,
         columns: columns
             .iter()
             .map(|column| column.column_desc.clone())

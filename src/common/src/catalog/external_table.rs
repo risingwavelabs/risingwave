@@ -81,12 +81,36 @@ pub struct CdcTableDesc {
 }
 
 impl CdcTableDesc {
-    pub fn from_protobuf(desc: &ExternalTableDesc) -> Self {
-        Self {
+    /// Restores a catalog-only CDC table source descriptor, whose key ordering is resolved at creation.
+    pub fn from_protobuf(desc: &ExternalTableDesc) -> anyhow::Result<Self> {
+        let ordering = desc.get_pk_ordering()?;
+        anyhow::ensure!(
+            desc.pk.len() == ordering.columns.len(),
+            "CDC key ordering length mismatch"
+        );
+        let pk_comparisons = desc
+            .pk
+            .iter()
+            .zip_eq_fast(&ordering.columns)
+            .map(|(pk, column)| {
+                anyhow::ensure!(
+                    pk.column_index == column.pk_col_idx,
+                    "CDC key ordering index mismatch"
+                );
+                let comparison = column.get_comparison()?;
+                anyhow::ensure!(
+                    comparison != Comparison::Unspecified,
+                    "CDC key comparison is unspecified"
+                );
+                Ok(CdcKeyComparison::from_protobuf(comparison))
+            })
+            .collect::<anyhow::Result<Vec<_>>>()?;
+        Ok(Self {
             table_id: desc.table_id,
             source_id: desc.source_id,
             external_table_name: desc.table_name.clone(),
             pk: desc.pk.iter().map(ColumnOrder::from_protobuf).collect(),
+            pk_comparisons,
             columns: desc.columns.iter().map(ColumnDesc::from).collect(),
             stream_key: desc
                 .stream_key
@@ -95,7 +119,7 @@ impl CdcTableDesc {
                 .collect(),
             connect_properties: desc.connect_properties.clone(),
             secret_refs: desc.secret_refs.clone(),
-        }
+        })
     }
 
     pub fn to_protobuf(&self) -> ExternalTableDesc {
@@ -154,6 +178,7 @@ mod tests {
         };
 
         let protobuf = table_desc.to_protobuf();
+        assert_eq!(CdcTableDesc::from_protobuf(&protobuf).unwrap(), table_desc);
         assert_eq!(protobuf.pk.len(), 2);
         assert_eq!(protobuf.pk[0].column_index, 3);
         assert_eq!(protobuf.pk[1].column_index, 1);

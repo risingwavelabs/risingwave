@@ -49,12 +49,12 @@ WITH (snapshot = 'false') FROM s_val TABLE 'risedev.t_val';
 
 # A primary key that is not the upstream primary key. Without this check the downstream
 # materialized view accumulates one row per version instead of overwriting.
-statement error Primary key mismatch
+statement error primary key column `payload` not found in upstream MySQL primary key info
 CREATE SOURCE ts_val (id INT, payload VARCHAR, PRIMARY KEY (payload))
 WITH (snapshot = 'false') FROM s_val TABLE 'risedev.t_val';
 
-# An upstream table that does not exist.
-statement error doesn't exist
+# An upstream table that does not exist is rejected during PK metadata discovery.
+statement error primary key column `id` not found in upstream MySQL primary key info
 CREATE SOURCE ts_val (id INT, payload VARCHAR, PRIMARY KEY (id))
 WITH (snapshot = 'false') FROM s_val TABLE 'risedev.no_such_table';
 

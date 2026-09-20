@@ -370,7 +370,7 @@ impl Planner {
                 .external_table
                 .as_ref()
                 .expect("checked by is_cdc_table_source");
-            let desc = CdcTableDesc::from_protobuf(catalog_desc);
+            let desc = CdcTableDesc::from_protobuf(catalog_desc)?;
             let upstream_source = {
                 let session = self.ctx.session_ctx();
                 let catalog_reader = session.env().catalog_reader().read_guard();

@@ -222,6 +222,7 @@ mod tests {
             source_id: SourceId::new(2),
             external_table_name: "mydb.orders".to_owned(),
             pk: vec![ColumnOrder::new(0, OrderType::ascending())],
+            pk_comparisons: vec![risingwave_common::catalog::CdcKeyComparison::Native],
             columns: vec![
                 ColumnDesc::named("id", ColumnId::new(1), DataType::Int32),
                 ColumnDesc::named("selected", ColumnId::new(2), DataType::Boolean),

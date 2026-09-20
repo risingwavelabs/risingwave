@@ -38,7 +38,7 @@ use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::{bail, bail_not_implemented};
-use risingwave_connector::source::cdc::external::{ExternalCdcTableType, ExternalTableConfig};
+use risingwave_connector::source::cdc::external::ExternalCdcTableType;
 use risingwave_connector::source::cdc::{
     build_cdc_table_id, normalize_simple_postgres_quoted_table_name,
 };
@@ -75,9 +75,8 @@ use crate::expr::{Expr, ExprImpl, ExprRewriter};
 use crate::handler::HandlerArgs;
 use crate::handler::cdc::{
     bind_cdc_pk_comparisons_externally, bind_cdc_table_schema, bind_cdc_table_schema_externally,
-    derive_with_options_for_cdc_table,
-    not_null_check_for_cdc_table, reject_pk_filtered_by_debezium_column_filter,
-    sanity_check_for_table_on_cdc_source,
+    derive_with_options_for_cdc_table, not_null_check_for_cdc_table,
+    reject_pk_filtered_by_debezium_column_filter, sanity_check_for_table_on_cdc_source,
 };
 use crate::handler::create_source::{
     bind_connector_props, bind_create_source_or_table_with_connector, bind_source_watermark,
@@ -2362,7 +2361,7 @@ mod tests {
         assert_eq!(table_source.with_properties.len(), 2);
         assert_eq!(
             table_source.with_properties.get_connector().as_deref(),
-            Some("mysql-cdc")
+            Some("postgres-cdc")
         );
         assert_eq!(
             table_source
@@ -2381,7 +2380,7 @@ mod tests {
         let err = frontend
             .run_sql_with_session(
                 user_session.clone(),
-                "SELECT * FROM mysql_query('cdc_table_source', 'SELECT 1')",
+                "SELECT * FROM postgres_query('cdc_table_source', 'SELECT 1')",
             )
             .await
             .unwrap_err();
