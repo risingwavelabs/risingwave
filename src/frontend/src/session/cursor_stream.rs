@@ -387,6 +387,10 @@ impl QueryCursorPgResponseStream {
         self.inner
             .begin_fetch(Arc::new(CursorRowFormat::new(formats, session)));
     }
+
+    fn fail_fetch(&mut self) {
+        self.inner.mark_completed(true);
+    }
 }
 
 impl Stream for QueryCursorPgResponseStream {
@@ -411,7 +415,7 @@ impl Stream for QueryCursorPgResponseStream {
             }
             Poll::Ready(Ok(CursorPgResponsePollItem::DataChunkStreamEnd)) => Poll::Ready(None),
             Poll::Ready(Ok(CursorPgResponsePollItem::Barrier(_))) => {
-                this.inner.mark_completed(true);
+                this.fail_fetch();
                 Poll::Ready(Some(Err(ErrorCode::InternalError(
                     "query cursor received a subscription cursor barrier".to_owned(),
                 )
@@ -490,6 +494,11 @@ impl SubscriptionCursorPgResponseStream {
         self.yielded_rows = 0;
     }
 
+    fn fail_fetch(&mut self) {
+        self.inner.mark_completed(true);
+        self.subscription_state = SubscriptionCursorState::Invalid;
+    }
+
     fn project_row(&mut self, row: Row, metadata: &CursorDataChunkMetadata) -> Result<Row> {
         let CursorDataChunkMetadata::Subscription {
             fields,
@@ -549,8 +558,7 @@ impl Stream for SubscriptionCursorPgResponseStream {
                 Poll::Ready(Ok(CursorPgResponsePollItem::Row { row, metadata })) => {
                     let row = this.project_row(row, &metadata);
                     if row.is_err() {
-                        this.inner.mark_completed(true);
-                        this.subscription_state = SubscriptionCursorState::Invalid;
+                        this.fail_fetch();
                     } else {
                         this.is_idle = false;
                         this.yielded_rows += 1;
@@ -606,8 +614,7 @@ impl Stream for SubscriptionCursorPgResponseStream {
                             }
                         }
                         CursorDataChunkBarrier::QueryEnd => {
-                            this.inner.mark_completed(true);
-                            this.subscription_state = SubscriptionCursorState::Invalid;
+                            this.fail_fetch();
                             return Poll::Ready(Some(Err(ErrorCode::InternalError(
                                 "subscription cursor received a query cursor barrier".to_owned(),
                             )
@@ -618,8 +625,7 @@ impl Stream for SubscriptionCursorPgResponseStream {
                 // Subscription cursor query stream expects never terminated, it will periodically
                 // launch new query to query new log-store epoch when consumed one.
                 Poll::Ready(Ok(CursorPgResponsePollItem::DataChunkStreamEnd)) => {
-                    this.inner.mark_completed(true);
-                    this.subscription_state = SubscriptionCursorState::Invalid;
+                    this.fail_fetch();
                     return Poll::Ready(Some(Err(ErrorCode::InternalError(
                         INVALID_CURSOR_ERROR_MESSAGE.to_owned(),
                     )
