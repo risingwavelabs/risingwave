@@ -45,9 +45,7 @@ use crate::barrier::command::{
     CreateStreamingJobCommandInfo, PostCollectCommand, ReplaceStreamJobPlan, ThrottleConfigMap,
     extract_throttle_config,
 };
-use crate::barrier::edge_builder::{
-    EdgeBuilderFragmentInfo, FragmentEdgeBuildResult, FragmentEdgeBuilder,
-};
+use crate::barrier::edge_builder::{FragmentEdgeBuildResult, FragmentEdgeBuilder};
 use crate::barrier::progress::{CreateMviewProgressTracker, StagingCommitInfo};
 use crate::barrier::rpc::{ControlStreamManager, to_partial_graph_id};
 use crate::barrier::{
@@ -1270,50 +1268,41 @@ impl InflightDatabaseInfo {
                     })
             }));
 
-        let mut builder = FragmentEdgeBuilder::from_existing_fragments(existing_fragment_ids.map(
-            |fragment_id| {
-                (
-                    fragment_id,
-                    EdgeBuilderFragmentInfo::from_inflight(
-                        self.fragment(fragment_id),
-                        to_partial_graph_id(self.database_id, None),
-                        control_stream_manager,
-                    ),
-                )
-            },
-        ));
-        builder.add_new_fragments(new_fragments.map(|(partial_graph_id, fragment)| {
-            (
-                fragment.fragment_id,
-                EdgeBuilderFragmentInfo::from_fragment(
-                    fragment,
-                    stream_actors,
-                    actor_location,
-                    partial_graph_id,
-                    control_stream_manager,
-                ),
+        let database_partial_graph_id = to_partial_graph_id(self.database_id, None);
+        let mut builder = FragmentEdgeBuilder::new()
+            .add_existing_fragments(
+                existing_fragment_ids.map(|fragment_id| self.fragment(fragment_id)),
+                database_partial_graph_id,
+                control_stream_manager,
             )
-        }));
-        let mut builder = builder.finish_fragments();
+            .add_new_logical_fragments(
+                new_fragments,
+                stream_actors,
+                actor_location,
+                control_stream_manager,
+            )
+            .finish_fragments();
         if let Some((info, _)) = info {
-            builder.add_relations(&info.upstream_fragment_downstreams)?;
-            builder.add_relations(&info.stream_job_fragments.downstreams)?;
+            builder = builder
+                .add_relations(&info.upstream_fragment_downstreams)?
+                .add_relations(&info.stream_job_fragments.downstreams)?;
         }
         if let Some(replace_job) = replace_job {
-            builder.add_relations(&replace_job.upstream_fragment_downstreams)?;
-            builder.add_relations(&replace_job.new_fragments.downstreams)?;
+            builder = builder
+                .add_relations(&replace_job.upstream_fragment_downstreams)?
+                .add_relations(&replace_job.new_fragments.downstreams)?;
         }
         if let Some(new_upstream_sink) = new_upstream_sink {
             let sink_fragment_id = new_upstream_sink.sink_fragment_id;
             let new_sink_downstream = &new_upstream_sink.new_sink_downstream;
-            builder.add_edge(sink_fragment_id, new_sink_downstream)?;
+            builder = builder.add_edge(sink_fragment_id, new_sink_downstream)?;
         }
         if let Some(replace_job) = replace_job {
             for (fragment_id, fragment_replacement) in &replace_job.replace_upstream {
                 for (original_upstream_fragment_id, new_upstream_fragment_id) in
                     fragment_replacement
                 {
-                    builder.replace_upstream(
+                    builder = builder.replace_upstream(
                         *fragment_id,
                         *original_upstream_fragment_id,
                         *new_upstream_fragment_id,

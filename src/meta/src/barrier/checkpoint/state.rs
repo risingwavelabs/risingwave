@@ -46,7 +46,7 @@ use crate::barrier::command::{
     CreateStreamingJobCommandInfo, PostCollectCommand, ReschedulePlan, ThrottleConfigMap,
 };
 use crate::barrier::context::CreateIndependentStreamingJobCommandInfo;
-use crate::barrier::edge_builder::{EdgeBuilderFragmentInfo, FragmentEdgeBuilder};
+use crate::barrier::edge_builder::FragmentEdgeBuilder;
 use crate::barrier::info::{
     BarrierInfo, CreateStreamingJobStatus, InflightDatabaseInfo, InflightStreamingJobInfo,
     SubscriberType,
@@ -1609,20 +1609,22 @@ impl DatabaseCheckpointControl {
                         let actor_mapping = &actor_mapping;
                         // Capture the old actor layouts before remapping the inflight fragment
                         // information to fresh actor IDs below.
-                        let old_fragment_edges: Vec<_> = info
-                            .fragment_infos
-                            .values()
-                            .map(|fragment| {
-                                (
-                                    fragment.fragment_id,
-                                    EdgeBuilderFragmentInfo::from_inflight(
-                                        fragment,
-                                        to_partial_graph_id(self.database_id, Some(job_id)),
-                                        partial_graph_manager.control_stream_manager(),
-                                    ),
-                                )
-                            })
-                            .collect();
+                        let database_partial_graph_id = to_partial_graph_id(self.database_id, None);
+                        let mut edge_builder = FragmentEdgeBuilder::new()
+                            .add_existing_fragments(
+                                info.upstream_fragment_downstreams.keys().map(
+                                    |upstream_fragment_id| {
+                                        self.database_info.fragment(*upstream_fragment_id)
+                                    },
+                                ),
+                                database_partial_graph_id,
+                                partial_graph_manager.control_stream_manager(),
+                            )
+                            .add_existing_fragments(
+                                info.fragment_infos.values(),
+                                to_partial_graph_id(self.database_id, Some(job_id)),
+                                partial_graph_manager.control_stream_manager(),
+                            );
                         let new_stream_actors: HashMap<_, _> = info
                             .stream_actors
                             .into_iter()
@@ -1665,40 +1667,16 @@ impl DatabaseCheckpointControl {
                                 }),
                         );
                         // new actors belong to the database partial graph
-                        let partial_graph_id = to_partial_graph_id(self.database_id, None);
-                        let mut edge_builder = FragmentEdgeBuilder::from_existing_fragments(
-                            info.upstream_fragment_downstreams
-                                .keys()
-                                .map(|upstream_fragment_id| {
-                                    let fragment =
-                                        self.database_info.fragment(*upstream_fragment_id);
-                                    (
-                                        fragment.fragment_id,
-                                        EdgeBuilderFragmentInfo::from_inflight(
-                                            fragment,
-                                            partial_graph_id,
-                                            partial_graph_manager.control_stream_manager(),
-                                        ),
-                                    )
-                                })
-                                .chain(old_fragment_edges),
+                        edge_builder = edge_builder.replace_existing_fragment_actors(
+                            new_fragment_info.values(),
+                            database_partial_graph_id,
+                            partial_graph_manager.control_stream_manager(),
                         );
-                        edge_builder.replace_existing_fragment_actors(
-                            new_fragment_info.values().map(|fragment| {
-                                (
-                                    fragment.fragment_id,
-                                    EdgeBuilderFragmentInfo::from_inflight(
-                                        fragment,
-                                        partial_graph_id,
-                                        partial_graph_manager.control_stream_manager(),
-                                    ),
-                                )
-                            }),
-                        );
-                        let mut edge_builder = edge_builder.finish_fragments();
-                        edge_builder.add_relations(&info.upstream_fragment_downstreams)?;
-                        edge_builder.add_relations(&info.downstreams)?;
-                        let mut edges = edge_builder.build();
+                        let mut edges = edge_builder
+                            .finish_fragments()
+                            .add_relations(&info.upstream_fragment_downstreams)?
+                            .add_relations(&info.downstreams)?
+                            .build();
                         let new_actors_to_create = edges.collect_actors_to_create(
                             new_fragment_info.values().map(|fragment| {
                                 (

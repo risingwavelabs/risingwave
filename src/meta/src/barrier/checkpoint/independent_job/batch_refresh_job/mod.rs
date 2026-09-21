@@ -47,14 +47,14 @@ use crate::MetaResult;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
 use crate::barrier::command::{PostCollectCommand, ThrottleConfigMap, extract_throttle_config};
 use crate::barrier::context::CreateIndependentStreamingJobCommandInfo;
-use crate::barrier::edge_builder::{EdgeBuilderFragmentInfo, FragmentEdgeBuilder};
+use crate::barrier::edge_builder::FragmentEdgeBuilder;
 use crate::barrier::info::BarrierInfo;
 use crate::barrier::notifier::NotifierStarter;
 use crate::barrier::partial_graph::{
     CollectedBarrier, PartialGraphBarrierInfo, PartialGraphManager, PartialGraphStat,
 };
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob, collect_done_fragments};
-use crate::barrier::rpc::to_partial_graph_id;
+use crate::barrier::rpc::{ControlStreamManager, to_partial_graph_id};
 use crate::barrier::{
     BackfillOrderState, BackfillProgress, BarrierKind, FragmentBackfillProgress, TracedEpoch,
 };
@@ -221,6 +221,7 @@ impl RenderedIndependentJobActors {
         definition: &str,
         actor_id_generator: &AtomicU32,
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
+        control_stream_manager: &ControlStreamManager,
         database_resource_group: &str,
         streaming_job_model: &streaming_job::Model,
     ) -> MetaResult<Self> {
@@ -375,20 +376,15 @@ impl BatchRefreshJobCheckpointControl {
         )?;
 
         // Step 4: Build edges (internal-only, no upstream).
-        let mut builder = FragmentEdgeBuilder::empty();
-        builder.add_new_fragments(fragment_infos.values().map(|f| {
-            (
-                f.fragment_id,
-                EdgeBuilderFragmentInfo::from_inflight_with_worker_nodes(
-                    f,
-                    partial_graph_id,
-                    worker_nodes,
-                ),
+        let mut edges = FragmentEdgeBuilder::new()
+            .add_new_fragments(
+                fragment_infos.values(),
+                partial_graph_id,
+                control_stream_manager,
             )
-        }));
-        let mut builder = builder.finish_fragments();
-        builder.add_relations(downstreams)?;
-        let mut edges = builder.build();
+            .finish_fragments()
+            .add_relations(downstreams)?
+            .build();
 
         let actors_to_create = edges.collect_actors_to_create(fragment_infos.values().map(|f| {
             (
@@ -538,6 +534,7 @@ impl BatchRefreshJobCheckpointControl {
             &create_info.info.definition,
             actor_id_generator,
             worker_nodes,
+            partial_graph_manager.control_stream_manager(),
             &create_info.info.database_resource_group,
             &create_info.info.streaming_job_model,
             partial_graph_id,
@@ -1271,6 +1268,7 @@ impl BatchRefreshJobCheckpointControl {
             &context.definition,
             actor_id_counter,
             worker_nodes,
+            partial_graph_manager.control_stream_manager(),
             &context.database_resource_group,
             &context.streaming_job_model,
             self.partial_graph_id,
