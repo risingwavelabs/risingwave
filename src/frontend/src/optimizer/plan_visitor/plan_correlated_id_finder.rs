@@ -40,8 +40,8 @@ impl PlanCorrelatedIdFinder {
 }
 
 impl LogicalPlanVisitor for PlanCorrelatedIdFinder {
-    /// `correlated_input_ref` can only appear in `LogicalProject`, `LogicalFilter`,
-    /// `LogicalJoin` or the `filter` clause of `PlanAggCall` of `LogicalAgg` now.
+    /// `correlated_input_ref` can appear in expressions owned by logical plan nodes,
+    /// including `LogicalValues` rows.
     type Result = ();
 
     type DefaultBehavior = impl DefaultBehavior<Self::Result>;
@@ -155,7 +155,6 @@ mod tests {
     use risingwave_common::types::DataType;
 
     use super::*;
-    use crate::expr::CorrelatedInputRef;
     use crate::optimizer::optimizer_context::OptimizerContext;
 
     #[test]
@@ -163,7 +162,7 @@ mod tests {
         let ctx = OptimizerContext::mock();
         let schema = Schema::new(vec![Field::with_name(DataType::Int32, "v")]);
 
-        let mut correlated = CorrelatedInputRef::new(0, DataType::Int32, 1);
+        let mut correlated = super::CorrelatedInputRef::new(0, DataType::Int32, 1);
         correlated.set_correlated_id(42);
 
         let values = LogicalValues::new(vec![vec![correlated.into()]], schema, ctx).into();
