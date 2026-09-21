@@ -15,10 +15,12 @@
 mod coordinator_worker;
 mod handle;
 mod manager;
+mod term;
 
 use futures::stream::BoxStream;
 pub use manager::SinkCoordinatorManager;
 use risingwave_pb::connector_service::{CoordinateRequest, CoordinateResponse};
+pub use term::SinkWriterTerms;
 use tokio::sync::mpsc::UnboundedSender;
 use tonic::Status;
 

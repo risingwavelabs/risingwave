@@ -37,6 +37,7 @@ pub struct CoordinatedLogSinker<W: SinkWriter<CommitMetadata = Option<SinkMetada
     sink_coordinate_client: SinkCoordinationRpcClientEnum,
     param: SinkParam,
     vnode_bitmap: Bitmap,
+    term_id: String,
     commit_checkpoint_interval: NonZeroU64,
     sink_writer_metrics: SinkWriterMetrics,
 }
@@ -64,6 +65,7 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> CoordinatedLogSinker<
                 .vnode_bitmap
                 .clone()
                 .unwrap_or_else(|| Bitmap::singleton().clone()),
+            term_id: writer_param.term_id.clone(),
             commit_checkpoint_interval,
             sink_writer_metrics: SinkWriterMetrics::new(writer_param),
         })
@@ -75,7 +77,7 @@ impl<W: SinkWriter<CommitMetadata = Option<SinkMetadata>>> LogSinker for Coordin
     async fn consume_log_and_sink(self, mut log_reader: impl SinkLogReader) -> Result<!> {
         let (mut coordinator_stream_handle, log_store_rewind_start_epoch) = self
             .sink_coordinate_client
-            .new_stream_handle(&self.param, self.vnode_bitmap)
+            .new_stream_handle(&self.param, self.vnode_bitmap, self.term_id)
             .await?;
         let mut sink_writer = self.writer;
         log_reader.start_from(log_store_rewind_start_epoch).await?;

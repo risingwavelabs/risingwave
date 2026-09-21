@@ -41,6 +41,7 @@ use crate::controller::session_params::{SessionParamsController, SessionParamsCo
 use crate::controller::system_param::{SystemParamsController, SystemParamsControllerRef};
 use crate::hummock::sequence::SequenceGenerator;
 use crate::manager::event_log::{EventLogManagerRef, start_event_log_manager};
+use crate::manager::sink_coordination::SinkWriterTerms;
 use crate::manager::{IdleManager, IdleManagerRef, NotificationManager, NotificationManagerRef};
 use crate::model::ClusterId;
 
@@ -64,6 +65,9 @@ pub struct MetaSrvEnv {
     notification_manager: NotificationManagerRef,
 
     pub shared_actor_info: SharedActorInfos,
+
+    /// Recovery terms whose sink writers the sink coordinator currently admits.
+    sink_writer_terms: SinkWriterTerms,
 
     /// stream client pool memorization.
     stream_client_pool: StreamClientPoolRef,
@@ -497,6 +501,7 @@ impl MetaSrvEnv {
             session_param_manager_impl: session_param_controller,
             meta_store_impl: meta_store_impl.clone(),
             shared_actor_info: SharedActorInfos::new(notification_manager.clone()),
+            sink_writer_terms: SinkWriterTerms::default(),
             notification_manager,
             stream_client_pool,
             frontend_client_pool,
@@ -577,6 +582,10 @@ impl MetaSrvEnv {
 
     pub fn await_tree_reg(&self) -> &await_tree::Registry {
         &self.await_tree_reg
+    }
+
+    pub fn sink_writer_terms(&self) -> &SinkWriterTerms {
+        &self.sink_writer_terms
     }
 
     pub fn shared_actor_infos(&self) -> &SharedActorInfos {
