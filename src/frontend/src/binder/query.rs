@@ -19,7 +19,9 @@ use std::rc::Rc;
 use risingwave_common::catalog::Schema;
 use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
-use risingwave_sqlparser::ast::{Cte, CteInner, Expr, Fetch, OrderByExpr, Query, Value, With};
+use risingwave_sqlparser::ast::{
+    Cte, CteInner, Expr, Fetch, Ident, OrderByExpr, Query, Value, With,
+};
 use thiserror_ext::AsReport;
 
 use super::BoundValues;
@@ -402,14 +404,13 @@ impl Binder {
                     );
                 }
                 CteInner::ChangeLog { from, key } => {
-                    if key.is_some() {
-                        return Err(ErrorCode::BindError(
-                            "AS CHANGELOG with KEY is not supported yet".to_owned(),
-                        )
-                        .into());
-                    }
                     self.push_context();
                     let from_table_relation = self.bind_relation_by_name(from, None, None, true)?;
+                    let key_indices = key
+                        .as_ref()
+                        .map(|key| self.bind_changelog_key(key))
+                        .transpose()?;
+
                     self.pop_context()?;
                     self.context.cte_to_relation.insert(
                         table_name,
@@ -417,6 +418,7 @@ impl Binder {
                             share_id,
                             state: BindingCteState::ChangeLog {
                                 table: from_table_relation,
+                                key_indices,
                             },
                             alias: alias.clone(),
                         })),
@@ -425,6 +427,34 @@ impl Binder {
             }
         }
         Ok(())
+    }
+
+    fn bind_changelog_key(&self, key: &[Ident]) -> Result<Vec<usize>> {
+        let mut seen = HashSet::new();
+
+        key.iter()
+            .map(|ident| {
+                let name = ident.real_value();
+                let index = self.context.get_column_binding_index(&None, &None, &name)?;
+                let column = &self.context.columns[index];
+
+                if column.is_hidden {
+                    return Err(ErrorCode::BindError(format!(
+                        "Changelog key column \"{name}\" must not be hidden"
+                    ))
+                    .into());
+                }
+
+                if !seen.insert(column.index) {
+                    return Err(ErrorCode::BindError(format!(
+                        "Changelog key column \"{name}\" specified more than once"
+                    ))
+                    .into());
+                }
+
+                Ok(index)
+            })
+            .collect()
     }
 }
 
