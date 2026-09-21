@@ -1769,6 +1769,10 @@ mod cursor_lifecycle_tests {
             fn abort_fetch(&mut self) {
                 self.aborts += 1;
             }
+
+            fn fail_fetch(&mut self) {
+                panic!("this fixture does not produce terminal failures");
+            }
         }
 
         let rows = futures::stream::iter((1..=3).map(|value| {
