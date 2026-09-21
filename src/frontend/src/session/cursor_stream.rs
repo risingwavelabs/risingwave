@@ -984,6 +984,9 @@ impl CursorPgResponseStream for SubscriptionCursorPgResponseStream {
     fn fail_fetch(&mut self) {
         self.inner.mark_completed(true);
         self.fetch_state.subscription_state = SubscriptionCursorState::Invalid;
+        self.fetch_state.seek_pk_row = None;
+        self.fetch_state_to_commit = None;
+        self.fetch_format = None;
     }
 }
 
@@ -2582,6 +2585,7 @@ mod tests {
         for source_error in [false, true] {
             let (mut stream, event_tx) =
                 pending_subscription_response_stream_for_test(&fields, Instant::now());
+            stream.fetch_state.seek_pk_row = Some(OwnedRow::new(vec![Some(7i32.into())]));
             if source_error {
                 event_tx
                     .try_send(Err(anyhow::anyhow!("injected source error").into()))
@@ -2601,6 +2605,9 @@ mod tests {
                 stream.subscription_state(),
                 SubscriptionCursorState::Invalid
             ));
+            assert!(stream.fetch_state.seek_pk_row.is_none());
+            assert!(stream.fetch_state_to_commit.is_none());
+            assert!(stream.fetch_format.is_none());
             // Once invalid, every poll returns an error, even before another FETCH begins.
             let error = stream.next().await.unwrap().unwrap_err();
             assert!(error.to_string().contains("ended unexpectedly"));
