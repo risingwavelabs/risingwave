@@ -249,17 +249,14 @@ impl TableIndex {
             .collect()
     }
 
-    /// Map the distribution key of the primary table to the columns of the index table.
-    ///
-    /// Returns `None` if some distribution key column is not stored in the index table.
-    pub fn primary_table_distribute_key_ref_to_index_table(&self) -> Option<Vec<usize>> {
+    pub fn primary_table_distribute_key_ref_to_index_table(&self) -> Vec<usize> {
         let mapping = self.primary_to_secondary_mapping();
 
         self.primary_table
             .distribution_key
             .iter()
-            .map(|x| mapping.get(x).copied())
-            .collect()
+            .map(|x| *mapping.get(x).unwrap())
+            .collect_vec()
     }
 
     pub fn full_covering(&self) -> bool {
