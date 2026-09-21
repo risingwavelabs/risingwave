@@ -120,6 +120,14 @@ impl BlockStreamIterator {
         self.iter.is_some()
     }
 
+    async fn ensure_block_iter(&mut self) -> HummockResult<()> {
+        if self.iter.is_none() {
+            let (buf, uncompressed_size) = self.download_next_block().await?.unwrap();
+            self.init_block_iter(buf, uncompressed_size)?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn init_block_iter(
         &mut self,
         buf: Bytes,
@@ -139,7 +147,7 @@ impl BlockStreamIterator {
     }
 
     /// Upper bound used to decide whether the unread block precedes the other input.
-    /// The next block's first key is exclusive; the SST's largest key is inclusive.
+    /// The next block's lower bound is exclusive; the SST's largest key is inclusive.
     /// Callers must compare user keys strictly to avoid copying across versions of one key.
     fn next_block_upper_bound(&self) -> &[u8] {
         let sstable = &self.block_stream.sstable;
@@ -171,6 +179,7 @@ impl BlockStreamIterator {
         }
     }
 
+    /// Current decoded key, or a possibly shortened lower bound of the unread block.
     fn key(&self) -> FullKey<&[u8]> {
         match self.iter.as_ref() {
             Some(iter) => iter.key(),
@@ -455,11 +464,22 @@ impl<B: FilterBuilder, C: CompactionFilter> CompactorRunner<B, C> {
     /// Merge while both inputs have data, retaining partially consumed decoded blocks.
     async fn merge_inputs(&mut self) -> HummockResult<()> {
         while self.left.is_valid() && self.right.is_valid() {
-            let ret = self
+            let mut ret = self
                 .left
                 .current_sstable()
                 .key()
                 .cmp(&self.right.current_sstable().key());
+            if ret == Ordering::Equal {
+                // Equal block lower bounds need not represent duplicate keys. Compare the
+                // actual keys before choosing an input or asserting that the ranges overlap.
+                self.left.current_sstable().ensure_block_iter().await?;
+                self.right.current_sstable().ensure_block_iter().await?;
+                ret = self
+                    .left
+                    .current_sstable()
+                    .key()
+                    .cmp(&self.right.current_sstable().key());
+            }
             let (first, second) = if ret == Ordering::Less {
                 (&mut self.left, &mut self.right)
             } else {
@@ -680,10 +700,7 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
         sstable_iter: &mut BlockStreamIterator,
         target_key: Option<FullKey<&[u8]>>,
     ) -> HummockResult<()> {
-        if sstable_iter.iter.is_none() {
-            let (buf, uncompressed_size) = sstable_iter.download_next_block().await?.unwrap();
-            sstable_iter.init_block_iter(buf, uncompressed_size)?;
-        }
+        sstable_iter.ensure_block_iter().await?;
         let consume_whole_block = target_key.is_none();
         let target_key = target_key.unwrap_or_else(|| {
             FullKey::decode(&sstable_iter.block_stream.sstable.meta.largest_key)

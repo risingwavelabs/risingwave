@@ -1481,6 +1481,110 @@ pub(crate) mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn test_fast_compact_equal_shortened_block_keys() {
+        let key = |suffix: &[u8]| {
+            let mut table_key = VirtualNode::ZERO.to_be_bytes().to_vec();
+            table_key.extend_from_slice(suffix);
+            FullKey::for_test(TableId::new(1), table_key, test_epoch(300))
+        };
+        let put = |suffix: &[u8]| (key(suffix), HummockValue::put(suffix.to_vec()));
+        for both_shortened in [false, true] {
+            for swap_inputs in [false, true] {
+                let store = mock_sstable_store().await;
+                let catalog = CompactionCatalogAgent::for_test(vec![1]);
+                let options = SstableBuilderOptions {
+                    shorten_block_meta_key_threshold: Some(1),
+                    ..Default::default()
+                };
+                // Distinct physical keys can share the same shortened block lower bound.
+                // Also cover a lower bound equal to the other input's actual first key.
+                let left = vec![vec![put(&[1, 8])], vec![put(&[3, 8])]];
+                let right = if both_shortened {
+                    vec![vec![put(&[2, 8])], vec![put(&[3, 9])]]
+                } else {
+                    vec![vec![put(&[3])]]
+                };
+                let mut expected = left.iter().chain(&right).flatten().cloned().collect_vec();
+                expected.sort_by(|a, b| a.0.cmp(&b.0));
+                let mut inputs = vec![];
+                for (index, blocks) in [left, right].into_iter().enumerate() {
+                    let block_count = blocks.len();
+                    let info = build_test_sstable_with_blocks(
+                        (index + 1) as u64,
+                        blocks,
+                        options.clone(),
+                        store.clone(),
+                        catalog.clone(),
+                    )
+                    .await;
+                    let table = store
+                        .sstable(&info, &mut StoreLocalStatistic::default())
+                        .await
+                        .unwrap();
+                    assert_eq!(table.meta.block_metas.len(), block_count);
+                    assert_eq!(
+                        FullKey::decode(&table.meta.block_metas.last().unwrap().smallest_key),
+                        key(&[3]).to_ref()
+                    );
+                    inputs.push(InputLevel {
+                        level_idx: 5 + index as u32,
+                        level_type: risingwave_pb::hummock::LevelType::Nonoverlapping,
+                        table_infos: vec![info],
+                    });
+                }
+                if swap_inputs {
+                    inputs.swap(0, 1);
+                }
+                let task = CompactTask {
+                    input_ssts: inputs,
+                    existing_table_ids: vec![TableId::new(1)],
+                    task_id: 1,
+                    splits: vec![KeyRange::inf()],
+                    target_level: 6,
+                    target_file_size: options.capacity as u64,
+                    sstable_filter_type:
+                        risingwave_pb::hummock::PbSstableFilterType::SstableFilterXor16,
+                    sstable_filter_layout: risingwave_pb::hummock::PbSstableFilterLayout::Blocked,
+                    gc_delete_keys: true,
+                    ..Default::default()
+                };
+                let context = CompactorContext::new_local_compact_context(
+                    Arc::new(StorageOpts::default()),
+                    store.clone(),
+                    Arc::new(CompactorMetrics::unused()),
+                    None,
+                );
+                let (output, _) = FastCompactorRunner::<BlockedXor16FilterBuilder, _>::new(
+                    context,
+                    task,
+                    catalog,
+                    SharedComapctorObjectIdManager::for_test(VecDeque::from_iter(22..30)),
+                    Arc::new(TaskProgress::default()),
+                    DummyCompactionFilter {},
+                )
+                .run()
+                .await
+                .unwrap();
+                let output = output.into_iter().map(|sst| sst.sst_info).collect_vec();
+                assert!(can_concat(&output));
+                let mut iter = ConcatIterator::new(
+                    output,
+                    store,
+                    Arc::new(SstableIteratorReadOptions::default()),
+                );
+                iter.rewind().await.unwrap();
+                for (key, value) in expected {
+                    assert!(iter.is_valid());
+                    assert_eq!(iter.key(), key.to_ref());
+                    assert_eq!(iter.value(), value.as_slice());
+                    iter.next().await.unwrap();
+                }
+                assert!(!iter.is_valid());
+            }
+        }
+    }
+
     async fn test_fast_compact_impl(data: Vec<Vec<KeyValue>>) {
         let existing_table_id = TableId::new(1);
         let compact_ctx = get_compactor_context_impl(
