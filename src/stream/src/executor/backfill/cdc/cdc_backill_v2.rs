@@ -1158,7 +1158,9 @@ mod tests {
 
     use futures::StreamExt;
     use risingwave_common::array::StreamChunk;
-    use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+    use risingwave_common::catalog::{
+        CdcKeyComparison, ColumnDesc, ColumnId, Field, Schema, TableId,
+    };
     use risingwave_common::row::{OwnedRow, Row};
     use risingwave_common::types::{DataType, ScalarImpl};
     use risingwave_common::util::epoch::{EpochExt, test_epoch};
