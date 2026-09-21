@@ -49,9 +49,9 @@ use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFacto
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    Block, BlockBuilder, BlockHolder, BlockIterator, BlockMeta, BlockedXor16FilterBuilder,
-    CachePolicy, CompressionAlgorithm, FilterBuilder, GetObjectId, HummockResult,
-    SstableBuilderOptions, StreamingSstableWriterFactory, TableHolder,
+    Block, BlockHolder, BlockIterator, BlockMeta, BlockedXor16FilterBuilder, CachePolicy,
+    FilterBuilder, GetObjectId, HummockResult, SstableBuilderOptions,
+    StreamingSstableWriterFactory, TableHolder,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 
@@ -292,7 +292,6 @@ pub struct CompactorRunner<
     right: Box<ConcatSstableIterator>,
     task_id: u64,
     executor: CompactTaskExecutor<RemoteBuilderFactory<StreamingSstableWriterFactory, B>, C>,
-    compression_algorithm: CompressionAlgorithm,
     metrics: Arc<CompactorMetrics>,
 }
 
@@ -306,8 +305,7 @@ impl<B: FilterBuilder, C: CompactionFilter> CompactorRunner<B, C> {
         compaction_filter: C,
     ) -> Self {
         let mut options: SstableBuilderOptions = context.storage_opts.as_ref().into();
-        let compression_algorithm: CompressionAlgorithm = task.compression_algorithm.into();
-        options.compression_algorithm = compression_algorithm;
+        options.compression_algorithm = task.compression_algorithm.into();
         options.capacity = task.target_file_size as usize;
         let estimated_output_key_count =
             estimate_output_key_count_for_task(&task, options.capacity);
@@ -419,7 +417,6 @@ impl<B: FilterBuilder, C: CompactionFilter> CompactorRunner<B, C> {
             right,
             task_id: task.task_id,
             metrics: context.compactor_metrics,
-            compression_algorithm,
         }
     }
 
@@ -507,20 +504,12 @@ impl<B: FilterBuilder, C: CompactionFilter> CompactorRunner<B, C> {
                     }
                     let smallest_key = smallest_key.to_vec();
 
-                    let (mut block, _) = first
+                    let (block, _) = first
                         .current_sstable()
                         .download_next_block()
                         .await?
                         .unwrap();
-                    let (filter_data, mut meta) =
-                        first.current_sstable().current_block_raw_metadata();
-                    let algorithm = Block::get_algorithm(&block)?;
-                    if algorithm == CompressionAlgorithm::None
-                        && algorithm != self.compression_algorithm
-                    {
-                        block = BlockBuilder::compress_block(block, self.compression_algorithm)?;
-                        meta.len = block.len() as u32;
-                    }
+                    let (filter_data, meta) = first.current_sstable().current_block_raw_metadata();
 
                     let largest_key = first.current_sstable().current_block_largest();
                     self.executor
@@ -651,15 +640,14 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
         largest_key: Vec<u8>,
         meta: BlockMeta,
     ) -> HummockResult<()> {
-        let block_len = block.len() as u64;
         let key_count = meta.total_key_count;
-        if self
+        if let Some(block_len) = self
             .builder
             .add_raw_block(block, filter_data, smallest_key, largest_key, meta)
             .await?
         {
             self.skip_raw_block_count += 1;
-            self.skip_raw_block_size += block_len;
+            self.skip_raw_block_size += block_len as u64;
         }
         self.may_report_process_key(key_count);
         // Decoded-key state precedes this block and must not affect subsequent rows.

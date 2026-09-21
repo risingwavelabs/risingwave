@@ -75,7 +75,7 @@ pub(crate) mod tests {
     use risingwave_storage::hummock::test_utils::{ReadOptions, *};
     use risingwave_storage::hummock::value::HummockValue;
     use risingwave_storage::hummock::{
-        BlockedXor16FilterBuilder, CachePolicy, CompressionAlgorithm, FilterBuilder,
+        Block, BlockedXor16FilterBuilder, CachePolicy, CompressionAlgorithm, FilterBuilder,
         HummockStorage as GlobalHummockStorage, HummockStorage, LocalHummockStorage, MemoryLimiter,
         ObjectIdManager, SharedComapctorObjectIdManager, Sstable, SstableBuilder,
         SstableBuilderOptions, SstableIteratorReadOptions, SstableWriterOptions,
@@ -1403,6 +1403,111 @@ pub(crate) mod tests {
                             "{case}: value_size={value_size}, compression={compression:?}, swap={swap_inputs}"
                         );
                     }
+                }
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn test_fast_compact_raw_block_compression() {
+        let algorithms = [
+            CompressionAlgorithm::None,
+            CompressionAlgorithm::Lz4,
+            CompressionAlgorithm::Zstd,
+        ];
+        let key = |index| {
+            let mut table_key = VirtualNode::ZERO.to_be_bytes().to_vec();
+            table_key.push(index);
+            FullKey::for_test(TableId::new(1), table_key, test_epoch(100))
+        };
+        for input_compression in algorithms {
+            for output_compression in algorithms {
+                for swap_inputs in [false, true] {
+                    let store = mock_sstable_store().await;
+                    let catalog = CompactionCatalogAgent::for_test(vec![1]);
+                    let options = SstableBuilderOptions {
+                        compression_algorithm: input_compression,
+                        ..Default::default()
+                    };
+                    let mut inputs = vec![];
+                    // Disjoint SSTs exercise raw copies in both merge_inputs and
+                    // drain_remaining, without a pending decoded block to coalesce into.
+                    for (object_id, indices) in [(1, [1, 2]), (2, [3, 4])] {
+                        inputs.push(
+                            build_test_sstable_with_blocks(
+                                object_id,
+                                indices
+                                    .into_iter()
+                                    .map(|index| {
+                                        vec![(key(index), HummockValue::put(vec![index; 600]))]
+                                    })
+                                    .collect(),
+                                options.clone(),
+                                store.clone(),
+                                catalog.clone(),
+                            )
+                            .await,
+                        );
+                    }
+                    if swap_inputs {
+                        inputs.swap(0, 1);
+                    }
+                    let right = inputs.split_off(1);
+                    let mut task = fast_compaction_task(
+                        inputs,
+                        right,
+                        vec![TableId::new(1)],
+                        options.capacity as u64,
+                    );
+                    task.compression_algorithm = u8::from(output_compression).into();
+                    let context =
+                        get_compactor_context_impl(Arc::new(StorageOpts::default()), store.clone());
+                    let (output, stats) = new_fast_compactor_runner(context, task, catalog)
+                        .run()
+                        .await
+                        .unwrap();
+                    assert_eq!(stats.iter_total_key_counts, 0, "expected only raw copies");
+                    assert_eq!(output.len(), 1);
+                    let info = &output[0].sst_info;
+                    let table = store
+                        .sstable(info, &mut StoreLocalStatistic::default())
+                        .await
+                        .unwrap();
+                    assert_eq!(table.meta.block_metas.len(), 4);
+                    let expected = if input_compression == CompressionAlgorithm::None {
+                        output_compression
+                    } else {
+                        input_compression
+                    };
+                    let mut stream = store
+                        .get_stream_for_blocks(info.object_id, &table.meta.block_metas)
+                        .await
+                        .unwrap();
+                    for meta in &table.meta.block_metas {
+                        let (block, _) = stream.next_block().await.unwrap().unwrap();
+                        assert_eq!(block.len(), meta.len as usize);
+                        assert_eq!(
+                            Block::get_algorithm(&block).unwrap(),
+                            expected,
+                            "input={input_compression:?}, output={output_compression:?}, swap={swap_inputs}"
+                        );
+                    }
+                    assert!(stream.next_block().await.unwrap().is_none());
+                    // Reading every key/value also checks the recompressed blocks' checksums
+                    // and the offsets/lengths used to locate subsequent blocks.
+                    let mut iter = ConcatIterator::new(
+                        vec![info.clone()],
+                        store,
+                        Arc::new(SstableIteratorReadOptions::default()),
+                    );
+                    iter.rewind().await.unwrap();
+                    for index in 1..=4 {
+                        assert!(iter.is_valid());
+                        assert_eq!(iter.key(), key(index).to_ref());
+                        assert_eq!(iter.value(), HummockValue::put(vec![index; 600]).as_slice());
+                        iter.next().await.unwrap();
+                    }
+                    assert!(!iter.is_valid());
                 }
             }
         }
