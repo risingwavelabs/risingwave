@@ -627,22 +627,28 @@ mod tests {
     /// Semicolons *inside* the query (multi-statement batches) must be
     /// rejected. This is the critical guard against
     /// `SELECT 1; DELETE FROM test` running DML with the source
-    /// credentials.
+    /// credentials. (The new top-level DML/DDL keyword check fires
+    /// *before* the trailing-semicolon check, so the error message
+    /// for these probes mentions the offending keyword rather than
+    /// `semicolon-delimited` — both are valid rejections.)
     #[test]
     fn validate_read_only_query_rejects_multi_statement_batch() {
-        let err = validate_read_only_query("SELECT 1; DELETE FROM test").unwrap_err();
-        let msg = err.to_string();
-        assert!(
-            msg.contains("semicolon-delimited"),
-            "expected error to mention semicolon-delimited batches, got: {msg}"
-        );
-
-        // DML after a comment must still be rejected.
-        let err = validate_read_only_query(
+        // Either error message is acceptable: the new top-level DML/DDL
+        // check is stricter than the semicolon-delimited check, so it
+        // fires first.
+        for q in [
+            "SELECT 1; DELETE FROM test",
             "-- a comment\nSELECT 1; /* another comment */ DROP TABLE test",
-        )
-        .unwrap_err();
-        assert!(err.to_string().contains("semicolon-delimited"));
+        ] {
+            let err = validate_read_only_query(q).unwrap_err();
+            let msg = err.to_string();
+            assert!(
+                msg.contains("semicolon-delimited")
+                    || msg.contains("not allowed")
+                    || msg.contains("at the top level"),
+                "expected rejection for {q:?}, got: {msg}"
+            );
+        }
     }
 
     /// DML / DDL statements are rejected regardless of case.
@@ -690,14 +696,19 @@ mod tests {
     /// masker ate the `--` inside the `'--'` literal, hiding the
     /// trailing `; DELETE` from the validation. The single-pass masker
     /// now processes strings before comments, so the closing `'` is
-    /// recognized correctly and the `;` triggers the rejection.
+    /// recognized correctly. The query is still rejected — by the
+    /// new top-level DML/DDL keyword check first, then by the
+    /// semicolon-delimited check.
     #[test]
     fn validate_read_only_query_rejects_delete_after_string_with_dashes() {
         let q = "SELECT '--'\n; DELETE FROM test";
         let err = validate_read_only_query(q).unwrap_err();
+        let msg = err.to_string();
         assert!(
-            err.to_string().contains("semicolon-delimited"),
-            "expected semicolon-delimited error for {q:?}, got: {err}"
+            msg.contains("semicolon-delimited")
+                || msg.contains("not allowed")
+                || msg.contains("at the top level"),
+            "expected rejection for {q:?}, got: {msg}"
         );
     }
 
@@ -768,20 +779,24 @@ mod tests {
         );
     }
 
-    /// Bypass #4: semicolon-free DDL after a SELECT.
+    /// Bypass #4: semicolon-free DDL after a SELECT. The new top-level
+    /// DML/DDL check rejects each example with a specific error
+    /// message naming the offending keyword.
     #[test]
     fn validate_read_only_query_rejects_semicolon_free_ddl() {
-        for q in [
-            "SELECT 1 DROP TABLE test",
-            "SELECT 1; DROP TABLE test", // already caught by `;` check
-            "SELECT 1 AS x TRUNCATE TABLE test",
-            "SELECT 1 EXEC sp_helpdb",
+        for (q, expected_kw) in [
+            ("SELECT 1 DROP TABLE test", "DROP"),
+            ("SELECT 1; DROP TABLE test", "DROP"),   // also caught by `;` check
+            ("SELECT 1 AS x TRUNCATE TABLE test", "TRUNCATE"),
+            ("SELECT 1 EXEC sp_helpdb", "EXEC"),
         ] {
             let err = validate_read_only_query(q).unwrap_err();
+            let msg = err.to_string();
             assert!(
-                err.to_string().contains("not allowed")
-                    || err.to_string().contains("semicolon-delimited"),
-                "expected rejection for {q:?}, got: {err}"
+                msg.contains("not allowed")
+                    || msg.contains(expected_kw)
+                    || msg.contains("semicolon-delimited"),
+                "expected rejection for {q:?}, got: {msg}"
             );
         }
     }
