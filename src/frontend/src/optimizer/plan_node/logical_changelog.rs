@@ -12,12 +12,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
+
 use super::expr_visitable::ExprVisitable;
 use super::generic::{_CHANGELOG_ROW_ID, CHANGELOG_OP, GenericPlanRef};
 use super::utils::impl_distill_by_unit;
 use super::{
     BatchPlanRef, ColPrunable, ColumnPruningContext, ExprRewritable, Logical,
-    LogicalPlanRef as PlanRef, PlanBase, PlanTreeNodeUnary, PredicatePushdown,
+    LogicalPlanRef as PlanRef, LogicalProject, PlanBase, PlanTreeNodeUnary, PredicatePushdown,
     RewriteStreamContext, StreamChangeLog, StreamPlanRef, ToBatch, ToStream, ToStreamContext,
     gen_filter_and_pushdown, generic,
 };
@@ -34,12 +36,17 @@ pub struct LogicalChangeLog {
 }
 
 impl LogicalChangeLog {
-    pub fn create(input: PlanRef) -> PlanRef {
-        Self::new(input, true, true).into()
+    pub fn create(input: PlanRef, key_indices: Option<Vec<usize>>) -> PlanRef {
+        Self::new(input, key_indices, true, true).into()
     }
 
-    pub fn new(input: PlanRef, need_op: bool, need_changelog_row_id: bool) -> Self {
-        let core = generic::ChangeLog::new(input, need_op, need_changelog_row_id);
+    pub fn new(
+        input: PlanRef,
+        key_indices: Option<Vec<usize>>,
+        need_op: bool,
+        need_changelog_row_id: bool,
+    ) -> Self {
+        let core = generic::ChangeLog::new(input, key_indices, need_op, need_changelog_row_id);
         Self::with_core(core)
     }
 
@@ -55,7 +62,9 @@ impl PlanTreeNodeUnary<Logical> for LogicalChangeLog {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.core.need_op, self.core.need_changelog_row_id)
+        let core = self.core.clone_with_input(input);
+
+        Self::with_core(core)
     }
 
     fn rewrite_with_input(
@@ -63,7 +72,12 @@ impl PlanTreeNodeUnary<Logical> for LogicalChangeLog {
         input: PlanRef,
         input_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
-        let changelog = Self::new(input, self.core.need_op, true);
+        let key_indices = self.core.key_indices.as_ref().map(|key| {
+            key.iter()
+                .map(|&index| input_col_change.map(index))
+                .collect()
+        });
+        let changelog = Self::new(input, key_indices, self.core.need_op, true);
 
         let out_col_change = if self.core.need_op {
             let (mut output_vec, len) = input_col_change.into_parts();
@@ -107,7 +121,7 @@ impl ColPrunable for LogicalChangeLog {
         let fields = self.schema().fields();
         let mut need_op = false;
         let mut need_changelog_row_id = false;
-        let new_required_cols: Vec<_> = required_cols
+        let mut input_required_cols = required_cols
             .iter()
             .filter_map(|a| {
                 if let Some(f) = fields.get(*a) {
@@ -124,10 +138,56 @@ impl ColPrunable for LogicalChangeLog {
                     Some(*a)
                 }
             })
-            .collect();
+            .collect_vec();
 
-        let new_input = self.input().prune_col(&new_required_cols, ctx);
-        Self::new(new_input, need_op, need_changelog_row_id).into()
+        if let Some(key) = &self.core.key_indices {
+            for &index in key {
+                if !input_required_cols.contains(&index) {
+                    input_required_cols.push(index);
+                }
+            }
+        }
+
+        let new_input = self.input().prune_col(&input_required_cols, ctx);
+        let input_mapping = ColIndexMapping::with_remaining_columns(
+            &input_required_cols,
+            self.input().schema().len(),
+        );
+        let key_indices = self
+            .core
+            .key_indices
+            .as_ref()
+            .map(|key| key.iter().map(|&index| input_mapping.map(index)).collect());
+
+        let changelog: PlanRef =
+            Self::new(new_input, key_indices, need_op, need_changelog_row_id).into();
+
+        let (mut output_mapping, new_output_len) = input_mapping.into_parts();
+
+        if self.core.need_op {
+            output_mapping.push(need_op.then_some(new_output_len));
+        }
+
+        if self.core.need_changelog_row_id {
+            output_mapping
+                .push(need_changelog_row_id.then_some(new_output_len + usize::from(need_op)));
+        }
+
+        let output_len = changelog.schema().len();
+        let output_mapping = ColIndexMapping::new(output_mapping, output_len);
+        let output_required_cols = required_cols
+            .iter()
+            .map(|&index| output_mapping.map(index))
+            .collect_vec();
+
+        if output_required_cols.iter().copied().eq(0..output_len) {
+            changelog
+        } else {
+            let output_mapping =
+                ColIndexMapping::with_remaining_columns(&output_required_cols, output_len);
+
+            LogicalProject::with_mapping(changelog, output_mapping).into()
+        }
     }
 }
 
@@ -139,6 +199,10 @@ impl ToBatch for LogicalChangeLog {
 
 impl ToStream for LogicalChangeLog {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<StreamPlanRef> {
+        if self.core.key_indices.is_some() {
+            return Err(BindError("AS CHANGELOG with KEY is not supported yet".to_owned()).into());
+        }
+
         let input = self.input().to_stream(ctx)?;
         let dist = input.distribution();
         let distribution_keys = match dist {

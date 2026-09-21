@@ -33,3 +33,34 @@
     ├── distribution key: [ 3 ]
     └── read pk prefix len hint: 1
 
+- name: changelog single key
+  sql: |
+    create table t (id int, name varchar);
+    with c as changelog from t key (id) select name, changelog_op from c;
+  logical_plan: |-
+    LogicalProject { exprs: [t.name, changelog_op] }
+    └─LogicalShare { id: 2 }
+      └─LogicalChangeLog { key: [t.id] }
+        └─LogicalScan { table: t, columns: [t.id, t.name, t._row_id, t._rw_timestamp] }
+  optimized_logical_plan_for_stream: |-
+    LogicalProject { exprs: [t.name, changelog_op] }
+    └─LogicalChangeLog { key: [t.id] }
+      └─LogicalScan { table: t, columns: [t.name, t.id] }
+- name: changelog composite key
+  sql: |
+    create table t (id int, age int, tenant int, name varchar);
+    with c as changelog from t key (tenant, ID) select name from c;
+  logical_plan: |-
+    LogicalProject { exprs: [t.name] }
+    └─LogicalShare { id: 2 }
+      └─LogicalChangeLog { key: [t.tenant, t.id] }
+        └─LogicalScan { table: t, columns: [t.id, t.age, t.tenant, t.name, t._row_id, t._rw_timestamp] }
+  optimized_logical_plan_for_stream: |-
+    LogicalProject { exprs: [t.name] }
+    └─LogicalChangeLog { key: [t.tenant, t.id] }
+      └─LogicalScan { table: t, columns: [t.name, t.tenant, t.id] }
+- name: changelog missing key column
+  sql: |
+    create table t (id int);
+    with c as changelog from t key (missing) select * from c;
+  binder_error: 'Item not found: Invalid column: missing'

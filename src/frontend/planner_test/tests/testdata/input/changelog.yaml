@@ -5,3 +5,26 @@
   expected_outputs:
   - stream_plan
   - stream_dist_plan
+
+- name: changelog single key
+  sql: |
+    create table t (id int, name varchar);
+    with c as changelog from t key (id) select name, changelog_op from c;
+  expected_outputs:
+  - logical_plan
+  - optimized_logical_plan_for_stream
+
+- name: changelog composite key
+  sql: |
+    create table t (id int, age int, tenant int, name varchar);
+    with c as changelog from t key (tenant, ID) select name from c;
+  expected_outputs:
+  - logical_plan
+  - optimized_logical_plan_for_stream
+
+- name: changelog missing key column
+  sql: |
+    create table t (id int);
+    with c as changelog from t key (missing) select * from c;
+  expected_outputs:
+  - binder_error

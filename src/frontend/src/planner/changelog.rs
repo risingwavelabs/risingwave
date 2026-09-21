@@ -14,7 +14,7 @@
 
 use crate::Planner;
 use crate::binder::Relation;
-use crate::error::{ErrorCode, Result};
+use crate::error::Result;
 use crate::optimizer::plan_node::{LogicalChangeLog, LogicalPlanRef as PlanRef};
 
 impl Planner {
@@ -23,15 +23,8 @@ impl Planner {
         relation: Relation,
         key_indices: Option<Vec<usize>>,
     ) -> Result<PlanRef> {
-        if key_indices.is_some() {
-            return Err(ErrorCode::BindError(
-                "AS CHANGELOG with KEY is not supported yet".to_owned(),
-            )
-            .into());
-        }
-
         let root = self.plan_relation(relation)?;
-        let plan = LogicalChangeLog::create(root);
+        let plan = LogicalChangeLog::create(root, key_indices);
         Ok(plan)
     }
 }
