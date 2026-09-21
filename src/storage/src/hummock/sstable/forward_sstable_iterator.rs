@@ -22,7 +22,7 @@ use sync_point::sync_point;
 use thiserror_ext::AsReport;
 
 use super::super::{HummockResult, HummockValue};
-use crate::hummock::block_stream::BlockStream;
+use crate::hummock::block_stream::{PrefetchBlockStream, PrefetchLookup};
 use crate::hummock::iterator::{Forward, HummockIterator, ValueMeta};
 use crate::hummock::sstable::SstableIteratorReadOptions;
 use crate::hummock::{BlockIterator, SstableStoreRef, TableHolder};
@@ -45,11 +45,10 @@ pub struct SstableIterator {
     /// Current block index.
     cur_idx: usize,
 
-    preload_stream: Option<Box<dyn BlockStream>>,
+    preload_stream: Option<Box<PrefetchBlockStream>>,
     /// Reference to the sst
     pub sst: TableHolder,
     preload_end_block_idx: usize,
-    preload_retry_times: usize,
 
     sstable_store: SstableStoreRef,
     stats: StoreLocalStatistic,
@@ -178,7 +177,6 @@ impl SstableIterator {
             stats: StoreLocalStatistic::default(),
             options,
             preload_end_block_idx: 0,
-            preload_retry_times: 0,
             block_start_idx_inclusive,
             block_end_idx_exclusive,
         }
@@ -218,13 +216,32 @@ impl SstableIterator {
         // do cooperative scheduling.
         tokio::task::consume_budget().await;
 
-        let mut hit_cache = false;
         if idx >= self.block_end_idx_exclusive {
             self.block_iter = None;
             return Ok(());
         }
-        // Maybe the previous preload stream breaks on some cached block, so here we can try to preload some data again
-        if self.preload_stream.is_none() && idx + 1 < self.preload_end_block_idx {
+        let mut prefetched_block = None;
+        let should_prefetch = match self
+            .preload_stream
+            .as_mut()
+            .map(|stream| stream.take_block(idx))
+        {
+            Some(PrefetchLookup::Hit(block)) => {
+                prefetched_block = Some(block);
+                false
+            }
+            // Preserve the queue for subsequent forward reads after a backward seek.
+            Some(PrefetchLookup::BeforeStart) => false,
+            Some(PrefetchLookup::Exhausted) | None => {
+                // Release the old tracker before checking the prefetch memory budget again.
+                self.preload_stream = None;
+                true
+            }
+        };
+
+        // Try at most once per seek. Even an empty prefetch result must reach the block-get
+        // fallback instead of repeatedly recreating a stream without making progress.
+        if should_prefetch && idx + 1 < self.preload_end_block_idx {
             match self
                 .sstable_store
                 .prefetch_blocks(
@@ -237,86 +254,26 @@ impl SstableIterator {
                 .instrument_await("prefetch_blocks".verbose())
                 .await
             {
-                Ok(preload_stream) => self.preload_stream = Some(preload_stream),
+                Ok(mut stream) => {
+                    if let PrefetchLookup::Hit(block) = stream.take_block(idx) {
+                        prefetched_block = Some(block);
+                        self.preload_stream = Some(stream);
+                    }
+                }
                 Err(e) => {
-                    tracing::warn!(error = %e.as_report(), "failed to create stream for prefetch data, fall back to block get")
+                    tracing::warn!(error = %e.as_report(), "failed to prefetch data, fall back to block get");
                 }
             }
         }
-
-        if self
-            .preload_stream
-            .as_ref()
-            .map(|preload_stream| preload_stream.next_block_index() <= idx)
-            .unwrap_or(false)
-        {
-            while let Some(preload_stream) = self.preload_stream.as_mut() {
-                let mut ret = Ok(());
-                loop {
-                    let block_index = preload_stream.next_block_index();
-                    match preload_stream.next_block().await {
-                        Ok(Some(block)) => {
-                            if block_index < idx {
-                                continue;
-                            }
-                            assert_eq!(block_index, idx);
-                            hit_cache = true;
-                            self.block_iter = Some(BlockIterator::new(block));
-                            break;
-                        }
-                        Ok(None) => {
-                            // A seek can jump beyond the end of the prefetched blocks.
-                            break;
-                        }
-                        Err(e) => {
-                            ret = Err(e);
-                            break;
-                        }
-                    }
-                }
-                if hit_cache {
-                    break;
-                }
-                self.preload_stream.take();
-                if idx + 1 < self.preload_end_block_idx {
-                    if let Err(e) = ret {
-                        tracing::warn!(error = %e.as_report(), "recreate stream because the connection to remote storage has closed");
-                        if self.preload_retry_times >= self.options.max_preload_retry_times {
-                            break;
-                        }
-                        self.preload_retry_times += 1;
-                    }
-
-                    match self
-                        .sstable_store
-                        .prefetch_blocks(
-                            &self.sst,
-                            idx,
-                            self.preload_end_block_idx,
-                            self.options.cache_policy,
-                            &mut self.stats,
-                        )
-                        .instrument_await("prefetch_blocks".verbose())
-                        .await
-                    {
-                        Ok(stream) => {
-                            self.preload_stream = Some(stream);
-                        }
-                        Err(e) => {
-                            tracing::warn!(error = %e.as_report(), "failed to recreate stream meet IO error");
-                            break;
-                        }
-                    }
-                }
+        let block = match prefetched_block {
+            Some(block) => block,
+            None => {
+                self.sstable_store
+                    .get(&self.sst, idx, self.options.cache_policy, &mut self.stats)
+                    .await?
             }
-        }
-        if !hit_cache {
-            let block = self
-                .sstable_store
-                .get(&self.sst, idx, self.options.cache_policy, &mut self.stats)
-                .await?;
-            self.block_iter = Some(BlockIterator::new(block));
         };
+        self.block_iter = Some(BlockIterator::new(block));
         let block_iter = self.block_iter.as_mut().unwrap();
         if let Some(key) = seek_key {
             block_iter.seek(key);
@@ -605,7 +562,6 @@ mod tests {
             read_table_id: None,
             scan_end_user_key: Some(Bound::Included(uk.clone())),
             prefetch: true,
-            max_preload_retry_times: 0,
         });
         let mut stats = StoreLocalStatistic::default();
         let mut sstable_iter = SstableIterator::create(
@@ -668,6 +624,78 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_prefetch_seek_preserves_remaining_blocks() {
+        let sstable_store = mock_sstable_store().await;
+        let mut builder_options = default_builder_opt_for_test();
+        builder_options.block_capacity = 128;
+        let info = gen_test_sstable_info(
+            builder_options,
+            0,
+            (0..64).map(|i| (test_key_of(i), HummockValue::put(test_value_of(i)))),
+            sstable_store.clone(),
+        )
+        .await;
+        let sstable = sstable_store
+            .sstable(&info, &mut StoreLocalStatistic::default())
+            .await
+            .unwrap();
+        assert!(sstable.meta.block_metas.len() > 16);
+        let mut iter = SstableIterator::new(
+            sstable.clone(),
+            sstable_store.clone(),
+            Arc::new(SstableIteratorReadOptions {
+                prefetch: true,
+                cache_policy: CachePolicy::Disable,
+                ..Default::default()
+            }),
+            &info,
+        );
+        let mut reference = SstableIterator::new(
+            sstable.clone(),
+            sstable_store.clone(),
+            Arc::new(SstableIteratorReadOptions {
+                prefetch: false,
+                cache_policy: CachePolicy::Disable,
+                ..Default::default()
+            }),
+            &info,
+        );
+        let last = sstable.meta.block_metas.len() - 1;
+        // Initial prefetch, forward skip, backward seek, reuse, final-block fallback,
+        // rewind after exhaustion, and reread of an already consumed block.
+        for (idx, prefetches, gets) in [
+            (0, 1, 0),
+            (2, 1, 0),
+            (1, 1, 1),
+            (3, 1, 1),
+            (last, 1, 2),
+            (0, 2, 2),
+            (0, 2, 3),
+        ] {
+            let key = FullKey::decode(&sstable.meta.block_metas[idx].smallest_key);
+            iter.seek(key).await.unwrap();
+            reference.seek(key).await.unwrap();
+            assert_eq!(iter.key(), reference.key(), "block {idx}");
+            assert_bytes_eq!(
+                iter.value().into_user_value().unwrap(),
+                reference.value().into_user_value().unwrap()
+            );
+            assert_eq!(
+                iter.stats.cache_data_prefetch_count, prefetches,
+                "block {idx}"
+            );
+            assert_eq!(iter.stats.cache_data_block_total, gets, "block {idx}");
+            if idx == last {
+                assert_eq!(sstable_store.get_prefetch_memory_usage(), 0);
+            } else {
+                assert!(sstable_store.get_prefetch_memory_usage() > 0);
+            }
+        }
+        drop(iter);
+        assert_eq!(sstable_store.get_prefetch_memory_usage(), 0);
+    }
+
+    #[tokio::test]
     async fn test_scan_end_with_prefetch_on_or_off() {
         let sstable_store = mock_sstable_store().await;
         let mut builder_options = default_builder_opt_for_test();
@@ -723,7 +751,6 @@ mod tests {
                 read_table_id: None,
                 scan_end_user_key: Some(Bound::Excluded(table_3_start.clone())),
                 prefetch,
-                max_preload_retry_times: 0,
             });
             let mut sstable_iter = SstableIterator::create(
                 sstable.clone(),
@@ -773,7 +800,6 @@ mod tests {
             read_table_id: Some(TableId::new(2)),
             scan_end_user_key: None,
             prefetch: false,
-            max_preload_retry_times: 0,
         });
         let mut sstable_iter = SstableIterator::create(
             sstable.clone(),
@@ -824,7 +850,6 @@ mod tests {
             read_table_id: None,
             scan_end_user_key: Some(Bound::Excluded(table_2_start)),
             prefetch: false,
-            max_preload_retry_times: 0,
         });
         let mut sstable_iter =
             SstableIterator::create(sstable, sstable_store, options, &table_2_sstable_info);
