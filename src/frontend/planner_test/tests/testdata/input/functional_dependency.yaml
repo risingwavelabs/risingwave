@@ -30,12 +30,11 @@
 # since it uses it as distribution key as well.
 - name: test functional dependency for order key pruning (index)
   sql: |
-    /* A single-row mv has an empty primary key, so an index on it is rejected (issue 27125). */
     create table t1 (v1 int, v2 int);
     create materialized view v as select count(*) cnt from t1;
     explain (verbose) create index mv_idx on v(cnt);
   expected_outputs:
-    - planner_error
+    - explain_output
 - name: test functional dependency for order key pruning (index 2)
   sql: |
     create table t1 (v1 int primary key, v2 int);

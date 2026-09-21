@@ -686,3 +686,19 @@
     select id from mv where j->>'k1' = 'v' or j->>'k1' = 'w';
   expected_outputs:
   - batch_plan
+- name: index on a single-row mv is never selected for a predicate scan (issue 27125)
+  sql: |
+    create table t (a int, b int);
+    create materialized view m as select count(*) as cnt from t;
+    create index mi on m(cnt);
+    select cnt + 1 from m where cnt > 1;
+  expected_outputs:
+  - batch_plan
+- name: index on a single-row mv is never selected for a full scan (issue 27125)
+  sql: |
+    create table t (a int, b int);
+    create materialized view m as select count(*) as cnt from t;
+    create index mi on m(cnt);
+    select * from m;
+  expected_outputs:
+  - batch_plan

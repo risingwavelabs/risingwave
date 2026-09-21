@@ -158,14 +158,13 @@ pub(crate) fn gen_create_index_plan(
     }
 
     // A relation without primary key holds at most one row, e.g. a materialized view of a global
-    // aggregation. An index on it is useless and the planner assumes every indexed table has at
-    // least one order column.
+    // aggregation. The index is still created for compatibility, but the planner will never
+    // prefer it over the primary table.
     if table.pk().is_empty() {
-        return Err(ErrorCode::InvalidInputSyntax(format!(
-            "cannot create index on \"{}\" which has no primary key (e.g. a single-row materialized view)",
-            table.name
-        ))
-        .into());
+        session.notice_to_user(format!(
+            "index \"{}\" will never be used by the planner: \"{}\" has no primary key and holds at most one row",
+            index_table_name, table.name
+        ));
     }
 
     if !session.is_super_user() && session.user_id() != table.owner {

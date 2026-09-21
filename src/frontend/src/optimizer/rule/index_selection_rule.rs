@@ -841,7 +841,9 @@ impl<'a> TableScanIoEstimator<'a> {
             }
         }
 
-        let (index_cost, primary_lookup) = match match_item_vec
+        // The product of an empty iterator is 1: a table without any order column holds at most
+        // one row, so scanning it is as cheap as a primary lookup.
+        let index_cost: usize = match_item_vec
             .iter()
             .enumerate()
             .take(INDEX_MAX_LEN)
@@ -852,15 +854,10 @@ impl<'a> TableScanIoEstimator<'a> {
                 MatchItem::RangeOneSideBound => INDEX_COST_MATRIX[3][i],
                 MatchItem::All => INDEX_COST_MATRIX[4][i],
             })
-            .reduce(|x, y| x * y)
-        {
-            // If `index_cost` equals 1, it is a primary lookup
-            Some(index_cost) => (index_cost, index_cost == 1),
-            // A table without any order column holds at most one row, so scanning it is as cheap
-            // as a primary lookup. This can be the case for an index created on a single-row
-            // materialized view before such `CREATE INDEX` was rejected.
-            None => (1, true),
-        };
+            .product();
+
+        // If `index_cost` equals 1, it is a primary lookup
+        let primary_lookup = index_cost == 1;
 
         IndexCost::new(index_cost, primary_lookup)
             .mul(&IndexCost::new(self.row_size, primary_lookup))

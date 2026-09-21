@@ -1143,3 +1143,23 @@
     └─BatchProject { exprs: [mv.id] }
       └─BatchFilter { predicate: ((JsonbAccessStr(mv.j, 'k1':Varchar) = 'v':Varchar) OR (JsonbAccessStr(mv.j, 'k1':Varchar) = 'w':Varchar)) }
         └─BatchScan { table: mv, columns: [mv.id, mv.j], distribution: Single }
+- name: index on a single-row mv is never selected for a predicate scan (issue 27125)
+  sql: |
+    create table t (a int, b int);
+    create materialized view m as select count(*) as cnt from t;
+    create index mi on m(cnt);
+    select cnt + 1 from m where cnt > 1;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [(m.cnt + 1:Int32) as $expr1] }
+      └─BatchFilter { predicate: (m.cnt > 1:Int32) }
+        └─BatchScan { table: m, columns: [m.cnt], distribution: Single }
+- name: index on a single-row mv is never selected for a full scan (issue 27125)
+  sql: |
+    create table t (a int, b int);
+    create materialized view m as select count(*) as cnt from t;
+    create index mi on m(cnt);
+    select * from m;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchScan { table: m, columns: [m.cnt], distribution: Single }
