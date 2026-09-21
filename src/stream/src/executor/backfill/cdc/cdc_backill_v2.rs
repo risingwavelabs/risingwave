@@ -281,7 +281,6 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                     fragment_id,
                 ));
 
-                let next_split = &actor_snapshot_splits[next_split_idx];
                 let table_reader = loop {
                     match build_reader_and_poll_upstream(&mut upstream, &mut future).await? {
                         Either::Left(msg) => match msg {
@@ -290,16 +289,6 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                     yield Message::Chunk(chunk.clone());
                                 }
 
-                                let next_split_state = &split_states[next_split_idx];
-                                state_impl
-                                    .mutate_state(
-                                        next_split.split_id,
-                                        false,
-                                        next_split_state.row_count as u64,
-                                        next_split_state.cdc_offset_low.clone(),
-                                        None,
-                                    )
-                                    .await?;
                                 state_impl.commit_state(barrier.epoch).await?;
 
                                 if let Some(mutation) = barrier.mutation.as_deref() {
@@ -670,15 +659,6 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                                     yield Message::Chunk(chunk.clone());
                                                 }
 
-                                                state_impl
-                                                    .mutate_state(
-                                                        split.split_id,
-                                                        false,
-                                                        durable_row_count,
-                                                        split_cdc_offset_low.clone(),
-                                                        None,
-                                                    )
-                                                    .await?;
                                                 state_impl.commit_state(barrier.epoch).await?;
 
                                                 if let Some(mutation) = barrier.mutation.as_deref()
