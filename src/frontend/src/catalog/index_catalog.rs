@@ -229,24 +229,37 @@ impl IndexCatalog {
 }
 
 impl TableIndex {
-    pub fn primary_table_pk_ref_to_index_table(&self) -> Vec<ColumnOrder> {
+    /// Map the primary key of the primary table to the columns of the index table.
+    ///
+    /// Returns `None` if some primary key column is not stored in the index table. The index
+    /// table always contains the *stream key* of the primary table, but the primary key (storage
+    /// order key) can be a superset of it, e.g. for a `TopN` materialized view whose primary key
+    /// is `[order_key..., stream_key...]`.
+    pub fn primary_table_pk_ref_to_index_table(&self) -> Option<Vec<ColumnOrder>> {
         let mapping = self.primary_to_secondary_mapping();
 
         self.primary_table
             .pk
             .iter()
-            .map(|x| ColumnOrder::new(*mapping.get(&x.column_index).unwrap(), x.order_type))
-            .collect_vec()
+            .map(|x| {
+                mapping
+                    .get(&x.column_index)
+                    .map(|idx| ColumnOrder::new(*idx, x.order_type))
+            })
+            .collect()
     }
 
-    pub fn primary_table_distribute_key_ref_to_index_table(&self) -> Vec<usize> {
+    /// Map the distribution key of the primary table to the columns of the index table.
+    ///
+    /// Returns `None` if some distribution key column is not stored in the index table.
+    pub fn primary_table_distribute_key_ref_to_index_table(&self) -> Option<Vec<usize>> {
         let mapping = self.primary_to_secondary_mapping();
 
         self.primary_table
             .distribution_key
             .iter()
-            .map(|x| *mapping.get(x).unwrap())
-            .collect_vec()
+            .map(|x| mapping.get(x).copied())
+            .collect()
     }
 
     pub fn full_covering(&self) -> bool {

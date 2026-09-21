@@ -157,6 +157,17 @@ pub(crate) fn gen_create_index_plan(
         );
     }
 
+    // A relation without primary key holds at most one row, e.g. a materialized view of a global
+    // aggregation. An index on it is useless and the planner assumes every indexed table has at
+    // least one order column.
+    if table.pk().is_empty() {
+        return Err(ErrorCode::InvalidInputSyntax(format!(
+            "cannot create index on \"{}\" which has no primary key (e.g. a single-row materialized view)",
+            table.name
+        ))
+        .into());
+    }
+
     if !session.is_super_user() && session.user_id() != table.owner {
         return Err(ErrorCode::PermissionDenied(format!(
             "must be owner of table \"{}\"",

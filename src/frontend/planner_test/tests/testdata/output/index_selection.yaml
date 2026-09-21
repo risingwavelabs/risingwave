@@ -1110,3 +1110,36 @@
       └─BatchExchange { order: [], dist: Single }
         └─BatchLimit { limit: 5, offset: 0 }
           └─BatchScan { table: t, columns: [t.a, t.b, t.c, t.d], scan_ranges: [t.a = Int32(1) AND t.b = Int32(2) AND t.c >= Int32(3) AND t.c <= Int32(5)], limit: 5, distribution: UpstreamHashShard(t.a, t.b, t.c, t.d) }
+- name: index on a TopN mv whose order key exceeds its stream key does not panic (issue 27125)
+  sql: |
+    create table t (id int, tag varchar, j jsonb);
+    create materialized view mv as select * from t order by tag limit 1000;
+    create index idxb on mv((j->>'k1')) include (id);
+    select j->>'k1' from mv where id = 1;
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [JsonbAccessStr(mv.j, 'k1':Varchar) as $expr1] }
+      └─BatchFilter { predicate: (mv.id = 1:Int32) }
+        └─BatchScan { table: mv, columns: [mv.j, mv.id], distribution: Single }
+- name: index on a TopN mv whose order key exceeds its stream key can not be used for index lookup (issue 27125)
+  sql: |
+    create table t (id int, tag varchar, j jsonb);
+    create materialized view mv as select * from t order by tag limit 1000;
+    create index idxb on mv((j->>'k1')) include (id);
+    select tag from mv where j->>'k1' = 'v';
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [mv.tag] }
+      └─BatchFilter { predicate: (JsonbAccessStr(mv.j, 'k1':Varchar) = 'v':Varchar) }
+        └─BatchScan { table: mv, columns: [mv.tag, mv.j], distribution: Single }
+- name: index on a TopN mv whose order key exceeds its stream key can not be used for index merge (issue 27125)
+  sql: |
+    create table t (id int, tag varchar, j jsonb);
+    create materialized view mv as select * from t order by tag limit 1000;
+    create index idxb on mv((j->>'k1')) include (id);
+    select id from mv where j->>'k1' = 'v' or j->>'k1' = 'w';
+  batch_plan: |-
+    BatchExchange { order: [], dist: Single }
+    └─BatchProject { exprs: [mv.id] }
+      └─BatchFilter { predicate: ((JsonbAccessStr(mv.j, 'k1':Varchar) = 'v':Varchar) OR (JsonbAccessStr(mv.j, 'k1':Varchar) = 'w':Varchar)) }
+        └─BatchScan { table: mv, columns: [mv.id, mv.j], distribution: Single }

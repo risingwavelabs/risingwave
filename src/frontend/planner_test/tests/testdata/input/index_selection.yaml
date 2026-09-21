@@ -662,3 +662,27 @@
     select a, b, c, d from t where a = 1 and b = 2 and c between 3 and 5 order by a, b, c limit 5;
   expected_outputs:
     - batch_plan
+- name: index on a TopN mv whose order key exceeds its stream key does not panic (issue 27125)
+  sql: |
+    create table t (id int, tag varchar, j jsonb);
+    create materialized view mv as select * from t order by tag limit 1000;
+    create index idxb on mv((j->>'k1')) include (id);
+    select j->>'k1' from mv where id = 1;
+  expected_outputs:
+  - batch_plan
+- name: index on a TopN mv whose order key exceeds its stream key can not be used for index lookup (issue 27125)
+  sql: |
+    create table t (id int, tag varchar, j jsonb);
+    create materialized view mv as select * from t order by tag limit 1000;
+    create index idxb on mv((j->>'k1')) include (id);
+    select tag from mv where j->>'k1' = 'v';
+  expected_outputs:
+  - batch_plan
+- name: index on a TopN mv whose order key exceeds its stream key can not be used for index merge (issue 27125)
+  sql: |
+    create table t (id int, tag varchar, j jsonb);
+    create materialized view mv as select * from t order by tag limit 1000;
+    create index idxb on mv((j->>'k1')) include (id);
+    select id from mv where j->>'k1' = 'v' or j->>'k1' = 'w';
+  expected_outputs:
+  - batch_plan
