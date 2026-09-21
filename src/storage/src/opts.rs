@@ -155,7 +155,6 @@ pub struct StorageOpts {
     /// enable `FastCompactorRunner`.
     pub enable_fast_compaction: bool,
     pub check_compaction_result: bool,
-    pub max_preload_io_retry_times: usize,
     pub compactor_fast_max_compact_delete_ratio: u32,
     pub compactor_fast_max_compact_task_size: u64,
 
@@ -314,7 +313,6 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             max_preload_wait_time_mill: c.storage.max_preload_wait_time_mill,
             compact_iter_recreate_timeout_ms: c.storage.compact_iter_recreate_timeout_ms,
 
-            max_preload_io_retry_times: c.storage.max_preload_io_retry_times,
             backup_storage_url: p.backup_storage_url().to_owned(),
             backup_storage_directory: p.backup_storage_directory().to_owned(),
             compactor_max_sst_key_count: c.storage.compactor_max_sst_key_count,

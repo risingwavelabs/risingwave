@@ -43,9 +43,9 @@ use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerCon
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::schedule::MarkReadyOptions;
 use crate::barrier::{
-    BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, BatchRefreshInfo, Command,
-    CreateStreamingJobCommandInfo, CreateStreamingJobType, DatabaseRuntimeInfoSnapshot,
-    RecoveryReason, ReplaceStreamJobPlan, Scheduled,
+    BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, Command, CreateStreamingJobCommandInfo,
+    CreateStreamingJobType, DatabaseRuntimeInfoSnapshot, RecoveryReason, ReplaceStreamJobPlan,
+    Scheduled,
 };
 use crate::hummock::CommitEpochInfo;
 use crate::manager::LocalNotification;
@@ -813,14 +813,10 @@ impl PostCollectCommand {
                             )
                             .await?
                     }
-                    CreateStreamingJobType::SnapshotBackfill {
+                    CreateStreamingJobType::Independent {
                         snapshot_backfill_info,
                         ..
-                    }
-                    | CreateStreamingJobType::BatchRefresh(BatchRefreshInfo {
-                        snapshot_backfill_info,
-                        ..
-                    }) => {
+                    } => {
                         barrier_manager_context
                             .metadata_manager
                             .catalog_controller

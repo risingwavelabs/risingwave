@@ -124,39 +124,34 @@ public class SourceValidateHandler {
     }
 
     /**
-     * Validate a user-supplied decimal handling mode. RisingWave's common Debezium configuration
-     * defaults this option to string, which preserves decimal precision in schema-less JSON.
+     * Requires an explicitly supplied heartbeat interval to be a positive signed 32-bit integer.
+     * Validates user-supplied options, not the final Debezium configuration. If omitted,
+     * DbzConnectorConfig supplies the connector default. Keep this policy in sync with Rust's
+     * validate_heartbeat_interval (CREATE and ALTER).
      */
-    private static void validateDecimalHandlingMode(Map<String, String> props) {
-        String mode = props.get("debezium.decimal.handling.mode");
-        if (mode != null && !mode.equals("string")) {
-            throw ValidatorUtils.invalidArgument(
-                    String.format(
-                            "'debezium.decimal.handling.mode' must be 'string', got: '%s'", mode));
-        }
-    }
-
-    /** Validate debezium.heartbeat.interval.ms if specified. If present, it must not be 0. */
-    private static void validateHeartbeatInterval(
-            Map<String, String> props, boolean isCdcSourceJob) {
+    private static void validateHeartbeatInterval(Map<String, String> props) {
         String intervalStr = props.get("debezium.heartbeat.interval.ms");
         if (intervalStr == null) {
             return; // Not specified, use default
         }
 
-        long interval;
+        int interval;
         try {
-            interval = Long.parseLong(intervalStr);
+            // Match Rust's ASCII integer syntax; Integer.parseInt also accepts Unicode digits.
+            if (!intervalStr.matches("[+-]?[0-9]+")) {
+                throw new NumberFormatException();
+            }
+            // Debezium uses a signed 32-bit integer; RW also rejects zero to keep heartbeats
+            // enabled.
+            interval = Integer.parseInt(intervalStr);
+            if (interval <= 0) {
+                throw new NumberFormatException();
+            }
         } catch (NumberFormatException e) {
             throw ValidatorUtils.invalidArgument(
                     String.format(
-                            "'debezium.heartbeat.interval.ms' must be a valid number, got: '%s'",
+                            "'debezium.heartbeat.interval.ms' must be a positive integer, got: '%s'",
                             intervalStr));
-        }
-
-        // Validate interval is not 0
-        if (interval == 0) {
-            throw ValidatorUtils.invalidArgument("'debezium.heartbeat.interval.ms' must not be 0");
         }
     }
 
@@ -172,11 +167,7 @@ public class SourceValidateHandler {
                 isCdcSourceJob,
                 isBackfillTable);
 
-        // Validate before any connector-specific database access. `precise` emits binary logical
-        // decimals whose scale cannot be reconstructed from RisingWave's schema-less JSON, while
-        // `double` can lose precision.
-        validateDecimalHandlingMode(props);
-
+        validateHeartbeatInterval(props);
         TableSchema tableSchema = TableSchema.fromProto(request.getTableSchema());
         switch (request.getSourceType()) {
             case POSTGRES:
@@ -225,7 +216,6 @@ public class SourceValidateHandler {
                 ensureRequiredProps(props, isCdcSourceJob);
                 ensurePropNotBlank(props, DbzConnectorConfig.MYSQL_SERVER_ID);
                 validateQueueMemoryRatio(props);
-                validateHeartbeatInterval(props, isCdcSourceJob);
                 try (var validator =
                         new MySqlValidator(props, tableSchema, isCdcSourceJob, isBackfillTable)) {
                     validator.validateAll();
@@ -243,7 +233,6 @@ public class SourceValidateHandler {
                 ensureRequiredProps(props, isCdcSourceJob);
                 ensurePropNotBlank(props, DbzConnectorConfig.SQL_SERVER_SCHEMA_NAME);
                 validateQueueMemoryRatio(props);
-                validateHeartbeatInterval(props, isCdcSourceJob);
                 try (var sqlServerValidator =
                         new SqlServerValidator(props, tableSchema, isCdcSourceJob)) {
                     sqlServerValidator.validateAll();

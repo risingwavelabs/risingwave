@@ -589,7 +589,6 @@ pub struct HummockVersionReader {
 
     /// Statistics
     state_store_metrics: Arc<HummockStateStoreMetrics>,
-    preload_retry_times: usize,
 }
 
 /// use `HummockVersionReader` to reuse `get` and `iter` implement for both `batch_query` and
@@ -598,12 +597,10 @@ impl HummockVersionReader {
     pub fn new(
         sstable_store: SstableStoreRef,
         state_store_metrics: Arc<HummockStateStoreMetrics>,
-        preload_retry_times: usize,
     ) -> Self {
         Self {
             sstable_store,
             state_store_metrics,
-            preload_retry_times,
         }
     }
 
@@ -1045,9 +1042,6 @@ impl HummockVersionReader {
         sst_read_options.read_table_id = Some(table_id);
         sst_read_options.scan_end_user_key = Some(user_key_range.1.map(|key| key.cloned()));
         sst_read_options.prefetch = read_options.prefetch_options.prefetch;
-        if sst_read_options.prefetch {
-            sst_read_options.max_preload_retry_times = self.preload_retry_times;
-        }
         let sst_read_options = Arc::new(sst_read_options);
         for sstable_info in &uncommitted_ssts {
             let table_holder = self
@@ -1216,7 +1210,6 @@ impl HummockVersionReader {
             read_table_id: Some(options.table_id),
             scan_end_user_key: None,
             prefetch: false,
-            max_preload_retry_times: 0,
         });
 
         async fn make_iter(
@@ -1468,7 +1461,6 @@ mod tests {
         let reader = HummockVersionReader::new(
             mock_sstable_store().await,
             Arc::new(HummockStateStoreMetrics::unused()),
-            0,
         );
 
         let result = reader
@@ -1697,7 +1689,7 @@ mod tests {
         let sstable_store = mock_sstable_store().await;
         let registry = Registry::new();
         let metrics = Arc::new(HummockStateStoreMetrics::new(&registry, MetricLevel::Debug));
-        let reader = HummockVersionReader::new(sstable_store, metrics.clone(), 0);
+        let reader = HummockVersionReader::new(sstable_store, metrics.clone());
         let (checked_before, pruned_before) = vnode_prune_counts(&metrics, table_id, "get");
 
         let make_user_key = |vnode: VirtualNode, suffix: &str| {
@@ -1761,7 +1753,7 @@ mod tests {
         let sstable_store = mock_sstable_store().await;
         let registry = Registry::new();
         let metrics = Arc::new(HummockStateStoreMetrics::new(&registry, MetricLevel::Debug));
-        let reader = HummockVersionReader::new(sstable_store.clone(), metrics.clone(), 0);
+        let reader = HummockVersionReader::new(sstable_store.clone(), metrics.clone());
         let (checked_before, pruned_before) = vnode_prune_counts(&metrics, table_id, "get");
 
         let mut opts = default_builder_opt_for_test();
@@ -1861,7 +1853,7 @@ mod tests {
         let sstable_store = mock_sstable_store().await;
         let registry = Registry::new();
         let metrics = Arc::new(HummockStateStoreMetrics::new(&registry, MetricLevel::Debug));
-        let reader = HummockVersionReader::new(sstable_store.clone(), metrics.clone(), 0);
+        let reader = HummockVersionReader::new(sstable_store.clone(), metrics.clone());
         let (checked_before, pruned_before) = vnode_prune_counts(&metrics, table_id, "get");
 
         let mut opts = default_builder_opt_for_test();
