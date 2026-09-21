@@ -17,6 +17,14 @@ use risingwave_pb::catalog::table::CdcTableType as PbCdcTableType;
 use crate::catalog::postgres_point_type;
 use crate::types::DataType;
 
+/// Returns whether a RisingWave type is unsupported as a PostgreSQL array element.
+pub fn is_unsupported_postgres_array_element_type(data_type: &DataType) -> bool {
+    matches!(
+        data_type,
+        DataType::Struct(_) | DataType::List(_) | DataType::Serial
+    )
+}
+
 pub fn cdc_source_column_type_compatible(
     cdc_table_type: PbCdcTableType,
     upstream_type_name: &str,
@@ -202,9 +210,14 @@ fn postgres_source_column_type_compatible(
                 return false;
             };
 
+            let element_type = list_type.elem();
+            if is_unsupported_postgres_array_element_type(element_type) {
+                return false;
+            }
+
             postgres_source_column_type_compatible(
                 &element_type_name.to_ascii_lowercase(),
-                list_type.elem(),
+                element_type,
                 None,
                 array_element_udt_name,
                 None,
@@ -451,6 +464,16 @@ mod tests {
             Some("_int4"),
             Some("integer"),
             Some("int4"),
+        ));
+        assert!(!cdc_source_column_type_compatible(
+            PbCdcTableType::Postgres,
+            "array",
+            &postgres_point_type().list(),
+            None,
+            false,
+            Some("_point"),
+            Some("point"),
+            Some("point"),
         ));
     }
 
