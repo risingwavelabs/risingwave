@@ -204,10 +204,7 @@ impl SinkCoordinatorManager {
         let (notifier, started_rx) = Notifier::new();
         if self
             .request_tx
-            .send(ManagerRequest::StopCoordinator {
-                notifier,
-                job_ids: job_ids.clone(),
-            })
+            .send(ManagerRequest::StopCoordinator { notifier, job_ids })
             .await
             .is_err()
         {
@@ -216,9 +213,7 @@ impl SinkCoordinatorManager {
         }
         if let Err(err) = Self::wait_for_completion(started_rx).await {
             error!(error = %err.as_report(), "failed to wait for sink coordinators to stop");
-            return;
         }
-        info!(?job_ids, "successfully stopped sink coordinators for jobs");
     }
 
     pub async fn start_recovery(&self, recovery: RecoveryStart) -> anyhow::Result<()> {
