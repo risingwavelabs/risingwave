@@ -502,18 +502,8 @@ impl<B: FilterBuilder, C: CompactionFilter> CompactorRunner<B, C> {
                     if !self.executor.shall_copy_raw_block(&smallest_key) {
                         break;
                     }
-                    let smallest_key = smallest_key.to_vec();
-
-                    let (block, _) = first
-                        .current_sstable()
-                        .download_next_block()
-                        .await?
-                        .unwrap();
-                    let (filter_data, meta) = first.current_sstable().current_block_raw_metadata();
-
-                    let largest_key = first.current_sstable().current_block_largest();
                     self.executor
-                        .append_raw_block(block, filter_data, smallest_key, largest_key, meta)
+                        .append_raw_block(first.current_sstable())
                         .await?;
                 }
                 if !first.current_sstable().is_valid() {
@@ -551,18 +541,13 @@ impl<B: FilterBuilder, C: CompactionFilter> CompactorRunner<B, C> {
         while rest_data.is_valid() {
             let sstable_iter = rest_data.current_sstable();
             while sstable_iter.is_valid() {
-                let smallest_key = FullKey::decode(sstable_iter.next_block_smallest()).to_vec();
+                let smallest_key = FullKey::decode(sstable_iter.next_block_smallest());
                 if self.executor.builder.need_flush()
-                    || !self.executor.shall_copy_raw_block(&smallest_key.to_ref())
+                    || !self.executor.shall_copy_raw_block(&smallest_key)
                 {
                     self.executor.compact_block(sstable_iter, None).await?;
                 } else {
-                    let (block, _) = sstable_iter.download_next_block().await?.unwrap();
-                    let (filter_data, block_meta) = sstable_iter.current_block_raw_metadata();
-                    let largest_key = sstable_iter.current_block_largest();
-                    self.executor
-                        .append_raw_block(block, filter_data, smallest_key, largest_key, block_meta)
-                        .await?;
+                    self.executor.append_raw_block(sstable_iter).await?;
                 }
             }
             rest_data.next_sstable().await?;
@@ -630,16 +615,17 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
         std::mem::take(&mut self.compaction_statistics)
     }
 
-    /// Commit a raw block and its bookkeeping together. The builder may decode and merge
-    /// the block into a small pending block; only an actual raw copy counts as skipped work.
+    /// Read and append the next block after the caller has checked raw-copy eligibility.
+    /// The builder may coalesce it; only an actual raw copy counts as skipped work.
     async fn append_raw_block(
         &mut self,
-        block: Bytes,
-        filter_data: Vec<u8>,
-        smallest_key: FullKey<Vec<u8>>,
-        largest_key: Vec<u8>,
-        meta: BlockMeta,
+        sstable_iter: &mut BlockStreamIterator,
     ) -> HummockResult<()> {
+        // Preserve the lower bound before advancing; metadata then refers to the read block.
+        let smallest_key = FullKey::decode(sstable_iter.next_block_smallest()).to_vec();
+        let (block, _) = sstable_iter.download_next_block().await?.unwrap();
+        let (filter_data, meta) = sstable_iter.current_block_raw_metadata();
+        let largest_key = sstable_iter.current_block_largest();
         let key_count = meta.total_key_count;
         if let Some(block_len) = self
             .builder
