@@ -401,10 +401,15 @@ impl Binder {
                         })),
                     );
                 }
-                CteInner::ChangeLog(from_table_name) => {
+                CteInner::ChangeLog { from, key } => {
+                    if key.is_some() {
+                        return Err(ErrorCode::BindError(
+                            "AS CHANGELOG with KEY is not supported yet".to_owned(),
+                        )
+                        .into());
+                    }
                     self.push_context();
-                    let from_table_relation =
-                        self.bind_relation_by_name(from_table_name, None, None, true)?;
+                    let from_table_relation = self.bind_relation_by_name(from, None, None, true)?;
                     self.pop_context()?;
                     self.context.cte_to_relation.insert(
                         table_name,
