@@ -252,32 +252,33 @@ impl SstableIterator {
         {
             while let Some(preload_stream) = self.preload_stream.as_mut() {
                 let mut ret = Ok(());
-                while preload_stream.next_block_index() < idx {
-                    if let Err(e) = preload_stream.next_block().await {
-                        ret = Err(e);
-                        break;
-                    }
-                }
-                assert_eq!(preload_stream.next_block_index(), idx);
-                if ret.is_ok() {
+                loop {
+                    let block_index = preload_stream.next_block_index();
                     match preload_stream.next_block().await {
                         Ok(Some(block)) => {
+                            if block_index < idx {
+                                continue;
+                            }
+                            assert_eq!(block_index, idx);
                             hit_cache = true;
                             self.block_iter = Some(BlockIterator::new(block));
                             break;
                         }
                         Ok(None) => {
-                            self.preload_stream.take();
+                            // A seek can jump beyond the end of the prefetched blocks.
+                            break;
                         }
                         Err(e) => {
-                            self.preload_stream.take();
                             ret = Err(e);
+                            break;
                         }
                     }
-                } else {
-                    self.preload_stream.take();
                 }
-                if self.preload_stream.is_none() && idx + 1 < self.preload_end_block_idx {
+                if hit_cache {
+                    break;
+                }
+                self.preload_stream.take();
+                if idx + 1 < self.preload_end_block_idx {
                     if let Err(e) = ret {
                         tracing::warn!(error = %e.as_report(), "recreate stream because the connection to remote storage has closed");
                         if self.preload_retry_times >= self.options.max_preload_retry_times {
@@ -636,6 +637,23 @@ mod tests {
             options.clone(),
             &sst_info,
         );
+
+        // Cache hits produce a singleton prefetch stream. Seeking past its end must
+        // fetch the requested block instead of repeatedly polling the exhausted stream.
+        assert!(
+            sstable_iter.calculate_block_idx_by_key(test_key_of(TEST_KEYS_COUNT / 2).to_ref())
+                > sstable_iter.calculate_block_idx_by_key(test_key_of(1000).to_ref()) + 1
+        );
+        for idx in [1000, TEST_KEYS_COUNT / 2, TEST_KEYS_COUNT - 1] {
+            sstable_iter.seek(test_key_of(idx).to_ref()).await.unwrap();
+            assert!(sstable_iter.is_valid());
+            assert_eq!(sstable_iter.key(), test_key_of(idx).to_ref());
+            assert_bytes_eq!(
+                sstable_iter.value().into_user_value().unwrap(),
+                test_value_of(idx)
+            );
+        }
+
         let mut cnt = 1000;
         sstable_iter.seek(test_key_of(cnt).to_ref()).await.unwrap();
         while sstable_iter.is_valid() {
