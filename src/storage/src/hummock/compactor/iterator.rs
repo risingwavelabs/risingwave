@@ -81,6 +81,7 @@ impl SstableStreamIterator {
         let key_range_right = FullKey::decode(&sstable_info.key_range.right).to_vec();
         let key_range_right_exclusive = sstable_info.key_range.right_exclusive;
 
+        task_progress.inc_num_pending_read_io();
         Self {
             block_stream: SstableBlockStream::new(
                 sstable,
@@ -375,11 +376,7 @@ impl ConcatSstableIterator {
             let block_metas_range =
                 filter_block_metas(&sstable.meta.block_metas, &read_table_ids, filter_key_range);
 
-            let mut found = true;
-            if block_metas_range.is_empty() {
-                found = false;
-            } else {
-                self.task_progress.inc_num_pending_read_io();
+            if !block_metas_range.is_empty() {
                 let mut sstable_iter = SstableStreamIterator::new(
                     sstable,
                     block_metas_range,
@@ -393,17 +390,12 @@ impl ConcatSstableIterator {
 
                 if sstable_iter.is_valid() {
                     self.sstable_iter = Some(sstable_iter);
-                } else {
-                    found = false;
+                    return Ok(());
                 }
             }
 
-            if found {
-                return Ok(());
-            } else {
-                self.cur_idx += 1;
-                seek_key = None;
-            }
+            self.cur_idx += 1;
+            seek_key = None;
         }
         Ok(())
     }

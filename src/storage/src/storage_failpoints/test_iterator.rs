@@ -408,15 +408,17 @@ async fn test_failpoints_compactor_iterator_recreate() {
 
     let table = sstable_store.sstable(&info, &mut stats).await.unwrap();
     let block_metas_range = 0..table.meta.block_metas.len();
+    let task_progress = Arc::new(TaskProgress::default());
     let mut sstable_iter = SstableStreamIterator::new(
         table,
         block_metas_range,
         info,
         &stats,
-        Arc::new(TaskProgress::default()),
+        task_progress.clone(),
         sstable_store,
         100,
     );
+    assert_eq!(task_progress.snapshot(0).num_pending_read_io, 1);
     let mut cnt = 0;
     sstable_iter.seek(None).await.unwrap();
     while sstable_iter.is_valid() {
@@ -431,6 +433,8 @@ async fn test_failpoints_compactor_iterator_recreate() {
     }
     assert_eq!(cnt, TEST_KEYS_COUNT);
     assert!(meet_err.load(Ordering::Acquire));
+    drop(sstable_iter);
+    assert_eq!(task_progress.snapshot(0).num_pending_read_io, 0);
 }
 
 #[tokio::test]
@@ -477,14 +481,16 @@ async fn test_failpoints_fast_compactor_iterator_recreate() {
     let mut stats = StoreLocalStatistic::default();
 
     let table = sstable_store.sstable(&info, &mut stats).await.unwrap();
+    let task_progress = Arc::new(TaskProgress::default());
     let mut sstable_iter = BlockStreamIterator::new(
         table,
-        Arc::new(TaskProgress::default()),
+        task_progress.clone(),
         sstable_store.clone(),
         info.clone(),
         10,
         Arc::new(AtomicU64::new(0)),
     );
+    assert_eq!(task_progress.snapshot(0).num_pending_read_io, 1);
 
     let mut cnt = 0;
     while sstable_iter.is_valid() {
@@ -511,4 +517,6 @@ async fn test_failpoints_fast_compactor_iterator_recreate() {
     }
     assert_eq!(cnt, TEST_KEYS_COUNT);
     assert!(meet_err.load(Ordering::Acquire));
+    drop(sstable_iter);
+    assert_eq!(task_progress.snapshot(0).num_pending_read_io, 0);
 }

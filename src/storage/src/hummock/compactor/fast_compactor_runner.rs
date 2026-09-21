@@ -77,6 +77,7 @@ impl BlockStreamIterator {
         // Fast compaction streams the physical SST. The executor decides whether each block
         // can be copied or needs decoding, including table-id pruning.
         let block_count = sstable.meta.block_metas.len();
+        task_progress.inc_num_pending_read_io();
         Self {
             block_stream: SstableBlockStream::new(
                 sstable,
@@ -260,8 +261,6 @@ impl ConcatSstableIterator {
                 .sstable(sstable_info, &mut self.stats)
                 .instrument_await("stream_iter_sstable".verbose())
                 .await?;
-            self.task_progress.inc_num_pending_read_io();
-
             let sstable_iter = BlockStreamIterator::new(
                 sstable,
                 self.task_progress.clone(),
@@ -544,13 +543,12 @@ impl<B: FilterBuilder, C: CompactionFilter> CompactorRunner<B, C> {
             let sstable_iter = rest_data.current_sstable();
             while sstable_iter.is_valid() {
                 let smallest_key = FullKey::decode(sstable_iter.next_block_smallest()).to_vec();
-                let (block, uncompressed_size) = sstable_iter.download_next_block().await?.unwrap();
                 if self.executor.builder.need_flush()
                     || !self.executor.shall_copy_raw_block(&smallest_key.to_ref())
                 {
-                    sstable_iter.init_block_iter(block, uncompressed_size)?;
                     self.executor.compact_block(sstable_iter, None).await?;
                 } else {
+                    let (block, _) = sstable_iter.download_next_block().await?.unwrap();
                     let (filter_data, block_meta) = sstable_iter.current_block_raw_metadata();
                     let largest_key = sstable_iter.current_block_largest();
                     self.executor
