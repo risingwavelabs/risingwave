@@ -1237,6 +1237,7 @@ mod tests {
                 Field::with_name(DataType::Float64, "price"),
             ]),
             vec![OrderType::ascending()],
+            Some(vec![CdcKeyComparison::Native]),
             vec![0],
         )
         .with_mock_snapshot_errors([1, 0]);
