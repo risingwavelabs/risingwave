@@ -35,8 +35,10 @@ use tokio::sync::{RwLock, RwLockReadGuard, RwLockWriteGuard, oneshot};
 use tokio::task::JoinHandle;
 use tokio::time::{Instant, MissedTickBehavior};
 
-use crate::barrier::edge_builder::{EdgeBuilderFragmentInfo, FragmentEdgeBuilder};
-use crate::barrier::{Command, Reschedule, RescheduleContext, ReschedulePlan};
+use crate::barrier::edge_builder::FragmentEdgeBuilder;
+use crate::barrier::{
+    Command, ControlStreamManager, Reschedule, RescheduleContext, ReschedulePlan,
+};
 use crate::controller::scale::{
     FragmentRenderMap, LoadedFragmentContext, NoShuffleEnsemble,
     find_fragment_no_shuffle_dags_detailed, load_fragment_context, load_fragment_context_for_jobs,
@@ -710,7 +712,7 @@ pub(crate) fn build_reschedule_commands(
     render_result: FragmentRenderMap,
     context: RescheduleContext,
     all_prev_fragments: HashMap<FragmentId, &InflightFragmentInfo>,
-    worker_nodes: &HashMap<WorkerId, WorkerNode>,
+    control_stream_manager: &ControlStreamManager,
 ) -> MetaResult<HashMap<DatabaseId, ReschedulePlan>> {
     if render_result.is_empty() {
         return Ok(HashMap::new());
@@ -770,34 +772,22 @@ pub(crate) fn build_reschedule_commands(
             }))
             .collect();
         let partial_graph_id = crate::barrier::to_partial_graph_id(*database_id, None);
-        let mut edge_builder = FragmentEdgeBuilder::from_existing_fragments(
-            affected_fragment_ids.iter().map(|fragment_id| {
-                let fragment = all_prev_fragments[fragment_id];
-                (
-                    *fragment_id,
-                    EdgeBuilderFragmentInfo::from_inflight_with_worker_nodes(
-                        fragment,
-                        partial_graph_id,
-                        worker_nodes,
-                    ),
-                )
-            }),
-        );
-        edge_builder.replace_existing_fragment_actors(jobs.values().flatten().map(
-            |(fragment_id, fragment)| {
-                (
-                    *fragment_id,
-                    EdgeBuilderFragmentInfo::from_inflight_with_worker_nodes(
-                        fragment,
-                        partial_graph_id,
-                        worker_nodes,
-                    ),
-                )
-            },
-        ));
-        let mut edge_builder = edge_builder.finish_fragments();
+        let mut edge_builder = FragmentEdgeBuilder::new()
+            .add_existing_fragments(
+                affected_fragment_ids
+                    .iter()
+                    .map(|fragment_id| all_prev_fragments[fragment_id]),
+                partial_graph_id,
+                control_stream_manager,
+            )
+            .replace_existing_fragment_actors(
+                jobs.values().flatten().map(|(_, fragment)| fragment),
+                partial_graph_id,
+                control_stream_manager,
+            )
+            .finish_fragments();
         for relation in relations {
-            edge_builder.add_edge(
+            edge_builder = edge_builder.add_edge(
                 relation.source_fragment_id as FragmentId,
                 &DownstreamFragmentRelation {
                     downstream_fragment_id: relation.target_fragment_id as FragmentId,
@@ -812,7 +802,7 @@ pub(crate) fn build_reschedule_commands(
                             .to_protobuf(),
                     },
                 },
-            );
+            )?;
         }
         let edges = edge_builder.build();
         let mut reschedules = HashMap::new();
@@ -1102,8 +1092,8 @@ mod tests {
         assert!(rendered_layout_matches_current(&rendered, &prev,).unwrap());
     }
 
-    #[test]
-    fn build_reschedule_plan_generates_edge_updates() {
+    #[tokio::test]
+    async fn build_reschedule_plan_generates_edge_updates() {
         let source_id = FragmentId::new(1);
         let changed_id = FragmentId::new(2);
         let target_id = FragmentId::new(3);
@@ -1128,7 +1118,7 @@ mod tests {
                 },
             );
         }
-        let workers = [1, 2, 3]
+        let workers: HashMap<_, _> = [1, 2, 3]
             .into_iter()
             .map(|worker_id| {
                 let worker_id: WorkerId = worker_id.into();
@@ -1145,6 +1135,11 @@ mod tests {
                 )
             })
             .collect();
+        let env = MetaSrvEnv::for_test().await;
+        let mut control_stream_manager = ControlStreamManager::new(env);
+        for worker in workers.values().cloned() {
+            control_stream_manager.add_worker_node_for_test(worker);
+        }
         let previous = HashMap::from([
             (source_id, &source),
             (changed_id, &changed),
@@ -1155,7 +1150,7 @@ mod tests {
             render_result(vec![(changed_id, rendered_changed)]),
             context,
             previous,
-            &workers,
+            &control_stream_manager,
         )
         .unwrap();
         let ReschedulePlan {
