@@ -50,7 +50,6 @@ use crate::barrier::command::{
 use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
 use crate::barrier::edge_builder::FragmentEdgeBuildResult;
 use crate::barrier::info::{BarrierInfo, InflightStreamingJobInfo};
-use crate::barrier::notifier::NotifierStarter;
 use crate::barrier::partial_graph::{
     CollectedBarrier, PartialGraphBarrierInfo, PartialGraphManager, PartialGraphRecoverer,
 };
@@ -63,6 +62,7 @@ use crate::barrier::{
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::manager::MetaOpts;
 use crate::model::{FragmentDownstreamRelation, StreamActor, StreamJobActorsToCreate};
+use crate::notification::NotifierStarter;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::source_manager::SplitAssignment;
 use crate::stream::{ExtendedFragmentBackfillOrder, build_actor_connector_splits};

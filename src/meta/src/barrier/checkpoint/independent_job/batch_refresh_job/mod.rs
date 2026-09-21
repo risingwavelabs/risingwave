@@ -49,7 +49,6 @@ use crate::barrier::command::{PostCollectCommand, ThrottleConfigMap, extract_thr
 use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
 use crate::barrier::edge_builder::{EdgeBuilderFragmentInfo, FragmentEdgeBuilder};
 use crate::barrier::info::BarrierInfo;
-use crate::barrier::notifier::NotifierStarter;
 use crate::barrier::partial_graph::{
     CollectedBarrier, PartialGraphBarrierInfo, PartialGraphManager, PartialGraphStat,
 };
@@ -66,6 +65,7 @@ use crate::controller::scale::{
 use crate::model::{
     FragmentDownstreamRelation, StreamActor, StreamJobActorsToCreate, StreamingJobModelContextExt,
 };
+use crate::notification::NotifierStarter;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::stream::ExtendedFragmentBackfillOrder;
 

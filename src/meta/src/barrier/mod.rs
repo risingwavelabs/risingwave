@@ -21,10 +21,10 @@ use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::meta::PbRecoveryStatus;
 use tokio::sync::oneshot::Sender;
 
-use self::notifier::Notifier;
 use crate::barrier::info::BarrierInfo;
 use crate::manager::ActiveStreamingWorkerNodes;
 use crate::model::{ActorId, BackfillUpstreamType, FragmentId, StreamActor, SubscriptionId};
+use crate::notification::Notifier;
 use crate::{MetaError, MetaResult};
 
 mod backfill_order_control;
@@ -37,7 +37,6 @@ pub(super) mod context;
 mod edge_builder;
 mod info;
 mod manager;
-mod notifier;
 mod partial_graph;
 mod progress;
 mod rpc;
