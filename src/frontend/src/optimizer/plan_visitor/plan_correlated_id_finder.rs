@@ -18,7 +18,7 @@ use super::{DefaultBehavior, DefaultValue, LogicalPlanVisitor};
 use crate::expr::{CorrelatedId, CorrelatedInputRef, ExprVisitor};
 use crate::optimizer::plan_node::{
     LogicalAgg, LogicalFilter, LogicalJoin, LogicalPlanRef as PlanRef, LogicalProject,
-    LogicalProjectSet, LogicalTableFunction, PlanTreeNode,
+    LogicalProjectSet, LogicalTableFunction, LogicalValues, PlanTreeNode,
 };
 use crate::optimizer::plan_visitor::PlanVisitor;
 
@@ -116,6 +116,15 @@ impl LogicalPlanVisitor for PlanCorrelatedIdFinder {
             .into_iter()
             .for_each(|input| self.visit(input));
     }
+
+    fn visit_logical_values(&mut self, plan: &LogicalValues) {
+        let mut finder = ExprCorrelatedIdFinder::default();
+        plan.rows()
+            .iter()
+            .flatten()
+            .for_each(|expr| finder.visit_expr(expr));
+        self.correlated_id_set.extend(finder.correlated_id_set);
+    }
 }
 
 #[derive(Default)]
@@ -137,5 +146,29 @@ impl ExprVisitor for ExprCorrelatedIdFinder {
     fn visit_correlated_input_ref(&mut self, correlated_input_ref: &CorrelatedInputRef) {
         self.correlated_id_set
             .insert(correlated_input_ref.correlated_id());
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::types::DataType;
+
+    use super::*;
+    use crate::expr::CorrelatedInputRef;
+    use crate::optimizer::optimizer_context::OptimizerContext;
+
+    #[test]
+    fn test_find_correlated_id_in_logical_values() {
+        let ctx = OptimizerContext::mock();
+        let schema = Schema::new(vec![Field::with_name(DataType::Int32, "v")]);
+
+        let mut correlated = CorrelatedInputRef::new(0, DataType::Int32, 1);
+        correlated.set_correlated_id(42);
+
+        let values = LogicalValues::new(vec![vec![correlated.into()]], schema, ctx).into();
+
+        assert!(PlanCorrelatedIdFinder::find_correlated_id(values.clone(), &42));
+        assert!(!PlanCorrelatedIdFinder::find_correlated_id(values, &43));
     }
 }
