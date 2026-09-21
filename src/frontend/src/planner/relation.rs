@@ -36,9 +36,9 @@ use thiserror_ext::AsReport;
 
 use crate::TableCatalog;
 use crate::binder::{
-    BoundBaseTable, BoundGapFill, BoundIcebergMetadataTable, BoundJoin, BoundShare,
-    BoundShareInput, BoundSource, BoundSystemTable, BoundWatermark, BoundWindowTableFunction,
-    Relation, WindowTableFunctionKind,
+    BoundBaseTable, BoundGapFill, BoundIcebergMetadataTable, BoundJoin, BoundMatchRecognize,
+    BoundShare, BoundShareInput, BoundSource, BoundSystemTable, BoundWatermark,
+    BoundWindowTableFunction, Relation, WindowTableFunctionKind,
 };
 use crate::catalog::source_catalog::SourceCatalog;
 use crate::error::{ErrorCode, Result};
@@ -48,9 +48,9 @@ use crate::optimizer::plan_node::generic::{self, GenericPlanRef, SourceNodeKind}
 use crate::optimizer::plan_node::utils::to_iceberg_time_travel_as_of;
 use crate::optimizer::plan_node::{
     LogicalApply, LogicalGapFill, LogicalHopWindow, LogicalIcebergIntermediateScan,
-    LogicalIcebergMetadataScan, LogicalJoin, LogicalPlanRef as PlanRef, LogicalProject,
-    LogicalScan, LogicalShare, LogicalSource, LogicalSysScan, LogicalTableFunction, LogicalUnion,
-    LogicalValues,
+    LogicalIcebergMetadataScan, LogicalJoin, LogicalMatchRecognize, LogicalPlanRef as PlanRef,
+    LogicalProject, LogicalScan, LogicalShare, LogicalSource, LogicalSysScan, LogicalTableFunction,
+    LogicalUnion, LogicalValues,
 };
 use crate::optimizer::property::Cardinality;
 use crate::planner::{PlanFor, Planner};
@@ -78,6 +78,7 @@ impl Planner {
             Relation::Watermark(tf) => self.plan_watermark(*tf),
             Relation::Share(share) => self.plan_share(*share),
             Relation::GapFill(bound_gap_fill) => self.plan_gap_fill(*bound_gap_fill),
+            Relation::MatchRecognize(mr) => self.plan_match_recognize(*mr),
         }
     }
 
@@ -112,6 +113,7 @@ impl Planner {
                 match as_of {
                     None
                     | Some(AsOf::ProcessTime)
+                    | Some(AsOf::ProcessTimeBroadcast)
                     | Some(AsOf::TimestampNum(_))
                     | Some(AsOf::TimestampString(_))
                     | Some(AsOf::ProcessTimeWithInterval(_)) => {}
@@ -171,7 +173,9 @@ impl Planner {
             | Some(AsOf::VersionNum(_))
             | Some(AsOf::TimestampString(_))
             | Some(AsOf::TimestampNum(_)) => {}
-            Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
+            Some(AsOf::ProcessTime)
+            | Some(AsOf::ProcessTimeBroadcast)
+            | Some(AsOf::ProcessTimeWithInterval(_)) => {
                 bail_not_implemented!("As Of ProcessTime() is not supported yet.")
             }
             Some(AsOf::VersionString(_)) => {
@@ -353,7 +357,9 @@ impl Planner {
                 | Some(AsOf::VersionNum(_))
                 | Some(AsOf::TimestampString(_))
                 | Some(AsOf::TimestampNum(_)) => {}
-                Some(AsOf::ProcessTime) | Some(AsOf::ProcessTimeWithInterval(_)) => {
+                Some(AsOf::ProcessTime)
+                | Some(AsOf::ProcessTimeBroadcast)
+                | Some(AsOf::ProcessTimeWithInterval(_)) => {
                     bail_not_implemented!("As Of ProcessTime() is not supported yet.")
                 }
                 Some(AsOf::VersionString(_)) => {
@@ -541,6 +547,23 @@ source: {:?}",
             gap_fill.interval,
             gap_fill.fill_strategies,
             gap_fill.partition_by_cols,
+        )
+        .into())
+    }
+
+    pub(super) fn plan_match_recognize(&mut self, mr: BoundMatchRecognize) -> Result<PlanRef> {
+        let input = self.plan_relation(mr.input)?;
+        Ok(LogicalMatchRecognize::new(
+            input,
+            mr.partition_by,
+            mr.order_by,
+            mr.measures,
+            mr.rows_per_match,
+            mr.after_match_skip,
+            mr.pattern,
+            mr.defines,
+            mr.within,
+            mr.within_deadline,
         )
         .into())
     }

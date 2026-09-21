@@ -14927,6 +14927,7 @@ dependencies = [
  "clap",
  "comfy-table",
  "crepe",
+ "criterion",
  "easy-ext",
  "educe",
  "either",

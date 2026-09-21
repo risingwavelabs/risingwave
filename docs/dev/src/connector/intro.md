@@ -159,6 +159,14 @@ For example, run the Redis sink test locally without preparing Redis separately:
 ./risedev k
 ```
 
+Run the ClickHouse sink test in the same way:
+
+```sh
+./risedev d local-clickhouse-sink-test
+./risedev slt './e2e_test/sink/clickhouse_sink.slt'
+./risedev k
+```
+
 ### Tips for writing `system` commands
 
 Refer to

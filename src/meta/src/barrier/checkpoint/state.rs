@@ -128,6 +128,7 @@ impl BarrierWorkerState {
         &mut self,
         is_checkpoint: bool,
         curr_epoch: TracedEpoch,
+        barrier_interval_ms: u32,
     ) -> BarrierInfo {
         assert!(
             self.in_flight_prev_epoch.value() < curr_epoch.value(),
@@ -149,6 +150,7 @@ impl BarrierWorkerState {
             prev_epoch,
             curr_epoch,
             kind,
+            barrier_interval_ms,
         }
     }
 }
@@ -619,6 +621,7 @@ impl DatabaseCheckpointControl {
                         notifier.as_mut(),
                         snapshot_backfill_upstream_tables,
                         snapshot_epoch,
+                        barrier_info.barrier_interval_ms,
                         since_timestamp_upstream_log_epochs,
                         hummock_version_stats,
                         term_id,
@@ -794,6 +797,7 @@ impl DatabaseCheckpointControl {
                         notifier.as_mut(),
                         snapshot_backfill_upstream_tables,
                         snapshot_epoch,
+                        barrier_info.barrier_interval_ms,
                         hummock_version_stats,
                         self.term_id(),
                         partial_graph_manager,
@@ -1745,6 +1749,7 @@ impl DatabaseCheckpointControl {
                         actor_cdc_table_snapshot_splits: None, /* no cdc table backfill in snapshot backfill */
                         sink_schema_change: Default::default(), /* no sink auto schema change happened here */
                         subscriptions_to_drop,
+                        iceberg_pk_index_compaction: None,
                     }))
                 } else {
                     let fragment_ids = self.database_info.take_pending_backfill_nodes();
@@ -1830,7 +1835,6 @@ impl DatabaseCheckpointControl {
         partial_graph_manager.inject_barrier(
             to_partial_graph_id(self.database_id, None),
             mutation,
-            None,
             &node_actors,
             InflightFragmentInfo::existing_table_ids(self.database_info.fragment_infos()),
             InflightFragmentInfo::workers(self.database_info.fragment_infos()),

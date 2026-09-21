@@ -131,3 +131,66 @@ DROP TABLE s3_full_reload_periodic_issue26012;
 
 system ok
 python3 e2e_test/s3/refresh_full_reload_helper.py cleanup
+
+# A limit of 0 holds a Parquet refresh open until it is lifted. A reader built while the limit
+# is 0 would get a batch size of 0 and read the file as empty, finishing the cycle with no rows.
+
+system ok
+python3 e2e_test/s3/refresh_full_reload_helper.py setup-parquet
+
+statement ok
+CREATE TABLE s3_full_reload_parquet_rl (id int PRIMARY KEY, name varchar) WITH (
+    connector = 's3',
+    match_pattern = 'refresh_full_reload_issue26012/*.parquet',
+    s3.region_name = 'custom',
+    s3.bucket_name = 'hummock001',
+    s3.credentials.access = 'hummockadmin',
+    s3.credentials.secret = 'hummockadmin',
+    s3.endpoint_url = 'http://hummock001.127.0.0.1:9301',
+    refresh_mode = 'FULL_RELOAD'
+) FORMAT PLAIN ENCODE PARQUET;
+
+statement ok
+REFRESH TABLE s3_full_reload_parquet_rl;
+
+query TI retry 12 backoff 5s
+SELECT s.current_status, (SELECT count(*) FROM s3_full_reload_parquet_rl)
+FROM rw_catalog.rw_refresh_table_state s
+JOIN rw_catalog.rw_tables t ON s.table_id = t.id
+WHERE t.name = 's3_full_reload_parquet_rl';
+----
+IDLE 2000
+
+statement ok
+ALTER TABLE s3_full_reload_parquet_rl SET SOURCE_RATE_LIMIT TO 0;
+
+statement ok
+REFRESH TABLE s3_full_reload_parquet_rl;
+
+# An unthrottled load of this file finishes in about a second, so the wait has to outlast that.
+sleep 10s
+
+query TI
+SELECT s.current_status, (SELECT count(*) FROM s3_full_reload_parquet_rl)
+FROM rw_catalog.rw_refresh_table_state s
+JOIN rw_catalog.rw_tables t ON s.table_id = t.id
+WHERE t.name = 's3_full_reload_parquet_rl';
+----
+REFRESHING 2000
+
+statement ok
+ALTER TABLE s3_full_reload_parquet_rl SET SOURCE_RATE_LIMIT TO DEFAULT;
+
+query TI retry 12 backoff 5s
+SELECT s.current_status, (SELECT count(*) FROM s3_full_reload_parquet_rl)
+FROM rw_catalog.rw_refresh_table_state s
+JOIN rw_catalog.rw_tables t ON s.table_id = t.id
+WHERE t.name = 's3_full_reload_parquet_rl';
+----
+IDLE 2000
+
+statement ok
+DROP TABLE s3_full_reload_parquet_rl;
+
+system ok
+python3 e2e_test/s3/refresh_full_reload_helper.py cleanup
