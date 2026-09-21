@@ -256,6 +256,9 @@ message Barrier {
   map<string, string> tracing_context = 2;
   // The kind of the barrier.
   BarrierKind kind = 9;
+  // The effective barrier interval for this database: the database-specific override when set,
+  // or the system-wide interval otherwise.
+  uint32 barrier_interval_ms = 10;
 }
 
 message Watermark {
@@ -1167,6 +1170,8 @@ message LocalityProviderNode {
   optional catalog.Table state_table = 2;
   // Progress table for tracking backfill progress
   optional catalog.Table progress_table = 3;
+  // Rate limit of the drain phase, set by `BACKFILL_RATE_LIMIT`.
+  optional uint32 rate_limit = 4;
 }
 
 message EowcGapFillNode {

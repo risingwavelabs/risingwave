@@ -408,8 +408,8 @@
     create table t (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
     select * from (select *, row_number() over (partition by v1, ts order by v2) as rn from t) where rn <= 1;
   stream_plan: |-
-    StreamMaterialize { columns: [ts, v1, v2, rn], stream_key: [v1, ts], pk_columns: [v1, ts], pk_conflict: NoCheck }
-    └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.v1, t.ts ORDER BY t.v2 ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+    StreamMaterialize { columns: [ts, v1, v2, rn], stream_key: [v1, ts], pk_columns: [v1, ts], pk_conflict: NoCheck, watermark_columns: [ts] }
+    └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.v1, t.ts ORDER BY t.v2 ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)], output_watermarks: [[t.ts]] }
       └─StreamProject { exprs: [t.ts, t.v1, t.v2], output_watermarks: [[t.ts]] }
         └─StreamGroupTopN [append_only] { order: [t.v2 ASC], limit: 1, offset: 0, group_key: [t.v1, t.ts], output_watermarks: [[t.ts]] }
           └─StreamExchange { dist: HashShard(t.ts, t.v1) }
@@ -419,8 +419,8 @@
     create table t (ts timestamp with time zone, v1 int, v2 int, watermark for ts as ts - INTERVAL '1' SECOND) append only;
     select * from (select *, row_number() over (partition by v1 order by ts) as rn from t) where rn <= 1;
   stream_plan: |-
-    StreamMaterialize { columns: [ts, v1, v2, rn], stream_key: [v1], pk_columns: [v1], pk_conflict: NoCheck }
-    └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.v1 ORDER BY t.ts ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
+    StreamMaterialize { columns: [ts, v1, v2, rn], stream_key: [v1], pk_columns: [v1], pk_conflict: NoCheck, watermark_columns: [ts] }
+    └─StreamOverWindow { window_functions: [row_number() OVER(PARTITION BY t.v1 ORDER BY t.ts ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)], output_watermarks: [[t.ts]] }
       └─StreamProject { exprs: [t.ts, t.v1, t.v2], output_watermarks: [[t.ts]] }
         └─StreamGroupTopN [append_only] { order: [t.ts ASC], limit: 1, offset: 0, group_key: [t.v1], output_watermarks: [[t.ts]] }
           └─StreamExchange { dist: HashShard(t.v1) }

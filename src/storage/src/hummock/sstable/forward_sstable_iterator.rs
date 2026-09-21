@@ -77,10 +77,19 @@ impl SstableIterator {
             sstable_info_ref.sst_id,
             sstable_info_ref.object_id,
         );
-        let read_table_id_range = (
-            *sstable_info_ref.table_ids.first().unwrap(),
-            *sstable_info_ref.table_ids.last().unwrap(),
-        );
+        let read_table_id_range = if let Some(read_table_id) = options.read_table_id
+            && sstable_info_ref
+                .table_ids
+                .binary_search(&read_table_id)
+                .is_ok()
+        {
+            (read_table_id, read_table_id)
+        } else {
+            (
+                *sstable_info_ref.table_ids.first().unwrap(),
+                *sstable_info_ref.table_ids.last().unwrap(),
+            )
+        };
         assert!(
             read_table_id_range.0 <= read_table_id_range.1,
             "invalid table id range {} - {}",
@@ -592,6 +601,7 @@ mod tests {
         );
         let options = Arc::new(SstableIteratorReadOptions {
             cache_policy: CachePolicy::Fill(Hint::Normal),
+            read_table_id: None,
             scan_end_user_key: Some(Bound::Included(uk.clone())),
             prefetch: true,
             max_preload_retry_times: 0,
@@ -692,6 +702,7 @@ mod tests {
         for (case, prefetch) in [("prefetch off", false), ("prefetch on", true)] {
             let options = Arc::new(SstableIteratorReadOptions {
                 cache_policy: CachePolicy::Disable,
+                read_table_id: None,
                 scan_end_user_key: Some(Bound::Excluded(table_3_start.clone())),
                 prefetch,
                 max_preload_retry_times: 0,
@@ -739,6 +750,50 @@ mod tests {
             }
         }
 
+        let options = Arc::new(SstableIteratorReadOptions {
+            cache_policy: CachePolicy::Disable,
+            read_table_id: Some(TableId::new(2)),
+            scan_end_user_key: None,
+            prefetch: false,
+            max_preload_retry_times: 0,
+        });
+        let mut sstable_iter = SstableIterator::create(
+            sstable.clone(),
+            sstable_store.clone(),
+            options,
+            &sstable_info,
+        );
+        assert_eq!(sstable_iter.block_start_idx_inclusive, table_2_block_start);
+        assert_eq!(sstable_iter.block_end_idx_exclusive, table_3_block_start);
+        sstable_iter.rewind().await.unwrap();
+        assert!(sstable_iter.is_valid());
+        while sstable_iter.is_valid() {
+            assert_eq!(sstable_iter.key().user_key.table_id, TableId::new(2));
+            sstable_iter.next().await.unwrap();
+        }
+
+        for missing_table_id in [0, 4] {
+            let options = Arc::new(SstableIteratorReadOptions {
+                read_table_id: Some(TableId::new(missing_table_id)),
+                ..Default::default()
+            });
+            let mut sstable_iter = SstableIterator::create(
+                sstable.clone(),
+                sstable_store.clone(),
+                options,
+                &sstable_info,
+            );
+            sstable_iter.rewind().await.unwrap();
+            for table_id in 1..=3 {
+                for idx in 0..8 {
+                    assert!(sstable_iter.is_valid());
+                    assert_eq!(sstable_iter.key(), test_key(table_id, idx).to_ref());
+                    sstable_iter.next().await.unwrap();
+                }
+            }
+            assert!(!sstable_iter.is_valid());
+        }
+
         let mut table_2_sstable_info = sstable_info.get_inner();
         table_2_sstable_info.table_ids = vec![TableId::new(2)];
         let table_2_sstable_info = SstableInfo::from(table_2_sstable_info);
@@ -748,6 +803,7 @@ mod tests {
                 .copy_into();
         let options = Arc::new(SstableIteratorReadOptions {
             cache_policy: CachePolicy::Disable,
+            read_table_id: None,
             scan_end_user_key: Some(Bound::Excluded(table_2_start)),
             prefetch: false,
             max_preload_retry_times: 0,

@@ -539,18 +539,9 @@ pub fn start(
                     .streaming
                     .developer
                     .refresh_scheduler_interval_sec,
-                table_stat_high_write_throughput_ratio_for_split: config
+                table_write_throughput_retention_seconds: config
                     .meta
-                    .table_stat_high_write_throughput_ratio_for_split,
-                table_stat_low_write_throughput_ratio_for_merge: config
-                    .meta
-                    .table_stat_low_write_throughput_ratio_for_merge,
-                table_stat_throuput_window_seconds_for_split: config
-                    .meta
-                    .table_stat_throuput_window_seconds_for_split,
-                table_stat_throuput_window_seconds_for_merge: config
-                    .meta
-                    .table_stat_throuput_window_seconds_for_merge,
+                    .table_write_throughput_retention_seconds,
                 object_store_config: config.storage.object_store,
                 max_trivial_move_task_count_per_loop: config
                     .meta

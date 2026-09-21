@@ -190,6 +190,7 @@ pub(crate) struct BatchRefreshJobCheckpointControl {
     snapshot_epoch: u64,
     /// Batch refresh interval in seconds. Used to determine when to trigger a refresh run.
     batch_refresh_seconds: u64,
+    barrier_interval_ms: u32,
 
     status: BatchRefreshJobStatus,
 }
@@ -469,6 +470,7 @@ impl BatchRefreshJobCheckpointControl {
         notifier: Option<&mut NotifierStarter>,
         snapshot_backfill_upstream_tables: HashSet<TableId>,
         snapshot_epoch: u64,
+        barrier_interval_ms: u32,
         version_stat: &HummockVersionStats,
         term_id: &str,
         partial_graph_manager: &mut PartialGraphManager,
@@ -523,6 +525,7 @@ impl BatchRefreshJobCheckpointControl {
             &mut prev_epoch_fake_physical_time,
             &mut pending_non_checkpoint_barriers,
             PbBarrierKind::Checkpoint,
+            barrier_interval_ms,
         );
 
         let mut graph_adder = partial_graph_manager.add_partial_graph(
@@ -555,6 +558,7 @@ impl BatchRefreshJobCheckpointControl {
             snapshot_backfill_upstream_tables,
             snapshot_epoch,
             batch_refresh_seconds,
+            barrier_interval_ms,
 
             status: BatchRefreshJobStatus::ConsumingSnapshot {
                 prev_epoch_fake_physical_time,
@@ -581,6 +585,7 @@ impl BatchRefreshJobCheckpointControl {
         snapshot_backfill_upstream_tables: HashSet<TableId>,
         snapshot_epoch: u64,
         committed_epoch: u64,
+        barrier_interval_ms: u32,
         backfill_order: ExtendedFragmentBackfillOrder,
         version_stat: &HummockVersionStats,
         initial_mutation: Mutation,
@@ -605,6 +610,7 @@ impl BatchRefreshJobCheckpointControl {
                 snapshot_backfill_upstream_tables,
                 snapshot_epoch,
                 batch_refresh_seconds,
+                barrier_interval_ms,
 
                 status: BatchRefreshJobStatus::Idle {
                     last_committed_epoch: committed_epoch,
@@ -643,6 +649,7 @@ impl BatchRefreshJobCheckpointControl {
             &mut prev_epoch_fake_physical_time,
             &mut pending_non_checkpoint_barriers,
             PbBarrierKind::Initial,
+            barrier_interval_ms,
         );
 
         partial_graph_recoverer.recover_graph(
@@ -662,6 +669,7 @@ impl BatchRefreshJobCheckpointControl {
             snapshot_backfill_upstream_tables,
             snapshot_epoch,
             batch_refresh_seconds,
+            barrier_interval_ms,
             status: BatchRefreshJobStatus::ConsumingSnapshot {
                 prev_epoch_fake_physical_time,
                 version_stats: version_stat.clone(),
@@ -732,6 +740,7 @@ impl BatchRefreshJobCheckpointControl {
         barrier_info: &BarrierInfo,
         mutation: Option<(Mutation, Option<&mut NotifierStarter>)>,
     ) -> MetaResult<()> {
+        self.barrier_interval_ms = barrier_info.barrier_interval_ms;
         if !matches!(self.status, BatchRefreshJobStatus::ConsumingSnapshot { .. }) {
             // ConsumingLogStore has all barriers pre-injected; no forwarding needed.
             // Idle has no partial graph.
@@ -780,6 +789,7 @@ impl BatchRefreshJobCheckpointControl {
                 curr_epoch: TracedEpoch::new(Epoch(snapshot_epoch)),
                 prev_epoch: TracedEpoch::new(prev_epoch),
                 kind: BarrierKind::Checkpoint(take(&mut pending_non_checkpoint_barriers)),
+                barrier_interval_ms: self.barrier_interval_ms,
             };
 
             // Inject stop barrier with u64::MAX as curr_epoch and empty nodes_to_sync_table.
@@ -787,6 +797,7 @@ impl BatchRefreshJobCheckpointControl {
                 prev_epoch: TracedEpoch::new(Epoch(snapshot_epoch)),
                 curr_epoch: TracedEpoch::new(Epoch(u64::MAX)),
                 kind: BarrierKind::Checkpoint(vec![snapshot_epoch]),
+                barrier_interval_ms: self.barrier_interval_ms,
             };
 
             let stop_actors: Vec<ActorId> = fragment_infos
@@ -865,6 +876,7 @@ impl BatchRefreshJobCheckpointControl {
                         unreachable!("upstream new epoch should not be initial")
                     }
                 },
+                barrier_info.barrier_interval_ms,
             );
             Self::inject_barrier(
                 self.partial_graph_id,
@@ -1183,6 +1195,7 @@ impl BatchRefreshJobCheckpointControl {
             &self.snapshot_backfill_upstream_tables,
             &context.upstream_table_log_epochs,
             last_committed_epoch,
+            self.barrier_interval_ms,
         )?
         else {
             info!(
@@ -1247,6 +1260,7 @@ impl BatchRefreshJobCheckpointControl {
             prev_epoch: TracedEpoch::new(Epoch(last_committed_epoch)),
             curr_epoch: TracedEpoch::new(Epoch(first_epoch)),
             kind: BarrierKind::Initial,
+            barrier_interval_ms: self.barrier_interval_ms,
         };
         let mut partial_graph_recoverer = partial_graph_manager.start_recover();
         let recover_result = partial_graph_recoverer.recover_graph(
@@ -1355,6 +1369,7 @@ impl BatchRefreshJobCheckpointControl {
         snapshot_backfill_upstream_tables: &HashSet<TableId>,
         upstream_table_log_epochs: &HashMap<TableId, Vec<(Vec<u64>, u64)>>,
         exclusive_start_log_epoch: u64,
+        barrier_interval_ms: u32,
     ) -> MetaResult<Option<(u64, Vec<BarrierInfo>)>> {
         let table_id = snapshot_backfill_upstream_tables
             .iter()
@@ -1407,6 +1422,7 @@ impl BatchRefreshJobCheckpointControl {
                 prev_epoch: TracedEpoch::new(Epoch(prev_epoch)),
                 curr_epoch: TracedEpoch::new(Epoch(curr_epoch)),
                 kind,
+                barrier_interval_ms,
             });
         }
 
@@ -1417,6 +1433,7 @@ impl BatchRefreshJobCheckpointControl {
             prev_epoch: TracedEpoch::new(Epoch(last_epoch)),
             curr_epoch: TracedEpoch::new(Epoch(u64::MAX)),
             kind: BarrierKind::Checkpoint(pending_non_checkpoint_epochs),
+            barrier_interval_ms,
         });
 
         Ok(Some((first_epoch, replay_barriers)))

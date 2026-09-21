@@ -2505,7 +2505,6 @@ impl CatalogController {
                 MetaError::catalog_id_not_found(ObjectType::Source.as_str(), source_id)
             })?;
 
-        let is_fs_source = source.with_properties.inner_ref().is_new_fs_connector();
         let streaming_job_ids: Vec<JobId> =
             if let Some(table_id) = source.optional_associated_table_id {
                 vec![table_id.as_job_id()]
@@ -2566,21 +2565,19 @@ impl CatalogController {
                     }
                 });
             }
-            if is_fs_source {
-                // in older versions, there's no fragment type flag for `FsFetch` node,
-                // so we just scan all fragments for StreamFsFetch node if using fs connector
-                visit_stream_node_mut(stream_node, |node| {
-                    if let PbNodeBody::StreamFsFetch(node) = node {
-                        fragment_type_mask.add(FragmentTypeFlag::FsFetch);
-                        if let Some(node_inner) = &mut node.node_inner
-                            && node_inner.source_id == source_id
-                        {
-                            node_inner.rate_limit = rate_limit;
-                            found = true;
-                        }
+            // Fragments from older versions carry no `FsFetch` flag, so scan every fragment
+            // for the node and backfill the flag.
+            visit_stream_node_mut(stream_node, |node| {
+                if let PbNodeBody::StreamFsFetch(node) = node {
+                    fragment_type_mask.add(FragmentTypeFlag::FsFetch);
+                    if let Some(node_inner) = &mut node.node_inner
+                        && node_inner.source_id == source_id
+                    {
+                        node_inner.rate_limit = rate_limit;
+                        found = true;
                     }
-                });
-            }
+                }
+            });
             found
         });
 
@@ -2780,6 +2777,10 @@ impl CatalogController {
                             found = true;
                         }
                         PbNodeBody::SourceBackfill(node) => {
+                            node.rate_limit = rate_limit;
+                            found = true;
+                        }
+                        PbNodeBody::LocalityProvider(node) => {
                             node.rate_limit = rate_limit;
                             found = true;
                         }
@@ -3815,6 +3816,10 @@ impl CatalogController {
                                 node.rate_limit = rate_limit;
                                 found = Ok(true);
                             }
+                            PbNodeBody::LocalityProvider(node) => {
+                                node.rate_limit = rate_limit;
+                                found = Ok(true);
+                            }
                             _ => {}
                         });
                     }
@@ -3912,6 +3917,10 @@ impl CatalogController {
                     PbNodeBody::StreamCdcScan(node) => {
                         rate_limit = node.rate_limit;
                         node_name = Some("STREAM_CDC_SCAN");
+                    }
+                    PbNodeBody::LocalityProvider(node) => {
+                        rate_limit = node.rate_limit;
+                        node_name = Some("LOCALITY_PROVIDER");
                     }
                     PbNodeBody::Sink(node) => {
                         rate_limit = node.rate_limit;

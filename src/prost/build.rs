@@ -989,12 +989,6 @@ for_all_wrapped_id_fields! (
         InjectBarrierRequest.FragmentBuildActorInfo {
             fragment_id: FragmentId,
         }
-        StreamingControlStreamRequest.ControlCompactionWriterRequest {
-            partial_graph_id: PartialGraphId,
-            sink_id: SinkId,
-            task_id: IcebergCompactionTaskId,
-            actor_ids: ActorId,
-        }
         StreamingControlStreamRequest.CreatePartialGraphRequest {
             partial_graph_id: PartialGraphId,
         }
@@ -1257,6 +1251,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .type_attribute("expr.FunctionCall", "#[derive(Eq, Hash)]")
         .type_attribute("expr.UserDefinedFunction", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.ColumnDesc", "#[derive(Eq, Hash)]")
+        .type_attribute("plan_common.CdcKeyOrdering", "#[derive(Eq, Hash)]")
         .type_attribute("plan_common.ExternalTableDesc", "#[derive(Eq, Hash)]")
         .type_attribute(
             "plan_common.ColumnDesc.generated_or_default_column",

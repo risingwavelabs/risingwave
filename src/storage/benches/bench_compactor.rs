@@ -354,6 +354,7 @@ fn bench_merge_iterator_compactor(c: &mut Criterion) {
     let level2 = vec![info1, info2];
     let read_options = Arc::new(SstableIteratorReadOptions {
         cache_policy: CachePolicy::Fill(Hint::Normal),
+        read_table_id: None,
         scan_end_user_key: None,
         prefetch: false,
         max_preload_retry_times: 0,
