@@ -665,7 +665,7 @@ impl Stream for QueryCursorPgResponseStream {
         match this.inner.poll_next_item(cx) {
             Poll::Pending => Poll::Pending,
             Poll::Ready(Err(error)) => {
-                this.inner.mark_completed(true);
+                this.fail_fetch();
                 Poll::Ready(Some(Err(error)))
             }
             Poll::Ready(Ok(CursorPgResponsePollItem::Row { row, .. })) => {
@@ -845,8 +845,7 @@ impl Stream for SubscriptionCursorPgResponseStream {
                     return Poll::Pending;
                 }
                 Poll::Ready(Err(error)) => {
-                    this.inner.mark_completed(true);
-                    this.subscription_state = SubscriptionCursorState::Invalid;
+                    this.fail_fetch();
                     return Poll::Ready(Some(Err(error)));
                 }
                 Poll::Ready(Ok(CursorPgResponsePollItem::Row { row, metadata })) => {
