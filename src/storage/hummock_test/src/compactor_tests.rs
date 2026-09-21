@@ -1098,127 +1098,6 @@ pub(crate) mod tests {
         assert_eq!(key_count, scan_count);
     }
 
-    #[ignore]
-    // may update the test after https://github.com/risingwavelabs/risingwave/pull/14320 is merged.
-    // This PR will support
-    #[tokio::test]
-    async fn test_compaction_delete_range() {
-        let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
-        let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
-            hummock_manager_ref.clone(),
-            worker_id as _,
-        ));
-        let existing_table_id = 1.into();
-        let storage = get_hummock_storage(
-            hummock_meta_client.clone(),
-            get_notification_client_for_test(
-                env,
-                hummock_manager_ref.clone(),
-                cluster_ctl_ref,
-                worker_id,
-            )
-            .await,
-            &hummock_manager_ref,
-            &[existing_table_id],
-        )
-        .await;
-        let compact_ctx = get_compactor_context(&storage);
-        let object_id_manager = Arc::new(ObjectIdManager::new(
-            hummock_meta_client.clone(),
-            storage
-                .storage_opts()
-                .clone()
-                .sstable_id_remote_fetch_number,
-        ));
-        prepare_data(hummock_meta_client.clone(), &storage, existing_table_id, 2).await;
-        let mut local = storage
-            .new_local(NewLocalOptions::for_test(existing_table_id))
-            .await;
-        let epoch = test_epoch(130);
-        local.init_for_test(epoch).await.unwrap();
-
-        local.flush().await.unwrap();
-        // TODO: seal with table watermark like the following code
-        // let prefix_key_range = |k: u16| {
-        //     let key = k.to_be_bytes();
-        //     (
-        //         Bound::Included(Bytes::copy_from_slice(key.as_slice())),
-        //         Bound::Excluded(Bytes::copy_from_slice(next_key(key.as_slice()).as_slice())),
-        //     )
-        // };
-        // local
-        //     .flush(vec![prefix_key_range(1u16), prefix_key_range(2u16)])
-        //     .await
-        //     .unwrap();
-        local.seal_current_epoch(u64::MAX, SealCurrentEpochOptions::for_test());
-
-        flush_and_commit(&hummock_meta_client, &storage, epoch, existing_table_id).await;
-
-        let manual_compcation_option = ManualCompactionOption {
-            level: 0,
-            ..Default::default()
-        };
-        // 2. get compact task
-        let compaction_group_id =
-            get_compaction_group_id_by_table_id(hummock_manager_ref.clone(), existing_table_id)
-                .await;
-        let mut compact_task = hummock_manager_ref
-            .manual_get_compact_task(compaction_group_id, manual_compcation_option)
-            .await
-            .unwrap()
-            .unwrap();
-
-        let compaction_filter_flag = CompactionFilterFlag::STATE_CLEAN;
-        compact_task.compaction_filter_mask = compaction_filter_flag.bits();
-        // assert compact_task
-        assert_eq!(
-            compact_task
-                .input_ssts
-                .iter()
-                .map(|level| level.table_infos.len())
-                .sum::<usize>(),
-            129
-        );
-
-        let compaction_catalog_agent_ref = storage
-            .compaction_catalog_manager_ref()
-            .acquire(vec![existing_table_id])
-            .await
-            .unwrap();
-
-        // 3. compact
-        let (_tx, rx) = tokio::sync::oneshot::channel();
-        let ((result_task, task_stats, object_timestamps), _) = compact_with_agent(
-            compact_ctx,
-            compact_task.clone(),
-            rx,
-            object_id_manager.clone(),
-            compaction_catalog_agent_ref.clone(),
-        )
-        .await;
-
-        hummock_manager_ref
-            .report_compact_task(
-                result_task.task_id,
-                result_task.task_status,
-                result_task.sorted_output_ssts,
-                Some(to_prost_table_stats_map(task_stats)),
-                object_timestamps,
-            )
-            .await
-            .unwrap();
-
-        // 4. get the latest version and check
-        let version = hummock_manager_ref.get_current_version().await;
-        let output_level_info = version
-            .get_compaction_group_levels(compaction_group_id)
-            .levels
-            .last()
-            .unwrap();
-        assert_eq!(1, output_level_info.table_infos.len());
-        assert_eq!(252, output_level_info.table_infos[0].total_key_count);
-    }
-
     type KeyValue = (FullKey<Vec<u8>>, HummockValue<Vec<u8>>);
     async fn check_compaction_result(
         sstable_store: SstableStoreRef,
@@ -1262,19 +1141,7 @@ pub(crate) mod tests {
             assert_eq!(
                 normal_iter.key(),
                 fast_iter.key(),
-                "not equal in {}, len: {} {} vs {}",
-                count,
-                normal_iter.key().user_key.table_key.as_ref().len(),
-                u64::from_be_bytes(
-                    normal_iter.key().user_key.table_key.as_ref()[0..8]
-                        .try_into()
-                        .unwrap()
-                ),
-                u64::from_be_bytes(
-                    fast_iter.key().user_key.table_key.as_ref()[0..8]
-                        .try_into()
-                        .unwrap()
-                ),
+                "key mismatch at {count}"
             );
             let hash = Sstable::hash_for_filter(
                 fast_iter.key().user_key.encode().as_slice(),
@@ -1543,13 +1410,33 @@ pub(crate) mod tests {
                             target_level: 6,
                             target_file_size: options.capacity as u64,
                             compression_algorithm: 1,
+                            sstable_filter_type:
+                                risingwave_pb::hummock::PbSstableFilterType::SstableFilterXor16,
+                            sstable_filter_layout:
+                                risingwave_pb::hummock::PbSstableFilterLayout::Auto,
+                            blocked_xor_filter_kv_count_threshold: Some(0),
                             gc_delete_keys: true,
                             ..Default::default()
                         };
-                        let (normal, fast) =
-                            run_fast_and_normal_runner(context, task, catalog).await;
-                        // Compare physical output keys to an independent expected sequence, not only to
-                        // the normal compactor (which shares the same streaming reader).
+                        let (output, _) = FastCompactorRunner::<BlockedXor16FilterBuilder, _>::new(
+                            context,
+                            task,
+                            catalog,
+                            SharedComapctorObjectIdManager::for_test(VecDeque::from_iter(22..30)),
+                            Arc::new(TaskProgress::default()),
+                            DummyCompactionFilter {},
+                        )
+                        .run()
+                        .await
+                        .unwrap();
+                        let fast = output.into_iter().map(|sst| sst.sst_info).collect_vec();
+                        assert!(can_concat(&fast), "{case}: overlapping output SSTs");
+                        assert!(
+                            fast.iter()
+                                .all(|sst| sst.file_size < options.capacity as u64 * 6 / 5)
+                        );
+                        // Check physical keys against an independent expected sequence. The large
+                        // input tests below separately compare normal and fast compaction.
                         let mut count = 0;
                         for info in &fast {
                             let table = store
@@ -1582,13 +1469,6 @@ pub(crate) mod tests {
                             }
                         }
                         assert_eq!(count, expected.len(), "{case}");
-                        check_compaction_result(
-                            store.clone(),
-                            normal,
-                            fast.clone(),
-                            options.capacity as u64,
-                        )
-                        .await;
 
                         assert_eq!(
                             metrics.compact_fast_runner_bytes.get() > 0,
@@ -1602,27 +1482,16 @@ pub(crate) mod tests {
     }
 
     async fn test_fast_compact_impl(data: Vec<Vec<KeyValue>>) {
-        let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
-        let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
-            hummock_manager_ref.clone(),
-            worker_id as _,
-        ));
-        let existing_table_id: TableId = 1.into();
-        let storage = get_hummock_storage(
-            hummock_meta_client.clone(),
-            get_notification_client_for_test(
-                env,
-                hummock_manager_ref.clone(),
-                cluster_ctl_ref,
-                worker_id,
-            )
-            .await,
-            &hummock_manager_ref,
-            &[existing_table_id],
-        )
-        .await;
-        hummock_manager_ref.get_new_object_ids(10).await.unwrap();
-        let compact_ctx = get_compactor_context(&storage);
+        let existing_table_id = TableId::new(1);
+        let compact_ctx = get_compactor_context_impl(
+            Arc::new(StorageOpts {
+                sstable_size_mb: 1,
+                block_size_kb: 1,
+                bloom_false_positive: 0.1,
+                ..Default::default()
+            }),
+            mock_sstable_store().await,
+        );
         let compaction_catalog_agent_ref =
             CompactionCatalogAgent::for_test(vec![existing_table_id]);
 
@@ -1688,12 +1557,7 @@ pub(crate) mod tests {
     async fn test_fast_compact() {
         const KEY_COUNT: usize = 20000;
         let mut last_k: u64 = 0;
-        let mut rng = rand::rngs::StdRng::seed_from_u64(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-        );
+        let mut rng = rand::rngs::StdRng::seed_from_u64(27167);
         let mut data1 = Vec::with_capacity(KEY_COUNT / 2);
         let mut data = Vec::with_capacity(KEY_COUNT);
         let mut last_epoch = test_epoch(400);
@@ -1754,12 +1618,7 @@ pub(crate) mod tests {
     #[tokio::test]
     async fn test_fast_compact_cut_file() {
         const KEY_COUNT: usize = 20000;
-        let mut rng = rand::rngs::StdRng::seed_from_u64(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs(),
-        );
+        let mut rng = rand::rngs::StdRng::seed_from_u64(27168);
         let mut data1 = Vec::with_capacity(KEY_COUNT / 2);
         let epoch1 = test_epoch(400);
         for start_idx in 0..3 {
@@ -2638,31 +2497,17 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn test_fast_compactor_input_table_ids_filter_in_rest_stage() {
-        let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
-        let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
-            hummock_manager_ref.clone(),
-            worker_id,
-        ));
-
         let read_table_id = TableId::new(1);
         let dropped_table_id = TableId::new(2);
-
-        let storage = get_hummock_storage(
-            hummock_meta_client.clone(),
-            get_notification_client_for_test(
-                env,
-                hummock_manager_ref.clone(),
-                cluster_ctl_ref,
-                worker_id,
-            )
-            .await,
-            &hummock_manager_ref,
-            &[read_table_id, dropped_table_id],
-        )
-        .await;
-
-        hummock_manager_ref.get_new_object_ids(10).await.unwrap();
-        let compact_ctx = get_compactor_context(&storage);
+        let compact_ctx = get_compactor_context_impl(
+            Arc::new(StorageOpts {
+                sstable_size_mb: 1,
+                block_size_kb: 1,
+                bloom_false_positive: 0.1,
+                ..Default::default()
+            }),
+            mock_sstable_store().await,
+        );
         let build_catalog_agent_ref =
             CompactionCatalogAgent::for_test(vec![read_table_id, dropped_table_id]);
         let compaction_catalog_agent_ref = CompactionCatalogAgent::for_test(vec![read_table_id]);
@@ -2759,30 +2604,17 @@ pub(crate) mod tests {
 
     #[tokio::test]
     async fn test_fast_compactor_input_table_ids_filter_in_merge_raw_copy_stage() {
-        let (env, hummock_manager_ref, cluster_ctl_ref, worker_id) = setup_compute_env(8080).await;
-        let hummock_meta_client: Arc<dyn HummockMetaClient> = Arc::new(MockHummockMetaClient::new(
-            hummock_manager_ref.clone(),
-            worker_id,
-        ));
-
         let dropped_table_id = TableId::new(1);
         let read_table_id = TableId::new(2);
-        let storage = get_hummock_storage(
-            hummock_meta_client.clone(),
-            get_notification_client_for_test(
-                env,
-                hummock_manager_ref.clone(),
-                cluster_ctl_ref,
-                worker_id,
-            )
-            .await,
-            &hummock_manager_ref,
-            &[dropped_table_id, read_table_id],
-        )
-        .await;
-
-        hummock_manager_ref.get_new_object_ids(10).await.unwrap();
-        let compact_ctx = get_compactor_context(&storage);
+        let compact_ctx = get_compactor_context_impl(
+            Arc::new(StorageOpts {
+                sstable_size_mb: 1,
+                block_size_kb: 1,
+                bloom_false_positive: 0.1,
+                ..Default::default()
+            }),
+            mock_sstable_store().await,
+        );
         let build_catalog_agent_ref =
             CompactionCatalogAgent::for_test(vec![dropped_table_id, read_table_id]);
         let compaction_catalog_agent_ref = CompactionCatalogAgent::for_test(vec![read_table_id]);

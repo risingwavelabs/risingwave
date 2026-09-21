@@ -56,7 +56,7 @@ use crate::hummock::{
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 
 /// Streams physical SST blocks for raw copy or decoded compaction.
-pub struct BlockStreamIterator {
+pub(crate) struct BlockStreamIterator {
     block_stream: SstableBlockStream,
     /// When present, this is the decoded block immediately before the stream cursor.
     /// Otherwise the next block is still eligible for raw copy, or the SST is exhausted.
@@ -66,7 +66,7 @@ pub struct BlockStreamIterator {
 }
 
 impl BlockStreamIterator {
-    pub fn new(
+    pub(crate) fn new(
         sstable: TableHolder,
         task_progress: Arc<TaskProgress>,
         sstable_store: SstableStoreRef,
@@ -196,7 +196,7 @@ impl Drop for BlockStreamIterator {
 
 /// Iterates over the KV-pairs of a given list of SSTs. The key-ranges of these SSTs are assumed to
 /// be consecutive and non-overlapping.
-pub struct ConcatSstableIterator {
+struct ConcatSstableIterator {
     /// The iterator of the current table.
     sstable_iter: Option<BlockStreamIterator>,
 
@@ -215,10 +215,8 @@ pub struct ConcatSstableIterator {
 }
 
 impl ConcatSstableIterator {
-    /// Caller should make sure that `tables` are non-overlapping,
-    /// arranged in ascending order when it serves as a forward iterator,
-    /// and arranged in descending order when it serves as a backward iterator.
-    pub fn new(
+    /// The SSTs must have non-overlapping key ranges in ascending order.
+    fn new(
         sst_infos: Vec<SstableInfo>,
         sstable_store: SstableStoreRef,
         task_progress: Arc<TaskProgress>,
@@ -235,23 +233,23 @@ impl ConcatSstableIterator {
         }
     }
 
-    pub async fn rewind(&mut self) -> HummockResult<()> {
+    async fn rewind(&mut self) -> HummockResult<()> {
         self.seek_idx(0).await
     }
 
-    pub async fn next_sstable(&mut self) -> HummockResult<()> {
+    async fn next_sstable(&mut self) -> HummockResult<()> {
         self.seek_idx(self.cur_idx + 1).await
     }
 
-    pub fn current_sstable(&mut self) -> &mut BlockStreamIterator {
+    fn current_sstable(&mut self) -> &mut BlockStreamIterator {
         self.sstable_iter.as_mut().unwrap()
     }
 
-    pub fn is_valid(&self) -> bool {
+    fn is_valid(&self) -> bool {
         self.cur_idx < self.sstables.len()
     }
 
-    /// Resets the iterator, loads the specified SST, and seeks in that SST to `seek_key` if given.
+    /// Replaces the current iterator with one at the start of the specified SST.
     async fn seek_idx(&mut self, idx: usize) -> HummockResult<()> {
         self.sstable_iter.take();
         self.cur_idx = idx;
@@ -566,7 +564,7 @@ impl<B: FilterBuilder, C: CompactionFilter> CompactorRunner<B, C> {
     }
 }
 
-pub struct CompactTaskExecutor<F: TableBuilderFactory, C: CompactionFilter> {
+struct CompactTaskExecutor<F: TableBuilderFactory, C: CompactionFilter> {
     last_key: FullKey<Vec<u8>>,
     compaction_statistics: CompactionStatistics,
     last_table_id: Option<TableId>,
@@ -586,7 +584,7 @@ pub struct CompactTaskExecutor<F: TableBuilderFactory, C: CompactionFilter> {
 }
 
 impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
-    pub fn new(
+    fn new(
         builder: CapacitySplitTableBuilder<F>,
         task_config: TaskConfig,
         task_progress: Arc<TaskProgress>,
@@ -708,7 +706,7 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
         Ok(())
     }
 
-    pub async fn run(
+    async fn run(
         &mut self,
         iter: &mut BlockIterator,
         target_key: FullKey<&[u8]>,
@@ -779,7 +777,7 @@ impl<F: TableBuilderFactory, C: CompactionFilter> CompactTaskExecutor<F, C> {
         Ok(())
     }
 
-    pub fn shall_copy_raw_block(&mut self, smallest_key: &FullKey<&[u8]>) -> bool {
+    fn shall_copy_raw_block(&mut self, smallest_key: &FullKey<&[u8]>) -> bool {
         if self.should_skip_block(smallest_key.user_key.table_id) {
             // If the table id of smallest key is not in read_table_ids, we can not copy the raw block.
             return false;
