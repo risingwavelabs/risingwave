@@ -528,6 +528,7 @@ impl CursorRowFormat {
 pub(super) trait CursorPgResponseStream: Stream<Item = Result<Row>> + Unpin {
     fn commit_fetch(&mut self);
     fn abort_fetch(&mut self);
+    fn fail_fetch(&mut self);
 }
 
 /// A formatted output row paired with its original typed subscription seek key, if any.
@@ -765,10 +766,6 @@ impl QueryCursorPgResponseStream {
         self.inner
             .begin_fetch(Arc::new(CursorRowFormat::new(formats, session)));
     }
-
-    fn fail_fetch(&mut self) {
-        self.inner.mark_completed(true);
-    }
 }
 
 impl CursorPgResponseStream for QueryCursorPgResponseStream {
@@ -778,6 +775,10 @@ impl CursorPgResponseStream for QueryCursorPgResponseStream {
 
     fn abort_fetch(&mut self) {
         self.inner.abort_fetch();
+    }
+
+    fn fail_fetch(&mut self) {
+        self.inner.mark_completed(true);
     }
 }
 
@@ -928,11 +929,6 @@ impl SubscriptionCursorPgResponseStream {
         self.yielded_rows = 0;
     }
 
-    fn fail_fetch(&mut self) {
-        self.inner.mark_completed(true);
-        self.fetch_state.subscription_state = SubscriptionCursorState::Invalid;
-    }
-
     fn project_row(
         &mut self,
         row: Row,
@@ -983,6 +979,11 @@ impl CursorPgResponseStream for SubscriptionCursorPgResponseStream {
         self.inner.abort_fetch();
         self.fetch_state_to_commit = None;
         self.fetch_format = None;
+    }
+
+    fn fail_fetch(&mut self) {
+        self.inner.mark_completed(true);
+        self.fetch_state.subscription_state = SubscriptionCursorState::Invalid;
     }
 }
 
