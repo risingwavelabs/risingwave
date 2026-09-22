@@ -19,15 +19,20 @@
 //! row per partition), so a watermark that closes nothing has nothing to emit and nothing to
 //! evict — the visit is pure overhead. Two shapes:
 //!
-//! - `idle_watermarks`: `M` watermarks that stay below every deadline. Before the wakeup frontier
-//!   (#27205) each one visits all `N` partitions: `O(N)` per watermark. With it, `O(1)`.
+//! - `idle_watermarks`: `IDLE_WATERMARKS` watermarks that stay below every deadline, reported per
+//!   watermark. Before the wakeup frontier (#27205) each one visits all `N` partitions: `O(N)` per
+//!   watermark. With it, `O(1)`.
+//! - `barrier_only`: the same round with zero watermarks — the fence alone, reported per round.
 //! - `within_cliff`: one watermark past every deadline, so all `N` partitions expire at once and
-//!   every row is evicted. The frontier must not regress this: it is the case where every
-//!   partition genuinely needs the visit.
+//!   every row is evicted, reported per expired partition. The frontier must not regress this: it
+//!   is the case where every partition genuinely needs the visit.
 //!
-//! Each idle round is fenced by a barrier, and `MemoryStateStore` syncs its whole key space on a
-//! barrier — so at 50k partitions the timed round carries ~0.5 ms of test-store sync that scales
-//! with stored rows regardless of the executor. Compare shapes across `N`, not absolute floors.
+//! The executor forwards no watermark downstream (its output carries no watermark column), so the
+//! only observable signal that a round's watermarks were processed is the barrier that follows
+//! them — and `MemoryStateStore` syncs its whole key space on a barrier, an `O(stored rows)` cost
+//! that has nothing to do with the executor. Hence the control: `idle_watermarks × IDLE_WATERMARKS
+//! − barrier_only` is the executor's cost for the round, and with 200 watermarks per round the
+//! fence is a small share of the timed interval to begin with.
 
 use std::hint::black_box;
 use std::sync::Arc;
@@ -62,8 +67,9 @@ risingwave_expr_impl::enable!();
 /// above any watermark the idle rounds can reach: with the wakeup index a round costs microseconds,
 /// so criterion runs hundreds of thousands of them per sample.
 const BOUND: i64 = 1 << 40;
-/// Idle watermarks per timed round.
-const IDLE_WATERMARKS: i64 = 20;
+/// Idle watermarks per timed round: enough that the fencing barrier (see the module doc) is a
+/// small share of the interval.
+const IDLE_WATERMARKS: i64 = 200;
 
 /// Input: `(partition int8, ts int8, v int8)`; `PARTITION BY partition ORDER BY ts`.
 fn input_types() -> Vec<DataType> {
@@ -186,24 +192,25 @@ async fn load(n: usize) -> (MessageSender, BoxedMessageStream) {
     (tx, stream)
 }
 
-/// `iters` rounds of `IDLE_WATERMARKS` watermarks on ONE loaded executor. An idle round mutates
+/// `iters` rounds of `watermarks` idle watermarks on ONE loaded executor. An idle round mutates
 /// nothing (no window closes), so the same partitions serve every round; the watermark keeps
 /// climbing and each round is fenced by a barrier so the whole pass is observed before the clock
-/// stops. Returns the summed time of the rounds only.
+/// stops. `watermarks == 0` is the barrier-only control. Returns the summed time of the rounds.
 async fn idle_rounds(
     mut tx: MessageSender,
     mut stream: BoxedMessageStream,
     iters: u64,
+    watermarks: i64,
 ) -> Duration {
     let mut total = Duration::ZERO;
     let mut w = 1i64;
     for epoch in (3u64..).take(iters as usize) {
         assert!(
-            w + IDLE_WATERMARKS < BOUND,
+            w + watermarks < BOUND,
             "too many idle rounds: the watermark would reach the deadline"
         );
         let start = Instant::now();
-        for _ in 0..IDLE_WATERMARKS {
+        for _ in 0..watermarks {
             tx.push_int64_watermark(1, w);
             w += 1;
         }
@@ -243,7 +250,15 @@ fn bench_watermark_pass(c: &mut Criterion) {
         group.bench_with_input(BenchmarkId::new("idle_watermarks", n), &n, |b, &n| {
             b.to_async(&rt).iter_custom(|iters| async move {
                 let (tx, stream) = load(n).await;
-                idle_rounds(tx, stream, iters).await
+                idle_rounds(tx, stream, iters, IDLE_WATERMARKS).await
+            })
+        });
+        // The fence alone, per round: subtract from `idle_watermarks × IDLE_WATERMARKS`.
+        group.throughput(Throughput::Elements(1));
+        group.bench_with_input(BenchmarkId::new("barrier_only", n), &n, |b, &n| {
+            b.to_async(&rt).iter_custom(|iters| async move {
+                let (tx, stream) = load(n).await;
+                idle_rounds(tx, stream, iters, 0).await
             })
         });
         // Reported per expired partition, which is what the cliff scales with.
