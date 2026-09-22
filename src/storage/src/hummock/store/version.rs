@@ -29,7 +29,7 @@ use risingwave_common::catalog::{TableId, TableOption};
 use risingwave_common::hash::VirtualNode;
 use risingwave_common::util::epoch::MAX_SPILL_TIMES;
 use risingwave_hummock_sdk::key::{
-    FullKey, TableKey, TableKeyRange, UserKey, bound_table_key_range,
+    FullKey, TableKey, TableKeyRange, UserKey, bound_table_key_range, is_empty_key_range,
 };
 use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -572,6 +572,10 @@ pub fn read_filter_for_version(
         watermark.rewrite_range_with_table_watermark(epoch, &mut table_key_range)
     }
 
+    if is_empty_key_range(&table_key_range) {
+        return Ok((table_key_range, (vec![], vec![], committed_version)));
+    }
+
     let (imm_iter, sst_iter) =
         read_version_guard
             .staging()
@@ -1019,6 +1023,12 @@ impl HummockVersionReader {
             }
         }
 
+        // Watermark pruning can leave [key, key). Skip storage iterator preparation
+        // after validating the range so invalid ranges still produce an error.
+        if is_empty_key_range(&table_key_range) {
+            return Ok(());
+        }
+
         local_stats.staging_imm_iter_count = imms.len() as u64;
         for imm in imms {
             factory.add_batch_iter(imm);
@@ -1079,14 +1089,17 @@ impl HummockVersionReader {
 
             if level.level_type == LevelType::Nonoverlapping {
                 let mut table_infos =
-                    prune_nonoverlapping_ssts(&level.table_infos, user_key_range_ref, table_id)
-                        .peekable();
+                    prune_nonoverlapping_ssts(&level.table_infos, user_key_range_ref, table_id);
 
-                if table_infos.peek().is_none() {
+                let Some(sstable_info) = table_infos.next() else {
                     continue;
-                }
-                let sstable_infos = table_infos.cloned().collect_vec();
-                if sstable_infos.len() > 1 {
+                };
+                if let Some(next_sstable_info) = table_infos.next() {
+                    let sstable_infos = [sstable_info, next_sstable_info]
+                        .into_iter()
+                        .chain(table_infos)
+                        .cloned()
+                        .collect_vec();
                     factory.add_concat_sst_iter(
                         sstable_infos,
                         self.sstable_store.clone(),
@@ -1094,8 +1107,6 @@ impl HummockVersionReader {
                     );
                     local_stats.non_overlapping_iter_count += 1;
                 } else {
-                    let sstable_info = &sstable_infos[0];
-
                     let sstable = self
                         .sstable_store
                         .sstable(sstable_info, local_stats)
@@ -1183,15 +1194,14 @@ impl HummockVersionReader {
         table_change_log_manager: Arc<TableChangeLogManager>,
     ) -> HummockResult<ChangeLogIterator> {
         // The end value of `epoch_range` is not greater than max committed epoch, guaranteed by the caller `BatchTableInnerIterLogInner`.
-        let change_log: Vec<_> = {
-            let table_change_logs = table_change_log_manager
-                .fetch_table_change_logs(options.table_id, epoch_range, false, None)
-                .await?;
-            if let Some(change_log) = table_change_logs.get(&options.table_id) {
-                change_log.filter_epoch(epoch_range).cloned().collect_vec()
-            } else {
-                Vec::new()
-            }
+        let table_change_logs = table_change_log_manager
+            .fetch_table_change_logs(options.table_id, epoch_range, false, None)
+            .await?;
+        let change_log: Vec<_> = if let Some(change_log) = table_change_logs.get(&options.table_id)
+        {
+            change_log.filter_epoch(epoch_range).collect_vec()
+        } else {
+            Vec::new()
         };
 
         if let Some(max_epoch_change_log) = change_log.last() {

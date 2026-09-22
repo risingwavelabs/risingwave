@@ -35,6 +35,7 @@ use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::{
     EmptySliceRef, FullKey, TableKey, UserKey, bound_table_key_range,
 };
+use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
 use tokio::sync::oneshot::{Receiver, Sender, channel};
 
@@ -127,8 +128,7 @@ where
         .filter(move |info| filter_single_sst(info, table_id, table_key_range))
 }
 
-/// Prune non-overlapping SSTs that does not overlap with a specific key range or does not overlap
-/// with a specific table id. Returns the sst ids after pruning.
+/// Select candidate SSTs for a table and user-key range from a non-overlapping level.
 #[expect(clippy::type_complexity)]
 pub fn prune_nonoverlapping_ssts<'a>(
     ssts: &'a [SstableInfo],
@@ -136,15 +136,33 @@ pub fn prune_nonoverlapping_ssts<'a>(
     table_id: StateTableId,
 ) -> impl DoubleEndedIterator<Item = &'a SstableInfo> {
     debug_assert!(can_concat(ssts));
-    let start_table_idx = match user_key_range.0 {
+    let mut start_table_idx = match user_key_range.0 {
         Included(key) | Excluded(key) => search_sst_idx(ssts, key).saturating_sub(1),
         _ => 0,
     };
+    // Use an exclusive slice end, excluding SSTs that start at an excluded query bound.
     let end_table_idx = match user_key_range.1 {
-        Included(key) | Excluded(key) => search_sst_idx(ssts, key).saturating_sub(1),
-        _ => ssts.len().saturating_sub(1),
+        Included(key) => search_sst_idx(ssts, key),
+        Excluded(key) => {
+            ssts.partition_point(|sst| FullKey::decode(&sst.key_range.left).user_key < key)
+        }
+        Unbounded => ssts.len(),
     };
-    ssts[start_table_idx..=end_table_idx]
+    // The predecessor found by the lower-bound search may end before the query starts.
+    // Only this boundary SST needs a right-bound check; the remaining SSTs start in range.
+    if start_table_idx < end_table_idx {
+        let key_range = &ssts[start_table_idx].key_range;
+        let ends_before_query = match user_key_range.0 {
+            Included(key) => key_range.compare_right_with_user_key(key).is_lt(),
+            Excluded(key) => key_range.compare_right_with_user_key(key).is_le(),
+            Unbounded => false,
+        };
+        if ends_before_query {
+            start_table_idx += 1;
+        }
+    }
+    // The query may fall entirely before the first SST or between two SSTs.
+    ssts[start_table_idx.min(end_table_idx)..end_table_idx]
         .iter()
         .filter(move |sst| sst.table_ids.binary_search(&table_id).is_ok())
 }
