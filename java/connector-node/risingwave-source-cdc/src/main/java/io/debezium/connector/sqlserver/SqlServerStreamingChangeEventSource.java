@@ -46,6 +46,7 @@ import java.util.PriorityQueue;
 import java.util.Queue;
 import java.util.Set;
 import java.util.UUID;
+import java.util.concurrent.Executor;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.regex.Matcher;
@@ -156,6 +157,35 @@ public class SqlServerStreamingChangeEventSource
 
     public void setOnConnectedCallback(Runnable callback) {
         this.onConnectedCallback = callback;
+    }
+
+    /**
+     * Abort the underlying SQL Server connections from outside the source thread so an in-flight
+     * JDBC operation that does not respond to {@link Thread#interrupt()} is unblocked.
+     *
+     * <p>The coordinator invokes this only after graceful shutdown and {@code shutdownNow()} have
+     * both timed out. {@link java.sql.Connection#abort(Executor)} closes the driver's network
+     * resources without waiting for the blocked operation to finish, allowing the source thread to
+     * unwind and release its SQL Server sessions.
+     */
+    public void forceCloseConnection() {
+        LOGGER.warn("Force-aborting SQL Server connections to unblock wedged native I/O");
+        Executor abortExecutor = Runnable::run;
+        abortConnection(dataConnection, abortExecutor, "data");
+        abortConnection(metadataConnection, abortExecutor, "metadata");
+    }
+
+    private void abortConnection(
+            SqlServerConnection connection, Executor abortExecutor, String connectionName) {
+        try {
+            java.sql.Connection raw = connection.connection(false);
+            if (raw != null) {
+                raw.abort(abortExecutor);
+            }
+        } catch (Exception e) {
+            LOGGER.warn(
+                    "Exception while force-aborting SQL Server {} connection", connectionName, e);
+        }
     }
 
     @Override
