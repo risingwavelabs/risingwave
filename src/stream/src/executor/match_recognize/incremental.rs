@@ -727,6 +727,12 @@ impl IncrementalMatcher {
         if final_pos > self.next_pos {
             return Finalized::MustRebuild;
         }
+        // Nothing evicted, nothing to rebase: return before touching any state. The executor never
+        // asks (`consume_prefix` returns on `upto == 0`), but a direct caller must not have a no-op
+        // eviction forget verdicts or, under a truncated scan, drop the found prefix.
+        if final_pos == 0 {
+            return Finalized::Rebased;
+        }
 
         // Finalized matches are the leading run of frozen matches whose *start* is being evicted
         // (`start_pos < final_pos`): their first row leaves the buffer, so they are consumed — final,
@@ -786,8 +792,9 @@ impl IncrementalMatcher {
         // re-derives the surviving suffix under a fresh budget — as an arrival's `advance` already
         // does after any rebase. A truncated FREEZE alone leaves a complete tail: keep both the tail
         // and the flag, and the resumed freeze re-walks from the reset `dead_upto`. Neither can
-        // spin: every `Rebased` evicted at least one row (`consume_prefix` returns on `upto == 0`),
-        // and between rebases each visit's fresh budget resumes where the previous one stopped.
+        // spin: every rebase that reaches this point evicted at least one row (the zero boundary
+        // returned above), and between rebases each visit's fresh budget resumes where the
+        // previous one stopped.
         if self.incomplete {
             self.matched.truncate(self.frozen_count);
             self.freeze_truncated = false;
@@ -3051,6 +3058,38 @@ mod tests {
     #[tokio::test]
     async fn incomplete_scan_survives_eviction_of_frozen_prefix() {
         assert_incomplete_survives_rebase(8, 24, 400).await;
+    }
+
+    /// The zero boundary (`final_pos == 0`) evicts nothing and must change nothing — including
+    /// under a truncated scan, where the rebase proper drops the found prefix along with its
+    /// cursor. `finalize_unknown_or_zero_seq_leaves_state_intact` covers the complete state; this
+    /// covers the incomplete one, where a mutating no-op eviction would silently discard work.
+    #[tokio::test]
+    async fn zero_boundary_rebase_is_a_no_op_while_incomplete() {
+        let (n, k, budget_per_visit) = (8usize, 24usize, 400usize);
+        let (mut inc, _nfa, surviving) =
+            truncated_tail_then_consume_frozen(n, k, budget_per_visit).await;
+        let matcher = SetMatcher::new(surviving);
+        // One resumed visit: re-finds a prefix of the surviving suffix and is cut short again.
+        let mut budget = ScanBudget::new(budget_per_visit);
+        inc.refresh(&matcher, &mut budget, true).await.unwrap();
+        assert!(
+            inc.is_incomplete() && !inc.provisional().is_empty(),
+            "setup: the resumed scan must hold a found prefix and still be truncated"
+        );
+        let before = inc.provisional().to_vec();
+        let (frozen, resume, refresh) = (inc.frozen(), inc.resume_pos(), inc.needs_refresh());
+
+        // The first surviving row is the boundary: position 0.
+        assert!(matches!(
+            inc.finalize_evicted_prefix(Seq(n as i64)),
+            Finalized::Rebased
+        ));
+        assert_eq!(inc.provisional(), before.as_slice(), "found prefix kept");
+        assert_eq!(
+            (inc.frozen(), inc.resume_pos(), inc.needs_refresh()),
+            (frozen, resume, refresh)
+        );
     }
 
     /// The reviewer's shape: the legal `a{834} b*` under the production budget (`2^20`
