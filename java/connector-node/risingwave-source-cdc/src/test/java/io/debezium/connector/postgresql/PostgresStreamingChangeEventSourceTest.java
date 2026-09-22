@@ -26,6 +26,7 @@ import io.debezium.connector.postgresql.connection.ReplicationConnection;
 import io.debezium.jdbc.JdbcConfiguration;
 import io.debezium.jdbc.JdbcConnection;
 import java.lang.reflect.Proxy;
+import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.Collections;
 import java.util.List;
@@ -119,6 +120,52 @@ public class PostgresStreamingChangeEventSourceTest {
         assertTrue(replicationClosed.get());
     }
 
+    @Test
+    public void forcedShutdownAbortsConnectionPublishedDuringStartup() throws SQLException {
+        PostgresStreamingChangeEventSource.AbortableConnection connection =
+                new PostgresStreamingChangeEventSource.AbortableConnection();
+        AtomicBoolean aborted = new AtomicBoolean(false);
+
+        connection.abort(Runnable::run);
+        try {
+            connection.capture(connection(aborted));
+            throw new AssertionError("Expected connection capture to reject forced shutdown");
+        } catch (SQLException expected) {
+            assertEquals("Connection opened during forced shutdown", expected.getMessage());
+        }
+
+        assertTrue(aborted.get());
+    }
+
+    @Test
+    public void forcedShutdownDoesNotReconnectDuringStartup() throws SQLException {
+        PostgresStreamingChangeEventSource.AbortableConnection connection =
+                new PostgresStreamingChangeEventSource.AbortableConnection();
+
+        connection.abort(Runnable::run);
+        try {
+            connection.capture(new TestJdbcConnection(false), true);
+            throw new AssertionError("Expected connection capture to reject forced shutdown");
+        } catch (SQLException expected) {
+            assertEquals("Connection requested during forced shutdown", expected.getMessage());
+        }
+    }
+
+    @Test
+    public void forcedShutdownAbortsLatestConnectionAfterReconnect() throws SQLException {
+        PostgresStreamingChangeEventSource.AbortableConnection connection =
+                new PostgresStreamingChangeEventSource.AbortableConnection();
+        AtomicBoolean oldConnectionAborted = new AtomicBoolean(false);
+        AtomicBoolean currentConnectionAborted = new AtomicBoolean(false);
+
+        connection.capture(connection(oldConnectionAborted));
+        connection.capture(connection(currentConnectionAborted));
+        connection.abort(Runnable::run);
+
+        assertFalse(oldConnectionAborted.get());
+        assertTrue(currentConnectionAborted.get());
+    }
+
     private static ReplicationConnection replicationConnection(AtomicBoolean closed) {
         return (ReplicationConnection)
                 Proxy.newProxyInstance(
@@ -127,6 +174,19 @@ public class PostgresStreamingChangeEventSourceTest {
                         (proxy, method, args) -> {
                             if (method.getName().equals("close")) {
                                 closed.set(true);
+                            }
+                            return null;
+                        });
+    }
+
+    private static Connection connection(AtomicBoolean aborted) {
+        return (Connection)
+                Proxy.newProxyInstance(
+                        Connection.class.getClassLoader(),
+                        new Class<?>[] {Connection.class},
+                        (proxy, method, args) -> {
+                            if (method.getName().equals("abort")) {
+                                aborted.set(true);
                             }
                             return null;
                         });

@@ -102,9 +102,10 @@ public class PostgresStreamingChangeEventSource
     private Runnable onConnectedCallback;
 
     // JdbcConnection.connection(false) reconnects when its cached connection is closed. Retain the
-    // raw connections while running so the forced shutdown path only aborts existing connections.
-    private volatile Connection rawConnection;
-    private volatile Connection rawReplicationConnection;
+    // raw connections while running so the forced shutdown path only aborts existing connections,
+    // and remember an abort request so a connection opened concurrently cannot escape shutdown.
+    private final AbortableConnection abortableConnection = new AbortableConnection();
+    private final AbortableConnection abortableReplicationConnection = new AbortableConnection();
     private volatile boolean forcedShutdown;
 
     // Offset committing is an asynchronous operation.
@@ -193,20 +194,14 @@ public class PostgresStreamingChangeEventSource
         LOGGER.warn("Force-aborting PG connections to unblock wedged native I/O");
         Executor abortExecutor = Runnable::run;
         try {
-            Connection raw = rawConnection;
-            if (raw != null) {
-                raw.abort(abortExecutor);
-            }
+            abortableConnection.abort(abortExecutor);
         } catch (Exception e) {
             // Not expected on the abort path: abort() does a raw Socket.close() and should not
             // throw under normal operation, so surface it at warn instead of swallowing silently.
             LOGGER.warn("Exception while force-aborting regular PG connection", e);
         }
         try {
-            Connection raw = rawReplicationConnection;
-            if (raw != null) {
-                raw.abort(abortExecutor);
-            }
+            abortableReplicationConnection.abort(abortExecutor);
         } catch (Exception e) {
             LOGGER.warn("Exception while force-aborting replication connection", e);
         }
@@ -225,8 +220,8 @@ public class PostgresStreamingChangeEventSource
 
     private void initSchema() {
         try {
+            abortableConnection.capture(connection, true);
             taskContext.refreshSchema(connection, true);
-            rawConnection = connection.connection();
         } catch (SQLException e) {
             throw new DebeziumException("Error while executing initial schema load", e);
         }
@@ -256,6 +251,7 @@ public class PostgresStreamingChangeEventSource
         try {
             final WalPositionLocator walPosition;
 
+            cacheReplicationJdbcConnection();
             if (hasStartLsnStoredInContext) {
                 // start streaming from the last recorded position in the offset
                 final Lsn lsn =
@@ -279,8 +275,6 @@ public class PostgresStreamingChangeEventSource
                 replicationStream.compareAndSet(
                         null, replicationConnection.startStreaming(walPosition));
             }
-            cacheReplicationJdbcConnection();
-
             // Start keep alive thread to prevent connection timeout during time-consuming
             // operations the DB side. Use monitored executor to detect keep-alive failures.
             keepAliveFailure = false;
@@ -312,10 +306,10 @@ public class PostgresStreamingChangeEventSource
                 keepAliveStopping = true;
                 stream.stopKeepAlive();
                 replicationConnection.reconnect();
+                cacheReplicationJdbcConnection();
                 replicationStream.set(
                         replicationConnection.startStreaming(
                                 walPosition.getLastEventStoredLsn(), walPosition));
-                cacheReplicationJdbcConnection();
                 stream = this.replicationStream.get();
                 keepAliveFailure = false;
                 keepAliveError = null;
@@ -380,15 +374,51 @@ public class PostgresStreamingChangeEventSource
 
     private void cacheReplicationJdbcConnection() throws SQLException {
         if (replicationConnection instanceof JdbcConnection) {
-            rawReplicationConnection = ((JdbcConnection) replicationConnection).connection(false);
+            abortableReplicationConnection.capture((JdbcConnection) replicationConnection);
         }
     }
 
     private void commitJdbcConnection() throws SQLException {
-        Connection raw = connection.connection();
-        rawConnection = raw;
+        Connection raw = abortableConnection.capture(connection, true);
         if (!raw.getAutoCommit()) {
             raw.commit();
+        }
+    }
+
+    static final class AbortableConnection {
+        private Connection connection;
+        private Executor abortExecutor;
+
+        void capture(JdbcConnection jdbcConnection) throws SQLException {
+            capture(jdbcConnection, false);
+        }
+
+        Connection capture(JdbcConnection jdbcConnection, boolean executeOnConnect)
+                throws SQLException {
+            throwIfAbortRequested();
+            return capture(jdbcConnection.connection(executeOnConnect));
+        }
+
+        synchronized Connection capture(Connection connection) throws SQLException {
+            this.connection = connection;
+            if (abortExecutor != null) {
+                connection.abort(abortExecutor);
+                throw new SQLException("Connection opened during forced shutdown");
+            }
+            return connection;
+        }
+
+        synchronized void abort(Executor executor) throws SQLException {
+            abortExecutor = executor;
+            if (connection != null) {
+                connection.abort(executor);
+            }
+        }
+
+        private synchronized void throwIfAbortRequested() throws SQLException {
+            if (abortExecutor != null) {
+                throw new SQLException("Connection requested during forced shutdown");
+            }
         }
     }
 
