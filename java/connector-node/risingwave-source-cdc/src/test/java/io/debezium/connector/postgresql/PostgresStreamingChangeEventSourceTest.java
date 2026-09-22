@@ -17,10 +17,16 @@
 package io.debezium.connector.postgresql;
 
 import static org.junit.Assert.assertEquals;
+import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
+import io.debezium.connector.postgresql.connection.ReplicationConnection;
+import io.debezium.jdbc.JdbcConfiguration;
+import io.debezium.jdbc.JdbcConnection;
+import java.lang.reflect.Proxy;
+import java.sql.SQLException;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.AbstractExecutorService;
@@ -87,6 +93,68 @@ public class PostgresStreamingChangeEventSourceTest {
 
         assertTrue(future.isDone());
         assertSame(expected, failure.get());
+    }
+
+    @Test
+    public void cleanupSkipsCommitAfterForcedShutdown() {
+        TestJdbcConnection connection = new TestJdbcConnection(false);
+        AtomicBoolean replicationClosed = new AtomicBoolean(false);
+
+        PostgresStreamingChangeEventSource.cleanUpConnectionOnStop(
+                connection, replicationConnection(replicationClosed), false);
+
+        assertFalse(connection.committed.get());
+        assertTrue(replicationClosed.get());
+    }
+
+    @Test
+    public void cleanupClosesReplicationConnectionWhenCommitFails() {
+        TestJdbcConnection connection = new TestJdbcConnection(true);
+        AtomicBoolean replicationClosed = new AtomicBoolean(false);
+
+        PostgresStreamingChangeEventSource.cleanUpConnectionOnStop(
+                connection, replicationConnection(replicationClosed), true);
+
+        assertTrue(connection.committed.get());
+        assertTrue(replicationClosed.get());
+    }
+
+    private static ReplicationConnection replicationConnection(AtomicBoolean closed) {
+        return (ReplicationConnection)
+                Proxy.newProxyInstance(
+                        ReplicationConnection.class.getClassLoader(),
+                        new Class<?>[] {ReplicationConnection.class},
+                        (proxy, method, args) -> {
+                            if (method.getName().equals("close")) {
+                                closed.set(true);
+                            }
+                            return null;
+                        });
+    }
+
+    private static class TestJdbcConnection extends JdbcConnection {
+        private final AtomicBoolean committed = new AtomicBoolean(false);
+        private final boolean failCommit;
+
+        TestJdbcConnection(boolean failCommit) {
+            super(
+                    JdbcConfiguration.empty(),
+                    config -> {
+                        throw new AssertionError("A test connection should not be established");
+                    },
+                    "\"",
+                    "\"");
+            this.failCommit = failCommit;
+        }
+
+        @Override
+        public JdbcConnection commit() throws SQLException {
+            committed.set(true);
+            if (failCommit) {
+                throw new SQLException("commit failed");
+            }
+            return this;
+        }
     }
 
     private static class SameThreadExecutor extends AbstractExecutorService {

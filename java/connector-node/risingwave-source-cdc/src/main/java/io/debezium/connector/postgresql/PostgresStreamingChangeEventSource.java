@@ -34,6 +34,7 @@ import io.debezium.connector.postgresql.connection.ReplicationMessage.Operation;
 import io.debezium.connector.postgresql.connection.ReplicationStream;
 import io.debezium.connector.postgresql.connection.WalPositionLocator;
 import io.debezium.heartbeat.Heartbeat;
+import io.debezium.jdbc.JdbcConnection;
 import io.debezium.pipeline.ErrorHandler;
 import io.debezium.pipeline.EventDispatcher;
 import io.debezium.pipeline.source.spi.StreamingChangeEventSource;
@@ -44,6 +45,7 @@ import io.debezium.util.Clock;
 import io.debezium.util.DelayStrategy;
 import io.debezium.util.ElapsedTimeStrategy;
 import io.debezium.util.Threads;
+import java.sql.Connection;
 import java.sql.SQLException;
 import java.util.Map;
 import java.util.Objects;
@@ -98,6 +100,12 @@ public class PostgresStreamingChangeEventSource
     private final DelayStrategy pauseNoMessage;
     private final ElapsedTimeStrategy connectionProbeTimer;
     private Runnable onConnectedCallback;
+
+    // JdbcConnection.connection(false) reconnects when its cached connection is closed. Retain the
+    // raw connections while running so the forced shutdown path only aborts existing connections.
+    private volatile Connection rawConnection;
+    private volatile Connection rawReplicationConnection;
+    private volatile boolean forcedShutdown;
 
     // Offset committing is an asynchronous operation.
     // When connector is restarted we cannot be sure about timing of recovery, offset committing
@@ -181,14 +189,13 @@ public class PostgresStreamingChangeEventSource
      * ResourceLock}.
      */
     public void forceCloseConnection() {
+        forcedShutdown = true;
         LOGGER.warn("Force-aborting PG connections to unblock wedged native I/O");
         Executor abortExecutor = Runnable::run;
         try {
-            if (connection != null) {
-                java.sql.Connection raw = connection.connection(false);
-                if (raw != null) {
-                    raw.abort(abortExecutor);
-                }
+            Connection raw = rawConnection;
+            if (raw != null) {
+                raw.abort(abortExecutor);
             }
         } catch (Exception e) {
             // Not expected on the abort path: abort() does a raw Socket.close() and should not
@@ -196,12 +203,9 @@ public class PostgresStreamingChangeEventSource
             LOGGER.warn("Exception while force-aborting regular PG connection", e);
         }
         try {
-            if (replicationConnection instanceof io.debezium.jdbc.JdbcConnection) {
-                java.sql.Connection raw =
-                        ((io.debezium.jdbc.JdbcConnection) replicationConnection).connection(false);
-                if (raw != null) {
-                    raw.abort(abortExecutor);
-                }
+            Connection raw = rawReplicationConnection;
+            if (raw != null) {
+                raw.abort(abortExecutor);
             }
         } catch (Exception e) {
             LOGGER.warn("Exception while force-aborting replication connection", e);
@@ -222,6 +226,7 @@ public class PostgresStreamingChangeEventSource
     private void initSchema() {
         try {
             taskContext.refreshSchema(connection, true);
+            rawConnection = connection.connection();
         } catch (SQLException e) {
             throw new DebeziumException("Error while executing initial schema load", e);
         }
@@ -274,6 +279,7 @@ public class PostgresStreamingChangeEventSource
                 replicationStream.compareAndSet(
                         null, replicationConnection.startStreaming(walPosition));
             }
+            cacheReplicationJdbcConnection();
 
             // Start keep alive thread to prevent connection timeout during time-consuming
             // operations the DB side. Use monitored executor to detect keep-alive failures.
@@ -287,7 +293,7 @@ public class PostgresStreamingChangeEventSource
             // transaction to persist
             // but normally we want to start streaming without any open transactions.
             if (!isInPreSnapshotCatchUpStreaming(this.effectiveOffset)) {
-                connection.commit();
+                commitJdbcConnection();
             }
 
             this.lastCompletelyProcessedLsn = replicationStream.get().startLsn();
@@ -297,7 +303,7 @@ public class PostgresStreamingChangeEventSource
                 searchWalPosition(context, partition, this.effectiveOffset, stream, walPosition);
                 try {
                     if (!isInPreSnapshotCatchUpStreaming(this.effectiveOffset)) {
-                        connection.commit();
+                        commitJdbcConnection();
                     }
                 } catch (Exception e) {
                     LOGGER.info("Commit failed while preparing for reconnect", e);
@@ -309,6 +315,7 @@ public class PostgresStreamingChangeEventSource
                 replicationStream.set(
                         replicationConnection.startStreaming(
                                 walPosition.getLastEventStoredLsn(), walPosition));
+                cacheReplicationJdbcConnection();
                 stream = this.replicationStream.get();
                 keepAliveFailure = false;
                 keepAliveError = null;
@@ -344,16 +351,44 @@ public class PostgresStreamingChangeEventSource
             // close the connection - this should also disconnect the current stream even if it's
             // blocking
             if (offsetContext != null) {
-                try {
-                    if (!isInPreSnapshotCatchUpStreaming(offsetContext)) {
-                        connection.commit();
-                    }
-                    replicationConnection.close();
-                } catch (Exception e) {
-                    LOGGER.debug("Exception while closing the connection", e);
-                }
+                cleanUpConnectionOnStop(
+                        connection,
+                        replicationConnection,
+                        !forcedShutdown && !isInPreSnapshotCatchUpStreaming(offsetContext));
             }
             replicationStream.set(null);
+        }
+    }
+
+    static void cleanUpConnectionOnStop(
+            JdbcConnection connection,
+            ReplicationConnection replicationConnection,
+            boolean commitConnection) {
+        if (commitConnection) {
+            try {
+                connection.commit();
+            } catch (Exception e) {
+                LOGGER.debug("Exception while committing the connection during cleanup", e);
+            }
+        }
+        try {
+            replicationConnection.close();
+        } catch (Exception e) {
+            LOGGER.debug("Exception while closing the replication connection", e);
+        }
+    }
+
+    private void cacheReplicationJdbcConnection() throws SQLException {
+        if (replicationConnection instanceof JdbcConnection) {
+            rawReplicationConnection = ((JdbcConnection) replicationConnection).connection(false);
+        }
+    }
+
+    private void commitJdbcConnection() throws SQLException {
+        Connection raw = connection.connection();
+        rawConnection = raw;
+        if (!raw.getAutoCommit()) {
+            raw.commit();
         }
     }
 
@@ -431,7 +466,7 @@ public class PostgresStreamingChangeEventSource
                 // streaming will not lose the current view of data. Since we need to hold the
                 // transaction open
                 // for the snapshot, this block must not commit during catch up streaming.
-                connection.commit();
+                commitJdbcConnection();
             }
 
             if (context.isPaused()) {
@@ -618,7 +653,7 @@ public class PostgresStreamingChangeEventSource
     private void probeConnectionIfNeeded() throws SQLException {
         if (connectionProbeTimer.hasElapsed()) {
             connection.prepareQuery("SELECT 1");
-            connection.commit();
+            commitJdbcConnection();
         }
     }
 
