@@ -77,7 +77,7 @@ impl_distill_by_unit!(StreamChangeLog, core, "StreamChangeLog");
 
 impl StreamNode for StreamChangeLog {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
-        let mode = self.core.key_indices.as_ref().map(|key| {
+        let mode = self.core.key_indices.is_some().then(|| {
             Mode::Keyed(Keyed {
                 stream_keys: self
                     .core
@@ -86,7 +86,6 @@ impl StreamNode for StreamChangeLog {
                     .iter()
                     .map(|&index| index as u32)
                     .collect(),
-                business_keys: key.iter().map(|&index| index as u32).collect(),
             })
         });
         PbNodeBody::Changelog(Box::new(ChangeLogNode {
