@@ -39,6 +39,7 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
+import org.apache.kafka.connect.errors.ConnectException;
 import org.junit.Test;
 
 public class PostgresStreamingChangeEventSourceTest {
@@ -227,6 +228,53 @@ public class PostgresStreamingChangeEventSourceTest {
                 throw new AssertionError("Expected a replacement connection to be rejected");
             } catch (SQLException expected) {
                 assertEquals("Connection opened during forced shutdown", expected.getMessage());
+            }
+        }
+
+        assertEquals(2, connectionCount.get());
+        assertTrue(oldConnectionAborted.get());
+        assertTrue(newConnectionAborted.get());
+    }
+
+    @Test
+    public void forcedShutdownAbortsGeneralConnectionCreatedDuringProbe() throws SQLException {
+        PostgresStreamingChangeEventSource.AbortableConnection abortableConnection =
+                new PostgresStreamingChangeEventSource.AbortableConnection();
+        AtomicBoolean oldConnectionAborted = new AtomicBoolean(false);
+        AtomicBoolean newConnectionAborted = new AtomicBoolean(false);
+        Connection oldConnection = connection(oldConnectionAborted);
+        Connection newConnection = connection(newConnectionAborted);
+        AtomicInteger connectionCount = new AtomicInteger();
+        JdbcConfiguration configuration =
+                JdbcConfiguration.adapt(
+                        Configuration.empty()
+                                .edit()
+                                .with("ApplicationName", PostgresConnection.CONNECTION_GENERAL)
+                                .build());
+        JdbcConnection jdbcConnection =
+                new JdbcConnection(
+                        configuration,
+                        TrackingPostgresConnection.trackingFactory(
+                                config ->
+                                        connectionCount.getAndIncrement() == 0
+                                                ? oldConnection
+                                                : newConnection),
+                        "\"",
+                        "\"");
+
+        try (PostgresConnection.ConnectionTrackingScope ignored =
+                PostgresConnection.trackConnections(
+                        PostgresConnection.CONNECTION_GENERAL, abortableConnection::capture)) {
+            assertSame(oldConnection, jdbcConnection.connection(false));
+            abortableConnection.abort(Runnable::run);
+            try {
+                jdbcConnection.prepareQuery("SELECT 1");
+                throw new AssertionError("Expected a replacement connection to be rejected");
+            } catch (ConnectException expected) {
+                assertTrue(expected.getCause() instanceof SQLException);
+                assertEquals(
+                        "Connection opened during forced shutdown",
+                        expected.getCause().getMessage());
             }
         }
 

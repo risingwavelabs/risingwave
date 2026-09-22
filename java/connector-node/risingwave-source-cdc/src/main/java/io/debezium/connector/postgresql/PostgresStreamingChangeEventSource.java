@@ -209,6 +209,17 @@ public class PostgresStreamingChangeEventSource
 
     @Override
     public void init(PostgresOffsetContext offsetContext) {
+        try (PostgresConnection.ConnectionTrackingScope ignored = trackRegularConnections()) {
+            initWithTrackedConnection(offsetContext);
+        }
+    }
+
+    private void initWithTrackedConnection(PostgresOffsetContext offsetContext) {
+        try {
+            abortableConnection.capture(connection, true);
+        } catch (SQLException e) {
+            throw new DebeziumException("Error while opening the initial JDBC connection", e);
+        }
 
         this.effectiveOffset =
                 offsetContext == null
@@ -236,6 +247,16 @@ public class PostgresStreamingChangeEventSource
 
     @Override
     public void execute(
+            ChangeEventSourceContext context,
+            PostgresPartition partition,
+            PostgresOffsetContext offsetContext)
+            throws InterruptedException {
+        try (PostgresConnection.ConnectionTrackingScope ignored = trackRegularConnections()) {
+            executeWithTrackedConnection(context, partition, offsetContext);
+        }
+    }
+
+    private void executeWithTrackedConnection(
             ChangeEventSourceContext context,
             PostgresPartition partition,
             PostgresOffsetContext offsetContext)
@@ -383,6 +404,11 @@ public class PostgresStreamingChangeEventSource
         if (replicationConnection instanceof JdbcConnection) {
             abortableReplicationConnection.capture((JdbcConnection) replicationConnection);
         }
+    }
+
+    private PostgresConnection.ConnectionTrackingScope trackRegularConnections() {
+        return PostgresConnection.trackConnections(
+                PostgresConnection.CONNECTION_GENERAL, abortableConnection::capture);
     }
 
     private ReplicationStream startReplicationStreaming(StreamingStarter starter)
