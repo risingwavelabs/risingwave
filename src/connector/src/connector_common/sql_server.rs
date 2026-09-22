@@ -97,7 +97,11 @@ pub async fn create_mssql_client(
 /// Wraps the user query in `sp_describe_first_result_set`, which returns one
 /// row per result column with `name` and `system_type_name` (e.g. `int`,
 /// `nvarchar(50)`, `decimal(18,2)`). Each row is mapped to a RisingWave
-/// [`DataType`].
+/// [`DataType`]. Columns whose `system_type_name` is `money` or `smallmoney`
+/// are additionally recorded in a parallel index list so the executor can
+/// apply the `i64 / 10000` → `Decimal` decoding for them; `CAST(... AS MONEY)`
+/// expressions produce such columns but Tiberius reports them as `ColumnType::Intn`,
+/// so the wire metadata alone is insufficient to identify them.
 ///
 /// The user query is passed as a literal to `EXEC sp_describe_first_result_set`,
 /// so any single-quote in the query is escaped by doubling it (standard T-SQL
@@ -105,7 +109,7 @@ pub async fn create_mssql_client(
 pub async fn describe_mssql_query(
     config: &MssqlConnectionConfig,
     user_query: &str,
-) -> anyhow::Result<Vec<(String, DataType)>> {
+) -> anyhow::Result<(Vec<(String, DataType)>, Vec<usize>)> {
     let mut client = create_mssql_client(config).await?;
 
     let escaped = user_query.replace('\'', "''");
@@ -115,6 +119,12 @@ pub async fn describe_mssql_query(
     let mut row_stream = stream.into_row_stream();
 
     let mut rw_types = vec![];
+    let mut money_indices = vec![];
+    // `column_ordinal` is 1-based and monotonically increasing within the
+    // visible columns. We re-number to 0-based (`visible_idx`) so the
+    // executor can index directly into the schema fields. Hidden columns are
+    // skipped, so the visible ordinal is denser than the raw ordinal.
+    let mut visible_idx: usize = 0;
     while let Some(row) = row_stream.try_next().await? {
         // Column ordinal 0 -> `is_hidden` (bit). 0 = visible, 1 = hidden
         // (a column hidden from the client, e.g. an unused join key).
@@ -134,6 +144,7 @@ pub async fn describe_mssql_query(
         let name: &str = row.try_get::<&str, _>(2)?.unwrap_or("");
         let type_name: &str = row.try_get::<&str, _>(5)?.unwrap_or("");
 
+        let is_money = is_money_type(type_name);
         let data_type = mssql_type_to_rw_type_str(type_name)
             .with_context(|| format!("unsupported column type {:?}", type_name))?;
         // Visible but unnamed columns (e.g. `SELECT COUNT(*) FROM t`) get a
@@ -144,7 +155,11 @@ pub async fn describe_mssql_query(
         } else {
             name.to_owned()
         };
+        if is_money {
+            money_indices.push(visible_idx);
+        }
         rw_types.push((column_name, data_type));
+        visible_idx += 1;
     }
 
     if rw_types.is_empty() {
@@ -159,7 +174,21 @@ pub async fn describe_mssql_query(
         ));
     }
 
-    Ok(rw_types)
+    Ok((rw_types, money_indices))
+}
+
+/// Return `true` if the SQL Server `system_type_name` from
+/// `sp_describe_first_result_set` represents `MONEY` or `SMALLMONEY`. Both map
+/// to a RisingWave [`DataType::Decimal`] but require the i64 / 10000 → Decimal
+/// decoding the wire payload carries.
+fn is_money_type(type_name: &str) -> bool {
+    // Strip the precision/scale/length suffix, e.g. "money(19,4)" -> "money",
+    // so the dispatch is purely on the base type. `MONEY` and `SMALLMONEY`
+    // never actually take a parenthesized suffix, but the stripping keeps us
+    // robust if a future SQL Server version changes that.
+    let lower = type_name.to_lowercase();
+    let base = lower.split_once('(').map(|(b, _)| b).unwrap_or(&lower);
+    matches!(base.trim(), "money" | "smallmoney")
 }
 
 /// Map a SQL Server `system_type_name` (as returned by

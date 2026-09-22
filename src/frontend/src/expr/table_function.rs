@@ -70,6 +70,14 @@ pub struct TableFunction {
     pub function_type: TableFunctionType,
     /// Catalog of user defined table function.
     pub user_defined: Option<Arc<FunctionCatalog>>,
+    /// 0-based ordinals of `MONEY` / `SMALLMONEY` columns in the
+    /// discovered result schema. Set by the `mssql_query` binder from
+    /// `describe_mssql_query`; `None` (or empty) for table functions
+    /// that don't surface MONEY data. Carried through to the
+    /// `BatchMssqlQuery` plan node so the executor can apply the
+    /// `i64 / 10000` → `Decimal` decoding even when Tiberius reports
+    /// `CAST(... AS MONEY)` as `ColumnType::Intn`.
+    pub money_column_indices: Vec<usize>,
 }
 
 impl TableFunction {
@@ -82,6 +90,7 @@ impl TableFunction {
             return_type,
             function_type: func_type,
             user_defined: None,
+            money_column_indices: vec![],
         })
     }
 
@@ -312,6 +321,7 @@ impl TableFunction {
             return_type,
             function_type: TableFunctionType::FileScan,
             user_defined: None,
+            money_column_indices: vec![],
         })
     }
 
@@ -398,6 +408,7 @@ impl TableFunction {
                 return_type: schema,
                 function_type: TableFunctionType::PostgresQuery,
                 user_defined: None,
+                money_column_indices: vec![],
             })
         }
     }
@@ -532,6 +543,7 @@ impl TableFunction {
                 return_type: schema,
                 function_type: TableFunctionType::MysqlQuery,
                 user_defined: None,
+                money_column_indices: vec![],
             })
         }
     }
@@ -594,19 +606,24 @@ impl TableFunction {
                         trust_cert,
                     };
 
-                    let rw_types = describe_mssql_query(&conn_config, &evaled_args[5]).await?;
+                    let (rw_types, money_indices) =
+                        describe_mssql_query(&conn_config, &evaled_args[5]).await?;
 
-                    Ok::<risingwave_common::types::DataType, anyhow::Error>(DataType::Struct(
-                        StructType::new(rw_types),
+                    Ok::<(risingwave_common::types::DataType, Vec<usize>), anyhow::Error>((
+                        DataType::Struct(StructType::new(rw_types)),
+                        money_indices,
                     ))
                 })
             })?;
+
+            let (schema, money_indices) = schema;
 
             Ok(TableFunction {
                 args,
                 return_type: schema,
                 function_type: TableFunctionType::MssqlQuery,
                 user_defined: None,
+                money_column_indices: money_indices,
             })
         }
     }
@@ -625,6 +642,7 @@ impl TableFunction {
             ])),
             function_type: TableFunctionType::InternalBackfillProgress,
             user_defined: None,
+            money_column_indices: vec![],
         }
     }
 
@@ -640,6 +658,7 @@ impl TableFunction {
             ])),
             function_type: TableFunctionType::InternalSourceBackfillProgress,
             user_defined: None,
+            money_column_indices: vec![],
         }
     }
 
@@ -655,6 +674,7 @@ impl TableFunction {
             ])),
             function_type: TableFunctionType::InternalGetChannelDeltaStats,
             user_defined: None,
+            money_column_indices: vec![],
         }
     }
 

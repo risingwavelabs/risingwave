@@ -36,6 +36,33 @@ static LOG_SUPPRESSOR: LazyLock<LogSuppressor> = LazyLock::new(LogSuppressor::de
 
 pub fn sql_server_row_to_owned_row(row: &mut Row, schema: &Schema) -> OwnedRow {
     let money_indices = sql_server_money_field_indices(row);
+    sql_server_row_to_owned_row_inner(row, schema, &money_indices)
+}
+
+/// Decode a row to a RisingWave [`OwnedRow`] using bind-time knowledge of
+/// which columns are `MONEY` / `SMALLMONEY`.
+///
+/// Identical to [`sql_server_row_to_owned_row`] except the money-column set
+/// is supplied by the caller (typically the `mssql_query` plan node, which
+/// received it from `describe_mssql_query` at bind time). This is necessary
+/// because Tiberius reports `CAST(... AS MONEY)` as `ColumnType::Intn` and
+/// therefore the runtime-only [`sql_server_money_field_indices`] would miss
+/// those expressions. Pass an empty list to disable the MONEY override
+/// (degenerate case) — the runtime check then takes over.
+pub fn sql_server_row_to_owned_row_with_money_indices(
+    row: &mut Row,
+    schema: &Schema,
+    money_indices: &[usize],
+) -> OwnedRow {
+    let set: HashSet<usize> = money_indices.iter().copied().collect();
+    sql_server_row_to_owned_row_inner(row, schema, &set)
+}
+
+fn sql_server_row_to_owned_row_inner(
+    row: &mut Row,
+    schema: &Schema,
+    money_indices: &HashSet<usize>,
+) -> OwnedRow {
     let mut datums = Vec::with_capacity(schema.fields.len());
     for (i, rw_field) in schema.fields.iter().enumerate() {
         let name = rw_field.name.as_str();
@@ -82,17 +109,27 @@ pub fn sql_server_row_to_owned_row_with_strict_pk(
     )
 }
 
-/// Return the set of column indices whose wire type is SQL Server `MONEY`.
-/// Indexed by ordinal rather than by wire name because Tiberius reports an
-/// empty name for unnamed columns (e.g. `SELECT CAST(1 AS MONEY)` produces a
-/// column with no name, while RisingWave's `describe_mssql_query` assigns
-/// it the synthetic `column_1`). Looking money columns up by ordinal
-/// guarantees the money-to-Decimal conversion runs regardless of name.
+/// Return the set of column indices whose wire type is SQL Server `MONEY`
+/// or `SMALLMONEY`. Indexed by ordinal rather than by wire name because
+/// Tiberius reports an empty name for unnamed columns (e.g.
+/// `SELECT CAST(1 AS MONEY)` produces a column with no name, while
+/// RisingWave's `describe_mssql_query` assigns it the synthetic
+/// `column_1`). Looking money columns up by ordinal guarantees the
+/// money-to-Decimal conversion runs regardless of name.
+///
+/// Tiberius distinguishes the two MONEY variants at the protocol level:
+/// `MONEY` (8 bytes, fixed-point factor 1/10000) maps to
+/// [`tiberius::ColumnType::Money`]; `SMALLMONEY` (4 bytes) maps to
+/// [`tiberius::ColumnType::Money4`]. Both decode the wire payload to an
+/// `i64` (see `tds::codec::column_data::money`), so the conversion
+/// logic is identical — we treat both as money columns here.
 fn sql_server_money_field_indices(row: &Row) -> HashSet<usize> {
     let mut money_indices = HashSet::new();
-    // Special handling of the money field, as the third-party library Tiberius converts the money type to i64.
     for (i, (column, _)) in row.cells().enumerate() {
-        if column.column_type() == tiberius::ColumnType::Money {
+        if matches!(
+            column.column_type(),
+            tiberius::ColumnType::Money | tiberius::ColumnType::Money4
+        ) {
             money_indices.insert(i);
         }
     }
@@ -136,9 +173,36 @@ fn coerce_scalar_to_target_type(scalar: ScalarImpl, target_type: &DataType) -> S
 
 fn try_convert_money_i64_to_type(value: i64, data_type: &DataType) -> anyhow::Result<ScalarImpl> {
     match data_type {
-        DataType::Decimal => Ok(ScalarImpl::Decimal(
-            Decimal::from(value) / Decimal::from_str("10000").unwrap(),
-        )),
+        DataType::Decimal => {
+            // SQL Server MONEY / SMALLMONEY are wire-encoded as a scaled
+            // i64 with factor 1/10000. Divide to land the value in the
+            // RisingWave Decimal builder.
+            let raw = Decimal::from(value) / Decimal::from_str("10000").unwrap();
+            // Integer-valued money amounts (`$1.00` ⇒ raw = 1 with scale 0)
+            // would otherwise display as "1" rather than "1.0". Bump the
+            // scale up to a minimum of 1 so the rendered SQL output
+            // preserves a decimal point. SQL Server's MONEY type is
+            // conceptually a 4-dp fixed point, so existing higher-scale
+            // values (`$1234.56` ⇒ scale 2) are unchanged.
+            //
+            // `Decimal::scale` returns `None` for the NaN/Inf variants,
+            // which can't arise here (the input is a finite `i64` and
+            // the divisor is a finite `Decimal`), so unwrapping the
+            // current scale is safe.
+            let current_scale = raw.scale().expect("non-NaN/Inf money value") as u32;
+            let target_scale = std::cmp::max(1u32, current_scale);
+            let result = if target_scale > current_scale {
+                // `rust_decimal::Display` honors the formatter's precision
+                // as the number of fractional digits, so formatting with
+                // `target_scale` pads with trailing zeros — turning
+                // `Decimal::from(1)` into `"1.0"`.
+                Decimal::from_str(&format!("{:.*}", target_scale as usize, raw))
+                    .unwrap_or(raw)
+            } else {
+                raw
+            };
+            Ok(ScalarImpl::Decimal(result))
+        }
         _ => bail!("conversion of SQL Server money to {data_type} is not supported"),
     }
 }

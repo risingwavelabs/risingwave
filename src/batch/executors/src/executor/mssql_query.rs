@@ -416,6 +416,13 @@ pub struct MssqlQueryExecutor {
     query: String,
     identity: String,
     chunk_size: usize,
+    /// 0-based ordinals of `MONEY` / `SMALLMONEY` columns in
+    /// `schema`, as discovered at bind time by `describe_mssql_query`
+    /// (and carried through the plan node). Forwarded to the row
+    /// decoder so the `i64 / 10000` → `Decimal` conversion runs even
+    /// when Tiberius reports the wire column as `ColumnType::Intn`
+    /// (which it does for `CAST(... AS MONEY)` expressions).
+    money_column_indices: Vec<usize>,
 }
 
 impl Executor for MssqlQueryExecutor {
@@ -442,15 +449,17 @@ impl Executor for MssqlQueryExecutor {
 
 impl MssqlQueryExecutor {
     /// Build a new [`MssqlQueryExecutor`] from the pre-discovered schema,
-    /// connection config, the user query, the plan node identity, and the
-    /// batch chunk size. The schema is computed at bind time by
-    /// `describe_mssql_query`; this constructor only stores it.
+    /// connection config, the user query, the plan node identity, the batch
+    /// chunk size, and the bind-time `MONEY` / `SMALLMONEY` ordinals.
+    /// The schema is computed at bind time by `describe_mssql_query`;
+    /// this constructor only stores it.
     pub fn new(
         schema: Schema,
         config: MssqlConnectionConfig,
         query: String,
         identity: String,
         chunk_size: usize,
+        money_column_indices: Vec<usize>,
     ) -> Self {
         Self {
             schema,
@@ -458,6 +467,7 @@ impl MssqlQueryExecutor {
             query,
             identity,
             chunk_size,
+            money_column_indices,
         }
     }
 
@@ -534,7 +544,11 @@ impl MssqlQueryExecutor {
             // by emitting NULL with a logged warning, and it owns the
             // `ScalarImplTiberiusWrapper` glue which is private to the connector crate.
             let mut row_mut = row;
-            let owned_row = sql_server_row_to_owned_row(&mut row_mut, &self.schema);
+            let owned_row = sql_server_row_to_owned_row_with_money_indices(
+                &mut row_mut,
+                &self.schema,
+                &self.money_column_indices,
+            );
             if let Some(chunk) = builder.append_one_row(owned_row) {
                 yield chunk;
             }
@@ -595,6 +609,7 @@ impl BoxedExecutorBuilder for MssqlQueryExecutorBuilder {
             mssql_query_node.query.clone(),
             source.plan_node().get_identity().clone(),
             source.context().get_config().developer.chunk_size,
+            mssql_query_node.money_column_indices.clone(),
         )))
     }
 }

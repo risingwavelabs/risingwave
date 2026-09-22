@@ -72,6 +72,16 @@ impl Rule<Logical> for TableFunctionToMssqlQueryRule {
             let encrypt = Some(eval_args[6].clone());
             let trust_cert = Some(eval_args[7].clone());
 
+            // The binder populated the `MONEY` / `SMALLMONEY` column
+            // ordinals alongside the schema. Forward them to the
+            // executor — the wire metadata (Tiberius `ColumnType`) is
+            // insufficient because `CAST(... AS MONEY)` is reported as
+            // `ColumnType::Intn`.
+            let money_column_indices = logical_table_function
+                .table_function()
+                .money_column_indices
+                .clone();
+
             Some(
                 LogicalMssqlQuery::new(
                     logical_table_function.ctx(),
@@ -84,6 +94,7 @@ impl Rule<Logical> for TableFunctionToMssqlQueryRule {
                     query,
                     encrypt,
                     trust_cert,
+                    money_column_indices,
                 )
                 .into(),
             )

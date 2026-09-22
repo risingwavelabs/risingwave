@@ -97,6 +97,9 @@ impl ToBatchPb for BatchMssqlQuery {
     /// batch task. `encrypt` / `trust_cert` are emitted as the strings
     /// `"true"` / `"false"`, with the default `false` / `true` used when
     /// the binder did not set them (2-arg source-reference form).
+    /// `money_column_indices` carries the bind-time `MONEY` /
+    /// `SMALLMONEY` ordinals that the executor applies for the i64 / 10000
+    /// → `Decimal` decoding.
     fn to_batch_prost_body(&self) -> NodeBody {
         NodeBody::MssqlQuery(MssqlQueryNode {
             columns: self
@@ -121,6 +124,12 @@ impl ToBatchPb for BatchMssqlQuery {
                 .trust_cert
                 .clone()
                 .unwrap_or_else(|| "true".to_owned()),
+            money_column_indices: self
+                .core
+                .money_column_indices
+                .iter()
+                .map(|i| *i as u32)
+                .collect(),
         })
     }
 }

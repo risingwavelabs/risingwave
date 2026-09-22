@@ -49,6 +49,7 @@ pub use self::postgres::{
 };
 pub use self::sql_server::{
     ScalarImplTiberiusWrapper, sql_server_row_to_owned_row,
+    sql_server_row_to_owned_row_with_money_indices,
     sql_server_row_to_owned_row_with_strict_pk,
 };
 pub use self::unified::Access;

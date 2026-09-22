@@ -43,6 +43,15 @@ pub struct MssqlQuery {
     /// SQL Server `TrustServerCertificate` connection string option:
     /// `true` or `false`. `None` for the 2-arg source-reference form.
     pub trust_cert: Option<String>,
+    /// 0-based ordinals of result columns whose SQL Server type is
+    /// `MONEY` or `SMALLMONEY`. Produced at bind time by
+    /// `describe_mssql_query` from `sp_describe_first_result_set`'s
+    /// `system_type_name`. Necessary because Tiberius reports
+    /// `CAST(... AS MONEY)` as `ColumnType::Intn`, so the wire metadata
+    /// alone cannot identify these columns at execution time.
+    #[educe(PartialEq(ignore))]
+    #[educe(Hash(ignore))]
+    pub money_column_indices: Vec<usize>,
 
     #[educe(PartialEq(ignore))]
     #[educe(Hash(ignore))]

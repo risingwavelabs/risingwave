@@ -185,6 +185,14 @@ message MssqlQueryNode {
   // SQL Server-specific: encrypt=true|false, trust_cert=true|false
   string encrypt = 8;
   string trust_cert = 9;
+  // 0-based ordinal positions of result columns whose SQL Server type is
+  // `MONEY` or `SMALLMONEY`. Necessary because Tiberius reports `CAST(... AS MONEY)`
+  // as `ColumnType::Intn` rather than `ColumnType::Money`, so the executor cannot
+  // distinguish MONEY-encoded i64 from a regular BIGINT by looking at the wire
+  // metadata alone. The indices are produced by `describe_mssql_query` from
+  // `sp_describe_first_result_set`'s `system_type_name` column at bind time.
+  // Empty for queries that produce no MONEY columns (the common case).
+  repeated uint32 money_column_indices = 10;
 }
 
 message ProjectNode {

@@ -45,6 +45,10 @@ impl LogicalMssqlQuery {
     /// connection parameters, and the optimizer context. The eight inline
     /// form fields are all required; the 2-arg source-reference form
     /// instead reuses connection parameters from the named source.
+    ///
+    /// `money_column_indices` carries the bind-time `MONEY` /
+    /// `SMALLMONEY` ordinals from `describe_mssql_query`. Empty for
+    /// queries that produce no MONEY columns (the common case).
     pub fn new(
         ctx: OptimizerContextRef,
         schema: Schema,
@@ -56,6 +60,7 @@ impl LogicalMssqlQuery {
         query: String,
         encrypt: Option<String>,
         trust_cert: Option<String>,
+        money_column_indices: Vec<usize>,
     ) -> Self {
         let core = generic::MssqlQuery {
             schema,
@@ -67,6 +72,7 @@ impl LogicalMssqlQuery {
             query,
             encrypt,
             trust_cert,
+            money_column_indices,
             ctx,
         };
 
