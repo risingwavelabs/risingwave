@@ -221,7 +221,6 @@ impl RenderedIndependentJobActors {
         definition: &str,
         actor_id_generator: &AtomicU32,
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
-        control_stream_manager: &ControlStreamManager,
         database_resource_group: &str,
         streaming_job_model: &streaming_job::Model,
     ) -> MetaResult<Self> {
@@ -357,6 +356,7 @@ impl BatchRefreshJobCheckpointControl {
         // Actor rendering context:
         actor_id_generator: &AtomicU32,
         worker_nodes: &HashMap<WorkerId, WorkerNode>,
+        control_stream_manager: &ControlStreamManager,
         database_resource_group: &str,
         streaming_job_model: &streaming_job::Model,
         // Edge building context:
