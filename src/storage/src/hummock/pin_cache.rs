@@ -20,8 +20,9 @@ use bytes::Bytes;
 use futures::StreamExt;
 use parking_lot::{Mutex, RwLock};
 use prometheus::{
-    IntCounterVec, IntGaugeVec, register_int_counter_vec_with_registry,
-    register_int_gauge_vec_with_registry,
+    IntCounter, IntCounterVec, IntGauge, IntGaugeVec, register_int_counter_vec_with_registry,
+    register_int_counter_with_registry, register_int_gauge_vec_with_registry,
+    register_int_gauge_with_registry,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_hummock_sdk::HummockSstableObjectId;
@@ -46,6 +47,51 @@ static PIN_CACHE_CAPACITY_BYTES: LazyLock<IntGaugeVec> = LazyLock::new(|| {
         "pin_cache_capacity_bytes",
         "Pin Cache capacity accounting by state",
         &["state"],
+        &GLOBAL_METRICS_REGISTRY
+    )
+    .unwrap()
+});
+
+static PIN_CACHE_PUBLISHED_OBJECTS: LazyLock<IntGauge> = LazyLock::new(|| {
+    register_int_gauge_with_registry!(
+        "pin_cache_published_objects",
+        "Complete SST objects currently routed to the local Pin Cache",
+        &GLOBAL_METRICS_REGISTRY
+    )
+    .unwrap()
+});
+
+static PIN_CACHE_PUBLISHED_BYTES: LazyLock<IntGauge> = LazyLock::new(|| {
+    register_int_gauge_with_registry!(
+        "pin_cache_published_bytes",
+        "Complete SST bytes currently routed to the local Pin Cache",
+        &GLOBAL_METRICS_REGISTRY
+    )
+    .unwrap()
+});
+
+static PIN_CACHE_RECOVERY_READY: LazyLock<IntGauge> = LazyLock::new(|| {
+    register_int_gauge_with_registry!(
+        "pin_cache_recovery_ready",
+        "Whether the local Pin Cache inventory scan completed successfully",
+        &GLOBAL_METRICS_REGISTRY
+    )
+    .unwrap()
+});
+
+static PIN_CACHE_RECOVERY_FAILURES: LazyLock<IntCounter> = LazyLock::new(|| {
+    register_int_counter_with_registry!(
+        "pin_cache_recovery_failure_total",
+        "Pin Cache inventory scan failures",
+        &GLOBAL_METRICS_REGISTRY
+    )
+    .unwrap()
+});
+
+static PIN_CACHE_GC_FAILURES: LazyLock<IntCounter> = LazyLock::new(|| {
+    register_int_counter_with_registry!(
+        "pin_cache_gc_failure_total",
+        "Failed Pin Cache reclaim batches",
         &GLOBAL_METRICS_REGISTRY
     )
     .unwrap()
@@ -151,6 +197,7 @@ impl PinCacheGc {
             match gc.store.delete_objects(&paths).await {
                 Ok(()) => gc.finish_delete(&paths),
                 Err(error) => {
+                    PIN_CACHE_GC_FAILURES.inc();
                     tracing::warn!(
                         object_count = paths.len(),
                         error = %error.as_report(),
@@ -197,6 +244,7 @@ struct PinCacheState {
     desired: Option<HashMap<HummockSstableObjectId, u64>>,
     // Only complete objects participate in read routing.
     published: HashMap<HummockSstableObjectId, Arc<PinCacheEntry>>,
+    published_bytes: u64,
     inflight: HashMap<HummockSstableObjectId, Arc<PinCacheEntry>>,
     recovered_files: Vec<(HummockSstableObjectId, Arc<PinCacheEntry>)>,
     recovery_state: RecoveryState,
@@ -213,6 +261,11 @@ impl PinCacheState {
             .and_then(|desired| desired.get(&id))
             .copied()
             .or_else(|| self.retired.get(&id).map(|(size, _)| *size))
+    }
+
+    fn report_published(&self) {
+        PIN_CACHE_PUBLISHED_OBJECTS.set(metric_bytes(self.published.len() as u64));
+        PIN_CACHE_PUBLISHED_BYTES.set(metric_bytes(self.published_bytes));
     }
 }
 
@@ -329,7 +382,11 @@ impl PinCacheDownloadGuard {
             && state.needed_size(self.object_id) == Some(self.entry.size)
         {
             state.inflight.remove(&self.object_id);
-            state.published.insert(self.object_id, self.entry.clone());
+            if let Some(previous) = state.published.insert(self.object_id, self.entry.clone()) {
+                state.published_bytes -= previous.size;
+            }
+            state.published_bytes += self.entry.size;
+            state.report_published();
             self.published = true;
         }
         self.published
@@ -381,11 +438,16 @@ impl PinCacheReadHandle {
         let entry = {
             let mut state = self.pin_cache.state.write();
             // A late failure must not invalidate a newer publication of the same object.
-            state
+            let removed = state
                 .published
                 .get(&self.object_id)
                 .is_some_and(|entry| Arc::ptr_eq(entry, &self.entry))
-                .then(|| state.published.remove(&self.object_id).unwrap())
+                .then(|| state.published.remove(&self.object_id).unwrap());
+            if let Some(entry) = &removed {
+                state.published_bytes -= entry.size;
+                state.report_published();
+            }
+            removed
         };
         if let Some(entry) = entry {
             self.pin_cache.gc.reclaim([entry]);
@@ -439,6 +501,10 @@ impl PinCache {
             #[cfg(test)]
             refill_gate: Mutex::new(None),
         });
+        pin_cache.state.read().report_published();
+        PIN_CACHE_RECOVERY_READY.set(0);
+        let _ = &*PIN_CACHE_RECOVERY_FAILURES;
+        let _ = &*PIN_CACHE_GC_FAILURES;
         let recovery = pin_cache.clone();
         tokio::spawn(async move { recovery.recover_local_files().await });
         pin_cache
@@ -460,14 +526,17 @@ impl PinCache {
                 .extract_if(|_, (_, retired_at)| applied >= *retired_at)
                 .map(|(id, _)| id)
                 .collect::<Vec<_>>();
-            removed
+            let stale = removed
                 .into_iter()
                 .filter_map(|id| {
                     state.generations.remove(&id);
                     state.inflight.remove(&id);
                     state.published.remove(&id)
                 })
-                .collect::<Vec<_>>()
+                .collect::<Vec<_>>();
+            state.published_bytes -= stale.iter().map(|entry| entry.size).sum::<u64>();
+            state.report_published();
+            stale
         };
         self.gc.reclaim(stale);
     }
@@ -547,9 +616,11 @@ impl PinCache {
                 })
                 .map(|(_, entry)| entry)
                 .collect::<Vec<_>>();
+            state.published_bytes -= stale.iter().map(|entry| entry.size).sum::<u64>();
             if state.recovery_state != RecoveryState::Pending {
                 stale.extend(Self::reconcile_recovered_files(&mut state));
             }
+            state.report_published();
             stale
         };
         self.gc.reclaim(stale_objects);
@@ -583,6 +654,7 @@ impl PinCache {
             let PinCacheState {
                 desired,
                 published,
+                published_bytes,
                 inflight,
                 retired,
                 ..
@@ -604,6 +676,7 @@ impl PinCache {
                     // only prevents publication here.
                     inflight.remove(&object_id);
                     if let Some(entry) = published.remove(&object_id) {
+                        *published_bytes -= entry.size;
                         stale.push(entry);
                     }
                 }
@@ -617,6 +690,7 @@ impl PinCache {
                     );
                 }
             }
+            state.report_published();
             stale
         };
         self.gc.reclaim(stale_objects);
@@ -662,6 +736,7 @@ impl PinCache {
         let PinCacheState {
             desired,
             published,
+            published_bytes,
             inflight,
             recovered_files,
             ..
@@ -677,6 +752,7 @@ impl PinCache {
                 && !published.contains_key(&object_id)
                 && !inflight.contains_key(&object_id)
             {
+                *published_bytes += entry.size;
                 published.insert(object_id, entry);
             } else {
                 stale.push(entry);
@@ -747,6 +823,14 @@ impl PinCache {
             };
             Self::reconcile_recovered_files(&mut state)
         };
+        {
+            let state = self.state.read();
+            state.report_published();
+            PIN_CACHE_RECOVERY_READY.set((state.recovery_state == RecoveryState::Ready) as i64);
+        }
+        if recovery_failed {
+            PIN_CACHE_RECOVERY_FAILURES.inc();
+        }
         stale_objects.extend(reconciled_stale_objects);
         self.recovery_notify.notify_waiters();
         self.gc.reclaim(stale_objects);
@@ -980,6 +1064,10 @@ mod tests {
             .unwrap();
         assert!(pin_cache.get(object_id).is_some());
         assert_eq!(
+            pin_cache.state.read().published_bytes,
+            original.len() as u64
+        );
+        assert_eq!(
             pin_cache.get(object_id).unwrap().read(..).await.unwrap(),
             original
         );
@@ -1007,6 +1095,7 @@ mod tests {
 
         pin_cache.replace_desired_objects(HashMap::new());
         assert!(pin_cache.get(object_id).is_none());
+        assert_eq!(pin_cache.state.read().published_bytes, 0);
 
         let changed = Bytes::from_static(b"changed remote");
         pin_cache.replace_desired_objects(HashMap::from([(object_id, changed.len() as u64)]));
@@ -1025,6 +1114,7 @@ mod tests {
             .await
             .unwrap();
         assert!(pin_cache.get(object_id).is_none());
+        assert_eq!(pin_cache.state.read().published_bytes, 0);
     }
 
     #[tokio::test]
@@ -1374,6 +1464,7 @@ mod tests {
                 assert!(old.read(..).await.is_err());
             }
             assert!(pin_cache.get(object_id).is_none());
+            assert_eq!(pin_cache.state.read().published_bytes, 0);
 
             pin_cache
                 .pin_sst(remote_store, "sst".into(), object_id)
@@ -1452,6 +1543,7 @@ mod tests {
         let recovered = PinCache::new(local_store, 1024);
         recovered.replace_desired_objects(HashMap::from([(object_id, data.len() as u64)]));
         recovered.wait_for_recovery().await;
+        assert_eq!(recovered.state.read().published_bytes, data.len() as u64);
         assert_eq!(
             recovered.get(object_id).unwrap().read(..).await.unwrap(),
             data
