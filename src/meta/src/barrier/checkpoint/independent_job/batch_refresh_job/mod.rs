@@ -376,7 +376,7 @@ impl BatchRefreshJobCheckpointControl {
         )?;
 
         // Step 4: Build edges (internal-only, no upstream).
-        let mut edges = FragmentEdgeBuilder::new()
+        let (mut edges, _) = FragmentEdgeBuilder::new()
             .add_new_fragments(
                 fragment_infos.values(),
                 partial_graph_id,

@@ -587,7 +587,7 @@ impl DatabaseCheckpointControl {
                         .cloned()
                         .collect();
                     // Build edges first (needed for no-shuffle mapping used in split resolution)
-                    let mut edges = self.database_info.build_edge(
+                    let (mut edges, actor_new_no_shuffle) = self.database_info.build_edge(
                         Some((&info, true)),
                         None,
                         None,
@@ -599,7 +599,7 @@ impl DatabaseCheckpointControl {
                     let resolved_split_assignment = resolve_source_splits(
                         &info,
                         &actors,
-                        edges.actor_new_no_shuffle(),
+                        &actor_new_no_shuffle,
                         &self.database_info,
                     )?;
 
@@ -662,11 +662,9 @@ impl DatabaseCheckpointControl {
                         [],
                         self.state.is_paused(),
                         edges,
-                        partial_graph_manager.control_stream_manager(),
                         None,
                         &resolved_split_assignment,
                         &actors.stream_actors,
-                        &actors.actor_location,
                     )?;
 
                     let (table_ids, node_actors) = self.collect_base_info();
@@ -894,7 +892,7 @@ impl DatabaseCheckpointControl {
                         None
                     };
 
-                let mut edges = self.database_info.build_edge(
+                let (mut edges, actor_new_no_shuffle) = self.database_info.build_edge(
                     Some((&info, false)),
                     None,
                     new_upstream_sink,
@@ -906,7 +904,7 @@ impl DatabaseCheckpointControl {
                 let resolved_split_assignment = resolve_source_splits(
                     &info,
                     &actors,
-                    edges.actor_new_no_shuffle(),
+                    &actor_new_no_shuffle,
                     &self.database_info,
                 )?;
 
@@ -995,11 +993,9 @@ impl DatabaseCheckpointControl {
                     dropped_actors,
                     is_currently_paused,
                     edges,
-                    partial_graph_manager.control_stream_manager(),
                     actor_cdc_table_snapshot_splits,
                     &resolved_split_assignment,
                     &actors.stream_actors,
-                    &actors.actor_location,
                 )?;
 
                 (
@@ -1245,7 +1241,7 @@ impl DatabaseCheckpointControl {
                 }
 
                 // Build edges first (needed for no-shuffle mapping used in split resolution)
-                let mut edges = self.database_info.build_edge(
+                let (mut edges, actor_new_no_shuffle) = self.database_info.build_edge(
                     None,
                     Some(&plan),
                     None,
@@ -1277,7 +1273,7 @@ impl DatabaseCheckpointControl {
                         SourceManager::resolve_replace_source_splits(
                             &plan.new_fragments,
                             &plan.replace_upstream,
-                            edges.actor_new_no_shuffle(),
+                            &actor_new_no_shuffle,
                             |_fragment_id, actor_id| {
                                 self.database_info.fragment_infos().find_map(|fragment| {
                                     fragment
@@ -1672,7 +1668,7 @@ impl DatabaseCheckpointControl {
                             database_partial_graph_id,
                             partial_graph_manager.control_stream_manager(),
                         );
-                        let mut edges = edge_builder
+                        let (mut edges, _) = edge_builder
                             .finish_fragments()
                             .add_relations(&info.upstream_fragment_downstreams)?
                             .add_relations(&info.downstreams)?

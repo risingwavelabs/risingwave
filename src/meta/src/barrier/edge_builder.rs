@@ -14,6 +14,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::marker::PhantomData;
+use std::mem::take;
 
 use anyhow::anyhow;
 use risingwave_common::bitmap::Bitmap;
@@ -124,45 +125,28 @@ pub(crate) struct FragmentEdgeBuildResult {
     dispatchers: FragmentActorDispatchers,
     merge_updates: HashMap<FragmentId, Vec<MergeUpdate>>,
     dispatcher_updates: Vec<DispatcherUpdate>,
-    actor_new_no_shuffle: ActorNewNoShuffle,
 }
 
 impl FragmentEdgeBuildResult {
-    pub(super) fn actor_new_no_shuffle(&self) -> &ActorNewNoShuffle {
-        &self.actor_new_no_shuffle
-    }
-
-    fn validate_terminal_consumption(&self, applies_updates: bool) {
-        // Upstreams to existing actors are intentionally unused by `Add` for sink-into-table:
-        // that input is carried separately in `new_upstream_sinks`. `actor_new_no_shuffle` is
-        // also excluded because split resolution only borrows it.
-        let remaining_upstreams = if applies_updates {
-            self.upstreams.values().map(HashMap::len).sum::<usize>()
-        } else {
-            0
-        };
-        let unapplied_dispatcher_updates = if applies_updates {
-            0
-        } else {
-            self.dispatcher_updates.len()
-        };
-        let unapplied_merge_updates = if applies_updates {
-            0
-        } else {
-            self.merge_updates.values().map(Vec::len).sum::<usize>()
-        };
+    fn validate_terminal_consumption(&self) {
+        let remaining_upstreams = self.upstreams.values().map(HashMap::len).sum::<usize>();
+        let remaining_dispatchers = self.dispatchers.values().map(HashMap::len).sum::<usize>();
+        let unapplied_dispatcher_updates = self.dispatcher_updates.len();
+        let unapplied_merge_updates = self.merge_updates.values().map(Vec::len).sum::<usize>();
         let has_unconsumed_fields = remaining_upstreams != 0
+            || remaining_dispatchers != 0
             || unapplied_dispatcher_updates != 0
             || unapplied_merge_updates != 0;
 
         debug_assert!(
             !has_unconsumed_fields,
-            "edge result has unconsumed fields: remaining_upstreams={remaining_upstreams}, unapplied_dispatcher_updates={unapplied_dispatcher_updates}, unapplied_merge_updates={unapplied_merge_updates}"
+            "edge result has unconsumed fields: remaining_upstreams={remaining_upstreams}, remaining_dispatchers={remaining_dispatchers}, unapplied_dispatcher_updates={unapplied_dispatcher_updates}, unapplied_merge_updates={unapplied_merge_updates}"
         );
         #[cfg(not(debug_assertions))]
         if has_unconsumed_fields {
             warn!(
                 remaining_upstreams,
+                remaining_dispatchers,
                 unapplied_dispatcher_updates,
                 unapplied_merge_updates,
                 "edge result has unconsumed fields"
@@ -171,9 +155,10 @@ impl FragmentEdgeBuildResult {
     }
 
     /// Apply the remaining dispatchers after newly created actors have been collected.
-    pub(crate) fn apply_to_add_mutation(self, mutation: &mut AddMutation) {
-        self.validate_terminal_consumption(false);
-        for (actor_id, dispatchers) in self.dispatchers.into_values().flatten() {
+    pub(crate) fn apply_to_add_mutation(mut self, mutation: &mut AddMutation) {
+        let dispatchers = take(&mut self.dispatchers);
+        self.validate_terminal_consumption();
+        for (actor_id, dispatchers) in dispatchers.into_values().flatten() {
             mutation
                 .actor_dispatchers
                 .entry(actor_id)
@@ -184,13 +169,16 @@ impl FragmentEdgeBuildResult {
     }
 
     /// Apply the remaining edge updates after newly created actors have been collected.
-    pub(crate) fn apply_to_update_mutation(self, mutation: &mut UpdateMutation) {
-        self.validate_terminal_consumption(true);
-        mutation.dispatcher_update.extend(self.dispatcher_updates);
+    pub(crate) fn apply_to_update_mutation(mut self, mutation: &mut UpdateMutation) {
+        let dispatchers = take(&mut self.dispatchers);
+        let dispatcher_updates = take(&mut self.dispatcher_updates);
+        let merge_updates = take(&mut self.merge_updates);
+        self.validate_terminal_consumption();
+        mutation.dispatcher_update.extend(dispatcher_updates);
         mutation
             .merge_update
-            .extend(self.merge_updates.into_values().flatten());
-        for (actor_id, dispatchers) in self.dispatchers.into_values().flatten() {
+            .extend(merge_updates.into_values().flatten());
+        for (actor_id, dispatchers) in dispatchers.into_values().flatten() {
             mutation
                 .actor_new_dispatchers
                 .entry(actor_id)
@@ -236,6 +224,58 @@ impl FragmentEdgeBuildResult {
         }
         actors_to_create
     }
+
+    /// Take the common upstream actor set for an edge to an existing fragment.
+    ///
+    /// This is used by sink-into-table, whose hash edge connects every downstream actor to the
+    /// same set of upstream sink actors. The downstream actors already exist, so their upstream
+    /// edge is installed through `new_upstream_sinks` rather than actor creation.
+    pub(crate) fn take_common_upstream_actors(
+        &mut self,
+        upstream_fragment_id: FragmentId,
+        downstream_fragment_id: FragmentId,
+    ) -> MetaResult<Vec<ActorInfo>> {
+        let downstream_actor_upstreams = self
+            .upstreams
+            .get_mut(&downstream_fragment_id)
+            .ok_or_else(|| {
+                anyhow!("cannot find upstreams for downstream fragment {downstream_fragment_id}")
+            })?;
+        let mut common_upstream_actors = None;
+        for (&downstream_actor_id, actor_upstreams) in downstream_actor_upstreams.iter_mut() {
+            let upstream_actors = actor_upstreams
+                .remove(&upstream_fragment_id)
+                .ok_or_else(|| {
+                    anyhow!(
+                        "cannot find upstream fragment {upstream_fragment_id} for downstream actor {downstream_actor_id}"
+                    )
+                })?;
+            if let Some(common) = &common_upstream_actors {
+                // `HashMap` equality is order-independent. Compare the complete `ActorInfo` values
+                // as well because matching actor IDs with different routing metadata do not form a
+                // common upstream layout.
+                if common != &upstream_actors {
+                    return Err(anyhow!(
+                        "upstream actors from fragment {upstream_fragment_id} are not common across downstream fragment {downstream_fragment_id}"
+                    )
+                    .into());
+                }
+            } else {
+                common_upstream_actors = Some(upstream_actors);
+            }
+        }
+        let common_upstream_actors = common_upstream_actors
+            .ok_or_else(|| anyhow!("downstream fragment {downstream_fragment_id} has no actors"))?;
+
+        downstream_actor_upstreams.retain(|_, actor_upstreams| !actor_upstreams.is_empty());
+        if downstream_actor_upstreams.is_empty() {
+            self.upstreams.remove(&downstream_fragment_id);
+        }
+
+        let mut common_upstream_actors: Vec<_> = common_upstream_actors.into_values().collect();
+        common_upstream_actors.sort_unstable_by_key(|actor| actor.actor_id);
+        Ok(common_upstream_actors)
+    }
 }
 
 pub(crate) struct RegisteringFragments;
@@ -244,6 +284,7 @@ pub(crate) struct AddingRelations;
 pub(crate) struct FragmentEdgeBuilder<State> {
     fragments: HashMap<FragmentId, FragmentStatus>,
     result: FragmentEdgeBuildResult,
+    actor_new_no_shuffle: ActorNewNoShuffle,
     _state: PhantomData<State>,
 }
 
@@ -256,8 +297,8 @@ impl FragmentEdgeBuilder<RegisteringFragments> {
                 dispatchers: Default::default(),
                 merge_updates: Default::default(),
                 dispatcher_updates: Default::default(),
-                actor_new_no_shuffle: Default::default(),
             },
+            actor_new_no_shuffle: Default::default(),
             _state: PhantomData,
         }
     }
@@ -394,6 +435,7 @@ impl FragmentEdgeBuilder<RegisteringFragments> {
         FragmentEdgeBuilder {
             fragments: self.fragments,
             result: self.result,
+            actor_new_no_shuffle: self.actor_new_no_shuffle,
             _state: PhantomData,
         }
     }
@@ -472,7 +514,7 @@ impl FragmentEdgeBuilder<AddingRelations> {
                 let (dispatchers, upstreams, no_shuffle_map) =
                     Self::compose_edge(fragment_id, fragment, downstream, downstream_fragment);
                 Self::add_no_shuffle_mapping(
-                    &mut self.result,
+                    &mut self.actor_new_no_shuffle,
                     fragment_id,
                     downstream.downstream_fragment_id,
                     no_shuffle_map,
@@ -498,7 +540,7 @@ impl FragmentEdgeBuilder<AddingRelations> {
                 let (dispatchers, upstreams, no_shuffle_map) =
                     Self::compose_edge(fragment_id, fragment, downstream, downstream_fragment);
                 Self::add_no_shuffle_mapping(
-                    &mut self.result,
+                    &mut self.actor_new_no_shuffle,
                     fragment_id,
                     downstream.downstream_fragment_id,
                     no_shuffle_map,
@@ -537,7 +579,7 @@ impl FragmentEdgeBuilder<AddingRelations> {
                 let (dispatchers, upstreams, no_shuffle_map) =
                     Self::compose_edge(fragment_id, fragment, downstream, downstream_fragment);
                 Self::add_no_shuffle_mapping(
-                    &mut self.result,
+                    &mut self.actor_new_no_shuffle,
                     fragment_id,
                     downstream.downstream_fragment_id,
                     no_shuffle_map,
@@ -554,14 +596,13 @@ impl FragmentEdgeBuilder<AddingRelations> {
     }
 
     fn add_no_shuffle_mapping(
-        result: &mut FragmentEdgeBuildResult,
+        actor_new_no_shuffle: &mut ActorNewNoShuffle,
         fragment_id: FragmentId,
         downstream_fragment_id: FragmentId,
         no_shuffle_map: Option<HashMap<ActorId, ActorId>>,
     ) {
         if let Some(no_shuffle_map) = no_shuffle_map {
-            result
-                .actor_new_no_shuffle
+            actor_new_no_shuffle
                 .entry(fragment_id)
                 .or_default()
                 .insert(downstream_fragment_id, no_shuffle_map);
@@ -727,8 +768,8 @@ impl FragmentEdgeBuilder<AddingRelations> {
     }
 
     /// Finalize the builder and return the generated edges and mutation-time deltas.
-    pub(crate) fn build(self) -> FragmentEdgeBuildResult {
-        self.result
+    pub(crate) fn build(self) -> (FragmentEdgeBuildResult, ActorNewNoShuffle) {
+        (self.result, self.actor_new_no_shuffle)
     }
 }
 
@@ -823,13 +864,14 @@ mod tests {
                 }
             }
         }
-        Ok(builder
+        let (result, _) = builder
             .finish_fragments()
             .add_relations(&HashMap::from([(
                 source_fragment,
                 vec![relation(target_fragment, DispatcherType::Broadcast)],
             )]))?
-            .build())
+            .build();
+        Ok(result)
     }
 
     #[test]
@@ -895,7 +937,7 @@ mod tests {
                 target,
                 edge_info(DistributionType::Hash, [(12, bitmap())]),
             )]);
-            let result = builder
+            let (result, _) = builder
                 .finish_fragments()
                 .add_edge(source, &relation(target, dispatcher_type))
                 .unwrap()
@@ -921,7 +963,7 @@ mod tests {
             (source, single_info(2)),
             (target, single_info(12)),
         ]);
-        let result = builder
+        let (result, actor_new_no_shuffle) = builder
             .finish_fragments()
             .add_edge(source, &relation(target, DispatcherType::NoShuffle))
             .unwrap()
@@ -929,10 +971,7 @@ mod tests {
 
         assert!(result.dispatcher_updates.is_empty());
         assert!(result.merge_updates.is_empty());
-        assert_eq!(
-            result.actor_new_no_shuffle[&source][&target][&actor(2)],
-            actor(12)
-        );
+        assert_eq!(actor_new_no_shuffle[&source][&target][&actor(2)], actor(12));
     }
 
     #[test]
@@ -957,7 +996,7 @@ mod tests {
             target,
             edge_info(DistributionType::Hash, actors(13, 14)),
         )]);
-        let result = builder
+        let (result, _) = builder
             .finish_fragments()
             .add_relations(&relations)
             .unwrap()
@@ -980,7 +1019,7 @@ mod tests {
             source,
             edge_info(DistributionType::Hash, actors(3, 4)),
         )]);
-        let result = builder
+        let (result, _) = builder
             .finish_fragments()
             .add_relations(&relations)
             .unwrap()
@@ -1004,7 +1043,7 @@ mod tests {
         let mut builder = FragmentEdgeBuilder::new();
         builder.add_existing_fragment_infos([(target, single_info(11))]);
         builder.add_new_fragment_infos([(new_source, single_info(2))]);
-        let result = builder
+        let (result, _) = builder
             .finish_fragments()
             .add_edge(new_source, &relation(target, DispatcherType::Broadcast))
             .unwrap()
@@ -1018,13 +1057,13 @@ mod tests {
     }
 
     #[test]
-    fn test_new_to_existing_upstreams_are_allowed_in_add_mutation() {
+    fn test_new_to_existing_upstreams_are_consumed_for_add_mutation() {
         let source = fragment(1);
         let target = fragment(2);
         let mut builder = FragmentEdgeBuilder::new();
         builder.add_existing_fragment_infos([(target, single_info(11))]);
         builder.add_new_fragment_infos([(source, single_info(1))]);
-        let mut result = builder
+        let (mut result, _) = builder
             .finish_fragments()
             .add_edge(source, &relation(target, DispatcherType::Broadcast))
             .unwrap()
@@ -1047,7 +1086,86 @@ mod tests {
         )));
 
         assert_eq!(actors_to_create[&worker_id][&source].1[0].2.len(), 1);
+        let upstream_actors = result.take_common_upstream_actors(source, target).unwrap();
+        assert_eq!(upstream_actors.len(), 1);
+        assert_eq!(upstream_actors[0].actor_id, actor(1));
         result.apply_to_add_mutation(&mut AddMutation::default());
+    }
+
+    #[test]
+    fn test_take_common_upstream_actors_from_hash_edge() {
+        let source = fragment(1);
+        let target = fragment(2);
+        let actors = |left, right| {
+            [
+                (left, Some(Bitmap::from_iter([true, false]))),
+                (right, Some(Bitmap::from_iter([false, true]))),
+            ]
+        };
+        let mut builder = FragmentEdgeBuilder::new();
+        builder.add_existing_fragment_infos([(
+            target,
+            edge_info(DistributionType::Hash, actors(11, 12)),
+        )]);
+        builder.add_new_fragment_infos([(source, edge_info(DistributionType::Hash, actors(1, 2)))]);
+        let (mut result, _) = builder
+            .finish_fragments()
+            .add_edge(source, &relation(target, DispatcherType::Hash))
+            .unwrap()
+            .build();
+
+        let upstream_actors = result.take_common_upstream_actors(source, target).unwrap();
+        assert_eq!(
+            upstream_actors
+                .into_iter()
+                .map(|actor| actor.actor_id)
+                .collect::<Vec<_>>(),
+            vec![actor(1), actor(2)]
+        );
+        assert!(!result.upstreams.contains_key(&target));
+    }
+
+    #[test]
+    #[should_panic(expected = "remaining_upstreams=1")]
+    fn test_add_mutation_rejects_uncollected_actor_upstreams() {
+        let source = fragment(1);
+        let target = fragment(2);
+        let mut builder = FragmentEdgeBuilder::new();
+        builder.add_existing_fragment_infos([(source, single_info(1))]);
+        builder.add_new_fragment_infos([(target, single_info(11))]);
+        let (result, _) = builder
+            .finish_fragments()
+            .add_edge(source, &relation(target, DispatcherType::Broadcast))
+            .unwrap()
+            .build();
+
+        result.apply_to_add_mutation(&mut AddMutation::default());
+    }
+
+    #[test]
+    fn test_update_mutation_consumes_edge_updates_before_validation() {
+        let source = fragment(1);
+        let mut result = build_status_pair(TestStatus::Changed, TestStatus::Existing).unwrap();
+        let source_actor = StreamActor {
+            actor_id: actor(2),
+            fragment_id: source,
+            vnode_bitmap: None,
+            mview_definition: Default::default(),
+            expr_context: None,
+            config_override: Default::default(),
+        };
+        let node = StreamNode::default();
+        result.collect_actors_to_create(std::iter::once((
+            source,
+            &node,
+            std::iter::once((&source_actor, 1.into())),
+            [],
+        )));
+        let mut mutation = UpdateMutation::default();
+
+        result.apply_to_update_mutation(&mut mutation);
+
+        assert_eq!(mutation.merge_update.len(), 1);
     }
 
     #[test]
@@ -1057,7 +1175,7 @@ mod tests {
         let mut builder = FragmentEdgeBuilder::new();
         builder.add_existing_fragment_infos([(source, single_info(1))]);
         builder.add_new_fragment_infos([(target, single_info(11))]);
-        let mut result = builder
+        let (mut result, _) = builder
             .finish_fragments()
             .add_edge(source, &relation(target, DispatcherType::Broadcast))
             .unwrap()
@@ -1095,7 +1213,7 @@ mod tests {
         let target = fragment(3);
         let mut builder = FragmentEdgeBuilder::new();
         builder.add_new_fragment_infos([(source, single_info(2)), (target, single_info(3))]);
-        let result = builder
+        let (result, _) = builder
             .finish_fragments()
             .add_relations(&HashMap::from([
                 (

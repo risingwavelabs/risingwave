@@ -990,22 +990,18 @@ impl Command {
         job_type: &CreateStreamingJobType,
         dropped_actors: impl IntoIterator<Item = ActorId>,
         is_currently_paused: bool,
-        edges: FragmentEdgeBuildResult,
-        control_stream_manager: &ControlStreamManager,
+        mut edges: FragmentEdgeBuildResult,
         actor_cdc_table_snapshot_splits: Option<HashMap<ActorId, PbCdcTableSnapshotSplits>>,
         split_assignment: &SplitAssignment,
         stream_actors: &HashMap<FragmentId, Vec<StreamActor>>,
-        actor_location: &HashMap<ActorId, WorkerId>,
     ) -> MetaResult<Mutation> {
         {
             {
                 let CreateStreamingJobCommandInfo {
                     stream_job_fragments,
                     fragment_backfill_ordering,
-                    streaming_job,
                     ..
                 } = info;
-                let database_id = streaming_job.database_id();
                 let added_actors: Vec<ActorId> = stream_actors
                     .values()
                     .flatten()
@@ -1050,27 +1046,17 @@ impl Command {
                         ..
                     }) = job_type
                     {
-                        let new_sink_actors = stream_actors
-                            .get(sink_fragment_id)
-                            .unwrap_or_else(|| {
-                                panic!("upstream sink fragment {sink_fragment_id} does not exist")
-                            })
-                            .iter()
-                            .map(|actor| {
-                                let worker_id = actor_location[&actor.actor_id];
-                                PbActorInfo {
-                                    actor_id: actor.actor_id,
-                                    host: Some(control_stream_manager.host_addr(worker_id)),
-                                    partial_graph_id: to_partial_graph_id(database_id, None),
-                                }
-                            });
+                        let upstream_actors = edges.take_common_upstream_actors(
+                            *sink_fragment_id,
+                            new_sink_downstream.downstream_fragment_id,
+                        )?;
                         let new_upstream_sink = PbNewUpstreamSink {
                             info: Some(PbUpstreamSinkInfo {
                                 upstream_fragment_id: *sink_fragment_id,
                                 sink_output_schema: sink_output_fields.clone(),
                                 project_exprs: project_exprs.clone(),
                             }),
-                            upstream_actors: new_sink_actors.collect(),
+                            upstream_actors,
                         };
                         HashMap::from([(
                             new_sink_downstream.downstream_fragment_id,

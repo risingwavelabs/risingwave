@@ -947,7 +947,7 @@ impl PartialGraphRecoverer<'_> {
                 control_stream_manager,
             );
         }
-        let mut edges = builder
+        let (mut edges, _) = builder
             .finish_fragments()
             .add_relations(fragment_relations)?
             .build();
