@@ -25,6 +25,7 @@ package io.debezium.connector.postgresql;
 import static io.debezium.connector.postgresql.PostgresConnectorConfig.LsnFlushTimeoutAction;
 
 import io.debezium.DebeziumException;
+import io.debezium.connector.postgresql.connection.GuardedReplicationConnection;
 import io.debezium.connector.postgresql.connection.LogicalDecodingMessage;
 import io.debezium.connector.postgresql.connection.Lsn;
 import io.debezium.connector.postgresql.connection.PostgresConnection;
@@ -150,6 +151,7 @@ public class PostgresStreamingChangeEventSource
             ReplicationConnection replicationConnection) {
         this.connectorConfig = connectorConfig;
         this.connection = connection;
+        this.connection.setConnectionTracker(connectionAbortRegistry);
         this.dispatcher = dispatcher;
         this.errorHandler = errorHandler;
         this.clock = clock;
@@ -158,6 +160,10 @@ public class PostgresStreamingChangeEventSource
         this.taskContext = taskContext;
         this.snapshotterService = snapshotterService;
         this.replicationConnection = replicationConnection;
+        if (replicationConnection instanceof GuardedReplicationConnection) {
+            ((GuardedReplicationConnection) replicationConnection)
+                    .setConnectionTracker(connectionAbortRegistry);
+        }
         this.connectionProbeTimer =
                 ElapsedTimeStrategy.constant(
                         Clock.system(), connectorConfig.statusUpdateInterval());
@@ -193,6 +199,9 @@ public class PostgresStreamingChangeEventSource
      */
     public void forceCloseConnection() {
         LOGGER.warn("Force-aborting PG connections to unblock wedged native I/O");
+        if (replicationConnection instanceof GuardedReplicationConnection) {
+            ((GuardedReplicationConnection) replicationConnection).suppressSlotDrop();
+        }
         try {
             connectionAbortRegistry.abortAll(Runnable::run);
         } catch (Exception e) {
@@ -394,7 +403,9 @@ public class PostgresStreamingChangeEventSource
     }
 
     private void closeReplicationConnection(boolean dropSlot) throws Exception {
-        if (replicationConnection instanceof PostgresReplicationConnection) {
+        if (replicationConnection instanceof GuardedReplicationConnection) {
+            ((GuardedReplicationConnection) replicationConnection).close(dropSlot);
+        } else if (replicationConnection instanceof PostgresReplicationConnection) {
             ((PostgresReplicationConnection) replicationConnection).close(dropSlot);
         } else {
             replicationConnection.close();
@@ -402,12 +413,19 @@ public class PostgresStreamingChangeEventSource
     }
 
     private PostgresConnection.ConnectionTrackingScope trackConnections() {
-        return PostgresConnection.trackConnections(connectionAbortRegistry::capture);
+        return PostgresConnection.trackConnections(connectionAbortRegistry);
     }
 
     private void captureReplicationConnection() throws SQLException {
-        if (replicationConnection instanceof JdbcConnection) {
-            connectionAbortRegistry.capture((JdbcConnection) replicationConnection, false);
+        JdbcConnection jdbcConnection = null;
+        if (replicationConnection instanceof GuardedReplicationConnection) {
+            jdbcConnection =
+                    ((GuardedReplicationConnection) replicationConnection).jdbcConnection();
+        } else if (replicationConnection instanceof JdbcConnection) {
+            jdbcConnection = (JdbcConnection) replicationConnection;
+        }
+        if (jdbcConnection != null) {
+            connectionAbortRegistry.capture(jdbcConnection, false);
         }
     }
 
@@ -429,18 +447,19 @@ public class PostgresStreamingChangeEventSource
         void close(boolean dropSlot) throws Exception;
     }
 
-    static final class ConnectionAbortRegistry {
+    static final class ConnectionAbortRegistry implements PostgresConnection.ConnectionTracker {
         private final Set<Connection> connections =
                 Collections.newSetFromMap(new IdentityHashMap<>());
         private Executor abortExecutor;
 
         Connection capture(JdbcConnection jdbcConnection, boolean executeOnConnect)
                 throws SQLException {
-            throwIfAbortRequested();
+            beforeConnect();
             return capture(jdbcConnection.connection(executeOnConnect));
         }
 
-        Connection capture(Connection connection) throws SQLException {
+        @Override
+        public Connection capture(Connection connection) throws SQLException {
             Objects.requireNonNull(connection);
             Executor executor;
             synchronized (this) {
@@ -487,7 +506,8 @@ public class PostgresStreamingChangeEventSource
             return abortExecutor != null;
         }
 
-        private synchronized void throwIfAbortRequested() throws SQLException {
+        @Override
+        public synchronized void beforeConnect() throws SQLException {
             if (abortExecutor != null) {
                 throw new SQLException("Connection requested during forced shutdown");
             }

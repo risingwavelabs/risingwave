@@ -106,6 +106,11 @@ public class PostgresConnection extends JdbcConnection {
     private static final ThreadLocal<ConnectionTrackingContext> CONNECTION_TRACKER =
             new ThreadLocal<>();
 
+    // The main metadata connection is shared with signal and incremental-snapshot executors. Keep
+    // its tracker on the connection itself so reconnects from those threads cannot bypass the
+    // source's abort registry.
+    private volatile ConnectionTracker connectionTracker;
+
     private static final String URL_PATTERN =
             "jdbc:postgresql://${"
                     + JdbcConfiguration.HOSTNAME
@@ -125,13 +130,48 @@ public class PostgresConnection extends JdbcConnection {
 
     protected static ConnectionFactory trackCreatedConnections(ConnectionFactory delegate) {
         return config -> {
-            Connection connection = delegate.connect(config);
             ConnectionTrackingContext context = CONNECTION_TRACKER.get();
+            if (context != null) {
+                context.tracker.beforeConnect();
+            }
+            Connection connection = delegate.connect(config);
             if (context != null) {
                 context.tracker.capture(connection);
             }
             return connection;
         };
+    }
+
+    public void setConnectionTracker(ConnectionTracker connectionTracker) {
+        this.connectionTracker = Objects.requireNonNull(connectionTracker);
+    }
+
+    @Override
+    public synchronized Connection connection(boolean executeOnConnect) throws SQLException {
+        ConnectionTracker tracker = connectionTracker;
+        if (tracker == null) {
+            return super.connection(executeOnConnect);
+        }
+
+        tracker.beforeConnect();
+        try (ConnectionTrackingScope ignored = trackConnections(tracker)) {
+            return tracker.capture(super.connection(executeOnConnect));
+        }
+    }
+
+    @Override
+    public synchronized void reconnect() throws SQLException {
+        ConnectionTracker tracker = connectionTracker;
+        if (tracker == null) {
+            super.reconnect();
+            return;
+        }
+
+        tracker.beforeConnect();
+        try (ConnectionTrackingScope ignored = trackConnections(tracker)) {
+            super.reconnect();
+            tracker.capture(super.connection(false));
+        }
     }
 
     public static ConnectionTrackingScope trackConnections(ConnectionTracker tracker) {
@@ -149,7 +189,9 @@ public class PostgresConnection extends JdbcConnection {
 
     @FunctionalInterface
     public interface ConnectionTracker {
-        void capture(Connection connection) throws SQLException;
+        default void beforeConnect() throws SQLException {}
+
+        Connection capture(Connection connection) throws SQLException;
     }
 
     @FunctionalInterface
@@ -255,6 +297,14 @@ public class PostgresConnection extends JdbcConnection {
      */
     public PostgresConnection(JdbcConfiguration config, String connectionUsage) {
         this(config, null, connectionUsage);
+    }
+
+    @VisibleForTesting
+    protected PostgresConnection(
+            JdbcConfiguration config, String connectionUsage, ConnectionFactory connectionFactory) {
+        super(addDefaultSettings(config, connectionUsage), connectionFactory, "\"", "\"");
+        this.typeRegistry = null;
+        this.defaultValueConverter = null;
     }
 
     static JdbcConfiguration addDefaultSettings(
