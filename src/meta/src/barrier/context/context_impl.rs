@@ -41,6 +41,7 @@ use crate::barrier::{
 };
 use crate::hummock::CommitEpochInfo;
 use crate::manager::LocalNotification;
+use crate::manager::sink_coordination::{RecoveryStart, RecoverySucceeded};
 use crate::model::FragmentDownstreamRelation;
 use crate::stream::{SourceChange, cleanup_dropped_streaming_jobs};
 use crate::{MetaError, MetaResult};
@@ -57,11 +58,15 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         self.scheduled_barriers.next_scheduled().await
     }
 
-    fn abort_and_mark_blocked(
+    async fn abort_and_mark_blocked(
         &self,
-        database_id: Option<DatabaseId>,
+        recovery: RecoveryStart,
         recovery_reason: RecoveryReason,
-    ) {
+    ) -> MetaResult<()> {
+        let database_id = match &recovery {
+            RecoveryStart::Global => None,
+            RecoveryStart::Database { database_id, .. } => Some(*database_id),
+        };
         if database_id.is_none() {
             self.set_status(BarrierManagerStatus::Recovering(recovery_reason));
         }
@@ -69,14 +74,25 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
             .abort_and_mark_blocked(database_id, "cluster is under recovering");
+        self.sink_manager.start_recovery(recovery).await?;
+
+        Ok(())
     }
 
-    fn mark_ready(&self, options: MarkReadyOptions) {
+    async fn mark_ready(&self, options: MarkReadyOptions) -> MetaResult<()> {
+        let recovery = match &options {
+            MarkReadyOptions::Database(database_id) => RecoverySucceeded::Database(*database_id),
+            MarkReadyOptions::Global { failed_databases } => RecoverySucceeded::Global {
+                failed_databases: failed_databases.clone(),
+            },
+        };
+        self.sink_manager.recovery_succeeded(recovery).await?;
         let is_global = matches!(&options, MarkReadyOptions::Global { .. });
         self.scheduled_barriers.mark_ready(options);
         if is_global {
             self.set_status(BarrierManagerStatus::Running);
         }
+        Ok(())
     }
 
     #[await_tree::instrument("post_collect_command({command})")]

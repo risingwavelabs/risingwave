@@ -468,6 +468,10 @@ pub struct InflightDatabaseInfo {
 }
 
 impl InflightDatabaseInfo {
+    pub(super) fn job_ids(&self) -> impl Iterator<Item = JobId> + '_ {
+        self.jobs.keys().copied()
+    }
+
     pub fn fragment_infos(&self) -> impl Iterator<Item = &InflightFragmentInfo> + '_ {
         self.jobs.values().flat_map(|job| job.fragment_infos())
     }

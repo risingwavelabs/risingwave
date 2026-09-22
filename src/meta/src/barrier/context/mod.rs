@@ -40,7 +40,7 @@ use crate::barrier::{
 };
 use crate::hummock::{CommitEpochInfo, HummockManagerRef};
 use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
-use crate::manager::sink_coordination::SinkCoordinatorManager;
+use crate::manager::sink_coordination::{RecoveryStart, SinkCoordinatorManager};
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::stream::source_manager::SplitAssignment;
 use crate::stream::{GlobalRefreshManagerRef, ScaleControllerRef, SourceManagerRef};
@@ -71,12 +71,12 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
     ) -> impl Future<Output = MetaResult<HummockVersionStats>> + Send + '_;
 
     async fn next_scheduled(&self) -> Scheduled;
-    fn abort_and_mark_blocked(
+    async fn abort_and_mark_blocked(
         &self,
-        database_id: Option<DatabaseId>,
+        recovery: RecoveryStart,
         recovery_reason: RecoveryReason,
-    );
-    fn mark_ready(&self, options: MarkReadyOptions);
+    ) -> MetaResult<()>;
+    async fn mark_ready(&self, options: MarkReadyOptions) -> MetaResult<()>;
 
     fn post_collect_command(
         &self,

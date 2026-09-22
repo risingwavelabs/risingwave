@@ -274,20 +274,6 @@ impl GlobalBarrierWorkerContextImpl {
         Ok(())
     }
 
-    async fn reset_sink_coordinator(&self, database_id: Option<DatabaseId>) -> MetaResult<()> {
-        if let Some(database_id) = database_id {
-            let sink_ids = self
-                .metadata_manager
-                .catalog_controller
-                .list_sink_ids(Some(database_id))
-                .await?;
-            self.sink_manager.stop_sink_coordinator(sink_ids).await;
-        } else {
-            self.sink_manager.reset().await;
-        }
-        Ok(())
-    }
-
     async fn abort_dirty_pending_sink_state(
         &self,
         database_id: Option<DatabaseId>,
@@ -613,9 +599,6 @@ impl GlobalBarrierWorkerContextImpl {
                         .await
                         .context("clean dirty streaming jobs")?;
 
-                    self.reset_sink_coordinator(None)
-                        .await
-                        .context("reset sink coordinator")?;
                     self.abort_dirty_pending_sink_state(None)
                         .await
                         .context("abort dirty pending sink state")?;
@@ -778,9 +761,6 @@ impl GlobalBarrierWorkerContextImpl {
             .await
             .context("clean dirty streaming jobs")?;
 
-        self.reset_sink_coordinator(Some(database_id))
-            .await
-            .context("reset sink coordinator")?;
         self.abort_dirty_pending_sink_state(Some(database_id))
             .await
             .context("abort dirty pending sink state")?;
