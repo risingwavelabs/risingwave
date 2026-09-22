@@ -72,9 +72,10 @@ impl CursorDataChunk {
     fn into_pg_rows(
         self,
         format: &CursorRowFormat,
+        committed_offset: usize,
     ) -> Result<(VecDeque<CursorPgRow>, CursorDataChunkMetadata)> {
         // Keep seek values typed and independent of the PostgreSQL result encoding.
-        let mut seek_keys = match &self.metadata {
+        let seek_keys = match &self.metadata {
             CursorDataChunkMetadata::Query { .. } => None,
             CursorDataChunkMetadata::Subscription { fields, .. } => Some(
                 self.chunk
@@ -111,12 +112,14 @@ impl CursorDataChunk {
                 .as_ref()
                 .is_none_or(|keys| keys.len() == rows.len())
         );
+        let mut seek_keys = seek_keys.map(|keys| keys.into_iter().skip(committed_offset));
         let rows = rows
             .into_iter()
+            .skip(committed_offset)
             .map(|row| CursorPgRow {
                 row,
                 seek_pk_row: seek_keys.as_mut().map(|keys| {
-                    keys.pop_front()
+                    keys.next()
                         .expect("one seek key per formatted subscription row")
                 }),
             })
@@ -695,11 +698,13 @@ where
                         let format = self.row_format.as_ref().expect(
                             "row formatting must be initialized before reading cursor chunks",
                         );
-                        match chunk.clone().into_pg_rows(format) {
+                        match chunk
+                            .clone()
+                            .into_pg_rows(format, event.row_offset_in_chunk)
+                        {
                             Ok((rows, metadata)) => {
                                 self.row_offset_in_chunk = event.row_offset_in_chunk;
-                                self.current_rows =
-                                    rows.into_iter().skip(self.row_offset_in_chunk).collect();
+                                self.current_rows = rows;
                                 self.current_metadata = Some(Arc::new(metadata));
                                 if self.current_rows.is_empty() {
                                     self.next_event_index += 1;
