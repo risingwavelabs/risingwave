@@ -26,7 +26,6 @@ use risingwave_common::id::{ObjectId, TableId};
 use risingwave_common::system_param::adaptive_parallelism_strategy::parse_strategy;
 use risingwave_common::types::DataType;
 use risingwave_common::util::stream_graph_visitor;
-use risingwave_connector::sink::catalog::SinkId;
 use risingwave_connector::sink::iceberg::ENABLE_PK_INDEX;
 use risingwave_meta::barrier::{BarrierScheduler, Command, ResumeBackfillTarget};
 use risingwave_meta::manager::{EventLogManagerRef, MetadataManager, iceberg_compaction};
@@ -488,10 +487,10 @@ impl DdlService for DdlServiceImpl {
         let version = self.ddl_controller.run_command(command).await?;
 
         self.sink_manager
-            .stop_sink_coordinator(vec![SinkId::from(sink_id)])
+            .stop_sink_coordinators_for_jobs(vec![sink_id.as_job_id()])
             .await;
         self.iceberg_compaction_manager
-            .clear_iceberg_maintenance_by_sink_id(SinkId::from(sink_id));
+            .clear_iceberg_maintenance_by_sink_id(sink_id);
 
         Ok(Response::new(DropSinkResponse {
             status: None,

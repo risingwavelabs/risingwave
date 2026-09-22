@@ -615,7 +615,7 @@ impl ScheduledBarriers {
 pub(super) enum MarkReadyOptions {
     Database(DatabaseId),
     Global {
-        blocked_databases: HashSet<DatabaseId>,
+        failed_databases: HashMap<DatabaseId, HashSet<JobId>>,
     },
 }
 
@@ -726,7 +726,7 @@ impl ScheduledBarriers {
                     self.inner.changed_tx.send(()).ok();
                 }
             }
-            MarkReadyOptions::Global { blocked_databases } => {
+            MarkReadyOptions::Global { failed_databases } => {
                 if !queue.status.is_blocked() {
                     if cfg!(debug_assertions) {
                         panic!("cluster marked as ready twice");
@@ -734,9 +734,12 @@ impl ScheduledBarriers {
                         warn!("cluster marked as ready twice");
                     }
                 }
-                info!(?blocked_databases, "cluster marked as ready");
+                info!(
+                    failed_database_ids = ?failed_databases.keys().collect_vec(),
+                    "cluster marked as ready"
+                );
                 let prev_blocked = queue.mark_ready();
-                for database_id in &blocked_databases {
+                for database_id in failed_databases.keys() {
                     queue.queue.entry(*database_id).or_insert_with(|| {
                         DatabaseScheduledQueue::new(
                             *database_id,
@@ -749,7 +752,7 @@ impl ScheduledBarriers {
                     });
                 }
                 for (database_id, queue) in &mut queue.queue {
-                    if !blocked_databases.contains(database_id) {
+                    if !failed_databases.contains_key(database_id) {
                         queue.mark_ready();
                     }
                 }
@@ -874,15 +877,15 @@ mod tests {
             unimplemented!()
         }
 
-        fn abort_and_mark_blocked(
+        async fn abort_and_mark_blocked(
             &self,
-            _database_id: Option<DatabaseId>,
+            _recovery: crate::manager::sink_coordination::RecoveryStart,
             _recovery_reason: crate::barrier::RecoveryReason,
-        ) {
+        ) -> MetaResult<()> {
             unimplemented!()
         }
 
-        fn mark_ready(&self, _options: MarkReadyOptions) {
+        async fn mark_ready(&self, _options: MarkReadyOptions) -> MetaResult<()> {
             unimplemented!()
         }
 

@@ -22,4 +22,5 @@ pub(super) use control::{
     DatabaseCheckpointControlMetrics,
 };
 pub(crate) use independent_job::{CreatingStreamingJobControl, IndependentCheckpointJobControl};
+pub(super) use recovery::{DatabaseStatusAction, EnterReset};
 pub(super) use state::BarrierWorkerState;

@@ -76,23 +76,28 @@ impl GlobalBarrierWorkerContext for MockBarrierWorkerContext {
         pending().await
     }
 
-    fn abort_and_mark_blocked(
+    async fn abort_and_mark_blocked(
         &self,
-        database_id: Option<DatabaseId>,
+        recovery: crate::manager::sink_coordination::RecoveryStart,
         recovery_reason: RecoveryReason,
-    ) {
-        assert_eq!(database_id, None);
+    ) -> MetaResult<()> {
+        assert!(matches!(
+            recovery,
+            crate::manager::sink_coordination::RecoveryStart::Global
+        ));
         self.0
             .send(ContextRequest::AbortAndMarkBlocked(recovery_reason))
             .unwrap();
+        Ok(())
     }
 
-    fn mark_ready(&self, options: MarkReadyOptions) {
-        let MarkReadyOptions::Global { blocked_databases } = options else {
+    async fn mark_ready(&self, options: MarkReadyOptions) -> MetaResult<()> {
+        let MarkReadyOptions::Global { failed_databases } = options else {
             unreachable!()
         };
-        assert!(blocked_databases.is_empty());
+        assert!(failed_databases.is_empty());
         self.0.send(ContextRequest::MarkReady).unwrap();
+        Ok(())
     }
 
     async fn post_collect_command(&self, _command: PostCollectCommand) -> MetaResult<()> {

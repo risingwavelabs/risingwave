@@ -18,7 +18,7 @@ mod handle;
 mod manager;
 
 use futures::stream::BoxStream;
-pub use manager::SinkCoordinatorManager;
+pub use manager::{RecoveryStart, RecoverySucceeded, SinkCoordinatorManager};
 use risingwave_pb::connector_service::{CoordinateRequest, CoordinateResponse};
 use tokio::sync::mpsc::UnboundedSender;
 use tonic::Status;
