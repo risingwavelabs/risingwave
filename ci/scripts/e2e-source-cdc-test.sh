@@ -35,10 +35,16 @@ risedev slt './e2e_test/source_inline/cdc/**/*.slt.serial' --skip 'cron_only'
 
 echo "--- Run SQL Server encrypted abort regression test"
 sqlserver_abort_test_classes=$(mktemp -d)
-javac -cp './connector-node/libs/*' \
+source_cdc_jars=(./connector-node/libs/risingwave-source-cdc-*.jar)
+if [[ ${#source_cdc_jars[@]} -ne 1 || ! -f "${source_cdc_jars[0]}" ]]; then
+  echo "Expected exactly one risingwave-source-cdc jar in connector-node/libs" >&2
+  exit 1
+fi
+source_cdc_classpath="${source_cdc_jars[0]}:./connector-node/libs/*"
+javac -cp "${source_cdc_classpath}" \
   -d "${sqlserver_abort_test_classes}" \
   e2e_test/source_inline/cdc/sql_server/SqlServerEncryptedAbortTest.java
-java -cp "${sqlserver_abort_test_classes}:./connector-node/libs/*" \
+java -cp "${sqlserver_abort_test_classes}:${source_cdc_classpath}" \
   io.debezium.connector.sqlserver.SqlServerEncryptedAbortTest
 rm -rf "${sqlserver_abort_test_classes}"
 
