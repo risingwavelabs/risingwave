@@ -52,6 +52,7 @@ impl Execute for ChangeLogExecutor {
 }
 
 impl ChangeLogExecutor {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         ctx: ActorContextRef,
         input: Executor,
@@ -127,7 +128,8 @@ impl ChangeLogExecutor {
         }
     }
 
-    /// Rewrites the changelog so that a row is deleted before its replacement shows up.
+    /// Orders changelog events so that the latest event per business key represents its state at the barrier.
+    /// Intermediate replacements may be reordered.
     ///
     /// Consider the schema (id, tier), with business key (id) and stream key (id, tier).
     ///
@@ -176,8 +178,8 @@ impl ChangeLogExecutor {
             self.output_data_types(),
         );
         let mut buffer = EventBuffer::new();
-
         let input = self.input.execute();
+
         #[for_await]
         for msg in input {
             match msg? {
