@@ -25,10 +25,15 @@ use futures::stream::BoxStream;
 use futures::{Stream, StreamExt};
 use futures_async_stream::try_stream;
 use pgwire::types::{Format, Row};
+use prometheus::core::Atomic;
+use risingwave_batch::error::BatchError;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::{Field, TableId};
 use risingwave_common::error::BoxedError;
+use risingwave_common::memory::{MemoryContext, MonitoredGlobalAlloc};
+use risingwave_common::metrics::TrAdderAtomic;
 use risingwave_common::row::{OwnedRow, Row as _, RowExt as _};
+use risingwave_common_estimate_size::EstimateSize;
 
 use super::{CursorQueryStream, FieldsManager, SubscriptionCursor, create_cursor_query_stream};
 use crate::TableCatalog;
@@ -69,11 +74,26 @@ pub(super) struct CursorDataChunk {
 }
 
 impl CursorDataChunk {
+    /// Formats this raw chunk for the active FETCH.
+    ///
+    /// The returned tuple contains, in order:
+    ///
+    /// 1. formatted rows in reverse order, so the response stream can consume them with `pop`
+    /// without shrinking the monitored vector's backing allocation;
+    /// 2. the chunk metadata needed for subscription projection and progress tracking; and
+    /// 3. the rows' explicit heap size, excluding the monitored vector's element-array capacity.
+    ///
+    /// Formatting errors leave the raw chunk available for retry with different formats.
     fn into_pg_rows(
         self,
         format: &CursorRowFormat,
+        memory_context: &MemoryContext,
         committed_offset: usize,
-    ) -> Result<(VecDeque<CursorPgRow>, CursorDataChunkMetadata)> {
+    ) -> Result<(
+        Vec<CursorPgRow, MonitoredGlobalAlloc>,
+        CursorDataChunkMetadata,
+        i64,
+    )> {
         // Keep seek values typed and independent of the PostgreSQL result encoding.
         let seek_keys = match &self.metadata {
             CursorDataChunkMetadata::Query { .. } => None,
@@ -85,7 +105,7 @@ impl CursorDataChunk {
             ),
         };
         let (column_types, formats) = match &self.metadata {
-            CursorDataChunkMetadata::Query { fields } => (
+            CursorDataChunkMetadata::Query { fields, .. } => (
                 fields.iter().map(Field::data_type).collect::<Vec<_>>(),
                 format.formats.clone(),
             ),
@@ -113,18 +133,30 @@ impl CursorDataChunk {
                 .is_none_or(|keys| keys.len() == rows.len())
         );
         let mut seek_keys = seek_keys.map(|keys| keys.into_iter().skip(committed_offset));
-        let rows = rows
-            .into_iter()
-            .skip(committed_offset)
-            .map(|row| CursorPgRow {
-                row,
-                seek_pk_row: seek_keys.as_mut().map(|keys| {
-                    keys.next()
-                        .expect("one seek key per formatted subscription row")
-                }),
-            })
-            .collect();
-        Ok((rows, self.metadata))
+        let mut rows_nested_heap_size = 0;
+        let mut rows = {
+            let mut pg_rows = Vec::with_capacity_in(
+                rows.len().saturating_sub(committed_offset),
+                memory_context.global_allocator(),
+            );
+            pg_rows.extend(rows.into_iter().skip(committed_offset).map(|row| {
+                let row = CursorPgRow {
+                    row,
+                    seek_pk_row: seek_keys.as_mut().map(|keys| {
+                        keys.next()
+                            .expect("one seek key per formatted subscription row")
+                    }),
+                };
+                rows_nested_heap_size += row.estimated_heap_size();
+                row
+            }));
+            pg_rows
+        };
+        // Store rows in reverse order so the response stream can move them out with `Vec::pop`.
+        // Each popped row leaves this chunk's reservation and is charged to FETCH output.
+        rows.reverse();
+        memory_context.add_unchecked(rows_nested_heap_size);
+        Ok((rows, self.metadata, rows_nested_heap_size))
     }
 }
 
@@ -175,6 +207,17 @@ pub(super) enum CursorDataChunkBarrier {
 pub(super) enum CursorDataChunkEvent {
     Chunk(CursorDataChunk),
     Barrier(CursorDataChunkBarrier),
+}
+
+impl CursorDataChunkEvent {
+    /// Estimates the data owned by one retained raw event. Schema and barrier metadata are
+    /// intentionally omitted because they are small relative to cached chunks and formatted rows.
+    fn estimated_heap_size(&self) -> i64 {
+        match self {
+            Self::Chunk(chunk) => chunk.chunk.estimated_heap_size() as i64,
+            Self::Barrier(_) => 0,
+        }
+    }
 }
 
 /// A persistent producer of raw query chunks followed by a query-completion barrier.
@@ -532,6 +575,7 @@ pub(super) trait CursorPgResponseStream: Stream<Item = Result<Row>> + Unpin {
     fn commit_fetch(&mut self);
     fn abort_fetch(&mut self);
     fn fail_fetch(&mut self);
+    fn memory_context(&self) -> MemoryContext;
 }
 
 /// A formatted output row paired with its original typed subscription seek key, if any.
@@ -540,9 +584,21 @@ struct CursorPgRow {
     seek_pk_row: Option<OwnedRow>,
 }
 
+impl CursorPgRow {
+    fn estimated_heap_size(&self) -> i64 {
+        self.row.estimated_heap_size()
+            + self
+                .seek_pk_row
+                .as_ref()
+                .map(EstimateSize::estimated_heap_size)
+                .unwrap_or_default() as i64
+    }
+}
+
 /// Unread formatted rows preserved by a successful FETCH, tied to the front raw chunk.
 struct CachedCursorPgRows {
-    rows: VecDeque<CursorPgRow>,
+    rows: Vec<CursorPgRow, MonitoredGlobalAlloc>,
+    rows_nested_heap_size: i64,
     metadata: Arc<CursorDataChunkMetadata>,
     format: Arc<CursorRowFormat>,
 }
@@ -550,6 +606,7 @@ struct CachedCursorPgRows {
 /// A raw event retained until a successful FETCH commits past it.
 struct CachedCursorDataChunkEvent {
     event: CursorDataChunkEvent,
+    event_nested_heap_size: i64,
     /// Leading output rows already committed for a chunk; zero for a barrier.
     row_offset_in_chunk: usize,
 }
@@ -557,22 +614,25 @@ struct CachedCursorDataChunkEvent {
 /// Shared raw-event history and tentative progress for query and subscription FETCH commands.
 /// Aborting discards only tentative progress; replay never rewinds the owned producer.
 ///
-/// TODO: Address retained-history memory accounting, limits, and limit-exceeded behavior
-/// in a subsequent PR.
+/// Raw and formatted buffers share the frontend's existing batch memory budget. Accounting
+/// estimates retained allocations; it cannot bound producer or formatting allocation peaks.
 struct CursorPgResponseStreamInner<S> {
+    memory_context: MemoryContext,
     /// Released on terminal EOF or error, but retained across individual FETCH boundaries.
     data_stream: Option<S>,
     /// Records terminal failure without clearing it on subsequent EOF polls.
     /// Subscription invalidity checks use `SubscriptionCursorState::Invalid` instead.
     failed: bool,
     /// Ordered raw chunks and barriers not yet fully committed.
-    cached_events: VecDeque<CachedCursorDataChunkEvent>,
+    cached_events: Vec<CachedCursorDataChunkEvent, MonitoredGlobalAlloc>,
+    cached_events_nested_heap_size: i64,
     /// Tentative index of the event being consumed, or the next event to consume.
     next_event_index: usize,
     /// Tentative output-row offset in the current chunk, including its committed prefix.
     row_offset_in_chunk: usize,
-    /// Unread formatted rows for the active FETCH.
-    current_rows: VecDeque<CursorPgRow>,
+    /// Unread formatted rows of the current chunk for the active FETCH.
+    current_pg_rows: Vec<CursorPgRow, MonitoredGlobalAlloc>,
+    current_pg_rows_nested_heap_size: i64,
     /// Reusable only after a successful FETCH and with identical formatting settings.
     cached_pg_rows: Option<CachedCursorPgRows>,
     current_metadata: Option<Arc<CursorDataChunkMetadata>>,
@@ -591,20 +651,30 @@ enum CursorPgResponsePollItem {
         metadata: Arc<CursorDataChunkMetadata>,
     },
     Barrier(CursorDataChunkBarrier),
-    /// A terminal producer error, distinct from FETCH-specific formatting errors.
+    /// A terminal producer or memory-limit error, distinct from FETCH-specific format errors.
     DataChunkStreamError(BoxedError),
     DataChunkStreamEnd,
 }
 
 impl<S> CursorPgResponseStreamInner<S> {
-    fn new(data_stream: S, output_fields: Vec<Field>) -> Self {
+    fn new(
+        data_stream: S,
+        output_fields: Vec<Field>,
+        parent_memory_context: MemoryContext,
+    ) -> Self {
+        let memory_context = MemoryContext::new(Some(parent_memory_context), TrAdderAtomic::new(0));
+        let cached_events = Vec::new_in(memory_context.global_allocator());
+        let current_rows = Vec::new_in(memory_context.global_allocator());
         Self {
+            memory_context,
             data_stream: Some(data_stream),
             failed: false,
-            cached_events: VecDeque::new(),
+            cached_events,
+            cached_events_nested_heap_size: 0,
             next_event_index: 0,
             row_offset_in_chunk: 0,
-            current_rows: VecDeque::new(),
+            current_pg_rows: current_rows,
+            current_pg_rows_nested_heap_size: 0,
             cached_pg_rows: None,
             current_metadata: None,
             row_format: None,
@@ -614,37 +684,82 @@ impl<S> CursorPgResponseStreamInner<S> {
         }
     }
 
+    fn empty_rows(&self) -> Vec<CursorPgRow, MonitoredGlobalAlloc> {
+        Vec::new_in(self.memory_context.global_allocator())
+    }
+
+    fn empty_events(&self) -> Vec<CachedCursorDataChunkEvent, MonitoredGlobalAlloc> {
+        Vec::new_in(self.memory_context.global_allocator())
+    }
+
+    fn clear_current_and_cached_rows(&mut self) {
+        if let Some(cached) = self.cached_pg_rows.take() {
+            self.memory_context
+                .add_unchecked(-cached.rows_nested_heap_size);
+            drop(cached);
+        }
+        self.current_pg_rows = self.empty_rows();
+        self.memory_context
+            .add_unchecked(-self.current_pg_rows_nested_heap_size);
+        self.current_pg_rows_nested_heap_size = 0;
+    }
+
+    fn clear_cached_events(&mut self) {
+        self.memory_context
+            .add_unchecked(-self.cached_events_nested_heap_size);
+        self.cached_events_nested_heap_size = 0;
+        self.cached_events = self.empty_events();
+    }
+
     fn begin_fetch(&mut self, format: Arc<CursorRowFormat>) {
         let cached = self.cached_pg_rows.take();
         // Also discard tentative progress if the preceding FETCH future was dropped.
         self.abort_fetch();
-        if let Some(cached) = cached
-            && cached.format.formats == format.formats
-            && cached.format.session_data.timezone == format.session_data.timezone
-        {
-            self.row_offset_in_chunk = self.cached_events.front().unwrap().row_offset_in_chunk;
-            self.current_rows = cached.rows;
-            self.current_metadata = Some(cached.metadata);
+        if let Some(cached) = cached {
+            if cached.format.formats == format.formats
+                && cached.format.session_data.timezone == format.session_data.timezone
+            {
+                self.row_offset_in_chunk = self.cached_events.first().unwrap().row_offset_in_chunk;
+                self.current_pg_rows = cached.rows;
+                self.current_pg_rows_nested_heap_size = cached.rows_nested_heap_size;
+                self.current_metadata = Some(cached.metadata);
+            } else {
+                self.memory_context
+                    .add_unchecked(-cached.rows_nested_heap_size);
+            }
         }
         self.row_format = Some(format);
         self.fetch_stream_terminated = false;
     }
 
     fn commit_fetch(&mut self) {
-        self.cached_events.drain(..self.next_event_index);
+        let released = self
+            .cached_events
+            .drain(..self.next_event_index)
+            .map(|event| event.event_nested_heap_size)
+            .sum::<i64>();
+        self.cached_events_nested_heap_size -= released;
+        self.memory_context.add_unchecked(-released);
+        if self.cached_events.is_empty() {
+            self.cached_events = self.empty_events();
+        }
         if self.current_metadata.is_some() {
-            let event = self.cached_events.front_mut().unwrap();
+            let event = self.cached_events.first_mut().unwrap();
             debug_assert!(matches!(event.event, CursorDataChunkEvent::Chunk(_)));
             event.row_offset_in_chunk = self.row_offset_in_chunk;
         }
         if let Some(fields) = self.output_fields_to_commit.take() {
             self.output_fields = fields;
         }
+        // Move the unread suffix and its existing charge to the reusable cache. Rows already
+        // returned by the response stream are owned and accounted for by `execute_fetch`.
+        let empty_rows = self.empty_rows();
         let cached = self
             .current_metadata
             .take()
             .map(|metadata| CachedCursorPgRows {
-                rows: std::mem::take(&mut self.current_rows),
+                rows: mem::replace(&mut self.current_pg_rows, empty_rows),
+                rows_nested_heap_size: mem::take(&mut self.current_pg_rows_nested_heap_size),
                 metadata,
                 format: self.row_format.as_ref().unwrap().clone(),
             });
@@ -653,10 +768,9 @@ impl<S> CursorPgResponseStreamInner<S> {
     }
 
     fn abort_fetch(&mut self) {
-        self.cached_pg_rows = None;
         self.next_event_index = 0;
         self.row_offset_in_chunk = 0;
-        self.current_rows.clear();
+        self.clear_current_and_cached_rows();
         self.current_metadata = None;
         self.row_format = None;
         self.output_fields_to_commit = None;
@@ -670,7 +784,8 @@ impl<S> CursorPgResponseStreamInner<S> {
         self.fetch_stream_terminated = true;
         self.data_stream = None;
         if is_failed {
-            self.cached_events.clear();
+            self.clear_cached_events();
+            self.output_fields = Vec::new();
             self.abort_fetch();
         }
     }
@@ -682,10 +797,14 @@ where
 {
     fn poll_next_item(&mut self, cx: &mut Context<'_>) -> Poll<Result<CursorPgResponsePollItem>> {
         loop {
-            if let Some(row) = self.current_rows.pop_front() {
+            if let Some(row) = self.current_pg_rows.pop() {
                 let metadata = self.current_metadata.as_ref().unwrap().clone();
+                let row_nested_heap_size = row.estimated_heap_size();
+                self.current_pg_rows_nested_heap_size -= row_nested_heap_size;
+                self.memory_context.add_unchecked(-row_nested_heap_size);
                 self.row_offset_in_chunk += 1;
-                if self.current_rows.is_empty() {
+                if self.current_pg_rows.is_empty() {
+                    self.clear_current_and_cached_rows();
                     self.next_event_index += 1;
                     self.row_offset_in_chunk = 0;
                     self.current_metadata = None;
@@ -698,18 +817,30 @@ where
                         let format = self.row_format.as_ref().expect(
                             "row formatting must be initialized before reading cursor chunks",
                         );
-                        match chunk
-                            .clone()
-                            .into_pg_rows(format, event.row_offset_in_chunk)
-                        {
-                            Ok((rows, metadata)) => {
+                        match chunk.clone().into_pg_rows(
+                            format,
+                            &self.memory_context,
+                            event.row_offset_in_chunk,
+                        ) {
+                            Ok((rows, metadata, rows_nested_heap_size)) => {
+                                self.current_pg_rows = rows;
+                                self.current_pg_rows_nested_heap_size = rows_nested_heap_size;
                                 self.row_offset_in_chunk = event.row_offset_in_chunk;
-                                self.current_rows = rows;
                                 self.current_metadata = Some(Arc::new(metadata));
-                                if self.current_rows.is_empty() {
+                                if self.current_pg_rows.is_empty() {
+                                    self.clear_current_and_cached_rows();
                                     self.next_event_index += 1;
                                     self.row_offset_in_chunk = 0;
                                     self.current_metadata = None;
+                                }
+                                if !self.memory_context.check_memory_usage() {
+                                    return Poll::Ready(Ok(
+                                        CursorPgResponsePollItem::DataChunkStreamError(Box::new(
+                                            BatchError::OutOfMemory(
+                                                self.memory_context.mem_limit(),
+                                            ),
+                                        )),
+                                    ));
                                 }
                             }
                             Err(error) => {
@@ -735,10 +866,19 @@ where
             match data_stream.poll_next_unpin(cx) {
                 Poll::Pending => return Poll::Pending,
                 Poll::Ready(Some(Ok(event))) => {
-                    self.cached_events.push_back(CachedCursorDataChunkEvent {
+                    let event_nested_heap_size = event.estimated_heap_size();
+                    self.cached_events.push(CachedCursorDataChunkEvent {
                         event,
+                        event_nested_heap_size,
                         row_offset_in_chunk: 0,
                     });
+                    self.memory_context.add_unchecked(event_nested_heap_size);
+                    self.cached_events_nested_heap_size += event_nested_heap_size;
+                    if !self.memory_context.check_memory_usage() {
+                        return Poll::Ready(Ok(CursorPgResponsePollItem::DataChunkStreamError(
+                            Box::new(BatchError::OutOfMemory(self.memory_context.mem_limit())),
+                        )));
+                    }
                 }
                 Poll::Ready(Some(Err(error))) => {
                     return Poll::Ready(Ok(CursorPgResponsePollItem::DataChunkStreamError(error)));
@@ -753,18 +893,29 @@ where
 
 /// A query response stream whose row/event progress commits only after a successful FETCH.
 pub(super) struct QueryCursorPgResponseStream {
+    memory_context: MemoryContext,
     inner: CursorPgResponseStreamInner<QueryCursorDataChunkStream>,
 }
 
 impl QueryCursorPgResponseStream {
-    pub(super) fn new(data_stream: QueryCursorDataChunkStream, output_fields: Vec<Field>) -> Self {
+    pub(super) fn new(
+        data_stream: QueryCursorDataChunkStream,
+        output_fields: Vec<Field>,
+        memory_context: MemoryContext,
+    ) -> Self {
+        let memory_context = MemoryContext::new(Some(memory_context), TrAdderAtomic::new(0));
         Self {
-            inner: CursorPgResponseStreamInner::new(data_stream, output_fields),
+            inner: CursorPgResponseStreamInner::new(
+                data_stream,
+                output_fields,
+                memory_context.clone(),
+            ),
+            memory_context,
         }
     }
 
     pub(super) fn fields(&self) -> Vec<Field> {
-        self.inner.output_fields.clone()
+        self.inner.output_fields.to_vec()
     }
 
     pub(super) fn begin_fetch(&mut self, formats: &[Format], session: &SessionImpl) {
@@ -785,6 +936,10 @@ impl CursorPgResponseStream for QueryCursorPgResponseStream {
     fn fail_fetch(&mut self) {
         self.inner.mark_completed(true);
     }
+
+    fn memory_context(&self) -> MemoryContext {
+        self.memory_context.clone()
+    }
 }
 
 impl Stream for QueryCursorPgResponseStream {
@@ -792,6 +947,19 @@ impl Stream for QueryCursorPgResponseStream {
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
+        if this.inner.failed {
+            return Poll::Ready(Some(Err(ErrorCode::InternalError(
+                "Query cursor is invalid; close and recreate the cursor".to_owned(),
+            )
+            .into())));
+        }
+        if !this.memory_context.check_memory_usage() {
+            this.fail_fetch();
+            return Poll::Ready(Some(Err(BatchError::OutOfMemory(
+                this.memory_context.mem_limit(),
+            )
+            .into())));
+        }
         // Completion releases the producer, but uncommitted events may still need replay.
         if this.inner.fetch_stream_terminated
             || (this.inner.data_stream.is_none() && this.inner.cached_events.is_empty())
@@ -829,6 +997,7 @@ impl Stream for QueryCursorPgResponseStream {
 /// A subscription response stream that applies log-store epoch and schema barriers in order.
 /// Published position, schema, expiry and typed seek keys advance only when FETCH commits.
 pub(super) struct SubscriptionCursorPgResponseStream {
+    memory_context: MemoryContext,
     inner: CursorPgResponseStreamInner<SubscriptionCursorDataChunkStream>,
     /// Subscription metadata published by successful FETCH commands.
     fetch_state: SubscriptionCursorFetchState,
@@ -856,9 +1025,16 @@ impl SubscriptionCursorPgResponseStream {
         output_fields: Vec<Field>,
         subscription_state: SubscriptionCursorState,
         expires_at: Instant,
+        memory_context: MemoryContext,
     ) -> Self {
+        let memory_context = MemoryContext::new(Some(memory_context), TrAdderAtomic::new(0));
         Self {
-            inner: CursorPgResponseStreamInner::new(data_stream, output_fields),
+            inner: CursorPgResponseStreamInner::new(
+                data_stream,
+                output_fields,
+                memory_context.clone(),
+            ),
+            memory_context,
             fetch_state: SubscriptionCursorFetchState {
                 subscription_state,
                 seek_pk_row: None,
@@ -873,7 +1049,7 @@ impl SubscriptionCursorPgResponseStream {
     }
 
     pub(super) fn fields(&self) -> Vec<Field> {
-        self.inner.output_fields.clone()
+        self.inner.output_fields.to_vec()
     }
 
     pub(super) fn state_info_string(&self) -> String {
@@ -993,6 +1169,10 @@ impl CursorPgResponseStream for SubscriptionCursorPgResponseStream {
         self.fetch_state_to_commit = None;
         self.fetch_format = None;
     }
+
+    fn memory_context(&self) -> MemoryContext {
+        self.memory_context.clone()
+    }
 }
 
 impl Stream for SubscriptionCursorPgResponseStream {
@@ -1005,6 +1185,13 @@ impl Stream for SubscriptionCursorPgResponseStream {
         if let SubscriptionCursorState::Invalid = this.fetch_state.subscription_state {
             return Poll::Ready(Some(Err(ErrorCode::InternalError(
                 INVALID_CURSOR_ERROR_MESSAGE.to_owned(),
+            )
+            .into())));
+        }
+        if !this.memory_context.check_memory_usage() {
+            this.fail_fetch();
+            return Poll::Ready(Some(Err(BatchError::OutOfMemory(
+                this.memory_context.mem_limit(),
             )
             .into())));
         }
@@ -1032,12 +1219,13 @@ impl Stream for SubscriptionCursorPgResponseStream {
                         metadata.as_ref(),
                         CursorDataChunkMetadata::Subscription { .. }
                     ));
-                    let row = this.project_row(row.row, row.seek_pk_row, &metadata);
-                    if row.is_ok() {
-                        this.fetch_state_to_commit.as_mut().unwrap().is_idle = false;
-                        this.yielded_rows += 1;
-                    }
-                    return Poll::Ready(Some(row));
+                    let row = match this.project_row(row.row, row.seek_pk_row, &metadata) {
+                        Ok(row) => row,
+                        Err(error) => return Poll::Ready(Some(Err(error))),
+                    };
+                    this.fetch_state_to_commit.as_mut().unwrap().is_idle = false;
+                    this.yielded_rows += 1;
+                    return Poll::Ready(Some(Ok(row)));
                 }
                 Poll::Ready(Ok(CursorPgResponsePollItem::Barrier(barrier))) => {
                     let fetch_state_to_commit = this.fetch_state_to_commit.as_mut().unwrap();
@@ -1059,8 +1247,8 @@ impl Stream for SubscriptionCursorPgResponseStream {
                                     expected_timestamp,
                                     init_query_timer,
                                 };
-                            this.inner.output_fields_to_commit = Some(output_fields);
                             fetch_state_to_commit.expires_at = expires_at;
+                            this.inner.output_fields_to_commit = Some(output_fields);
                             this.inner.row_format = this.fetch_format.clone();
                         }
                         CursorDataChunkBarrier::SubscriptionNewEpoch {
@@ -1085,7 +1273,7 @@ impl Stream for SubscriptionCursorPgResponseStream {
                             // Old-schema rows have been drained. Retain the producer and end the
                             // current FETCH regardless of waiting mode, so that any new-schema rows
                             // will be left for the next FETCH with latest description.
-                            debug_assert!(this.inner.current_rows.is_empty());
+                            debug_assert!(this.inner.current_pg_rows.is_empty());
                             this.inner.current_metadata = None;
                             // No new-query rows have been formatted yet. The next FETCH supplies
                             // formats for its new schema, which may have a different column count,
@@ -1160,7 +1348,7 @@ mod tests {
                 panic!("expected a query data chunk, but received a barrier");
             };
             assert_eq!(chunk.chunk, expected);
-            let CursorDataChunkMetadata::Query { fields: actual } = chunk.metadata else {
+            let CursorDataChunkMetadata::Query { fields: actual, .. } = chunk.metadata else {
                 panic!("query chunks must carry query metadata");
             };
             assert_eq!(*actual, fields);
@@ -1392,7 +1580,7 @@ mod tests {
             fields.clone(),
         );
         (
-            QueryCursorPgResponseStream::new(data_stream, fields),
+            QueryCursorPgResponseStream::new(data_stream, fields, MemoryContext::none()),
             chunk_tx,
         )
     }
@@ -1433,6 +1621,7 @@ mod tests {
                 expected_timestamp: None,
             },
             expires_at,
+            MemoryContext::none(),
         );
         (stream, event_tx)
     }
@@ -1479,6 +1668,213 @@ mod tests {
         assert!(stream.next().await.is_none());
     }
 
+    fn memory_budget_for_test(limit: u64) -> MemoryContext {
+        MemoryContext::root(TrAdderAtomic::new(0), limit)
+    }
+
+    /// Rebuilds an untouched fixture with a real budget, without introducing a production setter.
+    fn set_query_memory_budget_for_test(
+        stream: &mut QueryCursorPgResponseStream,
+        parent: &MemoryContext,
+    ) {
+        assert!(stream.inner.cached_events.is_empty());
+        let memory_context = MemoryContext::new(Some(parent.clone()), TrAdderAtomic::new(0));
+        let source = stream.inner.data_stream.take().unwrap();
+        let fields = stream.inner.output_fields.to_vec();
+        stream.inner = CursorPgResponseStreamInner::new(source, fields, memory_context.clone());
+        stream.memory_context = memory_context;
+    }
+
+    /// Verifies FETCH accounts two raw chunks and its output separately, preserves the unread
+    /// suffix, then invalidates the query cursor when a third raw chunk exceeds the budget.
+    #[tokio::test]
+    async fn test_cursor_memory_partial_fetch_then_oom() {
+        let session = SessionImpl::mock();
+        let limit = 32 * 1024;
+        let parent = memory_budget_for_test(limit);
+        let (mut stream, tx) = pending_query_response_stream_for_test();
+        set_query_memory_budget_for_test(&mut stream, &parent);
+        let first_chunk = DataChunk::from_pretty("i\n1\n2");
+        let first_event_nested_heap_size = first_chunk.estimated_heap_size() as i64;
+        tx.try_send(Ok(first_chunk)).unwrap();
+        tx.try_send(Ok(DataChunk::from_pretty("i\n3\n4"))).unwrap();
+
+        stream.begin_fetch(&[], &session);
+        let mut polled = 0;
+        let mut before_commit = 0;
+        let rows = super::super::execute_fetch(
+            &mut stream,
+            3,
+            None,
+            &mut FetchCursorCancelHandle::new(),
+            |_| {
+                polled += 1;
+                if polled == 3 {
+                    // The third row has left the current chunk, but has not yet been pushed
+                    // into FETCH output. The first two output rows are still charged here.
+                    before_commit = parent.get_bytes_used();
+                }
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(polled, 3);
+        for (row, value) in rows.iter().zip(["1", "2", "3"]) {
+            assert_text_row(row, &[Some(value)]);
+        }
+        let after_commit = parent.get_bytes_used();
+        assert_eq!(stream.inner.cached_events.len(), 1);
+        let cached = stream.inner.cached_pg_rows.as_ref().unwrap();
+        assert_eq!(cached.rows.len(), 1);
+        assert_eq!(
+            cached.rows_nested_heap_size,
+            cached.rows[0].estimated_heap_size()
+        );
+        assert_eq!(stream.inner.current_pg_rows_nested_heap_size, 0);
+        // Committing releases the first raw event. The command-local output context also drops
+        // its vector backing and the first two rows, which were charged at this poll point.
+        assert_eq!(
+            before_commit - after_commit,
+            first_event_nested_heap_size
+                + (3 * size_of::<Row>()) as i64
+                + rows[0].estimated_heap_size()
+                + rows[1].estimated_heap_size()
+        );
+        drop(rows);
+
+        let third_chunk = DataChunk::from_pretty(&format!(
+            "i\n{}",
+            (0..10_000)
+                .map(|i| i.to_string())
+                .collect::<Vec<_>>()
+                .join("\n")
+        ));
+        assert!(third_chunk.estimated_heap_size() > limit as usize);
+        tx.try_send(Ok(third_chunk)).unwrap();
+        stream.begin_fetch(&[], &session);
+        let error = super::super::execute_fetch(
+            &mut stream,
+            2,
+            None,
+            &mut FetchCursorCancelHandle::new(),
+            |_| {},
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("Not enough memory"), "{error}");
+        assert!(stream.inner.failed);
+        assert!(stream.inner.cached_events.is_empty());
+        assert!(stream.inner.cached_pg_rows.is_none());
+        assert!(tx.is_closed());
+        assert_eq!(parent.get_bytes_used(), 0);
+        drop(stream);
+        assert_eq!(parent.get_bytes_used(), 0);
+    }
+
+    /// Verifies subscription cursor memory accounting across partial FETCH and terminal OOM.
+    #[tokio::test]
+    async fn test_subscription_cursor_memory_partial_fetch_then_oom() {
+        let session = SessionImpl::mock();
+        let limit = 32 * 1024;
+        let parent = memory_budget_for_test(limit);
+        let fields = subscription_fields_for_test("v");
+        let (mut stream, tx) =
+            pending_subscription_response_stream_for_test(&fields, Instant::now());
+        let memory_context = MemoryContext::new(Some(parent.clone()), TrAdderAtomic::new(0));
+        let source = stream.inner.data_stream.take().unwrap();
+        stream.inner = CursorPgResponseStreamInner::new(
+            source,
+            stream.inner.output_fields.to_vec(),
+            memory_context.clone(),
+        );
+        stream.memory_context = memory_context;
+        let first = subscription_chunk_for_test(fields.clone(), true, 0, "i i\n11 1\n12 2");
+        let first_event_nested_heap_size = first.estimated_heap_size();
+        tx.try_send(Ok(first)).unwrap();
+        tx.try_send(Ok(subscription_chunk_for_test(
+            fields.clone(),
+            true,
+            0,
+            "i i\n13 3\n14 4",
+        )))
+        .unwrap();
+
+        stream.begin_fetch(&[], &session, false);
+        let mut polled = 0;
+        let mut before_commit = 0;
+        let rows = super::super::execute_fetch(
+            &mut stream,
+            3,
+            None,
+            &mut FetchCursorCancelHandle::new(),
+            |_| {
+                polled += 1;
+                if polled == 3 {
+                    before_commit = parent.get_bytes_used();
+                }
+            },
+        )
+        .await
+        .unwrap();
+        assert_eq!(polled, 3);
+        for (row, value) in rows.iter().zip(["1", "2", "3"]) {
+            assert_eq!(row.values()[0].as_deref(), Some(value.as_bytes()));
+        }
+        let after_commit = parent.get_bytes_used();
+        assert_eq!(stream.inner.cached_events.len(), 1);
+        let cached = stream.inner.cached_pg_rows.as_ref().unwrap();
+        assert_eq!(cached.rows.len(), 1);
+        assert_eq!(
+            cached.rows_nested_heap_size,
+            cached.rows[0].estimated_heap_size()
+        );
+        assert_eq!(stream.inner.current_pg_rows_nested_heap_size, 0);
+        assert_eq!(
+            before_commit - after_commit,
+            first_event_nested_heap_size
+                + (3 * size_of::<Row>()) as i64
+                + rows[0].estimated_heap_size()
+                + rows[1].estimated_heap_size()
+        );
+        drop(rows);
+
+        let third = subscription_chunk_for_test(
+            fields,
+            true,
+            0,
+            &format!(
+                "i i\n{}",
+                (0..10_000)
+                    .map(|i| format!("{} {}", i + 100, i + 100))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            ),
+        );
+        assert!(third.estimated_heap_size() > limit as i64);
+        tx.try_send(Ok(third)).unwrap();
+        stream.begin_fetch(&[], &session, false);
+        let error = super::super::execute_fetch(
+            &mut stream,
+            2,
+            None,
+            &mut FetchCursorCancelHandle::new(),
+            |_| {},
+        )
+        .await
+        .unwrap_err();
+        assert!(error.to_string().contains("Not enough memory"), "{error}");
+        assert!(matches!(
+            stream.subscription_state(),
+            SubscriptionCursorState::Invalid
+        ));
+        assert!(stream.inner.cached_events.is_empty());
+        assert!(stream.inner.cached_pg_rows.is_none());
+        assert!(tx.is_closed());
+        assert_eq!(parent.get_bytes_used(), 0);
+        drop(stream);
+        assert_eq!(parent.get_bytes_used(), 0);
+    }
+
     /// Successful FETCH commands reuse the unread formatted suffix. Aborted or abandoned
     /// commands discard it and replay from the committed raw position, using injected output.
     #[tokio::test]
@@ -1497,7 +1893,7 @@ mod tests {
         assert_eq!(stream.inner.cached_pg_rows.as_ref().unwrap().rows.len(), 3);
 
         stream.begin_fetch(&[], &session);
-        assert_eq!(stream.inner.current_rows.len(), 3);
+        assert_eq!(stream.inner.current_pg_rows.len(), 3);
         assert!(Arc::ptr_eq(
             stream.inner.current_metadata.as_ref().unwrap(),
             &metadata
@@ -1510,18 +1906,18 @@ mod tests {
         stream.begin_fetch(&[], &session);
         stream.commit_fetch();
         stream.begin_fetch(&[], &session);
-        assert_eq!(stream.inner.current_rows.len(), 2);
+        assert_eq!(stream.inner.current_pg_rows.len(), 2);
         assert_eq!(stream.inner.row_offset_in_chunk, 2);
         assert_text_row(&stream.next().await.unwrap().unwrap(), &[Some("3")]);
         stream.abort_fetch();
         assert!(stream.inner.cached_pg_rows.is_none());
 
         stream.begin_fetch(&[], &session);
-        assert!(stream.inner.current_rows.is_empty());
+        assert!(stream.inner.current_pg_rows.is_empty());
         assert_text_row(&stream.next().await.unwrap().unwrap(), &[Some("3")]);
         // Starting another FETCH without commit/abort models an abandoned command future.
         stream.begin_fetch(&[], &session);
-        assert!(stream.inner.current_rows.is_empty());
+        assert!(stream.inner.current_pg_rows.is_empty());
         assert_text_row(&stream.next().await.unwrap().unwrap(), &[Some("3")]);
         assert_text_row(&stream.next().await.unwrap().unwrap(), &[Some("4")]);
         assert!(stream.next().await.is_none());
@@ -1551,7 +1947,7 @@ mod tests {
         format.session_data.timezone = "Asia/Shanghai".to_owned();
         stream.inner.begin_fetch(Arc::new(format));
         assert!(stream.inner.cached_pg_rows.is_none());
-        assert!(stream.inner.current_rows.is_empty());
+        assert!(stream.inner.current_pg_rows.is_empty());
         assert!(stream.inner.current_metadata.is_none());
         assert_text_row(&stream.next().await.unwrap().unwrap(), &[Some("2")]);
         assert!(stream.next().await.is_none());
@@ -1593,7 +1989,7 @@ mod tests {
             let metadata = stream.inner.current_metadata.as_ref().unwrap().clone();
             stream.commit_fetch();
             stream.begin_fetch(&[Format::Binary], &session, false);
-            assert_eq!(stream.inner.current_rows.len(), 2);
+            assert_eq!(stream.inner.current_pg_rows.len(), 2);
             assert!(Arc::ptr_eq(
                 stream.inner.current_metadata.as_ref().unwrap(),
                 &metadata
@@ -1615,7 +2011,7 @@ mod tests {
             );
 
             stream.begin_fetch(&[Format::Binary], &session, false);
-            assert_eq!(stream.inner.current_rows.len(), 1);
+            assert_eq!(stream.inner.current_pg_rows.len(), 1);
             let row = stream.next().await.unwrap().unwrap();
             assert_eq!(
                 row.values()[0].as_deref(),
@@ -1760,7 +2156,7 @@ mod tests {
             stream
                 .inner
                 .cached_events
-                .front()
+                .first()
                 .unwrap()
                 .row_offset_in_chunk,
             1
@@ -1788,7 +2184,7 @@ mod tests {
             stream
                 .inner
                 .cached_events
-                .front()
+                .first()
                 .unwrap()
                 .row_offset_in_chunk,
             1
@@ -2188,7 +2584,7 @@ mod tests {
             Some(7i32.to_be_bytes().as_slice())
         );
         assert!(stream.seek_pk_row().is_none());
-        assert_eq!(stream.inner.current_rows.len(), 1);
+        assert_eq!(stream.inner.current_pg_rows.len(), 1);
         stream.commit_fetch();
         assert_eq!(
             stream.seek_pk_row(),
@@ -2293,7 +2689,7 @@ mod tests {
             // metadata so the next Parse/Describe sees the schema of its unread rows.
             assert!(stream.next().await.is_none());
             stream.commit_fetch();
-            assert!(stream.inner.current_rows.is_empty());
+            assert!(stream.inner.current_pg_rows.is_empty());
             assert!(stream.inner.current_metadata.is_none());
             assert_eq!(stream.fields(), new_fields.get_output_fields());
             assert!(!stream.is_expired(initial_expiry + Duration::from_secs(1)));
@@ -2310,7 +2706,7 @@ mod tests {
             let row = stream.next().await.unwrap().unwrap();
             assert_eq!(row.values()[0].as_deref(), Some(b"99".as_slice()));
             assert_eq!(stream.fields(), new_fields.get_output_fields());
-            assert_eq!(stream.inner.current_rows.len(), 1);
+            assert_eq!(stream.inner.current_pg_rows.len(), 1);
             assert!(stream.inner.current_metadata.is_some());
             assert!(matches!(
                 stream.subscription_state(),
@@ -2331,7 +2727,7 @@ mod tests {
             // latest metadata published on commit but no rows from that query consumed.
             assert!(stream.next().await.is_none());
             stream.commit_fetch();
-            assert!(stream.inner.current_rows.is_empty());
+            assert!(stream.inner.current_pg_rows.is_empty());
             assert!(stream.inner.current_metadata.is_none());
             assert!(!event_tx.is_closed());
             assert_eq!(stream.fields(), latest_fields.get_output_fields());
@@ -2406,6 +2802,7 @@ mod tests {
                 manager
                     .add_subscription_cursor(SubscriptionCursor {
                         shutdown_handle: CursorShutdownHandle::new(),
+                        _memory_context: MemoryContext::none(),
                         cursor_name: "cursor".to_owned(),
                         subscription: Arc::new(SubscriptionCatalog {
                             name: "subscription".to_owned(),
