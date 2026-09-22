@@ -146,7 +146,6 @@ pub struct ProgressTableChangeLogSubscriber {
     pub upstream_table_id: TableId,
     pub progress_table_id: TableId,
 }
-
 fn serverless_backfill_resource_group_placeholder(job_id: JobId) -> String {
     format!("SERVERLESS_BACKFILL_RESOURCE_GROUP_TBD_FOR_{job_id}")
 }
@@ -252,17 +251,36 @@ impl CatalogController {
     ) -> MetaResult<TableChangeLogTruncateInfo> {
         let inner = self.inner.read().await;
 
-        let subscriptions: Vec<(TableId, i64)> = Subscription::find()
+        // Fragments are the source of truth for cross-database backfills and contain all
+        // information needed to resolve their safe change-log truncation epochs.
+        let cross_db_fragments = Fragment::find()
+            .filter(FragmentTypeMask::intersects(
+                FragmentTypeFlag::CrossDbSnapshotBackfillStreamScan,
+            ))
+            .all(&inner.db)
+            .await?;
+
+        let subscriptions: Vec<(SubscriptionId, TableId, Option<i64>)> = Subscription::find()
             .select_only()
             .columns([
+                subscription::Column::SubscriptionId,
                 subscription::Column::DependentTableId,
                 subscription::Column::RetentionSeconds,
             ])
+            .filter(subscription::Column::CrossDbDownstreamJobId.is_null())
             .into_tuple()
             .all(&inner.db)
             .await?;
         let mut subscription_retention_seconds = HashMap::new();
-        for (table_id, retention_seconds) in subscriptions {
+        for (subscription_id, table_id, retention_seconds) in subscriptions {
+            let Some(retention_seconds) = retention_seconds else {
+                return Err(anyhow!(
+                    "user subscription {} on table {} has no retention",
+                    subscription_id,
+                    table_id
+                )
+                .into());
+            };
             let retention_seconds = u64::try_from(retention_seconds).map_err(|_| {
                 anyhow!(
                     "subscription on table {} has invalid retention seconds {}",
@@ -276,7 +294,11 @@ impl CatalogController {
                 .or_insert(retention_seconds);
         }
 
-        let committed_epoch_truncate_job_ids: HashSet<JobId> = StreamingJobModel::find()
+    let cross_db_job_ids: HashSet<_> = cross_db_fragments
+        .iter()
+        .map(|fragment| fragment.job_id)
+        .collect();
+    let committed_epoch_truncate_job_ids: HashSet<JobId> = StreamingJobModel::find()
             .select_only()
             .column(streaming_job::Column::JobId)
             .filter(
@@ -315,7 +337,9 @@ impl CatalogController {
             .collect();
         let mut committed_epoch_truncate_job_info: HashMap<_, _> = committed_epoch_truncate_job_ids
             .into_iter()
-            .filter(|job_id| !iceberg_job_ids.contains(job_id))
+            .filter(|job_id| {
+            !iceberg_job_ids.contains(job_id) && !cross_db_job_ids.contains(job_id)
+        })
             .map(|job_id| {
                 (
                     job_id,
@@ -406,7 +430,40 @@ impl CatalogController {
                 }
             }
         }
-        let committed_epoch_truncate_jobs = committed_epoch_truncate_job_info
+        for fragment in cross_db_fragments {
+        let mut collection_error = None;
+        visit_stream_node_stream_scan(&fragment.stream_node.to_protobuf(), |stream_scan| {
+            let scan_type = match StreamScanType::try_from(stream_scan.stream_scan_type) {
+                Ok(scan_type) => scan_type,
+                Err(err) => {
+                    collection_error = Some(anyhow::Error::new(err).context(format!(
+                        "invalid persisted stream scan type {} in job {} fragment {}",
+                        stream_scan.stream_scan_type, fragment.job_id, fragment.fragment_id
+                    )));
+                    return;
+                }
+            };
+            if scan_type != StreamScanType::CrossDbSnapshotBackfill {
+                return;
+            }
+            let Some(progress_table) = stream_scan.state_table.as_ref() else {
+                collection_error = Some(anyhow!(
+                    "cross-database backfill in job {} has no progress table",
+                    fragment.job_id
+                ));
+                return;
+            };
+            progress_table_subscribers.push(ProgressTableChangeLogSubscriber {
+                subscriber_job_id: fragment.job_id,
+                upstream_table_id: stream_scan.table_id,
+                progress_table_id: progress_table.id,
+            });
+        });
+        if let Some(err) = collection_error {
+            return Err(err.into());
+        }
+    }
+    let committed_epoch_truncate_jobs = committed_epoch_truncate_job_info
             .into_values()
             .filter(|info| !info.upstream_table_snapshot_epochs.is_empty())
             .collect();
