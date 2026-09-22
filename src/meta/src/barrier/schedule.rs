@@ -47,6 +47,7 @@ pub(super) struct NewBarrier {
     pub command: Option<(Command, Vec<Notifier>)>,
     pub span: tracing::Span,
     pub checkpoint: bool,
+    pub barrier_interval_ms: u32,
 }
 
 /// A queue for scheduling barriers.
@@ -517,6 +518,7 @@ impl PeriodicBarriers {
                 command: None,
                 span: tracing_span(),
                 checkpoint: true,
+                barrier_interval_ms: self.barrier_interval_ms(database_id),
             }
         } else {
             select! {
@@ -530,6 +532,7 @@ impl PeriodicBarriers {
                         command: Some((scheduled.command, scheduled.notifiers)),
                         span: scheduled.span,
                         checkpoint,
+                        barrier_interval_ms: self.barrier_interval_ms(database_id),
                     }
                 },
                 // If there is no database, we won't wait for `Interval`, but only wait for command.
@@ -541,6 +544,7 @@ impl PeriodicBarriers {
                         command: None,
                         span: tracing_span(),
                         checkpoint,
+                        barrier_interval_ms: self.barrier_interval_ms(database_id),
                     }
                 }
             }
@@ -548,6 +552,15 @@ impl PeriodicBarriers {
         self.update_num_uncheckpointed_barrier(new_barrier.database_id, new_barrier.checkpoint);
 
         new_barrier
+    }
+
+    pub(super) fn barrier_interval_ms(&self, database_id: DatabaseId) -> u32 {
+        self.databases[&database_id]
+            .barrier_interval
+            .unwrap_or(self.sys_barrier_interval)
+            .as_millis()
+            .try_into()
+            .expect("barrier interval should fit in u32 milliseconds")
     }
 
     /// Whether the barrier(checkpoint = true) should be injected.
@@ -1137,6 +1150,7 @@ mod tests {
 
         let db_state = periodic.databases.get(&database_id).unwrap();
         assert_eq!(db_state.barrier_interval, Some(Duration::from_millis(2000)));
+        assert_eq!(periodic.barrier_interval_ms(database_id), 2000);
         assert_eq!(db_state.checkpoint_frequency, Some(15));
         assert_eq!(db_state.num_uncheckpointed_barrier, 0);
         assert!(!periodic.force_checkpoint_databases.contains(&database_id));
@@ -1147,6 +1161,7 @@ mod tests {
         assert!(periodic.databases.contains_key(&DatabaseId::from(2)));
         let db2_state = periodic.databases.get(&DatabaseId::from(2)).unwrap();
         assert_eq!(db2_state.barrier_interval, None);
+        assert_eq!(periodic.barrier_interval_ms(DatabaseId::from(2)), 500);
         assert_eq!(db2_state.checkpoint_frequency, None);
     }
 }
