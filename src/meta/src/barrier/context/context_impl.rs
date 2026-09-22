@@ -29,7 +29,7 @@ use risingwave_pb::id::SourceId;
 use risingwave_pb::meta::PbTableRefillRuntimeConfig;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::stream_service::barrier_complete_response::{
-    PbIcebergPkIndexSinkMetadata, PbListFinishedSource, PbLoadFinishedSource,
+    PbListFinishedSource, PbLoadFinishedSource,
 };
 use risingwave_rpc_client::StreamingControlHandle;
 use thiserror_ext::AsReport;
@@ -43,12 +43,16 @@ use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerCon
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::schedule::MarkReadyOptions;
 use crate::barrier::{
-    BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, BatchRefreshInfo, Command,
-    CreateStreamingJobCommandInfo, CreateStreamingJobType, DatabaseRuntimeInfoSnapshot,
-    RecoveryReason, ReplaceStreamJobPlan, Scheduled,
+    BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, Command, CreateStreamingJobCommandInfo,
+    CreateStreamingJobType, DatabaseRuntimeInfoSnapshot, RecoveryReason, ReplaceStreamJobPlan,
+    Scheduled,
 };
 use crate::hummock::CommitEpochInfo;
 use crate::manager::LocalNotification;
+use crate::manager::iceberg_pk_index_sink::{
+    IcebergPkIndexPreCommitMetadata, group_pre_commit_metadata,
+};
+use crate::manager::sink_coordination::{RecoveryStart, RecoverySucceeded};
 use crate::model::FragmentDownstreamRelation;
 use crate::serving::{fetch_serving_infos, sync_serving_table_vnode_mappings_to_hummock};
 use crate::stream::{SourceChange, cleanup_dropped_streaming_jobs};
@@ -163,11 +167,18 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         self.scheduled_barriers.next_scheduled().await
     }
 
-    fn abort_and_mark_blocked(
+    async fn abort_and_mark_blocked(
         &self,
-        database_id: Option<DatabaseId>,
+        recovery: RecoveryStart,
         recovery_reason: RecoveryReason,
-    ) {
+    ) -> MetaResult<()> {
+        let (database_id, database_job_ids) = match &recovery {
+            RecoveryStart::Global => (None, None),
+            RecoveryStart::Database {
+                database_id,
+                job_ids,
+            } => (Some(*database_id), Some(job_ids.clone())),
+        };
         if database_id.is_none() {
             self.set_status(BarrierManagerStatus::Recovering(recovery_reason));
         }
@@ -175,14 +186,30 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
             .abort_and_mark_blocked(database_id, "cluster is under recovering");
+        self.sink_manager.start_recovery(recovery).await?;
+
+        if let Some(job_ids) = database_job_ids {
+            self.iceberg_pk_index_sink_manager.unregister_jobs(job_ids);
+        } else {
+            self.iceberg_pk_index_sink_manager.reset();
+        }
+        Ok(())
     }
 
-    fn mark_ready(&self, options: MarkReadyOptions) {
+    async fn mark_ready(&self, options: MarkReadyOptions) -> MetaResult<()> {
+        let recovery = match &options {
+            MarkReadyOptions::Database(database_id) => RecoverySucceeded::Database(*database_id),
+            MarkReadyOptions::Global { failed_databases } => RecoverySucceeded::Global {
+                failed_databases: failed_databases.clone(),
+            },
+        };
+        self.sink_manager.recovery_succeeded(recovery).await?;
         let is_global = matches!(&options, MarkReadyOptions::Global { .. });
         self.scheduled_barriers.mark_ready(options);
         if is_global {
             self.set_status(BarrierManagerStatus::Running);
         }
+        Ok(())
     }
 
     async fn resolve_log_store_epoch<'a>(
@@ -440,34 +467,30 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
     #[await_tree::instrument]
     async fn pre_commit_iceberg_pk_index_sink_metadata(
         &self,
-        reports: Vec<PbIcebergPkIndexSinkMetadata>,
+        metadata: Vec<IcebergPkIndexPreCommitMetadata>,
     ) -> MetaResult<Vec<SinkId>> {
-        let grouped = group_reports_by_sink(reports)?;
-        let success_ids: Vec<SinkId> = grouped.keys().cloned().collect();
+        let inputs = group_pre_commit_metadata(metadata)?;
         let futs = FuturesUnordered::new();
-        for (sink_id, (prev_epoch, reports)) in grouped {
-            if reports.is_empty() {
-                continue;
-            }
+        for input in inputs {
             let manager = &self.iceberg_pk_index_sink_manager;
             futs.push(async move {
-                (
-                    sink_id,
-                    manager.pre_commit_epoch(sink_id, prev_epoch, reports).await,
-                )
+                let sink_id = input.sink_id;
+                (sink_id, manager.pre_commit(input).await)
             });
         }
 
         // Drain all futures regardless of individual failures, so that no coordinator is left with
         // state inconsistent vs. the caller's view.
         let results: Vec<(SinkId, anyhow::Result<()>)> = futs.collect().await;
-        let errs: Vec<(SinkId, anyhow::Error)> = results
-            .into_iter()
-            .filter_map(|(id, r)| r.err().map(|e| (id, e)))
-            .collect();
-        if errs.is_empty() {
+        let has_err = results.iter().any(|(_, result)| result.is_err());
+        if !has_err {
+            let success_ids = results.into_iter().map(|(id, _)| id).collect();
             Ok(success_ids)
         } else {
+            let errs = results
+                .into_iter()
+                .filter_map(|(id, result)| result.err().map(|error| (id, error)))
+                .collect();
             Err(aggregate_sink_errors("pre-commit", errs).into())
         }
     }
@@ -485,11 +508,10 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
             .into_iter()
             .filter_map(|(id, r)| r.err().map(|e| (id, e)))
             .collect();
-        if errs.is_empty() {
-            Ok(())
-        } else {
-            Err(aggregate_sink_errors("commit", errs).into())
+        if !errs.is_empty() {
+            return Err(aggregate_sink_errors("commit", errs).into());
         }
+        Ok(())
     }
 
     fn advance_iceberg_pk_index_sink_committed_epochs(
@@ -522,28 +544,6 @@ fn aggregate_sink_errors(
         sink_ids.join(", "),
         details.join("; ")
     ))
-}
-
-fn group_reports_by_sink(
-    reports: Vec<PbIcebergPkIndexSinkMetadata>,
-) -> MetaResult<HashMap<SinkId, (u64, Vec<PbIcebergPkIndexSinkMetadata>)>> {
-    let mut grouped: HashMap<SinkId, (u64, Vec<PbIcebergPkIndexSinkMetadata>)> = HashMap::new();
-    for r in reports {
-        let sink_id = r.sink_id;
-        let prev_epoch = r.prev_epoch;
-        let entry = grouped.entry(sink_id).or_insert((prev_epoch, Vec::new()));
-        if entry.0 != prev_epoch {
-            return Err(anyhow::anyhow!(
-                "iceberg v3 sink {} reports disagree on prev_epoch: {} vs {}",
-                sink_id,
-                entry.0,
-                prev_epoch
-            )
-            .into());
-        }
-        entry.1.push(r);
-    }
-    Ok(grouped)
 }
 
 impl GlobalBarrierWorkerContextImpl {
@@ -837,14 +837,10 @@ impl PostCollectCommand {
                             )
                             .await?
                     }
-                    CreateStreamingJobType::SnapshotBackfill {
+                    CreateStreamingJobType::Independent {
                         snapshot_backfill_info,
                         ..
-                    }
-                    | CreateStreamingJobType::BatchRefresh(BatchRefreshInfo {
-                        snapshot_backfill_info,
-                        ..
-                    }) => {
+                    } => {
                         barrier_manager_context
                             .metadata_manager
                             .catalog_controller
@@ -918,7 +914,7 @@ impl PostCollectCommand {
                 if let Some(old_sink_id) = replace_sink {
                     barrier_manager_context
                         .sink_manager
-                        .stop_sink_coordinator(vec![old_sink_id])
+                        .stop_sink_coordinators_for_jobs(vec![old_sink_id.as_job_id()])
                         .await;
                     cleanup_dropped_streaming_jobs(
                         &barrier_manager_context.refresh_manager,

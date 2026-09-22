@@ -22,6 +22,7 @@ use risingwave_common::catalog::SYS_CATALOG_START_ID;
 use risingwave_hummock_sdk::key_range::KeyRange;
 use risingwave_hummock_sdk::version::HummockVersionDelta;
 use risingwave_meta::backup_restore::BackupManagerRef;
+use risingwave_meta::hummock::ScheduleTrigger;
 use risingwave_meta::manager::MetadataManager;
 use risingwave_meta::manager::iceberg_compaction::IcebergCompactionManagerRef;
 use risingwave_pb::hummock::get_compaction_score_response::PickerInfo;
@@ -465,10 +466,12 @@ impl HummockManagerService for HummockServiceImpl {
             .add_compactor_stream(context_id, request_stream);
 
         // Trigger compaction on all compaction groups.
-        for cg_id in self.hummock_manager.compaction_group_ids().await {
-            self.hummock_manager
-                .try_send_compaction_request(cg_id, compact_task::TaskType::Dynamic);
-        }
+        self.hummock_manager
+            .trigger_compaction_for_all_groups(
+                compact_task::TaskType::Dynamic,
+                ScheduleTrigger::NewData,
+            )
+            .await;
 
         Ok(Response::new(RwReceiverStream::new(rx)))
     }

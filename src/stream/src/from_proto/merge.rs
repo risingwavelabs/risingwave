@@ -39,7 +39,7 @@ impl MergeExecutorBuilder {
         let upstream_actors = actor_context
             .initial_upstream_actors
             .get(&upstream_fragment_id);
-        if upstream_actors.is_none() && !node.allow_no_initial_upstream {
+        if upstream_actors.is_none() && !node.allow_empty_upstream {
             return Ok(None);
         }
 
@@ -64,7 +64,8 @@ impl MergeExecutorBuilder {
         // If there's always only one upstream, we can use `ReceiverExecutor`. Note that it can't
         // scale to multiple upstreams. An initially empty merge must stay dynamic to accept a
         // later MergeUpdate, even for dispatcher kinds normally optimized to a singleton.
-        let always_single_input = !inputs.is_empty()
+        let always_single_input = !node.allow_empty_upstream
+            && !inputs.is_empty()
             && match node.get_upstream_dispatcher_type()? {
                 DispatcherType::Unspecified => unreachable!(),
                 DispatcherType::Hash | DispatcherType::Broadcast => false,

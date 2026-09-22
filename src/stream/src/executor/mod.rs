@@ -43,6 +43,7 @@ use risingwave_common::util::value_encoding::{DatumFromProtoExt, DatumToProtoExt
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_connector::source::SplitImpl;
 use risingwave_expr::expr::NonStrictExpression;
+use risingwave_pb::common::ThrottleType;
 use risingwave_pb::data::PbEpoch;
 use risingwave_pb::expr::PbInputRef;
 use risingwave_pb::stream_plan::add_mutation::PbNewUpstreamSink;
@@ -96,6 +97,7 @@ mod join;
 pub mod locality_provider;
 mod lookup;
 mod lookup_union;
+pub mod match_recognize;
 mod merge;
 mod mview;
 mod nested_loop_temporal_join;
@@ -327,6 +329,7 @@ pub struct UpdateMutation {
     pub actor_cdc_table_snapshot_splits: CdcTableSnapshotSplitAssignmentWithGeneration,
     pub sink_schema_change: HashMap<SinkId, PbSinkSchemaChange>,
     pub subscriptions_to_drop: Vec<SubscriptionUpstreamInfo>,
+    pub iceberg_pk_index_compaction: Option<IcebergPkIndexCompactionContext>,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -402,9 +405,11 @@ pub struct BarrierInner<M> {
     pub mutation: M,
     pub kind: BarrierKind,
 
+    /// The effective barrier interval for this database.
+    pub barrier_interval_ms: u32,
+
     /// Tracing context for the **current** epoch of this barrier.
     pub tracing_context: TracingContext,
-    pub iceberg_pk_index_compaction: Option<IcebergPkIndexCompactionContext>,
 }
 
 pub type BarrierMutationType = Option<Arc<Mutation>>;
@@ -417,9 +422,9 @@ impl<M: Default> BarrierInner<M> {
         Self {
             epoch: EpochPair::new_test_epoch(epoch),
             kind: BarrierKind::Checkpoint,
+            barrier_interval_ms: 1000,
             tracing_context: TracingContext::none(),
             mutation: Default::default(),
-            iceberg_pk_index_compaction: None,
         }
     }
 
@@ -427,9 +432,9 @@ impl<M: Default> BarrierInner<M> {
         Self {
             epoch: EpochPair::new(epoch, prev_epoch),
             kind: BarrierKind::Checkpoint,
+            barrier_interval_ms: 1000,
             tracing_context: TracingContext::none(),
             mutation: Default::default(),
-            iceberg_pk_index_compaction: None,
         }
     }
 }
@@ -440,8 +445,8 @@ impl Barrier {
             epoch: self.epoch,
             mutation: (),
             kind: self.kind,
+            barrier_interval_ms: self.barrier_interval_ms,
             tracing_context: self.tracing_context,
-            iceberg_pk_index_compaction: self.iceberg_pk_index_compaction,
         }
     }
 
@@ -453,22 +458,28 @@ impl Barrier {
         }
     }
 
+    #[cfg(any(test, feature = "test"))]
+    #[must_use]
+    pub fn with_iceberg_pk_index_compaction(self, update: IcebergPkIndexCompactionContext) -> Self {
+        self.with_mutation(Mutation::Update(UpdateMutation {
+            iceberg_pk_index_compaction: Some(update),
+            ..Default::default()
+        }))
+    }
+
+    pub fn iceberg_pk_index_compaction(&self) -> Option<&IcebergPkIndexCompactionContext> {
+        match self.mutation.as_deref() {
+            Some(Mutation::Update(update)) => update.iceberg_pk_index_compaction.as_ref(),
+            _ => None,
+        }
+    }
+
     #[must_use]
     pub fn with_stop(self) -> Self {
         self.with_mutation(Mutation::Stop(StopMutation {
             dropped_actors: Default::default(),
             dropped_sink_fragments: Default::default(),
         }))
-    }
-
-    pub fn with_iceberg_pk_index_compaction(
-        self,
-        context: IcebergPkIndexCompactionContext,
-    ) -> Self {
-        Self {
-            iceberg_pk_index_compaction: Some(context),
-            ..self
-        }
     }
 
     /// Whether this barrier carries stop mutation.
@@ -756,6 +767,17 @@ impl<M: PartialEq> PartialEq for BarrierInner<M> {
 }
 
 impl Mutation {
+    /// Return the backfill throttle configuration for `fragment_id`.
+    pub fn backfill_throttle_config(&self, fragment_id: FragmentId) -> Option<&ThrottleConfig> {
+        let Mutation::Throttle(fragment_throttles) = self else {
+            return None;
+        };
+
+        fragment_throttles
+            .get(&fragment_id)
+            .filter(|config| config.throttle_type() == ThrottleType::Backfill)
+    }
+
     /// Get all actors to be stopped (dropped) by this mutation.
     pub fn all_stop_actors(&self) -> Option<&HashSet<ActorId>> {
         match self {
@@ -824,6 +846,7 @@ impl Mutation {
                 actor_cdc_table_snapshot_splits,
                 sink_schema_change,
                 subscriptions_to_drop,
+                iceberg_pk_index_compaction,
             }) => PbMutation::Update(PbUpdateMutation {
                 dispatcher_update: dispatchers.values().flatten().cloned().collect(),
                 merge_update: merges.values().cloned().collect(),
@@ -857,6 +880,7 @@ impl Mutation {
                     .map(|(sink_id, change)| ((*sink_id).as_raw_id(), change.clone()))
                     .collect(),
                 subscriptions_to_drop: subscriptions_to_drop.clone(),
+                iceberg_pk_index_compaction: iceberg_pk_index_compaction.clone(),
             }),
             Mutation::Add(AddMutation {
                 adds,
@@ -1050,6 +1074,7 @@ impl Mutation {
                     .map(|(sink_id, change)| (SinkId::from(*sink_id), change.clone()))
                     .collect(),
                 subscriptions_to_drop: update.subscriptions_to_drop.clone(),
+                iceberg_pk_index_compaction: update.iceberg_pk_index_compaction.clone(),
             }),
 
             PbMutation::Add(add) => Mutation::Add(AddMutation {
@@ -1180,8 +1205,8 @@ impl<M> BarrierInner<M> {
             epoch,
             mutation,
             kind,
+            barrier_interval_ms,
             tracing_context,
-            iceberg_pk_index_compaction,
         } = self;
 
         PbBarrier {
@@ -1194,7 +1219,7 @@ impl<M> BarrierInner<M> {
             }),
             tracing_context: tracing_context.to_protobuf(),
             kind: *kind as _,
-            iceberg_pk_index_compaction: *iceberg_pk_index_compaction,
+            barrier_interval_ms: *barrier_interval_ms,
         }
     }
 
@@ -1210,8 +1235,8 @@ impl<M> BarrierInner<M> {
             mutation: mutation_from_pb(
                 (prost.mutation.as_ref()).and_then(|mutation| mutation.mutation.as_ref()),
             )?,
+            barrier_interval_ms: prost.barrier_interval_ms,
             tracing_context: TracingContext::from_protobuf(&prost.tracing_context),
-            iceberg_pk_index_compaction: prost.iceberg_pk_index_compaction,
         })
     }
 
@@ -1220,13 +1245,9 @@ impl<M> BarrierInner<M> {
             epoch: self.epoch,
             mutation: f(self.mutation),
             kind: self.kind,
+            barrier_interval_ms: self.barrier_interval_ms,
             tracing_context: self.tracing_context,
-            iceberg_pk_index_compaction: self.iceberg_pk_index_compaction,
         }
-    }
-
-    pub fn iceberg_pk_index_compaction(&self) -> Option<&IcebergPkIndexCompactionContext> {
-        self.iceberg_pk_index_compaction.as_ref()
     }
 }
 

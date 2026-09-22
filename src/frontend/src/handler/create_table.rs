@@ -28,13 +28,14 @@ use pgwire::pg_response::{PgResponse, StatementType};
 use prost::Message as _;
 use risingwave_common::acl::AclMode;
 use risingwave_common::catalog::{
-    CdcTableDesc, ColumnCatalog, ColumnDesc, ConflictBehavior, DEFAULT_SCHEMA_NAME, Engine,
-    ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX, RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME,
-    TableId,
+    CdcKeyComparison, CdcTableDesc, ColumnCatalog, ColumnDesc, ConflictBehavior,
+    DEFAULT_SCHEMA_NAME, Engine, ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX,
+    RISINGWAVE_ICEBERG_ROW_ID, ROW_ID_COLUMN_NAME, TableId,
 };
 use risingwave_common::config::MetaBackend;
 use risingwave_common::global_jvm::Jvm;
 use risingwave_common::session_config::sink_decouple::SinkDecouple;
+use risingwave_common::types::DataType;
 use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::{bail, bail_not_implemented};
@@ -836,6 +837,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
     source_watermarks: Vec<SourceWatermark>,
     mut columns: Vec<ColumnCatalog>,
     pk_names: Vec<String>,
+    pk_comparisons: Vec<CdcKeyComparison>,
     cdc_with_options: WithOptionsSecResolved,
     mut col_id_gen: ColumnIdGenerator,
     on_conflict: Option<OnConflict>,
@@ -914,6 +916,7 @@ pub(crate) fn gen_create_table_plan_for_cdc_table(
         source_id: source.id, // id of cdc source streaming job
         external_table_name: external_table_name.clone(),
         pk: table_pk,
+        pk_comparisons,
         columns: non_generated_column_descs,
         stream_key: pk_column_indices,
         connect_properties: options,
@@ -1430,7 +1433,7 @@ pub(super) async fn handle_create_table_plan(
                     cdc_table.external_table_name.clone(),
                 )?;
 
-            let (columns, pk_names) = match wildcard_idx {
+            let (columns, pk_names, pk_comparisons) = match wildcard_idx {
                 Some(_) => bind_cdc_table_schema_externally(cdc_with_options.clone()).await?,
                 None => {
                     for column_def in &column_defs {
@@ -1449,12 +1452,13 @@ pub(super) async fn handle_create_table_plan(
 
                     let (columns, pk_names) =
                         bind_cdc_table_schema(&column_defs, &constraints, false)?;
-                    // read default value definition from external db
-                    let (options, secret_refs) = cdc_with_options.clone().into_parts();
-                    let _config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
-                        .context("failed to extract external table config")?;
+                    let pk_comparisons = Box::pin(bind_cdc_pk_comparisons_externally(
+                        cdc_with_options.clone(),
+                        &pk_names,
+                    ))
+                    .await?;
 
-                    (columns, pk_names)
+                    (columns, pk_names, pk_comparisons)
                 }
             };
 
@@ -1475,6 +1479,7 @@ pub(super) async fn handle_create_table_plan(
                 source_watermarks,
                 columns,
                 pk_names,
+                pk_comparisons,
                 cdc_with_options,
                 col_id_gen,
                 on_conflict,
@@ -1621,7 +1626,7 @@ fn sanity_check_for_table_on_cdc_source(
 /// Derive schema for cdc table when create a new Table or alter an existing Table
 async fn bind_cdc_table_schema_externally(
     cdc_with_options: WithOptionsSecResolved,
-) -> Result<(Vec<ColumnCatalog>, Vec<String>)> {
+) -> Result<(Vec<ColumnCatalog>, Vec<String>, Vec<CdcKeyComparison>)> {
     // read cdc table schema from external db or parsing the schema from SQL definitions
     let (options, secret_refs) = cdc_with_options.into_parts();
     let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
@@ -1631,6 +1636,8 @@ async fn bind_cdc_table_schema_externally(
         .await
         .context("failed to auto derive table schema")?;
 
+    let pk_names = table.pk_names().clone();
+    let pk_comparisons = table.pk_column_comparisons(&pk_names)?;
     Ok((
         table
             .column_descs()
@@ -1641,8 +1648,21 @@ async fn bind_cdc_table_schema_externally(
                 is_hidden: false,
             })
             .collect(),
-        table.pk_names().clone(),
+        pk_names,
+        pk_comparisons,
     ))
+}
+
+async fn bind_cdc_pk_comparisons_externally(
+    cdc_with_options: WithOptionsSecResolved,
+    pk_names: &[String],
+) -> Result<Vec<CdcKeyComparison>> {
+    // Replacement plans also use this path, so a successful schema change persists the current
+    // upstream comparison semantics in the new stream graph.
+    let (options, secret_refs) = cdc_with_options.into_parts();
+    let config = ExternalTableConfig::try_from_btreemap(options, secret_refs)
+        .context("failed to extract external table config")?;
+    Ok(ExternalTableImpl::discover_pk_column_comparisons(&config, pk_names).await?)
 }
 
 /// Derive schema for cdc table when create a new Table or alter an existing Table
@@ -1699,7 +1719,7 @@ pub async fn handle_create_table(
     }
 
     let (graph, source, hummock_table, job_type, shared_source_id) = {
-        let (plan, source, table, job_type, shared_source_id) = handle_create_table_plan(
+        let (plan, source, table, job_type, shared_source_id) = Box::pin(handle_create_table_plan(
             handler_args.clone(),
             ExplainOptions::default(),
             format_encode,
@@ -1715,7 +1735,7 @@ pub async fn handle_create_table(
             include_column_options,
             webhook_info,
             engine,
-        )
+        ))
         .await?;
         tracing::trace!("table_plan: {:?}", plan.explain_to_string());
 
@@ -1815,6 +1835,27 @@ fn build_iceberg_engine_sink_options(
     sink_options.insert("is_exactly_once".to_owned(), "true".to_owned());
 
     let config = IcebergConfig::from_btreemap(sink_options.clone())?;
+
+    // Both merge-on-read and copy-on-write initialize an equality-delete writer for upserts.
+    // Reject unsupported key types before creating the remote Iceberg table.
+    if !table.append_only && !config.enable_pk_index {
+        for pk in table.pk() {
+            let column = &table.columns()[pk.column_index];
+            let data_type = column.data_type();
+            if data_type.is_composite()
+                || matches!(data_type, DataType::Float32 | DataType::Float64)
+            {
+                return Err(ErrorCode::NotSupported(
+                    format!(
+                        "Iceberg engine table primary key column \"{}\" has unsupported type {} for equality deletes",
+                        column.name(), data_type
+                    ),
+                    "Use non-floating-point scalar primary key columns.".to_owned(),
+                )
+                .into());
+            }
+        }
+    }
 
     // Engine tables own their Iceberg maintenance policy, so enable manifest rewrites by default
     // whenever the table format supports them. Keep V3 disabled until rewrites preserve row lineage.
@@ -2386,6 +2427,11 @@ pub async fn generate_stream_graph_for_replace_table(
                 )?;
 
             let (column_catalogs, pk_names) = bind_cdc_table_schema(&columns, &constraints, true)?;
+            let pk_comparisons = Box::pin(bind_cdc_pk_comparisons_externally(
+                cdc_with_options.clone(),
+                &pk_names,
+            ))
+            .await?;
 
             // CDC-table branch only: see the comment at the symmetric call site in
             // `handle_create_table_plan`. Plain (non-CDC) tables don't hit this check.
@@ -2401,6 +2447,7 @@ pub async fn generate_stream_graph_for_replace_table(
                 source_watermarks,
                 column_catalogs,
                 pk_names,
+                pk_comparisons,
                 cdc_with_options,
                 col_id_gen,
                 on_conflict,
@@ -2598,7 +2645,7 @@ mod tests {
     use risingwave_common::catalog::{
         DEFAULT_DATABASE_NAME, ROW_ID_COLUMN_NAME, RW_TIMESTAMP_COLUMN_NAME,
     };
-    use risingwave_common::types::{DataType, StructType};
+    use risingwave_common::types::StructType;
 
     use super::*;
     use crate::test_utils::{LocalFrontend, PROTO_FILE_DATA, create_proto_file};
@@ -2615,16 +2662,104 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_iceberg_engine_primary_key_types() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+        for (primary_key, append_only, pk_index, supported) in [
+            ("id, period", false, false, false),
+            ("id, items", false, false, false),
+            ("id, mapping", false, false, false),
+            ("id, f", false, false, false),
+            ("id, d", false, false, false),
+            ("id", false, false, true),
+            ("id, ts", false, false, true),
+            ("", false, false, true),
+            ("id, period", true, false, true),
+            ("id, period", false, true, true),
+        ] {
+            let pk_clause = if primary_key.is_empty() {
+                String::new()
+            } else {
+                format!(", PRIMARY KEY ({primary_key})")
+            };
+            frontend
+                .run_sql(&format!(
+                    "CREATE TABLE t (id INT, period STRUCT<start_ts TIMESTAMPTZ, end_ts TIMESTAMPTZ>, \
+                     items INT[], mapping MAP(INT, INT), f REAL, d DOUBLE PRECISION, ts TIMESTAMPTZ \
+                     {pk_clause}) {}",
+                    if append_only { "APPEND ONLY" } else { "" }
+                ))
+                .await
+                .unwrap();
+            let session = frontend.session_ref();
+            let table = session
+                .env()
+                .catalog_reader()
+                .read_guard()
+                .get_created_table_by_name(
+                    DEFAULT_DATABASE_NAME,
+                    SchemaPath::Name(DEFAULT_SCHEMA_NAME),
+                    "t",
+                )
+                .unwrap()
+                .0
+                .clone();
+            let pks = table
+                .pk_column_names()
+                .into_iter()
+                .map(str::to_owned)
+                .collect_vec();
+            for write_mode in ["merge-on-read", "copy-on-write"] {
+                if write_mode == "copy-on-write" && (append_only || pk_index) {
+                    continue;
+                }
+                let options = BTreeMap::from([
+                    ("connector".to_owned(), "iceberg".to_owned()),
+                    ("catalog.type".to_owned(), "storage".to_owned()),
+                    (
+                        "warehouse.path".to_owned(),
+                        "s3://test/warehouse".to_owned(),
+                    ),
+                    ("database.name".to_owned(), "public".to_owned()),
+                    ("table.name".to_owned(), "t".to_owned()),
+                    ("write_mode".to_owned(), write_mode.to_owned()),
+                    ("enable_pk_index".to_owned(), pk_index.to_string()),
+                ]);
+                let result = build_iceberg_engine_sink_options(
+                    options,
+                    &WithOptions::default(),
+                    &table,
+                    &pks,
+                );
+                if supported {
+                    result.unwrap();
+                } else {
+                    let err = result.unwrap_err().to_report_string();
+                    let column = primary_key.split(", ").last().unwrap();
+                    assert!(
+                        err.contains(&format!(
+                            "Iceberg engine table primary key column \"{column}\" has unsupported type"
+                        )),
+                        "{write_mode}: {err}"
+                    );
+                }
+            }
+            frontend.run_sql("DROP TABLE t").await.unwrap();
+        }
+    }
+
+    #[tokio::test]
     async fn test_cdc_table_requires_select_privilege_on_source() {
         let frontend = LocalFrontend::new(Default::default()).await;
+        // PostgreSQL CDC with an explicit schema avoids querying upstream PK metadata,
+        // so this privilege test does not require an external database.
         frontend
             .run_sql(
                 r#"
                 CREATE SOURCE cdc_source WITH (
-                    connector = 'mysql-cdc',
+                    connector = 'postgres-cdc',
                     hostname = 'localhost',
-                    port = '3306',
-                    username = 'root',
+                    port = '5432',
+                    username = 'postgres',
                     password = '',
                     database.name = 'db'
                 ) FORMAT PLAIN ENCODE JSON
@@ -2652,7 +2787,7 @@ mod tests {
             user_id,
         );
         let create_table =
-            "CREATE TABLE cdc_table (id INT PRIMARY KEY) FROM cdc_source TABLE 'db.t'";
+            "CREATE TABLE cdc_table (id INT PRIMARY KEY) FROM cdc_source TABLE 'public.t'";
 
         let err = frontend
             .run_sql_with_session(user_session.clone(), create_table)
