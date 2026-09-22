@@ -693,6 +693,9 @@ message UserDefinedFunction {
   // additional options for javascript functions
   optional bool is_async = 13;
   optional bool is_batched = 14;
+  // Unsafe: whether to skip materializing evaluated results of this function for retractable
+  // streams. This must travel with persisted expressions, such as generated columns.
+  bool unsafe_skip_materializing_exprs = 15;
 
   UdfExprVersion version = 1000;
 }

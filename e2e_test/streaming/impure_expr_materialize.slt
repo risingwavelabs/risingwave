@@ -87,6 +87,66 @@ order by name;
 identity_with_stored_result f
 identity_without_stored_result t
 
+# A generated-column expression is persisted as an ExprNode in the target table catalog and then
+# reconstructed while planning the sink. The sink reads its source snapshot as a RETRACT stream,
+# so successful planning proves that the reconstructed UDF remains pure.
+skipif madsim
+statement ok
+create table generated_udf_source (id int primary key, v int);
+
+skipif madsim
+statement ok
+create table generated_udf_target (
+    id int primary key,
+    v int,
+    generated_v int as identity_without_stored_result(v)
+);
+
+skipif madsim
+statement ok
+create sink generated_udf_sink into generated_udf_target as
+select id, v from generated_udf_source;
+
+skipif madsim
+query TT
+with scan_node as (
+    select jsonb_path_query_first(
+        f.node,
+        '$.**.**.** ? (exists(@.streamScan))'
+    ) as node
+    from rw_catalog.rw_fragment_infos f
+    join rw_catalog.rw_relations r on r.id = f.table_id
+    where r.name = 'generated_udf_sink'
+)
+select
+    coalesce(node->>'streamKind', 'STREAM_KIND_RETRACT'),
+    node->'streamScan'->>'streamScanType'
+from scan_node;
+----
+STREAM_KIND_RETRACT STREAM_SCAN_TYPE_ARRANGEMENT_BACKFILL
+
+skipif madsim
+statement ok
+insert into generated_udf_source values (1, 10);
+
+skipif madsim
+query III
+select * from generated_udf_target;
+----
+1 10 10
+
+skipif madsim
+statement ok
+drop sink generated_udf_sink;
+
+skipif madsim
+statement ok
+drop table generated_udf_target;
+
+skipif madsim
+statement ok
+drop table generated_udf_source;
+
 skipif madsim
 statement ok
 create materialized view mv_without_stored_result as

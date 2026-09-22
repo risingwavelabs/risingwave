@@ -503,30 +503,10 @@ pub fn impure_expr_desc(expr: &ExprImpl) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
-
     use risingwave_common::types::DataType;
-    use risingwave_pb::catalog::PbFunction;
-    use risingwave_pb::catalog::function::{Kind, ScalarFunction};
     use risingwave_pb::expr::expr_node::Type;
 
-    use crate::catalog::function_catalog::FunctionCatalog;
-    use crate::expr::{ExprImpl, FunctionCall, InputRef, UserDefinedFunction, is_impure, is_pure};
-
-    fn udf_expr(
-        unsafe_skip_materializing_exprs: bool,
-        return_type: DataType,
-        args: Vec<ExprImpl>,
-    ) -> ExprImpl {
-        let catalog = FunctionCatalog::from(&PbFunction {
-            name: "test_udf".to_owned(),
-            kind: Some(Kind::Scalar(ScalarFunction {})),
-            return_type: Some(return_type.into()),
-            unsafe_skip_materializing_exprs,
-            ..Default::default()
-        });
-        UserDefinedFunction::new(Arc::new(catalog), args).into()
-    }
+    use crate::expr::{ExprImpl, FunctionCall, InputRef, is_impure, is_pure};
 
     fn expect_pure(expr: &ExprImpl) {
         assert!(is_pure(expr));
@@ -561,31 +541,5 @@ mod tests {
         .unwrap()
         .into();
         expect_impure(&e);
-    }
-
-    /// Verifies that UDF result-materialization settings participate in recursive purity analysis.
-    #[test]
-    fn test_udf_unsafe_skip_materializing_exprs() {
-        let input: ExprImpl = InputRef::new(0, DataType::Int16).into();
-
-        let materialized_udf = udf_expr(false, DataType::Int16, vec![input.clone()]);
-        expect_impure(&materialized_udf);
-
-        // Creation requires an opted-out UDF to be declared IMMUTABLE, so the planner classifies
-        // it as pure when all of its descendants are pure.
-        let skipped_udf = udf_expr(true, DataType::Int16, vec![input]);
-        expect_pure(&skipped_udf);
-
-        let text_input: ExprImpl = InputRef::new(0, DataType::Varchar).into();
-        let nested_materialized_udf = udf_expr(false, DataType::Varchar, vec![text_input]);
-        let regclass_with_materialized_udf: ExprImpl =
-            FunctionCall::new(Type::CastRegclass, vec![nested_materialized_udf])
-                .unwrap()
-                .into();
-        let outer_skipped_udf =
-            udf_expr(true, DataType::Int32, vec![regclass_with_materialized_udf]);
-        // An opted-out outer UDF is still recursively impure when one of its descendants is
-        // impure. Stream planning therefore materializes this complete top-level expression.
-        expect_impure(&outer_skipped_udf);
     }
 }

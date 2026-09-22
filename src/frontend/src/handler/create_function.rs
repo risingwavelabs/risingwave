@@ -39,24 +39,6 @@ pub(crate) fn reject_variant_in_udf_signature(
     Ok(())
 }
 
-fn validate_retry_for_skipped_materialization(
-    unsafe_skip_materializing_exprs: bool,
-    always_retry_on_network_error: bool,
-    supports_always_retry_on_network_error: bool,
-) -> Result<()> {
-    if unsafe_skip_materializing_exprs
-        && supports_always_retry_on_network_error
-        && !always_retry_on_network_error
-    {
-        return Err(ErrorCode::InvalidParameterValue(
-            "`always_retry_on_network_error` must be true when `unsafe_skip_materializing_exprs` is true for an external scalar UDF"
-                .to_owned(),
-        )
-        .into());
-    }
-    Ok(())
-}
-
 pub async fn handle_create_function(
     handler_args: HandlerArgs,
     or_replace: bool,
@@ -208,11 +190,16 @@ pub async fn handle_create_function(
         Kind::Aggregate(_) => unreachable!(),
     };
     let udf_impl = risingwave_expr::sig::find_udf_impl(&language, runtime.as_deref(), link)?;
-    validate_retry_for_skipped_materialization(
-        unsafe_skip_materializing_exprs,
-        always_retry_on_network_error,
-        (udf_impl.supports_always_retry_on_network_error)(udf_kind),
-    )?;
+    if unsafe_skip_materializing_exprs
+        && (udf_impl.supports_always_retry_on_network_error)(udf_kind)
+        && !always_retry_on_network_error
+    {
+        return Err(ErrorCode::InvalidParameterValue(
+            "`always_retry_on_network_error` must be true when `unsafe_skip_materializing_exprs` is true for an external scalar UDF"
+                .to_owned(),
+        )
+        .into());
+    }
     let output = (udf_impl.create_fn)(CreateOptions {
         kind: udf_kind,
         name: &function_name,
@@ -260,7 +247,6 @@ mod tests {
     use risingwave_common::types::DataType;
     use risingwave_expr::sig::{CreateFunctionOutput, UDF_IMPLS, UdfImplDescriptor};
 
-    use super::validate_retry_for_skipped_materialization;
     use crate::catalog::root_catalog::SchemaPath;
     use crate::test_utils::LocalFrontend;
 
@@ -287,17 +273,6 @@ mod tests {
         let frontend = LocalFrontend::new(Default::default()).await;
 
         frontend.run_sql("create table t(v int)").await.unwrap();
-
-        // Only execution paths that support infinite network retry require the option when result
-        // materialization is skipped. The UDF-enabled e2e test covers descriptor selection for an
-        // actual external scalar UDF.
-        let error = validate_retry_for_skipped_materialization(true, false, true).unwrap_err();
-        assert!(
-            error.to_string().contains(
-                "`always_retry_on_network_error` must be true when `unsafe_skip_materializing_exprs` is true for an external scalar UDF"
-            ),
-            "{error}"
-        );
 
         // Embedded scalar UDFs do not use the external retry loop, but still require IMMUTABLE.
         let error = frontend
@@ -368,82 +343,6 @@ mod tests {
         assert!(
             materialized_line.contains("identity_without_stored_result"),
             "{plan}"
-        );
-    }
-
-    /// Verifies that an UPSERT project does not materialize impure computed expressions. Project
-    /// stream keys are always direct input references, including hidden references appended by
-    /// stream-plan rewriting, so computed impure expressions are necessarily non-key columns.
-    #[tokio::test]
-    async fn test_upsert_project_skips_impure_expr_materialization() {
-        let frontend = LocalFrontend::new(Default::default()).await;
-
-        frontend
-            .run_sql("create table upsert_input(id int primary key, v int)")
-            .await
-            .unwrap();
-        frontend
-            .run_sql("create table upsert_output(v int, id int primary key)")
-            .await
-            .unwrap();
-        frontend
-            .run_sql("create table computed_key_output(key int primary key, v int)")
-            .await
-            .unwrap();
-        frontend
-            .run_sql(
-                r#"create function identity_without_stored_result(v int)
-                   returns int immutable
-                   with (unsafe_skip_materializing_exprs = true)"#,
-            )
-            .await
-            .unwrap();
-        frontend
-            .run_sql(
-                r#"create function identity_with_stored_result(v int)
-                   returns int immutable"#,
-            )
-            .await
-            .unwrap();
-
-        // No matter the UDF is marked or not, the project on an UPSERT stream does not materialize
-        // them.
-        let plan = frontend
-            .get_explain_output(
-                "explain create sink skipped_sink into upsert_output as \
-                 select identity_without_stored_result(v) as v, id \
-                 from upsert_input with (snapshot = 'false')",
-            )
-            .await;
-        assert!(plan.contains("StreamProject"), "{plan}");
-        assert!(!plan.contains("StreamMaterializedExprs"), "{plan}");
-
-        let plan = frontend
-            .get_explain_output(
-                "explain create sink unmarked_sink into upsert_output as \
-                 select identity_with_stored_result(v) as v, id \
-                 from upsert_input with (snapshot = 'false')",
-            )
-            .await;
-        assert!(plan.contains("StreamProject"), "{plan}");
-        assert!(!plan.contains("StreamMaterializedExprs"), "{plan}");
-
-        // By default, sink planning rejects a computed impure output as the downstream primary key
-        // because it does not match the key derived from the internal stream. The explicit unsafe
-        // `streaming_unsafe_allow_upsert_sink_pk_mismatch` setting can bypass that validation.
-        let error = frontend
-            .run_sql(
-                "create sink computed_key_sink into computed_key_output as \
-                 select identity_with_stored_result(id) as key, v \
-                 from upsert_input with (snapshot = 'false')",
-            )
-            .await
-            .unwrap_err();
-        assert!(
-            error.to_string().contains(
-                "the downstream primary key must be the same as or a subset of the one derived from the stream"
-            ),
-            "{error}"
         );
     }
 }

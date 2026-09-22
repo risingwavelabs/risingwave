@@ -3768,6 +3768,8 @@ pub struct CreateFunctionWithOptions {
     pub always_retry_on_network_error: Option<bool>,
     /// Unsafe: skip materializing evaluated results of this function for retractable streams.
     /// Re-evaluation can produce inconsistent results or fail if the function is not truly pure.
+    /// This option is independent of `IMMUTABLE`: declaring a function `IMMUTABLE` alone still
+    /// allows materialization, which can avoid repeatedly evaluating an expensive function.
     pub unsafe_skip_materializing_exprs: Option<bool>,
     /// Use async functions (only available for JS UDF)
     pub r#async: Option<bool>,
