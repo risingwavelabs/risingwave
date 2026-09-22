@@ -79,7 +79,7 @@ impl CursorDataChunk {
     /// The returned tuple contains, in order:
     ///
     /// 1. formatted rows in reverse order, so the response stream can consume them with `pop`
-    /// without shrinking the monitored vector's backing allocation;
+    ///    without shrinking the monitored vector's backing allocation;
     /// 2. the chunk metadata needed for subscription projection and progress tracking; and
     /// 3. the rows' explicit heap size, excluding the monitored vector's element-array capacity.
     ///
@@ -915,7 +915,7 @@ impl QueryCursorPgResponseStream {
     }
 
     pub(super) fn fields(&self) -> Vec<Field> {
-        self.inner.output_fields.to_vec()
+        self.inner.output_fields.clone()
     }
 
     pub(super) fn begin_fetch(&mut self, formats: &[Format], session: &SessionImpl) {
@@ -1049,7 +1049,7 @@ impl SubscriptionCursorPgResponseStream {
     }
 
     pub(super) fn fields(&self) -> Vec<Field> {
-        self.inner.output_fields.to_vec()
+        self.inner.output_fields.clone()
     }
 
     pub(super) fn state_info_string(&self) -> String {
@@ -1680,7 +1680,7 @@ mod tests {
         assert!(stream.inner.cached_events.is_empty());
         let memory_context = MemoryContext::new(Some(parent.clone()), TrAdderAtomic::new(0));
         let source = stream.inner.data_stream.take().unwrap();
-        let fields = stream.inner.output_fields.to_vec();
+        let fields = stream.inner.output_fields.clone();
         stream.inner = CursorPgResponseStreamInner::new(source, fields, memory_context.clone());
         stream.memory_context = memory_context;
     }
@@ -1688,7 +1688,7 @@ mod tests {
     /// Verifies FETCH accounts two raw chunks and its output separately, preserves the unread
     /// suffix, then invalidates the query cursor when a third raw chunk exceeds the budget.
     #[tokio::test]
-    async fn test_cursor_memory_partial_fetch_then_oom() {
+    async fn test_query_cursor_memory_partial_fetch_then_oom() {
         let session = SessionImpl::mock();
         let limit = 32 * 1024;
         let parent = memory_budget_for_test(limit);
@@ -1719,8 +1719,8 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(polled, 3);
-        for (row, value) in rows.iter().zip(["1", "2", "3"]) {
-            assert_text_row(row, &[Some(value)]);
+        for (index, value) in ["1", "2", "3"].iter().enumerate() {
+            assert_text_row(&rows[index], &[Some(*value)]);
         }
         let after_commit = parent.get_bytes_used();
         assert_eq!(stream.inner.cached_events.len(), 1);
@@ -1784,7 +1784,7 @@ mod tests {
         let source = stream.inner.data_stream.take().unwrap();
         stream.inner = CursorPgResponseStreamInner::new(
             source,
-            stream.inner.output_fields.to_vec(),
+            stream.inner.output_fields.clone(),
             memory_context.clone(),
         );
         stream.memory_context = memory_context;
@@ -1817,8 +1817,8 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(polled, 3);
-        for (row, value) in rows.iter().zip(["1", "2", "3"]) {
-            assert_eq!(row.values()[0].as_deref(), Some(value.as_bytes()));
+        for (index, value) in ["1", "2", "3"].iter().enumerate() {
+            assert_eq!(rows[index].values()[0].as_deref(), Some(value.as_bytes()));
         }
         let after_commit = parent.get_bytes_used();
         assert_eq!(stream.inner.cached_events.len(), 1);
