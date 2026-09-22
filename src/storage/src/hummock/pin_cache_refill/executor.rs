@@ -120,6 +120,20 @@ fn report_backlog(current: [[i64; 2]; 3], previous: &mut [[i64; 2]; 3]) {
     *previous = current;
 }
 
+fn attempt_result_label<E, P>(
+    result: &Result<Result<PinCacheRefillOutcome, E>, P>,
+) -> &'static str {
+    match result {
+        Ok(Ok(PinCacheRefillOutcome::Published)) => "published",
+        Ok(Ok(PinCacheRefillOutcome::AlreadyPublished)) => "already_published",
+        Ok(Ok(PinCacheRefillOutcome::InProgress)) => "in_progress",
+        Ok(Ok(PinCacheRefillOutcome::CapacityRejected)) => "capacity_rejected",
+        Ok(Ok(PinCacheRefillOutcome::Obsolete)) => "obsolete",
+        Ok(Err(_)) => "error",
+        Err(_) => "panic",
+    }
+}
+
 struct RefillAttemptGuard {
     object: HummockSstableObjectId,
     generation: u64,
@@ -621,16 +635,7 @@ impl PinCacheRefillExecutor {
                     })
                     .rw_catch_unwind()
                     .await;
-                    let result_label = match &result {
-                        Ok(Ok(PinCacheRefillOutcome::Published)) => "published",
-                        Ok(Ok(PinCacheRefillOutcome::AlreadyPublished)) => "already_published",
-                        Ok(Ok(PinCacheRefillOutcome::InProgress)) => "in_progress",
-                        Ok(Ok(PinCacheRefillOutcome::CapacityRejected)) => "capacity_rejected",
-                        Ok(Ok(PinCacheRefillOutcome::Obsolete)) => "obsolete",
-                        Ok(Err(_)) => "error",
-                        Err(_) => "panic",
-                    };
-                    let elapsed = attempt.finish(result_label);
+                    let elapsed = attempt.finish(attempt_result_label(&result));
                     (object, generation, result, elapsed)
                 });
             }
@@ -639,16 +644,9 @@ impl PinCacheRefillExecutor {
                 _ = tokio::time::sleep_until(next_retry.unwrap_or_else(Instant::now)), if next_retry.is_some() && running.len() < limit => {},
                 Some((object, generation, result, elapsed)) = tasks.next(), if !tasks.is_empty() => {
                     running.remove(&object);
-                    let outcome = match &result {
-                        Ok(Ok(PinCacheRefillOutcome::Published)) => "published",
-                        Ok(Ok(PinCacheRefillOutcome::AlreadyPublished)) => "already_published",
-                        Ok(Ok(PinCacheRefillOutcome::InProgress)) => "in_progress",
-                        Ok(Ok(PinCacheRefillOutcome::CapacityRejected)) => "capacity_rejected",
-                        Ok(Ok(PinCacheRefillOutcome::Obsolete)) => "obsolete",
-                        Ok(Err(_)) => "error",
-                        Err(_) => "panic",
-                    };
-                    REFILL_OUTCOMES.with_label_values(&[outcome]).inc();
+                    REFILL_OUTCOMES
+                        .with_label_values(&[attempt_result_label(&result)])
+                        .inc();
                     let mut state = state.lock();
                     if state.objects.get(&object).is_some_and(|work| work.generation == generation) {
                         let mut work = state.remove(object).unwrap();

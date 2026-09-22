@@ -210,39 +210,46 @@ impl PinCacheRefillController {
         self.ownership = Arc::new(ownership);
         self.executor.reproject(self.ownership.clone());
         let refill = bootstrap && changed;
-        let plan = self.live_objects_plan(!refill);
+        let plan = self.live_objects_plan();
+        self.reconcile_recovered_routes(&plan, !refill);
         if refill {
             self.executor.submit(plan);
         }
     }
 
-    pub(crate) fn live_objects_plan(&self, validate_routes: bool) -> PinCacheRefillPlan {
+    pub(crate) fn live_objects_plan(&self) -> PinCacheRefillPlan {
         // Ownership acquisition is a separate trigger from SET: new workers and newly acquired
         // vnodes must cover already-live SSTs even if no future version delta arrives.
-        let plan = if self.object_ref_counts.is_empty() || self.ownership.is_empty() {
-            PinCacheRefillPlan {
-                ownership: self.ownership.clone(),
-                ..Default::default()
-            }
-        } else {
-            let inserts = self
+        let mut objects: HashMap<HummockSstableObjectId, Vec<SstableInfo>> = HashMap::new();
+        if !self.ownership.is_empty() {
+            for sst in self
                 .version
                 .levels
                 .values()
                 .flat_map(|levels| levels.l0.sub_levels.iter().chain(&levels.levels))
                 .flat_map(|level| &level.table_infos)
-                .filter(|sst| self.object_ref_counts.contains_key(&sst.object_id))
-                .cloned()
-                .collect();
-            PinCacheRefillPlan::new(
-                &[SstDeltaInfo {
-                    insert_sst_infos: inserts,
-                    ..Default::default()
-                }],
-                &self.object_ref_counts.keys().copied().collect(),
-                self.ownership.as_ref().clone(),
-            )
-        };
+                .filter(|sst| {
+                    self.object_ref_counts.contains_key(&sst.object_id)
+                        && sst
+                            .table_ids
+                            .iter()
+                            .any(|table| self.ownership.contains_key(table))
+                })
+            {
+                objects.entry(sst.object_id).or_default().push(sst.clone());
+            }
+        }
+        PinCacheRefillPlan {
+            objects,
+            ownership: self.ownership.clone(),
+        }
+    }
+
+    pub(crate) fn reconcile_recovered_routes(
+        &self,
+        plan: &PinCacheRefillPlan,
+        validate_routes: bool,
+    ) {
         let unplanned_objects = self
             .object_ref_counts
             .keys()
@@ -251,7 +258,6 @@ impl PinCacheRefillController {
             .collect();
         self.executor
             .reconcile_recovered_routes(unplanned_objects, validate_routes.then(|| plan.clone()));
-        plan
     }
 
     pub(crate) fn submit(&self, mut plan: PinCacheRefillPlan) -> Ticket {
@@ -312,17 +318,14 @@ impl PinCacheRefillController {
             .collect()
     }
 
-    fn rebuild_desired_objects(
-        &mut self,
-        preserve_versions: bool,
-    ) -> HashSet<HummockSstableObjectId> {
+    fn rebuild_desired_objects(&mut self, preserve_versions: bool) {
         let Some(pin_cache) = self.sstable_store.pin_cache().cloned() else {
             self.object_ref_counts.clear();
-            return HashSet::new();
+            return;
         };
         let Some(pinned_table_ids) = &self.pinned_table_ids else {
             self.object_ref_counts.clear();
-            return HashSet::new();
+            return;
         };
 
         let compaction_group_ids = pinned_table_ids
@@ -360,26 +363,19 @@ impl PinCacheRefillController {
             *object_ref_counts.entry(sst.object_id).or_insert(0) += 1;
         }
         if preserve_versions {
-            pin_cache.replace_version_objects(objects.clone());
+            pin_cache.replace_version_objects(objects);
         } else {
             pin_cache.replace_desired_objects(objects.iter().map(|(&id, &size)| (id, size)));
         }
         self.object_ref_counts = object_ref_counts;
-        objects.into_keys().collect()
     }
 
-    fn apply_desired_object_delta(
-        &mut self,
-        deltas: &[SstDeltaInfo],
-    ) -> Option<(
-        HashSet<HummockSstableObjectId>,
-        HashSet<HummockSstableObjectId>,
-    )> {
+    fn apply_desired_object_delta(&mut self, deltas: &[SstDeltaInfo]) -> Option<()> {
         let Some(pin_cache) = self.sstable_store.pin_cache().cloned() else {
-            return Some((HashSet::new(), HashSet::new()));
+            return Some(());
         };
         let Some(pinned_table_ids) = &self.pinned_table_ids else {
-            return Some((HashSet::new(), HashSet::new()));
+            return Some(());
         };
 
         let mut initial_counts = HashMap::new();
@@ -417,23 +413,19 @@ impl PinCacheRefillController {
             }
         }
 
-        let mut removed = HashSet::new();
+        let mut removed = Vec::new();
         let mut inserted = HashMap::new();
-        let mut refill_objects = HashSet::new();
         for (object_id, initial_count) in initial_counts {
             let final_count = self.object_ref_counts.get(&object_id).copied().unwrap_or(0);
             if initial_count > 0 && final_count == 0 {
-                removed.insert(object_id);
-            }
-            if final_count > initial_count {
-                refill_objects.insert(object_id);
+                removed.push(object_id);
             }
             if initial_count == 0 && final_count > 0 {
                 inserted.insert(object_id, inserted_sizes[&object_id]);
             }
         }
-        pin_cache.apply_desired_object_delta(removed.iter().copied(), inserted);
-        Some((removed, refill_objects))
+        pin_cache.apply_desired_object_delta(removed, inserted);
+        Some(())
     }
 
     fn is_pinned(sst: &SstableInfo, pinned_table_ids: &HashSet<TableId>) -> bool {

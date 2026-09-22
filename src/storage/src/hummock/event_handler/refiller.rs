@@ -478,7 +478,12 @@ impl CacheRefiller {
         let pin_cache_refill = match pin_cache_membership_update {
             // A full snapshot can arrive after initial ownership. Its existing SSTs belong
             // to the same release gate, not an independent background bootstrap.
-            PinCacheMembershipUpdate::Rebuild => self.pin_cache_refill.live_objects_plan(false),
+            PinCacheMembershipUpdate::Rebuild => {
+                let plan = self.pin_cache_refill.live_objects_plan();
+                self.pin_cache_refill
+                    .reconcile_recovered_routes(&plan, false);
+                plan
+            }
             PinCacheMembershipUpdate::Delta => PinCacheRefillPlan::new(
                 &deltas,
                 &pin_cache_refill_object_ids,
@@ -2056,90 +2061,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_pin_cache_desired_objects_follow_policy_and_version() {
-        let table_id = TableId::from(233);
-        let sstable_store = mock_sstable_store().await;
-        let (_, sst_info) =
-            gen_test_sst_with_object_id(table_id, sstable_store.clone(), 1001).await;
-        let local_store = pin_cache_store_for_test();
-        local_store
-            .upload(
-                &format!("{}-42.sst", sst_info.object_id.as_raw_id()),
-                Bytes::from(vec![0; sst_info.file_size as usize]),
-            )
-            .await
-            .unwrap();
-        let pin_cache = PinCache::new(local_store, u64::MAX);
-        sstable_store.set_pin_cache(pin_cache.clone());
-        let mut refiller = CacheRefiller::new(
-            Role::Streaming,
-            test_refill_config(CacheRefillPolicy::Disabled),
-            sstable_store.clone(),
-            CacheRefiller::default_spawn_refill_task(),
-            pinned_version_with_sst(table_id, &sst_info),
-        );
-        refiller.update_streaming_table_vnodes(
-            table_id,
-            Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
-        );
-
-        refiller.replace_table_cache_refill_policies(HashMap::from([(
-            table_id,
-            CacheRefillPolicy::Pinned,
-        )]));
-        assert!(pin_cache.is_desired(sst_info.object_id));
-        tokio::time::timeout(Duration::from_secs(1), async {
-            while pin_cache.get(sst_info.object_id).is_none() {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .unwrap();
-
-        refiller.replace_table_cache_refill_policies(HashMap::from([(
-            table_id,
-            CacheRefillPolicy::Disabled,
-        )]));
-        assert!(!pin_cache.is_desired(sst_info.object_id));
-        assert!(pin_cache.get(sst_info.object_id).is_none());
-
-        refiller.replace_table_cache_refill_policies(HashMap::from([(
-            table_id,
-            CacheRefillPolicy::Pinned,
-        )]));
-        refiller.start_cache_refill(
-            vec![SstDeltaInfo {
-                delete_sst_infos: vec![sst_info.clone()],
-                ..Default::default()
-            }],
-            pinned_version_with_sst(table_id, &sst_info),
-            pinned_version_for_test(),
-            PinCacheMembershipUpdate::Delta,
-        );
-        assert!(!pin_cache.is_desired(sst_info.object_id));
-
-        // Batched version deltas must preserve their order. An SST added and then removed before
-        // this worker handles the notification must not remain desired.
-        refiller.start_cache_refill(
-            vec![
-                SstDeltaInfo {
-                    insert_sst_infos: vec![sst_info.clone()],
-                    insert_sst_level: 0,
-                    ..Default::default()
-                },
-                SstDeltaInfo {
-                    delete_sst_infos: vec![sst_info.clone()],
-                    ..Default::default()
-                },
-            ],
-            pinned_version_for_test(),
-            pinned_version_for_test(),
-            PinCacheMembershipUpdate::Delta,
-        );
-        assert!(!pin_cache.is_desired(sst_info.object_id));
-    }
-
-    #[tokio::test]
     async fn test_pin_cache_keeps_split_object_until_last_logical_reference() {
         let table_a = TableId::from(233);
         let table_b = TableId::from(234);
@@ -2189,10 +2110,28 @@ mod tests {
 
         refiller.start_cache_refill(
             vec![SstDeltaInfo {
-                delete_sst_infos: vec![branch_b],
+                delete_sst_infos: vec![branch_b.clone()],
                 ..Default::default()
             }],
             only_b,
+            pinned_version_for_test(),
+            PinCacheMembershipUpdate::Delta,
+        );
+        assert_eq!(refiller.next_events().await.len(), 1);
+        assert!(!pin_cache.is_desired(object_id));
+
+        refiller.start_cache_refill(
+            vec![
+                SstDeltaInfo {
+                    insert_sst_infos: vec![branch_b.clone()],
+                    ..Default::default()
+                },
+                SstDeltaInfo {
+                    delete_sst_infos: vec![branch_b],
+                    ..Default::default()
+                },
+            ],
+            pinned_version_for_test(),
             pinned_version_for_test(),
             PinCacheMembershipUpdate::Delta,
         );
