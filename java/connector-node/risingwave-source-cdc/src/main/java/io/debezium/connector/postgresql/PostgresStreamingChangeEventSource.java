@@ -107,7 +107,6 @@ public class PostgresStreamingChangeEventSource
     private final AbortableConnection abortableConnection = new AbortableConnection();
     private final AbortableConnection abortableReplicationConnection = new AbortableConnection();
     private volatile boolean forcedShutdown;
-    private volatile boolean replicationConnectionStartupInProgress;
 
     // Offset committing is an asynchronous operation.
     // When connector is restarted we cannot be sure about timing of recovery, offset committing
@@ -205,12 +204,6 @@ public class PostgresStreamingChangeEventSource
             abortableReplicationConnection.abort(abortExecutor);
         } catch (Exception e) {
             LOGGER.warn("Exception while force-aborting replication connection", e);
-        } finally {
-            if (replicationConnection instanceof JdbcConnection) {
-                abortableReplicationConnection.abortConnectionsOpenedWhile(
-                        (JdbcConnection) replicationConnection,
-                        () -> replicationConnectionStartupInProgress);
-            }
         }
     }
 
@@ -394,15 +387,14 @@ public class PostgresStreamingChangeEventSource
 
     private ReplicationStream startReplicationStreaming(StreamingStarter starter)
             throws SQLException, InterruptedException {
-        replicationConnectionStartupInProgress = true;
-        try {
+        try (PostgresConnection.ConnectionTrackingScope ignored =
+                PostgresConnection.trackConnections(
+                        PostgresConnection.CONNECTION_STREAMING,
+                        abortableReplicationConnection::capture)) {
             cacheReplicationJdbcConnection();
             ReplicationStream stream = starter.start();
-            // startStreaming() can replace a connection while retrying internally.
             cacheReplicationJdbcConnection();
             return stream;
-        } finally {
-            replicationConnectionStartupInProgress = false;
         }
     }
 
@@ -451,56 +443,6 @@ public class PostgresStreamingChangeEventSource
             abortExecutor = executor;
             if (connection != null) {
                 connection.abort(executor);
-            }
-        }
-
-        void abortConnectionsOpenedWhile(
-                JdbcConnection jdbcConnection, BooleanSupplier operationInProgress) {
-            if (!operationInProgress.getAsBoolean()) {
-                return;
-            }
-
-            Thread monitor =
-                    new Thread(
-                            () -> {
-                                while (operationInProgress.getAsBoolean()) {
-                                    try {
-                                        abortCurrentConnectionIfConnected(jdbcConnection);
-                                    } catch (SQLException e) {
-                                        LOGGER.debug(
-                                                "Exception while monitoring a replication connection during forced shutdown",
-                                                e);
-                                    }
-                                    try {
-                                        TimeUnit.MILLISECONDS.sleep(10);
-                                    } catch (InterruptedException e) {
-                                        Thread.currentThread().interrupt();
-                                        return;
-                                    }
-                                }
-                            },
-                            "postgres-replication-abort-monitor");
-            monitor.setDaemon(true);
-            monitor.start();
-        }
-
-        private void abortCurrentConnectionIfConnected(JdbcConnection jdbcConnection)
-                throws SQLException {
-            Connection current;
-            synchronized (jdbcConnection) {
-                if (!jdbcConnection.isConnected()) {
-                    return;
-                }
-                current = jdbcConnection.connection(false);
-            }
-            synchronized (this) {
-                if (connection == current) {
-                    return;
-                }
-                connection = current;
-                if (abortExecutor != null) {
-                    current.abort(abortExecutor);
-                }
             }
         }
 

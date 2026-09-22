@@ -50,6 +50,7 @@ import io.debezium.spi.schema.DataCollectionId;
 import io.debezium.util.Clock;
 import io.debezium.util.Metronome;
 import java.nio.charset.Charset;
+import java.sql.Connection;
 import java.sql.DatabaseMetaData;
 import java.sql.PreparedStatement;
 import java.sql.ResultSet;
@@ -97,6 +98,12 @@ public class PostgresConnection extends JdbcConnection {
             Pattern.compile("\\(+(?:.+(?:[+ - * / < > = ~ ! @ # % ^ & | ` ?] ?.+)+)+\\)");
     private static final Logger LOGGER = LoggerFactory.getLogger(PostgresConnection.class);
 
+    // JdbcConnection has no passive accessor for its cached connection. Publish new connections
+    // from the factory so forced shutdown can abort them without calling connection() and possibly
+    // reconnecting. The tracker is thread-scoped because connection establishment is synchronous.
+    private static final ThreadLocal<ConnectionTrackingContext> CONNECTION_TRACKER =
+            new ThreadLocal<>();
+
     private static final String URL_PATTERN =
             "jdbc:postgresql://${"
                     + JdbcConfiguration.HOSTNAME
@@ -105,13 +112,62 @@ public class PostgresConnection extends JdbcConnection {
                     + "}/${"
                     + JdbcConfiguration.DATABASE
                     + "}";
-    protected static final ConnectionFactory FACTORY =
+    private static final ConnectionFactory DEFAULT_FACTORY =
             JdbcConnection.patternBasedFactory(
                     URL_PATTERN,
                     org.postgresql.Driver.class.getName(),
                     PostgresConnection.class.getClassLoader(),
                     JdbcConfiguration.PORT.withDefault(
                             PostgresConnectorConfig.PORT.defaultValueAsString()));
+    protected static final ConnectionFactory FACTORY = trackCreatedConnections(DEFAULT_FACTORY);
+
+    protected static ConnectionFactory trackCreatedConnections(ConnectionFactory delegate) {
+        return config -> {
+            Connection connection = delegate.connect(config);
+            ConnectionTrackingContext context = CONNECTION_TRACKER.get();
+            if (context != null
+                    && context.connectionUsage.equals(config.getString("ApplicationName"))) {
+                context.tracker.capture(connection);
+            }
+            return connection;
+        };
+    }
+
+    public static ConnectionTrackingScope trackConnections(
+            String connectionUsage, ConnectionTracker tracker) {
+        ConnectionTrackingContext previous = CONNECTION_TRACKER.get();
+        CONNECTION_TRACKER.set(
+                new ConnectionTrackingContext(
+                        Objects.requireNonNull(connectionUsage), Objects.requireNonNull(tracker)));
+        return () -> {
+            if (previous == null) {
+                CONNECTION_TRACKER.remove();
+            } else {
+                CONNECTION_TRACKER.set(previous);
+            }
+        };
+    }
+
+    @FunctionalInterface
+    public interface ConnectionTracker {
+        void capture(Connection connection) throws SQLException;
+    }
+
+    @FunctionalInterface
+    public interface ConnectionTrackingScope extends AutoCloseable {
+        @Override
+        void close();
+    }
+
+    private static final class ConnectionTrackingContext {
+        private final String connectionUsage;
+        private final ConnectionTracker tracker;
+
+        private ConnectionTrackingContext(String connectionUsage, ConnectionTracker tracker) {
+            this.connectionUsage = connectionUsage;
+            this.tracker = tracker;
+        }
+    }
 
     /**
      * Obtaining a replication slot may fail if there's a pending transaction. We're retrying to get

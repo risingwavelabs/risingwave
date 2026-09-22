@@ -22,6 +22,8 @@ import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
+import io.debezium.config.Configuration;
+import io.debezium.connector.postgresql.connection.PostgresConnection;
 import io.debezium.connector.postgresql.connection.ReplicationConnection;
 import io.debezium.jdbc.JdbcConfiguration;
 import io.debezium.jdbc.JdbcConnection;
@@ -35,6 +37,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.Test;
 
@@ -189,29 +192,47 @@ public class PostgresStreamingChangeEventSourceTest {
     }
 
     @Test
-    public void forcedShutdownAbortsConnectionReplacedDuringStreamingStartup()
-            throws SQLException, InterruptedException {
-        PostgresStreamingChangeEventSource.AbortableConnection connection =
+    public void forcedShutdownAbortsConnectionCreatedDuringStreamingStartup() throws SQLException {
+        PostgresStreamingChangeEventSource.AbortableConnection abortableConnection =
                 new PostgresStreamingChangeEventSource.AbortableConnection();
         AtomicBoolean oldConnectionAborted = new AtomicBoolean(false);
-        AtomicBoolean currentConnectionAborted = new AtomicBoolean(false);
-        ReconnectableJdbcConnection jdbcConnection =
-                new ReconnectableJdbcConnection(connection(oldConnectionAborted));
-        AtomicBoolean startupInProgress = new AtomicBoolean(true);
+        AtomicBoolean newConnectionAborted = new AtomicBoolean(false);
+        Connection oldConnection = connection(oldConnectionAborted);
+        Connection newConnection = connection(newConnectionAborted);
+        AtomicInteger connectionCount = new AtomicInteger();
+        JdbcConfiguration configuration =
+                JdbcConfiguration.adapt(
+                        Configuration.empty()
+                                .edit()
+                                .with("ApplicationName", PostgresConnection.CONNECTION_STREAMING)
+                                .build());
+        JdbcConnection jdbcConnection =
+                new JdbcConnection(
+                        configuration,
+                        TrackingPostgresConnection.trackingFactory(
+                                config ->
+                                        connectionCount.getAndIncrement() == 0
+                                                ? oldConnection
+                                                : newConnection),
+                        "\"",
+                        "\"");
 
-        connection.capture(jdbcConnection.connection(false));
-        connection.abort(Runnable::run);
-        connection.abortConnectionsOpenedWhile(jdbcConnection, startupInProgress::get);
-        jdbcConnection.current.set(connection(currentConnectionAborted));
-
-        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
-        while (!currentConnectionAborted.get() && System.nanoTime() < deadline) {
-            Thread.sleep(10);
+        try (PostgresConnection.ConnectionTrackingScope ignored =
+                PostgresConnection.trackConnections(
+                        PostgresConnection.CONNECTION_STREAMING, abortableConnection::capture)) {
+            assertSame(oldConnection, jdbcConnection.connection(false));
+            abortableConnection.abort(Runnable::run);
+            try {
+                jdbcConnection.connection(false);
+                throw new AssertionError("Expected a replacement connection to be rejected");
+            } catch (SQLException expected) {
+                assertEquals("Connection opened during forced shutdown", expected.getMessage());
+            }
         }
-        startupInProgress.set(false);
 
+        assertEquals(2, connectionCount.get());
         assertTrue(oldConnectionAborted.get());
-        assertTrue(currentConnectionAborted.get());
+        assertTrue(newConnectionAborted.get());
     }
 
     private static ReplicationConnection replicationConnection(AtomicBoolean closed) {
@@ -233,10 +254,15 @@ public class PostgresStreamingChangeEventSourceTest {
                         Connection.class.getClassLoader(),
                         new Class<?>[] {Connection.class},
                         (proxy, method, args) -> {
-                            if (method.getName().equals("abort")) {
-                                aborted.set(true);
+                            switch (method.getName()) {
+                                case "abort":
+                                    aborted.set(true);
+                                    return null;
+                                case "isClosed":
+                                    return aborted.get();
+                                default:
+                                    return null;
                             }
-                            return null;
                         });
     }
 
@@ -285,22 +311,14 @@ public class PostgresStreamingChangeEventSourceTest {
         }
     }
 
-    private static class ReconnectableJdbcConnection extends JdbcConnection {
-        private final AtomicReference<Connection> current;
-
-        ReconnectableJdbcConnection(Connection connection) {
-            super(JdbcConfiguration.empty(), config -> connection, "\"", "\"");
-            current = new AtomicReference<>(connection);
+    private static class TrackingPostgresConnection extends PostgresConnection {
+        private TrackingPostgresConnection() {
+            super(JdbcConfiguration.empty(), CONNECTION_GENERAL);
         }
 
-        @Override
-        public synchronized boolean isConnected() {
-            return current.get() != null;
-        }
-
-        @Override
-        public synchronized Connection connection(boolean executeOnConnect) {
-            return current.get();
+        private static JdbcConnection.ConnectionFactory trackingFactory(
+                JdbcConnection.ConnectionFactory delegate) {
+            return PostgresConnection.trackCreatedConnections(delegate);
         }
     }
 
