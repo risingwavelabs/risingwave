@@ -75,6 +75,15 @@ echo "--- Run kafka sasl test done"
 risedev slt './e2e_test/source_inline/**/*.slt' --skip 'cron_only' -j8
 risedev slt './e2e_test/source_inline/**/*.slt.serial' --skip 'cron_only'
 
+echo "--- Run SQL Server encrypted abort regression test"
+sqlserver_abort_test_classes=$(mktemp -d)
+javac -cp './connector-node/libs/*' \
+  -d "${sqlserver_abort_test_classes}" \
+  e2e_test/source_inline/cdc/sql_server/SqlServerEncryptedAbortTest.java
+java -cp "${sqlserver_abort_test_classes}:./connector-node/libs/*" \
+  io.debezium.connector.sqlserver.SqlServerEncryptedAbortTest
+rm -rf "${sqlserver_abort_test_classes}"
+
 echo "--- Run Vault secret tests"
 risedev slt './e2e_test/ddl/vault_secret.slt'
 
