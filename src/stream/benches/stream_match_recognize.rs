@@ -33,6 +33,13 @@
 //! that has nothing to do with the executor. Hence the control: `idle_watermarks × IDLE_WATERMARKS
 //! − barrier_only` is the executor's cost for the round, and with 200 watermarks per round the
 //! fence is a small share of the timed interval to begin with.
+//!
+//! `load` ends with one settling watermark outside the timer. An arrival marks its partition for
+//! the next watermark visit (the structural prune runs only there), so the first watermark after
+//! loading visits every partition once — legitimate work, but it is the arrival's, not the idle
+//! watermark's, and amortised over the few rounds a sample holds at 50k it would show up as a
+//! per-watermark cost that grows with `N`. Both timed shapes start from settled partitions: quiet
+//! ones that a watermark either leaves alone or expires.
 
 use std::hint::black_box;
 use std::sync::Arc;
@@ -183,14 +190,21 @@ async fn drain_until_barrier(stream: &mut BoxedMessageStream, epoch: u64) {
     panic!("stream ended before barrier {epoch}");
 }
 
-/// Load `n` partitions and return the executor ready for the timed section.
+/// Load `n` partitions, settle them with one watermark that closes nothing (see the module doc),
+/// and return the executor ready for the timed section at epoch `LOADED_EPOCH`.
 async fn load(n: usize) -> (MessageSender, BoxedMessageStream) {
     let (mut tx, mut stream) = build(MemoryStateStore::new()).await;
     tx.push_chunk(partitions_chunk(n));
     tx.push_barrier_with_prev_epoch_for_test(test_epoch(2), test_epoch(1), false);
     drain_until_barrier(&mut stream, test_epoch(2)).await;
+    tx.push_int64_watermark(1, 0);
+    tx.push_barrier_with_prev_epoch_for_test(test_epoch(LOADED_EPOCH), test_epoch(2), false);
+    drain_until_barrier(&mut stream, test_epoch(LOADED_EPOCH)).await;
     (tx, stream)
 }
+
+/// The epoch `load` leaves the executor at; timed shapes continue from the next one.
+const LOADED_EPOCH: u64 = 3;
 
 /// `iters` rounds of `watermarks` idle watermarks on ONE loaded executor. An idle round mutates
 /// nothing (no window closes), so the same partitions serve every round; the watermark keeps
@@ -204,7 +218,7 @@ async fn idle_rounds(
 ) -> Duration {
     let mut total = Duration::ZERO;
     let mut w = 1i64;
-    for epoch in (3u64..).take(iters as usize) {
+    for epoch in (LOADED_EPOCH + 1..).take(iters as usize) {
         assert!(
             w + watermarks < BOUND,
             "too many idle rounds: the watermark would reach the deadline"
@@ -229,8 +243,12 @@ async fn idle_rounds(
 /// consumes the loaded state, so the caller reloads before every call.
 async fn within_cliff(mut tx: MessageSender, mut stream: BoxedMessageStream) {
     tx.push_int64_watermark(1, BOUND + 1);
-    tx.push_barrier_with_prev_epoch_for_test(test_epoch(3), test_epoch(2), false);
-    drain_until_barrier(&mut stream, test_epoch(3)).await;
+    tx.push_barrier_with_prev_epoch_for_test(
+        test_epoch(LOADED_EPOCH + 1),
+        test_epoch(LOADED_EPOCH),
+        false,
+    );
+    drain_until_barrier(&mut stream, test_epoch(LOADED_EPOCH + 1)).await;
     drop(tx);
     drop(stream);
 }
