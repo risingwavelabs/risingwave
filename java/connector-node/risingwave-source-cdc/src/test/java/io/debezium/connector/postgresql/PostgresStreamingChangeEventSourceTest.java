@@ -102,7 +102,10 @@ public class PostgresStreamingChangeEventSourceTest {
         AtomicBoolean replicationClosed = new AtomicBoolean(false);
 
         PostgresStreamingChangeEventSource.cleanUpConnectionOnStop(
-                connection, replicationConnection(replicationClosed), false);
+                connection,
+                new PostgresStreamingChangeEventSource.AbortableConnection(),
+                replicationConnection(replicationClosed),
+                false);
 
         assertFalse(connection.committed.get());
         assertTrue(replicationClosed.get());
@@ -114,9 +117,28 @@ public class PostgresStreamingChangeEventSourceTest {
         AtomicBoolean replicationClosed = new AtomicBoolean(false);
 
         PostgresStreamingChangeEventSource.cleanUpConnectionOnStop(
-                connection, replicationConnection(replicationClosed), true);
+                connection,
+                new PostgresStreamingChangeEventSource.AbortableConnection(),
+                replicationConnection(replicationClosed),
+                true);
 
         assertTrue(connection.committed.get());
+        assertTrue(replicationClosed.get());
+    }
+
+    @Test
+    public void cleanupDoesNotReconnectAfterForcedShutdown() throws SQLException {
+        TestJdbcConnection connection = new TestJdbcConnection(false);
+        PostgresStreamingChangeEventSource.AbortableConnection abortableConnection =
+                new PostgresStreamingChangeEventSource.AbortableConnection();
+        AtomicBoolean replicationClosed = new AtomicBoolean(false);
+        abortableConnection.abort(Runnable::run);
+
+        PostgresStreamingChangeEventSource.cleanUpConnectionOnStop(
+                connection, abortableConnection, replicationConnection(replicationClosed), true);
+
+        assertFalse(connection.connected.get());
+        assertFalse(connection.committed.get());
         assertTrue(replicationClosed.get());
     }
 
@@ -166,6 +188,32 @@ public class PostgresStreamingChangeEventSourceTest {
         assertTrue(currentConnectionAborted.get());
     }
 
+    @Test
+    public void forcedShutdownAbortsConnectionReplacedDuringStreamingStartup()
+            throws SQLException, InterruptedException {
+        PostgresStreamingChangeEventSource.AbortableConnection connection =
+                new PostgresStreamingChangeEventSource.AbortableConnection();
+        AtomicBoolean oldConnectionAborted = new AtomicBoolean(false);
+        AtomicBoolean currentConnectionAborted = new AtomicBoolean(false);
+        ReconnectableJdbcConnection jdbcConnection =
+                new ReconnectableJdbcConnection(connection(oldConnectionAborted));
+        AtomicBoolean startupInProgress = new AtomicBoolean(true);
+
+        connection.capture(jdbcConnection.connection(false));
+        connection.abort(Runnable::run);
+        connection.abortConnectionsOpenedWhile(jdbcConnection, startupInProgress::get);
+        jdbcConnection.current.set(connection(currentConnectionAborted));
+
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(1);
+        while (!currentConnectionAborted.get() && System.nanoTime() < deadline) {
+            Thread.sleep(10);
+        }
+        startupInProgress.set(false);
+
+        assertTrue(oldConnectionAborted.get());
+        assertTrue(currentConnectionAborted.get());
+    }
+
     private static ReplicationConnection replicationConnection(AtomicBoolean closed) {
         return (ReplicationConnection)
                 Proxy.newProxyInstance(
@@ -193,27 +241,66 @@ public class PostgresStreamingChangeEventSourceTest {
     }
 
     private static class TestJdbcConnection extends JdbcConnection {
-        private final AtomicBoolean committed = new AtomicBoolean(false);
-        private final boolean failCommit;
+        private final AtomicBoolean connected;
+        private final AtomicBoolean committed;
 
         TestJdbcConnection(boolean failCommit) {
+            this(new AtomicBoolean(false), new AtomicBoolean(false), failCommit);
+        }
+
+        private TestJdbcConnection(
+                AtomicBoolean connected, AtomicBoolean committed, boolean failCommit) {
             super(
                     JdbcConfiguration.empty(),
                     config -> {
-                        throw new AssertionError("A test connection should not be established");
+                        connected.set(true);
+                        return commitConnection(committed, failCommit);
                     },
                     "\"",
                     "\"");
-            this.failCommit = failCommit;
+            this.connected = connected;
+            this.committed = committed;
+        }
+
+        private static Connection commitConnection(AtomicBoolean committed, boolean failCommit) {
+            return (Connection)
+                    Proxy.newProxyInstance(
+                            Connection.class.getClassLoader(),
+                            new Class<?>[] {Connection.class},
+                            (proxy, method, args) -> {
+                                switch (method.getName()) {
+                                    case "isClosed":
+                                    case "getAutoCommit":
+                                        return false;
+                                    case "commit":
+                                        committed.set(true);
+                                        if (failCommit) {
+                                            throw new SQLException("commit failed");
+                                        }
+                                        return null;
+                                    default:
+                                        return null;
+                                }
+                            });
+        }
+    }
+
+    private static class ReconnectableJdbcConnection extends JdbcConnection {
+        private final AtomicReference<Connection> current;
+
+        ReconnectableJdbcConnection(Connection connection) {
+            super(JdbcConfiguration.empty(), config -> connection, "\"", "\"");
+            current = new AtomicReference<>(connection);
         }
 
         @Override
-        public JdbcConnection commit() throws SQLException {
-            committed.set(true);
-            if (failCommit) {
-                throw new SQLException("commit failed");
-            }
-            return this;
+        public synchronized boolean isConnected() {
+            return current.get() != null;
+        }
+
+        @Override
+        public synchronized Connection connection(boolean executeOnConnect) {
+            return current.get();
         }
     }
 

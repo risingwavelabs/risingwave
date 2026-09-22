@@ -107,6 +107,7 @@ public class PostgresStreamingChangeEventSource
     private final AbortableConnection abortableConnection = new AbortableConnection();
     private final AbortableConnection abortableReplicationConnection = new AbortableConnection();
     private volatile boolean forcedShutdown;
+    private volatile boolean replicationConnectionStartupInProgress;
 
     // Offset committing is an asynchronous operation.
     // When connector is restarted we cannot be sure about timing of recovery, offset committing
@@ -204,6 +205,12 @@ public class PostgresStreamingChangeEventSource
             abortableReplicationConnection.abort(abortExecutor);
         } catch (Exception e) {
             LOGGER.warn("Exception while force-aborting replication connection", e);
+        } finally {
+            if (replicationConnection instanceof JdbcConnection) {
+                abortableReplicationConnection.abortConnectionsOpenedWhile(
+                        (JdbcConnection) replicationConnection,
+                        () -> replicationConnectionStartupInProgress);
+            }
         }
     }
 
@@ -251,7 +258,6 @@ public class PostgresStreamingChangeEventSource
         try {
             final WalPositionLocator walPosition;
 
-            cacheReplicationJdbcConnection();
             if (hasStartLsnStoredInContext) {
                 // start streaming from the last recorded position in the offset
                 final Lsn lsn =
@@ -267,13 +273,17 @@ public class PostgresStreamingChangeEventSource
                                 lsn,
                                 lastProcessedMessageType);
                 replicationStream.compareAndSet(
-                        null, replicationConnection.startStreaming(lsn, walPosition));
+                        null,
+                        startReplicationStreaming(
+                                () -> replicationConnection.startStreaming(lsn, walPosition)));
             } else {
                 LOGGER.info(
                         "No previous LSN found in Kafka, streaming from the latest xlogpos or flushed LSN...");
                 walPosition = new WalPositionLocator();
                 replicationStream.compareAndSet(
-                        null, replicationConnection.startStreaming(walPosition));
+                        null,
+                        startReplicationStreaming(
+                                () -> replicationConnection.startStreaming(walPosition)));
             }
             // Start keep alive thread to prevent connection timeout during time-consuming
             // operations the DB side. Use monitored executor to detect keep-alive failures.
@@ -305,11 +315,13 @@ public class PostgresStreamingChangeEventSource
                 walPosition.enableFiltering();
                 keepAliveStopping = true;
                 stream.stopKeepAlive();
-                replicationConnection.reconnect();
-                cacheReplicationJdbcConnection();
                 replicationStream.set(
-                        replicationConnection.startStreaming(
-                                walPosition.getLastEventStoredLsn(), walPosition));
+                        startReplicationStreaming(
+                                () -> {
+                                    replicationConnection.reconnect();
+                                    return replicationConnection.startStreaming(
+                                            walPosition.getLastEventStoredLsn(), walPosition);
+                                }));
                 stream = this.replicationStream.get();
                 keepAliveFailure = false;
                 keepAliveError = null;
@@ -347,6 +359,7 @@ public class PostgresStreamingChangeEventSource
             if (offsetContext != null) {
                 cleanUpConnectionOnStop(
                         connection,
+                        abortableConnection,
                         replicationConnection,
                         !forcedShutdown && !isInPreSnapshotCatchUpStreaming(offsetContext));
             }
@@ -356,11 +369,12 @@ public class PostgresStreamingChangeEventSource
 
     static void cleanUpConnectionOnStop(
             JdbcConnection connection,
+            AbortableConnection abortableConnection,
             ReplicationConnection replicationConnection,
             boolean commitConnection) {
         if (commitConnection) {
             try {
-                connection.commit();
+                commitJdbcConnection(connection, abortableConnection);
             } catch (Exception e) {
                 LOGGER.debug("Exception while committing the connection during cleanup", e);
             }
@@ -378,11 +392,36 @@ public class PostgresStreamingChangeEventSource
         }
     }
 
+    private ReplicationStream startReplicationStreaming(StreamingStarter starter)
+            throws SQLException, InterruptedException {
+        replicationConnectionStartupInProgress = true;
+        try {
+            cacheReplicationJdbcConnection();
+            ReplicationStream stream = starter.start();
+            // startStreaming() can replace a connection while retrying internally.
+            cacheReplicationJdbcConnection();
+            return stream;
+        } finally {
+            replicationConnectionStartupInProgress = false;
+        }
+    }
+
     private void commitJdbcConnection() throws SQLException {
+        commitJdbcConnection(connection, abortableConnection);
+    }
+
+    private static void commitJdbcConnection(
+            JdbcConnection connection, AbortableConnection abortableConnection)
+            throws SQLException {
         Connection raw = abortableConnection.capture(connection, true);
         if (!raw.getAutoCommit()) {
             raw.commit();
         }
+    }
+
+    @FunctionalInterface
+    private interface StreamingStarter {
+        ReplicationStream start() throws SQLException, InterruptedException;
     }
 
     static final class AbortableConnection {
@@ -412,6 +451,56 @@ public class PostgresStreamingChangeEventSource
             abortExecutor = executor;
             if (connection != null) {
                 connection.abort(executor);
+            }
+        }
+
+        void abortConnectionsOpenedWhile(
+                JdbcConnection jdbcConnection, BooleanSupplier operationInProgress) {
+            if (!operationInProgress.getAsBoolean()) {
+                return;
+            }
+
+            Thread monitor =
+                    new Thread(
+                            () -> {
+                                while (operationInProgress.getAsBoolean()) {
+                                    try {
+                                        abortCurrentConnectionIfConnected(jdbcConnection);
+                                    } catch (SQLException e) {
+                                        LOGGER.debug(
+                                                "Exception while monitoring a replication connection during forced shutdown",
+                                                e);
+                                    }
+                                    try {
+                                        TimeUnit.MILLISECONDS.sleep(10);
+                                    } catch (InterruptedException e) {
+                                        Thread.currentThread().interrupt();
+                                        return;
+                                    }
+                                }
+                            },
+                            "postgres-replication-abort-monitor");
+            monitor.setDaemon(true);
+            monitor.start();
+        }
+
+        private void abortCurrentConnectionIfConnected(JdbcConnection jdbcConnection)
+                throws SQLException {
+            Connection current;
+            synchronized (jdbcConnection) {
+                if (!jdbcConnection.isConnected()) {
+                    return;
+                }
+                current = jdbcConnection.connection(false);
+            }
+            synchronized (this) {
+                if (connection == current) {
+                    return;
+                }
+                connection = current;
+                if (abortExecutor != null) {
+                    current.abort(abortExecutor);
+                }
             }
         }
 
