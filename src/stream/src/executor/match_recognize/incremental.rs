@@ -238,7 +238,9 @@ pub struct IncrementalMatcher {
     /// set, absence of a match from `provisional()` is NOT evidence of absence: the executor must
     /// re-derive (fresh budget) before any decision that treats missing matches as decided — the
     /// WITHIN-deadline prune in particular would otherwise delete rows carrying a match the
-    /// truncated scan never reached.
+    /// truncated scan never reached. Also left set by [`IncrementalMatcher::finalize_evicted_prefix`]
+    /// when it rebases across a truncated scan: the found prefix is dropped there, so the tail is
+    /// then the empty prefix — still a leftmost-prefix under-approximation of the truth.
     incomplete: bool,
     /// Absolute buffer position where a budget-truncated match scan will resume. Unlike
     /// `matchless_upto`, this may follow successful matches: the corresponding leftmost-prefix of
@@ -325,8 +327,9 @@ impl IncrementalMatcher {
         self.freeze_truncated = false;
     }
 
-    /// Whether the last rescan was truncated by a spent budget — see the field doc. While true,
-    /// `provisional()` is a leftmost-prefix under-approximation.
+    /// Whether the last rescan was truncated by a spent budget, or an eviction rebase dropped the
+    /// found prefix of one — see the field doc. While true, `provisional()` is a leftmost-prefix
+    /// under-approximation.
     pub fn is_incomplete(&self) -> bool {
         self.incomplete
     }
@@ -772,8 +775,27 @@ impl IncrementalMatcher {
         self.dead_upto = self.next_pos;
         self.matchless_upto = self.next_pos;
         self.scan_cursor = self.next_pos;
-        self.incomplete = false;
-        self.freeze_truncated = false;
+        // A truncated SCAN is not forgotten. The unscanned suffix survives the eviction untouched,
+        // so `incomplete` still holds for it; clearing the flag would turn partial information into
+        // a completed-scan verdict, and the deadline prune — which treats a missing match as
+        // decided-absent once the tail counts as complete — would then delete the rows of every
+        // match the truncated scan never reached (#27197). The found prefix of that scan goes with
+        // the cursor: `scan_cursor` was just reset to `next_pos`, so a retained prefix would be
+        // re-found and duplicated by the resumed pull. Dropping it leaves the simplest state that
+        // keeps `incomplete`'s leftmost-prefix meaning (the empty prefix), and the next refresh
+        // re-derives the surviving suffix under a fresh budget — as an arrival's `advance` already
+        // does after any rebase. A truncated FREEZE alone leaves a complete tail: keep both the tail
+        // and the flag, and the resumed freeze re-walks from the reset `dead_upto`. Neither can
+        // spin: every `Rebased` evicted at least one row (`consume_prefix` returns on `upto == 0`),
+        // and between rebases each visit's fresh budget resumes where the previous one stopped.
+        if self.incomplete {
+            self.matched.truncate(self.frozen_count);
+            self.freeze_truncated = false;
+        }
+        debug_assert!(
+            !self.incomplete || self.matched.len() == self.frozen_count,
+            "a truncated scan must not retain a provisional prefix across a rebase"
+        );
         self.seq_index.drain(..final_pos);
         Finalized::Rebased
     }
@@ -2847,5 +2869,217 @@ mod tests {
                 assert_matches_batch(&inc, &nfa, &skip, &full_rows, evicted, fed, &ctx).await;
             }
         }
+    }
+
+    /// Shared driver for the "incomplete scan survives an eviction" regressions (the P1
+    /// follow-up from the review of #26584). Pattern `a{n} b*`, `PAST LAST ROW`, seq == position:
+    ///
+    /// ```text
+    ///   [a × 2n]                    visit 1: (0,n) freezes, (n,2n) stays provisional
+    ///   [a × (n-1), x] × k          visit 2: every start in a run walks to its `x` and dies —
+    ///   [a × n]                     Θ(n²) per run, more than two visits' budgets can cover, so the
+    ///                               match `h` at the very end is never reached
+    /// ```
+    ///
+    /// Drives the exact executor sequence: the truncated `advance`, the watermark visit's
+    /// `refresh` (fresh budget, still truncated), then the emission of the frozen match through
+    /// `finalize_evicted_prefix` at `final_pos == next_pos` — the only boundary the executor
+    /// produces. Returns the rebased matcher, the automaton, and the rows that survive eviction.
+    async fn truncated_tail_then_consume_frozen(
+        n: usize,
+        k: usize,
+        budget_per_visit: usize,
+    ) -> (IncrementalMatcher, Nfa, Vec<BTreeSet<String>>) {
+        let a_n = quant(
+            Pattern::Var("a".into()),
+            Quantifier::Range {
+                min: n as u32,
+                max: Some(n as u32),
+            },
+            false,
+        );
+        let b_star = quant(Pattern::Var("b".into()), Quantifier::Star, false);
+        let nfa = Nfa::compile(&Pattern::Concat(vec![a_n, b_star]));
+        assert_eq!(
+            nfa.max_match_rows(),
+            None,
+            "the test needs a cyclic automaton"
+        );
+
+        let a = || sets(&["a"]);
+        let x = || sets(&["x"]);
+        let mut rows: Vec<BTreeSet<String>> = vec![a(); 2 * n];
+        for _ in 0..k {
+            rows.extend(std::iter::repeat_n(a(), n - 1));
+            rows.push(x());
+        }
+        let h_start = rows.len();
+        rows.extend(std::iter::repeat_n(a(), n));
+        let skip = SkipMode::PastLastRow;
+        let matcher = SetMatcher::new(rows.clone());
+        let mut inc = IncrementalMatcher::new(std::sync::Arc::new(nfa.clone()), skip);
+
+        // Visit 1: feed the two blocks; let the freeze of (0,n) converge across as many
+        // budget-truncated visits as it needs (the freeze walks alone cost Θ(n²)).
+        let seqs: Vec<Seq> = (0..2 * n as i64).map(Seq).collect();
+        let mut budget = ScanBudget::new(budget_per_visit);
+        inc.advance(&seqs, &matcher, &mut budget, true)
+            .await
+            .unwrap();
+        let mut visits = 1;
+        while inc.needs_refresh() {
+            assert!(visits < 16, "setup: the first freeze did not converge");
+            budget = ScanBudget::new(budget_per_visit);
+            inc.refresh(&matcher, &mut budget, true).await.unwrap();
+            visits += 1;
+        }
+        assert_eq!(inc.frozen(), 1, "setup: (0,n) must be frozen");
+        assert_eq!(inc.resume_pos(), n);
+        assert!(!inc.is_incomplete());
+
+        // Visit 2: the near-miss runs and `h` arrive. The scan resumes at `n`, re-finds (n,2n),
+        // then burns the budget inside the runs.
+        let seqs: Vec<Seq> = (2 * n as i64..rows.len() as i64).map(Seq).collect();
+        budget = ScanBudget::new(budget_per_visit);
+        inc.advance(&seqs, &matcher, &mut budget, true)
+            .await
+            .unwrap();
+        assert!(
+            budget.hit && inc.is_incomplete(),
+            "setup: k too small to truncate"
+        );
+        assert_eq!(
+            inc.frozen(),
+            1,
+            "a truncated scan must not unfreeze anything"
+        );
+
+        // The watermark visit refreshes with a fresh budget before deciding anything — and is
+        // still cut short inside the runs.
+        budget = ScanBudget::new(budget_per_visit);
+        inc.refresh(&matcher, &mut budget, true).await.unwrap();
+        assert!(
+            inc.is_incomplete(),
+            "setup: k too small — the refresh completed the scan"
+        );
+        let found: Vec<i64> = inc.provisional().iter().map(|m| m.start_seq.0).collect();
+        assert!(
+            !found.contains(&(h_start as i64)),
+            "setup: `h` must still be undiscovered, found starts {found:?}"
+        );
+
+        // `emit_ready` emits the frozen (0,n) and `consume_prefix` evicts `[0, n)`; the boundary is
+        // the resume position, so this is the executor's `final_pos == next_pos` rebase.
+        assert!(matches!(
+            inc.finalize_evicted_prefix(Seq(n as i64)),
+            Finalized::Rebased
+        ));
+        (inc, nfa, rows[n..].to_vec())
+    }
+
+    /// After the rebase the unscanned suffix survives untouched, so the matcher must still ask
+    /// for a refresh: `needs_refresh()` is the only thing standing between `prune_dead_prefix`
+    /// (which treats a missing match as decided-absent once the tail counts as complete) and the
+    /// rows of `h`. On the buggy code the rebase clears `incomplete`, the executor skips the
+    /// refresh, and a WITHIN prune can delete `h`'s rows before any visit ever scans them.
+    ///
+    /// The regression pins the GATE, not the deletion: the state-table loss happens in
+    /// `prune_dead_prefix`, which acts on `is_incomplete()` — an executor-level reproduction
+    /// under the production budget is not reliably constructible, because per-chunk budgets and
+    /// the matchless-forever memory spread the scan work across arrivals.
+    async fn assert_incomplete_survives_rebase(n: usize, k: usize, budget_per_visit: usize) {
+        let (mut inc, nfa, surviving) =
+            truncated_tail_then_consume_frozen(n, k, budget_per_visit).await;
+        let matcher = SetMatcher::new(surviving.clone());
+
+        // A from-scratch scan over exactly the rows the executor still holds: the ground truth
+        // the deadline prune assumes `provisional()` to equal.
+        let truth = batch_triples(&nfa, &SkipMode::PastLastRow, &surviving).await;
+        let h_new_start = surviving.len() - n;
+        assert!(
+            truth.iter().any(|(s, _, _)| *s == h_new_start),
+            "oracle sanity: `h` is a match over the surviving rows"
+        );
+        let offset = n as i64;
+        let held: Vec<(usize, usize)> = inc
+            .provisional()
+            .iter()
+            .map(|m| {
+                (
+                    (m.start_seq.0 - offset) as usize,
+                    (m.end_seq.0 - offset) as usize,
+                )
+            })
+            .collect();
+        assert!(
+            !held.iter().any(|(s, _)| *s == h_new_start),
+            "the matcher does not know `h` yet: {held:?}"
+        );
+
+        // THE BUG: partial information must not become a completed-scan verdict.
+        assert!(
+            inc.needs_refresh(),
+            "an eviction must not clear a truncated scan: the matcher holds {} of {} matches \
+             over the surviving rows yet reports no refresh needed",
+            held.len(),
+            truth.len()
+        );
+
+        // And the recovery valve must still converge to the truth under fresh budgets.
+        let mut visits = 0;
+        while inc.needs_refresh() {
+            assert!(visits < 64, "the resumed scan did not converge");
+            let mut budget = ScanBudget::new(budget_per_visit);
+            inc.refresh(&matcher, &mut budget, true).await.unwrap();
+            visits += 1;
+        }
+        let final_triples: Vec<(usize, usize, Vec<String>)> = inc
+            .provisional()
+            .iter()
+            .map(|m| {
+                (
+                    (m.start_seq.0 - offset) as usize,
+                    (m.end_seq.0 - offset) as usize,
+                    m.labels.clone(),
+                )
+            })
+            .collect();
+        assert_eq!(final_triples, truth);
+    }
+
+    /// Small, fast shape of the P1 regression: `a{8} b*`, a 400-step budget.
+    #[tokio::test]
+    async fn incomplete_scan_survives_eviction_of_frozen_prefix() {
+        assert_incomplete_survives_rebase(8, 24, 400).await;
+    }
+
+    /// The reviewer's shape: the legal `a{834} b*` under the production budget (`2^20`
+    /// evaluations per visit). Each near-miss run costs Θ(834²) — about one visit's budget at
+    /// today's charging (one unit per predicate, consume edge and ε-edge; three per row) — so six
+    /// runs outlast the truncated `advance` and the refresh that follows with a 2× margin even if
+    /// the charging ever drops to one unit per row. Only the O(1) invariant is asserted here: the
+    /// oracle and the convergence loop cost ~15M budget units at this scale and prove nothing the
+    /// small shape above does not.
+    #[tokio::test]
+    async fn incomplete_scan_survives_eviction_under_production_budget() {
+        let (mut inc, _nfa, surviving) = truncated_tail_then_consume_frozen(834, 6, 1 << 20).await;
+        assert!(
+            inc.needs_refresh() && inc.is_incomplete(),
+            "an eviction must not clear a truncated scan"
+        );
+        assert_eq!(
+            inc.provisional().len(),
+            0,
+            "the found prefix is dropped with its cursor"
+        );
+        // One fresh-budget refresh must make progress from the empty tail (it re-finds the block
+        // that was provisional before the rebase, which now starts the surviving buffer).
+        let matcher = SetMatcher::new(surviving);
+        let mut budget = ScanBudget::new(1 << 20);
+        inc.refresh(&matcher, &mut budget, true).await.unwrap();
+        assert!(
+            !inc.provisional().is_empty(),
+            "the resumed scan made no progress"
+        );
     }
 }
