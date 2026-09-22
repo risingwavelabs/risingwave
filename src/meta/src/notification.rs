@@ -16,7 +16,7 @@ use anyhow::anyhow;
 use futures::future::join_all;
 use tokio::sync::oneshot;
 
-use crate::{MetaError, MetaResult};
+use crate::MetaResult;
 
 pub(crate) type CollectionReceiver = oneshot::Receiver<MetaResult<()>>;
 pub(crate) type StartReceiver = oneshot::Receiver<MetaResult<Vec<CollectionReceiver>>>;
@@ -58,10 +58,6 @@ impl Notifier {
             pending_collection: vec![],
         }
     }
-
-    pub fn notify_start_failed(self, err: MetaError) {
-        self.started.send(Err(err)).ok();
-    }
 }
 
 /// Builds the set of completion notifications before publishing that the operation has started.
@@ -81,10 +77,6 @@ impl NotifierStarter {
     pub fn started(self) {
         self.started.send(Ok(self.pending_collection)).ok();
     }
-
-    pub fn notify_start_failed(self, err: MetaError) {
-        self.started.send(Err(err)).ok();
-    }
 }
 
 /// Notifies the completion of one part of a started operation.
@@ -96,11 +88,6 @@ pub(crate) struct CollectionNotifier {
 impl CollectionNotifier {
     pub fn notify_collected(self) {
         self.collected.send(Ok(())).ok();
-    }
-
-    /// Notify when one part failed. This function consumes `self`.
-    pub fn notify_collection_failed(self, err: MetaError) {
-        self.collected.send(Err(err)).ok();
     }
 }
 
@@ -149,23 +136,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_waits_for_all_collection_notifiers_after_failure() {
-        let (notifier, started_rx) = Notifier::new();
-        let mut start = notifier.start();
-        let first = start.add_notify();
-        let second = start.add_notify();
-        start.started();
-
-        let receivers = started_rx.await.unwrap().unwrap();
-        let mut wait = Box::pin(wait_collection(receivers));
-        first.notify_collection_failed(anyhow!("first part failed").into());
-        assert!(timeout(Duration::from_millis(10), &mut wait).await.is_err());
-        second.notify_collection_failed(anyhow!("second part failed").into());
-        let err = wait.await.unwrap_err();
-        assert!(err.to_string().contains("first part failed"));
-    }
-
-    #[tokio::test]
     async fn test_dropped_collection_notifier_fails() {
         let (notifier, started_rx) = Notifier::new();
         let mut start = notifier.start();
@@ -175,24 +145,6 @@ mod tests {
 
         let receivers = started_rx.await.unwrap().unwrap();
         assert!(wait_collection(receivers).await.is_err());
-    }
-
-    #[tokio::test]
-    async fn test_start_failure() {
-        let (notifier, started_rx) = Notifier::new();
-        notifier.notify_start_failed(anyhow!("start failed").into());
-        assert!(started_rx.await.unwrap().is_err());
-    }
-
-    #[tokio::test]
-    async fn test_start_failure_after_entering_start_phase() {
-        let (notifier, started_rx) = Notifier::new();
-        let mut start = notifier.start();
-        let collection = start.add_notify();
-        start.notify_start_failed(anyhow!("start failed").into());
-
-        assert!(started_rx.await.unwrap().is_err());
-        collection.notify_collected();
     }
 
     #[tokio::test]
