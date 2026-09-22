@@ -116,7 +116,7 @@ mod tests {
 
     use super::*;
     use crate::barrier::RescheduleContext;
-    use crate::barrier::notifier::Notifier;
+    use crate::notification::Notifier;
     #[tokio::test]
     async fn test_reschedule_intent_without_workers_notifies_start_failed() {
         let env = MetaSrvEnv::for_test().await;

@@ -25,6 +25,7 @@ use risingwave_expr::expr::{
 };
 use risingwave_expr::expr_context::TIME_ZONE;
 use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::time::Instant;
 use tokio_stream::wrappers::UnboundedReceiverStream;
 
 use crate::executor::monitor::StreamingMetrics;
@@ -43,8 +44,6 @@ pub struct NowExecutor<S: StateStore> {
     state_table: StateTable<S>,
 
     progress_ratio: Option<f32>,
-
-    barrier_interval_ms: u32,
 
     /// Metrics for observing the streaming `NOW()` clock and its drift from wall time.
     metrics: Arc<StreamingMetrics>,
@@ -79,7 +78,6 @@ impl<S: StateStore> NowExecutor<S> {
         barrier_receiver: UnboundedReceiver<Barrier>,
         state_table: StateTable<S>,
         progress_ratio: Option<f32>,
-        barrier_interval_ms: u32,
         streaming_metrics: Arc<StreamingMetrics>,
         fragment_id: FragmentId,
     ) -> Self {
@@ -90,7 +88,6 @@ impl<S: StateStore> NowExecutor<S> {
             barrier_receiver,
             state_table,
             progress_ratio,
-            barrier_interval_ms,
             metrics: streaming_metrics,
             fragment_id,
         }
@@ -105,17 +102,13 @@ impl<S: StateStore> NowExecutor<S> {
             barrier_receiver,
             mut state_table,
             progress_ratio,
-            barrier_interval_ms,
             metrics,
             fragment_id,
         } = self;
 
         let mut executor_metrics = None;
 
-        info!(
-            "NowExecutor started. progress_ratio: {:?}, barrier_interval_ms: {:?}",
-            progress_ratio, barrier_interval_ms
-        );
+        info!("NowExecutor started. progress_ratio: {:?}", progress_ratio);
 
         let max_chunk_size = crate::config::chunk_size();
 
@@ -126,6 +119,9 @@ impl<S: StateStore> NowExecutor<S> {
 
         // Whether the first barrier is handled and `last_timestamp` is initialized.
         let mut initialized = false;
+        // The monotonic time when the previous barrier batch was handled. The initial barrier
+        // establishes the baseline, excluding downtime before actor startup from catch-up.
+        let mut last_barrier_time = None;
 
         let mut mode_vars = match &mode {
             NowMode::UpdateCurrent => ModeVars::UpdateCurrent,
@@ -147,6 +143,10 @@ impl<S: StateStore> NowExecutor<S> {
         for barriers in
             UnboundedReceiverStream::new(barrier_receiver).ready_chunks(MAX_MERGE_BARRIER_SIZE)
         {
+            let barrier_time = Instant::now();
+            let elapsed = last_barrier_time
+                .replace(barrier_time)
+                .map(|last| barrier_time.saturating_duration_since(last));
             let mut curr_timestamp_datum: Datum = None;
             // Wall-clock reference derived from the most recently processed barrier's epoch.
             // Used to observe how far the streaming NOW() lags real time.
@@ -193,22 +193,23 @@ impl<S: StateStore> NowExecutor<S> {
                     && progress_ratio > 1.0
                 {
                     let last_timestamp = datum.as_timestamptz();
-                    // curr_timestamp = min(last_timestamp + barrier_interval * progress_ratio, timestamp from epoch)
+                    // curr_timestamp = min(last_timestamp + elapsed * progress_ratio, timestamp from epoch)
                     // to avoid having a big gap between the last timestamp and the current timestamp,
                     // which may cause excessive changes in downstream dynamic filter
+                    let elapsed_ms = elapsed.map_or(0.0, |elapsed| elapsed.as_secs_f64() * 1000.0);
                     let progress_timestamp = last_timestamp
                         .timestamp_millis()
-                        .checked_add((barrier_interval_ms as f32 * progress_ratio).ceil() as i64)
+                        .checked_add((elapsed_ms * f64::from(progress_ratio)).ceil() as i64)
                         .expect("progress_timestamp is out of i64 range");
                     let adjusted_timestamp = if progress_timestamp
                         < new_timestamp.timestamp_millis()
                     {
                         debug!(
-                            "adjusted next now timestamp from {} to {}. curr_epoch: {}, barrier_interval_ms: {}, progress_ratio: {}",
+                            "adjusted next now timestamp from {} to {}. curr_epoch: {}, elapsed_ms: {}, progress_ratio: {}",
                             new_timestamp.timestamp_millis(),
                             progress_timestamp,
                             curr_epoch,
-                            barrier_interval_ms,
+                            elapsed_ms,
                             progress_ratio
                         );
                         Timestamptz::from_millis(progress_timestamp)
@@ -378,6 +379,8 @@ pub fn build_add_interval_expr(
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
     use risingwave_common::test_prelude::StreamChunkTestExt;
     use risingwave_common::types::test_utils::IntervalTestExt;
@@ -605,7 +608,7 @@ mod tests {
         TIME_ZONE::scope("UTC".to_owned(), test_now_generate_series_inner()).await
     }
 
-    #[tokio::test]
+    #[tokio::test(start_paused = true)]
     async fn test_now_with_progress_ratio() -> StreamExecutorResult<()> {
         let state_store = create_state_store();
         let progress_ratio = Some(2.0);
@@ -646,9 +649,10 @@ mod tests {
         );
 
         // Send next barrier at epoch 5000 (timestamp 2021-04-01T00:00:00.005Z)
-        // With progress_ratio = 2.0 and barrier_interval_ms = 1000,
+        // With progress_ratio = 2.0 and one second of elapsed time,
         // adjusted timestamp should be: 1 + (1000 * 2.0) = 2001ms = 2021-04-01T00:00:02.001Z
         // Since 2001 < 5000, the adjusted timestamp should be used
+        tokio::time::advance(Duration::from_secs(1)).await;
         tx.send(Barrier::with_prev_epoch_for_test(
             test_epoch(5000),
             test_epoch(1),
@@ -683,8 +687,9 @@ mod tests {
         );
 
         // Send another barrier at epoch 10000 (timestamp 2021-04-01T00:00:00.010Z)
-        // With progress_ratio = 2.0, adjusted timestamp should be: 2001 + (1000 * 2.0) = 4001ms
+        // With another second elapsed, the adjusted timestamp should be 4001ms.
         // Since 4001 < 10000, the adjusted timestamp should be used again
+        tokio::time::advance(Duration::from_secs(1)).await;
         tx.send(Barrier::with_prev_epoch_for_test(
             test_epoch(10000),
             test_epoch(5000),
@@ -719,8 +724,9 @@ mod tests {
         );
 
         // Send another barrier at epoch 15 (timestamp 2021-04-01T00:00:00.015Z)
-        // With progress_ratio = 2.0, adjusted timestamp should be: 4001 + (1000 * 2.0) = 6001ms
+        // With another second elapsed, the adjusted timestamp should be 6001ms.
         // Since 6001 < 15, the adjusted timestamp should be used
+        tokio::time::advance(Duration::from_secs(1)).await;
         tx.send(Barrier::with_prev_epoch_for_test(
             test_epoch(15000),
             test_epoch(10000),
@@ -755,8 +761,9 @@ mod tests {
         );
 
         // Now send a barrier at epoch 20 (timestamp 2021-04-01T00:00:00.020Z)
-        // With progress_ratio = 2.0, adjusted timestamp should be: 6001 + (1000 * 2.0) = 8001ms
+        // With another second elapsed, the adjusted timestamp should be 8001ms.
         // Since 8001 < 20, the adjusted timestamp should be used
+        tokio::time::advance(Duration::from_secs(1)).await;
         tx.send(Barrier::with_prev_epoch_for_test(
             test_epoch(20000),
             test_epoch(15000),
@@ -792,8 +799,9 @@ mod tests {
 
         // Test case where epoch timestamp is smaller than adjusted timestamp
         // Send barrier at epoch 25 (timestamp 2021-04-01T00:00:00.025Z)
-        // Adjusted timestamp would be: 8001 + (1000 * 2.0) = 10001ms = 2021-04-01T00:00:10.001Z
+        // After another second, the adjusted timestamp would be 10001ms.
         // Since 10001 < 25, use adjusted timestamp
+        tokio::time::advance(Duration::from_secs(1)).await;
         tx.send(Barrier::with_prev_epoch_for_test(
             test_epoch(25000),
             test_epoch(20000),
@@ -829,8 +837,9 @@ mod tests {
 
         // Finally test when epoch timestamp is larger than adjusted timestamp
         // Send barrier at epoch 30 (timestamp 2021-04-01T00:00:00.030Z)
-        // Adjusted timestamp would be: 10001 + (1000 * 2.0) = 12001ms = 2021-04-01T00:00:12.001Z
+        // After another second, the adjusted timestamp would be 12001ms.
         // Since 12001 < 30, use adjusted timestamp
+        tokio::time::advance(Duration::from_secs(1)).await;
         tx.send(Barrier::with_prev_epoch_for_test(
             test_epoch(30000),
             test_epoch(25000),
@@ -861,6 +870,39 @@ mod tests {
                 0,
                 DataType::Timestamptz,
                 ScalarImpl::Timestamptz("2021-04-01T00:00:12.001Z".parse().unwrap())
+            )
+        );
+
+        Ok(())
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn test_now_progress_ratio_uses_elapsed_time() -> StreamExecutorResult<()> {
+        let state_store = create_state_store();
+        let (tx, mut now) =
+            create_executor_with_progress_ratio(NowMode::UpdateCurrent, &state_store, Some(2.0))
+                .await;
+
+        tx.send(Barrier::new_test_barrier(test_epoch(1))).unwrap();
+        now.next_unwrap_ready_barrier()?;
+        now.next_unwrap_ready_chunk()?;
+        now.next_unwrap_ready_watermark()?;
+
+        tokio::time::advance(Duration::from_secs(5)).await;
+        tx.send(Barrier::with_prev_epoch_for_test(
+            test_epoch(20000),
+            test_epoch(1),
+        ))
+        .unwrap();
+
+        now.next_unwrap_ready_barrier()?;
+        let chunk = now.next_unwrap_ready_chunk()?;
+        assert_eq!(
+            chunk.compact_vis(),
+            StreamChunk::from_pretty(
+                " TZ
+                - 2021-04-01T00:00:00.001Z
+                + 2021-04-01T00:00:10.001Z"
             )
         );
 
@@ -1000,7 +1042,6 @@ mod tests {
             actor_context: ActorContext::for_test(123),
             identity: "NowExecutor".into(),
         };
-        let barrier_interval_ms = 1000;
         let now_executor = NowExecutor::new(
             vec![DataType::Timestamptz],
             mode,
@@ -1008,7 +1049,6 @@ mod tests {
             barrier_receiver,
             state_table,
             progress_ratio,
-            barrier_interval_ms,
             Arc::new(StreamingMetrics::unused()),
             0.into(),
         );
