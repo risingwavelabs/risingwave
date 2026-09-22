@@ -94,10 +94,10 @@ public class SqlServerStreamingChangeEventSource
     private final SqlServerConnection dataConnection;
 
     /**
-     * Cached before the source starts so emergency shutdown never needs to acquire the synchronized
-     * {@link SqlServerConnection} monitor.
+     * Cached and refreshed by the source thread so emergency shutdown never needs to acquire the
+     * synchronized {@link SqlServerConnection} monitor.
      */
-    private final Connection rawDataConnection;
+    private volatile Connection rawDataConnection;
 
     /**
      * A separate connection for retrieving details of the schema changes; without it, adaptive
@@ -109,7 +109,7 @@ public class SqlServerStreamingChangeEventSource
     private final SqlServerConnection metadataConnection;
 
     /** See {@link #rawDataConnection}. */
-    private final Connection rawMetadataConnection;
+    private volatile Connection rawMetadataConnection;
 
     private final EventDispatcher<SqlServerPartition, TableId> dispatcher;
     private final ErrorHandler errorHandler;
@@ -146,10 +146,9 @@ public class SqlServerStreamingChangeEventSource
         this.dataConnection = dataConnection;
         this.metadataConnection = metadataConnection;
         try {
-            this.rawDataConnection = dataConnection.connection(false);
-            this.rawMetadataConnection = metadataConnection.connection(false);
+            refreshRawConnections();
         } catch (SQLException e) {
-            throw new DebeziumException("Failed to cache SQL Server JDBC connections", e);
+            throw new DebeziumException("Failed to cache initial SQL Server JDBC connections", e);
         }
         this.dispatcher = dispatcher;
         this.errorHandler = errorHandler;
@@ -183,9 +182,9 @@ public class SqlServerStreamingChangeEventSource
      * <p>The coordinator invokes this only after graceful shutdown and {@code shutdownNow()} have
      * both timed out. {@link java.sql.Connection#abort(Executor)} closes the driver's network
      * resources without waiting for the blocked operation to finish, allowing the source thread to
-     * unwind and release its SQL Server sessions. The raw handles are cached before streaming
-     * starts so this method does not acquire the {@link SqlServerConnection} monitor, which may
-     * itself be held by a wedged synchronized JDBC operation.
+     * unwind and release its SQL Server sessions. The source thread refreshes the raw handles
+     * before each iteration so this method does not acquire the {@link SqlServerConnection}
+     * monitor, which may itself be held by a wedged synchronized JDBC operation.
      */
     public void forceCloseConnection() {
         LOGGER.warn("Force-aborting SQL Server connections to unblock wedged native I/O");
@@ -204,6 +203,11 @@ public class SqlServerStreamingChangeEventSource
             LOGGER.warn(
                     "Exception while force-aborting SQL Server {} connection", connectionName, e);
         }
+    }
+
+    private void refreshRawConnections() throws SQLException {
+        rawDataConnection = dataConnection.connection();
+        rawMetadataConnection = metadataConnection.connection();
     }
 
     @Override
@@ -281,6 +285,12 @@ public class SqlServerStreamingChangeEventSource
                     streamingExecutionContext.getLastProcessedPosition();
 
             if (context.isRunning()) {
+                // JdbcConnection may transparently replace a closed connection. Refresh the raw
+                // handles from the source thread so emergency shutdown always aborts the
+                // connections used by this iteration without acquiring the JdbcConnection
+                // monitor.
+                refreshRawConnections();
+
                 commitTransaction();
                 final Lsn toLsn =
                         getToLsn(
