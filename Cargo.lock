@@ -13142,7 +13142,7 @@ dependencies = [
 [[package]]
 name = "rdkafka-sys"
 version = "4.9.0+2.10.0"
-source = "git+https://github.com/risingwavelabs/rust-rdkafka?branch=downgrade-zstd#4b4ebb15290e067b53f76fb278cd1e358061e0f8"
+source = "git+https://github.com/risingwavelabs/rust-rdkafka?branch=downgrade-zstd#8e17e2ed9eb65973337f3c7d76281f9e6145d3fc"
 dependencies = [
  "cmake",
  "curl-sys",
