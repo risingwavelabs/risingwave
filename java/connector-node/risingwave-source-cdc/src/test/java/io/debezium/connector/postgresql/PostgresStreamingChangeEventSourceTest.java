@@ -109,7 +109,8 @@ public class PostgresStreamingChangeEventSourceTest {
                 connection,
                 new PostgresStreamingChangeEventSource.AbortableConnection(),
                 replicationConnection(replicationClosed),
-                false);
+                false,
+                true);
 
         assertFalse(connection.committed.get());
         assertTrue(replicationClosed.get());
@@ -124,7 +125,8 @@ public class PostgresStreamingChangeEventSourceTest {
                 connection,
                 new PostgresStreamingChangeEventSource.AbortableConnection(),
                 replicationConnection(replicationClosed),
-                true);
+                true,
+                false);
 
         assertTrue(connection.committed.get());
         assertTrue(replicationClosed.get());
@@ -139,7 +141,11 @@ public class PostgresStreamingChangeEventSourceTest {
         abortableConnection.abort(Runnable::run);
 
         PostgresStreamingChangeEventSource.cleanUpConnectionOnStop(
-                connection, abortableConnection, replicationConnection(replicationClosed), true);
+                connection,
+                abortableConnection,
+                replicationConnection(replicationClosed),
+                true,
+                true);
 
         assertFalse(connection.connected.get());
         assertFalse(connection.committed.get());
@@ -281,6 +287,39 @@ public class PostgresStreamingChangeEventSourceTest {
         assertEquals(2, connectionCount.get());
         assertTrue(oldConnectionAborted.get());
         assertTrue(newConnectionAborted.get());
+    }
+
+    @Test
+    public void nestedStreamingTrackerPreservesGeneralConnectionTracker() throws SQLException {
+        AtomicBoolean generalConnectionTracked = new AtomicBoolean(false);
+        AtomicBoolean streamingConnectionTracked = new AtomicBoolean(false);
+        Connection generalConnection = connection(new AtomicBoolean(false));
+        JdbcConfiguration configuration =
+                JdbcConfiguration.adapt(
+                        Configuration.empty()
+                                .edit()
+                                .with("ApplicationName", PostgresConnection.CONNECTION_GENERAL)
+                                .build());
+        JdbcConnection jdbcConnection =
+                new JdbcConnection(
+                        configuration,
+                        TrackingPostgresConnection.trackingFactory(config -> generalConnection),
+                        "\"",
+                        "\"");
+
+        try (PostgresConnection.ConnectionTrackingScope generalScope =
+                        PostgresConnection.trackConnections(
+                                PostgresConnection.CONNECTION_GENERAL,
+                                ignored -> generalConnectionTracked.set(true));
+                PostgresConnection.ConnectionTrackingScope streamingScope =
+                        PostgresConnection.trackConnections(
+                                PostgresConnection.CONNECTION_STREAMING,
+                                ignored -> streamingConnectionTracked.set(true))) {
+            assertSame(generalConnection, jdbcConnection.connection(false));
+        }
+
+        assertTrue(generalConnectionTracked.get());
+        assertFalse(streamingConnectionTracked.get());
     }
 
     private static ReplicationConnection replicationConnection(AtomicBoolean closed) {

@@ -28,6 +28,7 @@ import io.debezium.DebeziumException;
 import io.debezium.connector.postgresql.connection.LogicalDecodingMessage;
 import io.debezium.connector.postgresql.connection.Lsn;
 import io.debezium.connector.postgresql.connection.PostgresConnection;
+import io.debezium.connector.postgresql.connection.PostgresReplicationConnection;
 import io.debezium.connector.postgresql.connection.ReplicationConnection;
 import io.debezium.connector.postgresql.connection.ReplicationMessage;
 import io.debezium.connector.postgresql.connection.ReplicationMessage.Operation;
@@ -375,7 +376,8 @@ public class PostgresStreamingChangeEventSource
                         connection,
                         abortableConnection,
                         replicationConnection,
-                        !forcedShutdown && !isInPreSnapshotCatchUpStreaming(offsetContext));
+                        !forcedShutdown && !isInPreSnapshotCatchUpStreaming(offsetContext),
+                        forcedShutdown);
             }
             replicationStream.set(null);
         }
@@ -385,7 +387,8 @@ public class PostgresStreamingChangeEventSource
             JdbcConnection connection,
             AbortableConnection abortableConnection,
             ReplicationConnection replicationConnection,
-            boolean commitConnection) {
+            boolean commitConnection,
+            boolean forcedShutdown) {
         if (commitConnection) {
             try {
                 commitJdbcConnection(connection, abortableConnection);
@@ -394,7 +397,14 @@ public class PostgresStreamingChangeEventSource
             }
         }
         try {
-            replicationConnection.close();
+            if (forcedShutdown && replicationConnection instanceof PostgresReplicationConnection) {
+                // Dropping the slot opens another JDBC connection. Forced shutdown must only
+                // release existing resources, otherwise that new connection can wedge after the
+                // one-time abort and prevent the source executor from terminating.
+                ((PostgresReplicationConnection) replicationConnection).close(false);
+            } else {
+                replicationConnection.close();
+            }
         } catch (Exception e) {
             LOGGER.debug("Exception while closing the replication connection", e);
         }

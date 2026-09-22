@@ -124,10 +124,14 @@ public class PostgresConnection extends JdbcConnection {
     protected static ConnectionFactory trackCreatedConnections(ConnectionFactory delegate) {
         return config -> {
             Connection connection = delegate.connect(config);
-            ConnectionTrackingContext context = CONNECTION_TRACKER.get();
-            if (context != null
-                    && context.connectionUsage.equals(config.getString("ApplicationName"))) {
-                context.tracker.capture(connection);
+            String connectionUsage = config.getString("ApplicationName");
+            for (ConnectionTrackingContext context = CONNECTION_TRACKER.get();
+                    context != null;
+                    context = context.previous) {
+                if (context.connectionUsage.equals(connectionUsage)) {
+                    context.tracker.capture(connection);
+                    break;
+                }
             }
             return connection;
         };
@@ -138,7 +142,9 @@ public class PostgresConnection extends JdbcConnection {
         ConnectionTrackingContext previous = CONNECTION_TRACKER.get();
         CONNECTION_TRACKER.set(
                 new ConnectionTrackingContext(
-                        Objects.requireNonNull(connectionUsage), Objects.requireNonNull(tracker)));
+                        Objects.requireNonNull(connectionUsage),
+                        Objects.requireNonNull(tracker),
+                        previous));
         return () -> {
             if (previous == null) {
                 CONNECTION_TRACKER.remove();
@@ -162,10 +168,15 @@ public class PostgresConnection extends JdbcConnection {
     private static final class ConnectionTrackingContext {
         private final String connectionUsage;
         private final ConnectionTracker tracker;
+        private final ConnectionTrackingContext previous;
 
-        private ConnectionTrackingContext(String connectionUsage, ConnectionTracker tracker) {
+        private ConnectionTrackingContext(
+                String connectionUsage,
+                ConnectionTracker tracker,
+                ConnectionTrackingContext previous) {
             this.connectionUsage = connectionUsage;
             this.tracker = tracker;
+            this.previous = previous;
         }
     }
 
