@@ -1457,14 +1457,20 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                     if w.col_idx != time_col {
                         continue;
                     }
-                    let mut builder = StreamChunkBuilder::new(chunk_size, schema.data_types());
-                    let mut reported_budget = false;
-                    let mut reported_degradations: Vec<SkipDegradation> = Vec::new();
                     // Only the partitions this watermark can change: those whose earliest
                     // deadline has passed, and those touched since their last visit. See
                     // `WakeupIndex` for why skipping the rest is exact, not approximate.
                     let (due, pending) = wakeups.take_due(&w.val);
+                    if due.is_empty() && pending.is_empty() {
+                        // The idle watermark: nothing to visit, so no builder, no budget, no
+                        // pass — the common case for a watermark tick over many quiet partitions.
+                        debug_check_accounting(&parts, &wakeups, retained_rows);
+                        continue;
+                    }
                     let due_len = due.len();
+                    let mut builder = StreamChunkBuilder::new(chunk_size, schema.data_types());
+                    let mut reported_budget = false;
+                    let mut reported_degradations: Vec<SkipDegradation> = Vec::new();
                     let mut emptied: Vec<OwnedRow> = Vec::new();
                     for (i, pk) in due.into_iter().chain(pending).enumerate() {
                         let Some(run) = parts.get_mut(&pk) else {
@@ -1558,18 +1564,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                     }
                     // The pass no longer iterates every partition, so the gauge is maintained
                     // incrementally here as on the chunk arm; the exact recount is a debug check.
-                    debug_assert_eq!(
-                        retained_rows,
-                        parts.values().map(|r| r.rows.len() as i64).sum::<i64>(),
-                        "retained_rows accounting drifted"
-                    );
-                    // Same footing for the index: every filed key is a live partition filed under
-                    // its first row's deadline, so the index cannot outgrow the partition map.
-                    debug_assert!(
-                        wakeups.check_consistent(&parts).is_ok(),
-                        "wakeup index inconsistent: {:?}",
-                        wakeups.check_consistent(&parts)
-                    );
+                    debug_check_accounting(&parts, &wakeups, retained_rows);
                     metrics.match_recognize_retained_rows.set(retained_rows);
                     metrics
                         .match_recognize_retained_partitions
@@ -1637,6 +1632,30 @@ impl PartitionRun {
             pending: false,
         }
     }
+}
+
+/// Debug-build checks the watermark arm runs on every watermark: the incremental `retained_rows`
+/// against an exact recount, and the wakeup index against the partition map (every filed key is a
+/// live partition filed under its first row's deadline, so the index cannot outgrow the map).
+/// Compiled out in release, where both are `O(partitions)`.
+#[inline]
+fn debug_check_accounting(
+    parts: &hashbrown::HashMap<OwnedRow, PartitionRun>,
+    wakeups: &WakeupIndex,
+    retained_rows: i64,
+) {
+    debug_assert_eq!(
+        retained_rows,
+        parts.values().map(|r| r.rows.len() as i64).sum::<i64>(),
+        "retained_rows accounting drifted"
+    );
+    debug_assert!(
+        wakeups.check_consistent(parts).is_ok(),
+        "wakeup index inconsistent: {:?}",
+        wakeups.check_consistent(parts)
+    );
+    // Release builds: the parameters are unused.
+    let _ = (parts, wakeups, retained_rows);
 }
 
 /// Which partitions a watermark visit can change — so the watermark arm visits only those.
@@ -1735,6 +1754,13 @@ impl WakeupIndex {
         let mut expired = self.due.split_off(&DefaultOrdered(w.clone()));
         std::mem::swap(&mut self.due, &mut expired);
         let due: Vec<OwnedRow> = expired.into_values().flatten().collect();
+        if self.pending.is_empty() {
+            // Nothing to dedupe against and nothing to drain. The `is_empty` test matters:
+            // draining an empty `hashbrown` set still resets its whole control array, which keeps
+            // the capacity of the largest burst it ever held — an `O(capacity)` memset on every
+            // idle watermark, not `O(1)`.
+            return (due, Vec::new());
+        }
         for pk in &due {
             self.pending.remove(pk);
         }
