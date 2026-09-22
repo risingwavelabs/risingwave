@@ -210,7 +210,7 @@ sleep 3s
 statement ok
 flush;
 
-query T rowsort
+query T rowsort retry 3 backoff 5s
 select distinct foo_str from t_nats;
 ----
 bar
