@@ -26,7 +26,7 @@ use super::{
 use crate::error::ErrorCode::BindError;
 use crate::error::Result;
 use crate::optimizer::plan_node::generic::PhysicalPlanRef;
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::{Distribution, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -201,11 +201,13 @@ impl ToBatch for LogicalChangeLog {
 
 impl ToStream for LogicalChangeLog {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<StreamPlanRef> {
-        if self.core.key_indices.is_some() {
-            return Err(BindError("AS CHANGELOG with KEY is not supported yet".to_owned()).into());
-        }
-
         let input = self.input().to_stream(ctx)?;
+        let input = if let Some(key) = &self.core.key_indices {
+            RequiredDist::hash_shard(key).streaming_enforce_if_not_satisfies(input)?
+        } else {
+            input
+        };
+
         let dist = input.distribution();
         let distribution_keys = match dist {
             Distribution::HashShard(distribution_keys)

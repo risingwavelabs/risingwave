@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_pb::stream_plan::ChangeLogNode;
+use risingwave_pb::stream_plan::change_log_node::{Keyed, Mode};
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 
 use super::expr_visitable::ExprVisitable;
@@ -76,9 +77,22 @@ impl_distill_by_unit!(StreamChangeLog, core, "StreamChangeLog");
 
 impl StreamNode for StreamChangeLog {
     fn to_stream_prost_body(&self, _state: &mut BuildFragmentGraphState) -> PbNodeBody {
+        let mode = self.core.key_indices.as_ref().map(|key| {
+            Mode::Keyed(Keyed {
+                stream_keys: self
+                    .core
+                    .input
+                    .expect_stream_key()
+                    .iter()
+                    .map(|&index| index as u32)
+                    .collect(),
+                business_keys: key.iter().map(|&index| index as u32).collect(),
+            })
+        });
         PbNodeBody::Changelog(Box::new(ChangeLogNode {
             need_op: self.core.need_op,
             distribution_keys: self.distribution_keys.clone(),
+            mode,
         }))
     }
 }

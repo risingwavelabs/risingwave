@@ -455,9 +455,17 @@ message FilterNode {
 }
 
 message ChangeLogNode {
+  message Keyed {
+    repeated uint32 stream_keys = 1;
+    repeated uint32 business_keys = 2;
+  }
+
   // Whether or not there is an op in the final output.
   bool need_op = 1;
   repeated uint32 distribution_keys = 2;
+  oneof mode {
+    Keyed keyed = 4;
+  }
 }
 
 message CdcFilterNode {

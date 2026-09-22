@@ -13,6 +13,8 @@
   expected_outputs:
   - logical_plan
   - optimized_logical_plan_for_stream
+  - stream_plan
+  - stream_dist_plan
 
 - name: changelog composite key
   sql: |
@@ -21,6 +23,8 @@
   expected_outputs:
   - logical_plan
   - optimized_logical_plan_for_stream
+  - stream_plan
+  - stream_dist_plan
 
 - name: changelog missing key column
   sql: |
