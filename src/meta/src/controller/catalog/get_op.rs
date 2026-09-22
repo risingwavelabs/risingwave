@@ -344,33 +344,83 @@ impl CatalogController {
         Ok(subscription)
     }
 
+    /// Returns subscriptions grouped by their dependent upstream table.
+    ///
+    /// If `database_id` is specified, it filters on the dependent table's database. In
+    /// particular, an implicit cross-database subscription is selected with its upstream
+    /// database even though the subscription object itself belongs to the downstream database.
     pub async fn get_mv_depended_subscriptions(
         &self,
         database_id: Option<DatabaseId>,
-    ) -> MetaResult<HashMap<TableId, HashMap<SubscriptionId, u64>>> {
+    ) -> MetaResult<HashMap<TableId, HashSet<SubscriptionId>>> {
         let inner = self.inner.read().await;
         let select = Subscription::find()
             .select_only()
             .select_column(subscription::Column::SubscriptionId)
-            .select_column(subscription::Column::DependentTableId)
-            .select_column(subscription::Column::RetentionSeconds);
+            .select_column(subscription::Column::DependentTableId);
         let select = if let Some(database_id) = database_id {
             select
-                .join(JoinType::InnerJoin, subscription::Relation::Object.def())
+                .join(
+                    JoinType::InnerJoin,
+                    subscription::Relation::DependentObject.def(),
+                )
                 .filter(object::Column::DatabaseId.eq(database_id))
         } else {
             select
         };
-        let subscription_objs: Vec<(SubscriptionId, TableId, i64)> =
+        let subscription_objs: Vec<(SubscriptionId, TableId)> =
             select.into_tuple().all(&inner.db).await?;
-        let mut map: HashMap<_, HashMap<_, _>> = HashMap::new();
-        // Write object at the same time we write subscription, so we must be able to get obj
-        for (subscription_id, dependent_table_id, retention_seconds) in subscription_objs {
+        let mut map: HashMap<_, HashSet<_>> = HashMap::new();
+        for (subscription_id, dependent_table_id) in subscription_objs {
             map.entry(dependent_table_id)
                 .or_default()
-                .insert(subscription_id, retention_seconds as _);
+                .insert(subscription_id);
         }
         Ok(map)
+    }
+
+    pub async fn get_cross_db_subscriptions_by_job(
+        &self,
+        downstream_job_id: JobId,
+    ) -> MetaResult<Vec<CrossDbSubscriptionInfo>> {
+        let inner = self.inner.read().await;
+        let subscriptions = Subscription::find()
+            .filter(subscription::Column::CrossDbDownstreamJobId.eq(downstream_job_id))
+            .all(&inner.db)
+            .await?;
+        let upstream_objects = Object::find()
+            .filter(
+                object::Column::Oid.is_in(
+                    subscriptions
+                        .iter()
+                        .map(|subscription| subscription.dependent_table_id.as_object_id()),
+                ),
+            )
+            .all(&inner.db)
+            .await?
+            .into_iter()
+            .map(|object| (object.oid, object))
+            .collect::<HashMap<_, _>>();
+
+        subscriptions
+            .into_iter()
+            .map(|subscription| {
+                let upstream_database_id = upstream_objects
+                    .get(&subscription.dependent_table_id.as_object_id())
+                    .and_then(|object| object.database_id)
+                    .ok_or_else(|| {
+                        anyhow!(
+                            "cannot resolve upstream database for cross-database subscription {}",
+                            subscription.subscription_id
+                        )
+                    })?;
+                Ok(CrossDbSubscriptionInfo {
+                    subscription_id: subscription.subscription_id,
+                    upstream_table_id: subscription.dependent_table_id,
+                    upstream_database_id,
+                })
+            })
+            .collect()
     }
 
     pub async fn get_all_table_options(&self) -> MetaResult<HashMap<TableId, TableOption>> {

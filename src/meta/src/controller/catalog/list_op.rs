@@ -308,9 +308,9 @@ impl CatalogController {
         inner.list_sinks().await
     }
 
-    pub async fn list_subscriptions(&self) -> MetaResult<Vec<PbSubscription>> {
+    pub async fn list_user_created_subscriptions(&self) -> MetaResult<Vec<PbSubscription>> {
         let inner = self.inner.read().await;
-        inner.list_subscriptions().await
+        inner.list_user_created_subscriptions().await
     }
 
     pub async fn list_views(&self) -> MetaResult<Vec<PbView>> {

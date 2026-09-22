@@ -19,7 +19,6 @@ use risingwave_pb::common::PbObjectType;
 use risingwave_pb::meta::PbObjectDependency;
 
 use super::*;
-use crate::barrier::SnapshotBackfillInfo;
 
 impl CatalogController {
     pub(crate) async fn create_object(
@@ -207,6 +206,84 @@ impl CatalogController {
         .await?;
         txn.commit().await?;
         Ok(())
+    }
+
+    pub async fn create_cross_db_subscriptions(
+        &self,
+        downstream_job_id: JobId,
+        upstream_table_ids: impl IntoIterator<Item = TableId>,
+    ) -> MetaResult<Vec<CrossDbSubscriptionInfo>> {
+        let inner = self.inner.write().await;
+        let txn = inner.db.begin().await?;
+
+        let downstream_object = Object::find_by_id(downstream_job_id)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| MetaError::catalog_id_not_found("streaming job", downstream_job_id))?;
+        let upstream_table_ids = upstream_table_ids.into_iter().collect::<HashSet<_>>();
+        let mut upstream_objects = Object::find()
+            .filter(
+                object::Column::Oid.is_in(
+                    upstream_table_ids
+                        .iter()
+                        .copied()
+                        .map(TableId::as_object_id),
+                ),
+            )
+            .all(&txn)
+            .await?;
+        if upstream_objects.len() != upstream_table_ids.len() {
+            return Err(MetaError::catalog_id_not_found(
+                "cross-database upstream table",
+                downstream_job_id,
+            ));
+        }
+        upstream_objects.sort_by_key(|object| object.oid);
+
+        let mut subscriptions = Vec::with_capacity(upstream_objects.len());
+        for upstream_object in upstream_objects {
+            if upstream_object.obj_type != ObjectType::Table {
+                return Err(MetaError::invalid_parameter(format!(
+                    "cross-database subscription upstream {} is not a table",
+                    upstream_object.oid
+                )));
+            }
+            let upstream_database_id = upstream_object.database_id.ok_or_else(|| {
+                anyhow!(
+                    "cross-database subscription upstream {} has no database",
+                    upstream_object.oid
+                )
+            })?;
+            let subscription_object = Self::create_object(
+                &txn,
+                ObjectType::Subscription,
+                downstream_object.owner_id,
+                Some(downstream_job_id.as_object_id()),
+            )
+            .await?;
+            let subscription = subscription::Model {
+                subscription_id: subscription_object.oid.as_subscription_id(),
+                name: format!(
+                    "__cross_db_subscription_{}_{}",
+                    downstream_job_id, upstream_object.oid
+                ),
+                retention_seconds: None,
+                definition: String::new(),
+                subscription_state: SubscriptionState::Init as i32,
+                dependent_table_id: upstream_object.oid.as_table_id(),
+                cross_db_downstream_job_id: Some(downstream_job_id),
+            };
+            Subscription::insert(subscription.clone().into_active_model())
+                .exec(&txn)
+                .await?;
+            subscriptions.push(CrossDbSubscriptionInfo {
+                subscription_id: subscription.subscription_id,
+                upstream_table_id: subscription.dependent_table_id,
+                upstream_database_id,
+            });
+        }
+        txn.commit().await?;
+        Ok(subscriptions)
     }
 
     pub async fn create_source(
@@ -620,45 +697,5 @@ impl CatalogController {
         }
 
         Ok(version)
-    }
-
-    pub async fn validate_cross_db_snapshot_backfill(
-        &self,
-        cross_db_snapshot_backfill_info: &SnapshotBackfillInfo,
-    ) -> MetaResult<()> {
-        if cross_db_snapshot_backfill_info
-            .upstream_mv_table_id_to_backfill_epoch
-            .is_empty()
-        {
-            return Ok(());
-        }
-
-        let inner = self.inner.read().await;
-        let table_ids = cross_db_snapshot_backfill_info
-            .upstream_mv_table_id_to_backfill_epoch
-            .keys()
-            .copied()
-            .map_into()
-            .collect_vec();
-        let cnt = Subscription::find()
-            .select_only()
-            .column(subscription::Column::DependentTableId)
-            .distinct()
-            .filter(subscription::Column::DependentTableId.is_in::<TableId, _>(table_ids))
-            .count(&inner.db)
-            .await? as usize;
-
-        if cnt
-            < cross_db_snapshot_backfill_info
-                .upstream_mv_table_id_to_backfill_epoch
-                .keys()
-                .count()
-        {
-            return Err(MetaError::permission_denied(
-                "Some upstream tables are not subscribed".to_owned(),
-            ));
-        }
-
-        Ok(())
     }
 }

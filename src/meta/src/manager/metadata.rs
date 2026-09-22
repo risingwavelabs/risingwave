@@ -637,27 +637,18 @@ impl MetadataManager {
             .await
     }
 
+    /// Returns subscriptions grouped by their dependent upstream table.
+    ///
+    /// When `database_id` is set, it identifies the database of the dependent table, not the
+    /// database that owns the subscription object. This distinction matters for implicit
+    /// subscriptions, whose objects belong to cross-database downstream jobs.
     pub async fn get_mv_depended_subscriptions(
         &self,
         database_id: Option<DatabaseId>,
-    ) -> MetaResult<HashMap<TableId, HashMap<SubscriptionId, u64>>> {
-        Ok(self
-            .catalog_controller
+    ) -> MetaResult<HashMap<TableId, HashSet<SubscriptionId>>> {
+        self.catalog_controller
             .get_mv_depended_subscriptions(database_id)
-            .await?
-            .into_iter()
-            .map(|(table_id, subscriptions)| {
-                (
-                    table_id,
-                    subscriptions
-                        .into_iter()
-                        .map(|(subscription_id, retention_time)| {
-                            (subscription_id as SubscriptionId, retention_time)
-                        })
-                        .collect(),
-                )
-            })
-            .collect())
+            .await
     }
 
     pub async fn get_job_max_parallelism(&self, job_id: JobId) -> MetaResult<usize> {
