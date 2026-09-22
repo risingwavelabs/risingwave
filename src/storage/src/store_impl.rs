@@ -815,11 +815,12 @@ impl StateStoreImpl {
                 if let Err(e) = Feature::ElasticDiskCache.check_available() {
                     tracing::warn!(error = %e.as_report(), "ElasticDiskCache is not available.");
                 } else {
-                    let device = FsDeviceBuilder::new(&opts.meta_file_cache_dir)
+                    let device_builder = FsDeviceBuilder::new(&opts.meta_file_cache_dir)
                         .with_capacity(opts.meta_file_cache_capacity_mb * MB)
-                        .with_throttle(opts.meta_file_cache_throttle.clone())
-                        .build()
-                        .map_err(HummockError::foyer_error)?;
+                        .with_throttle(opts.meta_file_cache_throttle.clone());
+                    #[cfg(target_os = "linux")]
+                    let device_builder = device_builder.with_direct(opts.meta_file_cache_direct_io);
+                    let device = device_builder.build().map_err(HummockError::foyer_error)?;
                     let engine_builder = BlockEngineConfig::new(device)
                         .with_block_size(opts.meta_file_cache_file_capacity_mb * MB)
                         .with_indexer_shards(opts.meta_file_cache_indexer_shards)
@@ -870,11 +871,12 @@ impl StateStoreImpl {
                 if let Err(e) = Feature::ElasticDiskCache.check_available() {
                     tracing::warn!(error = %e.as_report(), "ElasticDiskCache is not available.");
                 } else {
-                    let device = FsDeviceBuilder::new(&opts.data_file_cache_dir)
+                    let device_builder = FsDeviceBuilder::new(&opts.data_file_cache_dir)
                         .with_capacity(opts.data_file_cache_capacity_mb * MB)
-                        .with_throttle(opts.data_file_cache_throttle.clone())
-                        .build()
-                        .map_err(HummockError::foyer_error)?;
+                        .with_throttle(opts.data_file_cache_throttle.clone());
+                    #[cfg(target_os = "linux")]
+                    let device_builder = device_builder.with_direct(opts.data_file_cache_direct_io);
+                    let device = device_builder.build().map_err(HummockError::foyer_error)?;
                     let engine_builder = BlockEngineConfig::new(device)
                         .with_block_size(opts.data_file_cache_file_capacity_mb * MB)
                         .with_indexer_shards(opts.data_file_cache_indexer_shards)

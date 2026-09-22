@@ -371,9 +371,20 @@ pub(super) struct BarrierInfo {
     pub prev_epoch: TracedEpoch,
     pub curr_epoch: TracedEpoch,
     pub kind: BarrierKind,
+    pub barrier_interval_ms: u32,
 }
 
 impl BarrierInfo {
+    pub(super) fn new_initial(prev_epoch: TracedEpoch, barrier_interval_ms: u32) -> Self {
+        let curr_epoch = prev_epoch.next();
+        Self {
+            prev_epoch,
+            curr_epoch,
+            kind: BarrierKind::Initial,
+            barrier_interval_ms,
+        }
+    }
+
     pub(super) fn prev_epoch(&self) -> u64 {
         self.prev_epoch.value().0
     }
@@ -460,6 +471,10 @@ pub struct InflightDatabaseInfo {
 }
 
 impl InflightDatabaseInfo {
+    pub(super) fn job_ids(&self) -> impl Iterator<Item = JobId> + '_ {
+        self.jobs.keys().copied()
+    }
+
     pub fn fragment_infos(&self) -> impl Iterator<Item = &InflightFragmentInfo> + '_ {
         self.jobs.values().flat_map(|job| job.fragment_infos())
     }
@@ -630,8 +645,7 @@ impl InflightDatabaseInfo {
                         info!(%job_id, "newly create job get cancelled before first barrier is collected")
                     }
                 }
-                CreateStreamingJobType::SnapshotBackfill { .. }
-                | CreateStreamingJobType::BatchRefresh(_) => {
+                CreateStreamingJobType::Independent { .. } => {
                     // The progress of SnapshotBackfill/BatchRefresh won't be tracked here
                 }
             }

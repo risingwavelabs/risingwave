@@ -33,6 +33,7 @@ use tokio_stream::wrappers::IntervalStream;
 use tracing::warn;
 
 use crate::backup_restore::BackupManagerRef;
+use crate::hummock::manager::compaction::ScheduleTrigger;
 use crate::hummock::metrics_utils::{trigger_lsm_stat, trigger_mv_stat};
 use crate::hummock::{HummockManager, TASK_NORMAL};
 
@@ -194,26 +195,41 @@ fn spawn_scheduling_loop(
             match event {
                 SchedulingEvent::DynamicCompaction => {
                     hummock_manager
-                        .on_handle_trigger_multi_group(compact_task::TaskType::Dynamic)
+                        .trigger_compaction_for_all_groups(
+                            compact_task::TaskType::Dynamic,
+                            ScheduleTrigger::Periodic,
+                        )
                         .await;
                 }
                 SchedulingEvent::SpaceReclaimCompaction => {
                     hummock_manager
-                        .on_handle_trigger_multi_group(compact_task::TaskType::SpaceReclaim)
+                        .trigger_compaction_for_all_groups(
+                            compact_task::TaskType::SpaceReclaim,
+                            ScheduleTrigger::Periodic,
+                        )
                         .await;
                     // Share the same trigger with SpaceReclaim.
                     hummock_manager
-                        .on_handle_trigger_multi_group(compact_task::TaskType::VnodeWatermark)
+                        .trigger_compaction_for_all_groups(
+                            compact_task::TaskType::VnodeWatermark,
+                            ScheduleTrigger::Periodic,
+                        )
                         .await;
                 }
                 SchedulingEvent::TtlCompaction => {
                     hummock_manager
-                        .on_handle_trigger_multi_group(compact_task::TaskType::Ttl)
+                        .trigger_compaction_for_all_groups(
+                            compact_task::TaskType::Ttl,
+                            ScheduleTrigger::Periodic,
+                        )
                         .await;
                 }
                 SchedulingEvent::TombstoneCompaction => {
                     hummock_manager
-                        .on_handle_trigger_multi_group(compact_task::TaskType::Tombstone)
+                        .trigger_compaction_for_all_groups(
+                            compact_task::TaskType::Tombstone,
+                            ScheduleTrigger::Periodic,
+                        )
                         .await;
                 }
                 SchedulingEvent::GroupSplit => {
@@ -456,11 +472,6 @@ impl HummockManager {
             .compaction_group_count
             .set(compaction_group_count as i64);
 
-        let max_statistic_expired_time = std::cmp::max(
-            self.env.opts.table_stat_throuput_window_seconds_for_split,
-            self.env.opts.table_stat_throuput_window_seconds_for_merge,
-        );
-
         for (group_id, group_levels) in &current_version.levels {
             let Some(compaction_group_config) = id_to_config.get(group_id) else {
                 warn!(
@@ -498,9 +509,8 @@ impl HummockManager {
 
             let mut avg_throughput = 0;
             for table_id in member_table_ids {
-                avg_throughput += table_write_throughput_statistic_manager
-                    .avg_write_throughput(*table_id, max_statistic_expired_time as i64)
-                    as u64;
+                avg_throughput +=
+                    table_write_throughput_statistic_manager.avg_write_throughput(*table_id) as u64;
             }
 
             self.metrics
@@ -699,16 +709,6 @@ impl HummockManager {
         self.on_handle_schedule_group_merge().await;
     }
 
-    async fn on_handle_trigger_multi_group(&self, task_type: compact_task::TaskType) {
-        for cg_id in self.compaction_group_ids().await {
-            self.compaction_state.try_sched_compaction(
-                cg_id,
-                task_type,
-                super::compaction::ScheduleTrigger::Periodic,
-            );
-        }
-    }
-
     /// Try to schedule a compaction merge for the given compaction groups.
     /// The merge will be triggered if the following conditions are met:
     /// 1. The compaction group is not contains creating table.
@@ -750,7 +750,12 @@ impl HummockManager {
                 )
                 .await
             {
-                Ok(_) => candidate += 1,
+                Ok(survivor) => {
+                    // Use the actual survivor and its state at commit, including accumulated
+                    // members and the config update, without rebuilding global statistics.
+                    group_infos[base] = survivor;
+                    candidate += 1;
+                }
                 Err(e) => {
                     tracing::debug!(
                         error = %e.as_report(),

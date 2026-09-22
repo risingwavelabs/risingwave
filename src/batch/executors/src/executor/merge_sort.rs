@@ -18,9 +18,11 @@ use std::sync::Arc;
 use futures_async_stream::try_stream;
 use futures_util::StreamExt;
 use itertools::Itertools;
+use prometheus::core::Atomic;
 use risingwave_common::array::DataChunk;
 use risingwave_common::catalog::Schema;
 use risingwave_common::memory::{MemMonitoredHeap, MemoryContext, MonitoredGlobalAlloc};
+use risingwave_common::metrics::TrAdderAtomic;
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::sort_util::{ColumnOrder, HeapElem};
 use risingwave_common_estimate_size::EstimateSize;
@@ -62,22 +64,17 @@ impl MergeSortExecutor {
             .into_iter()
             .map(|input| input.execute())
             .collect_vec();
-        for (input_idx, input_stream) in input_streams.iter_mut().enumerate() {
-            match input_stream.next().await {
-                Some(chunk) => {
-                    let chunk = chunk?;
-                    self.current_chunks.push(Some(chunk));
-                    if let Some(chunk) = &self.current_chunks[input_idx] {
-                        // We assume that we would always get a non-empty chunk from the upstream of
-                        // exchange, therefore we are sure that there is at least
-                        // one visible row.
-                        let next_row_idx = chunk.next_visible_row_idx(0);
-                        self.push_row_into_heap(input_idx, next_row_idx.unwrap());
-                    }
-                }
-                None => {
-                    self.current_chunks.push(None);
-                }
+        debug_assert!(
+            self.current_chunks.is_empty(),
+            "merge-sort input slots must be empty before execution"
+        );
+        for input_idx in 0..input_streams.len() {
+            self.current_chunks.push(None);
+            // Initial chunks need the same charge as replacements: both are released on retirement.
+            self.get_input_chunk(&mut input_streams, input_idx).await?;
+            if let Some(chunk) = &self.current_chunks[input_idx] {
+                let next_row_idx = chunk.next_visible_row_idx(0);
+                self.push_row_into_heap(input_idx, next_row_idx.unwrap());
             }
         }
 
@@ -144,7 +141,7 @@ impl MergeSortExecutor {
                 assert_ne!(chunk.cardinality(), 0);
                 let new_chunk_size = chunk.estimated_heap_size() as i64;
                 let old = self.current_chunks[input_idx].replace(chunk);
-                self.mem_context.add(new_chunk_size);
+                self.mem_context.add_unchecked(new_chunk_size);
                 old
             }
             None => std::mem::take(&mut self.current_chunks[input_idx]),
@@ -152,7 +149,8 @@ impl MergeSortExecutor {
 
         if let Some(chunk) = old {
             // Reduce the heap size of retired chunk
-            self.mem_context.add(-(chunk.estimated_heap_size() as i64));
+            self.mem_context
+                .add_unchecked(-(chunk.estimated_heap_size() as i64));
         }
 
         Ok(())
@@ -180,6 +178,9 @@ impl MergeSortExecutor {
         chunk_size: usize,
         mem_context: MemoryContext,
     ) -> Self {
+        // Create the private context before allocating either container. Once this executor and
+        // its allocators are dropped, even unfinished chunk and heap charges leave the parent.
+        let mem_context = MemoryContext::new(Some(mem_context), TrAdderAtomic::new(0));
         let inputs_num = inputs.len();
         Self {
             inputs,

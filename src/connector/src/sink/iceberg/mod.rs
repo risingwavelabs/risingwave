@@ -213,6 +213,17 @@ impl Sink for IcebergSink {
 
     crate::impl_validate_sink_unknown_fields!();
 
+    fn is_exactly_once(properties: &BTreeMap<String, String>) -> Result<bool> {
+        let Some(value) = properties.get("is_exactly_once") else {
+            return Ok(true);
+        };
+        value.parse::<bool>().map_err(|_| {
+            SinkError::Config(anyhow!(
+                "invalid value for `is_exactly_once`: expected `true` or `false`, got `{value}`"
+            ))
+        })
+    }
+
     async fn validate(&self) -> Result<()> {
         let catalog_kind = self.config.catalog_kind()?;
         if matches!(catalog_kind, IcebergCatalogKind::Snowflake) {
@@ -232,6 +243,27 @@ impl Sink for IcebergSink {
         )?;
         validate_explicit_compaction_type(&self.config)?;
         validate_compaction_option_compatibility(&self.config)?;
+
+        // VARIANT is not comparable, so it can never be an equality-delete key.
+        if self.config.r#type == SINK_TYPE_UPSERT
+            && !self.config.force_append_only
+            && let Some(pk_indices) = self
+                .param
+                .downstream_pk
+                .as_ref()
+                .filter(|pk| !pk.is_empty())
+        {
+            for &idx in pk_indices {
+                if let Some(column) = self.param.columns.get(idx)
+                    && column.data_type.contains_variant()
+                {
+                    bail!(
+                        "VARIANT column `{}` cannot be used as the primary key of an upsert iceberg sink",
+                        column.name
+                    );
+                }
+            }
+        }
 
         let table = self.create_and_validate_table().await?;
         self.config
@@ -385,7 +417,7 @@ impl Sink for IcebergSink {
             commit_retry_num: self.config.commit_retry_num,
             iceberg_compact_stat_sender,
         };
-        if self.config.is_exactly_once.unwrap_or_default() {
+        if Self::is_exactly_once(&self.param.properties)? {
             Ok(SinkCommitCoordinator::TwoPhase(Box::new(coordinator)))
         } else {
             Ok(SinkCommitCoordinator::SinglePhase(Box::new(coordinator)))

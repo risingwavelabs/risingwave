@@ -70,7 +70,7 @@ impl StreamCdcTableScan {
     /// schema: | `split_id` | `pk...` | `backfill_finished` | `row_count` | `cdc_offset` |
     ///
     /// For parallelized cdc backfill:
-    /// schema: | `split_id` | `pk...` | `backfill_finished` | `row_count` | `cdc_offset_low` | `cdc_offset_high` |
+    /// schema: | `split_id` | `backfill_finished` | `row_count` | `cdc_offset_low` | `cdc_offset_high` |
     pub fn build_backfill_state_catalog(
         &self,
         state: &mut BuildFragmentGraphState,
