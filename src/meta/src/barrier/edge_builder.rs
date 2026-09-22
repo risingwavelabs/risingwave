@@ -502,7 +502,7 @@ impl FragmentEdgeBuilder<AddingRelations> {
         let (dispatchers, upstreams, no_shuffle_map) =
             Self::compose_edge(fragment_id, fragment, downstream, downstream_fragment);
         Self::add_no_shuffle_mapping(
-            &mut self.result,
+            &mut self.actor_new_no_shuffle,
             fragment_id,
             downstream.downstream_fragment_id,
             no_shuffle_map,
@@ -1307,12 +1307,12 @@ mod tests {
         builder.add_existing_fragment_infos([(source, single_info(1)), (target, single_info(11))]);
         let mut mutation = UpdateMutation::default();
 
-        builder
+        let (edges, _) = builder
             .finish_fragments()
             .add_edge(source, &relation(target, DispatcherType::Broadcast))
             .unwrap()
-            .build()
-            .apply_to_update_mutation(&mut mutation);
+            .build();
+        edges.apply_to_update_mutation(&mut mutation);
 
         assert!(mutation.dispatcher_update.is_empty());
         assert_eq!(
