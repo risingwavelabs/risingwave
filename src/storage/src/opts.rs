@@ -89,6 +89,7 @@ pub struct StorageOpts {
     pub shorten_block_meta_key_threshold: Option<usize>,
 
     pub data_file_cache_dir: String,
+    pub data_file_cache_direct_io: bool,
     pub data_file_cache_capacity_mb: usize,
     pub data_file_cache_file_capacity_mb: usize,
     pub data_file_cache_flushers: usize,
@@ -118,6 +119,7 @@ pub struct StorageOpts {
     pub cache_refill_table_cache_refill_default_policy: CacheRefillPolicy,
 
     pub meta_file_cache_dir: String,
+    pub meta_file_cache_direct_io: bool,
     pub meta_file_cache_capacity_mb: usize,
     pub meta_file_cache_file_capacity_mb: usize,
     pub meta_file_cache_flushers: usize,
@@ -256,6 +258,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             max_concurrent_compaction_task_number: c.storage.max_concurrent_compaction_task_number,
             max_version_pinning_duration_sec: c.storage.max_version_pinning_duration_sec,
             data_file_cache_dir: c.storage.data_file_cache.dir.clone(),
+            data_file_cache_direct_io: c.storage.data_file_cache.direct_io,
             data_file_cache_capacity_mb: c.storage.data_file_cache.capacity_mb,
             data_file_cache_file_capacity_mb: c.storage.data_file_cache.file_capacity_mb,
             data_file_cache_flushers: c.storage.data_file_cache.flushers,
@@ -274,6 +277,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             data_file_cache_runtime_config: c.storage.data_file_cache.runtime_config.clone(),
             data_file_cache_throttle,
             meta_file_cache_dir: c.storage.meta_file_cache.dir.clone(),
+            meta_file_cache_direct_io: c.storage.meta_file_cache.direct_io,
             meta_file_cache_capacity_mb: c.storage.meta_file_cache.capacity_mb,
             meta_file_cache_file_capacity_mb: c.storage.meta_file_cache.file_capacity_mb,
             meta_file_cache_flushers: c.storage.meta_file_cache.flushers,
