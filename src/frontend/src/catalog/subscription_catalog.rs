@@ -14,15 +14,12 @@
 
 use risingwave_common::catalog::{TableId, UserId};
 pub use risingwave_common::id::SubscriptionId;
-use risingwave_common::id::{DatabaseId, SchemaId};
+use risingwave_common::id::{DatabaseId, JobId, SchemaId};
 use risingwave_common::util::epoch::Epoch;
 use risingwave_pb::catalog::PbSubscription;
 use risingwave_pb::catalog::subscription::PbSubscriptionState;
 
 use super::OwnedByUserCatalog;
-use crate::WithOptions;
-use crate::error::{ErrorCode, Result};
-use crate::handler::util::convert_interval_to_u64_seconds;
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
 #[cfg_attr(test, derive(Default))]
@@ -37,7 +34,10 @@ pub struct SubscriptionCatalog {
     pub definition: String,
 
     /// The retention seconds of the subscription.
-    pub retention_seconds: u64,
+    pub retention_seconds: Option<u64>,
+
+    /// The downstream job owning an internal cross-database subscription.
+    pub cross_db_downstream_job_id: Option<JobId>,
 
     /// The database id
     pub database_id: DatabaseId,
@@ -68,15 +68,6 @@ pub enum SubscriptionState {
 }
 
 impl SubscriptionCatalog {
-    pub fn set_retention_seconds(&mut self, properties: &WithOptions) -> Result<()> {
-        let retention_seconds_str = properties.get("retention").ok_or_else(|| {
-            ErrorCode::InternalError("Subscription retention time not set.".to_owned())
-        })?;
-        let retention_seconds = convert_interval_to_u64_seconds(retention_seconds_str)?;
-        self.retention_seconds = retention_seconds;
-        Ok(())
-    }
-
     pub fn create_sql(&self) -> String {
         self.definition.clone()
     }
@@ -99,6 +90,7 @@ impl SubscriptionCatalog {
                 SubscriptionState::Init => PbSubscriptionState::Init.into(),
                 SubscriptionState::Created => PbSubscriptionState::Created.into(),
             },
+            cross_db_downstream_job_id: self.cross_db_downstream_job_id,
         }
     }
 }
@@ -110,6 +102,7 @@ impl From<&PbSubscription> for SubscriptionCatalog {
             name: prost.name.clone(),
             definition: prost.definition.clone(),
             retention_seconds: prost.retention_seconds,
+            cross_db_downstream_job_id: prost.cross_db_downstream_job_id,
             database_id: prost.database_id,
             schema_id: prost.schema_id,
             dependent_table_id: prost.dependent_table_id,

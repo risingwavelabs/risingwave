@@ -405,7 +405,7 @@ impl From<ObjectModel<subscription::Model>> for PbSubscription {
             database_id: value.1.database_id.unwrap(),
             name: value.0.name,
             owner: value.1.owner_id as _,
-            retention_seconds: value.0.retention_seconds as _,
+            retention_seconds: value.0.retention_seconds.map(|v| v as _),
             definition: value.0.definition,
             initialized_at_epoch: Some(
                 Epoch::from_unix_millis(datetime_to_timestamp_millis(value.1.initialized_at) as _)
@@ -418,6 +418,7 @@ impl From<ObjectModel<subscription::Model>> for PbSubscription {
             created_at_cluster_version: value.1.created_at_cluster_version,
             dependent_table_id: value.0.dependent_table_id,
             subscription_state: value.0.subscription_state as _,
+            cross_db_downstream_job_id: value.0.cross_db_downstream_job_id,
         }
     }
 }
