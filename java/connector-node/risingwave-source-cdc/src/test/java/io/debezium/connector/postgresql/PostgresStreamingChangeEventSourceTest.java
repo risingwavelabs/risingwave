@@ -24,22 +24,24 @@ import static org.junit.Assert.assertTrue;
 
 import io.debezium.config.Configuration;
 import io.debezium.connector.postgresql.connection.PostgresConnection;
-import io.debezium.connector.postgresql.connection.ReplicationConnection;
 import io.debezium.jdbc.JdbcConfiguration;
 import io.debezium.jdbc.JdbcConnection;
 import java.lang.reflect.Proxy;
 import java.sql.Connection;
 import java.sql.SQLException;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.AbstractExecutorService;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
-import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicReference;
-import org.apache.kafka.connect.errors.ConnectException;
 import org.junit.Test;
 
 public class PostgresStreamingChangeEventSourceTest {
@@ -101,66 +103,68 @@ public class PostgresStreamingChangeEventSourceTest {
     }
 
     @Test
-    public void cleanupSkipsCommitAfterForcedShutdown() {
+    public void cleanupSkipsCommitAndSlotDropAfterForcedShutdown() throws SQLException {
         TestJdbcConnection connection = new TestJdbcConnection(false);
-        AtomicBoolean replicationClosed = new AtomicBoolean(false);
+        PostgresStreamingChangeEventSource.ConnectionAbortRegistry registry =
+                new PostgresStreamingChangeEventSource.ConnectionAbortRegistry();
+        AtomicBoolean dropSlot = new AtomicBoolean(true);
+        registry.abortAll(Runnable::run);
 
         PostgresStreamingChangeEventSource.cleanUpConnectionOnStop(
-                connection,
-                new PostgresStreamingChangeEventSource.AbortableConnection(),
-                replicationConnection(replicationClosed),
-                false,
-                true);
+                connection, registry, dropSlot::set, true);
 
+        assertFalse(connection.connected.get());
         assertFalse(connection.committed.get());
-        assertTrue(replicationClosed.get());
+        assertFalse(dropSlot.get());
     }
 
     @Test
     public void cleanupClosesReplicationConnectionWhenCommitFails() {
         TestJdbcConnection connection = new TestJdbcConnection(true);
+        PostgresStreamingChangeEventSource.ConnectionAbortRegistry registry =
+                new PostgresStreamingChangeEventSource.ConnectionAbortRegistry();
         AtomicBoolean replicationClosed = new AtomicBoolean(false);
+        AtomicBoolean dropSlot = new AtomicBoolean(false);
 
         PostgresStreamingChangeEventSource.cleanUpConnectionOnStop(
                 connection,
-                new PostgresStreamingChangeEventSource.AbortableConnection(),
-                replicationConnection(replicationClosed),
-                true,
-                false);
+                registry,
+                shouldDropSlot -> {
+                    replicationClosed.set(true);
+                    dropSlot.set(shouldDropSlot);
+                },
+                true);
 
         assertTrue(connection.committed.get());
         assertTrue(replicationClosed.get());
+        assertTrue(dropSlot.get());
     }
 
     @Test
-    public void cleanupDoesNotReconnectAfterForcedShutdown() throws SQLException {
-        TestJdbcConnection connection = new TestJdbcConnection(false);
-        PostgresStreamingChangeEventSource.AbortableConnection abortableConnection =
-                new PostgresStreamingChangeEventSource.AbortableConnection();
-        AtomicBoolean replicationClosed = new AtomicBoolean(false);
-        abortableConnection.abort(Runnable::run);
+    public void cleanupRechecksForcedShutdownAfterCommit() {
+        PostgresStreamingChangeEventSource.ConnectionAbortRegistry registry =
+                new PostgresStreamingChangeEventSource.ConnectionAbortRegistry();
+        TestJdbcConnection connection =
+                new TestJdbcConnection(false, () -> registry.abortAll(Runnable::run));
+        AtomicBoolean dropSlot = new AtomicBoolean(true);
 
         PostgresStreamingChangeEventSource.cleanUpConnectionOnStop(
-                connection,
-                abortableConnection,
-                replicationConnection(replicationClosed),
-                true,
-                true);
+                connection, registry, dropSlot::set, true);
 
-        assertFalse(connection.connected.get());
-        assertFalse(connection.committed.get());
-        assertTrue(replicationClosed.get());
+        assertTrue(connection.committed.get());
+        assertTrue(connection.aborted.get());
+        assertFalse(dropSlot.get());
     }
 
     @Test
     public void forcedShutdownAbortsConnectionPublishedDuringStartup() throws SQLException {
-        PostgresStreamingChangeEventSource.AbortableConnection connection =
-                new PostgresStreamingChangeEventSource.AbortableConnection();
+        PostgresStreamingChangeEventSource.ConnectionAbortRegistry registry =
+                new PostgresStreamingChangeEventSource.ConnectionAbortRegistry();
         AtomicBoolean aborted = new AtomicBoolean(false);
 
-        connection.abort(Runnable::run);
+        registry.abortAll(Runnable::run);
         try {
-            connection.capture(connection(aborted));
+            registry.capture(connection(aborted));
             throw new AssertionError("Expected connection capture to reject forced shutdown");
         } catch (SQLException expected) {
             assertEquals("Connection opened during forced shutdown", expected.getMessage());
@@ -171,12 +175,12 @@ public class PostgresStreamingChangeEventSourceTest {
 
     @Test
     public void forcedShutdownDoesNotReconnectDuringStartup() throws SQLException {
-        PostgresStreamingChangeEventSource.AbortableConnection connection =
-                new PostgresStreamingChangeEventSource.AbortableConnection();
+        PostgresStreamingChangeEventSource.ConnectionAbortRegistry registry =
+                new PostgresStreamingChangeEventSource.ConnectionAbortRegistry();
 
-        connection.abort(Runnable::run);
+        registry.abortAll(Runnable::run);
         try {
-            connection.capture(new TestJdbcConnection(false), true);
+            registry.capture(new TestJdbcConnection(false), true);
             throw new AssertionError("Expected connection capture to reject forced shutdown");
         } catch (SQLException expected) {
             assertEquals("Connection requested during forced shutdown", expected.getMessage());
@@ -184,155 +188,166 @@ public class PostgresStreamingChangeEventSourceTest {
     }
 
     @Test
-    public void forcedShutdownAbortsLatestConnectionAfterReconnect() throws SQLException {
-        PostgresStreamingChangeEventSource.AbortableConnection connection =
-                new PostgresStreamingChangeEventSource.AbortableConnection();
-        AtomicBoolean oldConnectionAborted = new AtomicBoolean(false);
-        AtomicBoolean currentConnectionAborted = new AtomicBoolean(false);
+    public void forcedShutdownAbortsEveryTrackedConnection() throws SQLException {
+        PostgresStreamingChangeEventSource.ConnectionAbortRegistry registry =
+                new PostgresStreamingChangeEventSource.ConnectionAbortRegistry();
+        AtomicBoolean firstConnectionAborted = new AtomicBoolean(false);
+        AtomicBoolean secondConnectionAborted = new AtomicBoolean(false);
 
-        connection.capture(connection(oldConnectionAborted));
-        connection.capture(connection(currentConnectionAborted));
-        connection.abort(Runnable::run);
+        registry.capture(connection(firstConnectionAborted));
+        registry.capture(connection(secondConnectionAborted));
+        registry.abortAll(Runnable::run);
 
-        assertFalse(oldConnectionAborted.get());
-        assertTrue(currentConnectionAborted.get());
+        assertTrue(firstConnectionAborted.get());
+        assertTrue(secondConnectionAborted.get());
     }
 
     @Test
-    public void forcedShutdownAbortsConnectionCreatedDuringStreamingStartup() throws SQLException {
-        PostgresStreamingChangeEventSource.AbortableConnection abortableConnection =
-                new PostgresStreamingChangeEventSource.AbortableConnection();
-        AtomicBoolean oldConnectionAborted = new AtomicBoolean(false);
-        AtomicBoolean newConnectionAborted = new AtomicBoolean(false);
-        Connection oldConnection = connection(oldConnectionAborted);
-        Connection newConnection = connection(newConnectionAborted);
-        AtomicInteger connectionCount = new AtomicInteger();
-        JdbcConfiguration configuration =
-                JdbcConfiguration.adapt(
-                        Configuration.empty()
-                                .edit()
-                                .with("ApplicationName", PostgresConnection.CONNECTION_STREAMING)
-                                .build());
-        JdbcConnection jdbcConnection =
-                new JdbcConnection(
-                        configuration,
-                        TrackingPostgresConnection.trackingFactory(
-                                config ->
-                                        connectionCount.getAndIncrement() == 0
-                                                ? oldConnection
-                                                : newConnection),
-                        "\"",
-                        "\"");
+    public void trackerCapturesEveryPostgresConnectionUsage() throws SQLException {
+        PostgresStreamingChangeEventSource.ConnectionAbortRegistry registry =
+                new PostgresStreamingChangeEventSource.ConnectionAbortRegistry();
+        List<AtomicBoolean> aborted = new ArrayList<>();
+        List<String> connectionUsages =
+                Arrays.asList(
+                        PostgresConnection.CONNECTION_GENERAL,
+                        PostgresConnection.CONNECTION_STREAMING,
+                        PostgresConnection.CONNECTION_SLOT_INFO,
+                        PostgresConnection.CONNECTION_DROP_SLOT);
 
         try (PostgresConnection.ConnectionTrackingScope ignored =
-                PostgresConnection.trackConnections(
-                        PostgresConnection.CONNECTION_STREAMING, abortableConnection::capture)) {
-            assertSame(oldConnection, jdbcConnection.connection(false));
-            abortableConnection.abort(Runnable::run);
+                PostgresConnection.trackConnections(registry::capture)) {
+            for (String connectionUsage : connectionUsages) {
+                AtomicBoolean connectionAborted = new AtomicBoolean(false);
+                aborted.add(connectionAborted);
+                Connection rawConnection = connection(connectionAborted);
+                JdbcConnection jdbcConnection =
+                        trackingJdbcConnection(connectionUsage, config -> rawConnection);
+                assertSame(rawConnection, jdbcConnection.connection(false));
+            }
+        }
+
+        registry.abortAll(Runnable::run);
+        for (AtomicBoolean connectionAborted : aborted) {
+            assertTrue(connectionAborted.get());
+        }
+    }
+
+    @Test
+    public void connectionCreatedAfterForcedShutdownIsAborted() throws SQLException {
+        PostgresStreamingChangeEventSource.ConnectionAbortRegistry registry =
+                new PostgresStreamingChangeEventSource.ConnectionAbortRegistry();
+        AtomicBoolean aborted = new AtomicBoolean(false);
+        Connection rawConnection = connection(aborted);
+        JdbcConnection jdbcConnection =
+                trackingJdbcConnection(
+                        PostgresConnection.CONNECTION_SLOT_INFO, config -> rawConnection);
+
+        registry.abortAll(Runnable::run);
+
+        try (PostgresConnection.ConnectionTrackingScope ignored =
+                PostgresConnection.trackConnections(registry::capture)) {
             try {
                 jdbcConnection.connection(false);
-                throw new AssertionError("Expected a replacement connection to be rejected");
+                throw new AssertionError("Expected a new connection to be rejected");
             } catch (SQLException expected) {
                 assertEquals("Connection opened during forced shutdown", expected.getMessage());
             }
         }
 
-        assertEquals(2, connectionCount.get());
-        assertTrue(oldConnectionAborted.get());
-        assertTrue(newConnectionAborted.get());
+        assertTrue(aborted.get());
     }
 
     @Test
-    public void forcedShutdownAbortsGeneralConnectionCreatedDuringProbe() throws SQLException {
-        PostgresStreamingChangeEventSource.AbortableConnection abortableConnection =
-                new PostgresStreamingChangeEventSource.AbortableConnection();
-        AtomicBoolean oldConnectionAborted = new AtomicBoolean(false);
-        AtomicBoolean newConnectionAborted = new AtomicBoolean(false);
-        Connection oldConnection = connection(oldConnectionAborted);
-        Connection newConnection = connection(newConnectionAborted);
-        AtomicInteger connectionCount = new AtomicInteger();
-        JdbcConfiguration configuration =
-                JdbcConfiguration.adapt(
-                        Configuration.empty()
-                                .edit()
-                                .with("ApplicationName", PostgresConnection.CONNECTION_GENERAL)
-                                .build());
+    public void connectionCreationRacingForcedShutdownIsAborted() throws Exception {
+        PostgresStreamingChangeEventSource.ConnectionAbortRegistry registry =
+                new PostgresStreamingChangeEventSource.ConnectionAbortRegistry();
+        AtomicBoolean aborted = new AtomicBoolean(false);
+        CountDownLatch connectStarted = new CountDownLatch(1);
+        CountDownLatch allowConnectToFinish = new CountDownLatch(1);
         JdbcConnection jdbcConnection =
-                new JdbcConnection(
-                        configuration,
-                        TrackingPostgresConnection.trackingFactory(
-                                config ->
-                                        connectionCount.getAndIncrement() == 0
-                                                ? oldConnection
-                                                : newConnection),
-                        "\"",
-                        "\"");
+                trackingJdbcConnection(
+                        PostgresConnection.CONNECTION_SLOT_INFO,
+                        config -> {
+                            connectStarted.countDown();
+                            try {
+                                if (!allowConnectToFinish.await(10, TimeUnit.SECONDS)) {
+                                    throw new SQLException("Timed out waiting to finish connect");
+                                }
+                            } catch (InterruptedException e) {
+                                Thread.currentThread().interrupt();
+                                throw new SQLException("Interrupted while connecting", e);
+                            }
+                            return connection(aborted);
+                        });
+        ExecutorService executor = Executors.newSingleThreadExecutor();
 
-        try (PostgresConnection.ConnectionTrackingScope ignored =
-                PostgresConnection.trackConnections(
-                        PostgresConnection.CONNECTION_GENERAL, abortableConnection::capture)) {
-            assertSame(oldConnection, jdbcConnection.connection(false));
-            abortableConnection.abort(Runnable::run);
+        try {
+            Future<?> connectionFuture =
+                    executor.submit(
+                            () -> {
+                                try (PostgresConnection.ConnectionTrackingScope ignored =
+                                        PostgresConnection.trackConnections(registry::capture)) {
+                                    jdbcConnection.connection(false);
+                                }
+                                return null;
+                            });
+
+            assertTrue(connectStarted.await(10, TimeUnit.SECONDS));
+            registry.abortAll(Runnable::run);
+            allowConnectToFinish.countDown();
+
             try {
-                jdbcConnection.prepareQuery("SELECT 1");
-                throw new AssertionError("Expected a replacement connection to be rejected");
-            } catch (ConnectException expected) {
+                connectionFuture.get(10, TimeUnit.SECONDS);
+                throw new AssertionError("Expected racing connection to be rejected");
+            } catch (ExecutionException expected) {
                 assertTrue(expected.getCause() instanceof SQLException);
                 assertEquals(
                         "Connection opened during forced shutdown",
                         expected.getCause().getMessage());
             }
+            assertTrue(aborted.get());
+        } finally {
+            allowConnectToFinish.countDown();
+            executor.shutdownNow();
         }
-
-        assertEquals(2, connectionCount.get());
-        assertTrue(oldConnectionAborted.get());
-        assertTrue(newConnectionAborted.get());
     }
 
     @Test
-    public void nestedStreamingTrackerPreservesGeneralConnectionTracker() throws SQLException {
-        AtomicBoolean generalConnectionTracked = new AtomicBoolean(false);
-        AtomicBoolean streamingConnectionTracked = new AtomicBoolean(false);
-        Connection generalConnection = connection(new AtomicBoolean(false));
+    public void nestedTrackerRestoresOuterTracker() throws SQLException {
+        AtomicBoolean outerTracked = new AtomicBoolean(false);
+        AtomicBoolean innerTracked = new AtomicBoolean(false);
+        JdbcConnection innerConnection =
+                trackingJdbcConnection(
+                        PostgresConnection.CONNECTION_STREAMING,
+                        config -> connection(new AtomicBoolean(false)));
+        JdbcConnection outerConnection =
+                trackingJdbcConnection(
+                        PostgresConnection.CONNECTION_GENERAL,
+                        config -> connection(new AtomicBoolean(false)));
+
+        try (PostgresConnection.ConnectionTrackingScope outerScope =
+                PostgresConnection.trackConnections(ignored -> outerTracked.set(true))) {
+            try (PostgresConnection.ConnectionTrackingScope innerScope =
+                    PostgresConnection.trackConnections(ignored -> innerTracked.set(true))) {
+                innerConnection.connection(false);
+            }
+            outerConnection.connection(false);
+        }
+
+        assertTrue(innerTracked.get());
+        assertTrue(outerTracked.get());
+    }
+
+    private static JdbcConnection trackingJdbcConnection(
+            String connectionUsage, JdbcConnection.ConnectionFactory factory) {
         JdbcConfiguration configuration =
                 JdbcConfiguration.adapt(
                         Configuration.empty()
                                 .edit()
-                                .with("ApplicationName", PostgresConnection.CONNECTION_GENERAL)
+                                .with("ApplicationName", connectionUsage)
                                 .build());
-        JdbcConnection jdbcConnection =
-                new JdbcConnection(
-                        configuration,
-                        TrackingPostgresConnection.trackingFactory(config -> generalConnection),
-                        "\"",
-                        "\"");
-
-        try (PostgresConnection.ConnectionTrackingScope generalScope =
-                        PostgresConnection.trackConnections(
-                                PostgresConnection.CONNECTION_GENERAL,
-                                ignored -> generalConnectionTracked.set(true));
-                PostgresConnection.ConnectionTrackingScope streamingScope =
-                        PostgresConnection.trackConnections(
-                                PostgresConnection.CONNECTION_STREAMING,
-                                ignored -> streamingConnectionTracked.set(true))) {
-            assertSame(generalConnection, jdbcConnection.connection(false));
-        }
-
-        assertTrue(generalConnectionTracked.get());
-        assertFalse(streamingConnectionTracked.get());
-    }
-
-    private static ReplicationConnection replicationConnection(AtomicBoolean closed) {
-        return (ReplicationConnection)
-                Proxy.newProxyInstance(
-                        ReplicationConnection.class.getClassLoader(),
-                        new Class<?>[] {ReplicationConnection.class},
-                        (proxy, method, args) -> {
-                            if (method.getName().equals("close")) {
-                                closed.set(true);
-                            }
-                            return null;
-                        });
+        return new JdbcConnection(
+                configuration, TrackingPostgresConnection.trackingFactory(factory), "\"", "\"");
     }
 
     private static Connection connection(AtomicBoolean aborted) {
@@ -356,26 +371,45 @@ public class PostgresStreamingChangeEventSourceTest {
     private static class TestJdbcConnection extends JdbcConnection {
         private final AtomicBoolean connected;
         private final AtomicBoolean committed;
+        private final AtomicBoolean aborted;
 
         TestJdbcConnection(boolean failCommit) {
-            this(new AtomicBoolean(false), new AtomicBoolean(false), failCommit);
+            this(failCommit, () -> {});
+        }
+
+        TestJdbcConnection(boolean failCommit, SqlAction onCommit) {
+            this(
+                    new AtomicBoolean(false),
+                    new AtomicBoolean(false),
+                    new AtomicBoolean(false),
+                    failCommit,
+                    onCommit);
         }
 
         private TestJdbcConnection(
-                AtomicBoolean connected, AtomicBoolean committed, boolean failCommit) {
+                AtomicBoolean connected,
+                AtomicBoolean committed,
+                AtomicBoolean aborted,
+                boolean failCommit,
+                SqlAction onCommit) {
             super(
                     JdbcConfiguration.empty(),
                     config -> {
                         connected.set(true);
-                        return commitConnection(committed, failCommit);
+                        return commitConnection(committed, aborted, failCommit, onCommit);
                     },
                     "\"",
                     "\"");
             this.connected = connected;
             this.committed = committed;
+            this.aborted = aborted;
         }
 
-        private static Connection commitConnection(AtomicBoolean committed, boolean failCommit) {
+        private static Connection commitConnection(
+                AtomicBoolean committed,
+                AtomicBoolean aborted,
+                boolean failCommit,
+                SqlAction onCommit) {
             return (Connection)
                     Proxy.newProxyInstance(
                             Connection.class.getClassLoader(),
@@ -383,10 +417,15 @@ public class PostgresStreamingChangeEventSourceTest {
                             (proxy, method, args) -> {
                                 switch (method.getName()) {
                                     case "isClosed":
+                                        return aborted.get();
                                     case "getAutoCommit":
                                         return false;
+                                    case "abort":
+                                        aborted.set(true);
+                                        return null;
                                     case "commit":
                                         committed.set(true);
+                                        onCommit.run();
                                         if (failCommit) {
                                             throw new SQLException("commit failed");
                                         }
@@ -396,6 +435,11 @@ public class PostgresStreamingChangeEventSourceTest {
                                 }
                             });
         }
+    }
+
+    @FunctionalInterface
+    private interface SqlAction {
+        void run() throws SQLException;
     }
 
     private static class TrackingPostgresConnection extends PostgresConnection {

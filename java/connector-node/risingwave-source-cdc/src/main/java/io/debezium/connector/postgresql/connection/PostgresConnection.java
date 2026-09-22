@@ -101,6 +101,8 @@ public class PostgresConnection extends JdbcConnection {
     // JdbcConnection has no passive accessor for its cached connection. Publish new connections
     // from the factory so forced shutdown can abort them without calling connection() and possibly
     // reconnecting. The tracker is thread-scoped because connection establishment is synchronous.
+    // Track every PostgreSQL connection created by the source thread, including short-lived slot
+    // inspection and cleanup connections.
     private static final ThreadLocal<ConnectionTrackingContext> CONNECTION_TRACKER =
             new ThreadLocal<>();
 
@@ -124,27 +126,18 @@ public class PostgresConnection extends JdbcConnection {
     protected static ConnectionFactory trackCreatedConnections(ConnectionFactory delegate) {
         return config -> {
             Connection connection = delegate.connect(config);
-            String connectionUsage = config.getString("ApplicationName");
-            for (ConnectionTrackingContext context = CONNECTION_TRACKER.get();
-                    context != null;
-                    context = context.previous) {
-                if (context.connectionUsage.equals(connectionUsage)) {
-                    context.tracker.capture(connection);
-                    break;
-                }
+            ConnectionTrackingContext context = CONNECTION_TRACKER.get();
+            if (context != null) {
+                context.tracker.capture(connection);
             }
             return connection;
         };
     }
 
-    public static ConnectionTrackingScope trackConnections(
-            String connectionUsage, ConnectionTracker tracker) {
+    public static ConnectionTrackingScope trackConnections(ConnectionTracker tracker) {
         ConnectionTrackingContext previous = CONNECTION_TRACKER.get();
         CONNECTION_TRACKER.set(
-                new ConnectionTrackingContext(
-                        Objects.requireNonNull(connectionUsage),
-                        Objects.requireNonNull(tracker),
-                        previous));
+                new ConnectionTrackingContext(Objects.requireNonNull(tracker), previous));
         return () -> {
             if (previous == null) {
                 CONNECTION_TRACKER.remove();
@@ -166,15 +159,11 @@ public class PostgresConnection extends JdbcConnection {
     }
 
     private static final class ConnectionTrackingContext {
-        private final String connectionUsage;
         private final ConnectionTracker tracker;
         private final ConnectionTrackingContext previous;
 
         private ConnectionTrackingContext(
-                String connectionUsage,
-                ConnectionTracker tracker,
-                ConnectionTrackingContext previous) {
-            this.connectionUsage = connectionUsage;
+                ConnectionTracker tracker, ConnectionTrackingContext previous) {
             this.tracker = tracker;
             this.previous = previous;
         }
