@@ -167,6 +167,7 @@ pub struct StreamingMetrics {
     match_recognize_scan_budget_exhausted_count: RelabeledGuardedIntCounterVec,
     match_recognize_within_deadline_overflow_count: RelabeledGuardedIntCounterVec,
     match_recognize_retained_rows: RelabeledAggregatedIntGaugeVec,
+    match_recognize_retained_partitions: RelabeledAggregatedIntGaugeVec,
 
     /// The duration from receipt of barrier to all actors collection.
     /// The max of all nodes' `barrier_inflight_latency` for a partial graph is the latency for a
@@ -1064,6 +1065,15 @@ impl StreamingMetrics {
         .unwrap()
         .relabel_debug_1_with_aggregation(level, GaugeAggregation::Sum);
 
+        let match_recognize_retained_partitions = register_guarded_int_gauge_vec_with_registry!(
+            "stream_match_recognize_retained_partitions",
+            "Partitions currently held in memory by the match recognize executor, including emptied entries awaiting the next watermark sweep",
+            &["actor_id", "table_id", "fragment_id"],
+            registry
+        )
+        .unwrap()
+        .relabel_debug_1_with_aggregation(level, GaugeAggregation::Sum);
+
         let barrier_inflight_latency = register_guarded_histogram_vec_with_registry!(
             "stream_barrier_inflight_duration_seconds",
             "barrier_inflight_latency",
@@ -1592,6 +1602,7 @@ impl StreamingMetrics {
             match_recognize_scan_budget_exhausted_count,
             match_recognize_within_deadline_overflow_count,
             match_recognize_retained_rows,
+            match_recognize_retained_partitions,
             barrier_inflight_latency,
             barrier_sync_latency,
             barrier_batch_size,
@@ -2001,6 +2012,9 @@ impl StreamingMetrics {
             match_recognize_retained_rows: self
                 .match_recognize_retained_rows
                 .with_guarded_label_values(label_list),
+            match_recognize_retained_partitions: self
+                .match_recognize_retained_partitions
+                .with_guarded_label_values(label_list),
         }
     }
 
@@ -2179,6 +2193,10 @@ pub struct MatchRecognizeMetrics {
     /// by match liveness and `WITHIN`, so this gauge is the one signal of a partition set growing
     /// toward memory exhaustion (a pattern whose closer never arrives retains its rows forever).
     pub match_recognize_retained_rows: RelabeledAggregatedIntGauge,
+    /// Partitions currently held in memory, emptied entries included. The watermark pass visits
+    /// only the partitions it can change, so an entry nothing reaches any more would be invisible
+    /// to `retained_rows` (it holds no rows); this gauge is where such a leak would show.
+    pub match_recognize_retained_partitions: RelabeledAggregatedIntGauge,
 }
 
 #[derive(Clone)]
@@ -2399,6 +2417,7 @@ mod tests {
                 &metrics.group_top_n_appendonly_cached_entry_count,
                 &metrics.group_top_n_cached_entry_count,
                 &metrics.lookup_cached_entry_count,
+                &metrics.match_recognize_retained_partitions,
                 &metrics.match_recognize_retained_rows,
                 &metrics.over_window_cached_entry_count,
                 &metrics.over_window_range_cache_entry_count,
