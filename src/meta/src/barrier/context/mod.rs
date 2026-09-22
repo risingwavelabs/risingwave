@@ -44,7 +44,7 @@ use crate::manager::iceberg_compaction::IcebergCompactionManagerRef;
 use crate::manager::iceberg_pk_index_sink::{
     IcebergPkIndexPreCommitMetadata, IcebergPkIndexSinkManager,
 };
-use crate::manager::sink_coordination::SinkCoordinatorManager;
+use crate::manager::sink_coordination::{RecoveryStart, SinkCoordinatorManager};
 use crate::manager::{MetaSrvEnv, MetadataManager};
 use crate::serving::ServingVnodeMappingRef;
 use crate::stream::source_manager::SplitAssignment;
@@ -90,12 +90,12 @@ pub(super) trait GlobalBarrierWorkerContext: Send + Sync + 'static {
     ) -> impl Future<Output = MetaResult<HummockVersionStats>> + Send + '_;
 
     async fn next_scheduled(&self) -> Scheduled;
-    fn abort_and_mark_blocked(
+    async fn abort_and_mark_blocked(
         &self,
-        database_id: Option<DatabaseId>,
+        recovery: RecoveryStart,
         recovery_reason: RecoveryReason,
-    );
-    fn mark_ready(&self, options: MarkReadyOptions);
+    ) -> MetaResult<()>;
+    async fn mark_ready(&self, options: MarkReadyOptions) -> MetaResult<()>;
     fn resolve_log_store_epoch<'a>(
         &'a self,
         upstream_table_ids: impl Iterator<Item = TableId> + Send + 'a,

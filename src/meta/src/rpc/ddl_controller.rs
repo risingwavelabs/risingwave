@@ -1474,6 +1474,7 @@ impl DdlController {
             removed_iceberg_sink_ids,
             removed_iceberg_pk_index_sink_ids,
         } = release_ctx;
+        let removed_job_ids_for_sink_coordinators = removed_streaming_job_ids.clone();
 
         // Notify serving module about deleted fragments so it can clean up serving vnode mappings.
         // This is driven by the fragment model deletion (cascade from Object::delete_many),
@@ -1516,11 +1517,6 @@ impl DdlController {
             .await;
 
         // clean up iceberg table sinks
-        let iceberg_sink_ids: Vec<SinkId> = removed_iceberg_table_sinks
-            .iter()
-            .map(|sink| sink.id)
-            .collect();
-
         for sink in removed_iceberg_table_sinks {
             let sink_param = SinkParam::try_from_sink_catalog(sink.into())
                 .expect("Iceberg sink should be valid");
@@ -1546,10 +1542,10 @@ impl DdlController {
             }
         }
 
-        // stop sink coordinators for iceberg table sinks
-        if !iceberg_sink_ids.is_empty() {
+        // stop sink coordinators for dropped streaming jobs
+        if !removed_job_ids_for_sink_coordinators.is_empty() {
             self.sink_manager
-                .stop_sink_coordinator(iceberg_sink_ids)
+                .stop_sink_coordinators_for_jobs(removed_job_ids_for_sink_coordinators)
                 .await;
         }
 
@@ -1564,8 +1560,11 @@ impl DdlController {
         // including user-created sinks with arbitrary names (not just the
         // `__iceberg_sink_%` auto-created ones above).
         if !removed_iceberg_pk_index_sink_ids.is_empty() {
-            self.iceberg_pk_index_sink_manager
-                .unregister_sinks(removed_iceberg_pk_index_sink_ids);
+            self.iceberg_pk_index_sink_manager.unregister_jobs(
+                removed_iceberg_pk_index_sink_ids
+                    .into_iter()
+                    .map(|sink_id| sink_id.as_job_id()),
+            );
         }
 
         // remove secrets.
