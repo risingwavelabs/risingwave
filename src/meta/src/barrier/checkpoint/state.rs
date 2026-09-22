@@ -1621,9 +1621,7 @@ impl DatabaseCheckpointControl {
                                 }
                             }
                             let (edges, _) = edge_builder.build();
-                            edges.apply_to_update_mutation(
-                                update_mutation.get_or_insert_default(),
-                            );
+                            edges.apply_to_update_mutation(update_mutation.get_or_insert_default());
                             started_consuming_upstream_jobs.insert(job_id);
                         }
                     }
