@@ -72,11 +72,11 @@ impl PlanTreeNodeUnary<Logical> for LogicalChangeLog {
         input: PlanRef,
         input_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
-        let key_indices = self.core.key_indices.as_ref().map(|key| {
-            key.iter()
-                .map(|&index| input_col_change.map(index))
-                .collect()
-        });
+        let key_indices = self
+            .core
+            .key_indices
+            .as_ref()
+            .map(|key| input_col_change.map_all(key));
         let changelog = Self::new(input, key_indices, self.core.need_op, true);
 
         let out_col_change = if self.core.need_op {
@@ -121,6 +121,8 @@ impl ColPrunable for LogicalChangeLog {
         let fields = self.schema().fields();
         let mut need_op = false;
         let mut need_changelog_row_id = false;
+        // columns required as input from children,
+        // generated columns like op and event_id are removed
         let mut input_required_cols = required_cols
             .iter()
             .filter_map(|a| {
@@ -140,6 +142,7 @@ impl ColPrunable for LogicalChangeLog {
             })
             .collect_vec();
 
+        // add declared business keys to input request
         if let Some(key) = &self.core.key_indices {
             for &index in key {
                 if !input_required_cols.contains(&index) {
@@ -157,11 +160,13 @@ impl ColPrunable for LogicalChangeLog {
             .core
             .key_indices
             .as_ref()
-            .map(|key| key.iter().map(|&index| input_mapping.map(index)).collect());
+            .map(|key| input_mapping.map_all(key));
 
+        // updated plan with new inputs
         let changelog: PlanRef =
             Self::new(new_input, key_indices, need_op, need_changelog_row_id).into();
 
+        // output now contains business keys as well, we need to hide it if not requested by the parent
         let (mut output_mapping, new_output_len) = input_mapping.into_parts();
 
         if self.core.need_op {
@@ -175,10 +180,7 @@ impl ColPrunable for LogicalChangeLog {
 
         let output_len = changelog.schema().len();
         let output_mapping = ColIndexMapping::new(output_mapping, output_len);
-        let output_required_cols = required_cols
-            .iter()
-            .map(|&index| output_mapping.map(index))
-            .collect_vec();
+        let output_required_cols = output_mapping.map_all(required_cols);
 
         if output_required_cols.iter().copied().eq(0..output_len) {
             changelog
