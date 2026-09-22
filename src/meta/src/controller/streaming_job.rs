@@ -88,10 +88,11 @@ use crate::controller::fragment::FragmentTypeMaskExt;
 use crate::controller::utils::{
     PartialObject, build_object_group_for_delete, check_if_belongs_to_iceberg_table,
     check_relation_name_duplicate, check_sink_into_table_cycle, ensure_job_not_canceled,
-    ensure_object_id, ensure_user_id, fetch_target_fragments, format_with_option_secret_resolved,
-    get_belong_objects, get_belong_objects_by_ids, get_referring_objects, get_table_columns,
+    ensure_object_id, ensure_user_id, fetch_target_fragments, get_belong_objects,
+    get_belong_objects_by_ids, get_referring_objects, get_table_columns,
     grant_default_privileges_automatically, insert_fragment_relations,
-    list_object_dependencies_by_object_id, list_user_info_by_ids, upsert_user_privileges,
+    list_object_dependencies_by_object_id, list_user_info_by_ids, update_secret_dependencies,
+    update_with_options, upsert_user_privileges,
 };
 use crate::error::MetaErrorInner;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
@@ -2951,16 +2952,15 @@ impl CatalogController {
 
             match &mut stmt {
                 Statement::CreateSource { stmt } => {
-                    let altered_sql_options =
-                        format_with_option_secret_resolved(&txn, &altered_options_with_secret)
-                            .await?;
-                    merge_with_options(&mut stmt.with_properties.0, altered_sql_options);
+                    update_with_options(
+                        &txn,
+                        &mut stmt.with_properties.0,
+                        &altered_options_with_secret,
+                    )
+                    .await?;
                 }
                 Statement::CreateTable { with_options, .. } => {
-                    let altered_sql_options =
-                        format_with_option_secret_resolved(&txn, &altered_options_with_secret)
-                            .await?;
-                    merge_with_options(with_options, altered_sql_options);
+                    update_with_options(&txn, with_options, &altered_options_with_secret).await?;
                     associate_table_id = source.optional_associated_table_id;
                     preferred_id = associate_table_id.unwrap().as_object_id();
                 }
@@ -2970,33 +2970,8 @@ impl CatalogController {
             stmt.to_string()
         };
 
-        {
-            // Update secret dependencies atomically within the transaction.
-            // Add new dependencies for secrets that are newly referenced.
-            if !to_add_secret_dep.is_empty() {
-                ObjectDependency::insert_many(to_add_secret_dep.into_iter().map(|secret_id| {
-                    object_dependency::ActiveModel {
-                        oid: Set(secret_id.into()),
-                        used_by: Set(preferred_id),
-                        ..Default::default()
-                    }
-                }))
-                .exec(&txn)
-                .await?;
-            }
-            // Remove dependencies for secrets that are no longer referenced.
-            // This allows the secrets to be deleted after this source no longer uses them.
-            if !to_remove_secret_dep.is_empty() {
-                let _ = ObjectDependency::delete_many()
-                    .filter(
-                        object_dependency::Column::Oid
-                            .is_in(to_remove_secret_dep)
-                            .and(object_dependency::Column::UsedBy.eq(preferred_id)),
-                    )
-                    .exec(&txn)
-                    .await?;
-            }
-        }
+        update_secret_dependencies(&txn, preferred_id, to_add_secret_dep, to_remove_secret_dep)
+            .await?;
 
         let active_source_model = source::ActiveModel {
             source_id: Set(source_id),
@@ -3373,28 +3348,13 @@ impl CatalogController {
             validate_connection(&connection).await?;
         }
 
-        // Update connection secret dependencies
-        if !to_add_secret_dep.is_empty() {
-            ObjectDependency::insert_many(to_add_secret_dep.into_iter().map(|secret_id| {
-                object_dependency::ActiveModel {
-                    oid: Set(secret_id.into()),
-                    used_by: Set(connection_id.as_object_id()),
-                    ..Default::default()
-                }
-            }))
-            .exec(&txn)
-            .await?;
-        }
-        if !to_remove_secret_dep.is_empty() {
-            let _ = ObjectDependency::delete_many()
-                .filter(
-                    object_dependency::Column::Oid
-                        .is_in(to_remove_secret_dep)
-                        .and(object_dependency::Column::UsedBy.eq(connection_id.as_object_id())),
-                )
-                .exec(&txn)
-                .await?;
-        }
+        update_secret_dependencies(
+            &txn,
+            connection_id.as_object_id(),
+            to_add_secret_dep,
+            to_remove_secret_dep,
+        )
+        .await?;
 
         // Update the connection with new properties
         let updated_connection_params = risingwave_pb::catalog::ConnectionParams {
@@ -3458,27 +3418,13 @@ impl CatalogController {
                     .optional_associated_table_id
                     .map(|table_id| table_id.as_object_id())
                     .unwrap_or_else(|| source_id.as_object_id());
-                if !source_to_add_secret_dep.is_empty() {
-                    ObjectDependency::insert_many(source_to_add_secret_dep.into_iter().map(
-                        |secret_id| object_dependency::ActiveModel {
-                            oid: Set(secret_id.into()),
-                            used_by: Set(source_used_by_id),
-                            ..Default::default()
-                        },
-                    ))
-                    .exec(&txn)
-                    .await?;
-                }
-                if !source_to_remove_secret_dep.is_empty() {
-                    let _ = ObjectDependency::delete_many()
-                        .filter(
-                            object_dependency::Column::Oid
-                                .is_in(source_to_remove_secret_dep)
-                                .and(object_dependency::Column::UsedBy.eq(source_used_by_id)),
-                        )
-                        .exec(&txn)
-                        .await?;
-                }
+                update_secret_dependencies(
+                    &txn,
+                    source_used_by_id,
+                    source_to_add_secret_dep,
+                    source_to_remove_secret_dep,
+                )
+                .await?;
 
                 // Prepare source update
                 let active_source = source::ActiveModel {
@@ -3972,19 +3918,6 @@ fn update_stmt_with_props(
     Ok(())
 }
 
-fn merge_with_options(with_properties: &mut Vec<SqlOption>, altered_options: Vec<SqlOption>) {
-    for altered_option in altered_options {
-        if let Some(existing_option) = with_properties
-            .iter_mut()
-            .find(|option| option.name.real_value() == altered_option.name.real_value())
-        {
-            *existing_option = altered_option;
-        } else {
-            with_properties.push(altered_option);
-        }
-    }
-}
-
 async fn ensure_source_props_not_set_by_connection(
     txn: &DatabaseTransaction,
     source: &source::Model,
@@ -4140,38 +4073,4 @@ where
     }
 
     Ok(())
-}
-
-#[cfg(test)]
-mod tests {
-    use risingwave_sqlparser::ast::{SqlOption, Statement};
-
-    use super::{Parser, merge_with_options};
-
-    #[test]
-    fn test_merge_with_options_normalizes_altered_option_name() {
-        let mut statements = Parser::parse_sql(
-            "CREATE SOURCE s WITH (properties.receive.message.max.bytes = 'old', \
-             connection = kafka_conn) FORMAT PLAIN ENCODE JSON",
-        )
-        .unwrap();
-        let Statement::CreateSource { stmt } = statements.remove(0) else {
-            unreachable!()
-        };
-        let mut with_properties = stmt.with_properties.0;
-        let altered_name = "properties.receive.message.max.bytes".to_owned();
-        let altered_value = "new".to_owned();
-
-        merge_with_options(
-            &mut with_properties,
-            vec![SqlOption::try_from((&altered_name, &altered_value)).unwrap()],
-        );
-
-        assert_eq!(with_properties.len(), 2);
-        assert_eq!(
-            with_properties[0].to_string(),
-            "properties.receive.\"message\".\"max\".bytes = 'new'"
-        );
-        assert_eq!(with_properties[1].to_string(), "connection = kafka_conn");
-    }
 }
