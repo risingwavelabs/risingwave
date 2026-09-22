@@ -1,0 +1,91 @@
+# Structural prune of a partition touched by an arrival, without WITHIN.
+#
+# The watermark pass visits only the partitions a watermark can change: those whose earliest
+# WITHIN deadline has passed, and those touched since their last visit. Without WITHIN a partition
+# has no deadline at all, so the ONLY way its dead rows are ever pruned is the second route — the
+# arrival must mark the partition for the next watermark visit. Match output cannot tell: no match
+# completes either way. So this asserts on the matcher's state table: the two dead rows must be
+# gone after the first watermark that follows their arrival, not retained forever.
+
+control substitution on
+
+statement ok
+set streaming_parallelism = 1;
+
+statement ok
+set rw_implicit_flush to true;
+
+statement ok
+drop materialized view if exists mv_pending;
+
+statement ok
+drop table if exists t;
+
+statement ok
+create table t (id int, ts int, v int, watermark for ts as ts - 1) append only;
+
+statement ok
+create materialized view mv_pending as
+select * from t match_recognize (
+  partition by id
+  order by ts
+  measures b.v as dip
+  one row per match
+  after match skip past last row
+  pattern (a b)
+  define a as a.v > 0, b as b.v < 0
+);
+
+# Partition 1: an `a` (v = 5) at ts = 10 followed by a row that is neither `a` nor `b` (v = 0) at
+# ts = 11. `a`@10 needs `b` as its immediate successor, so once `0`@11 arrives it is structurally
+# dead; `0`@11 matches no variable and is dead on arrival. Both are prunable — but only a watermark
+# visit prunes.
+statement ok
+insert into t values (1, 10, 5), (1, 11, 0);
+
+# A sentinel in partition 8 advances the watermark to 12 (lateness 1): the sort releases both
+# partition-1 rows to the matcher, then the watermark reaches it. The arrival marked partition 1
+# pending, so this watermark visits it and prunes both rows.
+statement ok
+insert into t values (8, 13, 0);
+
+query II rowsort
+select * from mv_pending;
+----
+
+# Nothing retained in the matcher for partition 1. Were the arrival not to mark the partition for
+# a visit, a WITHIN-less partition would never be visited again and the count would be 2. The
+# sentinel `0`@13 is still held by the sort (13 >= watermark 12), so it does not count here.
+let matcher_table
+SELECT name FROM rw_catalog.rw_internal_table_info
+WHERE job_name = 'mv_pending' AND name LIKE '%matchrecognize%'
+
+query I
+select count(*) from ${matcher_table};
+----
+0
+
+# A second sentinel releases `0`@13 (partition 8), which is dead on arrival and pruned by the
+# watermark it rides in on for the same reason.
+statement ok
+insert into t values (9, 16, 0);
+
+query I
+select count(*) from ${matcher_table};
+----
+0
+
+let sort_table
+SELECT name FROM rw_catalog.rw_internal_table_info
+WHERE job_name = 'mv_pending' AND name LIKE '%sort%'
+
+query I
+select count(*) from ${sort_table};
+----
+1
+
+statement ok
+drop materialized view mv_pending;
+
+statement ok
+drop table t;
