@@ -26,12 +26,20 @@ use risingwave_common::util::row_id::ChangelogRowIdGenerator;
 
 use super::{ActorContextRef, BoxedMessageStream, Execute, Executor, Message, StreamExecutorError};
 
+#[derive(Debug)]
+pub enum ChangeLogMode {
+    Normal,
+    Keyed,
+}
+
 pub struct ChangeLogExecutor {
     ctx: ActorContextRef,
     input: Executor,
     need_op: bool,
     all_vnode_count: usize,
+    mode: ChangeLogMode,
     distribution_keys: Vec<usize>,
+    stream_keys: Vec<usize>,
     changelog_row_id_generator: ChangelogRowIdGenerator,
 }
 
@@ -53,7 +61,9 @@ impl ChangeLogExecutor {
         need_op: bool,
         all_vnode_count: usize,
         vnodes: Bitmap,
+        mode: ChangeLogMode,
         distribution_keys: Vec<usize>,
+        stream_keys: Vec<usize>,
     ) -> Self {
         let changelog_row_id_generator = ChangelogRowIdGenerator::new(vnodes, all_vnode_count);
         Self {
@@ -61,13 +71,16 @@ impl ChangeLogExecutor {
             input,
             need_op,
             all_vnode_count,
+            mode,
             distribution_keys,
+            stream_keys,
             changelog_row_id_generator,
         }
     }
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_inner(mut self) {
+        // TODO: Use stream_keys to order events before assigning IDs in keyed mode.
         let input = self.input.execute();
         #[for_await]
         for msg in input {
@@ -113,5 +126,109 @@ impl ChangeLogExecutor {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use itertools::Itertools;
+    use risingwave_common::catalog::{Field, Schema};
+    use risingwave_common::row::{Row, RowExt};
+    use risingwave_common::test_prelude::StreamChunkTestExt;
+    use risingwave_common::types::{DataType, ScalarRefImpl};
+    use risingwave_common::util::epoch::test_epoch;
+
+    use super::*;
+    use crate::executor::test_utils::MockSource;
+    use crate::executor::{ActorContext, Barrier};
+
+    #[tokio::test]
+    async fn test_keyed_changelog_reorders_replacement() {
+        let source = MockSource::with_messages(vec![
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
+            Message::Chunk(StreamChunk::from_pretty("I T B\n+ 42 Beginner false")),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
+            Message::Chunk(StreamChunk::from_pretty("I T B\n+ 42 Advanced true")),
+            Message::Chunk(StreamChunk::from_pretty("I T B\n- 42 Beginner false")),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
+        ])
+        .stop_on_finish(false)
+        .into_executor(
+            Schema::new(vec![
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Varchar),
+                Field::unnamed(DataType::Boolean),
+            ]),
+            vec![0, 1, 2],
+        );
+
+        let mut output = ChangeLogExecutor::new(
+            ActorContext::for_test(1),
+            source,
+            true,
+            VirtualNode::COUNT_FOR_TEST,
+            Bitmap::ones(VirtualNode::COUNT_FOR_TEST),
+            ChangeLogMode::Keyed,
+            vec![0],
+            vec![0, 1, 2],
+        )
+        .boxed()
+        .execute();
+
+        let mut events = Vec::new();
+
+        while let Some(message) = output.next().await {
+            match message.unwrap() {
+                Message::Chunk(chunk) => {
+                    for (op, row) in chunk.rows() {
+                        assert_eq!(op, Op::Insert, "changelog output must be append-only");
+
+                        let Some(ScalarRefImpl::Serial(id)) = row.datum_at(4) else {
+                            panic!("expected a non-null changelog event ID");
+                        };
+
+                        let Some(ScalarRefImpl::Int16(change_op)) = row.datum_at(3) else {
+                            panic!("expected a non-null changelog operation");
+                        };
+
+                        let row = row.project(&[0, 1, 2]).into_owned_row();
+
+                        events.push((row, change_op, id));
+                    }
+                }
+                Message::Barrier(_) => {}
+                Message::Watermark(_) => panic!("unexpected watermark"),
+            }
+        }
+
+        let expected = StreamChunk::from_pretty(
+            "I T B\n+ 42 Beginner false\n- 42 Beginner false\n+ 42 Advanced true",
+        );
+        let ids = expected
+            .rows()
+            .map(|(op, row)| {
+                let row = row.to_owned_row();
+
+                events
+                    .iter()
+                    .find(|(event, change_op, _)| *event == row && *change_op == op.to_i16())
+                    .unwrap_or_else(|| panic!("missing changelog event: {row:?}"))
+                    .2
+            })
+            .collect_vec();
+
+        let [original_insert_id, old_delete_id, replacement_insert_id] = ids[..] else {
+            panic!("expected exactly three changelog events");
+        };
+
+        assert!(
+            original_insert_id < old_delete_id,
+            "original insert must precede deletion"
+        );
+
+        assert!(
+            old_delete_id < replacement_insert_id,
+            "old deletion must precede replacement insert"
+        );
     }
 }
