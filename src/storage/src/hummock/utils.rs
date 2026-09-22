@@ -896,6 +896,69 @@ mod tests {
 
     use crate::hummock::utils::MemoryLimiter;
 
+    #[test]
+    fn test_prune_nonoverlapping_sst_bounds() {
+        use std::ops::Bound::{Excluded, Included, Unbounded};
+
+        use risingwave_common::catalog::TableId;
+        use risingwave_hummock_sdk::key::{FullKey, UserKey};
+        use risingwave_hummock_sdk::key_range::KeyRange;
+        use risingwave_hummock_sdk::sstable_info::{SstableInfo, SstableInfoInner};
+
+        use super::prune_nonoverlapping_ssts;
+
+        let table_id = TableId::default();
+        let ssts: Vec<SstableInfo> = [(10, 20, true), (20, 30, false), (60, 70, false)]
+            .into_iter()
+            .enumerate()
+            .map(|(id, (left, right, right_exclusive))| {
+                SstableInfoInner {
+                    sst_id: (id as u64).into(),
+                    table_ids: vec![table_id],
+                    key_range: KeyRange {
+                        left: FullKey::for_test(table_id, vec![left], 0).encode().into(),
+                        right: FullKey::for_test(table_id, vec![right], 0).encode().into(),
+                        right_exclusive,
+                    },
+                    ..Default::default()
+                }
+                .into()
+            })
+            .collect();
+        for (left, right, expected) in [
+            (Unbounded, Unbounded, vec![0, 1, 2]),
+            (Included(5), Excluded(10), vec![]),
+            (Included(5), Included(10), vec![0]),
+            (Included(20), Included(20), vec![1]),
+            (Included(10), Excluded(20), vec![0]),
+            (Included(10), Included(20), vec![0, 1]),
+            (Included(30), Included(40), vec![1]),
+            (Excluded(30), Included(40), vec![]),
+            (Included(40), Excluded(60), vec![]),
+            (Included(40), Included(60), vec![2]),
+            (Included(71), Unbounded, vec![]),
+        ] {
+            let left = left.map(|key| UserKey::for_test(table_id, vec![key]));
+            let right = right.map(|key| UserKey::for_test(table_id, vec![key]));
+            let range = (
+                left.as_ref().map(UserKey::as_ref),
+                right.as_ref().map(UserKey::as_ref),
+            );
+            let actual: Vec<_> = prune_nonoverlapping_ssts(&ssts, range, table_id)
+                .map(|sst| sst.sst_id.as_raw_id())
+                .collect();
+            assert_eq!(actual, expected, "{range:?}");
+            assert_eq!(
+                prune_nonoverlapping_ssts(&ssts, range, TableId::new(1)).count(),
+                0
+            );
+        }
+        assert_eq!(
+            prune_nonoverlapping_ssts(&[], (Unbounded, Unbounded), table_id).count(),
+            0
+        );
+    }
+
     async fn assert_pending(future: &mut (impl Future + Unpin)) {
         for _ in 0..10 {
             assert!(

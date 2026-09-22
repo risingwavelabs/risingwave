@@ -1403,6 +1403,210 @@ mod tests {
     use crate::monitor::{HummockStateStoreMetrics, flush_local_metrics_for_test};
     use crate::store::ReadOptions;
 
+    #[tokio::test]
+    async fn test_scan_pruning() {
+        use std::ops::Bound::{Excluded, Included};
+
+        use risingwave_hummock_sdk::key::is_empty_key_range;
+
+        use super::{
+            BackwardIteratorFactory, ForwardIteratorFactory, HummockReadVersion, VersionUpdate,
+            VnodeWatermark, WatermarkDirection, WatermarkSerdeType, read_filter_for_version,
+        };
+        use crate::hummock::event_handler::TEST_LOCAL_INSTANCE_ID;
+        use crate::hummock::shared_buffer::shared_buffer_batch::{
+            SharedBufferBatch, SharedBufferValue,
+        };
+        use crate::hummock::test_utils::gen_test_sstable_info;
+        use crate::mem_table::{MemTable, MemTableHummockIterator, MemTableHummockRevIterator};
+        use crate::monitor::StoreLocalStatistic;
+        use crate::store::{OpConsistencyLevel, StateStoreIter};
+
+        let table_id = TableId::default();
+        let epoch = test_epoch(1);
+        let key = |n| gen_key_from_bytes(VirtualNode::ZERO, &[n]);
+        let full_key = |n| FullKey::new(table_id, key(n), epoch);
+        let store = mock_sstable_store().await;
+        let reader =
+            HummockVersionReader::new(store.clone(), Arc::new(HummockStateStoreMetrics::unused()));
+        let absent_sst: SstableInfo = SstableInfoInner {
+            object_id: 100.into(),
+            sst_id: 100.into(),
+            table_ids: vec![table_id],
+            key_range: KeyRange {
+                left: full_key(10).encode().into(),
+                right: full_key(20).encode().into(),
+                right_exclusive: false,
+            },
+            ..Default::default()
+        }
+        .into();
+
+        // No object exists for this descriptor: an unnecessary metadata read must fail.
+        for level_type in [PbLevelType::Nonoverlapping, PbLevelType::Overlapping] {
+            let version =
+                build_version_from_sstables(table_id, vec![absent_sst.clone()], level_type);
+            for range in [
+                (Included(key(15)), Excluded(key(15))),
+                (Included(key(30)), Included(key(40))),
+            ] {
+                let staging = if is_empty_key_range(&range) {
+                    vec![absent_sst.clone()]
+                } else {
+                    vec![]
+                };
+                let mut stats = StoreLocalStatistic::default();
+                reader
+                    .iter_inner(
+                        range.clone(),
+                        epoch,
+                        table_id,
+                        ReadOptions::default(),
+                        vec![],
+                        staging.clone(),
+                        &version,
+                        &mut stats,
+                        &mut ForwardIteratorFactory::default(),
+                    )
+                    .await
+                    .unwrap();
+                reader
+                    .iter_inner(
+                        range,
+                        epoch,
+                        table_id,
+                        ReadOptions::default(),
+                        vec![],
+                        staging,
+                        &version,
+                        &mut stats,
+                        &mut BackwardIteratorFactory::default(),
+                    )
+                    .await
+                    .unwrap();
+                assert_eq!(stats.cache_meta_block_total, 0);
+            }
+        }
+
+        let mut ssts = vec![];
+        for (id, keys) in [(1, [10, 20]), (2, [60, 70])] {
+            ssts.push(
+                gen_test_sstable_info(
+                    default_builder_opt_for_test(),
+                    id,
+                    keys.map(|n| (full_key(n), HummockValue::put(Bytes::from(vec![n])))),
+                    store.clone(),
+                )
+                .await,
+            );
+        }
+        let version = build_version_from_sstables(table_id, ssts, PbLevelType::Nonoverlapping);
+        let vnodes = Arc::new(risingwave_common::bitmap::Bitmap::ones(
+            VirtualNode::COUNT_FOR_TEST,
+        ));
+        let mut read_version = HummockReadVersion::new_with_replication_option(
+            table_id,
+            TEST_LOCAL_INSTANCE_ID,
+            version.clone(),
+            true,
+            vnodes.clone(),
+        );
+        read_version.init();
+        read_version.add_replicated_imm(SharedBufferBatch::for_test(
+            vec![
+                (
+                    key(10),
+                    SharedBufferValue::Insert(Bytes::from_static(&[10])),
+                ),
+                (
+                    key(20),
+                    SharedBufferValue::Insert(Bytes::from_static(&[20])),
+                ),
+            ],
+            epoch,
+            table_id,
+        ));
+        read_version.update(VersionUpdate::NewTableWatermark {
+            direction: WatermarkDirection::Ascending,
+            epoch,
+            vnode_watermarks: vec![VnodeWatermark::new(vnodes, Bytes::from_static(&[15]))],
+            watermark_type: WatermarkSerdeType::PkPrefix,
+        });
+        let (range, (imms, ssts, committed)) = read_filter_for_version(
+            epoch,
+            table_id,
+            (Included(key(10)), Included(key(10))),
+            &parking_lot::RwLock::new(read_version),
+        )
+        .unwrap();
+        assert_eq!(range, (Included(key(15)), Excluded(key(15))));
+        assert!(imms.is_empty() && ssts.is_empty());
+        assert_eq!(committed.id(), version.id());
+
+        let mut memtable = MemTable::new(table_id, OpConsistencyLevel::Inconsistent);
+        memtable.insert(key(15), Bytes::from_static(&[15])).unwrap();
+        memtable.insert(key(35), Bytes::from_static(&[35])).unwrap();
+
+        // Include empty, singleton, excluded endpoint, multiple SSTs and a gap filled only
+        // by the memtable. The backward factory must preserve the reverse output order.
+        for (range, expected) in [
+            ((Included(key(15)), Excluded(key(15))), vec![]),
+            ((Included(key(10)), Included(key(10))), vec![10]),
+            ((Included(key(10)), Excluded(key(20))), vec![10, 15]),
+            (
+                (Included(key(10)), Included(key(70))),
+                vec![10, 15, 20, 35, 60, 70],
+            ),
+            ((Included(key(30)), Included(key(40))), vec![35]),
+        ] {
+            let mut iter = reader
+                .iter_with_memtable(
+                    range.clone(),
+                    epoch,
+                    table_id,
+                    TableOption::default(),
+                    ReadOptions::default(),
+                    (vec![], vec![], version.clone()),
+                    Some(MemTableHummockIterator::new(
+                        &memtable.buffer,
+                        EpochWithGap::new_from_epoch(epoch),
+                        table_id,
+                    )),
+                )
+                .await
+                .unwrap();
+            let mut actual = vec![];
+            while let Some((key, value)) = iter.try_next().await.unwrap() {
+                actual.push(*key.user_key.table_key.as_ref().last().unwrap());
+                assert_eq!(value, &[*actual.last().unwrap()]);
+            }
+            assert_eq!(actual, expected);
+
+            let mut iter = reader
+                .rev_iter(
+                    range,
+                    epoch,
+                    table_id,
+                    TableOption::default(),
+                    ReadOptions::default(),
+                    (vec![], vec![], version.clone()),
+                    Some(MemTableHummockRevIterator::new(
+                        &memtable.buffer,
+                        EpochWithGap::new_from_epoch(epoch),
+                        table_id,
+                    )),
+                )
+                .await
+                .unwrap();
+            let mut actual = vec![];
+            while let Some((key, value)) = iter.try_next().await.unwrap() {
+                actual.push(*key.user_key.table_key.as_ref().last().unwrap());
+                assert_eq!(value, &[*actual.last().unwrap()]);
+            }
+            assert_eq!(actual, expected.into_iter().rev().collect::<Vec<_>>());
+        }
+    }
+
     /// In a nonoverlapping level, `search_sst_idx` may locate an SST whose key range covers
     /// the query user key but whose `table_ids` does not contain the queried table. The get
     /// path must skip such SSTs instead of reading them.
