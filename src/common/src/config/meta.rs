@@ -384,27 +384,32 @@ pub struct MetaConfig {
     #[serde(default = "default::meta::split_group_size_ratio")]
     pub split_group_size_ratio: f64,
 
-    // During group scheduling, the configured `*_throughput_ratio` is used to determine if the sample exceeds the threshold.
-    // Use `table_stat_throuput_window_seconds_for_*` to check if the split and merge conditions are met.
-    /// To split the compaction group when the high throughput statistics of the group exceeds the threshold.
+    /// Deprecated. Split now compares observed bytes per second directly with the high threshold.
     #[serde(default = "default::meta::table_stat_high_write_throughput_ratio_for_split")]
+    #[deprecated]
     pub table_stat_high_write_throughput_ratio_for_split: f64,
 
-    /// To merge the compaction group when the low throughput statistics of the group exceeds the threshold.
+    /// Deprecated. Merge now requires a full observed window with a low peak throughput.
     #[serde(default = "default::meta::table_stat_low_write_throughput_ratio_for_merge")]
+    #[deprecated]
     pub table_stat_low_write_throughput_ratio_for_merge: f64,
 
-    // Hummock also control the size of samples to be judged during group scheduling by `table_stat_sample_size_for_split` and `table_stat_sample_size_for_merge`.
-    // Will use max(table_stat_throuput_window_seconds_for_split /ckpt, table_stat_throuput_window_seconds_for_merge/ckpt) as the global sample size.
-    // For example, if `table_stat_throuput_window_seconds_for_merge` = 240 and `table_stat_throuput_window_seconds_for_split` = 60, and `ckpt_sec = 1`,
-    //  global sample size will be max(240/1, 60/1), then only the last 60 samples will be considered for split, and so on.
-    /// The window seconds of table throughput statistic history for split compaction group.
+    /// Deprecated and ignored. Use `table_write_throughput_retention_seconds`.
     #[serde(default = "default::meta::table_stat_throuput_window_seconds_for_split")]
+    #[deprecated]
     pub table_stat_throuput_window_seconds_for_split: usize,
 
-    /// The window seconds of table throughput statistic history for merge compaction group.
+    /// Deprecated and ignored. Use `table_write_throughput_retention_seconds`.
     #[serde(default = "default::meta::table_stat_throuput_window_seconds_for_merge")]
+    #[deprecated]
     pub table_stat_throuput_window_seconds_for_merge: usize,
+
+    /// Retention in seconds for successful commit throughput observations. Split uses the
+    /// latest observed rate; merge requires a full observed retention with a low peak.
+    /// Six buckets may retain a boundary sample for up to one extra bucket
+    /// (one fifth of retention, at least one second). Zero retention is treated as one second.
+    #[serde(default = "default::meta::table_write_throughput_retention_seconds")]
+    pub table_write_throughput_retention_seconds: usize,
 
     /// The threshold of table size in one compact task to decide whether to partition one table into `hybrid_partition_vnode_count` parts, which belongs to default group and materialized view group.
     /// Set it max value of 64-bit number to disable this feature.
@@ -896,6 +901,10 @@ pub mod default {
 
         pub fn table_stat_throuput_window_seconds_for_merge() -> usize {
             240
+        }
+
+        pub fn table_write_throughput_retention_seconds() -> usize {
+            300
         }
 
         pub fn periodic_scheduling_compaction_group_merge_interval_sec() -> u64 {

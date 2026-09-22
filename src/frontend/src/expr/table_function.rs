@@ -331,7 +331,7 @@ impl TableFunction {
                         ssl_mode,
                         ssl_root_cert,
                     };
-                    let client = create_pg_client(&pg_conn, None).await?;
+                    let client = create_pg_client(&pg_conn, None, None).await?;
 
                     let statement = client.prepare(evaled_args[5].as_str()).await?;
 

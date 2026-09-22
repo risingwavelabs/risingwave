@@ -155,7 +155,6 @@ pub struct StorageOpts {
     /// enable `FastCompactorRunner`.
     pub enable_fast_compaction: bool,
     pub check_compaction_result: bool,
-    pub max_preload_io_retry_times: usize,
     pub compactor_fast_max_compact_delete_ratio: u32,
     pub compactor_fast_max_compact_task_size: u64,
 
@@ -193,6 +192,8 @@ pub struct StorageOpts {
     pub iceberg_compaction_size_estimation_smoothing_factor: f64,
     /// Multiplier for pending waiting parallelism budget for iceberg compaction task queue.
     pub iceberg_compaction_pending_parallelism_budget_multiplier: f32,
+    /// Maximum number of Iceberg compaction tasks requested in one pull.
+    pub iceberg_compaction_max_pull_task_count: u32,
     /// Pull interval for iceberg compaction task requests in milliseconds.
     pub iceberg_compaction_pull_interval_ms: u64,
     /// Whether to enable prefetch for iceberg compaction.
@@ -312,7 +313,6 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             max_preload_wait_time_mill: c.storage.max_preload_wait_time_mill,
             compact_iter_recreate_timeout_ms: c.storage.compact_iter_recreate_timeout_ms,
 
-            max_preload_io_retry_times: c.storage.max_preload_io_retry_times,
             backup_storage_url: p.backup_storage_url().to_owned(),
             backup_storage_directory: p.backup_storage_directory().to_owned(),
             compactor_max_sst_key_count: c.storage.compactor_max_sst_key_count,
@@ -368,6 +368,9 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             iceberg_compaction_pending_parallelism_budget_multiplier: c
                 .storage
                 .iceberg_compaction_pending_parallelism_budget_multiplier,
+            iceberg_compaction_max_pull_task_count: c
+                .storage
+                .iceberg_compaction_max_pull_task_count,
             iceberg_compaction_pull_interval_ms: c.storage.iceberg_compaction_pull_interval_ms,
             iceberg_compaction_enable_prefetch: c.storage.iceberg_compaction_enable_prefetch,
             iceberg_compaction_target_binpack_group_size_mb: c

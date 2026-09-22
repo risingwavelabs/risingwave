@@ -204,46 +204,35 @@ impl LevelCompactionPicker {
             return None;
         }
 
-        let mut skip_by_pending = false;
-        let mut input_levels = vec![];
-
+        let mut all_pending = true;
         for input in candidate_l0_plans {
-            let l0_select_tables = input
-                .sstable_infos
-                .iter()
-                .flat_map(|(_, select_tables)| select_tables.clone())
-                .collect_vec();
+            let mut overlap_info = overlap_strategy.create_overlap_info();
+            for (_, tables) in &input.sstable_infos {
+                for sst in tables {
+                    overlap_info.update(&sst.key_range);
+                }
+            }
+            let target_range = overlap_info.check_multiple_overlap(&target_level.table_infos);
+            let target_level_files = if target_range.is_empty() {
+                &[][..]
+            } else {
+                &target_level.table_infos[target_range]
+            };
 
-            let target_level_ssts = overlap_strategy
-                .check_base_level_overlap(&l0_select_tables, &target_level.table_infos);
-
-            let mut target_level_size = 0;
+            let mut target_file_size = 0;
             let mut pending_compact = false;
-            for sst in &target_level_ssts {
+            for sst in target_level_files {
                 if level_handlers[target_level.level_idx as usize].is_pending_compact(&sst.sst_id) {
                     pending_compact = true;
                     break;
                 }
-
-                target_level_size += sst.sst_size;
+                target_file_size += sst.sst_size;
             }
-
             if pending_compact {
-                skip_by_pending = true;
                 continue;
             }
+            all_pending = false;
 
-            input_levels.push((input, target_level_size, target_level_ssts));
-        }
-
-        if input_levels.is_empty() {
-            if skip_by_pending {
-                stats.skip_by_pending_files += 1;
-            }
-            return None;
-        }
-
-        for (input, target_file_size, target_level_files) in input_levels {
             let mut select_level_inputs = input
                 .sstable_infos
                 .into_iter()
@@ -258,7 +247,7 @@ impl LevelCompactionPicker {
             select_level_inputs.push(InputLevel {
                 level_idx: target_level.level_idx,
                 level_type: target_level.level_type,
-                table_infos: target_level_files,
+                table_infos: target_level_files.to_vec(),
             });
 
             let result = CompactionInput {
@@ -299,6 +288,10 @@ impl LevelCompactionPicker {
 
             return Some(result);
         }
+        // Preserve the pending statistic: validator rejection is a separate reason to skip.
+        if all_pending {
+            stats.skip_by_pending_files += 1;
+        }
         None
     }
 }
@@ -310,6 +303,141 @@ pub mod tests {
     use crate::hummock::compaction::compaction_config::CompactionConfigBuilder;
     use crate::hummock::compaction::selector::tests::*;
     use crate::hummock::compaction::{CompactionMode, TierCompactionPicker};
+
+    fn candidate_fixture(count: usize, target_size: u64) -> (OverlappingLevel, Level) {
+        let sub_levels = (0..2)
+            .map(|level_idx| {
+                let table_infos = (0..count)
+                    .map(|idx| {
+                        generate_table(
+                            (level_idx * count + idx) as u64,
+                            1,
+                            idx * 10,
+                            idx * 10 + 9,
+                            1,
+                        )
+                    })
+                    .collect();
+                Level {
+                    sub_level_id: level_idx as u64,
+                    level_type: LevelType::Nonoverlapping,
+                    table_infos,
+                    total_file_size: count as u64 * 10,
+                    ..Default::default()
+                }
+            })
+            .collect();
+        let table_infos = (0..count)
+            .map(|idx| {
+                let mut sst =
+                    generate_table_impl((2 * count + idx) as u64, 1, idx * 10, idx * 10 + 9, 1);
+                sst.sst_size = target_size;
+                sst.into()
+            })
+            .collect();
+        (
+            OverlappingLevel {
+                sub_levels,
+                total_file_size: count as u64 * 20,
+                ..Default::default()
+            },
+            Level {
+                level_idx: 1,
+                level_type: LevelType::Nonoverlapping,
+                table_infos,
+                total_file_size: count as u64 * target_size,
+                ..Default::default()
+            },
+        )
+    }
+
+    #[test]
+    fn test_candidate_pending_and_validation_statistics() {
+        let picker = create_compaction_picker_for_test();
+        for (target_size, pending_count, succeeds, write_amp_skips, pending_skips) in [
+            (10, 0, true, 0, 0),
+            (10, 7, true, 0, 0),
+            (10, 8, false, 0, 1),
+            (100, 0, false, 8, 0),
+            (100, 7, false, 1, 0),
+            (100, 8, false, 0, 1),
+        ] {
+            let (l0, target) = candidate_fixture(8, target_size);
+            let mut handlers = vec![LevelHandler::new(0), LevelHandler::new(1)];
+            for sst in target.table_infos.iter().take(pending_count) {
+                handlers[1].test_add_pending_sst(sst.sst_id, 1);
+            }
+            let mut stats = LocalPickerStatistic::default();
+            let result = picker.pick_multi_level_to_base(&l0, &target, 0, &handlers, &mut stats);
+            assert_eq!(
+                result.is_some(),
+                succeeds,
+                "target_size={target_size}, pending={pending_count}"
+            );
+            assert_eq!(stats.skip_by_write_amp_limit, write_amp_skips);
+            assert_eq!(stats.skip_by_pending_files, pending_skips);
+            assert_eq!(stats.skip_by_count_limit, 0);
+            assert_eq!(stats.skip_by_overlapping, 0);
+            if let Some(result) = result {
+                assert_eq!(
+                    result.input_levels[0].table_infos[0].sst_id,
+                    (8 + pending_count) as u64
+                );
+                assert_eq!(
+                    result.input_levels[1].table_infos[0].sst_id,
+                    pending_count as u64
+                );
+                assert_eq!(
+                    result.input_levels[2].table_infos[0].sst_id,
+                    (16 + pending_count) as u64
+                );
+                assert_eq!(result.select_input_size, 20);
+                assert_eq!(result.target_input_size, 10);
+                assert_eq!(result.total_file_count, 3);
+            }
+        }
+    }
+
+    // Run explicitly with cargo test --release -p risingwave_meta bench_level_to_base -- --ignored --nocapture --test-threads=1.
+    #[test]
+    #[ignore = "microbenchmark"]
+    fn bench_level_to_base() {
+        use std::hint::black_box;
+        use std::time::Duration;
+
+        let mut criterion = criterion::Criterion::default()
+            .sample_size(30)
+            .warm_up_time(Duration::from_secs(1))
+            .measurement_time(Duration::from_secs(3));
+        let picker = create_compaction_picker_for_test();
+        for (name, count, target_size, pending_count) in [
+            ("small", 8, 10, 0),
+            ("first_valid", 256, 10, 0),
+            ("late_valid", 256, 10, 255),
+            ("all_pending", 256, 10, 256),
+            ("all_rejected", 256, 100, 0),
+        ] {
+            let (l0, target) = candidate_fixture(count, target_size);
+            let mut handlers = vec![LevelHandler::new(0), LevelHandler::new(1)];
+            for sst in target.table_infos.iter().take(pending_count) {
+                handlers[1].test_add_pending_sst(sst.sst_id, 1);
+            }
+            criterion.bench_function(&format!("level_to_base/{name}"), |b| {
+                b.iter(|| {
+                    let mut stats = LocalPickerStatistic::default();
+                    let result = picker.pick_multi_level_to_base(
+                        black_box(&l0),
+                        black_box(&target),
+                        0,
+                        black_box(&handlers),
+                        &mut stats,
+                    );
+                    black_box((result, stats))
+                })
+            });
+        }
+        criterion.final_summary();
+    }
 
     fn create_compaction_picker_for_test() -> LevelCompactionPicker {
         let config = Arc::new(

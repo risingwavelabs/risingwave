@@ -370,6 +370,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
         self,
         runtime_info: DatabaseRuntimeInfoSnapshot,
         rendered_info: RenderedDatabaseRuntimeInfo,
+        barrier_interval_ms: u32,
         partial_graph_manager: &mut PartialGraphManager,
     ) {
         let database_status = self
@@ -407,6 +408,7 @@ impl DatabaseStatusAction<'_, EnterInitializing> {
         let result: MetaResult<_> = try {
             recoverer.inject_database_initial_barrier(
                 self.database_id,
+                barrier_interval_ms,
                 job_infos,
                 &recovery_context.job_extra_info,
                 &mut state_table_committed_epochs,

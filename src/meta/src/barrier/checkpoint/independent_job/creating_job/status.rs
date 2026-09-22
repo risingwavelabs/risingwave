@@ -32,7 +32,6 @@ use tracing::warn;
 
 use crate::barrier::checkpoint::independent_job::creating_job::CreatingJobInfo;
 use crate::barrier::command::{ThrottleConfigMap, extract_throttle_config};
-use crate::barrier::notifier::CollectionNotifier;
 use crate::barrier::partial_graph::PartialGraphManager;
 use crate::barrier::progress::{CreateMviewProgressTracker, TrackingJob};
 use crate::barrier::{BarrierInfo, BarrierKind, TracedEpoch};
@@ -115,6 +114,7 @@ pub(super) enum CreatingStreamingJobStatus {
         create_mview_tracker: CreateMviewProgressTracker,
         snapshot_backfill_actors: HashSet<ActorId>,
         snapshot_epoch: u64,
+        barrier_interval_ms: u32,
         info: CreatingJobInfo,
         /// The `prev_epoch` of pending non checkpoint barriers
         pending_non_checkpoint_barriers: Vec<u64>,
@@ -132,7 +132,6 @@ pub(super) enum CreatingStreamingJobStatus {
     /// will be finished when all previously injected barriers have been collected
     /// Store the `prev_epoch` that will finish at.
     Finishing(u64, TrackingJob),
-    Resetting(Vec<CollectionNotifier>),
     PlaceHolder,
 }
 
@@ -149,6 +148,7 @@ impl CreatingStreamingJobStatus {
                 ref mut pending_upstream_barriers,
                 ref mut pending_non_checkpoint_barriers,
                 ref snapshot_epoch,
+                barrier_interval_ms,
                 ..
             } => {
                 for progress in create_mview_progress {
@@ -162,6 +162,7 @@ impl CreatingStreamingJobStatus {
                         curr_epoch: TracedEpoch::new(Epoch(*snapshot_epoch)),
                         prev_epoch: TracedEpoch::new(prev_epoch),
                         kind: BarrierKind::Checkpoint(take(pending_non_checkpoint_barriers)),
+                        barrier_interval_ms,
                     }]
                     .into_iter()
                     .chain(pending_upstream_barriers.drain(..))
@@ -202,8 +203,7 @@ impl CreatingStreamingJobStatus {
             } => {
                 log_store_progress_tracker.update(create_mview_progress);
             }
-            CreatingStreamingJobStatus::Finishing(..)
-            | CreatingStreamingJobStatus::Resetting(..) => {}
+            CreatingStreamingJobStatus::Finishing(..) => {}
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
             }
@@ -234,9 +234,6 @@ impl CreatingStreamingJobStatus {
             CreatingStreamingJobStatus::Finishing { .. } => {
                 unreachable!("should not start consuming upstream for a job again")
             }
-            CreatingStreamingJobStatus::Resetting(..) => {
-                unreachable!("unlikely to start consume upstream when resetting")
-            }
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
             }
@@ -261,6 +258,7 @@ impl CreatingStreamingJobStatus {
                 prev_epoch_fake_physical_time,
                 pending_non_checkpoint_barriers,
                 create_mview_tracker,
+                barrier_interval_ms,
                 ..
             } => {
                 let mutation = mutation.or_else(|| {
@@ -279,6 +277,7 @@ impl CreatingStreamingJobStatus {
                 });
                 let barrier_num_to_inject = resolve_initial_barrier_num_to_inject();
                 pending_upstream_barriers.push(barrier_info.clone());
+                *barrier_interval_ms = barrier_info.barrier_interval_ms;
                 // Mutation barriers must be forwarded even when the partial graph has reached the
                 // configured pending-barrier limit.
                 if barrier_num_to_inject == 0 && mutation.is_none() {
@@ -295,6 +294,7 @@ impl CreatingStreamingJobStatus {
                                 unreachable!("upstream new epoch should not be initial")
                             }
                         },
+                        barrier_info.barrier_interval_ms,
                     ),
                     mutation,
                 )]
@@ -314,8 +314,7 @@ impl CreatingStreamingJobStatus {
                 .map(|barrier_info| (barrier_info, None))
                 .collect()
             }
-            CreatingStreamingJobStatus::Finishing { .. }
-            | CreatingStreamingJobStatus::Resetting(..) => vec![],
+            CreatingStreamingJobStatus::Finishing { .. } => vec![],
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
             }
@@ -326,11 +325,13 @@ impl CreatingStreamingJobStatus {
         prev_epoch_fake_physical_time: &mut u64,
         pending_non_checkpoint_barriers: &mut Vec<u64>,
         kind: PbBarrierKind,
+        barrier_interval_ms: u32,
     ) -> BarrierInfo {
         super::super::new_fake_barrier(
             prev_epoch_fake_physical_time,
             pending_non_checkpoint_barriers,
             kind,
+            barrier_interval_ms,
         )
     }
 
@@ -340,8 +341,7 @@ impl CreatingStreamingJobStatus {
             | CreatingStreamingJobStatus::ConsumingLogStore { info, .. } => {
                 Some(&info.fragment_infos)
             }
-            CreatingStreamingJobStatus::Finishing(..)
-            | CreatingStreamingJobStatus::Resetting(..) => None,
+            CreatingStreamingJobStatus::Finishing(..) => None,
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
             }
@@ -357,8 +357,7 @@ impl CreatingStreamingJobStatus {
             | CreatingStreamingJobStatus::ConsumingLogStore { info, .. } => {
                 &mut info.fragment_infos
             }
-            CreatingStreamingJobStatus::Finishing(..)
-            | CreatingStreamingJobStatus::Resetting(..) => return None,
+            CreatingStreamingJobStatus::Finishing(..) => return None,
             CreatingStreamingJobStatus::PlaceHolder => {
                 unreachable!()
             }
@@ -396,6 +395,7 @@ mod tests {
             prev_epoch: TracedEpoch::new(Epoch(prev_epoch)),
             curr_epoch: TracedEpoch::new(Epoch(curr_epoch)),
             kind: BarrierKind::Barrier,
+            barrier_interval_ms: 1000,
         }
     }
 
@@ -444,23 +444,6 @@ mod tests {
 
         assert_eq!(epochs(&injected), vec![(1, 2)]);
         assert!(pending_barriers.is_empty());
-    }
-
-    #[tokio::test]
-    async fn test_resetting_skips_barrier_capacity_lookup() {
-        let mut status = CreatingStreamingJobStatus::Resetting(vec![]);
-        let partial_graph_manager =
-            PartialGraphManager::uninitialized(crate::manager::MetaSrvEnv::for_test().await);
-
-        let injected = status.on_new_upstream_epoch(
-            &partial_graph_manager,
-            PartialGraphId::new(1),
-            10,
-            &barrier(1, 2),
-            None,
-        );
-
-        assert!(injected.is_empty());
     }
 
     #[test]
@@ -520,6 +503,7 @@ mod tests {
             prev_epoch: TracedEpoch::new(Epoch(1)),
             curr_epoch: TracedEpoch::new(Epoch(2)),
             kind: BarrierKind::Checkpoint(vec![1]),
+            barrier_interval_ms: 1000,
         });
         assert_eq!(info.fragment_infos[&fragment_id].nodes, new_node);
     }
