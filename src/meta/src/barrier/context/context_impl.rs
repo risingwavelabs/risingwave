@@ -52,6 +52,7 @@ use crate::manager::LocalNotification;
 use crate::manager::iceberg_pk_index_sink::{
     IcebergPkIndexPreCommitMetadata, group_pre_commit_metadata,
 };
+use crate::manager::sink_coordination::{RecoveryStart, RecoverySucceeded};
 use crate::model::FragmentDownstreamRelation;
 use crate::serving::{fetch_serving_infos, sync_serving_table_vnode_mappings_to_hummock};
 use crate::stream::{SourceChange, cleanup_dropped_streaming_jobs};
@@ -166,11 +167,18 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         self.scheduled_barriers.next_scheduled().await
     }
 
-    fn abort_and_mark_blocked(
+    async fn abort_and_mark_blocked(
         &self,
-        database_id: Option<DatabaseId>,
+        recovery: RecoveryStart,
         recovery_reason: RecoveryReason,
-    ) {
+    ) -> MetaResult<()> {
+        let (database_id, database_job_ids) = match &recovery {
+            RecoveryStart::Global => (None, None),
+            RecoveryStart::Database {
+                database_id,
+                job_ids,
+            } => (Some(*database_id), Some(job_ids.clone())),
+        };
         if database_id.is_none() {
             self.set_status(BarrierManagerStatus::Recovering(recovery_reason));
         }
@@ -178,14 +186,30 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         // Mark blocked and abort buffered schedules, they might be dirty already.
         self.scheduled_barriers
             .abort_and_mark_blocked(database_id, "cluster is under recovering");
+        self.sink_manager.start_recovery(recovery).await?;
+
+        if let Some(job_ids) = database_job_ids {
+            self.iceberg_pk_index_sink_manager.unregister_jobs(job_ids);
+        } else {
+            self.iceberg_pk_index_sink_manager.reset();
+        }
+        Ok(())
     }
 
-    fn mark_ready(&self, options: MarkReadyOptions) {
+    async fn mark_ready(&self, options: MarkReadyOptions) -> MetaResult<()> {
+        let recovery = match &options {
+            MarkReadyOptions::Database(database_id) => RecoverySucceeded::Database(*database_id),
+            MarkReadyOptions::Global { failed_databases } => RecoverySucceeded::Global {
+                failed_databases: failed_databases.clone(),
+            },
+        };
+        self.sink_manager.recovery_succeeded(recovery).await?;
         let is_global = matches!(&options, MarkReadyOptions::Global { .. });
         self.scheduled_barriers.mark_ready(options);
         if is_global {
             self.set_status(BarrierManagerStatus::Running);
         }
+        Ok(())
     }
 
     async fn resolve_log_store_epoch<'a>(
@@ -890,7 +914,7 @@ impl PostCollectCommand {
                 if let Some(old_sink_id) = replace_sink {
                     barrier_manager_context
                         .sink_manager
-                        .stop_sink_coordinator(vec![old_sink_id])
+                        .stop_sink_coordinators_for_jobs(vec![old_sink_id.as_job_id()])
                         .await;
                     cleanup_dropped_streaming_jobs(
                         &barrier_manager_context.refresh_manager,

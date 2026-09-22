@@ -52,7 +52,6 @@ use crate::barrier::info::{
     BarrierInfo, CreateStreamingJobStatus, InflightDatabaseInfo, InflightStreamingJobInfo,
     SubscriberType,
 };
-use crate::barrier::notifier::NotifierStarter;
 use crate::barrier::partial_graph::{PartialGraphBarrierInfo, PartialGraphManager};
 use crate::barrier::rpc::to_partial_graph_id;
 use crate::barrier::{
@@ -67,6 +66,7 @@ use crate::model::{
     ActorId, ActorNewNoShuffle, FragmentDownstreamRelation, FragmentId, StreamActor, StreamContext,
     StreamJobActorsToCreate, StreamJobFragmentsToCreate,
 };
+use crate::notification::NotifierStarter;
 use crate::stream::cdc::parallel_cdc_table_backfill_fragment;
 use crate::stream::{
     GlobalActorIdGen, ReplaceJobSplitPlan, SourceManager, SplitAssignment,

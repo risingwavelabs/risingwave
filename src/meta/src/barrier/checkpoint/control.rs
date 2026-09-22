@@ -49,7 +49,6 @@ use crate::barrier::checkpoint::recovery::{
 use crate::barrier::checkpoint::state::{ApplyCommandInfo, BarrierWorkerState};
 use crate::barrier::complete_task::{BarrierCompleteOutput, CompleteBarrierTask};
 use crate::barrier::info::{InflightDatabaseInfo, SharedActorInfos};
-use crate::barrier::notifier::Notifier;
 use crate::barrier::partial_graph::{CollectedBarrier, PartialGraphManager, PartialGraphStat};
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::rpc::{from_partial_graph_id, to_partial_graph_id};
@@ -61,6 +60,7 @@ use crate::barrier::{
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::controller::scale::{build_no_shuffle_fragment_graph_edges, find_no_shuffle_graphs};
 use crate::manager::MetaSrvEnv;
+use crate::notification::Notifier;
 
 fn fragment_has_online_unreschedulable_scan(fragment: &InflightFragmentInfo) -> bool {
     let mut has_unreschedulable_scan = false;

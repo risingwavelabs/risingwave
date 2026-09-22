@@ -464,25 +464,6 @@ impl GlobalBarrierWorkerContextImpl {
         Ok(())
     }
 
-    async fn reset_sink_coordinator(&self, database_id: Option<DatabaseId>) -> MetaResult<()> {
-        if let Some(database_id) = database_id {
-            let sink_ids = self
-                .metadata_manager
-                .catalog_controller
-                .list_sink_ids(Some(database_id))
-                .await?;
-            self.sink_manager
-                .stop_sink_coordinator(sink_ids.clone())
-                .await;
-            self.iceberg_pk_index_sink_manager
-                .unregister_sinks(sink_ids);
-        } else {
-            self.sink_manager.reset().await;
-            self.iceberg_pk_index_sink_manager.reset();
-        }
-        Ok(())
-    }
-
     /// Re-register iceberg pk-index sink commit coordinators after recovery wipes them.
     async fn reregister_iceberg_pk_index_sinks(
         &self,
@@ -862,9 +843,6 @@ impl GlobalBarrierWorkerContextImpl {
                         .await
                         .context("clean dirty streaming jobs")?;
 
-                    self.reset_sink_coordinator(None)
-                        .await
-                        .context("reset sink coordinator")?;
                     self.abort_dirty_pending_sink_state(None)
                         .await
                         .context("abort dirty pending sink state")?;
@@ -1038,9 +1016,6 @@ impl GlobalBarrierWorkerContextImpl {
             .await
             .context("clean dirty streaming jobs")?;
 
-        self.reset_sink_coordinator(Some(database_id))
-            .await
-            .context("reset sink coordinator")?;
         self.abort_dirty_pending_sink_state(Some(database_id))
             .await
             .context("abort dirty pending sink state")?;
