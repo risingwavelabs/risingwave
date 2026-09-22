@@ -33,6 +33,15 @@ echo "--- Run inline CDC source tests"
 risedev slt './e2e_test/source_inline/cdc/**/*.slt' --skip 'cron_only' -j1
 risedev slt './e2e_test/source_inline/cdc/**/*.slt.serial' --skip 'cron_only'
 
+echo "--- Run SQL Server encrypted abort regression test"
+sqlserver_abort_test_classes=$(mktemp -d)
+javac -cp './connector-node/libs/*' \
+  -d "${sqlserver_abort_test_classes}" \
+  e2e_test/source_inline/cdc/sql_server/SqlServerEncryptedAbortTest.java
+java -cp "${sqlserver_abort_test_classes}:./connector-node/libs/*" \
+  io.debezium.connector.sqlserver.SqlServerEncryptedAbortTest
+rm -rf "${sqlserver_abort_test_classes}"
+
 echo "--- Run TVF source tests"
 export MYSQL_HOST=mysql MYSQL_TCP_PORT=3306 MYSQL_PWD=123456
 risedev slt './e2e_test/source_inline/tvf/*.slt'

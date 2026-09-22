@@ -16,6 +16,7 @@
 
 package io.debezium.connector.sqlserver;
 
+import com.microsoft.sqlserver.jdbc.SQLServerConnection;
 import io.debezium.DebeziumException;
 import io.debezium.pipeline.ErrorHandler;
 import io.debezium.pipeline.EventDispatcher;
@@ -30,6 +31,9 @@ import io.debezium.schema.SchemaChangeEvent.SchemaChangeEventType;
 import io.debezium.snapshot.SnapshotterService;
 import io.debezium.util.Clock;
 import io.debezium.util.ElapsedTimeStrategy;
+import java.io.IOException;
+import java.lang.reflect.Field;
+import java.net.Socket;
 import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
@@ -86,6 +90,18 @@ public class SqlServerStreamingChangeEventSource
 
     private static final Logger LOGGER =
             LoggerFactory.getLogger(SqlServerStreamingChangeEventSource.class);
+
+    /**
+     * The SQL Server driver performs {@link Connection#abort(Executor)} cleanup on the supplied
+     * executor. Never run it on the coordinator thread because cleanup of an encrypted connection
+     * can block in {@code SSLSocket.close()}.
+     */
+    private static final Executor ABORT_EXECUTOR =
+            command -> {
+                Thread thread = new Thread(command, "sqlserver-jdbc-abort");
+                thread.setDaemon(true);
+                thread.start();
+            };
 
     private static final Duration DEFAULT_INTERVAL_BETWEEN_COMMITS = Duration.ofMinutes(1);
     private static final int INTERVAL_BETWEEN_COMMITS_BASED_ON_POLL_FACTOR = 3;
@@ -180,29 +196,60 @@ public class SqlServerStreamingChangeEventSource
      * JDBC operation that does not respond to {@link Thread#interrupt()} is unblocked.
      *
      * <p>The coordinator invokes this only after graceful shutdown and {@code shutdownNow()} have
-     * both timed out. {@link java.sql.Connection#abort(Executor)} closes the driver's network
-     * resources without waiting for the blocked operation to finish, allowing the source thread to
-     * unwind and release its SQL Server sessions. The source thread refreshes the raw handles
-     * before each iteration so this method does not acquire the {@link SqlServerConnection}
-     * monitor, which may itself be held by a wedged synchronized JDBC operation.
+     * both timed out. mssql-jdbc's normal close path first closes its SSL socket, which can wait
+     * for the same lock held by an encrypted socket read. This method therefore closes the
+     * underlying TCP socket directly before scheduling normal driver cleanup asynchronously.
+     * Closing a {@link Socket} is thread-safe and unblocks its current read without acquiring the
+     * driver's SSL or input-stream locks. The source thread refreshes the raw handles before each
+     * iteration so this method does not acquire the {@link SqlServerConnection} monitor, which may
+     * itself be held by a wedged synchronized JDBC operation.
      */
     public void forceCloseConnection() {
         LOGGER.warn("Force-aborting SQL Server connections to unblock wedged native I/O");
-        Executor abortExecutor = Runnable::run;
-        abortConnection(rawDataConnection, abortExecutor, "data");
-        abortConnection(rawMetadataConnection, abortExecutor, "metadata");
+        abortConnection(rawDataConnection, "data");
+        abortConnection(rawMetadataConnection, "metadata");
     }
 
-    private static void abortConnection(
-            Connection connection, Executor abortExecutor, String connectionName) {
+    static void abortConnection(Connection connection, String connectionName) {
+        if (connection == null) {
+            return;
+        }
+
         try {
-            if (connection != null) {
-                connection.abort(abortExecutor);
-            }
+            closeTcpTransport(connection);
         } catch (Exception e) {
             LOGGER.warn(
-                    "Exception while force-aborting SQL Server {} connection", connectionName, e);
+                    "Exception while force-closing SQL Server {} TCP transport", connectionName, e);
         }
+
+        try {
+            connection.abort(ABORT_EXECUTOR);
+        } catch (Exception e) {
+            LOGGER.warn("Exception while aborting SQL Server {} connection", connectionName, e);
+        }
+    }
+
+    private static void closeTcpTransport(Connection connection)
+            throws SQLException, ReflectiveOperationException, IOException {
+        SQLServerConnection driverConnection = connection.unwrap(SQLServerConnection.class);
+        // mssql-jdbc has no public API that bypasses SSL cleanup. Access the raw transport so an
+        // emergency shutdown can wake the reader before invoking the driver's normal abort path.
+        Object tdsChannel =
+                readPrivateField(driverConnection, SQLServerConnection.class, "tdsChannel");
+        Socket tcpSocket =
+                (Socket) readPrivateField(tdsChannel, tdsChannel.getClass(), "tcpSocket");
+        if (tcpSocket != null) {
+            tcpSocket.close();
+        }
+    }
+
+    private static Object readPrivateField(Object target, Class<?> owner, String fieldName)
+            throws ReflectiveOperationException {
+        Field field = owner.getDeclaredField(fieldName);
+        if (!field.trySetAccessible()) {
+            throw new IllegalAccessException("Cannot access " + owner.getName() + "." + fieldName);
+        }
+        return field.get(target);
     }
 
     private void refreshRawConnections() throws SQLException {
