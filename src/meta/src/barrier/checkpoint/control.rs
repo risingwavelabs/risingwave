@@ -244,7 +244,6 @@ impl CheckpointControl {
             command,
             span,
             checkpoint,
-            barrier_interval_ms,
         } = new_barrier;
 
         if let Some((mut command, notifier)) = command {
@@ -354,7 +353,6 @@ impl CheckpointControl {
             database.handle_new_barrier(
                 Some((command, notifier)),
                 checkpoint,
-                barrier_interval_ms,
                 span,
                 partial_graph_manager,
                 &self.hummock_version_stats,
@@ -382,7 +380,6 @@ impl CheckpointControl {
             database.handle_new_barrier(
                 None,
                 checkpoint,
-                barrier_interval_ms,
                 span,
                 partial_graph_manager,
                 &self.hummock_version_stats,
@@ -1215,7 +1212,6 @@ impl DatabaseCheckpointControl {
         &mut self,
         command: Option<(Command, Notifier)>,
         checkpoint: bool,
-        barrier_interval_ms: u32,
         span: tracing::Span,
         partial_graph_manager: &mut PartialGraphManager,
         hummock_version_stats: &HummockVersionStats,
@@ -1322,9 +1318,7 @@ impl DatabaseCheckpointControl {
             return Ok(());
         }
 
-        let barrier_info =
-            self.state
-                .next_barrier_info(checkpoint, curr_epoch, barrier_interval_ms);
+        let barrier_info = self.state.next_barrier_info(checkpoint, curr_epoch);
         // Tracing related stuff
         barrier_info.prev_epoch.span().in_scope(|| {
             tracing::info!(target: "rw_tracing", epoch = barrier_info.curr_epoch(), "new barrier enqueued");
