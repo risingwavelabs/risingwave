@@ -16,6 +16,7 @@
 
 package io.debezium.connector.sqlserver;
 
+import io.debezium.DebeziumException;
 import io.debezium.pipeline.ErrorHandler;
 import io.debezium.pipeline.EventDispatcher;
 import io.debezium.pipeline.notification.Notification;
@@ -29,6 +30,7 @@ import io.debezium.schema.SchemaChangeEvent.SchemaChangeEventType;
 import io.debezium.snapshot.SnapshotterService;
 import io.debezium.util.Clock;
 import io.debezium.util.ElapsedTimeStrategy;
+import java.sql.Connection;
 import java.sql.ResultSet;
 import java.sql.SQLException;
 import java.time.Duration;
@@ -92,6 +94,12 @@ public class SqlServerStreamingChangeEventSource
     private final SqlServerConnection dataConnection;
 
     /**
+     * Cached before the source starts so emergency shutdown never needs to acquire the synchronized
+     * {@link SqlServerConnection} monitor.
+     */
+    private final Connection rawDataConnection;
+
+    /**
      * A separate connection for retrieving details of the schema changes; without it, adaptive
      * buffering will not work.
      *
@@ -99,6 +107,9 @@ public class SqlServerStreamingChangeEventSource
      *     https://docs.microsoft.com/en-us/sql/connect/jdbc/using-adaptive-buffering?view=sql-server-2017#guidelines-for-using-adaptive-buffering
      */
     private final SqlServerConnection metadataConnection;
+
+    /** See {@link #rawDataConnection}. */
+    private final Connection rawMetadataConnection;
 
     private final EventDispatcher<SqlServerPartition, TableId> dispatcher;
     private final ErrorHandler errorHandler;
@@ -134,6 +145,12 @@ public class SqlServerStreamingChangeEventSource
         this.connectorConfig = connectorConfig;
         this.dataConnection = dataConnection;
         this.metadataConnection = metadataConnection;
+        try {
+            this.rawDataConnection = dataConnection.connection(false);
+            this.rawMetadataConnection = metadataConnection.connection(false);
+        } catch (SQLException e) {
+            throw new DebeziumException("Failed to cache SQL Server JDBC connections", e);
+        }
         this.dispatcher = dispatcher;
         this.errorHandler = errorHandler;
         this.clock = clock;
@@ -166,21 +183,22 @@ public class SqlServerStreamingChangeEventSource
      * <p>The coordinator invokes this only after graceful shutdown and {@code shutdownNow()} have
      * both timed out. {@link java.sql.Connection#abort(Executor)} closes the driver's network
      * resources without waiting for the blocked operation to finish, allowing the source thread to
-     * unwind and release its SQL Server sessions.
+     * unwind and release its SQL Server sessions. The raw handles are cached before streaming
+     * starts so this method does not acquire the {@link SqlServerConnection} monitor, which may
+     * itself be held by a wedged synchronized JDBC operation.
      */
     public void forceCloseConnection() {
         LOGGER.warn("Force-aborting SQL Server connections to unblock wedged native I/O");
         Executor abortExecutor = Runnable::run;
-        abortConnection(dataConnection, abortExecutor, "data");
-        abortConnection(metadataConnection, abortExecutor, "metadata");
+        abortConnection(rawDataConnection, abortExecutor, "data");
+        abortConnection(rawMetadataConnection, abortExecutor, "metadata");
     }
 
-    private void abortConnection(
-            SqlServerConnection connection, Executor abortExecutor, String connectionName) {
+    private static void abortConnection(
+            Connection connection, Executor abortExecutor, String connectionName) {
         try {
-            java.sql.Connection raw = connection.connection(false);
-            if (raw != null) {
-                raw.abort(abortExecutor);
+            if (connection != null) {
+                connection.abort(abortExecutor);
             }
         } catch (Exception e) {
             LOGGER.warn(
