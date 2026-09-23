@@ -132,6 +132,13 @@ impl ChangeLogExecutor {
 
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_keyed(mut self) {
+        let compaction_keys = self
+            .stream_keys
+            .iter()
+            .chain(&self.distribution_keys)
+            .copied()
+            .unique()
+            .collect_vec();
         let mut builder = StreamChunkBuilder::new(
             self.ctx.config.developer.chunk_size,
             self.output_data_types(),
@@ -146,7 +153,7 @@ impl ChangeLogExecutor {
                 Message::Watermark(_w) => {}
                 Message::Barrier(barrier) => {
                     let chunks = StreamChunkCompactor::new(
-                        self.stream_keys.clone(),
+                        compaction_keys.clone(),
                         std::mem::take(&mut chunk_buffer),
                     )
                     .into_compacted_chunks_inline::<RETRACT>(InconsistencyBehavior::Warn);
@@ -336,6 +343,68 @@ mod tests {
         assert!(
             old_delete_id < new_insert_id,
             "old deletion must precede replacement insert"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_keyed_changelog_does_not_pair_different_keys() {
+        let source = MockSource::with_messages(vec![
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(1))),
+            Message::Chunk(StreamChunk::from_pretty("I T I\n+ 1 Alice 7")),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(2))),
+            Message::Chunk(StreamChunk::from_pretty("I T I\n- 1 Alice 7\n+ 2 Alice 7")),
+            Message::Barrier(Barrier::new_test_barrier(test_epoch(3))),
+        ])
+        .stop_on_finish(false)
+        .into_executor(
+            Schema::new(vec![
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Varchar),
+                Field::unnamed(DataType::Int64),
+            ]),
+            vec![2],
+        );
+
+        let mut output = ChangeLogExecutor::new(
+            ActorContext::for_test(1),
+            source,
+            true,
+            VirtualNode::COUNT_FOR_TEST,
+            Bitmap::ones(VirtualNode::COUNT_FOR_TEST),
+            ChangeLogMode::Keyed,
+            vec![0],
+            vec![2],
+        )
+        .boxed()
+        .execute();
+
+        let mut events = Vec::new();
+        while let Some(message) = output.next().await {
+            match message.unwrap() {
+                Message::Chunk(chunk) => {
+                    for (op, row) in chunk.rows() {
+                        assert_eq!(op, Op::Insert, "changelog output must be append-only");
+                        let Some(ScalarRefImpl::Int64(key)) = row.datum_at(0) else {
+                            panic!("expected a non-null changelog key");
+                        };
+                        let Some(ScalarRefImpl::Int16(change_op)) = row.datum_at(3) else {
+                            panic!("expected a non-null changelog operation");
+                        };
+                        events.push((key, change_op));
+                    }
+                }
+                Message::Barrier(_) => {}
+                Message::Watermark(_) => panic!("unexpected watermark"),
+            }
+        }
+
+        assert_eq!(
+            events,
+            vec![
+                (1, Op::Insert.to_i16()),
+                (1, Op::Delete.to_i16()),
+                (2, Op::Insert.to_i16())
+            ]
         );
     }
 }
