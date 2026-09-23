@@ -444,11 +444,15 @@ impl InflightStreamingJobInfo {
     pub fn tracking_progress_actor_ids(
         fragment_infos: &HashMap<FragmentId, InflightFragmentInfo>,
     ) -> Vec<(ActorId, BackfillUpstreamType)> {
-        StreamJobFragments::tracking_progress_actor_ids_impl(
-            fragment_infos
-                .values()
-                .map(|fragment| (fragment.fragment_type_mask, fragment.actors.keys().copied())),
-        )
+        StreamJobFragments::tracking_progress_actor_ids_impl(fragment_infos.values().map(
+            |fragment| {
+                (
+                    fragment.fragment_type_mask,
+                    &fragment.nodes,
+                    fragment.actors.keys().copied(),
+                )
+            },
+        ))
     }
 }
 
@@ -471,6 +475,10 @@ pub struct InflightDatabaseInfo {
 }
 
 impl InflightDatabaseInfo {
+    pub(super) fn job_ids(&self) -> impl Iterator<Item = JobId> + '_ {
+        self.jobs.keys().copied()
+    }
+
     pub fn fragment_infos(&self) -> impl Iterator<Item = &InflightFragmentInfo> + '_ {
         self.jobs.values().flat_map(|job| job.fragment_infos())
     }
@@ -641,8 +649,7 @@ impl InflightDatabaseInfo {
                         info!(%job_id, "newly create job get cancelled before first barrier is collected")
                     }
                 }
-                CreateStreamingJobType::SnapshotBackfill { .. }
-                | CreateStreamingJobType::BatchRefresh(_) => {
+                CreateStreamingJobType::Independent { .. } => {
                     // The progress of SnapshotBackfill/BatchRefresh won't be tracked here
                 }
             }

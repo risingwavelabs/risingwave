@@ -439,20 +439,19 @@ pub struct SinceEpochInfo {
 }
 
 #[derive(Debug, Clone)]
-pub struct BatchRefreshInfo {
-    pub snapshot_backfill_info: SnapshotBackfillInfo,
-    pub refresh_interval_sec: u64,
+pub enum IndependentStreamingJobType {
+    SnapshotBackfill { since_epoch: Option<SinceEpochInfo> },
+    BatchRefresh { refresh_interval_sec: u64 },
 }
 
 #[derive(Debug, Clone)]
 pub enum CreateStreamingJobType {
     Normal,
     SinkIntoTable(UpstreamSinkInfo),
-    SnapshotBackfill {
+    Independent {
         snapshot_backfill_info: SnapshotBackfillInfo,
-        since_epoch: Option<SinceEpochInfo>,
+        kind: IndependentStreamingJobType,
     },
-    BatchRefresh(BatchRefreshInfo),
 }
 
 /// [`Command`] is the input of [`crate::barrier::worker::GlobalBarrierWorker`]. For different commands,
@@ -857,8 +856,7 @@ impl Command {
             PostCollectCommand::CreateStreamingJob { info, job_type, .. } => {
                 assert!(!matches!(
                     job_type,
-                    CreateStreamingJobType::SnapshotBackfill { .. }
-                        | CreateStreamingJobType::BatchRefresh(_)
+                    CreateStreamingJobType::Independent { .. }
                 ));
                 let table_fragments = &info.stream_job_fragments;
                 let mut table_ids: HashSet<_> =
@@ -1020,14 +1018,10 @@ impl Command {
                     .flat_map(build_actor_connector_splits)
                     .collect();
                 let subscriptions_to_add = {
-                    if let CreateStreamingJobType::SnapshotBackfill {
+                    if let CreateStreamingJobType::Independent {
                         snapshot_backfill_info,
                         ..
-                    }
-                    | CreateStreamingJobType::BatchRefresh(BatchRefreshInfo {
-                        snapshot_backfill_info,
-                        ..
-                    }) = job_type
+                    } = job_type
                     {
                         snapshot_backfill_info
                             .upstream_mv_table_id_to_backfill_epoch
