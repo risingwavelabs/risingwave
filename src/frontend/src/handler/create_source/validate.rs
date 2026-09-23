@@ -123,6 +123,17 @@ fn validate_license(connector: &str) -> Result<()> {
     Ok(())
 }
 
+fn validate_decimal_handling_mode(props: &BTreeMap<String, String>) -> Result<()> {
+    if let Some(mode) = props.get("debezium.decimal.handling.mode")
+        && mode != "string"
+    {
+        return Err(RwError::from(ProtocolError(format!(
+            "'debezium.decimal.handling.mode' must be 'string', got: '{mode}'"
+        ))));
+    }
+    Ok(())
+}
+
 /// Requires an explicitly supplied heartbeat interval to be a positive signed 32-bit integer.
 /// Keep this policy in sync with Java's `SourceValidateHandler.validateHeartbeatInterval`.
 /// Validates user-supplied options, not the final Debezium configuration. On CREATE, an omitted
@@ -175,6 +186,11 @@ pub fn validate_compatibility(
                 CONNECTORS_COMPATIBLE_FORMATS.keys()
             )))
         })?;
+
+    // RisingWave consumes schema-less JSON from Debezium and cannot reconstruct the scale of
+    // binary logical decimals emitted by `precise`. `double` can lose precision, so an explicit
+    // override must retain the common `string` default from `debezium.properties`.
+    validate_decimal_handling_mode(props)?;
 
     validate_license(&connector)?;
     if connector != KAFKA_CONNECTOR {

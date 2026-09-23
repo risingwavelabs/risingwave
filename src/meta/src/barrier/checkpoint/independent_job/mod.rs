@@ -32,10 +32,10 @@ pub(crate) use batch_refresh_job::{
 pub(crate) use creating_job::CreatingStreamingJobControl;
 
 use crate::barrier::info::BarrierInfo;
-use crate::barrier::notifier::{CollectionNotifier, NotifierStarter};
 use crate::barrier::partial_graph::{CollectedBarrier, PartialGraphManager};
 use crate::barrier::{BackfillProgress, BarrierKind, FragmentBackfillProgress, TracedEpoch};
 use crate::controller::fragment::InflightFragmentInfo;
+use crate::notification::{CollectionNotifier, NotifierStarter};
 
 /// Build a fake `BarrierInfo` for independent partial-graph barriers.
 ///
