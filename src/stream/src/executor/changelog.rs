@@ -174,7 +174,7 @@ impl ChangeLogExecutor {
                     }
 
                     for (chunk, vnodes) in deletes.into_iter().chain(inserts) {
-                        for (event, vnode) in chunk.rows_with_holes().zip(vnodes.iter()) {
+                        for (event, vnode) in chunk.rows_with_holes().zip_eq(vnodes.iter()) {
                             let Some((op, row)) = event else { continue };
 
                             let id = Serial::from(self.changelog_row_id_generator.next(vnode));
