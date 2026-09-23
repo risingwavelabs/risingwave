@@ -2201,6 +2201,10 @@ pub async fn rename_relation_refer(
             ObjectType::Sink => {
                 rename_relation_ref!(Sink, sink, sink_id, obj.oid.as_sink_id())
             }
+            // A CDC table source refers to the shared CDC source it reads from.
+            ObjectType::Source => {
+                rename_relation_ref!(Source, source, source_id, obj.oid.as_source_id())
+            }
             ObjectType::Subscription => {
                 rename_relation_ref!(
                     Subscription,
@@ -2221,7 +2225,7 @@ pub async fn rename_relation_refer(
             }
             _ => {
                 bail!(
-                    "only the table, sink, subscription, view and index will depend on other objects."
+                    "only the table, source, sink, subscription, view and index will depend on other objects."
                 )
             }
         }
