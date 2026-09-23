@@ -3068,7 +3068,8 @@ impl CatalogController {
     pub async fn update_sink_props_by_sink_id(
         &self,
         sink_id: SinkId,
-        props: BTreeMap<String, String>,
+        changed_props: BTreeMap<String, String>,
+        changed_secret_refs: BTreeMap<String, PbSecretRef>,
     ) -> MetaResult<HashMap<String, String>> {
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
@@ -3078,30 +3079,98 @@ impl CatalogController {
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), sink_id))?;
-        validate_sink_props(&sink, &props)?;
-        let definition = sink.definition.clone();
-        let [mut stmt]: [_; 1] = Parser::parse_sql(&definition)
-            .map_err(|e| SinkError::Config(anyhow!(e)))?
-            .try_into()
-            .unwrap();
-        if let Statement::CreateSink { stmt } = &mut stmt {
-            update_stmt_with_props(&mut stmt.with_properties.0, &props)?;
-        } else {
-            panic!("definition is not a create sink statement")
-        }
-        let mut new_config = sink.properties.clone().into_inner();
-        new_config.extend(props.clone());
 
-        let definition = stmt.to_string();
+        if changed_props.contains_key(CONNECTOR_TYPE_KEY)
+            || changed_secret_refs.contains_key(CONNECTOR_TYPE_KEY)
+        {
+            return Err(MetaError::invalid_parameter(
+                "Cannot alter sink connector type. Drop and recreate the sink instead.",
+            ));
+        }
+
+        let altered_options =
+            WithOptionsSecResolved::new(changed_props.clone(), changed_secret_refs.clone());
+
+        let mut options = WithOptionsSecResolved::new(
+            sink.properties.0.clone(),
+            sink.secret_ref
+                .as_ref()
+                .map(SecretRef::to_protobuf)
+                .unwrap_or_default(),
+        );
+
+        let (mut to_add, mut to_remove) =
+            options.handle_update(changed_props, changed_secret_refs)?;
+
+        // Connector and format options share the sink's dependency records.
+        if let Some(format_desc) = &sink.sink_format_desc {
+            let format_secret_ids: HashSet<_> = format_desc
+                .to_protobuf()
+                .secret_refs
+                .values()
+                .map(|secret_ref| secret_ref.secret_id)
+                .collect();
+            to_add.retain(|id| !format_secret_ids.contains(id));
+            to_remove.retain(|id| !format_secret_ids.contains(id));
+        }
+
+        let resolved_props = LocalSecretManager::global()
+            .fill_secrets(options.as_plaintext().clone(), options.as_secret().clone())?;
+
+        let resolved_delta = altered_options
+            .as_plaintext()
+            .keys()
+            .chain(altered_options.as_secret().keys())
+            .map(|key| (key.clone(), resolved_props[key].clone()))
+            .collect();
+
+        validate_sink_config(&sink, &resolved_props, &resolved_delta)?;
+
+        let rewrite_sql = {
+            let definition = sink.definition.clone();
+
+            let [mut stmt]: [_; 1] = Parser::parse_sql(&definition)
+                .map_err(|e| SinkError::Config(anyhow!(e)))?
+                .try_into()
+                .unwrap();
+            if let Statement::CreateSink { stmt } = &mut stmt {
+                update_with_options(&txn, &mut stmt.with_properties.0, &altered_options).await?;
+            } else {
+                panic!("definition is not a create sink statement")
+            }
+
+            stmt.to_string()
+        };
+
         let active_sink = sink::ActiveModel {
             sink_id: Set(sink_id),
-            properties: Set(risingwave_meta_model::Property(new_config.clone())),
-            definition: Set(definition),
+            properties: Set(options.as_plaintext().clone().into()),
+            secret_ref: Set((!options.as_secret().is_empty())
+                .then(|| SecretRef::from(options.as_secret().clone()))),
+            definition: Set(rewrite_sql),
             ..Default::default()
         };
         Sink::update(active_sink).exec(&txn).await?;
 
-        update_sink_fragment_props(&txn, sink_id, new_config).await?;
+        update_secret_dependencies(&txn, sink_id.as_object_id(), to_add, to_remove).await?;
+
+        update_connector_props_fragments(
+            &txn,
+            vec![sink_id.as_job_id()],
+            FragmentTypeFlag::Sink,
+            |node, found| {
+                if let PbNodeBody::Sink(node) = node
+                    && let Some(sink_desc) = &mut node.sink_desc
+                    && sink_desc.id == sink_id
+                {
+                    sink_desc.properties = options.as_plaintext().clone();
+                    sink_desc.secret_refs = options.as_secret().clone();
+                    *found = true;
+                }
+            },
+            true,
+        )
+        .await?;
         let (sink, obj) = Sink::find_by_id(sink_id)
             .find_also_related(Object)
             .one(&txn)
@@ -3127,13 +3196,13 @@ impl CatalogController {
             )
             .await;
 
-        Ok(props.into_iter().collect())
+        Ok(resolved_delta.into_iter().collect())
     }
 
     pub async fn update_iceberg_table_props_by_table_id(
         &self,
         table_id: TableId,
-        props: BTreeMap<String, String>,
+        changed_props: BTreeMap<String, String>,
         alter_iceberg_table_props: Option<
             risingwave_pb::meta::alter_connector_props_request::PbExtraOptions,
         >,
@@ -3148,7 +3217,10 @@ impl CatalogController {
             .one(&txn)
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), sink_id))?;
-        validate_sink_props(&sink, &props)?;
+
+        let mut merged_props = sink.properties.clone().into_inner();
+        merged_props.extend(changed_props.clone());
+        validate_sink_config(&sink, &merged_props, &changed_props)?;
 
         let definition = sink.definition.clone();
         let [mut stmt]: [_; 1] = Parser::parse_sql(&definition)
@@ -3167,17 +3239,15 @@ impl CatalogController {
                 ))
                 .into());
             }
-            update_stmt_with_props(with_options, &props)?;
+            update_stmt_with_props(with_options, &changed_props)?;
         } else {
             panic!("definition is not a create iceberg table statement")
         }
-        let mut new_config = sink.properties.clone().into_inner();
-        new_config.extend(props.clone());
 
         let definition = stmt.to_string();
         let active_sink = sink::ActiveModel {
             sink_id: Set(sink_id),
-            properties: Set(risingwave_meta_model::Property(new_config.clone())),
+            properties: Set(risingwave_meta_model::Property(merged_props.clone())),
             definition: Set(definition.clone()),
             ..Default::default()
         };
@@ -3195,7 +3265,7 @@ impl CatalogController {
         Source::update(active_source).exec(&txn).await?;
         Table::update(active_table).exec(&txn).await?;
 
-        update_sink_fragment_props(&txn, sink_id, new_config).await?;
+        update_sink_fragment_props(&txn, sink_id, merged_props).await?;
 
         let (sink, sink_obj) = Sink::find_by_id(sink_id)
             .find_also_related(Object)
@@ -3248,7 +3318,7 @@ impl CatalogController {
             )
             .await;
 
-        Ok((props.into_iter().collect(), sink_id))
+        Ok((changed_props.into_iter().collect(), sink_id))
     }
 
     /// Update connection properties and all dependent sources/sinks in a single transaction
@@ -3867,23 +3937,23 @@ impl CatalogController {
     }
 }
 
-fn validate_sink_props(sink: &sink::Model, props: &BTreeMap<String, String>) -> MetaResult<()> {
-    // Validate that props can be altered
+fn validate_sink_config(
+    sink: &sink::Model,
+    merged_props: &BTreeMap<String, String>,
+    changed_props: &BTreeMap<String, String>,
+) -> MetaResult<()> {
+    // Validate that the changed properties can be altered
     match sink.properties.inner_ref().get(CONNECTOR_TYPE_KEY) {
         Some(connector) => {
             let connector_type = connector.to_lowercase();
-            let field_names: Vec<String> = props.keys().cloned().collect();
+            let field_names: Vec<String> = changed_props.keys().cloned().collect();
             check_sink_allow_alter_on_fly_fields(&connector_type, &field_names)
                 .map_err(|e| SinkError::Config(anyhow!(e)))?;
 
             match_sink_name_str!(
                 connector_type.as_str(),
                 SinkType,
-                {
-                    let mut new_props = sink.properties.0.clone();
-                    new_props.extend(props.clone());
-                    SinkType::validate_alter_config_change(&new_props, props)
-                },
+                SinkType::validate_alter_config_change(merged_props, changed_props),
                 |sink: &str| Err(SinkError::Config(anyhow!("unsupported sink type {}", sink)))
             )?
         }

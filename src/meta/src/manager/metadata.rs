@@ -25,6 +25,7 @@ use risingwave_pb::catalog::{PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
+use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::{PbDispatcherType, PbStreamNode, PbStreamScanType};
 use sea_orm::TransactionTrait;
 use sea_orm::prelude::DateTime;
@@ -580,11 +581,12 @@ impl MetadataManager {
     pub async fn update_sink_props_by_sink_id(
         &self,
         sink_id: SinkId,
-        props: BTreeMap<String, String>,
+        changed_props: BTreeMap<String, String>,
+        changed_secret_refs: BTreeMap<String, PbSecretRef>,
     ) -> MetaResult<HashMap<String, String>> {
         let new_props = self
             .catalog_controller
-            .update_sink_props_by_sink_id(sink_id, props)
+            .update_sink_props_by_sink_id(sink_id, changed_props, changed_secret_refs)
             .await?;
         Ok(new_props)
     }

@@ -734,6 +734,7 @@ impl StreamManagerService for StreamServiceImpl {
                     .update_sink_props_by_sink_id(
                         request.object_id.into(),
                         request.changed_props.clone().into_iter().collect(),
+                        request.changed_secret_refs.clone().into_iter().collect(),
                     )
                     .await?,
                 request.object_id.into(),

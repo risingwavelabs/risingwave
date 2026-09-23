@@ -180,6 +180,8 @@ fi
 
 sqllogictest -p 4566 -d dev 'e2e_test/sink/kafka/drop_sink.slt'
 risedev slt 'e2e_test/sink/kafka/alter_kafka_sink_props.slt'
+risedev slt 'e2e_test/sink/kafka/alter_sink_secret.slt'
+risedev slt 'e2e_test/sink/kafka/alter_sink_secret.slt.serial'
 rpk topic delete test-rw-sink-append-only
 rpk topic delete test-rw-sink-upsert
 rpk topic delete test-rw-sink-debezium
