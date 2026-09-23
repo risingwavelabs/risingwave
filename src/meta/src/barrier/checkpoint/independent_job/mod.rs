@@ -31,11 +31,15 @@ use risingwave_pb::stream_service::barrier_complete_response::CreateMviewProgres
 
 pub(crate) mod batch_refresh_job;
 pub(crate) mod creating_job;
+pub(crate) mod iceberg_v3_job;
 pub(crate) use batch_refresh_job::{
     BatchRefreshJobCheckpointControl, BatchRefreshJobTriggerContext, BatchRefreshLogicalFragments,
-    BatchRefreshRenderResult,
+    BatchRefreshRenderResult, RenderedIndependentJobActors,
 };
 pub(crate) use creating_job::CreatingStreamingJobControl;
+pub(crate) use iceberg_v3_job::{
+    IcebergV3JobCheckpointControl, IcebergV3RenderResult, is_iceberg_v3_fragment_nodes,
+};
 
 use crate::MetaResult;
 use crate::barrier::backfill_order_control::get_nodes_with_backfill_dependencies;
@@ -358,6 +362,7 @@ fn new_fake_barrier(
 pub(crate) enum IndependentCheckpointJob {
     CreatingStreamingJob(CreatingStreamingJobControl),
     BatchRefresh(BatchRefreshJobCheckpointControl),
+    IcebergV3(IcebergV3JobCheckpointControl),
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -391,6 +396,7 @@ impl IndependentCheckpointJob {
         match self {
             Self::CreatingStreamingJob(j) => j.can_drop_independently(),
             Self::BatchRefresh(_) => true,
+            Self::IcebergV3(_) => true,
         }
     }
 
@@ -398,6 +404,7 @@ impl IndependentCheckpointJob {
         match self {
             Self::CreatingStreamingJob(j) => j.pinned_upstream_tables(),
             Self::BatchRefresh(j) => j.pinned_upstream_tables(),
+            Self::IcebergV3(j) => j.pinned_upstream_tables(),
         }
     }
 
@@ -408,6 +415,7 @@ impl IndependentCheckpointJob {
         match self {
             Self::CreatingStreamingJob(job) => job.pre_apply_throttle(config),
             Self::BatchRefresh(job) => job.pre_apply_throttle(config),
+            Self::IcebergV3(job) => job.pre_apply_throttle(config),
         }
     }
 
@@ -422,6 +430,9 @@ impl IndependentCheckpointJob {
                 job.on_new_upstream_barrier(partial_graph_manager, barrier_info, mutation)
             }
             Self::BatchRefresh(job) => {
+                job.on_new_upstream_barrier(partial_graph_manager, barrier_info, mutation)
+            }
+            Self::IcebergV3(job) => {
                 job.on_new_upstream_barrier(partial_graph_manager, barrier_info, mutation)
             }
         }
@@ -475,6 +486,20 @@ impl IndependentCheckpointJobControl {
         }
     }
 
+    pub(crate) fn iceberg_v3(
+        job_id: JobId,
+        partial_graph_id: PartialGraphId,
+        status: IndependentCheckpointJobStatus,
+        job: IcebergV3JobCheckpointControl,
+    ) -> Self {
+        Self::Running {
+            status,
+            job_id,
+            partial_graph_id,
+            job: IndependentCheckpointJob::IcebergV3(job),
+        }
+    }
+
     pub(crate) fn running(&self) -> Option<&IndependentCheckpointJob> {
         match self {
             Self::Running { job, .. } => Some(job),
@@ -514,6 +539,7 @@ impl IndependentCheckpointJobControl {
         match self.running()? {
             IndependentCheckpointJob::CreatingStreamingJob(j) => Some(j.gen_backfill_progress()),
             IndependentCheckpointJob::BatchRefresh(j) => j.gen_backfill_progress(),
+            IndependentCheckpointJob::IcebergV3(j) => j.gen_backfill_progress(),
         }
     }
 
@@ -525,6 +551,7 @@ impl IndependentCheckpointJobControl {
         match job {
             IndependentCheckpointJob::CreatingStreamingJob(j) => j.collect(collected_barrier),
             IndependentCheckpointJob::BatchRefresh(j) => j.collect(collected_barrier),
+            IndependentCheckpointJob::IcebergV3(j) => j.collect(collected_barrier),
         }
     }
 
@@ -534,6 +561,7 @@ impl IndependentCheckpointJobControl {
                 j.gen_fragment_backfill_progress()
             }
             Some(IndependentCheckpointJob::BatchRefresh(j)) => j.gen_fragment_backfill_progress(),
+            Some(IndependentCheckpointJob::IcebergV3(j)) => j.gen_fragment_backfill_progress(),
             None => vec![],
         }
     }
@@ -552,6 +580,7 @@ impl IndependentCheckpointJobControl {
         match self.running()? {
             IndependentCheckpointJob::CreatingStreamingJob(j) => j.fragment_infos(),
             IndependentCheckpointJob::BatchRefresh(j) => j.fragment_infos(),
+            IndependentCheckpointJob::IcebergV3(j) => Some(j.fragment_infos()),
         }
     }
 
@@ -575,6 +604,11 @@ impl IndependentCheckpointJobControl {
             } => {
                 j.ack_completed(partial_graph_manager, epoch);
             }
+            Self::Running {
+                status: IndependentCheckpointJobStatus::Ready,
+                job: IndependentCheckpointJob::IcebergV3(j),
+                ..
+            } => j.ack_completed(partial_graph_manager, epoch),
             Self::Running {
                 status: IndependentCheckpointJobStatus::Initial { .. },
                 ..
