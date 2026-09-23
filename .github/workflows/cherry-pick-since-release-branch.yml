@@ -115,6 +115,7 @@ jobs:
           # For automatic trigger from PR events, `pr_sha` is unset,
           # and it will use the triggering SHA (GITHUB_SHA) instead.
           commit_sha: ${{ needs.get-target-release-branches.outputs.pr_sha || '' }}
+          source_pr_number: ${{ needs.get-target-release-branches.outputs.pr_number }}
           pr_branch: ${{ matrix.branch }}
           pr_labels: "cherry-pick"
           pr_body: |
