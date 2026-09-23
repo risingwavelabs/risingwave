@@ -651,9 +651,9 @@ impl PostCollectCommand {
                 table_id,
                 database_id,
                 associated_source_id,
+                staging_table_id,
                 trigger_time,
                 actors,
-                ..
             } => {
                 barrier_manager_context
                     .refresh_manager
@@ -661,6 +661,7 @@ impl PostCollectCommand {
                         table_id,
                         database_id,
                         associated_source_id,
+                        staging_table_id,
                         trigger_time,
                         actors,
                     )
@@ -669,6 +670,7 @@ impl PostCollectCommand {
             PostCollectCommand::FinishRefresh {
                 table_id,
                 trigger_time,
+                ..
             } => {
                 barrier_manager_context
                     .refresh_manager

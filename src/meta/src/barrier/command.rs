@@ -558,7 +558,8 @@ pub enum Command {
     ConnectorPropsChange(ConnectorPropsChange),
 
     /// Starts the refresh cycle `trigger_time` of a table: the barrier's commit truncates the
-    /// staging table and its post-collect moves the job to `Refreshing`.
+    /// staging table, which an abandoned cycle leaves dirty, and its post-collect moves the job to
+    /// `Refreshing`.
     Refresh {
         table_id: TableId,
         associated_source_id: SourceId,
@@ -573,9 +574,12 @@ pub enum Command {
         table_id: TableId,
         associated_source_id: SourceId,
     },
-    /// Ends the refresh cycle `trigger_time` of a table once the barrier is committed.
+    /// Ends the refresh cycle `trigger_time` of a table once every materialize actor merged: the
+    /// barrier's commit truncates the staging table, which nothing reads after the merge, and its
+    /// post-collect moves the job back to `Idle`.
     FinishRefresh {
         table_id: TableId,
+        staging_table_id: TableId,
         trigger_time: NaiveDateTime,
     },
 
@@ -684,6 +688,7 @@ impl std::fmt::Display for Command {
             Command::FinishRefresh {
                 table_id,
                 trigger_time,
+                ..
             } => write!(f, "FinishRefresh: {} (cycle: {})", table_id, trigger_time),
             Command::ResetSource { source_id } => write!(f, "ResetSource: {source_id}"),
             Command::ResumeBackfill { target } => match target {
@@ -761,6 +766,7 @@ pub enum PostCollectCommand {
     },
     FinishRefresh {
         table_id: TableId,
+        staging_table_id: TableId,
         trigger_time: NaiveDateTime,
     },
 }
@@ -946,6 +952,11 @@ impl Command {
                 .expect("non-duplicate");
         }
         if let PostCollectCommand::RefreshStarted {
+            table_id,
+            staging_table_id,
+            ..
+        }
+        | PostCollectCommand::FinishRefresh {
             table_id,
             staging_table_id,
             ..

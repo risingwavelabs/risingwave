@@ -271,13 +271,20 @@ impl GlobalRefreshManager {
         table_id: TableId,
         database_id: DatabaseId,
         associated_source_id: SourceId,
+        staging_table_id: TableId,
         trigger_time: NaiveDateTime,
         actors: RefreshCycleActors,
     ) -> MetaResult<()> {
         // Installed before the row moves, so the row never says `Refreshing` without it.
         self.cycles.lock().trackers.insert(
             table_id,
-            CycleTracker::new(database_id, associated_source_id, trigger_time, actors),
+            CycleTracker::new(
+                database_id,
+                associated_source_id,
+                staging_table_id,
+                trigger_time,
+                actors,
+            ),
         );
         if !self
             .metadata_manager
@@ -316,9 +323,10 @@ impl GlobalRefreshManager {
         if !tracker.stage_mut(stage).report(stage, &actors)? {
             return Ok(());
         }
-        let (database_id, associated_source_id, trigger_time) = (
+        let (database_id, associated_source_id, staging_table_id, trigger_time) = (
             tracker.database_id,
             tracker.associated_source_id,
+            tracker.staging_table_id,
             tracker.trigger_time,
         );
         let command = match stage {
@@ -333,6 +341,7 @@ impl GlobalRefreshManager {
             RefreshStage::Mview => {
                 let command = Command::FinishRefresh {
                     table_id,
+                    staging_table_id,
                     trigger_time,
                 };
                 // The queue only refuses a command while the database is recovering, and that
@@ -657,6 +666,7 @@ impl RefreshFinishedMetrics {
 struct CycleTracker {
     database_id: DatabaseId,
     associated_source_id: SourceId,
+    staging_table_id: TableId,
     trigger_time: NaiveDateTime,
     list: StageProgress,
     fetch: StageProgress,
@@ -668,12 +678,14 @@ impl CycleTracker {
     fn new(
         database_id: DatabaseId,
         associated_source_id: SourceId,
+        staging_table_id: TableId,
         trigger_time: NaiveDateTime,
         actors: RefreshCycleActors,
     ) -> Self {
         Self {
             database_id,
             associated_source_id,
+            staging_table_id,
             trigger_time,
             list: StageProgress::new(actors.list),
             fetch: StageProgress::new(actors.fetch),
