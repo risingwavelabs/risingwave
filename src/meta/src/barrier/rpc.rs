@@ -70,7 +70,7 @@ use crate::barrier::checkpoint::{
     IndependentCheckpointJobControl, IndependentCheckpointJobStatus,
 };
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
-use crate::barrier::edge_builder::{EdgeBuilderFragmentInfo, FragmentEdgeBuilder};
+use crate::barrier::edge_builder::FragmentEdgeBuilder;
 use crate::barrier::info::{
     BarrierInfo, CreateStreamingJobStatus, InflightDatabaseInfo, InflightStreamingJobInfo,
     SubscriberType,
@@ -935,40 +935,22 @@ impl PartialGraphRecoverer<'_> {
         }?;
 
         let control_stream_manager = self.control_stream_manager();
-        let mut builder = FragmentEdgeBuilder::new(
-            database_jobs
-                .values()
-                .flat_map(|job| {
-                    let partial_graph_id = to_partial_graph_id(database_id, None);
-                    job.fragment_infos().map(move |info| {
-                        (
-                            info.fragment_id,
-                            EdgeBuilderFragmentInfo::from_inflight(
-                                info,
-                                partial_graph_id,
-                                control_stream_manager,
-                            ),
-                        )
-                    })
-                })
-                .chain(ongoing_snapshot_backfill_jobs.iter().flat_map(
-                    |(job_id, (fragments, ..))| {
-                        let partial_graph_id = to_partial_graph_id(database_id, Some(*job_id));
-                        fragments.values().map(move |fragment| {
-                            (
-                                fragment.fragment_id,
-                                EdgeBuilderFragmentInfo::from_inflight(
-                                    fragment,
-                                    partial_graph_id,
-                                    control_stream_manager,
-                                ),
-                            )
-                        })
-                    },
-                )),
+        let mut builder = FragmentEdgeBuilder::new().add_new_fragments(
+            database_jobs.values().flat_map(|job| job.fragment_infos()),
+            to_partial_graph_id(database_id, None),
+            control_stream_manager,
         );
-        builder.add_relations(fragment_relations);
-        let mut edges = builder.build();
+        for (job_id, (fragments, ..)) in &ongoing_snapshot_backfill_jobs {
+            builder = builder.add_new_fragments(
+                fragments.values(),
+                to_partial_graph_id(database_id, Some(*job_id)),
+                control_stream_manager,
+            );
+        }
+        let (mut edges, _) = builder
+            .finish_fragments()
+            .add_relations(fragment_relations)?
+            .build();
 
         {
             let new_actors =
