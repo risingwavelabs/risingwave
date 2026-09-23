@@ -177,7 +177,7 @@ fn try_convert_money_i64_to_type(value: i64, data_type: &DataType) -> anyhow::Re
             // SQL Server MONEY / SMALLMONEY are wire-encoded as a scaled
             // i64 with factor 1/10000. Divide to land the value in the
             // RisingWave Decimal builder.
-            let raw = Decimal::from(value) / Decimal::from_str("10000").unwrap();
+            let mut result = Decimal::from(value) / Decimal::from_str("10000").unwrap();
             // Integer-valued money amounts (`$1.00` ⇒ raw = 1 with scale 0)
             // would otherwise display as "1" rather than "1.0". Bump the
             // scale up to a minimum of 1 so the rendered SQL output
@@ -185,22 +185,16 @@ fn try_convert_money_i64_to_type(value: i64, data_type: &DataType) -> anyhow::Re
             // conceptually a 4-dp fixed point, so existing higher-scale
             // values (`$1234.56` ⇒ scale 2) are unchanged.
             //
-            // `Decimal::scale` returns `None` for the NaN/Inf variants,
-            // which can't arise here (the input is a finite `i64` and
-            // the divisor is a finite `Decimal`), so unwrapping the
-            // current scale is safe.
-            let current_scale = raw.scale().expect("non-NaN/Inf money value") as u32;
+            // Use `rescale` rather than the format+parse trick: the
+            // RisingWave `Decimal` enum wraps a `rust_decimal::Decimal`
+            // and the wrapper's `Display` impl does not propagate format
+            // precision to the inner value, so `format!("{:.1}", ...)`
+            // would silently keep the original scale.
+            let current_scale = result.scale().expect("non-NaN/Inf money value") as u32;
             let target_scale = std::cmp::max(1u32, current_scale);
-            let result = if target_scale > current_scale {
-                // `rust_decimal::Display` honors the formatter's precision
-                // as the number of fractional digits, so formatting with
-                // `target_scale` pads with trailing zeros — turning
-                // `Decimal::from(1)` into `"1.0"`.
-                Decimal::from_str(&format!("{:.*}", target_scale as usize, raw))
-                    .unwrap_or(raw)
-            } else {
-                raw
-            };
+            if target_scale > current_scale {
+                result.rescale(target_scale);
+            }
             Ok(ScalarImpl::Decimal(result))
         }
         _ => bail!("conversion of SQL Server money to {data_type} is not supported"),

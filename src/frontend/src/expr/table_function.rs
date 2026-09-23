@@ -104,6 +104,7 @@ impl TableFunction {
             return_type: catalog.return_type.clone(),
             function_type: TableFunctionType::UserDefined,
             user_defined: Some(catalog),
+            money_column_indices: vec![],
         }
     }
 

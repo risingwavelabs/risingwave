@@ -21,7 +21,7 @@ use risingwave_common::util::chunk_coalesce::DataChunkBuilder;
 use risingwave_connector::connector_common::sql_server::{
     MssqlConnectionConfig, create_mssql_client,
 };
-use risingwave_connector::parser::sql_server_row_to_owned_row;
+use risingwave_connector::parser::sql_server_row_to_owned_row_with_money_indices;
 use risingwave_pb::batch_plan::plan_node::NodeBody;
 
 use crate::error::BatchError;
@@ -609,7 +609,11 @@ impl BoxedExecutorBuilder for MssqlQueryExecutorBuilder {
             mssql_query_node.query.clone(),
             source.plan_node().get_identity().clone(),
             source.context().get_config().developer.chunk_size,
-            mssql_query_node.money_column_indices.clone(),
+            mssql_query_node
+                .money_column_indices
+                .iter()
+                .map(|i| *i as usize)
+                .collect(),
         )))
     }
 }
