@@ -165,7 +165,15 @@ mod tests {
         let mut correlated = super::CorrelatedInputRef::new(0, DataType::Int32, 1);
         correlated.set_correlated_id(42);
 
-        let values = LogicalValues::new(vec![vec![correlated.into()]], schema, ctx).into();
+        let values = LogicalValues::new(
+            vec![
+                vec![1_i32.into()],
+                vec![correlated.into()],
+            ],
+            schema,
+            ctx,
+        )
+        .into();
 
         assert!(PlanCorrelatedIdFinder::find_correlated_id(values.clone(), &42));
         assert!(!PlanCorrelatedIdFinder::find_correlated_id(values, &43));
