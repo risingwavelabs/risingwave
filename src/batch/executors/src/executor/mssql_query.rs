@@ -473,7 +473,7 @@ impl MssqlQueryExecutor {
 
     /// Stream query results. Connects to SQL Server via `tiberius`, runs
     /// `self.query` verbatim, and yields each [`DataChunk`] decoded through
-    /// [`sql_server_row_to_owned_row`]. Errors from connection setup, query
+    /// [`sql_server_row_to_owned_row_with_money_indices`]. Errors from connection setup, query
     /// execution, or row decoding are propagated as [`BatchError`].
     ///
     /// **Security**: the query is first run through
