@@ -634,14 +634,14 @@ not on Flink, whose window is exclusive.
   filed only while its partition is non-empty and under exactly its first deadline; removal
   unfiles; empty buckets are dropped), so it is bounded by the partition map; a debug-build check
   pins that on every watermark. Measured (criterion `stream_match_recognize`, one open partial
-  per partition): 20 idle watermarks cost 4.7 ms / 50 ms / 344 ms over 1k / 10k / 50k partitions
-  before, and 7 µs / 11 µs / ~0.5 ms after — the remaining 50k cost is the in-memory test store
-  syncing its 50k stored rows at the fencing barrier, not the executor. The case where every
-  partition expires at once (the `WITHIN` cliff) measured 0.79 / 9.6 / 69 ms before and
-  0.79 / 8.9 / 79 ms after: each popped partition now costs a hash probe into the partition map
-  (a cache miss at 50k partitions) instead of a map-iteration step. A slab-indexed partition map
-  (the index storing a slot number, the key stored once) would remove the probe and the key
-  clones in the index; follow-up.
+  per partition, quiet partitions, a barrier-only control subtracted): an idle watermark cost
+  234 µs / 2.37 ms / 13.7 ms over 1k / 10k / 50k partitions before and 89 / 91 / 88 ns after —
+  flat in the partition count. The case where every partition expires at once (the `WITHIN`
+  cliff) costs 0.76 / 0.82 / 1.33 µs per expired partition before and 0.79 / 0.89 / 1.46 µs
+  after (+4 % / +7 % / +10 %): each popped partition now costs a hash probe into the partition
+  map, a cache miss once the map outgrows the caches, instead of an in-order iteration step. A
+  slab-indexed partition map (the index storing a slot number, the key stored once) would remove
+  the probe and the key clones in the index; follow-up.
 - **A row is persisted twice across the fragment** — once in the sort's buffer, once in the
   matcher's retained rows — the storage cost of the ordering/matching split.
 - `ALL ROWS PER MATCH`, `MATCH_NUMBER()`, anchors (`^`, `$`), exclusions (`{- … -}`), batch
