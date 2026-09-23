@@ -179,17 +179,12 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
             let full_path = Path::new(&root_path).join(&file_path);
 
             // Read the entire file
-            let content = match fs::read(&full_path).await {
-                Ok(content) => content,
-                Err(e) => {
-                    tracing::error!(
-                        error = %e.as_report(),
-                        file_path = %full_path.display(),
-                        "Failed to read file"
-                    );
-                    continue;
-                }
-            };
+            let content = fs::read(&full_path).await.map_err(|e| {
+                StreamExecutorError::connector_error(
+                    anyhow::Error::from(e)
+                        .context(format!("failed to read file {}", full_path.display())),
+                )
+            })?;
 
             if content.is_empty() {
                 // Empty file, skip it
@@ -305,7 +300,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
             match msg {
                 Err(e) => {
                     tracing::error!(error = %e.as_report(), "Fetch Error");
-                    files_in_progress = 0;
+                    return Err(e);
                 }
                 Ok(msg) => match msg {
                     // Barrier messages from upstream
@@ -452,7 +447,7 @@ impl<S: StateStore> BatchPosixFsFetchExecutor<S> {
                         yield Message::Chunk(chunk);
                     }
                     Either::Right(None) => {
-                        files_in_progress -= 1;
+                        files_in_progress = files_in_progress.saturating_sub(1);
                     }
                 },
             }
