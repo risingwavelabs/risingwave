@@ -14818,6 +14818,7 @@ dependencies = [
  "itertools 0.14.0",
  "madsim-tokio",
  "parking_lot 0.12.5",
+ "prometheus",
  "rand 0.9.5",
  "risingwave_common",
  "risingwave_common_service",

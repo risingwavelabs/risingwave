@@ -830,7 +830,7 @@ impl SstableStore {
                 )));
             }
         };
-        Ok(BlockDataStream::new(reader, metas.to_vec()))
+        Ok(BlockDataStream::new(reader, metas))
     }
 
     pub fn meta_cache(&self) -> &HybridCache<HummockSstableObjectId, Box<Sstable>> {

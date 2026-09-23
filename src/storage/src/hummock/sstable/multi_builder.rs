@@ -159,6 +159,7 @@ where
         self.add_full_key(full_key, value, is_new_user_key).await
     }
 
+    /// Returns the raw written length, or `None` if the block was coalesced.
     pub async fn add_raw_block(
         &mut self,
         buf: Bytes,
@@ -166,7 +167,7 @@ where
         smallest_key: FullKey<Vec<u8>>,
         largest_key: Vec<u8>,
         block_meta: BlockMeta,
-    ) -> HummockResult<bool> {
+    ) -> HummockResult<Option<usize>> {
         if self.current_builder.is_none() {
             if let Some(progress) = &self.task_progress {
                 progress.inc_num_pending_write_io()
