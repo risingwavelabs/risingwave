@@ -1035,8 +1035,7 @@ impl PartialGraphRecoverer<'_> {
                 )
             }));
 
-            let database_job_source_splits =
-                collect_source_splits(database_jobs.values().flatten(), source_splits);
+            let job_source_splits = collect_source_splits(info.values(), source_splits);
             assert!(
                 !cdc_table_snapshot_splits.contains_key(&job_id),
                 "snapshot backfill job {job_id} should not have cdc backfill"
@@ -1056,7 +1055,7 @@ impl PartialGraphRecoverer<'_> {
                     },
                 );
             let mutation = build_mutation(
-                &database_job_source_splits,
+                &job_source_splits,
                 Default::default(), // no cdc backfill job for
                 &job_backfill_orders,
                 false,
