@@ -28,10 +28,12 @@ pub struct PlanCorrelatedIdFinder {
 }
 
 impl PlanCorrelatedIdFinder {
+    /// Return whether the finder observed the given correlated ID.
     pub fn contains(&self, correlated_id: &CorrelatedId) -> bool {
         self.correlated_id_set.contains(correlated_id)
     }
 
+    /// Visit a logical plan and return whether it contains the given correlated ID.
     pub fn find_correlated_id(plan: PlanRef, correlated_id: &CorrelatedId) -> bool {
         let mut plan_correlated_id_finder = Self::default();
         plan_correlated_id_finder.visit(plan);
@@ -117,6 +119,7 @@ impl LogicalPlanVisitor for PlanCorrelatedIdFinder {
             .for_each(|input| self.visit(input));
     }
 
+    /// Inspect every expression in every row because correlated references can occur in any row.
     fn visit_logical_values(&mut self, plan: &LogicalValues) {
         let mut finder = ExprCorrelatedIdFinder::default();
         plan.rows()
