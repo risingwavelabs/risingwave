@@ -571,7 +571,7 @@ impl CursorRowFormat {
 }
 
 /// A response stream with cursor-specific commit/abort handling for a prepared FETCH.
-pub(super) trait CursorPgResponseStream: Stream<Item = Result<Row>> + Unpin {
+pub(super) trait CursorPgResponseStream: Stream<Item = Result<(Row, i64)>> + Unpin {
     fn commit_fetch(&mut self);
     fn abort_fetch(&mut self);
     fn fail_fetch(&mut self);
@@ -943,7 +943,7 @@ impl CursorPgResponseStream for QueryCursorPgResponseStream {
 }
 
 impl Stream for QueryCursorPgResponseStream {
-    type Item = Result<Row>;
+    type Item = Result<(Row, i64)>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
@@ -974,7 +974,9 @@ impl Stream for QueryCursorPgResponseStream {
                 Poll::Ready(Some(Err(error.into())))
             }
             Poll::Ready(Ok(CursorPgResponsePollItem::Row { row, .. })) => {
-                Poll::Ready(Some(Ok(row.row)))
+                let row = row.row;
+                let row_nested_heap_size = row.estimated_heap_size();
+                Poll::Ready(Some(Ok((row, row_nested_heap_size))))
             }
             Poll::Ready(Ok(CursorPgResponsePollItem::Barrier(
                 CursorDataChunkBarrier::QueryEnd,
@@ -1176,7 +1178,7 @@ impl CursorPgResponseStream for SubscriptionCursorPgResponseStream {
 }
 
 impl Stream for SubscriptionCursorPgResponseStream {
-    type Item = Result<Row>;
+    type Item = Result<(Row, i64)>;
 
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         const INVALID_CURSOR_ERROR_MESSAGE: &str =
@@ -1223,9 +1225,10 @@ impl Stream for SubscriptionCursorPgResponseStream {
                         Ok(row) => row,
                         Err(error) => return Poll::Ready(Some(Err(error))),
                     };
+                    let row_nested_heap_size = row.estimated_heap_size();
                     this.fetch_state_to_commit.as_mut().unwrap().is_idle = false;
                     this.yielded_rows += 1;
-                    return Poll::Ready(Some(Ok(row)));
+                    return Poll::Ready(Some(Ok((row, row_nested_heap_size))));
                 }
                 Poll::Ready(Ok(CursorPgResponsePollItem::Barrier(barrier))) => {
                     let fetch_state_to_commit = this.fetch_state_to_commit.as_mut().unwrap();
@@ -1656,11 +1659,11 @@ mod tests {
         drop(chunk_tx);
 
         stream.begin_fetch(&[], &session);
-        assert_text_row(&stream.next().await.unwrap().unwrap(), &[Some("1")]);
+        assert_text_row(&stream.next().await.unwrap().unwrap().0, &[Some("1")]);
         stream.commit_fetch();
         stream.begin_fetch(&[], &session);
         for expected in ["2", "3"] {
-            assert_text_row(&stream.next().await.unwrap().unwrap(), &[Some(expected)]);
+            assert_text_row(&stream.next().await.unwrap().unwrap().0, &[Some(expected)]);
         }
         assert!(stream.next().await.is_none());
         stream.commit_fetch();
@@ -1887,7 +1890,7 @@ mod tests {
         drop(chunk_tx);
 
         stream.begin_fetch(&[], &session);
-        assert_text_row(&stream.next().await.unwrap().unwrap(), &[Some("1")]);
+        assert_text_row(&stream.next().await.unwrap().unwrap().0, &[Some("1")]);
         let metadata = stream.inner.current_metadata.as_ref().unwrap().clone();
         stream.commit_fetch();
         assert_eq!(stream.inner.cached_pg_rows.as_ref().unwrap().rows.len(), 3);
@@ -1899,7 +1902,7 @@ mod tests {
             &metadata
         ));
         assert_eq!(stream.inner.row_offset_in_chunk, 1);
-        assert_text_row(&stream.next().await.unwrap().unwrap(), &[Some("2")]);
+        assert_text_row(&stream.next().await.unwrap().unwrap().0, &[Some("2")]);
         stream.commit_fetch();
 
         // A successful zero-row FETCH must not lose the cached suffix or its raw offset.
@@ -1908,18 +1911,18 @@ mod tests {
         stream.begin_fetch(&[], &session);
         assert_eq!(stream.inner.current_pg_rows.len(), 2);
         assert_eq!(stream.inner.row_offset_in_chunk, 2);
-        assert_text_row(&stream.next().await.unwrap().unwrap(), &[Some("3")]);
+        assert_text_row(&stream.next().await.unwrap().unwrap().0, &[Some("3")]);
         stream.abort_fetch();
         assert!(stream.inner.cached_pg_rows.is_none());
 
         stream.begin_fetch(&[], &session);
         assert!(stream.inner.current_pg_rows.is_empty());
-        assert_text_row(&stream.next().await.unwrap().unwrap(), &[Some("3")]);
+        assert_text_row(&stream.next().await.unwrap().unwrap().0, &[Some("3")]);
         // Starting another FETCH without commit/abort models an abandoned command future.
         stream.begin_fetch(&[], &session);
         assert!(stream.inner.current_pg_rows.is_empty());
-        assert_text_row(&stream.next().await.unwrap().unwrap(), &[Some("3")]);
-        assert_text_row(&stream.next().await.unwrap().unwrap(), &[Some("4")]);
+        assert_text_row(&stream.next().await.unwrap().unwrap().0, &[Some("3")]);
+        assert_text_row(&stream.next().await.unwrap().unwrap().0, &[Some("4")]);
         assert!(stream.next().await.is_none());
         stream.commit_fetch();
         assert!(stream.inner.cached_pg_rows.is_none());
@@ -1939,7 +1942,7 @@ mod tests {
         let mut format = CursorRowFormat::new(&[], &session);
         format.session_data.timezone = "UTC".to_owned();
         stream.inner.begin_fetch(Arc::new(format));
-        assert_text_row(&stream.next().await.unwrap().unwrap(), &[Some("1")]);
+        assert_text_row(&stream.next().await.unwrap().unwrap().0, &[Some("1")]);
         stream.commit_fetch();
         assert!(stream.inner.cached_pg_rows.is_some());
 
@@ -1949,7 +1952,7 @@ mod tests {
         assert!(stream.inner.cached_pg_rows.is_none());
         assert!(stream.inner.current_pg_rows.is_empty());
         assert!(stream.inner.current_metadata.is_none());
-        assert_text_row(&stream.next().await.unwrap().unwrap(), &[Some("2")]);
+        assert_text_row(&stream.next().await.unwrap().unwrap().0, &[Some("2")]);
         assert!(stream.next().await.is_none());
         stream.commit_fetch();
     }
@@ -1981,7 +1984,7 @@ mod tests {
                 .unwrap();
 
             stream.begin_fetch(&[Format::Binary], &session, false);
-            let row = stream.next().await.unwrap().unwrap();
+            let row = stream.next().await.unwrap().unwrap().0;
             assert_eq!(
                 row.values()[0].as_deref(),
                 Some(42i32.to_be_bytes().as_slice())
@@ -1994,7 +1997,7 @@ mod tests {
                 stream.inner.current_metadata.as_ref().unwrap(),
                 &metadata
             ));
-            let row = stream.next().await.unwrap().unwrap();
+            let row = stream.next().await.unwrap().unwrap().0;
             assert_eq!(
                 row.values()[0].as_deref(),
                 Some(43i32.to_be_bytes().as_slice())
@@ -2012,7 +2015,7 @@ mod tests {
 
             stream.begin_fetch(&[Format::Binary], &session, false);
             assert_eq!(stream.inner.current_pg_rows.len(), 1);
-            let row = stream.next().await.unwrap().unwrap();
+            let row = stream.next().await.unwrap().unwrap().0;
             assert_eq!(
                 row.values()[0].as_deref(),
                 Some(44i32.to_be_bytes().as_slice())
@@ -2038,13 +2041,13 @@ mod tests {
         drop(chunk_tx);
 
         stream.begin_fetch(&[], &session);
-        assert_text_row(&stream.next().await.unwrap().unwrap(), &[Some("1")]);
+        assert_text_row(&stream.next().await.unwrap().unwrap().0, &[Some("1")]);
         assert_eq!(stream.inner.cached_events.len(), 1);
         assert_eq!(stream.inner.row_offset_in_chunk, 1);
         stream.commit_fetch();
 
         stream.begin_fetch(&[Format::Binary], &session);
-        let row = stream.next().await.unwrap().unwrap();
+        let row = stream.next().await.unwrap().unwrap().0;
         assert_eq!(
             row.values()[0].as_deref(),
             Some(2i32.to_be_bytes().as_slice())
@@ -2053,7 +2056,7 @@ mod tests {
         stream.commit_fetch();
 
         stream.begin_fetch(&[Format::Text], &session);
-        assert_text_row(&stream.next().await.unwrap().unwrap(), &[Some("3")]);
+        assert_text_row(&stream.next().await.unwrap().unwrap().0, &[Some("3")]);
         assert!(stream.next().await.is_none());
         stream.commit_fetch();
         assert!(stream.inner.cached_events.is_empty());
@@ -2087,7 +2090,7 @@ mod tests {
                 .unwrap();
 
             stream.begin_fetch(&[], &session, false);
-            let row = stream.next().await.unwrap().unwrap();
+            let row = stream.next().await.unwrap().unwrap().0;
             assert_eq!(row.values()[0].as_deref(), Some(b"42".as_slice()));
             stream.commit_fetch();
             assert_eq!(
@@ -2096,7 +2099,7 @@ mod tests {
             );
 
             stream.begin_fetch(&[Format::Binary], &session, false);
-            let row = stream.next().await.unwrap().unwrap();
+            let row = stream.next().await.unwrap().unwrap().0;
             assert_eq!(
                 row.values()[0].as_deref(),
                 Some(43i32.to_be_bytes().as_slice())
@@ -2113,7 +2116,7 @@ mod tests {
             );
 
             stream.begin_fetch(&[Format::Text], &session, false);
-            let row = stream.next().await.unwrap().unwrap();
+            let row = stream.next().await.unwrap().unwrap().0;
             assert_eq!(row.values()[0].as_deref(), Some(b"44".as_slice()));
             assert_eq!(
                 row.values()[1].as_deref(),
@@ -2150,7 +2153,7 @@ mod tests {
         drop(chunk_tx);
 
         stream.begin_fetch(&[], &session);
-        assert_text_row(&stream.next().await.unwrap().unwrap(), &[Some("1")]);
+        assert_text_row(&stream.next().await.unwrap().unwrap().0, &[Some("1")]);
         stream.commit_fetch();
         assert_eq!(
             stream
@@ -2164,7 +2167,7 @@ mod tests {
 
         stream.begin_fetch(&[], &session);
         for expected in ["2", "3", "4"] {
-            assert_text_row(&stream.next().await.unwrap().unwrap(), &[Some(expected)]);
+            assert_text_row(&stream.next().await.unwrap().unwrap().0, &[Some(expected)]);
         }
         assert!(stream.next().await.is_none());
         assert!(stream.inner.data_stream.is_none());
@@ -2172,7 +2175,7 @@ mod tests {
 
         stream.begin_fetch(&[Format::Binary], &session);
         for expected in [2i32, 3] {
-            let row = stream.next().await.unwrap().unwrap();
+            let row = stream.next().await.unwrap().unwrap().0;
             assert_eq!(
                 row.values()[0].as_deref(),
                 Some(expected.to_be_bytes().as_slice())
@@ -2191,7 +2194,7 @@ mod tests {
         );
 
         stream.begin_fetch(&[], &session);
-        assert_text_row(&stream.next().await.unwrap().unwrap(), &[Some("4")]);
+        assert_text_row(&stream.next().await.unwrap().unwrap().0, &[Some("4")]);
         assert!(stream.next().await.is_none());
         stream.commit_fetch();
         assert!(stream.inner.cached_events.is_empty());
@@ -2244,7 +2247,7 @@ mod tests {
 
         stream.begin_fetch(&[], &session, false);
         assert_text_row(
-            &stream.next().await.unwrap().unwrap(),
+            &stream.next().await.unwrap().unwrap().0,
             &[Some("42"), Some("Insert"), None],
         );
         assert!(stream.seek_pk_row().is_none());
@@ -2255,7 +2258,7 @@ mod tests {
         for _ in 0..2 {
             stream.begin_fetch(&[], &session, false);
             for expected in ["43", "44"] {
-                let row = stream.next().await.unwrap().unwrap();
+                let row = stream.next().await.unwrap().unwrap().0;
                 assert_eq!(row.values()[0].as_deref(), Some(expected.as_bytes()));
             }
             assert!(stream.next().await.is_none());
@@ -2274,7 +2277,7 @@ mod tests {
 
         stream.begin_fetch(&[Format::Binary], &session, false);
         for expected in [43i32, 44] {
-            let row = stream.next().await.unwrap().unwrap();
+            let row = stream.next().await.unwrap().unwrap().0;
             assert_eq!(
                 row.values()[0].as_deref(),
                 Some(expected.to_be_bytes().as_slice())
@@ -2323,7 +2326,7 @@ mod tests {
             )))
             .unwrap();
         stream.begin_fetch(&[], &session, false);
-        let row = stream.next().await.unwrap().unwrap();
+        let row = stream.next().await.unwrap().unwrap().0;
         assert_eq!(row.values()[0].as_deref(), Some(b"45".as_slice()));
         stream.commit_fetch();
         assert_eq!(
@@ -2406,7 +2409,7 @@ mod tests {
         ));
         assert!(!event_tx.is_closed());
         stream.begin_fetch(&[Format::Binary], &session, false);
-        let row = stream.next().await.unwrap().unwrap();
+        let row = stream.next().await.unwrap().unwrap().0;
         assert_eq!(
             row.values()[0].as_deref(),
             Some(42i32.to_be_bytes().as_slice())
@@ -2455,7 +2458,7 @@ mod tests {
                 .unwrap();
 
             stream.begin_fetch(&[], &session, false);
-            let row = stream.next().await.unwrap().unwrap();
+            let row = stream.next().await.unwrap().unwrap().0;
             let expected = if from_snapshot {
                 [Some("42"), Some("Insert"), None]
             } else {
@@ -2511,7 +2514,7 @@ mod tests {
                     )))
                     .unwrap();
                 stream.begin_fetch(&formats, &session, false);
-                let row = stream.next().await.unwrap().unwrap();
+                let row = stream.next().await.unwrap().unwrap().0;
                 let value = if binary_value {
                     42i32.to_be_bytes().to_vec()
                 } else {
@@ -2578,7 +2581,7 @@ mod tests {
             .unwrap();
         stream.begin_fetch(&[Format::Binary], &session, false);
         assert!(stream.seek_pk_row().is_none());
-        let row = stream.next().await.unwrap().unwrap();
+        let row = stream.next().await.unwrap().unwrap().0;
         assert_eq!(
             row.values()[0].as_deref(),
             Some(7i32.to_be_bytes().as_slice())
@@ -2591,7 +2594,7 @@ mod tests {
             Some(OwnedRow::new(vec![Some(42i32.into()), Some(7i32.into())]))
         );
         stream.begin_fetch(&[Format::Binary], &session, false);
-        let row = stream.next().await.unwrap().unwrap();
+        let row = stream.next().await.unwrap().unwrap().0;
         assert_eq!(
             row.values()[0].as_deref(),
             Some(8i32.to_be_bytes().as_slice())
@@ -2703,7 +2706,7 @@ mod tests {
                 }
             ));
             stream.begin_fetch(&[], &session, should_wait_when_idle_and_empty);
-            let row = stream.next().await.unwrap().unwrap();
+            let row = stream.next().await.unwrap().unwrap().0;
             assert_eq!(row.values()[0].as_deref(), Some(b"99".as_slice()));
             assert_eq!(stream.fields(), new_fields.get_output_fields());
             assert_eq!(stream.inner.current_pg_rows.len(), 1);
@@ -2721,7 +2724,7 @@ mod tests {
             assert!(stream.is_expired(renewed_expiry + Duration::from_secs(1)));
 
             // Drain the buffered row before reading the second schema barrier; do not discard it.
-            let row = stream.next().await.unwrap().unwrap();
+            let row = stream.next().await.unwrap().unwrap().0;
             assert_eq!(row.values()[0].as_deref(), Some(b"100".as_slice()));
             // The second boundary also ends FETCH after its two old-schema rows, with the
             // latest metadata published on commit but no rows from that query consumed.
@@ -2744,7 +2747,7 @@ mod tests {
 
             // The next query's first chunk remains unread until the next FETCH begins.
             stream.begin_fetch(&[], &session, should_wait_when_idle_and_empty);
-            let row = stream.next().await.unwrap().unwrap();
+            let row = stream.next().await.unwrap().unwrap().0;
             assert_eq!(row.values()[0].as_deref(), Some(b"changed".as_slice()));
             assert_eq!(stream.fields(), latest_fields.get_output_fields());
             assert!(matches!(
@@ -2947,7 +2950,7 @@ mod tests {
         }
         stream.begin_fetch(&[], &session, true);
         assert_text_row(
-            &stream.next().await.unwrap().unwrap(),
+            &stream.next().await.unwrap().unwrap().0,
             &[Some("42"), Some("Insert"), None],
         );
         assert!(stream.next().await.is_none());
@@ -2972,7 +2975,7 @@ mod tests {
         stream.abort_fetch();
         stream.begin_fetch(&[], &session);
         for expected in ["1", "2"] {
-            assert_text_row(&stream.next().await.unwrap().unwrap(), &[Some(expected)]);
+            assert_text_row(&stream.next().await.unwrap().unwrap().0, &[Some(expected)]);
         }
         stream.commit_fetch();
         assert!(stream.inner.cached_events.is_empty());

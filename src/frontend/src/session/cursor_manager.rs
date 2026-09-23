@@ -356,11 +356,10 @@ async fn execute_fetch<S: CursorPgResponseStream>(
                     row = stream.next() => row,
                 }
             };
-            let Some(row) = row.transpose()? else {
+            let Some((row, row_nested_heap_size)) = row.transpose()? else {
                 break;
             };
             record_poll(started.elapsed());
-            let row_nested_heap_size = row.estimated_heap_size();
             rows.push(row);
             // The response stream releases each row's charge when it moves out of the current
             // chunk. Charge it to the FETCH output together with its monitored vector capacity.
@@ -1788,13 +1787,13 @@ mod cursor_lifecycle_tests {
         use crate::error::Result;
 
         struct TestResponseStream {
-            inner: futures::stream::BoxStream<'static, Result<Row>>,
+            inner: futures::stream::BoxStream<'static, Result<(Row, i64)>>,
             commits: usize,
             aborts: usize,
         }
 
         impl Stream for TestResponseStream {
-            type Item = Result<Row>;
+            type Item = Result<(Row, i64)>;
 
             fn poll_next(
                 mut self: Pin<&mut Self>,
@@ -1828,7 +1827,9 @@ mod cursor_lifecycle_tests {
                 // still returns Ready, including those for the remaining rows.
                 std::thread::sleep(Duration::from_millis(1100));
             }
-            Ok(Row::new(vec![Some(value.to_string().into())]))
+            let row = Row::new(vec![Some(value.to_string().into())]);
+            let row_nested_heap_size = row.estimated_heap_size();
+            Ok((row, row_nested_heap_size))
         }));
         let mut stream = TestResponseStream {
             inner: rows.boxed(),
