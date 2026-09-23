@@ -238,9 +238,9 @@ pub struct IncrementalMatcher {
     /// set, absence of a match from `provisional()` is NOT evidence of absence: the executor must
     /// re-derive (fresh budget) before any decision that treats missing matches as decided — the
     /// WITHIN-deadline prune in particular would otherwise delete rows carrying a match the
-    /// truncated scan never reached. Also left set by [`IncrementalMatcher::finalize_evicted_prefix`]
-    /// when it rebases across a truncated scan: the found prefix is dropped there, so the tail is
-    /// then the empty prefix — still a leftmost-prefix under-approximation of the truth.
+    /// truncated scan never reached. Survives [`IncrementalMatcher::finalize_evicted_prefix`]
+    /// together with the found prefix and the scan cursor, which the rebase shifts rather than
+    /// resets: the unscanned suffix is untouched by an eviction, so the flag still describes it.
     incomplete: bool,
     /// Absolute buffer position where a budget-truncated match scan will resume. Unlike
     /// `matchless_upto`, this may follow successful matches: the corresponding leftmost-prefix of
@@ -258,7 +258,8 @@ pub struct IncrementalMatcher {
     /// walks up to `L` rows), and once that exceeds the per-visit budget the region never freezes:
     /// the permanent, non-self-healing shape a long chain pattern (`a{600}`) otherwise degrades
     /// into. Reset to `next_pos` whenever the rows a verdict was computed over can change
-    /// (truncation, eviction rebase).
+    /// (truncation); an eviction rebase only shifts it, since a verdict about a surviving start was
+    /// computed over surviving rows (see [`IncrementalMatcher::finalize_evicted_prefix`]).
     dead_upto: usize,
     /// Starts `[next_pos, matchless_upto)` proven MATCHLESS FOREVER by the finder: their walks found
     /// no accept and never reached the boundary, so they died entirely on immutable rows (see
@@ -727,13 +728,6 @@ impl IncrementalMatcher {
         if final_pos > self.next_pos {
             return Finalized::MustRebuild;
         }
-        // Nothing evicted, nothing to rebase: return before touching any state. The executor never
-        // asks (`consume_prefix` returns on `upto == 0`), but a direct caller must not have a no-op
-        // eviction forget verdicts or, under a truncated scan, drop the found prefix.
-        if final_pos == 0 {
-            return Finalized::Rebased;
-        }
-
         // Finalized matches are the leading run of frozen matches whose *start* is being evicted
         // (`start_pos < final_pos`): their first row leaves the buffer, so they are consumed — final,
         // already emitted — and drop from the diffable set. Only frozen matches can start within
@@ -769,40 +763,33 @@ impl IncrementalMatcher {
             cursor = start_pos + 1;
         }
 
-        // Drop the finalized matches and rebase the buffer.
+        // Drop the finalized matches and rebase the buffer: every position shifts down by
+        // `final_pos`, verdicts included. A verdict about a start `p >= final_pos` was computed over
+        // rows `>= p` only — the binder requires a `PREV(.., k)` to sit at least `k` rows from the
+        // match start (`min_start_distances`), running `FIRST`/`LAST` read inside the match, and
+        // there is no forward navigation — so evicting `[0, final_pos)` invalidates nothing about a
+        // surviving start, and the matchless / dead prefixes and the scan cursor move with the rows
+        // instead of resetting to `next_pos`. That also keeps a truncated scan's found prefix (its
+        // matches are identified by seq and start at `>= next_pos`) together with `incomplete` and
+        // `freeze_truncated`: the next refresh resumes where the scan stopped rather than
+        // rescanning the surviving suffix after every emitted match, and `final_pos == 0` is a
+        // genuine no-op. Clearing `incomplete` here was #27197 — it turned partial information
+        // into a completed-scan verdict and the deadline prune deleted the rows of matches the
+        // truncated scan never reached. Truncation (`truncate`) still resets all three: there the
+        // rows a verdict was computed over do change.
+        debug_assert!(
+            final_pos <= self.next_pos
+                && self.next_pos <= self.matchless_upto
+                && self.matchless_upto <= self.dead_upto
+                && self.next_pos <= self.scan_cursor,
+            "cursor invariant violated before rebase"
+        );
         self.matched.drain(..finalized);
         self.frozen_count -= finalized;
         self.next_pos -= final_pos;
-        // Through the executor `final_pos == next_pos`, so this is `0`: every frozen match was
-        // emitted and the surviving suffix is re-derived from scratch. Verdicts beyond the frozen
-        // prefix are forgotten rather than shifted: a `PREV` slot at the new buffer start reads
-        // past it where it read an evicted row before, so a verdict computed over the old buffer
-        // need not hold — conservative, and resumable.
-        self.dead_upto = self.next_pos;
-        self.matchless_upto = self.next_pos;
-        self.scan_cursor = self.next_pos;
-        // A truncated SCAN is not forgotten. The unscanned suffix survives the eviction untouched,
-        // so `incomplete` still holds for it; clearing the flag would turn partial information into
-        // a completed-scan verdict, and the deadline prune — which treats a missing match as
-        // decided-absent once the tail counts as complete — would then delete the rows of every
-        // match the truncated scan never reached (#27197). The found prefix of that scan goes with
-        // the cursor: `scan_cursor` was just reset to `next_pos`, so a retained prefix would be
-        // re-found and duplicated by the resumed pull. Dropping it leaves the simplest state that
-        // keeps `incomplete`'s leftmost-prefix meaning (the empty prefix), and the next refresh
-        // re-derives the surviving suffix under a fresh budget — as an arrival's `advance` already
-        // does after any rebase. A truncated FREEZE alone leaves a complete tail: keep both the tail
-        // and the flag, and the resumed freeze re-walks from the reset `dead_upto`. Neither can
-        // spin: every rebase that reaches this point evicted at least one row (the zero boundary
-        // returned above), and between rebases each visit's fresh budget resumes where the
-        // previous one stopped.
-        if self.incomplete {
-            self.matched.truncate(self.frozen_count);
-            self.freeze_truncated = false;
-        }
-        debug_assert!(
-            !self.incomplete || self.matched.len() == self.frozen_count,
-            "a truncated scan must not retain a provisional prefix across a rebase"
-        );
+        self.dead_upto -= final_pos;
+        self.matchless_upto -= final_pos;
+        self.scan_cursor -= final_pos;
         self.seq_index.drain(..final_pos);
         Finalized::Rebased
     }
@@ -3060,10 +3047,10 @@ mod tests {
         assert_incomplete_survives_rebase(8, 24, 400).await;
     }
 
-    /// The zero boundary (`final_pos == 0`) evicts nothing and must change nothing — including
-    /// under a truncated scan, where the rebase proper drops the found prefix along with its
-    /// cursor. `finalize_unknown_or_zero_seq_leaves_state_intact` covers the complete state; this
-    /// covers the incomplete one, where a mutating no-op eviction would silently discard work.
+    /// The zero boundary (`final_pos == 0`) evicts nothing and must change nothing — under a
+    /// truncated scan too, where the rebase's shift is by zero and the found prefix, cursor and
+    /// flags all stay. `finalize_unknown_or_zero_seq_leaves_state_intact` covers the complete
+    /// state; this covers the incomplete one.
     #[tokio::test]
     async fn zero_boundary_rebase_is_a_no_op_while_incomplete() {
         let (n, k, budget_per_visit) = (8usize, 24usize, 400usize);
@@ -3106,19 +3093,22 @@ mod tests {
             inc.needs_refresh() && inc.is_incomplete(),
             "an eviction must not clear a truncated scan"
         );
-        assert_eq!(
-            inc.provisional().len(),
-            0,
-            "the found prefix is dropped with its cursor"
+        let kept = inc.provisional().to_vec();
+        assert!(
+            !kept.is_empty(),
+            "the found prefix survives the rebase with its cursor"
         );
-        // One fresh-budget refresh must make progress from the empty tail (it re-finds the block
-        // that was provisional before the rebase, which now starts the surviving buffer).
+        // One fresh-budget refresh resumes past the kept prefix: it neither re-finds nor drops it.
         let matcher = SetMatcher::new(surviving);
         let mut budget = ScanBudget::new(1 << 20);
         inc.refresh(&matcher, &mut budget, true).await.unwrap();
-        assert!(
-            !inc.provisional().is_empty(),
-            "the resumed scan made no progress"
+        assert_eq!(&inc.provisional()[..kept.len()], kept.as_slice());
+        let starts: Vec<i64> = inc.provisional().iter().map(|m| m.start_seq.0).collect();
+        let mut dedup = starts.clone();
+        dedup.dedup();
+        assert_eq!(
+            starts, dedup,
+            "a resumed scan must not duplicate the kept prefix"
         );
     }
 }
