@@ -379,6 +379,7 @@ pub fn build_add_interval_expr(
 
 #[cfg(test)]
 mod tests {
+    #[cfg(not(madsim))]
     use std::time::Duration;
 
     use risingwave_common::catalog::{ColumnDesc, ColumnId, TableId};
@@ -608,6 +609,7 @@ mod tests {
         TIME_ZONE::scope("UTC".to_owned(), test_now_generate_series_inner()).await
     }
 
+    #[cfg(not(madsim))]
     #[tokio::test(start_paused = true)]
     async fn test_now_with_progress_ratio() -> StreamExecutorResult<()> {
         let state_store = create_state_store();
@@ -876,6 +878,7 @@ mod tests {
         Ok(())
     }
 
+    #[cfg(not(madsim))]
     #[tokio::test(start_paused = true)]
     async fn test_now_progress_ratio_uses_elapsed_time() -> StreamExecutorResult<()> {
         let state_store = create_state_store();
