@@ -125,6 +125,13 @@ impl IndependentCheckpointJob {
         }
     }
 
+    fn can_drop(&self) -> bool {
+        match self {
+            Self::CreatingStreamingJob(j) => j.can_drop(),
+            Self::BatchRefresh(_) => true,
+        }
+    }
+
     fn pinned_upstream_tables(&self) -> &HashSet<TableId> {
         match self {
             Self::CreatingStreamingJob(j) => j.pinned_upstream_tables(),
@@ -296,6 +303,13 @@ impl IndependentCheckpointJobControl {
             Self::Running { .. } => {
                 panic!("should be resetting when receiving reset partial graph resp")
             }
+        }
+    }
+
+    pub(crate) fn can_drop(&self) -> bool {
+        match self {
+            Self::Running { job, .. } => job.can_drop(),
+            Self::Resetting { .. } => true,
         }
     }
 

@@ -1243,6 +1243,36 @@ impl DatabaseCheckpointControl {
         let mut notifier_start = notifier.map(Notifier::start);
         if let Some(Command::DropStreamingJobs {
             streaming_job_ids, ..
+        }) = &command
+        {
+            let blocked_job_ids = streaming_job_ids
+                .iter()
+                .copied()
+                .filter(|job_id| {
+                    self.independent_checkpoint_job_controls
+                        .get(job_id)
+                        .is_some_and(|job| !job.can_drop())
+                })
+                .collect_vec();
+            if !blocked_job_ids.is_empty() {
+                warn!(
+                    ?blocked_job_ids,
+                    "reject dropping snapshot backfill jobs while activating their upstream edges"
+                );
+                if let Some(notifier) = notifier_start {
+                    notifier.notify_start_failed(
+                        anyhow!(
+                            "cannot drop snapshot backfill jobs {:?} while they are starting to consume upstream",
+                            blocked_job_ids
+                        )
+                        .into(),
+                    );
+                }
+                return Ok(());
+            }
+        }
+        if let Some(Command::DropStreamingJobs {
+            streaming_job_ids, ..
         }) = &mut command
         {
             streaming_job_ids.retain(|job_id| {

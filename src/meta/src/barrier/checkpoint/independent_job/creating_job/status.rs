@@ -281,6 +281,20 @@ impl CreatingStreamingJobStatus {
         }
     }
 
+    /// Dropping a job while its delayed upstream edge is being activated can leave an upstream
+    /// actor waiting for an output request from an actor that has already been stopped.
+    pub(super) fn can_drop(&self) -> bool {
+        match self {
+            CreatingStreamingJobStatus::ConsumingSnapshot { .. }
+            | CreatingStreamingJobStatus::ConsumingLogStore { .. }
+            | CreatingStreamingJobStatus::Finishing(_, _) => true,
+            CreatingStreamingJobStatus::ConsumingUpstream { .. } => false,
+            CreatingStreamingJobStatus::PlaceHolder => {
+                unreachable!()
+            }
+        }
+    }
+
     pub(super) fn pre_apply_throttle(
         &mut self,
         config: &mut ThrottleConfigMap,
@@ -377,6 +391,40 @@ mod tests {
 
         assert_eq!(epochs(&injected), vec![(1, 2)]);
         assert!(pending_barriers.is_empty());
+    }
+
+    #[test]
+    fn test_drop_admission_during_upstream_handoff() {
+        let job_id = risingwave_common::id::JobId::new(1);
+        let fragment_infos = HashMap::new();
+        let mut status = CreatingStreamingJobStatus::ConsumingLogStore {
+            tracking_job: TrackingJob::recovered(job_id, &fragment_infos),
+            info: CreatingJobInfo {
+                fragment_infos,
+                upstream_fragment_downstreams: Default::default(),
+                downstreams: Default::default(),
+                snapshot_backfill_upstream_tables: Default::default(),
+                stream_actors: Default::default(),
+            },
+            pending_barriers: Default::default(),
+        };
+        let transition_barrier = BarrierInfo {
+            prev_epoch: TracedEpoch::new(Epoch(1)),
+            curr_epoch: TracedEpoch::new(Epoch(2)),
+            kind: BarrierKind::Checkpoint(vec![1]),
+            barrier_interval_ms: 1000,
+        };
+
+        assert!(status.can_drop());
+        status.start_consume_upstream(&transition_barrier);
+        assert!(!status.can_drop());
+        status.start_finishing(&BarrierInfo {
+            prev_epoch: TracedEpoch::new(Epoch(2)),
+            curr_epoch: TracedEpoch::new(Epoch(3)),
+            kind: BarrierKind::Checkpoint(vec![2]),
+            barrier_interval_ms: 1000,
+        });
+        assert!(status.can_drop());
     }
 
     #[test]
