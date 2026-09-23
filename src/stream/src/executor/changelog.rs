@@ -18,17 +18,19 @@ use std::sync::Arc;
 
 use futures::prelude::stream::StreamExt;
 use futures_async_stream::try_stream;
-use indexmap::IndexMap;
 use itertools::Itertools;
 use risingwave_common::array::stream_chunk_builder::StreamChunkBuilder;
 use risingwave_common::array::{ArrayImpl, I16Array, Op, SerialArray, StreamChunk};
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::hash::VirtualNode;
-use risingwave_common::row::{OwnedRow, Row, RowExt};
+use risingwave_common::row::{OwnedRow, RowExt};
 use risingwave_common::types::{DataType, ScalarImpl, Serial};
 use risingwave_common::util::row_id::ChangelogRowIdGenerator;
 
 use super::{ActorContextRef, BoxedMessageStream, Execute, Executor, Message, StreamExecutorError};
+use crate::common::change_buffer::InconsistencyBehavior;
+use crate::common::change_buffer::output_kind::RETRACT;
+use crate::common::compact_chunk::StreamChunkCompactor;
 
 pub struct ChangeLogExecutor {
     ctx: ActorContextRef,
@@ -128,112 +130,66 @@ impl ChangeLogExecutor {
         }
     }
 
-    /// Orders changelog events so that the latest event per business key represents its state at the barrier.
-    /// Intermediate replacements may be reordered.
-    ///
-    /// Consider the schema (id, tier), with business key (id) and stream key (id, tier).
-    ///
-    /// Upstream actors can be partitioned by (id, tier), so a replacement's insert may
-    /// arrive before the old row's delete.
-    ///
-    /// Consider the following events:
-    ///
-    /// ```text
-    /// 1. + (55, Plus)
-    /// 2. + (88, Basic)
-    /// 3. + (55, Pro)
-    /// 4. + (88, Pro)
-    /// 5. - (55, Plus)
-    /// 6. - (88, Basic)
-    /// ```
-    ///
-    /// Here, ID 55 transitions from Plus -> Pro,
-    /// but the insertion for Pro comes before the deletion for Plus
-    ///
-    /// We solve this by buffering by business key, then by stream key, keeping each history's arrival order:
-    ///
-    /// ```text
-    /// business key       stream key          history
-    /// 55 ───────────┬── (55, Plus)  ────> [+, -]  ends in deletion
-    ///               └── (55, Pro)   ────> [+]     survives
-    ///
-    /// 88 ───────────┬── (88, Basic) ────> [+, -]  ends in deletion
-    ///               └── (88, Pro)   ────> [+]     survives
-    /// ```
-    ///
-    /// At the barrier, emit deletion-ending histories before surviving histories.
-    /// Move each history as a whole: its insert must still precede its own delete.
-    ///
-    /// ```text
-    /// business key 55                    business key 88
-    /// + (55, Plus) -> ID A1              + (88, Basic) -> ID B1
-    /// - (55, Plus) -> ID A2              - (88, Basic) -> ID B2
-    /// + (55, Pro)  -> ID A3              + (88, Pro)   -> ID B3
-    ///                A1 < A2 < A3                       B1 < B2 < B3
-    /// ```
     #[try_stream(ok = Message, error = StreamExecutorError)]
     async fn execute_keyed(mut self) {
         let mut builder = StreamChunkBuilder::new(
             self.ctx.config.developer.chunk_size,
             self.output_data_types(),
         );
-        let mut buffer = EventBuffer::new();
+        let mut chunk_buffer: Vec<StreamChunk> = vec![];
         let input = self.input.execute();
 
         #[for_await]
         for msg in input {
             match msg? {
-                Message::Chunk(chunk) => {
-                    for (op, row) in chunk.rows() {
-                        let [business_key, stream_key] =
-                            [&self.distribution_keys, &self.stream_keys]
-                                .map(|key| row.project(key).into_owned_row());
-
-                        buffer
-                            .entry(business_key)
-                            .or_default()
-                            .entry(stream_key)
-                            .or_default()
-                            .push((op, row.into_owned_row()));
-                    }
-                }
+                Message::Chunk(chunk) => chunk_buffer.push(chunk),
                 Message::Watermark(_w) => {}
                 Message::Barrier(barrier) => {
-                    for (_key, group) in buffer.drain(..) {
-                        let (vacating, remaining): (Vec<_>, Vec<_>) =
-                            group.into_values().partition(|event_history| {
-                                event_history.last().is_some_and(|(op, _row)| {
-                                    matches!(op, Op::Delete | Op::UpdateDelete)
-                                })
-                            });
+                    let chunks = StreamChunkCompactor::new(
+                        self.stream_keys.clone(),
+                        std::mem::take(&mut chunk_buffer),
+                    )
+                    .into_compacted_chunks_inline::<RETRACT>(InconsistencyBehavior::Warn);
 
-                        // rows with the same keys are grouped together, so they can share the same vnode value
-                        // this way we can avoid recomputing it many times for the same value
-                        let mut vnode = None;
+                    let mut deletes = Vec::with_capacity(chunks.len());
+                    let mut inserts = Vec::with_capacity(chunks.len());
 
-                        for (op, row) in vacating.into_iter().chain(remaining).flatten() {
-                            let vnode = vnode.get_or_insert_with(|| {
-                                VirtualNode::compute_row(
-                                    &row,
-                                    &self.distribution_keys,
-                                    self.all_vnode_count,
-                                )
-                            });
+                    for chunk in chunks {
+                        let vnodes: Arc<[VirtualNode]> = VirtualNode::compute_chunk(
+                            chunk.data_chunk(),
+                            &self.distribution_keys,
+                            self.all_vnode_count,
+                        )
+                        .into();
+
+                        let delete_view = chunk.clone().retain_ops(&[Op::Delete, Op::UpdateDelete]);
+                        if delete_view.any() {
+                            deletes.push((delete_view, vnodes.clone()));
+                        }
+
+                        let insert_view = chunk.retain_ops(&[Op::Insert, Op::UpdateInsert]);
+                        if insert_view.any() {
+                            inserts.push((insert_view, vnodes));
+                        }
+                    }
+
+                    for (chunk, vnodes) in deletes.into_iter().chain(inserts) {
+                        for (event, vnode) in chunk.rows_with_holes().zip(vnodes.iter()) {
+                            let Some((op, row)) = event else { continue };
+
                             let id = Serial::from(self.changelog_row_id_generator.next(vnode));
 
-                            let row = {
-                                let mut datums = row.into_inner().into_vec();
+                            let mut suffix = Vec::with_capacity(2);
 
-                                if self.need_op {
-                                    datums.push(Some(ScalarImpl::Int16(op.to_i16())));
-                                }
+                            if self.need_op {
+                                suffix.push(Some(ScalarImpl::Int16(op.to_i16())));
+                            }
 
-                                datums.push(Some(ScalarImpl::Serial(id)));
+                            suffix.push(Some(ScalarImpl::Serial(id)));
 
-                                OwnedRow::new(datums)
-                            };
-
-                            if let Some(chunk) = builder.append_row(Op::Insert, row) {
+                            if let Some(chunk) =
+                                builder.append_row(Op::Insert, row.chain(OwnedRow::new(suffix)))
+                            {
                                 yield Message::Chunk(chunk);
                             }
                         }
@@ -267,11 +223,6 @@ impl ChangeLogExecutor {
         data_types
     }
 }
-
-type EventHistory = Vec<(Op, OwnedRow)>;
-
-/// Events buffered during one barrier interval, grouped by declared key and then by input stream key
-type EventBuffer = IndexMap<OwnedRow, IndexMap<OwnedRow, EventHistory>>;
 
 #[derive(Debug)]
 pub enum ChangeLogMode {
@@ -373,17 +324,17 @@ mod tests {
             })
             .collect_vec();
 
-        let [original_insert_id, old_delete_id, replacement_insert_id] = ids[..] else {
+        let [old_insert_id, old_delete_id, new_insert_id] = ids[..] else {
             panic!("expected exactly three changelog events");
         };
 
         assert!(
-            original_insert_id < old_delete_id,
+            old_insert_id < old_delete_id,
             "original insert must precede deletion"
         );
 
         assert!(
-            old_delete_id < replacement_insert_id,
+            old_delete_id < new_insert_id,
             "old deletion must precede replacement insert"
         );
     }
