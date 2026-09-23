@@ -691,6 +691,7 @@ impl std::fmt::Debug for meta::SystemParams {
 impl std::fmt::Debug for data::DataType {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let data::DataType {
+            precision,
             field_type,
             field_names,
             field_ids,
@@ -702,6 +703,9 @@ impl std::fmt::Debug for data::DataType {
             .unwrap_or("Unknown");
 
         let mut s = f.debug_struct(type_name);
+        if self.precision != 0 {
+            s.field("precision", precision);
+        }
         if !self.field_type.is_empty() {
             s.field("field_type", field_type);
         }

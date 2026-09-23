@@ -62,9 +62,7 @@ message DataType {
   // Data length for vector.
   // Max data length for varchar.
   // Precision for time, decimal.
-  // uint32 precision = 2;
-  reserved "precision";
-  reserved 2;
+  uint32 precision = 2;
   // Scale for decimal.
   reserved "scale";
   reserved 3;
