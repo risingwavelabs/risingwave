@@ -1016,6 +1016,10 @@ impl CreatingStreamingJobControl {
             }
         }
     }
+
+    pub(super) fn can_drop(&self) -> bool {
+        self.status.can_drop()
+    }
 }
 
 #[cfg(test)]
