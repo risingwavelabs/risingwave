@@ -1093,11 +1093,11 @@ impl IcebergCommon {
                         java_catalog_configs
                             .insert("rest.signing-name".to_owned(), rest_signing_name.clone());
                     }
-                    if let Some(rest_sigv4_enabled) = self.rest_sigv4_enabled {
-                        java_catalog_configs.insert(
-                            "rest.sigv4-enabled".to_owned(),
-                            rest_sigv4_enabled.to_string(),
-                        );
+                    if self.rest_sigv4_enabled == Some(true) {
+                        // Equivalent to the legacy `rest.sigv4-enabled=true`, which is
+                        // deprecated since Iceberg 1.10 and warns on every catalog load.
+                        java_catalog_configs
+                            .insert("rest.auth.type".to_owned(), "sigv4".to_owned());
 
                         if let Some(access_key) = &self.s3_access_key {
                             java_catalog_configs
@@ -1108,6 +1108,15 @@ impl IcebergCommon {
                             java_catalog_configs
                                 .insert("rest.secret-access-key".to_owned(), secret_key.clone());
                         }
+                    }
+                    // Iceberg 1.10+ infers `rest.auth.type=oauth2` from `credential`/`token`
+                    // when it is unset, warning on every catalog load. Set it explicitly.
+                    if !java_catalog_configs.contains_key("rest.auth.type")
+                        && (java_catalog_configs.contains_key("credential")
+                            || java_catalog_configs.contains_key("token"))
+                    {
+                        java_catalog_configs
+                            .insert("rest.auth.type".to_owned(), "oauth2".to_owned());
                     }
                 }
                 JniCatalogImpl::Glue => {
@@ -1382,6 +1391,41 @@ mod tests {
             "arn:aws:iam::123456789012:role/risingwave-s3"
         );
         assert!(!java_catalog_configs.contains_key("client.factory"));
+    }
+
+    #[test]
+    fn test_rest_jni_catalog_sets_auth_type_explicitly() {
+        let build = |common: IcebergCommon, props: &[(&str, &str)]| {
+            let props = props
+                .iter()
+                .map(|(k, v)| ((*k).to_owned(), (*v).to_owned()))
+                .collect();
+            common
+                .build_jni_catalog_configs(JniCatalogImpl::Rest, &props)
+                .unwrap()
+                .1
+        };
+        let oauth2 = IcebergCommon {
+            catalog_credential: Some("client-id:client-secret".to_owned()),
+            rest_sigv4_enabled: Some(false),
+            ..test_common("rest")
+        };
+
+        let configs = build(oauth2.clone(), &[]);
+        assert_eq!(configs.get("rest.auth.type").unwrap(), "oauth2");
+        assert!(!configs.contains_key("rest.sigv4-enabled"));
+
+        let configs = build(oauth2, &[("rest.auth.type", "basic")]);
+        assert_eq!(configs.get("rest.auth.type").unwrap(), "basic");
+
+        let sigv4 = IcebergCommon {
+            catalog_token: Some("token".to_owned()),
+            rest_sigv4_enabled: Some(true),
+            ..test_common("rest")
+        };
+        let configs = build(sigv4, &[]);
+        assert_eq!(configs.get("rest.auth.type").unwrap(), "sigv4");
+        assert!(!configs.contains_key("rest.sigv4-enabled"));
     }
 
     #[test]
