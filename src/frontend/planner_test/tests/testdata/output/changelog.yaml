@@ -45,22 +45,22 @@
   optimized_logical_plan_for_stream: |-
     LogicalProject { exprs: [t.name, changelog_op] }
     └─LogicalChangeLog { key: [t.id] }
-      └─LogicalScan { table: t, columns: [t.name, t.id] }
+      └─LogicalScan { table: t, columns: [t.name, t._row_id, t.id] }
   stream_plan: |-
     StreamMaterialize { columns: [name, changelog_op, _changelog_row_id(hidden)], stream_key: [_changelog_row_id], pk_columns: [_changelog_row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.name, changelog_op, _changelog_row_id] }
       └─StreamChangeLog { key: [t.id] }
         └─StreamExchange { dist: HashShard(t.id) }
-          └─StreamTableScan { table: t, columns: [t.name, t.id, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamTableScan { table: t, columns: [t.name, t._row_id, t.id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [name, changelog_op, _changelog_row_id(hidden)], stream_key: [_changelog_row_id], pk_columns: [_changelog_row_id], pk_conflict: NoCheck }
     └── StreamProject { exprs: [t.name, changelog_op, _changelog_row_id] }
         └── StreamChangeLog { key: [t.id] }
-            └── StreamExchange Hash([1]) from 1
+            └── StreamExchange Hash([2]) from 1
 
     Fragment 1
-    StreamTableScan { table: t, columns: [t.name, t.id, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+    StreamTableScan { table: t, columns: [t.name, t._row_id, t.id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
     ├── tables: [ StreamScan: 0 ]
     ├── Upstream
     └── BatchPlanNode
@@ -92,22 +92,22 @@
   optimized_logical_plan_for_stream: |-
     LogicalProject { exprs: [t.name] }
     └─LogicalChangeLog { key: [t.tenant, t.id] }
-      └─LogicalScan { table: t, columns: [t.name, t.tenant, t.id] }
+      └─LogicalScan { table: t, columns: [t.name, t._row_id, t.tenant, t.id] }
   stream_plan: |-
     StreamMaterialize { columns: [name, _changelog_row_id(hidden)], stream_key: [_changelog_row_id], pk_columns: [_changelog_row_id], pk_conflict: NoCheck }
     └─StreamProject { exprs: [t.name, _changelog_row_id] }
       └─StreamChangeLog { key: [t.tenant, t.id] }
         └─StreamExchange { dist: HashShard(t.tenant, t.id) }
-          └─StreamTableScan { table: t, columns: [t.name, t.tenant, t.id, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+          └─StreamTableScan { table: t, columns: [t.name, t._row_id, t.tenant, t.id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
   stream_dist_plan: |+
     Fragment 0
     StreamMaterialize { columns: [name, _changelog_row_id(hidden)], stream_key: [_changelog_row_id], pk_columns: [_changelog_row_id], pk_conflict: NoCheck }
     └── StreamProject { exprs: [t.name, _changelog_row_id] }
         └── StreamChangeLog { key: [t.tenant, t.id] }
-            └── StreamExchange Hash([1, 2]) from 1
+            └── StreamExchange Hash([2, 3]) from 1
 
     Fragment 1
-    StreamTableScan { table: t, columns: [t.name, t.tenant, t.id, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+    StreamTableScan { table: t, columns: [t.name, t._row_id, t.tenant, t.id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
     ├── tables: [ StreamScan: 0 ]
     ├── Upstream
     └── BatchPlanNode
