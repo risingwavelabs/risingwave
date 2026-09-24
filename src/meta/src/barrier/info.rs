@@ -371,20 +371,9 @@ pub(super) struct BarrierInfo {
     pub prev_epoch: TracedEpoch,
     pub curr_epoch: TracedEpoch,
     pub kind: BarrierKind,
-    pub barrier_interval_ms: u32,
 }
 
 impl BarrierInfo {
-    pub(super) fn new_initial(prev_epoch: TracedEpoch, barrier_interval_ms: u32) -> Self {
-        let curr_epoch = prev_epoch.next();
-        Self {
-            prev_epoch,
-            curr_epoch,
-            kind: BarrierKind::Initial,
-            barrier_interval_ms,
-        }
-    }
-
     pub(super) fn prev_epoch(&self) -> u64 {
         self.prev_epoch.value().0
     }
