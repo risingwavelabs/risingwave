@@ -15,7 +15,7 @@
 use std::collections::HashMap;
 
 use risingwave_common::id::SinkId;
-use risingwave_common::types::Fields;
+use risingwave_common::types::{Fields, Timestamptz};
 use risingwave_connector::WithPropertiesExt;
 use risingwave_frontend_macro::system_catalog;
 
@@ -35,6 +35,11 @@ struct RwIcebergCompactionSchedules {
     next_compaction_after_sec: Option<i64>,
     pending_snapshot_count: Option<i64>,
     is_triggerable: bool,
+    last_success_at: Option<Timestamptz>,
+    last_failure_at: Option<Timestamptz>,
+    last_error: Option<String>,
+    consecutive_failures: i32,
+    compaction_lag_sec: Option<i64>,
 }
 
 #[system_catalog(table, "rw_catalog.rw_iceberg_compaction_schedules")]
@@ -71,6 +76,11 @@ async fn read(reader: &SysCatalogReaderImpl) -> Result<Vec<RwIcebergCompactionSc
                 next_compaction_after_sec: status.next_compaction_after_sec.map(|v| v as i64),
                 pending_snapshot_count: status.pending_snapshot_count.map(|v| v as i64),
                 is_triggerable: status.is_triggerable,
+                last_success_at: status.last_success_at_ms.and_then(Timestamptz::from_millis),
+                last_failure_at: status.last_failure_at_ms.and_then(Timestamptz::from_millis),
+                last_error: status.last_error,
+                consecutive_failures: status.consecutive_failures as i32,
+                compaction_lag_sec: status.compaction_lag_sec.map(|v| v as i64),
             }
         })
         .collect())
