@@ -10801,6 +10801,7 @@ dependencies = [
  "opendal-http-transport-reqwest",
  "opendal-layer-concurrent-limit",
  "opendal-layer-logging",
+ "opendal-layer-prometheus",
  "opendal-layer-retry",
  "opendal-layer-timeout",
  "opendal-service-azblob",
