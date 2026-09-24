@@ -162,3 +162,25 @@ DROP TABLE issue_12238_a;
 
 statement ok
 DROP TABLE issue_12238_b;
+
+# All FROM items of one query level share a namespace, so a lateral reference that matches an earlier
+# FROM item and a join input is ambiguous, whichever way the FROM list is spelled.
+statement ok
+CREATE TABLE ambiguous_lateral_a(a1 INT);
+
+statement ok
+INSERT INTO ambiguous_lateral_a VALUES (1), (2);
+
+statement error column reference "a1" is ambiguous
+SELECT * FROM ambiguous_lateral_a, (SELECT 100 AS a1) t CROSS JOIN LATERAL (SELECT a1 AS y) z;
+
+statement error column reference "a1" is ambiguous
+SELECT * FROM ambiguous_lateral_a, (SELECT 100 AS a1) t, LATERAL (SELECT a1 AS y) z;
+
+# An ambiguous lateral reference must not resolve to the outer query's column.
+statement error column reference "a1" is ambiguous
+SELECT (SELECT y FROM (SELECT 100 AS a1) t1, (SELECT 200 AS a1) t2, LATERAL (SELECT a1 AS y) z)
+FROM ambiguous_lateral_a;
+
+statement ok
+DROP TABLE ambiguous_lateral_a;
