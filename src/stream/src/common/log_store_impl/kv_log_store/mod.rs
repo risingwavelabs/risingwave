@@ -37,6 +37,7 @@ use crate::common::log_store_impl::kv_log_store::reader::KvLogStoreReader;
 use crate::common::log_store_impl::kv_log_store::serde::LogStoreRowSerde;
 use crate::common::log_store_impl::kv_log_store::writer::KvLogStoreWriter;
 use crate::executor::monitor::StreamingMetrics;
+use crate::task::FragmentId;
 
 pub(crate) mod buffer;
 pub mod reader;
@@ -228,12 +229,13 @@ impl KvLogStoreMetrics {
     pub(crate) fn new(
         metrics: &StreamingMetrics,
         actor_id: ActorId,
+        fragment_id: FragmentId,
         sink_param: &SinkParam,
         connector: &'static str,
     ) -> Self {
         let id = sink_param.sink_id.as_raw_id();
         let name = &sink_param.sink_name;
-        Self::new_inner(metrics, actor_id, id, name, connector)
+        Self::new_inner(metrics, actor_id, fragment_id, id, name, connector)
     }
 
     /// `id`: refers to a unique way to identify the logstore. This can be the sink id,
@@ -245,11 +247,13 @@ impl KvLogStoreMetrics {
     pub(crate) fn new_inner(
         metrics: &StreamingMetrics,
         actor_id: ActorId,
+        fragment_id: FragmentId,
         id: u32,
         name: &str,
         target: &'static str,
     ) -> Self {
         let actor_id_str = actor_id.to_string();
+        let fragment_id_str = fragment_id.to_string();
         let id_str = id.to_string();
 
         let labels = &[&actor_id_str, target, &id_str, name];
@@ -323,7 +327,13 @@ impl KvLogStoreMetrics {
             .with_guarded_label_values(labels);
         let buffer_memory_bytes = metrics
             .kv_log_store_buffer_memory_bytes
-            .with_guarded_label_values(labels);
+            .with_guarded_label_values(&[
+                actor_id_str.as_str(),
+                fragment_id_str.as_str(),
+                target,
+                id_str.as_str(),
+                name,
+            ]);
 
         Self {
             storage_write_size,
@@ -363,7 +373,7 @@ impl KvLogStoreMetrics {
             buffer_unconsumed_min_epoch: RelabeledAggregatedIntGauge::test_int_gauge::<4>(
                 GaugeAggregation::Min,
             ),
-            buffer_memory_bytes: RelabeledAggregatedIntGauge::test_int_gauge::<4>(
+            buffer_memory_bytes: RelabeledAggregatedIntGauge::test_int_gauge::<5>(
                 GaugeAggregation::Sum,
             ),
             rewind_count: LabelGuardedIntCounter::test_int_counter::<4>(),

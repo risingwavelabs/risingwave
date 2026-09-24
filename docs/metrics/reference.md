@@ -160,6 +160,11 @@ bounded. At `debug`, actor-level diagnostic metrics retain their real actor
 IDs. The only exception is `actor_info`, which retains real actor IDs at all
 enabled levels because dashboards use it to locate and count actors.
 
+The generated inventory check enforces this policy: every non-allowlisted
+metric containing `actor_id` must put it first and apply Debug-level relabeling.
+New actor-labeled registrations therefore fail CI until they explicitly choose
+the required cardinality behavior.
+
 When relabeling produces an empty first `actor_id` label, numeric gauges are
 combined from their live actor contributions instead of using the last value
 written. Counts and sizes use a sum; progress gauges such as epochs and message
@@ -170,6 +175,9 @@ contribution disappears, the series is set to zero for a transitional
 collection and then removed. These values are node-local aggregates;
 Prometheus queries must still aggregate across compute nodes. When the first
 label remains non-empty, each label set keeps an independent gauge.
+Minimum-epoch gauges treat an empty buffer as an absent contribution, so an
+idle actor cannot mask another actor's pending epoch; they report zero only
+when every buffer in the group is empty.
 
 ### 2.3 The info/join metrics
 
@@ -879,10 +887,11 @@ streaming graph backpressures.
 | `kv_log_store_rewind_count`                      | counter | Log-store rewind events — recovery-induced replays from a prior epoch. Spikes are normal during recovery; sustained non-zero rate in steady state indicates a sink that cannot commit its epoch. |
 | `kv_log_store_rewind_delay`                      | histogram  | Duration of rewind operations. |
 
-All of the above carry the same labels: `actor_id`, `connector`, `sink_id`,
-`sink_name` (storage_read_count/size also carry `read_type`). Because the
-log-store is per-actor, aggregate by `sink_id` when alerting unless you
-specifically need per-parallel-unit detail.
+All of the above carry `actor_id`, `connector`, `sink_id`, and `sink_name`.
+`kv_log_store_buffer_memory_bytes` additionally carries `fragment_id`, while
+storage_read_count/size additionally carry `read_type`. Because the log-store
+is per-actor, aggregate by `sink_id` when alerting unless you specifically need
+per-parallel-unit detail.
 
 ### 9.3 The sync kv log store (on-disk path)
 
@@ -1387,10 +1396,10 @@ A few notes on reading the TSV:
    lazily on first use, so a metric absent from a freshly-started node
    doesn't necessarily mean the feature is disabled.
 
-The inventory has 508 metric rows, all with unique names. 14 of those rows
+The inventory has 535 metric rows, all with unique names. 14 of those rows
 are `rdkafka_<PATH>_<stat>` templates; each template expands at runtime to
 6 concrete metrics (one per `<PATH>` value listed in §8.3), so the
-exposed-on-`/metrics` count is 508 − 14 + (14 × 6) = 578 distinct families
+exposed-on-`/metrics` count is 535 − 14 + (14 × 6) = 605 distinct families
 when the Kafka source is in use. If a metric name you expect to see is
 absent, either the feature isn't compiled in, or it was renamed; grep the
 Rust source (`src/**/monitor/*.rs`, `src/**/metrics.rs`) to confirm.

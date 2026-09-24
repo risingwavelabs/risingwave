@@ -166,7 +166,7 @@ pub struct StreamingMetrics {
     match_recognize_evicted_rows_count: RelabeledGuardedIntCounterVec,
     match_recognize_scan_budget_exhausted_count: RelabeledGuardedIntCounterVec,
     match_recognize_within_deadline_overflow_count: RelabeledGuardedIntCounterVec,
-    match_recognize_retained_rows: RelabeledGuardedIntGaugeVec,
+    match_recognize_retained_rows: RelabeledAggregatedIntGaugeVec,
 
     /// The duration from receipt of barrier to all actors collection.
     /// The max of all nodes' `barrier_inflight_latency` for a partial graph is the latency for a
@@ -1044,7 +1044,7 @@ impl StreamingMetrics {
             registry
         )
         .unwrap()
-        .relabel_debug_1(level);
+        .relabel_debug_1_with_aggregation(level, GaugeAggregation::Sum);
 
         let barrier_inflight_latency = register_guarded_histogram_vec_with_registry!(
             "stream_barrier_inflight_duration_seconds",
@@ -1313,7 +1313,13 @@ impl StreamingMetrics {
             register_guarded_int_gauge_vec_with_registry!(
                 "kv_log_store_buffer_memory_bytes",
                 "Estimated heap bytes used by kv log store buffer (unconsumed + consumed but not truncated)",
-                &["actor_id", "connector", "sink_id", "sink_name"],
+                &[
+                    "actor_id",
+                    "fragment_id",
+                    "connector",
+                    "sink_id",
+                    "sink_name",
+                ],
                 registry
             )
             .unwrap()
@@ -2152,7 +2158,7 @@ pub struct MatchRecognizeMetrics {
     /// Rows currently retained in memory across the actor's partitions. Retention is bounded only
     /// by match liveness and `WITHIN`, so this gauge is the one signal of a partition set growing
     /// toward memory exhaustion (a pattern whose closer never arrives retains its rows forever).
-    pub match_recognize_retained_rows: LabelGuardedIntGauge,
+    pub match_recognize_retained_rows: RelabeledAggregatedIntGauge,
 }
 
 #[derive(Clone)]
@@ -2183,6 +2189,19 @@ mod tests {
         assert_eq!(second.get(), expected);
     }
 
+    fn assert_min_ignores_absent(
+        gauge_vec: &RelabeledAggregatedIntGaugeVec,
+        empty_labels: &[&str],
+        pending_labels: &[&str],
+    ) {
+        let empty = gauge_vec.with_guarded_label_values(empty_labels);
+        let pending = gauge_vec.with_guarded_label_values(pending_labels);
+        empty.set_optional(None);
+        pending.set_optional(Some(100));
+        assert_eq!(empty.get(), 100);
+        assert_eq!(pending.get(), 100);
+    }
+
     fn assert_metric_labels(registry: &Registry, metric_name: &str, expected: &[(&str, &str)]) {
         let metric_family = registry
             .gather()
@@ -2197,7 +2216,13 @@ mod tests {
 
     fn record_reordered_metrics(
         metrics: &StreamingMetrics,
-    ) -> (LabelGuardedIntCounter, SinkExecutorMetrics, HashAggMetrics) {
+    ) -> (
+        LabelGuardedIntCounter,
+        SinkExecutorMetrics,
+        HashAggMetrics,
+        OverWindowMetrics,
+        MatchRecognizeMetrics,
+    ) {
         let source_output_row_count = metrics
             .source_output_row_count
             .with_guarded_label_values(&["11", "22", "source", "33"]);
@@ -2208,7 +2233,30 @@ mod tests {
         let agg_metrics =
             metrics.new_hash_agg_metrics(TableId::new(55), ActorId::new(11), FragmentId::new(33));
         agg_metrics.agg_lookup_miss_count.inc();
-        (source_output_row_count, sink_metrics, agg_metrics)
+        let over_window_metrics = metrics.new_over_window_metrics(
+            TableId::new(66),
+            ActorId::new(11),
+            FragmentId::new(33),
+        );
+        over_window_metrics
+            .over_window_state_cleaned_row_count
+            .inc();
+        let match_recognize_metrics = metrics.new_match_recognize_metrics(
+            TableId::new(77),
+            ActorId::new(11),
+            FragmentId::new(33),
+        );
+        match_recognize_metrics
+            .match_recognize_matches_emitted_count
+            .inc();
+        match_recognize_metrics.match_recognize_retained_rows.set(1);
+        (
+            source_output_row_count,
+            sink_metrics,
+            agg_metrics,
+            over_window_metrics,
+            match_recognize_metrics,
+        )
     }
 
     #[test]
@@ -2237,6 +2285,21 @@ mod tests {
                 &registry,
                 "stream_agg_lookup_miss_count",
                 &[("actor_id", ""), ("table_id", "55"), ("fragment_id", "33")],
+            );
+            assert_metric_labels(
+                &registry,
+                "stream_over_window_state_cleaned_row_count",
+                &[("actor_id", ""), ("table_id", "66"), ("fragment_id", "33")],
+            );
+            assert_metric_labels(
+                &registry,
+                "stream_match_recognize_matches_emitted_count",
+                &[("actor_id", ""), ("table_id", "77"), ("fragment_id", "33")],
+            );
+            assert_metric_labels(
+                &registry,
+                "stream_match_recognize_retained_rows",
+                &[("actor_id", ""), ("table_id", "77"), ("fragment_id", "33")],
             );
         }
     }
@@ -2316,6 +2379,7 @@ mod tests {
                 &metrics.group_top_n_appendonly_cached_entry_count,
                 &metrics.group_top_n_cached_entry_count,
                 &metrics.lookup_cached_entry_count,
+                &metrics.match_recognize_retained_rows,
                 &metrics.over_window_cached_entry_count,
                 &metrics.over_window_range_cache_entry_count,
                 &metrics.temporal_join_cached_entry_count,
@@ -2333,8 +2397,13 @@ mod tests {
                 &["2", "table", "description"],
                 12,
             );
-            for gauge_vec in [
+            assert_aggregation(
                 &metrics.kv_log_store_buffer_memory_bytes,
+                &["1", "fragment", "connector", "sink", "name"],
+                &["2", "fragment", "connector", "sink", "name"],
+                12,
+            );
+            for gauge_vec in [
                 &metrics.kv_log_store_buffer_unconsumed_epoch_count,
                 &metrics.kv_log_store_buffer_unconsumed_item_count,
                 &metrics.kv_log_store_buffer_unconsumed_row_count,
@@ -2359,6 +2428,25 @@ mod tests {
                     12,
                 );
             }
+        }
+    }
+
+    #[test]
+    fn empty_log_store_buffers_do_not_mask_pending_epochs() {
+        for level in [MetricLevel::Critical, MetricLevel::Info] {
+            let registry = Registry::new();
+            let metrics = StreamingMetrics::new(&registry, level);
+
+            assert_min_ignores_absent(
+                &metrics.kv_log_store_buffer_unconsumed_min_epoch,
+                &["1", "connector", "sink", "name"],
+                &["2", "connector", "sink", "name"],
+            );
+            assert_min_ignores_absent(
+                &metrics.sync_kv_log_store_buffer_unconsumed_min_epoch,
+                &["1", "target", "fragment", "relation"],
+                &["2", "target", "fragment", "relation"],
+            );
         }
     }
 }

@@ -447,6 +447,20 @@ impl RelabeledAggregatedIntGauge {
         }
     }
 
+    /// Updates this contribution when a value exists, or excludes it from aggregation otherwise.
+    /// A passthrough gauge keeps the conventional zero value when no value exists.
+    pub fn set_optional(&self, value: Option<i64>) {
+        match &self.inner {
+            RelabeledAggregatedIntGaugeInner::Passthrough(gauge) => {
+                gauge.set(value.unwrap_or_default());
+            }
+            RelabeledAggregatedIntGaugeInner::Aggregated(contribution) => match value {
+                Some(value) => contribution.group.set(contribution.id, value),
+                None => contribution.group.remove(contribution.id),
+            },
+        }
+    }
+
     pub fn add(&self, value: i64) {
         match &self.inner {
             RelabeledAggregatedIntGaugeInner::Passthrough(gauge) => gauge.add(value),
@@ -563,6 +577,29 @@ mod tests {
             assert_eq!(values(&registry), [200]);
             drop(actor_2);
             assert_eq!(values(&registry), [300]);
+        }
+    }
+
+    #[test]
+    fn test_min_aggregation_ignores_absent_contributions() {
+        for level in [MetricLevel::Critical, MetricLevel::Info] {
+            let registry = Registry::new();
+            let vec = test_vec(&registry, level, GaugeAggregation::Min);
+            let empty_actor = vec.with_guarded_label_values(&["1", "shared"]);
+            let pending_actor = vec.with_guarded_label_values(&["2", "shared"]);
+
+            empty_actor.set_optional(None);
+            pending_actor.set_optional(Some(100));
+            assert_eq!(values(&registry), [100]);
+
+            empty_actor.set_optional(Some(200));
+            assert_eq!(values(&registry), [100]);
+
+            pending_actor.set_optional(None);
+            assert_eq!(values(&registry), [200]);
+
+            empty_actor.set_optional(None);
+            assert_eq!(values(&registry), [0]);
         }
     }
 

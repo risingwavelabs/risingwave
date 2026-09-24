@@ -1351,12 +1351,9 @@ impl SyncedLogStoreBuffer {
         self.metrics
             .buffer_unconsumed_item_count
             .set(self.buffer.len() as _);
-        self.metrics.buffer_unconsumed_min_epoch.set(
-            self.buffer
-                .front()
-                .map(|(epoch, _)| *epoch)
-                .unwrap_or_default() as _,
-        );
+        self.metrics
+            .buffer_unconsumed_min_epoch
+            .set_optional(self.buffer.front().map(|(epoch, _)| *epoch as _));
         self.metrics.buffer_memory_bytes.set(memory_bytes as _);
     }
 }

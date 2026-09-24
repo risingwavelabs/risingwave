@@ -9,10 +9,6 @@ compute_batch_total_mem	gauge		Total number of memory usage for batch tasks.		sr
 user_compute_error_cnt	counter	error_type,executor_name,fragment_id	Compute errors in the system, queryable by tags		src/common/metrics/src/error_metrics.rs
 user_sink_error_cnt	counter	error_type,sink_id,sink_name,fragment_id	Sink errors in the system, queryable by tags		src/common/metrics/src/error_metrics.rs
 user_source_error_cnt	counter	error_type,source_id,source_name,fragment_id	Source errors in the system, queryable by tags		src/common/metrics/src/error_metrics.rs
-test	counter		test		src/common/metrics/src/guarded_metrics.rs
-test	gauge		test		src/common/metrics/src/guarded_metrics.rs
-test	gauge		test		src/common/metrics/src/guarded_metrics.rs
-test	histogram		test		src/common/metrics/src/guarded_metrics.rs
 aws_sdk_retry_counts	counter		Total number of aws sdk retry happens		src/common/metrics/src/lib.rs
 connection_count	gauge	connection_type,uri	The number of current existing connection		src/common/metrics/src/monitor/connection.rs
 connection_create_rate	counter	connection_type,uri	Rate on creating new connection		src/common/metrics/src/monitor/connection.rs
@@ -360,6 +356,7 @@ state_store_read_req_bloom_filter_positive_counts	counter	table_id,type	Total nu
 state_store_read_req_check_bloom_filter_counts	counter	table_id,type	Total number of read request that checks an SST filter with a prefix hint		src/storage/src/monitor/hummock_state_store_metrics.rs
 state_store_read_req_positive_but_non_exist_counts	counter	table_id,type	Total number of read request on non-existent key/prefix with at least one SST filter check returns positive		src/storage/src/monitor/hummock_state_store_metrics.rs
 state_store_remote_read_time_per_task	histogram	table_id	Total time of operations which read from remote storage when enable prefetch		src/storage/src/monitor/hummock_state_store_metrics.rs
+state_store_replicated_imm_size	gauge		Total retained replicated immutable memtable size		src/storage/src/monitor/hummock_state_store_metrics.rs
 state_store_safe_version_hit	counter		The total count of a safe version that can be retrieved successfully		src/storage/src/monitor/hummock_state_store_metrics.rs
 state_store_safe_version_miss	counter		The total count of a safe version that cannot be retrieved		src/storage/src/monitor/hummock_state_store_metrics.rs
 state_store_spill_task_counts	counter	uploader_stage	Total number of started spill tasks		src/storage/src/monitor/hummock_state_store_metrics.rs
@@ -411,7 +408,7 @@ jemalloc_metadata_bytes	gauge		The active memory jemalloc, got from jemalloc_ctl
 jemalloc_resident_bytes	gauge		The active memory jemalloc, got from jemalloc_ctl		src/stream/src/executor/monitor/streaming_stats.rs
 jvm_active_bytes	gauge		The active jvm memory		src/stream/src/executor/monitor/streaming_stats.rs
 jvm_allocated_bytes	gauge		The allocated jvm memory		src/stream/src/executor/monitor/streaming_stats.rs
-kv_log_store_buffer_memory_bytes	gauge	actor_id,connector,sink_id,sink_name	Estimated heap bytes used by kv log store buffer (unconsumed + consumed but not truncated)		src/stream/src/executor/monitor/streaming_stats.rs
+kv_log_store_buffer_memory_bytes	gauge	actor_id,fragment_id,connector,sink_id,sink_name	Estimated heap bytes used by kv log store buffer (unconsumed + consumed but not truncated)		src/stream/src/executor/monitor/streaming_stats.rs
 kv_log_store_buffer_unconsumed_epoch_count	gauge	actor_id,connector,sink_id,sink_name	Number of Unconsumed Epoch in buffer		src/stream/src/executor/monitor/streaming_stats.rs
 kv_log_store_buffer_unconsumed_item_count	gauge	actor_id,connector,sink_id,sink_name	Number of Unconsumed Item in buffer		src/stream/src/executor/monitor/streaming_stats.rs
 kv_log_store_buffer_unconsumed_min_epoch	gauge	actor_id,connector,sink_id,sink_name	Number of Unconsumed Epoch in buffer		src/stream/src/executor/monitor/streaming_stats.rs
@@ -496,6 +493,8 @@ stream_mview_current_epoch	gauge	actor_id,table_id,fragment_id	The current epoch
 stream_mview_input_row_count	counter	actor_id,table_id,fragment_id	Total number of rows streamed into materialize executors		src/stream/src/executor/monitor/streaming_stats.rs
 stream_mysql_cdc_state_binlog_file_seq	gauge	source_id	Current binlog file sequence number stored in MySQL CDC state table		src/stream/src/executor/monitor/streaming_stats.rs
 stream_mysql_cdc_state_binlog_position	gauge	source_id	Current binlog position stored in MySQL CDC state table		src/stream/src/executor/monitor/streaming_stats.rs
+stream_now_streaming_clock_ms	gauge	fragment_id	Latest streaming NOW() timestamp (milliseconds since Unix epoch) emitted as a watermark by this fragment on this compute node.		src/stream/src/executor/monitor/streaming_stats.rs
+stream_now_wall_clock_drift_ms	gauge	fragment_id	Latest processed barrier epoch minus the latest streaming NOW() timestamp emitted as a watermark by this fragment on this compute node, in milliseconds. This is relative to processed barriers, not scrape-time wall clock.		src/stream/src/executor/monitor/streaming_stats.rs
 stream_over_window_accessed_entry_count	counter	actor_id,table_id,fragment_id	Over window accessed entry count		src/stream/src/executor/monitor/streaming_stats.rs
 stream_over_window_cache_lookup_count	counter	actor_id,table_id,fragment_id	Over window executor cache lookup count		src/stream/src/executor/monitor/streaming_stats.rs
 stream_over_window_cache_miss_count	counter	actor_id,table_id,fragment_id	Over window executor cache miss count		src/stream/src/executor/monitor/streaming_stats.rs
