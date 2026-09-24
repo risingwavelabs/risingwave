@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use risingwave_pb::stream_plan::ChangeLogNode;
+use risingwave_pb::stream_plan::change_log_node::Mode;
 use risingwave_storage::StateStore;
 
 use super::ExecutorBuilder;
@@ -32,6 +33,9 @@ impl ExecutorBuilder for ChangeLogExecutorBuilder {
         node: &Self::Node,
         _store: impl StateStore,
     ) -> StreamResult<Executor> {
+        if let Some(Mode::Keyed(_)) = &node.mode {
+            risingwave_common::bail!("AS CHANGELOG with KEY execution is not supported yet");
+        }
         let [input]: [_; 1] = params.input.try_into().unwrap();
 
         let vnodes = params
