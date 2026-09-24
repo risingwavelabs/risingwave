@@ -53,5 +53,16 @@ select count(*) as cnt, company_id from files group by company_id order by cnt d
 2048 1
 1024 2
 
+# Verify partial aggregation with many distinct group keys as well.
+statement ok
+insert into files select id + 2, 1 from generate_series(1, 1024) as g(id)
+
+query I
+select count(*) from (
+  select company_id, count(*) as cnt from files group by company_id
+) as grouped where cnt = 1
+----
+1024
+
 statement ok
 drop table files
