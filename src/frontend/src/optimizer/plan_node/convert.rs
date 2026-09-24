@@ -298,7 +298,6 @@ pub trait ToDistributedBatch {
         required_dist: &RequiredDist,
     ) -> Result<BatchPlanRef> {
         let ret = self.to_distributed()?;
-        let ret = required_order.enforce_if_not_satisfies(ret)?;
         required_dist.batch_enforce_if_not_satisfies(ret, required_order)
     }
 }

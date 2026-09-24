@@ -1449,8 +1449,8 @@
     └─BatchProject { exprs: [$expr2, $expr3, $expr4, $expr5, $expr6, $expr1, $expr7] }
       └─BatchFilter { predicate: (row_number <= 1:Int32) }
         └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY $expr3, $expr2 ORDER BY $expr1 DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-          └─BatchExchange { order: [$expr3 ASC, $expr2 ASC, $expr1 DESC], dist: HashShard($expr2, $expr3) }
-            └─BatchSort { order: [$expr3 ASC, $expr2 ASC, $expr1 DESC] }
+          └─BatchSort { order: [$expr3 ASC, $expr2 ASC, $expr1 DESC] }
+            └─BatchExchange { order: [], dist: HashShard($expr2, $expr3) }
               └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, Field(bid, 2:Int32) as $expr4, Field(bid, 3:Int32) as $expr5, Field(bid, 4:Int32) as $expr6, $expr1, Field(bid, 6:Int32) as $expr7] }
                 └─BatchFilter { predicate: (event_type = 2:Int32) }
                   └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id] }
@@ -1515,8 +1515,8 @@
     └─BatchProject { exprs: [$expr2, $expr3, $expr4, $expr5, $expr6, $expr1, $expr7] }
       └─BatchFilter { predicate: (rank <= 1:Int32) }
         └─BatchOverWindow { window_functions: [rank() OVER(PARTITION BY $expr3, $expr2 ORDER BY $expr1 DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-          └─BatchExchange { order: [$expr3 ASC, $expr2 ASC, $expr1 DESC], dist: HashShard($expr2, $expr3) }
-            └─BatchSort { order: [$expr3 ASC, $expr2 ASC, $expr1 DESC] }
+          └─BatchSort { order: [$expr3 ASC, $expr2 ASC, $expr1 DESC] }
+            └─BatchExchange { order: [], dist: HashShard($expr2, $expr3) }
               └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, Field(bid, 2:Int32) as $expr4, Field(bid, 3:Int32) as $expr5, Field(bid, 4:Int32) as $expr6, $expr1, Field(bid, 6:Int32) as $expr7] }
                 └─BatchFilter { predicate: (event_type = 2:Int32) }
                   └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id] }
@@ -1577,8 +1577,8 @@
     BatchExchange { order: [], dist: Single }
     └─BatchFilter { predicate: (row_number <= 10:Int32) }
       └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY $expr2 ORDER BY $expr4 DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-        └─BatchExchange { order: [$expr2 ASC, $expr4 DESC], dist: HashShard($expr2) }
-          └─BatchSort { order: [$expr2 ASC, $expr4 DESC] }
+        └─BatchSort { order: [$expr2 ASC, $expr4 DESC] }
+          └─BatchExchange { order: [], dist: HashShard($expr2) }
             └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, Field(bid, 2:Int32) as $expr4, Field(bid, 3:Int32) as $expr5, Field(bid, 4:Int32) as $expr6, $expr1, Field(bid, 6:Int32) as $expr7] }
               └─BatchFilter { predicate: (event_type = 2:Int32) }
                 └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id] }
@@ -2604,8 +2604,8 @@
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [$expr2, $expr3, $expr1, $expr4, Case((count = 0:Int32), null:Decimal, (sum / count::Decimal)) as $expr5, max] }
       └─BatchOverWindow { window_functions: [sum($expr4) OVER(PARTITION BY $expr2 ORDER BY $expr1 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW), count($expr4) OVER(PARTITION BY $expr2 ORDER BY $expr1 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW), max($expr4) OVER(PARTITION BY $expr2 ORDER BY $expr1 ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)] }
-        └─BatchExchange { order: [$expr2 ASC, $expr1 ASC], dist: HashShard($expr2) }
-          └─BatchSort { order: [$expr2 ASC, $expr1 ASC] }
+        └─BatchSort { order: [$expr2 ASC, $expr1 ASC] }
+          └─BatchExchange { order: [], dist: HashShard($expr2) }
             └─BatchProject { exprs: [Field(bid, 0:Int32) as $expr2, Field(bid, 1:Int32) as $expr3, Field(bid, 2:Int32) as $expr4, $expr1] }
               └─BatchFilter { predicate: ((Field(bid, 0:Int32) % 100:Int32) = 0:Int32) AND (event_type = 2:Int32) }
                 └─BatchProject { exprs: [event_type, person, auction, bid, Case((event_type = 0:Int32), Field(person, 6:Int32), (event_type = 1:Int32), Field(auction, 5:Int32), Field(bid, 5:Int32)) as $expr1, _row_id] }

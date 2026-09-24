@@ -312,8 +312,22 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchSortAgg { group_key: [mv.v1], aggs: [max(mv.v2)] }
-      └─BatchExchange { order: [mv.v1 DESC], dist: HashShard(mv.v1) }
-        └─BatchScan { table: mv, columns: [mv.v1, mv.v2], distribution: SomeShard }
+      └─BatchSort { order: [mv.v1 DESC] }
+        └─BatchExchange { order: [], dist: HashShard(mv.v1) }
+          └─BatchScan { table: mv, columns: [mv.v1, mv.v2], distribution: SomeShard }
+- name: sort agg after hash redistribution
+  sql: |
+    create table files (company_id int, file_id int, primary key (company_id, file_id));
+    select count(*) as cnt, company_id from files group by company_id order by cnt desc limit 100;
+  batch_plan: |-
+    BatchTopN { order: [count DESC], limit: 100, offset: 0 }
+    └─BatchExchange { order: [], dist: Single }
+      └─BatchTopN { order: [count DESC], limit: 100, offset: 0 }
+        └─BatchProject { exprs: [count, files.company_id] }
+          └─BatchSortAgg { group_key: [files.company_id], aggs: [count] }
+            └─BatchSort { order: [files.company_id ASC] }
+              └─BatchExchange { order: [], dist: HashShard(files.company_id) }
+                └─BatchScan { table: files, columns: [files.company_id], distribution: SomeShard }
 - sql: |
     create table t(v1 int, v2 int);
     select v1, max(v2) from t group by v1 order by v1 desc;
@@ -1884,8 +1898,8 @@
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [t.a, t.b, sum] }
       └─BatchOverWindow { window_functions: [sum(sum(t.c)) OVER(PARTITION BY t.a ORDER BY t.b ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-        └─BatchExchange { order: [t.a ASC, t.b ASC], dist: HashShard(t.a) }
-          └─BatchSort { order: [t.a ASC, t.b ASC] }
+        └─BatchSort { order: [t.a ASC, t.b ASC] }
+          └─BatchExchange { order: [], dist: HashShard(t.a) }
             └─BatchHashAgg { group_key: [t.a, t.b], aggs: [sum(t.c)] }
               └─BatchExchange { order: [], dist: HashShard(t.a, t.b) }
                 └─BatchScan { table: t, columns: [t.a, t.b, t.c], distribution: SomeShard }
@@ -1907,8 +1921,8 @@
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [t.a, t.b, sum] }
       └─BatchOverWindow { window_functions: [sum(sum(t.c)) OVER(PARTITION BY t.a, $expr1 ORDER BY max(t.e) ASC, t.b ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-        └─BatchExchange { order: [t.a ASC, $expr1 ASC, max(t.e) ASC, t.b ASC], dist: HashShard(t.a, $expr1) }
-          └─BatchSort { order: [t.a ASC, $expr1 ASC, max(t.e) ASC, t.b ASC] }
+        └─BatchSort { order: [t.a ASC, $expr1 ASC, max(t.e) ASC, t.b ASC] }
+          └─BatchExchange { order: [], dist: HashShard(t.a, $expr1) }
             └─BatchProject { exprs: [t.a, t.b, sum(t.c), max(t.e), Case((count(t.d) = 0:Int32), null:Decimal, (sum(t.d)::Decimal / count(t.d)::Decimal)) as $expr1] }
               └─BatchHashAgg { group_key: [t.a, t.b], aggs: [sum(t.c), sum(t.d), count(t.d), max(t.e)] }
                 └─BatchExchange { order: [], dist: HashShard(t.a, t.b) }

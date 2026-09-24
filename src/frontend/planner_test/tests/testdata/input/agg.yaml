@@ -193,6 +193,12 @@
     select v1, max(v2) from mv group by v1;
   expected_outputs:
   - batch_plan
+- name: sort agg after hash redistribution
+  sql: |
+    create table files (company_id int, file_id int, primary key (company_id, file_id));
+    select count(*) as cnt, company_id from files group by company_id order by cnt desc limit 100;
+  expected_outputs:
+  - batch_plan
 - sql: |
     create table t(v1 int, v2 int);
     select v1, max(v2) from t group by v1 order by v1 desc;

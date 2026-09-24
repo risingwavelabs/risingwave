@@ -532,7 +532,6 @@ impl BatchTaskExecution {
         loop {
             select! {
                 biased;
-                // `shutdown_rx` can't be removed here to avoid `sender.send(data_chunk)` blocked whole execution.
                 _ = shutdown_rx.cancelled() => {
                     match self.shutdown_rx.message() {
                         ShutdownMsg::Abort(e) => {
@@ -552,7 +551,14 @@ impl BatchTaskExecution {
                 data_chunk = data_chunk_stream.next()=> {
                     match data_chunk {
                         Some(Ok(data_chunk)) => {
-                            if let Err(e) = sender.send(data_chunk).await {
+                            let send_result = select! {
+                                biased;
+                                // Sending to a bounded output channel may block indefinitely if
+                                // the receiver stops draining it. Recheck shutdown in the loop.
+                                _ = shutdown_rx.cancelled() => continue,
+                                result = sender.send(data_chunk) => result,
+                            };
+                            if let Err(e) = send_result {
                                 match e {
                                     BatchError::SenderError => {
                                         // This is possible since when we have limit executor in parent
@@ -603,7 +609,13 @@ impl BatchTaskExecution {
         let error = error.map(Arc::new);
         self.failure.lock().clone_from(&error);
         let err_str = error.as_ref().map(|e| e.to_report_string());
-        if let Err(e) = sender.close(error).await {
+        // Closing also sends into bounded channels, so do not wait for it after shutdown.
+        let close_result = select! {
+            biased;
+            _ = shutdown_rx.cancelled() => None,
+            result = sender.close(error) => Some(result),
+        };
+        if let Some(Err(e)) = close_result {
             match e {
                 SenderError => {
                     // This is possible since when we have limit executor in parent
@@ -700,7 +712,101 @@ impl BatchTaskExecution {
 
 #[cfg(test)]
 mod tests {
+    use std::time::Duration;
+
+    use futures::StreamExt;
+    use risingwave_common::array::DataChunkTestExt;
+    use risingwave_common::catalog::Schema;
+    use risingwave_pb::batch_plan::ExchangeInfo;
+    use risingwave_pb::batch_plan::exchange_info::DistributionMode;
+
     use super::*;
+    use crate::executor::{BoxedDataChunkStream, Executor};
+    use crate::task::ComputeNodeContext;
+
+    struct ChunksExecutor {
+        schema: Schema,
+        channel_capacity: usize,
+        reached_full_channel: tokio::sync::oneshot::Sender<()>,
+    }
+
+    impl Executor for ChunksExecutor {
+        fn schema(&self) -> &Schema {
+            &self.schema
+        }
+
+        fn identity(&self) -> &str {
+            "ChunksExecutor"
+        }
+
+        fn execute(self: Box<Self>) -> BoxedDataChunkStream {
+            let channel_capacity = self.channel_capacity;
+            let mut reached_full_channel = Some(self.reached_full_channel);
+            futures::stream::iter((0..=channel_capacity).map(move |index| {
+                if index == channel_capacity {
+                    reached_full_channel.take().unwrap().send(()).unwrap();
+                }
+                Ok(DataChunk::from_pretty("i\n1"))
+            }))
+            .boxed()
+        }
+    }
+
+    #[tokio::test]
+    async fn cancel_task_blocked_on_output_channel() {
+        let runtime = Arc::new(
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .unwrap()
+                .into(),
+        );
+        let context = ComputeNodeContext::for_test();
+        let channel_capacity = context.get_config().developer.output_channel_size;
+        let task = Arc::new(
+            BatchTaskExecution::new(
+                &PbTaskId::default(),
+                PlanFragment {
+                    root: None,
+                    exchange_info: Some(ExchangeInfo {
+                        mode: DistributionMode::Single as i32,
+                        distribution: None,
+                    }),
+                },
+                context,
+                runtime,
+                None,
+            )
+            .unwrap(),
+        );
+        let (reached_full_channel, full_channel_rx) = tokio::sync::oneshot::channel();
+        let sender = task.sender.clone();
+        let run_task = task.clone();
+        let run = tokio::spawn(async move {
+            run_task
+                .run(
+                    Box::new(ChunksExecutor {
+                        schema: Schema::default(),
+                        channel_capacity,
+                        reached_full_channel,
+                    }),
+                    sender,
+                    None,
+                )
+                .await;
+        });
+
+        tokio::time::timeout(Duration::from_secs(5), full_channel_rx)
+            .await
+            .unwrap()
+            .unwrap();
+        task.cancel();
+        tokio::time::timeout(Duration::from_secs(5), run)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(*task.state.lock(), TaskStatus::Cancelled);
+    }
 
     #[test]
     fn test_task_output_id_debug() {

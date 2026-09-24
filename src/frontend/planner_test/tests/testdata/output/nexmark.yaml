@@ -561,8 +561,8 @@
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [auction.seller, Case((count = 0:Int32), null:Decimal, (sum / count::Decimal)) as $expr1] }
       └─BatchOverWindow { window_functions: [sum(bid.price) OVER(PARTITION BY auction.seller ORDER BY bid.date_time ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW), count(bid.price) OVER(PARTITION BY auction.seller ORDER BY bid.date_time ASC ROWS BETWEEN 10 PRECEDING AND CURRENT ROW)] }
-        └─BatchExchange { order: [auction.seller ASC, bid.date_time ASC], dist: HashShard(auction.seller) }
-          └─BatchSort { order: [auction.seller ASC, bid.date_time ASC] }
+        └─BatchSort { order: [auction.seller ASC, bid.date_time ASC] }
+          └─BatchExchange { order: [], dist: HashShard(auction.seller) }
             └─BatchProject { exprs: [auction.seller, bid.price, bid.date_time] }
               └─BatchFilter { predicate: (row_number <= 1:Int32) }
                 └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY auction.id, auction.seller ORDER BY bid.price ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
@@ -1495,8 +1495,8 @@
     └─BatchProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra] }
       └─BatchFilter { predicate: (row_number <= 1:Int32) }
         └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY bid.bidder, bid.auction ORDER BY bid.date_time DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-          └─BatchExchange { order: [bid.bidder ASC, bid.auction ASC, bid.date_time DESC], dist: HashShard(bid.auction, bid.bidder) }
-            └─BatchSort { order: [bid.bidder ASC, bid.auction ASC, bid.date_time DESC] }
+          └─BatchSort { order: [bid.bidder ASC, bid.auction ASC, bid.date_time DESC] }
+            └─BatchExchange { order: [], dist: HashShard(bid.auction, bid.bidder) }
               └─BatchScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra], stream_key: [bidder, auction], pk_columns: [bidder, auction], pk_conflict: NoCheck }
@@ -1548,8 +1548,8 @@
     └─BatchProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra] }
       └─BatchFilter { predicate: (rank <= 1:Int32) }
         └─BatchOverWindow { window_functions: [rank() OVER(PARTITION BY bid.bidder, bid.auction ORDER BY bid.date_time DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-          └─BatchExchange { order: [bid.bidder ASC, bid.auction ASC, bid.date_time DESC], dist: HashShard(bid.auction, bid.bidder) }
-            └─BatchSort { order: [bid.bidder ASC, bid.auction ASC, bid.date_time DESC] }
+          └─BatchSort { order: [bid.bidder ASC, bid.auction ASC, bid.date_time DESC] }
+            └─BatchExchange { order: [], dist: HashShard(bid.auction, bid.bidder) }
               └─BatchScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, bid._row_id(hidden)], stream_key: [bidder, auction, bid._row_id], pk_columns: [bidder, auction, bid._row_id], pk_conflict: NoCheck }
@@ -1603,8 +1603,8 @@
     └─BatchProject { exprs: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time] }
       └─BatchFilter { predicate: (row_number <= 10:Int32) }
         └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY bid.auction ORDER BY bid.price DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-          └─BatchExchange { order: [bid.auction ASC, bid.price DESC], dist: HashShard(bid.auction) }
-            └─BatchSort { order: [bid.auction ASC, bid.price DESC] }
+          └─BatchSort { order: [bid.auction ASC, bid.price DESC] }
+            └─BatchExchange { order: [], dist: HashShard(bid.auction) }
               └─BatchScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, p_time, bid._row_id(hidden)], stream_key: [auction, bid._row_id], pk_columns: [auction, bid._row_id], pk_conflict: NoCheck }
@@ -1652,8 +1652,8 @@
     BatchExchange { order: [], dist: Single }
     └─BatchFilter { predicate: (row_number <= 10:Int32) }
       └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY bid.auction ORDER BY bid.price DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-        └─BatchExchange { order: [bid.auction ASC, bid.price DESC], dist: HashShard(bid.auction) }
-          └─BatchSort { order: [bid.auction ASC, bid.price DESC] }
+        └─BatchSort { order: [bid.auction ASC, bid.price DESC] }
+          └─BatchExchange { order: [], dist: HashShard(bid.auction) }
             └─BatchScan { table: bid, columns: [bid.auction, bid.bidder, bid.price, bid.channel, bid.url, bid.date_time, bid.extra, bid.p_time], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [auction, bidder, price, channel, url, date_time, extra, p_time, bid._row_id(hidden), rank_number], stream_key: [auction, bid._row_id], pk_columns: [auction, bid._row_id], pk_conflict: NoCheck }

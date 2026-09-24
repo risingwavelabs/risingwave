@@ -222,8 +222,9 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchSortAgg { group_key: [mv_rollup.a], aggs: [sum(mv_rollup.s), sum0(mv_rollup.cnt)] }
-      └─BatchExchange { order: [mv_rollup.a ASC], dist: HashShard(mv_rollup.a) }
-        └─BatchScan { table: mv_rollup, columns: [mv_rollup.a, mv_rollup.s, mv_rollup.cnt], distribution: SomeShard }
+      └─BatchSort { order: [mv_rollup.a ASC] }
+        └─BatchExchange { order: [], dist: HashShard(mv_rollup.a) }
+          └─BatchScan { table: mv_rollup, columns: [mv_rollup.a, mv_rollup.s, mv_rollup.cnt], distribution: SomeShard }
 - id: agg_rollup_distinct_not_selected
   sql: |
     create table t_rollup_distinct (a int, b int, c int);
@@ -257,8 +258,9 @@
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [mv_rollup_dup.a, sum(mv_rollup_dup.s), sum(mv_rollup_dup.s)] }
       └─BatchSortAgg { group_key: [mv_rollup_dup.a], aggs: [sum(mv_rollup_dup.s)] }
-        └─BatchExchange { order: [mv_rollup_dup.a ASC], dist: HashShard(mv_rollup_dup.a) }
-          └─BatchScan { table: mv_rollup_dup, columns: [mv_rollup_dup.a, mv_rollup_dup.s], distribution: SomeShard }
+        └─BatchSort { order: [mv_rollup_dup.a ASC] }
+          └─BatchExchange { order: [], dist: HashShard(mv_rollup_dup.a) }
+            └─BatchScan { table: mv_rollup_dup, columns: [mv_rollup_dup.a, mv_rollup_dup.s], distribution: SomeShard }
 - id: agg_rollup_duplicate_query_aggs2
   sql: |
     create table t_rollup_dup (a int, b int, c int);
@@ -273,8 +275,9 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchSortAgg { group_key: [mv_rollup_dup.a], aggs: [sum0(mv_rollup_dup.s1)] }
-      └─BatchExchange { order: [mv_rollup_dup.a ASC], dist: HashShard(mv_rollup_dup.a) }
-        └─BatchScan { table: mv_rollup_dup, columns: [mv_rollup_dup.a, mv_rollup_dup.s1], distribution: SomeShard }
+      └─BatchSort { order: [mv_rollup_dup.a ASC] }
+        └─BatchExchange { order: [], dist: HashShard(mv_rollup_dup.a) }
+          └─BatchScan { table: mv_rollup_dup, columns: [mv_rollup_dup.a, mv_rollup_dup.s1], distribution: SomeShard }
 - id: inner_join_selection
   sql: |
     create table depts (deptno int, deptname varchar);

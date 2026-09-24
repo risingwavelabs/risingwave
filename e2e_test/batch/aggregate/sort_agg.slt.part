@@ -36,3 +36,22 @@ drop materialized view mv
 
 statement ok
 drop table t
+
+# A PK ordered scan must be redistributed by company before sort aggregation.
+statement ok
+create table files (company_id int, file_id int, primary key (company_id, file_id))
+
+statement ok
+insert into files
+select 1, id from generate_series(1, 2048) as g(id)
+union all
+select 2, id from generate_series(1, 1024) as g(id)
+
+query II
+select count(*) as cnt, company_id from files group by company_id order by cnt desc limit 100
+----
+2048 1
+1024 2
+
+statement ok
+drop table files

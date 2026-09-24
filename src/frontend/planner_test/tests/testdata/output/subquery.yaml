@@ -584,8 +584,8 @@
         └─BatchGroupTopN { order: [integers.i ASC], limit: 1, offset: 0, group_key: [integers.i] }
           └─BatchProject { exprs: [integers.i, row_number] }
             └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY integers.i ORDER BY integers.i ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-              └─BatchExchange { order: [integers.i ASC, integers.i ASC], dist: HashShard(integers.i) }
-                └─BatchSort { order: [integers.i ASC, integers.i ASC] }
+              └─BatchSort { order: [integers.i ASC, integers.i ASC] }
+                └─BatchExchange { order: [], dist: HashShard(integers.i) }
                   └─BatchProject { exprs: [integers.i, integers.i] }
                     └─BatchFilter { predicate: IsNotNull(integers.i) }
                       └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }
@@ -620,8 +620,8 @@
         └─BatchGroupTopN { order: [integers.i ASC], limit: 1, offset: 0, group_key: [integers.i] }
           └─BatchProject { exprs: [integers.i, row_number] }
             └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY integers.i ORDER BY integers.i ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-              └─BatchExchange { order: [integers.i ASC, integers.i ASC], dist: HashShard(integers.i) }
-                └─BatchSort { order: [integers.i ASC, integers.i ASC] }
+              └─BatchSort { order: [integers.i ASC, integers.i ASC] }
+                └─BatchExchange { order: [], dist: HashShard(integers.i) }
                   └─BatchProject { exprs: [integers.i, integers.i] }
                     └─BatchFilter { predicate: IsNotNull(integers.i) }
                       └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }
@@ -642,8 +642,8 @@
         └─BatchGroupTopN { order: [integers.i ASC], limit: 1, offset: 0, group_key: [integers.i] }
           └─BatchProject { exprs: [integers.i, sum] }
             └─BatchOverWindow { window_functions: [sum(integers.i) OVER(PARTITION BY integers.i ORDER BY integers.i ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-              └─BatchExchange { order: [integers.i ASC, integers.i ASC], dist: HashShard(integers.i) }
-                └─BatchSort { order: [integers.i ASC, integers.i ASC] }
+              └─BatchSort { order: [integers.i ASC, integers.i ASC] }
+                └─BatchExchange { order: [], dist: HashShard(integers.i) }
                   └─BatchProject { exprs: [integers.i, integers.i] }
                     └─BatchFilter { predicate: IsNotNull(integers.i) }
                       └─BatchScan { table: integers, columns: [integers.i], distribution: SomeShard }
@@ -674,8 +674,8 @@
         └─BatchGroupTopN { order: [integers.i ASC], limit: 1, offset: 0, group_key: [integers.i] }
           └─BatchProject { exprs: [integers.i, sum] }
             └─BatchOverWindow { window_functions: [sum(integers.i) OVER(PARTITION BY integers.i ORDER BY integers.i ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-              └─BatchExchange { order: [integers.i ASC, integers.i ASC], dist: HashShard(integers.i) }
-                └─BatchSort { order: [integers.i ASC, integers.i ASC] }
+              └─BatchSort { order: [integers.i ASC, integers.i ASC] }
+                └─BatchExchange { order: [], dist: HashShard(integers.i) }
                   └─BatchProject { exprs: [integers.i, integers.i] }
                     └─BatchNestedLoopJoin { type: Inner, predicate: true, output: all }
                       ├─BatchExchange { order: [], dist: Single }
@@ -701,8 +701,8 @@
       └─BatchExchange { order: [], dist: HashShard(rows.correlated_col, sum) }
         └─BatchProject { exprs: [rows.correlated_col, sum] }
           └─BatchOverWindow { window_functions: [sum(rows.v) OVER(PARTITION BY rows.correlated_col, rows.k ORDER BY rows.v ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-            └─BatchExchange { order: [rows.correlated_col ASC, rows.k ASC, rows.v ASC], dist: HashShard(rows.correlated_col, rows.k) }
-              └─BatchSort { order: [rows.correlated_col ASC, rows.k ASC, rows.v ASC] }
+            └─BatchSort { order: [rows.correlated_col ASC, rows.k ASC, rows.v ASC] }
+              └─BatchExchange { order: [], dist: HashShard(rows.correlated_col, rows.k) }
                 └─BatchProject { exprs: [rows.correlated_col, rows.k, rows.v] }
                   └─BatchFilter { predicate: IsNotNull(rows.correlated_col) }
                     └─BatchScan { table: rows, columns: [rows.k, rows.v, rows.correlated_col], distribution: SomeShard }

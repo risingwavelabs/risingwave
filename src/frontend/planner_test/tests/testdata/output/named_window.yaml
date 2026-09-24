@@ -40,8 +40,8 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-      └─BatchExchange { order: [t.y ASC, t.x ASC], dist: HashShard(t.y) }
-        └─BatchSort { order: [t.y ASC, t.x ASC] }
+      └─BatchSort { order: [t.y ASC, t.x ASC] }
+        └─BatchExchange { order: [], dist: HashShard(t.y) }
           └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [x, y, t._row_id(hidden), row_number], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
@@ -60,8 +60,8 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 1 PRECEDING AND CURRENT ROW)] }
-      └─BatchExchange { order: [t.y ASC, t.x ASC], dist: HashShard(t.y) }
-        └─BatchSort { order: [t.y ASC, t.x ASC] }
+      └─BatchSort { order: [t.y ASC, t.x ASC] }
+        └─BatchExchange { order: [], dist: HashShard(t.y) }
           └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [x, y, t._row_id(hidden), sum], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
@@ -84,11 +84,11 @@
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [t.x, t.y, t.z, sum, Case((count = 0:Int32), null:Decimal, (sum::Decimal / count::Decimal)) as $expr1] }
       └─BatchOverWindow { window_functions: [sum(t.y) OVER(PARTITION BY t.z ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count(t.y) OVER(PARTITION BY t.z ORDER BY t.y ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-        └─BatchExchange { order: [t.z ASC, t.y ASC], dist: HashShard(t.z) }
-          └─BatchSort { order: [t.z ASC, t.y ASC] }
+        └─BatchSort { order: [t.z ASC, t.y ASC] }
+          └─BatchExchange { order: [], dist: HashShard(t.z) }
             └─BatchOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-              └─BatchExchange { order: [t.y ASC, t.x ASC], dist: HashShard(t.y) }
-                └─BatchSort { order: [t.y ASC, t.x ASC] }
+              └─BatchSort { order: [t.y ASC, t.x ASC] }
+                └─BatchExchange { order: [], dist: HashShard(t.y) }
                   └─BatchScan { table: t, columns: [t.x, t.y, t.z], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [x, y, z, sum, avg, t._row_id(hidden)], stream_key: [t._row_id, y, z], pk_columns: [t._row_id, y, z], pk_conflict: NoCheck }
@@ -113,8 +113,8 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-      └─BatchExchange { order: [t.y ASC, t.x ASC], dist: HashShard(t.y) }
-        └─BatchSort { order: [t.y ASC, t.x ASC] }
+      └─BatchSort { order: [t.y ASC, t.x ASC] }
+        └─BatchExchange { order: [], dist: HashShard(t.y) }
           └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [x, y, t._row_id(hidden), sum, count], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
@@ -135,8 +135,8 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchOverWindow { window_functions: [max(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC RANGE BETWEEN 100 PRECEDING AND CURRENT ROW)] }
-      └─BatchExchange { order: [t.y ASC, t.x ASC], dist: HashShard(t.y) }
-        └─BatchSort { order: [t.y ASC, t.x ASC] }
+      └─BatchSort { order: [t.y ASC, t.x ASC] }
+        └─BatchExchange { order: [], dist: HashShard(t.y) }
           └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [x, y, t._row_id(hidden), max], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
@@ -157,8 +157,8 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchOverWindow { window_functions: [first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING), last_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND UNBOUNDED FOLLOWING)] }
-      └─BatchExchange { order: [t.y ASC, t.x ASC], dist: HashShard(t.y) }
-        └─BatchSort { order: [t.y ASC, t.x ASC] }
+      └─BatchSort { order: [t.y ASC, t.x ASC] }
+        └─BatchExchange { order: [], dist: HashShard(t.y) }
           └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [x, y, t._row_id(hidden), first_value, last_value], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
@@ -185,8 +185,8 @@
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [t.x, t.y, t.z, sum, Case((count = 0:Int32), null:Decimal, (sum::Decimal / count::Decimal)) as $expr1, min, max, count] }
       └─BatchOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count(t.x) OVER(PARTITION BY t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), min(t.x) OVER(PARTITION BY t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), max(t.x) OVER(PARTITION BY t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count() OVER(PARTITION BY t.y ORDER BY t.z ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-        └─BatchExchange { order: [t.y ASC, t.z ASC], dist: HashShard(t.y) }
-          └─BatchSort { order: [t.y ASC, t.z ASC] }
+        └─BatchSort { order: [t.y ASC, t.z ASC] }
+          └─BatchExchange { order: [], dist: HashShard(t.y) }
             └─BatchScan { table: t, columns: [t.x, t.y, t.z], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [x, y, z, sum, avg, min, max, count, t._row_id(hidden)], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
@@ -211,8 +211,8 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), rank() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), dense_rank() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-      └─BatchExchange { order: [t.y ASC, t.x ASC], dist: HashShard(t.y) }
-        └─BatchSort { order: [t.y ASC, t.x ASC] }
+      └─BatchSort { order: [t.y ASC, t.x ASC] }
+        └─BatchExchange { order: [], dist: HashShard(t.y) }
           └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [x, y, t._row_id(hidden), row_number, rank, dense_rank], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
@@ -237,8 +237,8 @@
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
     └─BatchOverWindow { window_functions: [first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 1 PRECEDING AND 1 PRECEDING), first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN 1 FOLLOWING AND 1 FOLLOWING), first_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), last_value(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-      └─BatchExchange { order: [t.y ASC, t.x ASC], dist: HashShard(t.y) }
-        └─BatchSort { order: [t.y ASC, t.x ASC] }
+      └─BatchSort { order: [t.y ASC, t.x ASC] }
+        └─BatchExchange { order: [], dist: HashShard(t.y) }
           └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [x, y, t._row_id(hidden), lag, lead, first_value, last_value], stream_key: [t._row_id, y], pk_columns: [t._row_id, y], pk_conflict: NoCheck }
@@ -277,11 +277,11 @@
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [t.x, t.y, t.z, sum, Case((count = 0:Int32), null:Decimal, (sum::Decimal / count::Decimal)) as $expr1, count] }
       └─BatchOverWindow { window_functions: [sum(t.y) OVER(PARTITION BY t.z ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count(t.y) OVER(PARTITION BY t.z ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-        └─BatchExchange { order: [t.z ASC, t.x ASC], dist: HashShard(t.z) }
-          └─BatchSort { order: [t.z ASC, t.x ASC] }
+        └─BatchSort { order: [t.z ASC, t.x ASC] }
+          └─BatchExchange { order: [], dist: HashShard(t.z) }
             └─BatchOverWindow { window_functions: [sum(t.x) OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW), count() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-              └─BatchExchange { order: [t.y ASC, t.x ASC], dist: HashShard(t.y) }
-                └─BatchSort { order: [t.y ASC, t.x ASC] }
+              └─BatchSort { order: [t.y ASC, t.x ASC] }
+                └─BatchExchange { order: [], dist: HashShard(t.y) }
                   └─BatchScan { table: t, columns: [t.x, t.y, t.z], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [x, y, z, sum, avg, count, t._row_id(hidden)], stream_key: [t._row_id, y, z], pk_columns: [t._row_id, y, z], pk_conflict: NoCheck }
@@ -322,8 +322,8 @@
     BatchExchange { order: [], dist: Single }
     └─BatchProject { exprs: [t.x, t.y, t.z, sum] }
       └─BatchOverWindow { window_functions: [sum($expr1) OVER(PARTITION BY $expr2 ORDER BY $expr3 ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-        └─BatchExchange { order: [$expr2 ASC, $expr3 ASC], dist: HashShard($expr2) }
-          └─BatchSort { order: [$expr2 ASC, $expr3 ASC] }
+        └─BatchSort { order: [$expr2 ASC, $expr3 ASC] }
+          └─BatchExchange { order: [], dist: HashShard($expr2) }
             └─BatchProject { exprs: [t.x, t.y, t.z, (t.x * 2:Int32) as $expr1, (t.y + 1:Int32) as $expr2, Abs(t.z) as $expr3] }
               └─BatchScan { table: t, columns: [t.x, t.y, t.z], distribution: SomeShard }
   stream_plan: |-
@@ -353,8 +353,8 @@
     └─BatchProject { exprs: [t.x, t.y] }
       └─BatchFilter { predicate: (row_number <= 3:Int32) }
         └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-          └─BatchExchange { order: [t.y ASC, t.x ASC], dist: HashShard(t.y) }
-            └─BatchSort { order: [t.y ASC, t.x ASC] }
+          └─BatchSort { order: [t.y ASC, t.x ASC] }
+            └─BatchExchange { order: [], dist: HashShard(t.y) }
               └─BatchScan { table: t, columns: [t.x, t.y], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [x, y, t._row_id(hidden)], stream_key: [y, t._row_id], pk_columns: [y, t._row_id], pk_conflict: NoCheck }
@@ -420,8 +420,8 @@
     └─BatchProject { exprs: [t.x, t.z] }
       └─BatchFilter { predicate: (row_number = 1:Int32) }
         └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY t.y ORDER BY t.x ASC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-          └─BatchExchange { order: [t.y ASC, t.x ASC], dist: HashShard(t.y) }
-            └─BatchSort { order: [t.y ASC, t.x ASC] }
+          └─BatchSort { order: [t.y ASC, t.x ASC] }
+            └─BatchExchange { order: [], dist: HashShard(t.y) }
               └─BatchScan { table: t, columns: [t.x, t.y, t.z], distribution: SomeShard }
   stream_plan: |-
     StreamMaterialize { columns: [x, z, t.y(hidden)], stream_key: [t.y], pk_columns: [t.y], pk_conflict: NoCheck }

@@ -1492,8 +1492,8 @@
     └─BatchProject { exprs: [auction, bidder, price, channel, url, date_time, extra] }
       └─BatchFilter { predicate: (row_number <= 1:Int32) }
         └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY bidder, auction ORDER BY date_time DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-          └─BatchExchange { order: [bidder ASC, auction ASC, date_time DESC], dist: HashShard(auction, bidder) }
-            └─BatchSort { order: [bidder ASC, auction ASC, date_time DESC] }
+          └─BatchSort { order: [bidder ASC, auction ASC, date_time DESC] }
+            └─BatchExchange { order: [], dist: HashShard(auction, bidder) }
               └─BatchProject { exprs: [auction, bidder, price, channel, url, date_time, extra] }
                 └─BatchKafkaScan { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id], filter: (None, None) }
   stream_plan: |-
@@ -1554,8 +1554,8 @@
     └─BatchProject { exprs: [auction, bidder, price, channel, url, date_time, extra] }
       └─BatchFilter { predicate: (rank <= 1:Int32) }
         └─BatchOverWindow { window_functions: [rank() OVER(PARTITION BY bidder, auction ORDER BY date_time DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-          └─BatchExchange { order: [bidder ASC, auction ASC, date_time DESC], dist: HashShard(auction, bidder) }
-            └─BatchSort { order: [bidder ASC, auction ASC, date_time DESC] }
+          └─BatchSort { order: [bidder ASC, auction ASC, date_time DESC] }
+            └─BatchExchange { order: [], dist: HashShard(auction, bidder) }
               └─BatchProject { exprs: [auction, bidder, price, channel, url, date_time, extra] }
                 └─BatchKafkaScan { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id], filter: (None, None) }
   stream_plan: |-
@@ -1611,8 +1611,8 @@
     BatchExchange { order: [], dist: Single }
     └─BatchFilter { predicate: (row_number <= 10:Int32) }
       └─BatchOverWindow { window_functions: [row_number() OVER(PARTITION BY auction ORDER BY price DESC ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)] }
-        └─BatchExchange { order: [auction ASC, price DESC], dist: HashShard(auction) }
-          └─BatchSort { order: [auction ASC, price DESC] }
+        └─BatchSort { order: [auction ASC, price DESC] }
+          └─BatchExchange { order: [], dist: HashShard(auction) }
             └─BatchProject { exprs: [auction, bidder, price, channel, url, date_time, extra] }
               └─BatchKafkaScan { source: bid, columns: [auction, bidder, price, channel, url, date_time, extra, _rw_kafka_timestamp, _rw_kafka_partition, _rw_kafka_offset, _row_id], filter: (None, None) }
   stream_plan: |-

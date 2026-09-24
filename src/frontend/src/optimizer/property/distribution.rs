@@ -332,15 +332,24 @@ impl RequiredDist {
 
     pub fn batch_enforce_if_not_satisfies(
         &self,
-        mut plan: BatchPlanRef,
+        plan: BatchPlanRef,
         required_order: &Order,
     ) -> Result<BatchPlanRef> {
-        plan = required_order.enforce_if_not_satisfies(plan)?;
-        if !plan.distribution().satisfies(self) {
-            Ok(self.batch_enforce(plan, required_order))
-        } else {
-            Ok(plan)
+        if plan.distribution().satisfies(self) {
+            return required_order.enforce_if_not_satisfies(plan);
         }
+
+        let dist = self.to_dist();
+        if matches!(dist, Distribution::Single) {
+            let plan = required_order.enforce_if_not_satisfies(plan)?;
+            return Ok(BatchExchange::new(plan, required_order.clone(), dist).into());
+        }
+
+        // A merge-sort exchange with multiple destinations can deadlock: each destination
+        // waits for every source, while a source may be blocked on another destination's
+        // bounded output channel. Drain the shuffle before sorting each destination.
+        let plan = BatchExchange::new(plan, Order::any(), dist).into();
+        required_order.enforce_if_not_satisfies(plan)
     }
 
     pub fn streaming_enforce_if_not_satisfies(&self, plan: StreamPlanRef) -> Result<StreamPlanRef> {
@@ -378,11 +387,6 @@ impl RequiredDist {
             },
             RequiredDist::PhysicalDist(dist) => dist.satisfies(required),
         }
-    }
-
-    pub fn batch_enforce(&self, plan: BatchPlanRef, required_order: &Order) -> BatchPlanRef {
-        let dist = self.to_dist();
-        BatchExchange::new(plan, required_order.clone(), dist).into()
     }
 
     pub fn stream_enforce(&self, plan: StreamPlanRef) -> StreamPlanRef {
