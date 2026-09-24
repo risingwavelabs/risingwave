@@ -21,8 +21,7 @@ use fail::fail_point;
 use risingwave_object_store::object::{MonitoredStreamingReader, ObjectError};
 
 use super::BlockMeta;
-use crate::hummock::pin_cache::PinCacheReadHandle;
-use crate::hummock::{Block, BlockHolder, HummockResult};
+use crate::hummock::{BlockHolder, HummockResult};
 
 pub struct MemoryUsageTracker {
     total_usage: Arc<AtomicUsize>,
@@ -62,8 +61,6 @@ pub struct BlockDataStream {
     buf: Bytes,
 
     buff_offset: usize,
-
-    local_route: Option<PinCacheReadHandle>,
 }
 
 impl BlockDataStream {
@@ -76,14 +73,6 @@ impl BlockDataStream {
         // Meta data of the SST that is streamed.
         block_metas: &[BlockMeta],
     ) -> Self {
-        Self::new_with_local_route(byte_stream, block_metas, None)
-    }
-
-    pub(crate) fn new_with_local_route(
-        byte_stream: MonitoredStreamingReader,
-        block_metas: &[BlockMeta],
-        local_route: Option<PinCacheReadHandle>,
-    ) -> Self {
         Self {
             buf_reader: byte_stream,
             block_idx: 0,
@@ -93,39 +82,12 @@ impl BlockDataStream {
                 .collect(),
             buf: Bytes::default(),
             buff_offset: 0,
-            local_route,
         }
     }
 
     /// Reads the next block from the stream and returns it. Returns `None` if there are no blocks
     /// left to read.
     pub async fn next_block(&mut self) -> HummockResult<Option<(Bytes, usize)>> {
-        let result = self.next_block_inner().await;
-        if result.is_err() {
-            self.invalidate_local_route();
-        }
-        result
-    }
-
-    pub(crate) fn decode_block(
-        &self,
-        data: Bytes,
-        uncompressed_size: usize,
-    ) -> HummockResult<Block> {
-        let result = Block::decode(data, uncompressed_size);
-        if result.is_err() {
-            self.invalidate_local_route();
-        }
-        result
-    }
-
-    fn invalidate_local_route(&self) {
-        if let Some(route) = &self.local_route {
-            route.invalidate();
-        }
-    }
-
-    async fn next_block_inner(&mut self) -> HummockResult<Option<(Bytes, usize)>> {
         if self.block_idx >= self.block_sizes.len() {
             return Ok(None);
         }
@@ -311,65 +273,5 @@ mod tests {
         assert!(matches!(empty.take_block(9), PrefetchLookup::BeforeStart));
         assert!(matches!(empty.take_block(10), PrefetchLookup::Exhausted));
         assert!(matches!(empty.take_block(11), PrefetchLookup::Exhausted));
-    }
-}
-
-#[cfg(test)]
-mod pin_cache_tests {
-    use std::collections::HashMap;
-    use std::sync::Arc;
-
-    use bytes::Bytes;
-    use risingwave_common::config::ObjectStoreConfig;
-    use risingwave_hummock_sdk::HummockSstableObjectId;
-    use risingwave_object_store::object::{InMemObjectStore, ObjectStore, ObjectStoreImpl};
-
-    use super::{BlockDataStream, BlockMeta};
-    use crate::hummock::pin_cache::PinCache;
-    use crate::monitor::ObjectStoreMetrics;
-
-    #[tokio::test]
-    async fn test_stream_read_or_decode_error_invalidates_local_route() {
-        for decode_error in [false, true] {
-            let remote_store = Arc::new(ObjectStoreImpl::InMem(
-                InMemObjectStore::for_test().monitored(
-                    Arc::new(ObjectStoreMetrics::unused()),
-                    Arc::new(ObjectStoreConfig::default()),
-                ),
-            ));
-            let local_store = Arc::new(ObjectStoreImpl::InMem(
-                InMemObjectStore::for_test().monitored(
-                    Arc::new(ObjectStoreMetrics::unused()),
-                    Arc::new(ObjectStoreConfig::default()),
-                ),
-            ));
-            let pin_cache = PinCache::new(local_store, 1024);
-            let object_id = HummockSstableObjectId::from(1001);
-            let data = Bytes::from_static(b"corrupted_block");
-            remote_store.upload("sst", data.clone()).await.unwrap();
-            pin_cache.replace_desired_objects(HashMap::from([(object_id, data.len() as u64)]));
-            pin_cache
-                .pin_sst(remote_store, "sst".into(), object_id)
-                .await
-                .unwrap();
-
-            let route = pin_cache.get(object_id).unwrap();
-            let reader = route.streaming_read(..).await.unwrap();
-            let mut stream = BlockDataStream::new_with_local_route(
-                reader,
-                &[BlockMeta {
-                    len: data.len() as u32 + u32::from(!decode_error),
-                    ..Default::default()
-                }],
-                Some(route),
-            );
-            if decode_error {
-                let (data, size) = stream.next_block().await.unwrap().unwrap();
-                assert!(stream.decode_block(data, size).is_err());
-            } else {
-                assert!(stream.next_block().await.is_err());
-            }
-            assert!(pin_cache.get(object_id).is_none());
-        }
     }
 }

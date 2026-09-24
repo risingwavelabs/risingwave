@@ -1093,31 +1093,16 @@ impl SstableStore {
         fail_point!("get_stream_err");
         let data_path = self.get_sst_data_path(object_id);
         let store = self.store();
-        let pinned_sst = self.pinned_sst(object_id);
         let block_meta = &metas[0];
         let start_pos = block_meta.offset as usize;
         let end_pos = metas.iter().map(|meta| meta.len as usize).sum::<usize>() + start_pos;
         let range = start_pos..end_pos;
         // spawn to tokio pool because the object-storage sdk may not be safe to cancel.
-        let ret = tokio::spawn(async move {
-            if let Some(pinned_sst) = pinned_sst {
-                match pinned_sst.streaming_read(range.clone()).await {
-                    Ok(reader) => return Ok((reader, Some(pinned_sst))),
-                    Err(error) => tracing::warn!(
-                        object_id = object_id.as_raw_id(),
-                        error = %error.as_report(),
-                        "failed to stream pinned SST; falling back to remote object store"
-                    ),
-                }
-            }
-            store
-                .streaming_read(&data_path, range)
-                .await
-                .map(|reader| (reader, None))
-        })
-        .await;
+        // Compaction may copy raw blocks without decoding them. Always stream from the
+        // authoritative store so local cache corruption cannot reach a new SST.
+        let ret = tokio::spawn(async move { store.streaming_read(&data_path, range).await }).await;
 
-        let (reader, local_route) = match ret {
+        let reader = match ret {
             Ok(Ok(reader)) => reader,
             Ok(Err(e)) => return Err(HummockError::from(e)),
             Err(e) => {
@@ -1127,11 +1112,7 @@ impl SstableStore {
                 )));
             }
         };
-        Ok(BlockDataStream::new_with_local_route(
-            reader,
-            metas,
-            local_route,
-        ))
+        Ok(BlockDataStream::new(reader, metas))
     }
 
     pub fn meta_cache(&self) -> &HybridCache<HummockSstableObjectId, Box<Sstable>> {
@@ -1183,7 +1164,7 @@ mod tests {
         test_key_of,
     };
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{CachePolicy, SstableIterator, SstableMeta, SstableStore};
+    use crate::hummock::{BlockMeta, CachePolicy, SstableIterator, SstableMeta, SstableStore};
     use crate::monitor::StoreLocalStatistic;
 
     const SST_ID: u64 = 1;
@@ -1643,6 +1624,48 @@ mod tests {
                 .entry()
                 .is_some()
         );
+    }
+
+    #[tokio::test]
+    async fn test_compactor_stream_ignores_published_pin() {
+        let sstable_store = mock_sstable_store().await;
+        let pin_cache = PinCache::new(mock_sstable_store().await.store(), u64::MAX);
+        sstable_store.set_pin_cache(pin_cache.clone());
+
+        let object_id = SST_ID.into();
+        let path = sstable_store.get_sst_data_path(object_id);
+        let remote_store = sstable_store.store();
+        let local_bytes = Bytes::from_static(b"local!");
+        let remote_bytes = Bytes::from_static(b"remote");
+        remote_store
+            .upload(&path, local_bytes.clone())
+            .await
+            .unwrap();
+        pin_cache.replace_desired_objects(HashMap::from([(object_id, local_bytes.len() as u64)]));
+        pin_cache
+            .pin_sst(remote_store.clone(), path.clone(), object_id)
+            .await
+            .unwrap();
+        assert_eq!(
+            pin_cache.get(object_id).unwrap().read(..).await.unwrap(),
+            local_bytes
+        );
+
+        remote_store
+            .upload(&path, remote_bytes.clone())
+            .await
+            .unwrap();
+        let mut stream = sstable_store
+            .get_stream_for_blocks(
+                object_id,
+                &[BlockMeta {
+                    len: remote_bytes.len() as u32,
+                    ..Default::default()
+                }],
+            )
+            .await
+            .unwrap();
+        assert_eq!(stream.next_block().await.unwrap().unwrap().0, remote_bytes);
     }
 
     #[tokio::test]

@@ -31,7 +31,7 @@ use crate::hummock::compactor::task_progress::TaskProgress;
 use crate::hummock::iterator::{Forward, HummockIterator, ValueMeta};
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
-use crate::hummock::{BlockHolder, BlockIterator, BlockMeta, HummockResult, TableHolder};
+use crate::hummock::{Block, BlockHolder, BlockIterator, BlockMeta, HummockResult, TableHolder};
 use crate::monitor::StoreLocalStatistic;
 
 const PROGRESS_KEY_INTERVAL: usize = 100;
@@ -156,7 +156,7 @@ impl SstableStreamIterator {
         self.block_iter = match self.block_stream.next_block().await? {
             Some((buf, uncompressed_size)) => {
                 // Decode errors are terminal and must not recreate the I/O stream.
-                let block = Box::new(self.block_stream.decode_block(buf, uncompressed_size)?);
+                let block = Box::new(Block::decode(buf, uncompressed_size)?);
                 let mut iter = BlockIterator::new(BlockHolder::from_owned_block(block));
                 iter.seek_to_first();
                 Some(iter)
