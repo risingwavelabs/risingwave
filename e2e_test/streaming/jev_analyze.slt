@@ -1,0 +1,21 @@
+# SQL NULL arguments do not make a request, even with an invalid endpoint.
+query T
+SELECT jev_analyze(NULL::jsonb, 'invalid', 'test-model', '{}'::jsonb, 'test-key');
+----
+NULL
+
+query T
+SELECT CASE WHEN false THEN jev_analyze('{}'::jsonb, 'invalid', 'test-model', '{}'::jsonb, 'test-key') ELSE '{}'::jsonb END;
+----
+{}
+
+# JSON null is a real input, unlike SQL NULL. An outer expression must not hide failures.
+statement error jev_analyze: invalid model_url
+SELECT coalesce(jev_analyze('null'::jsonb, 'invalid', 'test-model', '{}'::jsonb, 'test-key'), '{}'::jsonb);
+
+# The fixture uses a real local HTTP server and psql, which cannot run under madsim.
+skipif madsim
+system ok
+python3 e2e_test/streaming/jev_analyze_http.py
+----
+jev_analyze HTTP integration passed
