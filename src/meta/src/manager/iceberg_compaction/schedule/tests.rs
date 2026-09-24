@@ -67,6 +67,7 @@ fn new_track(
             next_compaction_time: now + Duration::from_secs(trigger_interval_sec),
             manual_task_type: None,
         },
+        health: CompactionHealth::default(),
     }
 }
 
@@ -468,7 +469,7 @@ fn test_force_advances_active_round_retry_without_adding_backlog() {
     let mut track = new_round_track(now, 120, 10, 1);
     track.record_observed_snapshot(committed_snapshot(10, 1000));
     start_in_flight(&mut track, 1, now);
-    track.finish_failed(now);
+    track.finish_failed(now, "boom".to_owned());
 
     let force_at = now + Duration::from_millis(500);
     assert!(!track.should_trigger(force_at));
@@ -487,7 +488,7 @@ fn test_active_round_failure_backoff_ignores_commit_threshold() {
     start_in_flight(&mut track, 1, now);
     record_commits(&mut track, 3);
 
-    track.finish_failed(now);
+    track.finish_failed(now, "boom".to_owned());
 
     assert_eq!(track.round_max_file_sequence_number, Some(10));
     assert_eq!(track.pending_commit_count, 3);
@@ -501,7 +502,7 @@ fn test_finish_failed_preserves_backlog_and_allows_retry() {
     let mut track = new_track(now, 120, 10, 4);
     start_in_flight(&mut track, 1, now);
 
-    track.finish_failed(now);
+    track.finish_failed(now, "boom".to_owned());
 
     assert_eq!(track.pending_commit_count, 4);
     assert!(!track.should_trigger(now));
@@ -592,7 +593,7 @@ fn test_finish_failed_after_force_keeps_force_backlog() {
     track.record_force_compaction(now, None);
     start_in_flight(&mut track, 1, now);
 
-    track.finish_failed(now);
+    track.finish_failed(now, "boom".to_owned());
 
     assert_eq!(track.pending_commit_count, 1);
     assert!(!track.should_trigger(now));
@@ -1443,6 +1444,92 @@ async fn test_handle_report_task_treats_unbounded_drained_as_failure() {
     let track = guard.sink_schedules.get(&sink_id).unwrap();
     assert_eq!(track.pending_commit_count, 2);
     assert!(matches!(track.state, CompactionTrackState::Idle { .. }));
+}
+
+#[tokio::test]
+async fn test_compaction_status_reports_failures_until_success() {
+    let manager = build_test_manager().await;
+    let sink_id = SinkId::new(482);
+    let now = Instant::now();
+    let mut track = new_track(now, 120, 10, 2);
+    track.report_timeout = Duration::from_secs(1);
+    track.record_observed_snapshot(committed_snapshot(10, 1000));
+    start_in_flight(&mut track, 1, now);
+    manager.inner.write().sink_schedules.insert(sink_id, track);
+    let status = || {
+        manager
+            .list_compaction_statuses()
+            .into_iter()
+            .find(|status| status.sink_id == sink_id)
+            .unwrap()
+    };
+
+    manager.handle_report_task(IcebergReportTask {
+        task_id: 1.into(),
+        sink_id: sink_id.as_raw_id(),
+        status: IcebergReportTaskStatus::Failed as i32,
+        error_message: Some("boom".to_owned()),
+        pk_index_result: None,
+    });
+    let failed = status();
+    assert_eq!(failed.consecutive_failures, 1);
+    assert_eq!(failed.last_error.as_deref(), Some("boom"));
+    assert!(failed.last_failure_at.is_some());
+    assert!(failed.last_success_at.is_none());
+    assert_eq!(failed.compaction_lag, None);
+
+    {
+        let mut guard = manager.inner.write();
+        let track = guard.sink_schedules.get_mut(&sink_id).unwrap();
+        track.record_observed_snapshot(committed_snapshot(11, 4000));
+        track.record_commit();
+        start_in_flight(track, 2, now - Duration::from_secs(5));
+    }
+    assert!(manager.get_top_n_iceberg_commit_sink_ids(0).is_empty());
+    let timed_out = status();
+    assert_eq!(timed_out.consecutive_failures, 2);
+    assert!(timed_out.last_error.unwrap().contains("timed out"));
+
+    {
+        let mut guard = manager.inner.write();
+        let track = guard.sink_schedules.get_mut(&sink_id).unwrap();
+        start_in_flight(track, 3, now);
+        track.record_observed_snapshot(committed_snapshot(12, 9000));
+        track.record_commit();
+    }
+    manager.handle_report_task(IcebergReportTask {
+        task_id: 3.into(),
+        sink_id: sink_id.as_raw_id(),
+        status: IcebergReportTaskStatus::Success as i32,
+        error_message: None,
+        pk_index_result: None,
+    });
+    let recovered = status();
+    assert_eq!(recovered.consecutive_failures, 0);
+    assert!(recovered.last_success_at.is_some());
+    assert!(recovered.last_error.unwrap().contains("timed out"));
+    // The task started from snapshot 11, so snapshot 12 is still uncompacted.
+    assert_eq!(recovered.compaction_lag, Some(Duration::from_secs(5)));
+}
+
+#[test]
+fn test_compaction_lag_uses_round_start_snapshot() {
+    let now = Instant::now();
+    let mut track = new_round_track(now, 120, 10, 1);
+    track.record_observed_snapshot(committed_snapshot(10, 1000));
+    start_in_flight(&mut track, 1, now);
+    track.record_observed_snapshot(committed_snapshot(11, 4000));
+    track.record_commit();
+
+    track.finish_success(now);
+    assert!(track.health.last_success_at.is_some());
+    assert_eq!(track.compaction_lag(), None);
+
+    // A later attempt in the same round observes snapshot 11, but draining the
+    // round only proves that commits up to the round start are compacted.
+    start_in_flight(&mut track, 2, now);
+    track.finish_drained(now);
+    assert_eq!(track.compaction_lag(), Some(Duration::from_secs(3)));
 }
 
 #[tokio::test]
