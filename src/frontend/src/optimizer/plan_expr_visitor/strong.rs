@@ -370,6 +370,7 @@ impl Strong {
             | ExprType::CompositeCast
             | ExprType::RwEpochToTs
             | ExprType::OpenaiEmbedding
+            | ExprType::JevAnalyze
             | ExprType::HasDatabasePrivilege
             | ExprType::Random
             | ExprType::ClockTimestamp

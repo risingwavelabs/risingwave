@@ -56,6 +56,7 @@ mod format_type;
 mod hmac;
 mod in_;
 mod int256;
+mod jev;
 mod jsonb_access;
 mod jsonb_build;
 mod jsonb_concat;

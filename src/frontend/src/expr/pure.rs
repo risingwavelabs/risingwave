@@ -406,6 +406,7 @@ impl ExprVisitor for ImpureAnalyzer {
             | Type::PgTableIsVisible
             | Type::HasFunctionPrivilege
             | Type::OpenaiEmbedding
+            | Type::JevAnalyze
             | Type::HasDatabasePrivilege
             | Type::Random
             | Type::ClockTimestamp
