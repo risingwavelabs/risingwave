@@ -496,9 +496,11 @@ IcebergConfig:
   - name: s3.access.key
     field_type: String
     required: false
+    allow_alter_on_fly: true
   - name: s3.secret.key
     field_type: String
     required: false
+    allow_alter_on_fly: true
   - name: s3.iam_role_arn
     field_type: String
     required: false

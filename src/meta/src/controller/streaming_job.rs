@@ -16,7 +16,6 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 use std::num::NonZeroUsize;
 
 use anyhow::anyhow;
-use indexmap::IndexMap;
 use itertools::Itertools;
 use risingwave_common::catalog::{
     ColumnCatalog, FragmentTypeFlag, FragmentTypeMask, ICEBERG_SINK_PREFIX, ICEBERG_SOURCE_PREFIX,
@@ -37,6 +36,7 @@ use risingwave_connector::allow_alter_on_fly_fields::check_sink_allow_alter_on_f
 use risingwave_connector::connector_common::validate_connection;
 use risingwave_connector::error::ConnectorError;
 use risingwave_connector::sink::file_sink::fs::FsSink;
+use risingwave_connector::sink::iceberg::is_iceberg_engine_option;
 use risingwave_connector::sink::{CONNECTOR_TYPE_KEY, SinkError};
 use risingwave_connector::source::{
     ConnectorProperties, UPSTREAM_SOURCE_KEY, pb_connection_type_to_connection_type,
@@ -52,7 +52,7 @@ use risingwave_pb::catalog::table::PbEngine;
 use risingwave_pb::catalog::{PbConnection, PbCreateType, PbTable};
 use risingwave_pb::common::ThrottleType;
 use risingwave_pb::ddl_service::streaming_job_resource_type;
-use risingwave_pb::meta::alter_connector_props_request::AlterIcebergTableIds;
+use risingwave_pb::meta::alter_connector_props_request::{AlterIcebergTableIds, PbExtraOptions};
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::meta::object::PbObjectInfo;
 use risingwave_pb::meta::subscribe_response::{
@@ -68,8 +68,8 @@ use risingwave_pb::stream_plan::stream_fragment_graph::Parallelism;
 use risingwave_pb::stream_plan::stream_node::PbNodeBody;
 use risingwave_pb::stream_plan::{PbSinkLogStoreType, PbStreamNode, StreamScanType};
 use risingwave_pb::user::PbUserInfo;
-use risingwave_sqlparser::ast::{Engine, SqlOption, Statement};
-use risingwave_sqlparser::parser::{Parser, ParserError};
+use risingwave_sqlparser::ast::{Engine, Statement};
+use risingwave_sqlparser::parser::Parser;
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::{Expr, Query, SimpleExpr};
 use sea_orm::{
@@ -3147,12 +3147,13 @@ impl CatalogController {
         &self,
         table_id: TableId,
         changed_props: BTreeMap<String, String>,
-        alter_iceberg_table_props: Option<
-            risingwave_pb::meta::alter_connector_props_request::PbExtraOptions,
-        >,
+        changed_secret_refs: BTreeMap<String, PbSecretRef>,
+        alter_iceberg_table_props: Option<PbExtraOptions>,
     ) -> MetaResult<(HashMap<String, String>, SinkId)> {
-        let risingwave_pb::meta::alter_connector_props_request::PbExtraOptions::AlterIcebergTableIds(AlterIcebergTableIds { sink_id, source_id }) = alter_iceberg_table_props.
-            ok_or_else(|| MetaError::invalid_parameter("alter_iceberg_table_props is required"))?;
+        let PbExtraOptions::AlterIcebergTableIds(AlterIcebergTableIds { sink_id, source_id }) =
+            alter_iceberg_table_props.ok_or_else(|| {
+                MetaError::invalid_parameter("alter_iceberg_table_props is required")
+            })?;
         let inner = self.inner.read().await;
         let txn = inner.db.begin().await?;
 
@@ -3162,54 +3163,97 @@ impl CatalogController {
             .await?
             .ok_or_else(|| MetaError::catalog_id_not_found(ObjectType::Sink.as_str(), sink_id))?;
 
-        let mut merged_props = sink.properties.clone().into_inner();
-        merged_props.extend(changed_props.clone());
-        validate_sink_config(&sink, &merged_props, &changed_props)?;
+        let altered_options = WithOptionsSecResolved::new(changed_props, changed_secret_refs);
 
-        let definition = sink.definition.clone();
-        let [mut stmt]: [_; 1] = Parser::parse_sql(&definition)
-            .map_err(|e| SinkError::Config(anyhow!(e)))?
-            .try_into()
-            .unwrap();
-        if let Statement::CreateTable {
-            with_options,
-            engine,
-            ..
-        } = &mut stmt
-        {
-            if !matches!(engine, Engine::Iceberg) {
-                return Err(SinkError::Config(anyhow!(
-                    "only iceberg table can be altered as sink"
-                ))
-                .into());
+        let resolved_props = update_sink_connector_props(&txn, &sink, &altered_options).await?;
+
+        let resolved_delta = altered_options
+            .as_plaintext()
+            .keys()
+            .chain(altered_options.as_secret().keys())
+            .map(|key| (key.clone(), resolved_props[key].clone()))
+            .collect();
+
+        let source = Source::find_by_id(source_id)
+            .one(&txn)
+            .await?
+            .ok_or_else(|| {
+                MetaError::catalog_id_not_found(ObjectType::Source.as_str(), source_id)
+            })?;
+        let mut source_options = WithOptionsSecResolved::new(
+            source.with_properties.0.clone(),
+            source
+                .secret_ref
+                .as_ref()
+                .map(SecretRef::to_protobuf)
+                .unwrap_or_default(),
+        );
+
+        let (to_add, to_remove) = source_options.handle_update(
+            altered_options
+                .as_plaintext()
+                .iter()
+                .filter(|(key, _)| !is_iceberg_engine_option(key))
+                .map(|(key, value)| (key.clone(), value.clone()))
+                .collect(),
+            altered_options
+                .as_secret()
+                .iter()
+                .filter(|(key, _)| !is_iceberg_engine_option(key))
+                .map(|(key, value)| (key.clone(), *value))
+                .collect(),
+        )?;
+        let _ = ConnectorProperties::extract(source_options.clone(), true)?;
+        update_secret_dependencies(&txn, source_id.as_object_id(), to_add, to_remove).await?;
+
+        let rewrite_sql = {
+            let definition = sink.definition.clone();
+
+            let [mut stmt]: [_; 1] = Parser::parse_sql(&definition)
+                .map_err(|e| SinkError::Config(anyhow!(e)))?
+                .try_into()
+                .unwrap();
+            if let Statement::CreateTable {
+                with_options,
+                engine,
+                ..
+            } = &mut stmt
+            {
+                if !matches!(engine, Engine::Iceberg) {
+                    return Err(SinkError::Config(anyhow!(
+                        "only iceberg table can be altered as sink"
+                    ))
+                    .into());
+                }
+                update_with_options(&txn, with_options, &altered_options).await?;
+            } else {
+                panic!("definition is not a create iceberg table statement")
             }
-            update_stmt_with_props(with_options, &changed_props)?;
-        } else {
-            panic!("definition is not a create iceberg table statement")
-        }
 
-        let definition = stmt.to_string();
+            stmt.to_string()
+        };
+
         let active_sink = sink::ActiveModel {
             sink_id: Set(sink_id),
-            properties: Set(risingwave_meta_model::Property(merged_props.clone())),
-            definition: Set(definition.clone()),
+            definition: Set(rewrite_sql.clone()),
             ..Default::default()
         };
         let active_source = source::ActiveModel {
             source_id: Set(source_id),
-            definition: Set(definition.clone()),
+            with_properties: Set(source_options.as_plaintext().clone().into()),
+            secret_ref: Set((!source_options.as_secret().is_empty())
+                .then(|| SecretRef::from(source_options.as_secret().clone()))),
+            definition: Set(rewrite_sql.clone()),
             ..Default::default()
         };
         let active_table = table::ActiveModel {
             table_id: Set(table_id),
-            definition: Set(definition),
+            definition: Set(rewrite_sql),
             ..Default::default()
         };
         Sink::update(active_sink).exec(&txn).await?;
         Source::update(active_source).exec(&txn).await?;
         Table::update(active_table).exec(&txn).await?;
-
-        update_sink_fragment_props(&txn, sink_id, merged_props).await?;
 
         let (sink, sink_obj) = Sink::find_by_id(sink_id)
             .find_also_related(Object)
@@ -3262,7 +3306,7 @@ impl CatalogController {
             )
             .await;
 
-        Ok((changed_props.into_iter().collect(), sink_id))
+        Ok((resolved_delta, sink_id))
     }
 
     /// Update connection properties and all dependent sources/sinks in a single transaction
@@ -3918,28 +3962,6 @@ fn validate_sink_config(
     Ok(())
 }
 
-fn update_stmt_with_props(
-    with_properties: &mut Vec<SqlOption>,
-    props: &BTreeMap<String, String>,
-) -> MetaResult<()> {
-    let mut new_sql_options = with_properties
-        .iter()
-        .map(|sql_option| (&sql_option.name, sql_option))
-        .collect::<IndexMap<_, _>>();
-    let add_sql_options = props
-        .iter()
-        .map(|(k, v)| SqlOption::try_from((k, v)))
-        .collect::<Result<Vec<SqlOption>, ParserError>>()
-        .map_err(|e| SinkError::Config(anyhow!(e)))?;
-    new_sql_options.extend(
-        add_sql_options
-            .iter()
-            .map(|sql_option| (&sql_option.name, sql_option)),
-    );
-    *with_properties = new_sql_options.into_values().cloned().collect();
-    Ok(())
-}
-
 async fn ensure_source_props_not_set_by_connection(
     txn: &DatabaseTransaction,
     source: &source::Model,
@@ -3972,58 +3994,6 @@ async fn ensure_source_props_not_set_by_connection(
         )));
     }
 
-    Ok(())
-}
-
-async fn update_sink_fragment_props(
-    txn: &DatabaseTransaction,
-    sink_id: SinkId,
-    props: BTreeMap<String, String>,
-) -> MetaResult<()> {
-    let fragments: Vec<(FragmentId, i32, StreamNode)> = Fragment::find()
-        .select_only()
-        .columns([
-            fragment::Column::FragmentId,
-            fragment::Column::FragmentTypeMask,
-            fragment::Column::StreamNode,
-        ])
-        .filter(fragment::Column::JobId.eq(sink_id))
-        .into_tuple()
-        .all(txn)
-        .await?;
-    let fragments = fragments
-        .into_iter()
-        .filter(|(_, fragment_type_mask, _)| {
-            *fragment_type_mask & FragmentTypeFlag::Sink as i32 != 0
-        })
-        .filter_map(|(id, _, stream_node)| {
-            let mut stream_node = stream_node.to_protobuf();
-            let mut found = false;
-            visit_stream_node_mut(&mut stream_node, |node| {
-                if let PbNodeBody::Sink(node) = node
-                    && let Some(sink_desc) = &mut node.sink_desc
-                    && sink_desc.id == sink_id
-                {
-                    sink_desc.properties.extend(props.clone());
-                    found = true;
-                }
-            });
-            if found { Some((id, stream_node)) } else { None }
-        })
-        .collect_vec();
-    assert!(
-        !fragments.is_empty(),
-        "sink id should be used by at least one fragment"
-    );
-    for (id, stream_node) in fragments {
-        Fragment::update(fragment::ActiveModel {
-            fragment_id: Set(id),
-            stream_node: Set(StreamNode::from(&stream_node)),
-            ..Default::default()
-        })
-        .exec(txn)
-        .await?;
-    }
     Ok(())
 }
 

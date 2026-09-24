@@ -24,6 +24,7 @@ use risingwave_meta_model::{SinkId, SourceId, WorkerId};
 use risingwave_pb::catalog::{PbSource, PbTable};
 use risingwave_pb::common::worker_node::{PbResource, Property as AddNodeProperty, State};
 use risingwave_pb::common::{HostAddress, PbWorkerNode, PbWorkerType, WorkerNode, WorkerType};
+use risingwave_pb::meta::alter_connector_props_request::PbExtraOptions;
 use risingwave_pb::meta::list_rate_limits_response::RateLimitInfo;
 use risingwave_pb::secret::PbSecretRef;
 use risingwave_pb::stream_plan::{PbDispatcherType, PbStreamNode, PbStreamScanType};
@@ -595,13 +596,17 @@ impl MetadataManager {
         &self,
         table_id: TableId,
         props: BTreeMap<String, String>,
-        alter_iceberg_table_props: Option<
-            risingwave_pb::meta::alter_connector_props_request::PbExtraOptions,
-        >,
+        secret_refs: BTreeMap<String, PbSecretRef>,
+        alter_iceberg_table_props: Option<PbExtraOptions>,
     ) -> MetaResult<(HashMap<String, String>, SinkId)> {
         let (new_props, sink_id) = self
             .catalog_controller
-            .update_iceberg_table_props_by_table_id(table_id, props, alter_iceberg_table_props)
+            .update_iceberg_table_props_by_table_id(
+                table_id,
+                props,
+                secret_refs,
+                alter_iceberg_table_props,
+            )
             .await?;
         Ok((new_props, sink_id))
     }

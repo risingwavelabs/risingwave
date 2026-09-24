@@ -64,8 +64,10 @@ pub struct IcebergCommon {
     #[serde(rename = "s3.endpoint")]
     pub s3_endpoint: Option<String>,
     #[serde(rename = "s3.access.key")]
+    #[with_option(allow_alter_on_fly)]
     pub s3_access_key: Option<String>,
     #[serde(rename = "s3.secret.key")]
+    #[with_option(allow_alter_on_fly)]
     pub s3_secret_key: Option<String>,
     #[serde(rename = "s3.iam_role_arn")]
     pub s3_iam_role_arn: Option<String>,
