@@ -1110,3 +1110,22 @@
       └─BatchExchange { order: [], dist: Single }
         └─BatchLimit { limit: 5, offset: 0 }
           └─BatchScan { table: t, columns: [t.a, t.b, t.c, t.d], scan_ranges: [t.a = Int32(1) AND t.b = Int32(2) AND t.c >= Int32(3) AND t.c <= Int32(5)], limit: 5, distribution: UpstreamHashShard(t.a, t.b, t.c, t.d) }
+- name: prefer the order-satisfying covering index over a marginally cheaper unordered one
+  sql: |
+    create table t (a bigint, b int, c varchar);
+    create index i_a on t(a) include (b);
+    create index i_b on t(b) include (a);
+    select a, b from t order by a;
+  batch_plan: |-
+    BatchExchange { order: [i_a.a ASC], dist: Single }
+    └─BatchScan { table: i_a, columns: [i_a.a, i_a.b], distribution: UpstreamHashShard(i_a.a) }
+- name: a much more selective index still wins over an order-satisfying one
+  sql: |
+    create table t (a bigint, b int, c varchar);
+    create index i_a on t(a) include (b);
+    create index i_b on t(b) include (a);
+    select a, b from t where b = 1 order by a;
+  batch_plan: |-
+    BatchExchange { order: [i_b.a ASC], dist: Single }
+    └─BatchSort { order: [i_b.a ASC] }
+      └─BatchScan { table: i_b, columns: [i_b.a, i_b.b], scan_ranges: [i_b.b = Int32(1)], distribution: UpstreamHashShard(i_b.b) }

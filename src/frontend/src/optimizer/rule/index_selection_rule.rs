@@ -46,9 +46,9 @@
 //!
 //! For index order key length > 5, we just ignore the rest.
 
-use std::cmp::min;
+use std::cmp::{max, min};
 use std::collections::hash_map::Entry::{Occupied, Vacant};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use itertools::Itertools;
@@ -73,6 +73,7 @@ use crate::optimizer::plan_node::{
     ColumnPruningContext, LogicalJoin, LogicalScan, LogicalUnion, PlanTreeNode, PlanTreeNodeBinary,
     PredicatePushdown, PredicatePushdownContext, generic,
 };
+use crate::optimizer::property::Order;
 use crate::utils::Condition;
 
 const INDEX_MAX_LEN: usize = 5;
@@ -84,10 +85,22 @@ const INDEX_COST_MATRIX: [[usize; INDEX_MAX_LEN]; 5] = [
     [4000, 100, 30, 20, 20],
 ];
 const LOOKUP_COST_CONST: usize = 3;
+/// Reward factor applied to a covering index whose order already satisfies the order required by
+/// the consumer of the scan. `IndexCost` is a pure IO estimate with no term for ordering, so
+/// without this an index that is marginally cheaper to read always wins and we pay for a sort that
+/// another index would have given us for free. Like `LOOKUP_COST_CONST` this is a heuristic
+/// constant, deliberately small: a sort is worth avoiding, but not at the price of reading an
+/// index that is several times larger or far less selective.
+const ORDER_SATISFIED_REWARD_CONST: usize = 3;
 const MAX_COMBINATION_SIZE: usize = 4;
 const MAX_CONJUNCTION_SIZE: usize = 8;
 
-pub struct IndexSelectionRule {}
+pub struct IndexSelectionRule {
+    /// The order the consumer of the scan requires. `Order::any()` (the default) means the
+    /// consumer does not care, in which case index selection is pure cost comparison, exactly as
+    /// before.
+    required_order: Order,
+}
 
 impl Rule<Logical> for IndexSelectionRule {
     fn apply(&self, plan: PlanRef) -> Option<PlanRef> {
@@ -107,6 +120,20 @@ impl Rule<Logical> for IndexSelectionRule {
             return None;
         }
 
+        // Covering indexes whose own order already satisfies `required_order`, i.e. the ones that
+        // let us skip a sort. Empty when no order is required, so the `Order::any()` path below is
+        // bit-for-bit the old cost-only comparison.
+        let order_satisfied_index_ids: HashSet<_> = if self.required_order.column_orders.is_empty()
+        {
+            HashSet::new()
+        } else {
+            logical_scan
+                .indexes_satisfy_order(&self.required_order)
+                .into_iter()
+                .map(|index| index.index_table.id)
+                .collect()
+        };
+
         let mut final_plan: PlanRef = logical_scan.clone().into();
         let mut min_cost = primary_cost.clone();
 
@@ -116,6 +143,12 @@ impl Rule<Logical> for IndexSelectionRule {
                     &index_scan,
                     TableScanIoEstimator::estimate_row_size(&index_scan),
                 );
+
+                let index_cost = if order_satisfied_index_ids.contains(&index.index_table.id) {
+                    index_cost.div(ORDER_SATISFIED_REWARD_CONST)
+                } else {
+                    index_cost
+                };
 
                 if index_cost.le(&min_cost) {
                     min_cost = index_cost;
@@ -957,6 +990,12 @@ impl IndexCost {
         )
     }
 
+    /// Discount the cost by `factor`. Used to reward an index that saves us a sort; never reaches
+    /// zero, and never fabricates a `primary_lookup`.
+    fn div(&self, factor: usize) -> IndexCost {
+        IndexCost::new(max(self.cost / factor, 1), self.primary_lookup)
+    }
+
     fn mul(&self, other: &IndexCost) -> IndexCost {
         IndexCost::new(
             self.cost
@@ -1004,7 +1043,17 @@ impl ExprRewriter for ShiftInputRefRewriter {
 }
 
 impl IndexSelectionRule {
-    pub fn create() -> BoxedRule {
-        Box::new(IndexSelectionRule {})
+    /// Cost-only index selection, i.e. the consumer of the scan does not require any order.
+    pub(crate) fn new_cost_only() -> Self {
+        IndexSelectionRule {
+            required_order: Order::any(),
+        }
+    }
+
+    /// Create the rule with the order required by the consumer of the scan. A covering index that
+    /// already provides that order is then rewarded in the cost comparison, so that a marginally
+    /// cheaper but unordered index does not silently cost us a sort.
+    pub fn create_with_order(required_order: Order) -> BoxedRule {
+        Box::new(IndexSelectionRule { required_order })
     }
 }

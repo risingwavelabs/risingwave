@@ -591,7 +591,11 @@ impl ToBatch for LogicalScan {
                 .config()
                 .enable_index_selection()
         {
-            let index_selection_rule = IndexSelectionRule::create();
+            // Pass `required_order` down so that the cost comparison itself knows which covering
+            // indexes save a sort. Without this the cost-only winner below returns unconditionally
+            // and `use_index_scan_if_order_is_satisfied` is never reached.
+            let index_selection_rule =
+                IndexSelectionRule::create_with_order(required_order.clone());
             if let ApplyResult::Ok(applied) = index_selection_rule.apply(new.clone().into()) {
                 if let Some(scan) = applied.as_logical_scan() {
                     // covering index
