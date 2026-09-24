@@ -21,7 +21,7 @@ use crate::types::DataType;
 pub fn is_unsupported_postgres_array_element_type(data_type: &DataType) -> bool {
     matches!(
         data_type,
-        DataType::Struct(_) | DataType::List(_) | DataType::Serial
+        DataType::Struct(_) | DataType::List(_) | DataType::Serial | DataType::Vector(_)
     )
 }
 
@@ -218,7 +218,7 @@ fn postgres_source_column_type_compatible(
             postgres_source_column_type_compatible(
                 &element_type_name.to_ascii_lowercase(),
                 element_type,
-                None,
+                char_max_length,
                 array_element_udt_name,
                 None,
                 None,
@@ -474,6 +474,36 @@ mod tests {
             Some("_point"),
             Some("point"),
             Some("point"),
+        ));
+        assert!(!cdc_source_column_type_compatible(
+            PbCdcTableType::Postgres,
+            "array",
+            &DataType::Vector(3).list(),
+            None,
+            false,
+            Some("_vector"),
+            Some("user-defined"),
+            Some("vector"),
+        ));
+        assert!(cdc_source_column_type_compatible(
+            PbCdcTableType::Postgres,
+            "array",
+            &DataType::Boolean.list(),
+            Some(1),
+            false,
+            Some("_bit"),
+            Some("bit"),
+            Some("bit"),
+        ));
+        assert!(!cdc_source_column_type_compatible(
+            PbCdcTableType::Postgres,
+            "array",
+            &DataType::Boolean.list(),
+            Some(8),
+            false,
+            Some("_bit"),
+            Some("bit"),
+            Some("bit"),
         ));
     }
 

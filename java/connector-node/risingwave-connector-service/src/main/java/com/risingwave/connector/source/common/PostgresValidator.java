@@ -77,6 +77,21 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             this.arrayElementDataType = arrayElementDataType;
             this.arrayElementUdtName = arrayElementUdtName;
         }
+
+        Long charMaxLengthForValidation() {
+            if (charMaxLength != null) {
+                return charMaxLength;
+            }
+            // information_schema.element_types does not expose the length of bit(n) array
+            // elements. PostgreSQL stores it in the array column's pg_attribute.atttypmod.
+            if ("array".equalsIgnoreCase(dataType)
+                    && "bit".equalsIgnoreCase(arrayElementDataType)
+                    && atttypmod != null
+                    && atttypmod >= 0) {
+                return atttypmod.longValue();
+            }
+            return null;
+        }
     }
 
     public PostgresValidator(
@@ -771,11 +786,12 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
                 "Data type compatibility check: PostgreSQL type '{}', colInfo.udtName: {}",
                 colInfo.dataType,
                 colInfo.udtName);
+        Long charMaxLength = colInfo.charMaxLengthForValidation();
         return Binding.validateCdcSourceColumnType(
                 CDC_TABLE_TYPE,
                 colInfo.dataType,
                 dataType.toByteArray(),
-                colInfo.charMaxLength == null ? -1 : colInfo.charMaxLength,
+                charMaxLength == null ? -1 : charMaxLength,
                 false,
                 colInfo.udtName,
                 colInfo.arrayElementDataType,
