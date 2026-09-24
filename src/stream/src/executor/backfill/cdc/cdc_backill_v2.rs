@@ -318,7 +318,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                 yield Message::Barrier(barrier);
                             }
                             Message::Chunk(chunk) => {
-                                if !chunk.any() {
+                                if !chunk.has_visible_rows() {
                                     continue;
                                 }
 
@@ -529,7 +529,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                                             }
                                         }
                                         Message::Chunk(chunk) => {
-                                            if !chunk.any() {
+                                            if !chunk.has_visible_rows() {
                                                 continue 'backfill_stream;
                                             }
 
@@ -833,7 +833,7 @@ impl<S: StateStore> ParallelizedCdcBackfillExecutor<S> {
                         yield Message::Barrier(barrier);
                     }
                     Message::Chunk(chunk) => {
-                        if actor_snapshot_splits.is_empty() || !chunk.any() {
+                        if actor_snapshot_splits.is_empty() || !chunk.has_visible_rows() {
                             continue;
                         }
 
@@ -1004,7 +1004,7 @@ fn filter_stream_chunk(
     let is_leftmost_bound = is_leftmost_bound(left);
     let is_rightmost_bound = is_rightmost_bound(right);
     if is_leftmost_bound && is_rightmost_bound {
-        return chunk.any().then_some(chunk);
+        return chunk.has_visible_rows().then_some(chunk);
     }
     let mut new_bitmap = BitmapBuilder::with_capacity(chunk.capacity());
     let (ops, columns, visibility) = chunk.into_inner();

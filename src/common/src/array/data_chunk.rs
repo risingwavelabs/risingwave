@@ -145,8 +145,8 @@ impl DataChunk {
         self.visibility.count_ones()
     }
 
-    /// Returns whether there is at least one visible tuple
-    pub fn any(&self) -> bool {
+    /// Returns whether this chunk contains at least one visible row.
+    pub fn has_visible_rows(&self) -> bool {
         self.visibility.any()
     }
 

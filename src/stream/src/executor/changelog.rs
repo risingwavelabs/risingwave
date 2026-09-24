@@ -170,12 +170,12 @@ impl ChangeLogExecutor {
                         .into();
 
                         let delete_view = chunk.clone().retain_ops(&[Op::Delete, Op::UpdateDelete]);
-                        if delete_view.any() {
+                        if delete_view.has_visible_rows() {
                             deletes.push((delete_view, vnodes.clone()));
                         }
 
                         let insert_view = chunk.retain_ops(&[Op::Insert, Op::UpdateInsert]);
-                        if insert_view.any() {
+                        if insert_view.has_visible_rows() {
                             inserts.push((insert_view, vnodes));
                         }
                     }
