@@ -34,7 +34,7 @@ mod command;
 pub use command::RescheduleContext;
 mod complete_task;
 pub(super) mod context;
-mod edge_builder;
+pub(crate) mod edge_builder;
 mod info;
 mod manager;
 mod partial_graph;
@@ -58,7 +58,7 @@ pub use self::command::{
 };
 pub(crate) use self::info::{SharedActorInfos, SharedFragmentInfo};
 pub use self::manager::{BarrierManagerRef, GlobalBarrierManager};
-pub(crate) use self::rpc::to_partial_graph_id;
+pub(crate) use self::rpc::{ControlStreamManager, to_partial_graph_id};
 pub use self::schedule::BarrierScheduler;
 pub use self::trace::TracedEpoch;
 use crate::barrier::cdc_progress::CdcProgress;

@@ -1091,17 +1091,19 @@ impl DatabaseCheckpointControl {
             }
 
             Some(Command::RescheduleIntent {
-                reschedule_plan, ..
+                mut reschedule_plan,
+                ..
             }) => {
                 let ReschedulePlan {
                     reschedules,
-                    fragment_actors,
+                    mut edges,
+                    ..
                 } = reschedule_plan
-                    .as_ref()
+                    .take()
                     .expect("reschedule intent should be resolved in global barrier worker");
 
                 // Pre-apply: reschedule fragments
-                for (fragment_id, reschedule) in reschedules {
+                for (fragment_id, reschedule) in &reschedules {
                     self.database_info.pre_apply_reschedule(
                         *fragment_id,
                         reschedule
@@ -1117,7 +1119,6 @@ impl DatabaseCheckpointControl {
                                                 .newly_created_actors
                                                 .get(actor_id)
                                                 .expect("should exist")
-                                                .0
                                                 .0
                                                 .vnode_bitmap
                                                 .clone(),
@@ -1147,10 +1148,9 @@ impl DatabaseCheckpointControl {
 
                 // Actors to create
                 let actors_to_create = Some(Command::reschedule_actors_to_create(
-                    reschedules,
-                    fragment_actors,
+                    &reschedules,
+                    &mut edges,
                     &self.database_info,
-                    partial_graph_manager.control_stream_manager(),
                 ));
 
                 // Post-apply: remove old actors
@@ -1163,16 +1163,8 @@ impl DatabaseCheckpointControl {
                     }));
 
                 // Mutation
-                let mutation = Command::reschedule_to_mutation(
-                    reschedules,
-                    fragment_actors,
-                    partial_graph_manager.control_stream_manager(),
-                    &mut self.database_info,
-                )?;
-
-                let reschedules = reschedule_plan
-                    .expect("reschedule intent should be resolved in global barrier worker")
-                    .reschedules;
+                let mutation =
+                    Command::reschedule_to_mutation(&reschedules, edges, &mut self.database_info)?;
                 (
                     mutation,
                     table_ids,

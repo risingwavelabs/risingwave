@@ -89,7 +89,6 @@ fn collect_fragment_upstream_fragment_ids(
     });
 }
 
-use crate::model::ActorId;
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::{MetaError, MetaResult};
 
@@ -966,23 +965,13 @@ impl DatabaseCheckpointControl {
     fn collect_reschedule_blocked_job_ids(
         &self,
         reschedules: &HashMap<FragmentId, Reschedule>,
-        fragment_actors: &HashMap<FragmentId, HashSet<ActorId>>,
+        affected_fragment_ids: &HashSet<FragmentId>,
         blocked_job_ids: &HashSet<JobId>,
     ) -> HashSet<JobId> {
-        let mut affected_fragment_ids: HashSet<FragmentId> = reschedules.keys().copied().collect();
-        affected_fragment_ids.extend(fragment_actors.keys().copied());
-        for reschedule in reschedules.values() {
-            affected_fragment_ids.extend(reschedule.downstream_fragment_ids.iter().copied());
-            affected_fragment_ids.extend(
-                reschedule
-                    .upstream_fragment_dispatcher_ids
-                    .iter()
-                    .map(|(fragment_id, _)| *fragment_id),
-            );
-        }
-
         affected_fragment_ids
-            .into_iter()
+            .iter()
+            .copied()
+            .chain(reschedules.keys().copied())
             .filter_map(|fragment_id| self.database_info.job_id_by_fragment(fragment_id))
             .filter(|job_id| blocked_job_ids.contains(job_id))
             .collect()
@@ -1269,7 +1258,7 @@ impl DatabaseCheckpointControl {
                 self.collect_reschedule_blocked_jobs_for_independent_jobs_inflight()?;
             let blocked_reschedule_job_ids = self.collect_reschedule_blocked_job_ids(
                 &reschedule_plan.reschedules,
-                &reschedule_plan.fragment_actors,
+                &reschedule_plan.affected_fragment_ids,
                 &blocked_job_ids,
             );
             if !blocked_reschedule_job_ids.is_empty() {

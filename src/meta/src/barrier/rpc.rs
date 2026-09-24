@@ -175,13 +175,13 @@ enum WorkerNodeState {
     Reconnecting(BoxFuture<'static, StreamingControlHandle>),
 }
 
-pub(super) struct ControlStreamManager {
+pub(crate) struct ControlStreamManager {
     workers: HashMap<WorkerId, (WorkerNode, WorkerNodeState)>,
     pub env: MetaSrvEnv,
 }
 
 impl ControlStreamManager {
-    pub(super) fn new(env: MetaSrvEnv) -> Self {
+    pub(crate) fn new(env: MetaSrvEnv) -> Self {
         Self {
             workers: Default::default(),
             env,
@@ -190,6 +190,17 @@ impl ControlStreamManager {
 
     pub(super) fn host_addr(&self, worker_id: WorkerId) -> HostAddress {
         self.workers[&worker_id].0.host.clone().unwrap()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn add_worker_node_for_test(&mut self, node: WorkerNode) {
+        self.workers.insert(
+            node.id,
+            (
+                node,
+                WorkerNodeState::Reconnecting(futures::future::pending().boxed()),
+            ),
+        );
     }
 
     pub(super) async fn add_worker<'a>(

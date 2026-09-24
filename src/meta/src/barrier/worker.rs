@@ -47,8 +47,8 @@ use crate::barrier::context::recovery::{RenderedDatabaseRuntimeInfo, render_runt
 use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerContextImpl};
 use crate::barrier::info::InflightDatabaseInfo;
 use crate::barrier::rpc::{
-    DatabaseInitialBarrierCollector, database_partial_graphs, from_partial_graph_id,
-    merge_node_rpc_errors,
+    ControlStreamManager, DatabaseInitialBarrierCollector, database_partial_graphs,
+    from_partial_graph_id, merge_node_rpc_errors,
 };
 use crate::barrier::schedule::{MarkReadyOptions, PeriodicBarriers};
 use crate::barrier::{
@@ -165,8 +165,14 @@ mod tests {
             barrier_interval_ms: 1000,
         };
 
-        let result =
-            resolve_reschedule_intent(env, HashMap::new(), Some(&database_info), new_barrier);
+        let control_stream_manager = ControlStreamManager::new(env.clone());
+        let result = resolve_reschedule_intent(
+            env,
+            HashMap::new(),
+            &control_stream_manager,
+            Some(&database_info),
+            new_barrier,
+        );
 
         assert!(matches!(result, Ok(None)));
         let started = started_rx.await.expect("started notifier dropped");
@@ -210,6 +216,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
 fn resolve_reschedule_intent(
     env: MetaSrvEnv,
     worker_nodes: HashMap<WorkerId, WorkerNode>,
+    control_stream_manager: &ControlStreamManager,
     database_info: Option<&InflightDatabaseInfo>,
     mut new_barrier: schedule::NewBarrier,
 ) -> MetaResult<Option<schedule::NewBarrier>> {
@@ -249,6 +256,7 @@ fn resolve_reschedule_intent(
                             new_barrier.database_id
                         )
                     })?,
+                    control_stream_manager,
                 )
             };
             match reschedule_plan {
@@ -286,6 +294,7 @@ fn build_reschedule_from_context(
     database_id: DatabaseId,
     context: RescheduleContext,
     database_info: &InflightDatabaseInfo,
+    control_stream_manager: &ControlStreamManager,
 ) -> MetaResult<Option<crate::barrier::ReschedulePlan>> {
     if worker_nodes.is_empty() {
         return Err(anyhow!("no active streaming workers for reschedule").into());
@@ -312,7 +321,12 @@ fn build_reschedule_from_context(
     // Materialization only replaces preview actor ids with real ids. Worker
     // placement, vnode ownership, and split assignment remain unchanged.
     let rendered = materialize_actor_assignments(actor_id_counter, previewed);
-    let mut commands = build_reschedule_commands(rendered.fragments, context, all_prev_fragments)?;
+    let mut commands = build_reschedule_commands(
+        rendered.fragments,
+        context,
+        all_prev_fragments,
+        control_stream_manager,
+    )?;
     Ok(commands.remove(&database_id))
 }
 
@@ -861,6 +875,7 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         match resolve_reschedule_intent(
                             env,
                             worker_nodes,
+                            self.partial_graph_manager.control_stream_manager(),
                             database_info,
                             new_barrier,
                         ) {
