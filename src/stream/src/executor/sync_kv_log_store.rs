@@ -105,7 +105,9 @@ use crate::executor::{
 
 pub mod metrics {
     use risingwave_common::id::FragmentId;
-    use risingwave_common::metrics::{LabelGuardedIntCounter, LabelGuardedIntGauge};
+    #[cfg(test)]
+    use risingwave_common::metrics::GaugeAggregation;
+    use risingwave_common::metrics::{LabelGuardedIntCounter, RelabeledAggregatedIntGauge};
 
     use crate::common::log_store_impl::kv_log_store::KvLogStoreReadMetrics;
     use crate::executor::monitor::StreamingMetrics;
@@ -124,11 +126,11 @@ pub mod metrics {
         pub pause_duration_ns: LabelGuardedIntCounter,
 
         // Buffer metrics
-        pub buffer_unconsumed_item_count: LabelGuardedIntGauge,
-        pub buffer_unconsumed_row_count: LabelGuardedIntGauge,
-        pub buffer_unconsumed_epoch_count: LabelGuardedIntGauge,
-        pub buffer_unconsumed_min_epoch: LabelGuardedIntGauge,
-        pub buffer_memory_bytes: LabelGuardedIntGauge,
+        pub buffer_unconsumed_item_count: RelabeledAggregatedIntGauge,
+        pub buffer_unconsumed_row_count: RelabeledAggregatedIntGauge,
+        pub buffer_unconsumed_epoch_count: RelabeledAggregatedIntGauge,
+        pub buffer_unconsumed_min_epoch: RelabeledAggregatedIntGauge,
+        pub buffer_memory_bytes: RelabeledAggregatedIntGauge,
         pub buffer_read_count: LabelGuardedIntCounter,
         pub buffer_read_size: LabelGuardedIntCounter,
 
@@ -319,11 +321,21 @@ pub mod metrics {
                 storage_write_count: LabelGuardedIntCounter::test_int_counter::<4>(),
                 storage_write_size: LabelGuardedIntCounter::test_int_counter::<4>(),
                 pause_duration_ns: LabelGuardedIntCounter::test_int_counter::<4>(),
-                buffer_unconsumed_item_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
-                buffer_unconsumed_row_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
-                buffer_unconsumed_epoch_count: LabelGuardedIntGauge::test_int_gauge::<4>(),
-                buffer_unconsumed_min_epoch: LabelGuardedIntGauge::test_int_gauge::<4>(),
-                buffer_memory_bytes: LabelGuardedIntGauge::test_int_gauge::<4>(),
+                buffer_unconsumed_item_count: RelabeledAggregatedIntGauge::test_int_gauge::<4>(
+                    GaugeAggregation::Sum,
+                ),
+                buffer_unconsumed_row_count: RelabeledAggregatedIntGauge::test_int_gauge::<4>(
+                    GaugeAggregation::Sum,
+                ),
+                buffer_unconsumed_epoch_count: RelabeledAggregatedIntGauge::test_int_gauge::<4>(
+                    GaugeAggregation::Sum,
+                ),
+                buffer_unconsumed_min_epoch: RelabeledAggregatedIntGauge::test_int_gauge::<4>(
+                    GaugeAggregation::Min,
+                ),
+                buffer_memory_bytes: RelabeledAggregatedIntGauge::test_int_gauge::<4>(
+                    GaugeAggregation::Sum,
+                ),
                 buffer_read_count: LabelGuardedIntCounter::test_int_counter::<5>(),
                 buffer_read_size: LabelGuardedIntCounter::test_int_counter::<5>(),
                 total_read_count: LabelGuardedIntCounter::test_int_counter::<5>(),

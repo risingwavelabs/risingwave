@@ -9,6 +9,10 @@ compute_batch_total_mem	gauge		Total number of memory usage for batch tasks.		sr
 user_compute_error_cnt	counter	error_type,executor_name,fragment_id	Compute errors in the system, queryable by tags		src/common/metrics/src/error_metrics.rs
 user_sink_error_cnt	counter	error_type,sink_id,sink_name,fragment_id	Sink errors in the system, queryable by tags		src/common/metrics/src/error_metrics.rs
 user_source_error_cnt	counter	error_type,source_id,source_name,fragment_id	Source errors in the system, queryable by tags		src/common/metrics/src/error_metrics.rs
+test	counter		test		src/common/metrics/src/guarded_metrics.rs
+test	gauge		test		src/common/metrics/src/guarded_metrics.rs
+test	gauge		test		src/common/metrics/src/guarded_metrics.rs
+test	histogram		test		src/common/metrics/src/guarded_metrics.rs
 aws_sdk_retry_counts	counter		Total number of aws sdk retry happens		src/common/metrics/src/lib.rs
 connection_count	gauge	connection_type,uri	The number of current existing connection		src/common/metrics/src/monitor/connection.rs
 connection_create_rate	counter	connection_type,uri	Rate on creating new connection		src/common/metrics/src/monitor/connection.rs
@@ -273,6 +277,7 @@ storage_table_change_log_get_latency	histogram		latency of serving table change 
 storage_table_change_log_min_epoch	gauge	table_id	min epoch currently retained in table change log		src/meta/src/rpc/metrics.rs
 storage_table_change_log_object_count	gauge	table_id	per table change log object count		src/meta/src/rpc/metrics.rs
 storage_table_change_log_object_size	gauge	table_id	per table change log object size		src/meta/src/rpc/metrics.rs
+storage_table_change_log_truncate_latency	histogram		latency of truncating persisted table change logs		src/meta/src/rpc/metrics.rs
 storage_time_travel_object_count	gauge		total number of objects that is referenced by time travel.		src/meta/src/rpc/metrics.rs
 storage_time_travel_vacuum_metadata_latency	histogram		Latency of vacuuming metadata for time travel		src/meta/src/rpc/metrics.rs
 storage_time_travel_version_replay_latency	histogram		The latency(ms) of replaying a hummock version for time travel		src/meta/src/rpc/metrics.rs
@@ -319,6 +324,8 @@ compactor_write_build_l0_bytes	counter		Total size of compaction files size that
 state_store_write_build_l0_sst_duration	histogram		Total time of batch_write_build_table that have been issued to state store		src/storage/src/monitor/compactor_metrics.rs
 storage_compact_task_pending_num	gauge		the num of storage compact task		src/storage/src/monitor/compactor_metrics.rs
 storage_compact_task_pending_parallelism	gauge		the num of storage compact parallelism		src/storage/src/monitor/compactor_metrics.rs
+storage_iceberg_compaction_memory_budget_bytes	gauge		Heap admission budget for running Iceberg compaction plans on this compactor node		src/storage/src/monitor/compactor_metrics.rs
+storage_iceberg_compaction_running_memory_reservation_bytes	gauge		Estimated heap peak reservations of currently running Iceberg compaction plans		src/storage/src/monitor/compactor_metrics.rs
 storage_level_compact_read_curr	counter	group,level_index	KBs read from current level during history compactions to next level		src/storage/src/monitor/compactor_metrics.rs
 storage_level_compact_read_next	counter	group,level_index	KBs read from next level during history compactions to next level		src/storage/src/monitor/compactor_metrics.rs
 storage_level_compact_read_sstn_curr	counter	group,level_index	num of SSTs read from current level during history compactions to next level		src/storage/src/monitor/compactor_metrics.rs

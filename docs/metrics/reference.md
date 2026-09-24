@@ -160,6 +160,17 @@ bounded. At `debug`, actor-level diagnostic metrics retain their real actor
 IDs. The only exception is `actor_info`, which retains real actor IDs at all
 enabled levels because dashboards use it to locate and count actors.
 
+When relabeling produces an empty first `actor_id` label, numeric gauges are
+combined from their live actor contributions instead of using the last value
+written. Counts and sizes use a sum; progress gauges such as epochs and message
+IDs use a minimum so they report the slowest live actor. An actor starts
+contributing only after its gauge is first updated, and its contribution is
+removed when the final handle for that actor is dropped. If the last
+contribution disappears, the series is set to zero for a transitional
+collection and then removed. These values are node-local aggregates;
+Prometheus queries must still aggregate across compute nodes. When the first
+label remains non-empty, each label set keeps an independent gauge.
+
 ### 2.3 The info/join metrics
 
 Several metrics exist purely to carry human-readable names alongside numeric

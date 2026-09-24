@@ -82,8 +82,9 @@ use risingwave_common::catalog::{ColumnDesc, Field, Schema};
 use risingwave_common::config::{MetricLevel, StreamingConfig};
 use risingwave_common::hash::ActorId;
 use risingwave_common::metrics::{
-    LabelGuardedHistogram, LabelGuardedIntCounter, LabelGuardedIntGaugeVec, MetricVecRelabelExt,
-    RelabeledGuardedHistogramVec, RelabeledGuardedIntCounterVec, RelabeledGuardedIntGaugeVec,
+    GaugeAggregation, IntGaugeVecRelabelExt, LabelGuardedHistogram, LabelGuardedIntCounter,
+    LabelGuardedIntGaugeVec, MetricVecRelabelExt, RelabeledAggregatedIntGaugeVec,
+    RelabeledGuardedHistogramVec, RelabeledGuardedIntCounterVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::secret::{LocalSecretManager, SecretError};
@@ -498,12 +499,12 @@ pub struct SinkMetrics {
     pub connector_sink_rows_received: RelabeledGuardedIntCounterVec,
 
     // Log store writer metrics
-    pub log_store_first_write_epoch: RelabeledGuardedIntGaugeVec,
-    pub log_store_latest_write_epoch: RelabeledGuardedIntGaugeVec,
+    pub log_store_first_write_epoch: RelabeledAggregatedIntGaugeVec,
+    pub log_store_latest_write_epoch: RelabeledAggregatedIntGaugeVec,
     pub log_store_write_rows: RelabeledGuardedIntCounterVec,
 
     // Log store reader metrics
-    pub log_store_latest_read_epoch: RelabeledGuardedIntGaugeVec,
+    pub log_store_latest_read_epoch: RelabeledAggregatedIntGaugeVec,
     pub log_store_read_rows: RelabeledGuardedIntCounterVec,
     pub log_store_read_bytes: RelabeledGuardedIntCounterVec,
     pub log_store_reader_wait_new_future_duration_ns: RelabeledGuardedIntCounterVec,
@@ -511,9 +512,9 @@ pub struct SinkMetrics {
     // Iceberg metrics
     pub iceberg_write_qps: RelabeledGuardedIntCounterVec,
     pub iceberg_write_latency: RelabeledGuardedHistogramVec,
-    pub iceberg_rolling_unflushed_data_file: RelabeledGuardedIntGaugeVec,
-    pub iceberg_position_delete_cache_num: RelabeledGuardedIntGaugeVec,
-    pub iceberg_partition_num: RelabeledGuardedIntGaugeVec,
+    pub iceberg_rolling_unflushed_data_file: RelabeledAggregatedIntGaugeVec,
+    pub iceberg_position_delete_cache_num: RelabeledAggregatedIntGaugeVec,
+    pub iceberg_partition_num: RelabeledAggregatedIntGaugeVec,
     pub iceberg_write_bytes: RelabeledGuardedIntCounterVec,
     pub iceberg_snapshot_num: LabelGuardedIntGaugeVec,
 }
@@ -545,7 +546,7 @@ impl SinkMetrics {
             registry
         )
         .unwrap()
-        .relabel_debug_1(metric_level);
+        .relabel_debug_1_with_aggregation(metric_level, GaugeAggregation::Min);
 
         let log_store_latest_write_epoch = register_guarded_int_gauge_vec_with_registry!(
             "log_store_latest_write_epoch",
@@ -554,7 +555,7 @@ impl SinkMetrics {
             registry
         )
         .unwrap()
-        .relabel_debug_1(metric_level);
+        .relabel_debug_1_with_aggregation(metric_level, GaugeAggregation::Min);
 
         let log_store_write_rows = register_guarded_int_counter_vec_with_registry!(
             "log_store_write_rows",
@@ -572,7 +573,7 @@ impl SinkMetrics {
             registry
         )
         .unwrap()
-        .relabel_debug_1(metric_level);
+        .relabel_debug_1_with_aggregation(metric_level, GaugeAggregation::Min);
 
         let log_store_read_rows = register_guarded_int_counter_vec_with_registry!(
             "log_store_read_rows",
@@ -627,7 +628,7 @@ impl SinkMetrics {
             registry
         )
         .unwrap()
-        .relabel_debug_1(metric_level);
+        .relabel_debug_1_with_aggregation(metric_level, GaugeAggregation::Sum);
 
         let iceberg_position_delete_cache_num = register_guarded_int_gauge_vec_with_registry!(
             "iceberg_position_delete_cache_num",
@@ -636,7 +637,7 @@ impl SinkMetrics {
             registry
         )
         .unwrap()
-        .relabel_debug_1(metric_level);
+        .relabel_debug_1_with_aggregation(metric_level, GaugeAggregation::Sum);
 
         let iceberg_partition_num = register_guarded_int_gauge_vec_with_registry!(
             "iceberg_partition_num",
@@ -645,7 +646,7 @@ impl SinkMetrics {
             registry
         )
         .unwrap()
-        .relabel_debug_1(metric_level);
+        .relabel_debug_1_with_aggregation(metric_level, GaugeAggregation::Sum);
 
         let iceberg_write_bytes = register_guarded_int_counter_vec_with_registry!(
             "iceberg_write_bytes",
@@ -1331,6 +1332,20 @@ mod tests {
 
     use super::*;
 
+    fn assert_aggregation(
+        gauge_vec: &RelabeledAggregatedIntGaugeVec,
+        first_labels: &[&str],
+        second_labels: &[&str],
+        expected: i64,
+    ) {
+        let first = gauge_vec.with_guarded_label_values(first_labels);
+        let second = gauge_vec.with_guarded_label_values(second_labels);
+        first.set(5);
+        second.set(7);
+        assert_eq!(first.get(), expected);
+        assert_eq!(second.get(), expected);
+    }
+
     fn btreemap<const N: usize>(entries: [(&str, &str); N]) -> BTreeMap<String, String> {
         entries
             .into_iter()
@@ -1404,5 +1419,38 @@ mod tests {
         ]))
         .unwrap_err();
         assert!(error.to_report_string().contains("is_exactly_once"));
+    }
+
+    #[test]
+    fn actor_relabeled_gauges_use_the_assigned_reducers() {
+        for level in [MetricLevel::Critical, MetricLevel::Info] {
+            let registry = Registry::new();
+            let metrics = SinkMetrics::new(&registry, level);
+
+            for gauge_vec in [
+                &metrics.log_store_first_write_epoch,
+                &metrics.log_store_latest_write_epoch,
+            ] {
+                assert_aggregation(gauge_vec, &["1", "sink", "name"], &["2", "sink", "name"], 5);
+            }
+            assert_aggregation(
+                &metrics.log_store_latest_read_epoch,
+                &["1", "connector", "sink", "name"],
+                &["2", "connector", "sink", "name"],
+                5,
+            );
+            for gauge_vec in [
+                &metrics.iceberg_partition_num,
+                &metrics.iceberg_position_delete_cache_num,
+                &metrics.iceberg_rolling_unflushed_data_file,
+            ] {
+                assert_aggregation(
+                    gauge_vec,
+                    &["1", "sink", "name"],
+                    &["2", "sink", "name"],
+                    12,
+                );
+            }
+        }
     }
 }

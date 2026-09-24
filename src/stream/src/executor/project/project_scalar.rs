@@ -18,7 +18,7 @@ use futures::future::{Either, pending, select};
 use futures::pin_mut;
 use futures::stream::FuturesOrdered;
 use multimap::MultiMap;
-use risingwave_common::metrics::LabelGuardedIntGauge;
+use risingwave_common::metrics::RelabeledAggregatedIntGauge;
 use risingwave_common::row::RowExt;
 use risingwave_common::types::ToOwnedDatum;
 use risingwave_common::util::iter_util::ZipEqFast;
@@ -81,7 +81,7 @@ struct Inner {
     project_expr_inflight_request_concurrency: Option<Arc<Semaphore>>,
 
     /// Number of messages waiting in the ordered projection window.
-    project_expr_inflight_window_size: Option<LabelGuardedIntGauge>,
+    project_expr_inflight_window_size: Option<RelabeledAggregatedIntGauge>,
 }
 
 impl ProjectExecutor {

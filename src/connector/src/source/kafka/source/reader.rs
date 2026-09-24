@@ -24,7 +24,9 @@ use futures_async_stream::try_stream;
 use rdkafka::consumer::{Consumer, StreamConsumer};
 use rdkafka::error::KafkaError;
 use rdkafka::{ClientConfig, Message, Offset, TopicPartitionList};
-use risingwave_common::metrics::{LabelGuardedIntCounter, LabelGuardedIntGauge};
+use risingwave_common::metrics::{
+    LabelGuardedIntCounter, LabelGuardedIntGauge, RelabeledAggregatedIntGauge,
+};
 use risingwave_pb::plan_common::additional_column::ColumnType as AdditionalColumnType;
 
 use crate::connector_common::read_kafka_log_level;
@@ -410,7 +412,8 @@ impl KafkaSplitReader {
             )
         });
 
-        let mut latest_message_id_metrics: HashMap<String, LabelGuardedIntGauge> = HashMap::new();
+        let mut latest_message_id_metrics: HashMap<String, RelabeledAggregatedIntGauge> =
+            HashMap::new();
         let mut partition_eof_count_metrics: HashMap<String, LabelGuardedIntCounter> =
             HashMap::new();
         let mut partition_eof_offset_metrics: HashMap<String, LabelGuardedIntGauge> =

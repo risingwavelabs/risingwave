@@ -20,8 +20,9 @@ use prometheus::{
 };
 use risingwave_common::config::MetricLevel;
 use risingwave_common::metrics::{
-    LabelGuardedHistogramVec, LabelGuardedIntCounterVec, LabelGuardedIntGaugeVec,
-    MetricVecRelabelExt, RelabeledGuardedIntCounterVec, RelabeledGuardedIntGaugeVec,
+    GaugeAggregation, IntGaugeVecRelabelExt, LabelGuardedHistogramVec, LabelGuardedIntCounterVec,
+    LabelGuardedIntGaugeVec, MetricVecRelabelExt, RelabeledAggregatedIntGaugeVec,
+    RelabeledGuardedIntCounterVec,
 };
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_common::{
@@ -182,7 +183,7 @@ pub struct SourceMetrics {
     // For messages from load generator, the metric is the size of stream chunk.
     pub partition_input_bytes: RelabeledGuardedIntCounterVec,
     /// Report latest message id
-    pub latest_message_id: RelabeledGuardedIntGaugeVec,
+    pub latest_message_id: RelabeledAggregatedIntGaugeVec,
     pub partition_eof_count: LabelGuardedIntCounterVec,
     pub partition_eof_offset: LabelGuardedIntGaugeVec,
     pub rdkafka_native_metric: Arc<RdKafkaStats>,
@@ -191,7 +192,7 @@ pub struct SourceMetrics {
 
     pub parquet_source_skip_row_count: RelabeledGuardedIntCounterVec,
     pub file_source_input_row_count: RelabeledGuardedIntCounterVec,
-    pub file_source_dirty_split_count: RelabeledGuardedIntGaugeVec,
+    pub file_source_dirty_split_count: RelabeledAggregatedIntGaugeVec,
     pub file_source_failed_split_count: RelabeledGuardedIntCounterVec,
 
     // kinesis source
@@ -264,7 +265,7 @@ impl SourceMetrics {
             registry,
         )
         .unwrap()
-        .relabel_debug_1(metric_level);
+        .relabel_debug_1_with_aggregation(metric_level, GaugeAggregation::Min);
         let partition_eof_count = register_guarded_int_counter_vec_with_registry!(
             "source_partition_eof_count",
             "Total number of EOF events received from specific partition",
@@ -315,7 +316,7 @@ impl SourceMetrics {
             registry
         )
         .unwrap()
-        .relabel_debug_1(metric_level);
+        .relabel_debug_1_with_aggregation(metric_level, GaugeAggregation::Sum);
         let file_source_failed_split_count = register_guarded_int_counter_vec_with_registry!(
             "file_source_failed_split_count",
             "Total number of file splits marked dirty in file source",
@@ -408,5 +409,45 @@ impl SourceMetrics {
 impl Default for SourceMetrics {
     fn default() -> Self {
         GLOBAL_SOURCE_METRICS.clone()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn assert_aggregation(
+        gauge_vec: &RelabeledAggregatedIntGaugeVec,
+        first_labels: &[&str],
+        second_labels: &[&str],
+        expected: i64,
+    ) {
+        let first = gauge_vec.with_guarded_label_values(first_labels);
+        let second = gauge_vec.with_guarded_label_values(second_labels);
+        first.set(5);
+        second.set(7);
+        assert_eq!(first.get(), expected);
+        assert_eq!(second.get(), expected);
+    }
+
+    #[test]
+    fn actor_relabeled_gauges_use_the_assigned_reducers() {
+        for level in [MetricLevel::Critical, MetricLevel::Info] {
+            let registry = Registry::new();
+            let metrics = SourceMetrics::new(&registry, level);
+
+            assert_aggregation(
+                &metrics.latest_message_id,
+                &["1", "source", "partition"],
+                &["2", "source", "partition"],
+                5,
+            );
+            assert_aggregation(
+                &metrics.file_source_dirty_split_count,
+                &["1", "source", "name", "fragment"],
+                &["2", "source", "name", "fragment"],
+                12,
+            );
+        }
     }
 }
