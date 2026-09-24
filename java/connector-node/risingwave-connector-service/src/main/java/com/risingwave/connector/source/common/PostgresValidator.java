@@ -82,14 +82,19 @@ public class PostgresValidator extends DatabaseValidator implements AutoCloseabl
             if (charMaxLength != null) {
                 return charMaxLength;
             }
+
             // information_schema.element_types does not expose the length of bit(n) array
-            // elements. PostgreSQL stores it in the array column's pg_attribute.atttypmod.
-            if ("array".equalsIgnoreCase(dataType)
-                    && "bit".equalsIgnoreCase(arrayElementDataType)
-                    && atttypmod != null
-                    && atttypmod >= 0) {
+            // elements, PostgreSQL stores it in the array column's pg_attribute.atttypmod
+            //
+            // https://github.com/postgres/postgres/blob/master/src/backend/utils/adt/varbit.c#L18-L19
+            var isBitArray =
+                    "array".equalsIgnoreCase(dataType)
+                            && "bit".equalsIgnoreCase(arrayElementDataType);
+
+            if (isBitArray && atttypmod != null && atttypmod >= 0) {
                 return atttypmod.longValue();
             }
+
             return null;
         }
     }
