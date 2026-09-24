@@ -499,6 +499,15 @@ pub struct SessionConfig {
     #[parameter(default = true)]
     enable_index_selection: bool,
 
+    /// How much cheaper a covering index is considered to be when its own order already satisfies
+    /// the order the query requires, expressed as a divisor on the estimated IO cost. The cost
+    /// model has no term for ordering, so without this a marginally cheaper index always wins and
+    /// we pay for a sort that another index would have given us for free. The flip side is that a
+    /// large value buys ordering with IO: raise it to sort less, lower it to read less, and set it
+    /// to `1` to go back to pure cost comparison.
+    #[parameter(default = 3_usize)]
+    index_order_satisfied_reward: usize,
+
     /// Enable mv selection for queries
     #[parameter(default = false)]
     enable_mv_selection: bool,

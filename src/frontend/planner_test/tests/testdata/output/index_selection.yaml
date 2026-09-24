@@ -1129,3 +1129,24 @@
     BatchExchange { order: [i_b.a ASC], dist: Single }
     └─BatchSort { order: [i_b.a ASC] }
       └─BatchScan { table: i_b, columns: [i_b.a, i_b.b], scan_ranges: [i_b.b = Int32(1)], distribution: UpstreamHashShard(i_b.b) }
+- name: the order-satisfying index does not win when it would give up a scan range
+  sql: |
+    create table t (a bigint, b int, c varchar, d varchar, e varchar);
+    create index i_a on t(a) include (b,c,d,e);
+    create index i_b on t(b);
+    select a, b, c from t where b > 1 order by a;
+  batch_plan: |-
+    BatchExchange { order: [i_b.a ASC], dist: Single }
+    └─BatchSort { order: [i_b.a ASC] }
+      └─BatchScan { table: i_b, columns: [i_b.a, i_b.b, i_b.c], scan_ranges: [i_b.b > Int32(1)], distribution: UpstreamHashShard(i_b.b) }
+- name: index_order_satisfied_reward = 1 restores pure cost comparison
+  sql: |
+    set index_order_satisfied_reward = 1;
+    create table t (a bigint, b int, c varchar);
+    create index i_a on t(a) include (b);
+    create index i_b on t(b) include (a);
+    select a, b from t order by a;
+  batch_plan: |-
+    BatchExchange { order: [i_b.a ASC], dist: Single }
+    └─BatchSort { order: [i_b.a ASC] }
+      └─BatchScan { table: i_b, columns: [i_b.a, i_b.b], distribution: UpstreamHashShard(i_b.b) }

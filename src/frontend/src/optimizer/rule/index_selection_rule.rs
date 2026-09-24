@@ -85,21 +85,24 @@ const INDEX_COST_MATRIX: [[usize; INDEX_MAX_LEN]; 5] = [
     [4000, 100, 30, 20, 20],
 ];
 const LOOKUP_COST_CONST: usize = 3;
-/// Reward factor applied to a covering index whose order already satisfies the order required by
-/// the consumer of the scan. `IndexCost` is a pure IO estimate with no term for ordering, so
-/// without this an index that is marginally cheaper to read always wins and we pay for a sort that
-/// another index would have given us for free. Like `LOOKUP_COST_CONST` this is a heuristic
-/// constant, deliberately small: a sort is worth avoiding, but not at the price of reading an
-/// index that is several times larger or far less selective.
-const ORDER_SATISFIED_REWARD_CONST: usize = 3;
 const MAX_COMBINATION_SIZE: usize = 4;
 const MAX_CONJUNCTION_SIZE: usize = 8;
 
 pub struct IndexSelectionRule {
-    /// The order the consumer of the scan requires. `Order::any()` (the default) means the
-    /// consumer does not care, in which case index selection is pure cost comparison, exactly as
-    /// before.
+    /// The order the consumer of the scan requires. An empty order -- which is what
+    /// `Order::any()` produces, and what plain `to_batch()` and the streaming rule pass -- means
+    /// the consumer does not care, in which case index selection is pure cost comparison, exactly
+    /// as it was before order-awareness was added.
     required_order: Order,
+    /// Divisor applied to the estimated cost of a covering index whose order already satisfies
+    /// `required_order`, from the `index_order_satisfied_reward` session variable. `IndexCost` is
+    /// a pure IO estimate with no term for ordering, so without this an index that is marginally
+    /// cheaper to read always wins and we pay for a sort that another index would have given us
+    /// for free. `1` disables the preference and restores pure cost comparison.
+    ///
+    /// Unlike `LOOKUP_COST_CONST` this is never folded into `min_cost`; it is applied once, at
+    /// the end of [`Rule::apply`], so that `min_cost` stays a real cost.
+    order_satisfied_reward: usize,
 }
 
 impl Rule<Logical> for IndexSelectionRule {
@@ -110,9 +113,11 @@ impl Rule<Logical> for IndexSelectionRule {
             return None;
         }
         let primary_table_row_size = TableScanIoEstimator::estimate_row_size(logical_scan);
+        let primary_full_cost =
+            self.estimate_full_table_scan_cost(logical_scan, primary_table_row_size);
         let primary_cost = min(
             self.estimate_table_scan_cost(logical_scan, primary_table_row_size),
-            self.estimate_full_table_scan_cost(logical_scan, primary_table_row_size),
+            primary_full_cost.clone(),
         );
 
         // If it is a primary lookup plan, avoid checking other indexes.
@@ -135,23 +140,39 @@ impl Rule<Logical> for IndexSelectionRule {
         };
 
         let mut final_plan: PlanRef = logical_scan.clone().into();
+        // The pure-cost ranking. No order reward is ever folded into this, so index lookup joins
+        // and index merges below are compared against the same bar as before.
         let mut min_cost = primary_cost.clone();
+        // Whether the current winner still turns the predicate into a scan range. A candidate
+        // whose filtered cost equals its full-scan cost reads everything and filters afterwards.
+        let mut winner_has_pushdown = primary_cost.le(&primary_full_cost);
+        // Cheapest order-satisfying covering candidate, held at its TRUE cost.
+        let mut order_candidate: Option<(IndexCost, PlanRef, bool)> = None;
 
         for index in indexes {
             if let Some(index_scan) = logical_scan.to_index_scan_if_index_covered(index) {
-                let index_cost = self.estimate_table_scan_cost(
-                    &index_scan,
-                    TableScanIoEstimator::estimate_row_size(&index_scan),
-                );
+                let index_row_size = TableScanIoEstimator::estimate_row_size(&index_scan);
+                let index_cost = self.estimate_table_scan_cost(&index_scan, index_row_size);
+                let index_has_pushdown =
+                    index_cost.le(&self.estimate_full_table_scan_cost(&index_scan, index_row_size));
 
-                let index_cost = if order_satisfied_index_ids.contains(&index.index_table.id) {
-                    index_cost.div(ORDER_SATISFIED_REWARD_CONST)
-                } else {
-                    index_cost
-                };
+                if order_satisfied_index_ids.contains(&index.index_table.id) {
+                    let better = match &order_candidate {
+                        Some((best, _, _)) => index_cost.le(best),
+                        None => true,
+                    };
+                    if better {
+                        order_candidate = Some((
+                            index_cost.clone(),
+                            index_scan.clone().into(),
+                            index_has_pushdown,
+                        ));
+                    }
+                }
 
                 if index_cost.le(&min_cost) {
                     min_cost = index_cost;
+                    winner_has_pushdown = index_has_pushdown;
                     final_plan = index_scan.into();
                 }
             } else {
@@ -159,6 +180,10 @@ impl Rule<Logical> for IndexSelectionRule {
                 let (index_lookup, lookup_cost) = self.gen_index_lookup(logical_scan, index);
                 if lookup_cost.le(&min_cost) {
                     min_cost = lookup_cost;
+                    // A lookup join is only ever cheap because the index prefix matched the
+                    // predicate, so treat it as pushing down. Being wrong here only suppresses
+                    // the reward, i.e. falls back to the pure-cost choice.
+                    winner_has_pushdown = true;
                     final_plan = index_lookup;
                 }
             }
@@ -168,13 +193,43 @@ impl Rule<Logical> for IndexSelectionRule {
             && merge_index_cost.le(&min_cost)
         {
             min_cost = merge_index_cost;
+            winner_has_pushdown = true;
             final_plan = merge_index;
         }
 
-        if min_cost == primary_cost {
-            None
-        } else {
+        let mut beats_primary = min_cost != primary_cost;
+
+        // The order reward is applied *here*, once the pure-cost ranking is settled: an
+        // order-satisfying covering index may cost up to `order_satisfied_reward` times the best
+        // alternative, and otherwise the cost winner stands.
+        //
+        // That is the same choice the previous shape made -- discounting a candidate inside the
+        // loop and taking the minimum is algebraically the same as ranking on true cost and then
+        // letting the best ordered candidate in if `O / reward < min(O, U)`. What it is not is
+        // the same *statement*: with the discount folded in, `min_cost` was a mixture of real and
+        // discounted numbers, so an index lookup join or index merge appeared to be rejected for
+        // being more expensive than a scan that in truth costs more than it does. It is rejected
+        // because we are willing to pay up to `reward`x to avoid a sort, and that applies to
+        // every kind of rival. Keeping `min_cost` undiscounted says so, and also keeps the
+        // `min_cost != primary_cost` test below comparing two real costs.
+        if let Some((order_cost, order_plan, order_has_pushdown)) = order_candidate
+            // Do not trade a scan range for a sort. If the cost winner pushes the predicate into
+            // its scan range and the ordered candidate does not, the ordered plan reads the whole
+            // index and filters; the reward would paper over an IO difference that is real and,
+            // unlike a sort, grows with the table.
+            && (order_has_pushdown || !winner_has_pushdown)
+            && order_cost.div(self.order_satisfied_reward).le(&min_cost)
+        {
+            final_plan = order_plan;
+            // Same rows as the primary table scan and no sort on top, so this is worth returning
+            // even when its raw cost ties the primary table's.
+            beats_primary = true;
+        }
+
+        if beats_primary {
             Some(final_plan)
+        } else {
+            None
         }
     }
 }
@@ -990,10 +1045,14 @@ impl IndexCost {
         )
     }
 
-    /// Discount the cost by `factor`. Used to reward an index that saves us a sort; never reaches
-    /// zero, and never fabricates a `primary_lookup`.
+    /// Discount the cost by `factor`, used to reward an index that saves us a sort. `factor` is
+    /// clamped to at least 1 because it comes from a session variable, so `div(0)` and `div(1)`
+    /// both return the cost unchanged. Note the result is clamped to at least 1 as well, which
+    /// means this is a discount and not a floor: a hypothetical zero-cost index would come back
+    /// as 1. That cannot happen in practice -- `cost == 1` is the primary-lookup case and returns
+    /// early -- and it never fabricates a `primary_lookup`.
     fn div(&self, factor: usize) -> IndexCost {
-        IndexCost::new(max(self.cost / factor, 1), self.primary_lookup)
+        IndexCost::new(max(self.cost / max(factor, 1), 1), self.primary_lookup)
     }
 
     fn mul(&self, other: &IndexCost) -> IndexCost {
@@ -1043,17 +1102,27 @@ impl ExprRewriter for ShiftInputRefRewriter {
 }
 
 impl IndexSelectionRule {
+    // Two constructors rather than the usual single `create() -> BoxedRule`, because the two
+    // callers need different shapes: `StreamingIndexSelectionRule` borrows the cost helpers off a
+    // concrete `IndexSelectionRule` instead of running the rule, so it needs `Self`, while
+    // `LogicalScan::to_batch_with_order_required` applies it as a rule and needs a `BoxedRule`.
+
     /// Cost-only index selection, i.e. the consumer of the scan does not require any order.
     pub(crate) fn new_cost_only() -> Self {
         IndexSelectionRule {
             required_order: Order::any(),
+            order_satisfied_reward: 1,
         }
     }
 
     /// Create the rule with the order required by the consumer of the scan. A covering index that
-    /// already provides that order is then rewarded in the cost comparison, so that a marginally
-    /// cheaper but unordered index does not silently cost us a sort.
-    pub fn create_with_order(required_order: Order) -> BoxedRule {
-        Box::new(IndexSelectionRule { required_order })
+    /// already provides that order is then preferred over the cost winner as long as it is within
+    /// `order_satisfied_reward` times its cost, so that a marginally cheaper but unordered index
+    /// does not silently cost us a sort.
+    pub fn create_with_order(required_order: Order, order_satisfied_reward: usize) -> BoxedRule {
+        Box::new(IndexSelectionRule {
+            required_order,
+            order_satisfied_reward,
+        })
     }
 }
