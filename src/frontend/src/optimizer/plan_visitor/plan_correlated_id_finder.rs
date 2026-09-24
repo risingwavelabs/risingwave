@@ -187,7 +187,7 @@ mod tests {
             ctx.clone(),
         )
         .into();
-        let apply = LogicalApply::create(
+        let apply = crate::optimizer::plan_node::LogicalApply::create(
             left,
             values,
             risingwave_pb::plan_common::JoinType::Inner,
@@ -201,6 +201,7 @@ mod tests {
         // still contains a correlated reference. Attempting batch conversion should
         // therefore return the existing unsupported-LogicalApply error, rather than
         // reaching protobuf serialization with an unresolved CorrelatedInputRef.
+        use crate::optimizer::plan_node::ToBatch;
         use crate::optimizer::rule::{ApplyEliminateRule, Rule};
         let rule = ApplyEliminateRule::create();
         let plan = rule.apply(apply.clone()).unwrap_or(apply);
