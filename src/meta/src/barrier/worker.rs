@@ -1068,7 +1068,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         .insert(*job_id);
                     job_ids
                 });
-
             let mut partial_graph_manager = PartialGraphManager::recover(
                     self.env.clone(),
                     active_streaming_nodes.current(),
