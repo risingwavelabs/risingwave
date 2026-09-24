@@ -1,4 +1,4 @@
-// Copyright 2022 RisingWave Labs
+// Copyright 2026 RisingWave Labs
 //
 // Licensed under the Apache License, Version 2.0 (the "License");
 // you may not use this file except in compliance with the License.
@@ -26,7 +26,7 @@ pub(crate) async fn wait_collection(receivers: Vec<CollectionReceiver>) -> MetaR
     for result in join_all(receivers).await {
         let result = match result {
             Ok(result) => result,
-            Err(_) => Err(anyhow!("failed to collect barrier: notifier dropped").into()),
+            Err(_) => Err(anyhow!("completion notifier dropped").into()),
         };
         if let Err(err) = result
             && first_error.is_none()
@@ -40,7 +40,7 @@ pub(crate) async fn wait_collection(receivers: Vec<CollectionReceiver>) -> MetaR
     }
 }
 
-/// Used for notifying the status of a scheduled command/barrier.
+/// Notifies a caller when an operation starts and when all of its parts complete.
 #[derive(Debug)]
 pub(crate) struct Notifier {
     started: oneshot::Sender<MetaResult<Vec<CollectionReceiver>>>,
@@ -64,7 +64,7 @@ impl Notifier {
     }
 }
 
-/// Builds the set of collection notifications before publishing that the command has started.
+/// Builds the set of completion notifications before publishing that the operation has started.
 #[derive(Debug)]
 pub(crate) struct NotifierStarter {
     started: oneshot::Sender<MetaResult<Vec<CollectionReceiver>>>,
@@ -87,7 +87,7 @@ impl NotifierStarter {
     }
 }
 
-/// Notifies the completion of one part of a started command.
+/// Notifies the completion of one part of a started operation.
 #[derive(Debug)]
 pub(crate) struct CollectionNotifier {
     collected: oneshot::Sender<MetaResult<()>>,
@@ -98,7 +98,7 @@ impl CollectionNotifier {
         self.collected.send(Ok(())).ok();
     }
 
-    /// Notify when we failed to collect a barrier. This function consumes `self`.
+    /// Notify when one part failed. This function consumes `self`.
     pub fn notify_collection_failed(self, err: MetaError) {
         self.collected.send(Err(err)).ok();
     }
