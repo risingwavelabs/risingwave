@@ -492,8 +492,8 @@ impl IncrementalMatcher {
         // loop stops early and the tail is INCOMPLETE: the freeze loop below holds (it treats
         // `budget.hit` as "alive"), the executor's emission gate holds, and the next visit
         // rescans with a fresh budget — degraded latency, never a wrong or lost match.
-        let continuing_scan = self.incomplete;
-        let resume_freeze = !continuing_scan && self.freeze_truncated;
+        let mut continuing_scan = self.incomplete;
+        let mut resume_freeze = !continuing_scan && self.freeze_truncated;
         let mut tail_abs: Vec<LabeledMatch> = if continuing_scan || resume_freeze {
             // Preserve the already-scanned leftmost prefix. Matches are seq-anchored in storage, so
             // recover their current buffer positions before appending the resumed scan's suffix.
@@ -517,6 +517,31 @@ impl IncrementalMatcher {
         } else {
             Vec::new()
         };
+        // A resumed scan continues AFTER the retained provisional prefix: on the healthy path
+        // `scan_cursor` is where the truncated pull stopped, at or past the last retained match's
+        // resume position. A cursor inside the buffer but before that point passed the range
+        // check above and would re-find the retained matches and append them a second time —
+        // so it is treated like any other stray cursor: forget the verdicts and the truncation
+        // flags, drop the retained prefix, and rescan from the frozen boundary.
+        if continuing_scan && let Some(last) = tail_abs.last() {
+            let (resume, _) = self.skip.next_pos(last.start, last.end, &last.labels);
+            if self.scan_cursor < resume {
+                crate::consistency::consistency_panic!(
+                    scan_cursor = self.scan_cursor,
+                    last_retained_resume = resume,
+                    "MATCH_RECOGNIZE resumed scan would re-find its retained prefix; rescanning \
+                     from the frozen boundary",
+                );
+                self.matchless_upto = self.next_pos;
+                self.dead_upto = self.next_pos;
+                self.scan_cursor = self.next_pos;
+                self.incomplete = false;
+                self.freeze_truncated = false;
+                tail_abs.clear();
+                continuing_scan = false;
+                resume_freeze = false;
+            }
+        }
         let mut scan_truncated = false;
         if !resume_freeze {
             // A truncated refresh resumes after the successful matches already retained above.
@@ -3227,6 +3252,51 @@ mod tests {
                 );
                 assert!(!inc.is_incomplete());
                 assert!(inc.scan_cursor <= rows.len());
+            })
+            .await;
+        }
+
+        /// A cursor inside the buffer but before the retained provisional tail's resume point
+        /// passes the range check; the resumed scan would re-find the tail and duplicate it. It
+        /// is rejected like a stray cursor: the tail is dropped and the rescan from the frozen
+        /// boundary reproduces the batch oracle exactly.
+        #[tokio::test]
+        async fn cursor_before_the_retained_tail_is_rejected() {
+            non_strict(async {
+                // `(a+ b+)`: over "aabaab" the first match freezes (a following `a` ends its
+                // `b+`), the second ends at the boundary with `b+` still open — a retained
+                // provisional match with a resume position of 6.
+                let pat = Pattern::Concat(vec![
+                    quant(Pattern::Var("a".into()), Quantifier::Plus, false),
+                    quant(Pattern::Var("b".into()), Quantifier::Plus, false),
+                ]);
+                let nfa = Nfa::compile(&pat);
+                let rows = from_str("aabaab");
+                let matcher = SetMatcher::new(rows.clone());
+                let mut inc = IncrementalMatcher::new(
+                    std::sync::Arc::new(nfa.clone()),
+                    SkipMode::PastLastRow,
+                );
+                let seqs: Vec<Seq> = (0..rows.len() as i64).map(Seq).collect();
+                inc.advance(&seqs, &matcher, &mut ScanBudget::unlimited(), false)
+                    .await
+                    .unwrap();
+                let truth = batch_triples(&nfa, &SkipMode::PastLastRow, &rows).await;
+                assert_eq!(provisional_triples(&inc), truth);
+                assert!(
+                    inc.provisional().len() > inc.frozen(),
+                    "setup: a provisional match must be retained past the frozen prefix"
+                );
+
+                // Corrupt: a "truncated" scan whose cursor sits at the frozen boundary, inside the
+                // buffer, before the retained match's resume point.
+                inc.incomplete = true;
+                inc.scan_cursor = inc.resume_pos();
+                inc.refresh(&matcher, &mut ScanBudget::unlimited(), false)
+                    .await
+                    .unwrap();
+                assert_eq!(provisional_triples(&inc), truth, "no duplicated match");
+                assert!(!inc.is_incomplete());
             })
             .await;
         }
