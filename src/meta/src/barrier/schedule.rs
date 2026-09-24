@@ -33,10 +33,10 @@ use tokio_stream::wrappers::IntervalStream;
 use tokio_stream::{StreamExt, StreamMap};
 use tracing::{info, warn};
 
-use super::notifier::{Notifier, wait_collection};
 use super::{Command, Scheduled};
 use crate::barrier::context::GlobalBarrierWorkerContext;
 use crate::hummock::HummockManagerRef;
+use crate::notification::{Notifier, wait_collection};
 use crate::rpc::metrics::GLOBAL_META_METRICS;
 use crate::{MetaError, MetaResult};
 
@@ -45,7 +45,6 @@ pub(super) struct NewBarrier {
     pub command: Option<(Command, Notifier)>,
     pub span: tracing::Span,
     pub checkpoint: bool,
-    pub barrier_interval_ms: u32,
 }
 
 /// A queue for scheduling barriers.
@@ -489,7 +488,6 @@ impl PeriodicBarriers {
                 command: None,
                 span: tracing_span(),
                 checkpoint: true,
-                barrier_interval_ms: self.barrier_interval_ms(database_id),
             }
         } else {
             select! {
@@ -503,7 +501,6 @@ impl PeriodicBarriers {
                         command: Some((scheduled.command, scheduled.notifier)),
                         span: scheduled.span,
                         checkpoint,
-                        barrier_interval_ms: self.barrier_interval_ms(database_id),
                     }
                 },
                 // If there is no database, we won't wait for `Interval`, but only wait for command.
@@ -515,7 +512,6 @@ impl PeriodicBarriers {
                         command: None,
                         span: tracing_span(),
                         checkpoint,
-                        barrier_interval_ms: self.barrier_interval_ms(database_id),
                     }
                 }
             }
@@ -523,15 +519,6 @@ impl PeriodicBarriers {
         self.update_num_uncheckpointed_barrier(new_barrier.database_id, new_barrier.checkpoint);
 
         new_barrier
-    }
-
-    pub(super) fn barrier_interval_ms(&self, database_id: DatabaseId) -> u32 {
-        self.databases[&database_id]
-            .barrier_interval
-            .unwrap_or(self.sys_barrier_interval)
-            .as_millis()
-            .try_into()
-            .expect("barrier interval should fit in u32 milliseconds")
     }
 
     /// Whether the barrier(checkpoint = true) should be injected.
@@ -585,7 +572,7 @@ impl ScheduledBarriers {
 pub(super) enum MarkReadyOptions {
     Database(DatabaseId),
     Global {
-        blocked_databases: HashSet<DatabaseId>,
+        failed_databases: HashMap<DatabaseId, HashSet<JobId>>,
     },
 }
 
@@ -689,7 +676,7 @@ impl ScheduledBarriers {
                     self.inner.changed_tx.send(()).ok();
                 }
             }
-            MarkReadyOptions::Global { blocked_databases } => {
+            MarkReadyOptions::Global { failed_databases } => {
                 if !queue.status.is_blocked() {
                     if cfg!(debug_assertions) {
                         panic!("cluster marked as ready twice");
@@ -697,9 +684,12 @@ impl ScheduledBarriers {
                         warn!("cluster marked as ready twice");
                     }
                 }
-                info!(?blocked_databases, "cluster marked as ready");
+                info!(
+                    failed_database_ids = ?failed_databases.keys().collect_vec(),
+                    "cluster marked as ready"
+                );
                 let prev_blocked = queue.mark_ready();
-                for database_id in &blocked_databases {
+                for database_id in failed_databases.keys() {
                     queue.queue.entry(*database_id).or_insert_with(|| {
                         DatabaseScheduledQueue::new(QueueStatus::Blocked(format!(
                             "database {} failed to recover in global recovery",
@@ -708,7 +698,7 @@ impl ScheduledBarriers {
                     });
                 }
                 for (database_id, queue) in &mut queue.queue {
-                    if !blocked_databases.contains(database_id) {
+                    if !failed_databases.contains_key(database_id) {
                         queue.mark_ready();
                     }
                 }
@@ -829,15 +819,15 @@ mod tests {
             unimplemented!()
         }
 
-        fn abort_and_mark_blocked(
+        async fn abort_and_mark_blocked(
             &self,
-            _database_id: Option<DatabaseId>,
+            _recovery: crate::manager::sink_coordination::RecoveryStart,
             _recovery_reason: crate::barrier::RecoveryReason,
-        ) {
+        ) -> MetaResult<()> {
             unimplemented!()
         }
 
-        fn mark_ready(&self, _options: MarkReadyOptions) {
+        async fn mark_ready(&self, _options: MarkReadyOptions) -> MetaResult<()> {
             unimplemented!()
         }
 
@@ -1172,7 +1162,6 @@ mod tests {
 
         let db_state = periodic.databases.get(&database_id).unwrap();
         assert_eq!(db_state.barrier_interval, Some(Duration::from_millis(2000)));
-        assert_eq!(periodic.barrier_interval_ms(database_id), 2000);
         assert_eq!(db_state.checkpoint_frequency, Some(15));
         assert_eq!(db_state.num_uncheckpointed_barrier, 0);
         assert!(!periodic.force_checkpoint_databases.contains(&database_id));
@@ -1183,7 +1172,6 @@ mod tests {
         assert!(periodic.databases.contains_key(&DatabaseId::from(2)));
         let db2_state = periodic.databases.get(&DatabaseId::from(2)).unwrap();
         assert_eq!(db2_state.barrier_interval, None);
-        assert_eq!(periodic.barrier_interval_ms(DatabaseId::from(2)), 500);
         assert_eq!(db2_state.checkpoint_frequency, None);
     }
 }

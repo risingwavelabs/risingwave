@@ -36,11 +36,11 @@ use crate::barrier::BarrierKind;
 use crate::barrier::command::PostCollectCommand;
 use crate::barrier::context::GlobalBarrierWorkerContext;
 use crate::barrier::info::BarrierInfo;
-use crate::barrier::notifier::{CollectionNotifier, NotifierStarter};
 use crate::barrier::rpc::{ControlStreamManager, WorkerNodeEvent};
 use crate::barrier::utils::{BarrierItemCollector, NodeToCollect, is_valid_after_worker_err};
 use crate::manager::MetaSrvEnv;
 use crate::model::StreamJobActorsToCreate;
+use crate::notification::{CollectionNotifier, NotifierStarter};
 use crate::{MetaError, MetaResult};
 
 #[derive(Debug)]
@@ -906,7 +906,6 @@ mod tests {
                 prev_epoch: TracedEpoch::new(Epoch(prev_epoch)),
                 curr_epoch: TracedEpoch::new(Epoch(curr_epoch)),
                 kind: BarrierKind::Barrier,
-                barrier_interval_ms: 1000,
             },
             None,
             HashSet::new(),

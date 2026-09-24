@@ -9,6 +9,79 @@ control substitution on
 
 
 ############################################################
+# CDC: Debezium decimal handling mode validation.
+############################################################
+
+# Precise mode emits binary logical decimals that RisingWave cannot decode safely from
+# schema-less JSON.
+statement error 'debezium.decimal.handling.mode' must be 'string', got: 'precise'
+create source mysql_invalid_decimal_precise with (
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
+ database.name = 'my@db',
+ server.id = '5802',
+ debezium.decimal.handling.mode = 'precise'
+);
+
+# Double mode can lose decimal precision.
+statement error 'debezium.decimal.handling.mode' must be 'string', got: 'double'
+create source mysql_invalid_decimal_double with (
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
+ database.name = 'my@db',
+ server.id = '5803',
+ debezium.decimal.handling.mode = 'double'
+);
+
+
+############################################################
+# CDC: Debezium heartbeat interval validation.
+############################################################
+
+statement error 'debezium.heartbeat.interval.ms' must be a positive integer, got: '0'
+create source mysql_invalid_heartbeat_zero with (
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
+ database.name = 'my@db',
+ server.id = '5802',
+ debezium.heartbeat.interval.ms = '0'
+);
+
+statement error 'debezium.heartbeat.interval.ms' must be a positive integer, got: '-1'
+create source mysql_invalid_heartbeat_negative with (
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
+ database.name = 'my@db',
+ server.id = '5803',
+ debezium.heartbeat.interval.ms = '-1'
+);
+
+statement error 'debezium.heartbeat.interval.ms' must be a positive integer, got: 'invalid'
+create source mysql_invalid_heartbeat_non_integer with (
+ connector = 'mysql-cdc',
+ hostname = 'mysql',
+ port = '3306',
+ username = 'root',
+ password = '123456',
+ database.name = 'my@db',
+ server.id = '5804',
+ debezium.heartbeat.interval.ms = 'invalid'
+);
+
+
+############################################################
 # MySQL: connection-level errors fire at `CREATE SOURCE`.
 ############################################################
 

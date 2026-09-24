@@ -43,6 +43,7 @@ use risingwave_common::util::value_encoding::{DatumFromProtoExt, DatumToProtoExt
 use risingwave_common_estimate_size::EstimateSize;
 use risingwave_connector::source::SplitImpl;
 use risingwave_expr::expr::NonStrictExpression;
+use risingwave_pb::common::ThrottleType;
 use risingwave_pb::data::PbEpoch;
 use risingwave_pb::expr::PbInputRef;
 use risingwave_pb::stream_plan::add_mutation::PbNewUpstreamSink;
@@ -145,7 +146,7 @@ pub use backfill::snapshot_backfill::*;
 pub use barrier_recv::BarrierRecvExecutor;
 pub use batch_query::BatchQueryExecutor;
 pub use chain::ChainExecutor;
-pub use changelog::ChangeLogExecutor;
+pub use changelog::{ChangeLogExecutor, ChangeLogMode};
 pub use dedup::AppendOnlyDedupExecutor;
 pub use dispatch::{DispatchExecutor, SyncLogStoreDispatchExecutor};
 pub use dynamic_filter::DynamicFilterExecutor;
@@ -404,9 +405,6 @@ pub struct BarrierInner<M> {
     pub mutation: M,
     pub kind: BarrierKind,
 
-    /// The effective barrier interval for this database.
-    pub barrier_interval_ms: u32,
-
     /// Tracing context for the **current** epoch of this barrier.
     pub tracing_context: TracingContext,
 }
@@ -421,7 +419,6 @@ impl<M: Default> BarrierInner<M> {
         Self {
             epoch: EpochPair::new_test_epoch(epoch),
             kind: BarrierKind::Checkpoint,
-            barrier_interval_ms: 1000,
             tracing_context: TracingContext::none(),
             mutation: Default::default(),
         }
@@ -431,7 +428,6 @@ impl<M: Default> BarrierInner<M> {
         Self {
             epoch: EpochPair::new(epoch, prev_epoch),
             kind: BarrierKind::Checkpoint,
-            barrier_interval_ms: 1000,
             tracing_context: TracingContext::none(),
             mutation: Default::default(),
         }
@@ -444,7 +440,6 @@ impl Barrier {
             epoch: self.epoch,
             mutation: (),
             kind: self.kind,
-            barrier_interval_ms: self.barrier_interval_ms,
             tracing_context: self.tracing_context,
         }
     }
@@ -766,6 +761,17 @@ impl<M: PartialEq> PartialEq for BarrierInner<M> {
 }
 
 impl Mutation {
+    /// Return the backfill throttle configuration for `fragment_id`.
+    pub fn backfill_throttle_config(&self, fragment_id: FragmentId) -> Option<&ThrottleConfig> {
+        let Mutation::Throttle(fragment_throttles) = self else {
+            return None;
+        };
+
+        fragment_throttles
+            .get(&fragment_id)
+            .filter(|config| config.throttle_type() == ThrottleType::Backfill)
+    }
+
     /// Get all actors to be stopped (dropped) by this mutation.
     pub fn all_stop_actors(&self) -> Option<&HashSet<ActorId>> {
         match self {
@@ -1193,7 +1199,6 @@ impl<M> BarrierInner<M> {
             epoch,
             mutation,
             kind,
-            barrier_interval_ms,
             tracing_context,
         } = self;
 
@@ -1207,7 +1212,6 @@ impl<M> BarrierInner<M> {
             }),
             tracing_context: tracing_context.to_protobuf(),
             kind: *kind as _,
-            barrier_interval_ms: *barrier_interval_ms,
         }
     }
 
@@ -1223,7 +1227,6 @@ impl<M> BarrierInner<M> {
             mutation: mutation_from_pb(
                 (prost.mutation.as_ref()).and_then(|mutation| mutation.mutation.as_ref()),
             )?,
-            barrier_interval_ms: prost.barrier_interval_ms,
             tracing_context: TracingContext::from_protobuf(&prost.tracing_context),
         })
     }
@@ -1233,7 +1236,6 @@ impl<M> BarrierInner<M> {
             epoch: self.epoch,
             mutation: f(self.mutation),
             kind: self.kind,
-            barrier_interval_ms: self.barrier_interval_ms,
             tracing_context: self.tracing_context,
         }
     }

@@ -15,7 +15,7 @@
 use risingwave_common::array::Op;
 use risingwave_common::row::{RowDeserializer, RowExt};
 use risingwave_common::util::epoch::EpochPair;
-use risingwave_common::util::sort_util::ColumnOrder;
+use risingwave_common::util::sort_util::{ColumnOrder, topn_watermark_forwardable_order_key};
 
 use super::top_n_cache::TopNStaging;
 use super::utils::*;
@@ -89,6 +89,9 @@ pub struct InnerTopNExecutor<S: StateStore, const WITH_TIES: bool> {
 
     /// Used for serializing pk into `CacheKey`.
     cache_key_serde: CacheKeySerde,
+
+    /// The `ORDER BY` column whose watermarks can be forwarded, if any.
+    watermark_order_key: Option<usize>,
 }
 
 impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutor<S, WITH_TIES> {
@@ -120,6 +123,7 @@ impl<S: StateStore, const WITH_TIES: bool> InnerTopNExecutor<S, WITH_TIES> {
             storage_key_indices: storage_key.into_iter().map(|op| op.column_index).collect(),
             cache: TopNCache::new(num_offset, num_limit, data_types),
             cache_key_serde,
+            watermark_order_key: topn_watermark_forwardable_order_key(&order_by),
         })
     }
 }
@@ -194,9 +198,10 @@ where
             .await
     }
 
-    async fn handle_watermark(&mut self, _: Watermark) -> Option<Watermark> {
-        // TODO(yuhao): handle watermark
-        None
+    async fn handle_watermark(&mut self, watermark: Watermark) -> Option<Watermark> {
+        // Only watermarks on the first `ORDER BY` column ordered `ASC NULLS LAST` can be forwarded.
+        // See `topn_watermark_forwardable_order_key` for the reasoning.
+        (Some(watermark.col_idx) == self.watermark_order_key).then_some(watermark)
     }
 }
 

@@ -2433,6 +2433,32 @@ async fn test_move_state_tables_to_dedicated_compaction_group_on_demand_bottom_l
             .table_ids,
         [103].into_iter().map(Into::<TableId>::into).collect_vec()
     );
+
+    // Merge in reverse argument order: SST concatenation must follow table order.
+    hummock_manager
+        .merge_compaction_group_for_test(
+            right_compaction_group_id,
+            left_compaction_group_id,
+            HashSet::from_iter((100..=103).map(TableId::new)),
+        )
+        .await
+        .unwrap();
+    let merged_version = hummock_manager.get_current_version().await;
+    assert!(
+        !merged_version
+            .levels
+            .contains_key(&right_compaction_group_id)
+    );
+    assert_eq!(
+        merged_version
+            .get_compaction_group_levels(left_compaction_group_id)
+            .levels[base_level - 1]
+            .table_infos
+            .iter()
+            .flat_map(|sst| sst.table_ids.iter().copied())
+            .collect_vec(),
+        (100..=103).map(TableId::new).collect_vec()
+    );
 }
 
 #[tokio::test]

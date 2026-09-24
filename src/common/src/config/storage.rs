@@ -156,6 +156,8 @@ pub struct StorageConfig {
     pub enable_fast_compaction: bool,
     #[serde(default = "default::storage::check_compaction_result")]
     pub check_compaction_result: bool,
+    /// Legacy setting retained for configuration compatibility. This has no effect because
+    /// prefetched blocks are fully buffered before consumption.
     #[serde(default = "default::storage::max_preload_io_retry_times")]
     pub max_preload_io_retry_times: usize,
     #[serde(default = "default::storage::compactor_fast_max_compact_delete_ratio")]
@@ -464,6 +466,10 @@ pub enum FileCacheRuntimeConfig {
 pub struct FileCacheConfig {
     #[serde(default = "default::file_cache::dir")]
     pub dir: String,
+
+    /// Whether to use direct I/O for file cache reads and writes on Linux.
+    #[serde(default = "default::file_cache::direct_io")]
+    pub direct_io: bool,
 
     #[serde(default = "default::file_cache::capacity_mb")]
     pub capacity_mb: usize,
@@ -1251,6 +1257,10 @@ pub mod default {
 
         pub fn dir() -> String {
             "".to_owned()
+        }
+
+        pub fn direct_io() -> bool {
+            false
         }
 
         pub fn capacity_mb() -> usize {

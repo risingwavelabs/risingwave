@@ -123,6 +123,37 @@ fn validate_license(connector: &str) -> Result<()> {
     Ok(())
 }
 
+fn validate_decimal_handling_mode(props: &BTreeMap<String, String>) -> Result<()> {
+    if let Some(mode) = props.get("debezium.decimal.handling.mode")
+        && mode != "string"
+    {
+        return Err(RwError::from(ProtocolError(format!(
+            "'debezium.decimal.handling.mode' must be 'string', got: '{mode}'"
+        ))));
+    }
+    Ok(())
+}
+
+/// Requires an explicitly supplied heartbeat interval to be a positive signed 32-bit integer.
+/// Keep this policy in sync with Java's `SourceValidateHandler.validateHeartbeatInterval`.
+/// Validates user-supplied options, not the final Debezium configuration. On CREATE, an omitted
+/// interval uses the connector default; on ALTER, omission leaves the existing interval unchanged.
+/// Unrelated connector heartbeat mechanisms are not checked here.
+pub fn validate_heartbeat_interval(props: &BTreeMap<String, String>) -> Result<()> {
+    let Some(value) = props.get("debezium.heartbeat.interval.ms") else {
+        return Ok(());
+    };
+
+    // Match Java's ASCII integer syntax and Debezium's signed 32-bit range.
+    if !value.parse::<i32>().is_ok_and(|interval| interval > 0) {
+        return Err(ErrorCode::InvalidParameterValue(format!(
+            "'debezium.heartbeat.interval.ms' must be a positive integer, got: '{value}'"
+        ))
+        .into());
+    }
+    Ok(())
+}
+
 pub fn validate_compatibility(
     format_encode: &FormatEncodeOptions,
     props: &mut BTreeMap<String, String>,
@@ -155,6 +186,11 @@ pub fn validate_compatibility(
                 CONNECTORS_COMPATIBLE_FORMATS.keys()
             )))
         })?;
+
+    // RisingWave consumes schema-less JSON from Debezium and cannot reconstruct the scale of
+    // binary logical decimals emitted by `precise`. `double` can lose precision, so an explicit
+    // override must retain the common `string` default from `debezium.properties`.
+    validate_decimal_handling_mode(props)?;
 
     validate_license(&connector)?;
     if connector != KAFKA_CONNECTOR {
@@ -271,17 +307,5 @@ pub fn validate_compatibility(
         .into());
     }
 
-    // Validate debezium.heartbeat.interval.ms for Postgres CDC: must be a valid integer and not 0
-    if connector == POSTGRES_CDC_CONNECTOR
-        && let Some(interval_value) = props.get("debezium.heartbeat.interval.ms")
-        && !interval_value.parse::<i64>().is_ok_and(|v| v != 0)
-    {
-        return Err(ErrorCode::InvalidConfigValue {
-            config_entry: "debezium.heartbeat.interval.ms".to_owned(),
-            config_value: interval_value.to_owned(),
-        }
-        .into());
-    }
-
-    Ok(())
+    validate_heartbeat_interval(props)
 }

@@ -49,7 +49,6 @@ use crate::barrier::checkpoint::recovery::{
 use crate::barrier::checkpoint::state::{ApplyCommandInfo, BarrierWorkerState};
 use crate::barrier::complete_task::{BarrierCompleteOutput, CompleteBarrierTask};
 use crate::barrier::info::{InflightDatabaseInfo, SharedActorInfos};
-use crate::barrier::notifier::Notifier;
 use crate::barrier::partial_graph::{CollectedBarrier, PartialGraphManager, PartialGraphStat};
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::rpc::{from_partial_graph_id, to_partial_graph_id};
@@ -61,6 +60,7 @@ use crate::barrier::{
 use crate::controller::fragment::InflightFragmentInfo;
 use crate::controller::scale::{build_no_shuffle_fragment_graph_edges, find_no_shuffle_graphs};
 use crate::manager::MetaSrvEnv;
+use crate::notification::Notifier;
 
 fn fragment_has_online_unreschedulable_scan(fragment: &InflightFragmentInfo) -> bool {
     let mut has_unreschedulable_scan = false;
@@ -244,7 +244,6 @@ impl CheckpointControl {
             command,
             span,
             checkpoint,
-            barrier_interval_ms,
         } = new_barrier;
 
         if let Some((mut command, notifier)) = command {
@@ -354,7 +353,6 @@ impl CheckpointControl {
             database.handle_new_barrier(
                 Some((command, notifier)),
                 checkpoint,
-                barrier_interval_ms,
                 span,
                 partial_graph_manager,
                 &self.hummock_version_stats,
@@ -382,7 +380,6 @@ impl CheckpointControl {
             database.handle_new_barrier(
                 None,
                 checkpoint,
-                barrier_interval_ms,
                 span,
                 partial_graph_manager,
                 &self.hummock_version_stats,
@@ -1215,7 +1212,6 @@ impl DatabaseCheckpointControl {
         &mut self,
         command: Option<(Command, Notifier)>,
         checkpoint: bool,
-        barrier_interval_ms: u32,
         span: tracing::Span,
         partial_graph_manager: &mut PartialGraphManager,
         hummock_version_stats: &HummockVersionStats,
@@ -1307,9 +1303,7 @@ impl DatabaseCheckpointControl {
         };
 
         if let Some(Command::CreateStreamingJob {
-            job_type:
-                CreateStreamingJobType::SnapshotBackfill { .. }
-                | CreateStreamingJobType::BatchRefresh(_),
+            job_type: CreateStreamingJobType::Independent { .. },
             ..
         }) = &command
             && self.state.is_paused()
@@ -1324,9 +1318,7 @@ impl DatabaseCheckpointControl {
             return Ok(());
         }
 
-        let barrier_info =
-            self.state
-                .next_barrier_info(checkpoint, curr_epoch, barrier_interval_ms);
+        let barrier_info = self.state.next_barrier_info(checkpoint, curr_epoch);
         // Tracing related stuff
         barrier_info.prev_epoch.span().in_scope(|| {
             tracing::info!(target: "rw_tracing", epoch = barrier_info.curr_epoch(), "new barrier enqueued");
