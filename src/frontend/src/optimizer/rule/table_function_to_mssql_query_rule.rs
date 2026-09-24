@@ -19,7 +19,7 @@ use risingwave_common::types::{DataType, ScalarImpl};
 use super::prelude::{PlanRef, *};
 use crate::expr::{Expr, TableFunctionType};
 use crate::optimizer::plan_node::generic::GenericPlanRef;
-use crate::optimizer::plan_node::{LogicalMssqlQuery, LogicalTableFunction};
+use crate::optimizer::plan_node::{LogicalMssqlQuery, LogicalTableFunction, MssqlConnection};
 
 /// Optimizer rule that rewrites a `LogicalTableFunction` of type
 /// `MSSQL_QUERY` into a `LogicalMssqlQuery` plan node. Registered in the
@@ -86,14 +86,16 @@ impl Rule<Logical> for TableFunctionToMssqlQueryRule {
                 LogicalMssqlQuery::new(
                     logical_table_function.ctx(),
                     schema,
-                    hostname,
-                    port,
-                    username,
-                    password,
-                    database,
+                    MssqlConnection {
+                        hostname,
+                        port,
+                        username,
+                        password,
+                        database,
+                        encrypt,
+                        trust_cert,
+                    },
                     query,
-                    encrypt,
-                    trust_cert,
                     money_column_indices,
                 )
                 .into(),

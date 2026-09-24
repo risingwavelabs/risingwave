@@ -243,8 +243,7 @@ fn validate_read_only_query(query: &str) -> Result<(), BatchError> {
                 // always preceded by whitespace + `AS`. Skip past the
                 // matching `)` so it isn't recorded as a top-level
                 // close-paren below.
-                let prev_is_ident =
-                    i > 0 && is_ident_char(bytes[i - 1]) && depth == 0;
+                let prev_is_ident = i > 0 && is_ident_char(bytes[i - 1]) && depth == 0;
                 if prev_is_ident {
                     let mut inner: i32 = 1;
                     i += 1;
@@ -303,19 +302,8 @@ fn validate_read_only_query(query: &str) -> Result<(), BatchError> {
     // and word boundaries, so identifiers like `update_log` are not
     // matched.
     for forbidden in [
-        "INSERT",
-        "UPDATE",
-        "DELETE",
-        "MERGE",
-        "CREATE",
-        "ALTER",
-        "DROP",
-        "TRUNCATE",
-        "EXEC",
-        "EXECUTE",
-        "GRANT",
-        "REVOKE",
-        "DENY",
+        "INSERT", "UPDATE", "DELETE", "MERGE", "CREATE", "ALTER", "DROP", "TRUNCATE", "EXEC",
+        "EXECUTE", "GRANT", "REVOKE", "DENY",
     ] {
         if has_top_level_keyword(&masked, forbidden) {
             return Err(BatchError::from(anyhow::anyhow!(
@@ -805,7 +793,7 @@ mod tests {
     fn validate_read_only_query_rejects_semicolon_free_ddl() {
         for (q, expected_kw) in [
             ("SELECT 1 DROP TABLE test", "DROP"),
-            ("SELECT 1; DROP TABLE test", "DROP"),   // also caught by `;` check
+            ("SELECT 1; DROP TABLE test", "DROP"), // also caught by `;` check
             ("SELECT 1 AS x TRUNCATE TABLE test", "TRUNCATE"),
             ("SELECT 1 EXEC sp_helpdb", "EXEC"),
         ] {
@@ -846,10 +834,8 @@ mod tests {
         validate_read_only_query("SELECT 1 INTERSECT SELECT 2").unwrap();
         validate_read_only_query("SELECT 1 INTERSECT ALL SELECT 2").unwrap();
         // Three-way, mixed.
-        validate_read_only_query(
-            "SELECT a FROM t1 UNION SELECT b FROM t2 EXCEPT SELECT c FROM t3",
-        )
-        .unwrap();
+        validate_read_only_query("SELECT a FROM t1 UNION SELECT b FROM t2 EXCEPT SELECT c FROM t3")
+            .unwrap();
     }
 
     /// A DML keyword that is part of an identifier (e.g. table named
@@ -858,7 +844,8 @@ mod tests {
     fn validate_read_only_query_allows_dml_substring_as_identifier() {
         validate_read_only_query("SELECT * FROM update_log").unwrap();
         validate_read_only_query("SELECT * FROM inserted_rows WHERE id = 1").unwrap();
-        validate_read_only_query("WITH cte AS (SELECT * FROM deleted_log) SELECT * FROM cte").unwrap();
+        validate_read_only_query("WITH cte AS (SELECT * FROM deleted_log) SELECT * FROM cte")
+            .unwrap();
     }
 
     /// CTEs with an explicit column list — `WITH cte(x) AS (...)` — must
@@ -867,10 +854,8 @@ mod tests {
     #[test]
     fn validate_read_only_query_accepts_cte_with_column_list() {
         validate_read_only_query("WITH cte(x) AS (SELECT 1) SELECT x FROM cte").unwrap();
-        validate_read_only_query(
-            "WITH cte(a, b) AS (SELECT 1, 2) SELECT a + b AS s FROM cte",
-        )
-        .unwrap();
+        validate_read_only_query("WITH cte(a, b) AS (SELECT 1, 2) SELECT a + b AS s FROM cte")
+            .unwrap();
         // Multiple CTEs, each with an explicit column list.
         validate_read_only_query(
             "WITH cte1(a) AS (SELECT 1), cte2(b) AS (SELECT 2) SELECT a + b FROM cte1, cte2",

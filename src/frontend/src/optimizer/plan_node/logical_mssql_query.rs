@@ -40,11 +40,33 @@ pub struct LogicalMssqlQuery {
     pub core: generic::MssqlQuery,
 }
 
+/// Bundled SQL Server connection parameters for the `mssql_query` table
+/// function. The seven fields are grouped into one argument so that
+/// [`LogicalMssqlQuery::new`] stays under `clippy::too_many_arguments`.
+///
+/// `encrypt` / `trust_cert` mirror the binder-side T-SQL `encrypt` and
+/// `TrustServerCertificate` connection-string options; `None` represents
+/// the 2-arg source-reference form, where the values are inherited from
+/// the named `sqlserver-cdc` source.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct MssqlConnection {
+    pub hostname: String,
+    pub port: String,
+    pub username: String,
+    pub password: String,
+    pub database: String,
+    pub encrypt: Option<String>,
+    pub trust_cert: Option<String>,
+}
+
 impl LogicalMssqlQuery {
     /// Build a `LogicalMssqlQuery` from the pre-discovered schema, the
-    /// connection parameters, and the optimizer context. The eight inline
-    /// form fields are all required; the 2-arg source-reference form
-    /// instead reuses connection parameters from the named source.
+    /// SQL Server connection parameters, the user query, the optimizer
+    /// context, and the bind-time `MONEY` / `SMALLMONEY` ordinals.
+    ///
+    /// `connection` groups the seven inline connection parameters; the
+    /// 2-arg source-reference form instead reuses connection parameters
+    /// from the named source (and is rewritten by the binder, not here).
     ///
     /// `money_column_indices` carries the bind-time `MONEY` /
     /// `SMALLMONEY` ordinals from `describe_mssql_query`. Empty for
@@ -52,16 +74,20 @@ impl LogicalMssqlQuery {
     pub fn new(
         ctx: OptimizerContextRef,
         schema: Schema,
-        hostname: String,
-        port: String,
-        username: String,
-        password: String,
-        database: String,
+        connection: MssqlConnection,
         query: String,
-        encrypt: Option<String>,
-        trust_cert: Option<String>,
         money_column_indices: Vec<usize>,
     ) -> Self {
+        let MssqlConnection {
+            hostname,
+            port,
+            username,
+            password,
+            database,
+            encrypt,
+            trust_cert,
+        } = connection;
+
         let core = generic::MssqlQuery {
             schema,
             hostname,

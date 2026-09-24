@@ -1194,7 +1194,7 @@ pub use logical_limit::LogicalLimit;
 pub use logical_locality_provider::LogicalLocalityProvider;
 pub use logical_match_recognize::LogicalMatchRecognize;
 pub use logical_max_one_row::LogicalMaxOneRow;
-pub use logical_mssql_query::LogicalMssqlQuery;
+pub use logical_mssql_query::{LogicalMssqlQuery, MssqlConnection};
 pub use logical_multi_join::{LogicalMultiJoin, LogicalMultiJoinBuilder};
 pub use logical_mysql_query::LogicalMySqlQuery;
 pub use logical_now::LogicalNow;

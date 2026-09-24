@@ -32,10 +32,7 @@ rw-dynamic-link = ["workspace-config/rw-dynamic-link"]
 openssl-vendored = ["workspace-config/openssl-vendored"]
 udf = ["risingwave_expr_impl/udf"]
 fips = ["workspace-config/fips"]
-all-connectors = [
-    "risingwave_connector/all-sinks-heavy",
-    "all-connectors-lite",
-]
+all-connectors = ["risingwave_connector/all-sinks-heavy", "all-connectors-lite"]
 all-connectors-lite = [
     "risingwave_connector/all-sinks-lite",
     "risingwave_connector/all-sources",
