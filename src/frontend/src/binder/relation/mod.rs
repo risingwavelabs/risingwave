@@ -96,28 +96,11 @@ impl Relation {
     pub fn is_correlated_by_depth(&self, depth: Depth) -> bool {
         match self {
             Relation::Subquery(subquery) => subquery.query.is_correlated_by_depth(depth),
-            Relation::Join(join) => {
+            Relation::Join(join) | Relation::Apply(join) => {
                 join.cond.has_correlated_input_ref_by_depth(depth)
                     || join.left.is_correlated_by_depth(depth)
                     || join.right.is_correlated_by_depth(depth)
             }
-            // The right side of an `Apply` is bound in a scope extended by its left input. When
-            // looking for a reference owned by an enclosing `Apply`, cross that scope boundary.
-            Relation::Apply(join) => {
-                join.cond.has_correlated_input_ref_by_depth(depth)
-                    || join.left.is_correlated_by_depth(depth)
-                    || join.right.is_correlated_by_depth(depth + 1)
-            }
-            Relation::TableFunction {
-                expr: table_function,
-                with_ordinality: _,
-            } => table_function.has_correlated_input_ref_by_depth(depth + 1),
-            Relation::Share(share) => match &share.input {
-                BoundShareInput::Query(query) => query.is_correlated_by_depth(depth),
-                BoundShareInput::ChangeLog { relation, .. } => {
-                    relation.is_correlated_by_depth(depth)
-                }
-            },
             _ => false,
         }
     }
@@ -133,18 +116,6 @@ impl Relation {
                     || join.left.is_correlated_by_correlated_id(correlated_id)
                     || join.right.is_correlated_by_correlated_id(correlated_id)
             }
-            Relation::TableFunction {
-                expr: table_function,
-                with_ordinality: _,
-            } => table_function.has_correlated_input_ref_by_correlated_id(correlated_id),
-            Relation::Share(share) => match &share.input {
-                BoundShareInput::Query(query) => {
-                    query.is_correlated_by_correlated_id(correlated_id)
-                }
-                BoundShareInput::ChangeLog { relation, .. } => {
-                    relation.is_correlated_by_correlated_id(correlated_id)
-                }
-            },
             _ => false,
         }
     }
@@ -179,14 +150,13 @@ impl Relation {
                 with_ordinality: _,
             } => table_function
                 .collect_correlated_indices_by_depth_and_assign_id(depth + 1, correlated_id),
-            Relation::Share(share) => {
-                match &mut share.input {
-                    BoundShareInput::Query(query) => query
-                        .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
-                    BoundShareInput::ChangeLog { relation, .. } => relation
-                        .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+            Relation::Share(share) => match &mut share.input {
+                BoundShareInput::Query(query) => {
+                    query.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id)
                 }
-            }
+                BoundShareInput::ChangeLog { relation, .. } => relation
+                    .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+            },
             _ => vec![],
         }
     }
