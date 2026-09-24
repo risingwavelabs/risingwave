@@ -412,7 +412,6 @@ mod tests {
             prev_epoch: TracedEpoch::new(Epoch(1)),
             curr_epoch: TracedEpoch::new(Epoch(2)),
             kind: BarrierKind::Checkpoint(vec![1]),
-            barrier_interval_ms: 1000,
         };
 
         assert!(status.can_drop());
@@ -422,7 +421,6 @@ mod tests {
             prev_epoch: TracedEpoch::new(Epoch(2)),
             curr_epoch: TracedEpoch::new(Epoch(3)),
             kind: BarrierKind::Checkpoint(vec![2]),
-            barrier_interval_ms: 1000,
         });
         assert!(status.can_drop());
     }
@@ -480,17 +478,17 @@ mod tests {
             prev_epoch: TracedEpoch::new(Epoch(1)),
             curr_epoch: TracedEpoch::new(Epoch(2)),
             kind: BarrierKind::Checkpoint(vec![1]),
-            };
-            let info = status.start_consume_upstream(&transition_barrier);
-            assert_eq!(info.fragment_infos[&fragment_id].nodes, new_node);
-            assert!(matches!(
-                status,
-                CreatingStreamingJobStatus::ConsumingUpstream { .. }
-            ));
-            let info = status.start_finishing(&BarrierInfo {
-                prev_epoch: TracedEpoch::new(Epoch(2)),
-                curr_epoch: TracedEpoch::new(Epoch(3)),
-                kind: BarrierKind::Checkpoint(vec![2]),
+        };
+        let info = status.start_consume_upstream(&transition_barrier);
+        assert_eq!(info.fragment_infos[&fragment_id].nodes, new_node);
+        assert!(matches!(
+            status,
+            CreatingStreamingJobStatus::ConsumingUpstream { .. }
+        ));
+        let info = status.start_finishing(&BarrierInfo {
+            prev_epoch: TracedEpoch::new(Epoch(2)),
+            curr_epoch: TracedEpoch::new(Epoch(3)),
+            kind: BarrierKind::Checkpoint(vec![2]),
         });
         assert_eq!(info.fragment_infos[&fragment_id].nodes, new_node);
         assert!(matches!(
