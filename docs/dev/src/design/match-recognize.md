@@ -240,6 +240,11 @@ liveness checks, extension probes — runs under two defenses:
   sound only when no `DEFINE` slot reads the running label assignment (all slots `SelfCol`/`Prev`);
   the executor computes that classification once per query. For such path-independent patterns the
   memo removes the exponential blowup outright; the budget remains as the backstop for the rest.
+  Its per-predicate sibling is the **verdict cache**: a matcher-scoped memo of each path-independent
+  `DEFINE`'s verdict per row, so a walk that asks the same `(var, pos)` from many paths evaluates
+  the expression once (see [Known costs](#known-costs-and-future-work) for the numbers). It lowers
+  the constant of a rescan, not its shape or its budget consumption: the budget still charges every
+  consuming edge, so the run length that exhausts a visit is unchanged.
 
 ## The executor
 
@@ -345,7 +350,9 @@ clearing it there turned partial information into a completed-scan verdict and t
 the rows of every match the truncated scan never reached (#27197). What remains inherently per-visit is a run that stays *alive* — `a{600} b`
 over an unbroken run of `a` rows keeps every start alive until a `b` arrives or its `WITHIN` window
 closes — where each rescan re-walks the live starts and the budget throttles the partition as
-described above; `WITHIN` is what bounds that.
+described above; `WITHIN` is what bounds that. The verdict cache makes each row's predicates cost
+one evaluation per rescan instead of one per start, which is most of that rescan's time; the
+`Θ(r²)` walk steps remain.
 
 **Without `WITHIN`.** There is no deadline, so `WITHIN`-finality is unreachable and nothing above
 applies: the partition emits nothing and evicts nothing, and because per-visit cost grows with the
@@ -615,8 +622,20 @@ not on Flink, whose window is exclusive.
 
 - **Per-row rescan of the live window.** A partition holding an open partial re-derives its
   provisional matches over the unfrozen suffix on every arriving row; incrementalizing the
-  provisional tail is the main planned performance follow-up, along with per-row predicate caching,
-  `WITHIN` deadline precompute, and label interning.
+  provisional tail is the main planned performance follow-up, along with `WITHIN` deadline
+  precompute and label interning. The `DEFINE` evaluations of that rescan are cached per row: a
+  predicate whose slots read only the candidate row or a physical `PREV` has a verdict that is a
+  function of the row position (the same path independence the walker's failure memo needs, per
+  predicate), so the matcher evaluates it once per row per visit and every later path that reaches
+  the row gets a cell load; predicates using running `FIRST`/`LAST` are evaluated per path as
+  before, and the `WITHIN` span test stays outside the cache. Cells are allocated lazily per
+  256-row chunk, so a matcher over a long buffer of matchless rows awaiting the watermark's prune
+  costs the walk, not the buffer. Measured (criterion `stream_match_recognize_define`, `(a+ b)`
+  over a pending run of `R` all-`a` rows, one arrival): 581 µs / 8.2 ms / 31.5 ms per arrival at
+  `R` = 64 / 256 / 512 before, 225 µs / 2.8 ms / 10.6 ms after; the automaton alone over a trivial
+  matcher costs 157 µs / 2.1 ms / 7.9 ms of either. Per predicate question that is ~45 ns before
+  (the expression evaluation) and ~5 ns after (the variable lookup and a cell load). What remains
+  is the walk itself, ~30 ns per position a start passes, still quadratic in the run.
 - **Watermark passes visit every partition.** A per-partition wakeup frontier (a deadline index)
   would make the pass proportional to the partitions that actually need attention; the previous
   design carried one, and reintroducing it on this architecture is future work.
