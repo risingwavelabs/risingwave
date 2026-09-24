@@ -174,7 +174,7 @@ mod tests {
                 vec![correlated.into()],
             ],
             schema,
-            ctx,
+            ctx.clone(),
         )
         .into();
 
