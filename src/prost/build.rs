@@ -740,6 +740,9 @@ for_all_wrapped_id_fields! (
             state_table_ids: TableId,
             table_id: JobId,
         }
+        WarmUpTableCacheRequest {
+            table_id: TableId,
+        }
         WorkerReschedule {
             worker_actor_diff: WorkerId,
         }
@@ -1003,6 +1006,9 @@ for_all_wrapped_id_fields! (
         }
         StreamingControlStreamResponse.ResetPartialGraphResponse {
             partial_graph_id: PartialGraphId,
+        }
+        WarmUpTableCacheRequest {
+            table_id: TableId,
         }
     }
     task_service {
