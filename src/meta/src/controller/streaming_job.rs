@@ -4170,7 +4170,7 @@ mod tests {
         assert_eq!(with_properties.len(), 2);
         assert_eq!(
             with_properties[0].to_string(),
-            "properties.receive.\"message\".\"max\".bytes = 'new'"
+            "properties.receive.message.\"max\".bytes = 'new'"
         );
         assert_eq!(with_properties[1].to_string(), "connection = kafka_conn");
     }
