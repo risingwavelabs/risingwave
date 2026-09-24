@@ -150,13 +150,14 @@ impl Relation {
                 with_ordinality: _,
             } => table_function
                 .collect_correlated_indices_by_depth_and_assign_id(depth + 1, correlated_id),
-            Relation::Share(share) => match &mut share.input {
-                BoundShareInput::Query(query) => {
-                    query.collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id)
+            Relation::Share(share) => {
+                match &mut share.input {
+                    BoundShareInput::Query(query) => query
+                        .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
+                    BoundShareInput::ChangeLog { relation, .. } => relation
+                        .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
                 }
-                BoundShareInput::ChangeLog { relation, .. } => relation
-                    .collect_correlated_indices_by_depth_and_assign_id(depth, correlated_id),
-            },
+            }
             _ => vec![],
         }
     }

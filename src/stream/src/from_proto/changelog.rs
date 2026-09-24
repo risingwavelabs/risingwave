@@ -18,7 +18,7 @@ use risingwave_storage::StateStore;
 
 use super::ExecutorBuilder;
 use crate::error::StreamResult;
-use crate::executor::{ChangeLogExecutor, Executor};
+use crate::executor::{ChangeLogExecutor, ChangeLogMode, Executor};
 use crate::task::ExecutorParams;
 
 pub struct ChangeLogExecutorBuilder;
@@ -31,9 +31,6 @@ impl ExecutorBuilder for ChangeLogExecutorBuilder {
         node: &Self::Node,
         _store: impl StateStore,
     ) -> StreamResult<Executor> {
-        if let Some(Mode::Keyed(_)) = &node.mode {
-            risingwave_common::bail!("AS CHANGELOG with KEY execution is not supported yet");
-        }
         let [input]: [_; 1] = params.input.try_into().unwrap();
 
         let vnodes = params
@@ -45,13 +42,20 @@ impl ExecutorBuilder for ChangeLogExecutorBuilder {
             .iter()
             .map(|k| *k as usize)
             .collect::<Vec<_>>();
+        let mode = match &node.mode {
+            None => ChangeLogMode::Normal,
+            Some(Mode::Keyed(_)) => ChangeLogMode::Keyed,
+        };
+        let stream_keys = node.stream_keys.iter().map(|&k| k as usize).collect();
         let exec = ChangeLogExecutor::new(
             params.actor_context,
             input,
             node.need_op,
             vnode_count,
             vnodes,
+            mode,
             distribution_keys,
+            stream_keys,
         );
         Ok((params.info, exec).into())
     }
