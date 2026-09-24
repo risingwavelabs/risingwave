@@ -179,6 +179,32 @@ mod tests {
         .into();
 
         assert!(PlanCorrelatedIdFinder::find_correlated_id(values.clone(), &42));
-        assert!(!PlanCorrelatedIdFinder::find_correlated_id(values, &43));
+        assert!(!PlanCorrelatedIdFinder::find_correlated_id(values.clone(), &43));
+
+        let left = LogicalValues::new(
+            vec![vec![2_i32.into()]],
+            Schema::new(vec![Field::with_name(DataType::Int32, "left")]),
+            ctx.clone(),
+        )
+        .into();
+        let apply = LogicalApply::create(
+            left,
+            values,
+            risingwave_pb::plan_common::JoinType::Inner,
+            crate::utils::Condition::true_cond(),
+            42,
+            vec![0],
+            false,
+        );
+
+        // The finder must keep ApplyEliminateRule from removing an Apply whose RHS
+        // still contains a correlated reference. Attempting batch conversion should
+        // therefore return the existing unsupported-LogicalApply error, rather than
+        // reaching protobuf serialization with an unresolved CorrelatedInputRef.
+        use crate::optimizer::rule::{ApplyEliminateRule, Rule};
+        let rule = ApplyEliminateRule::create();
+        let plan = rule.apply(apply.clone()).unwrap_or(apply);
+        let err = plan.to_batch().expect_err("LogicalApply must not reach batch conversion");
+        assert!(err.to_string().contains("LogicalApply should be unnested"));
     }
 }
