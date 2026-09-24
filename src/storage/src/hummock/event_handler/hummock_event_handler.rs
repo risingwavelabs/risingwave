@@ -743,7 +743,7 @@ impl HummockEventHandler {
                         assert_eq!(version_to_apply.id, version_delta.prev_id);
                         if let Some(sst_delta_infos) = &mut sst_delta_infos {
                             sst_delta_infos
-                                .extend(version_to_apply.build_sst_delta_infos(&version_delta));
+                                .extend(version_to_apply.build_sst_delta_infos(&version_delta).0);
                         }
 
                         version_to_apply.apply_version_delta(&version_delta);
