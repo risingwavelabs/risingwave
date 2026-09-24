@@ -314,7 +314,7 @@ impl Binder {
             .collect::<Result<Vec<Field>>>()?;
 
         if let Some(Relation::Share(bound)) = &from
-            && matches!(bound.input, BoundShareInput::ChangeLog(_))
+            && matches!(bound.input, BoundShareInput::ChangeLog { .. })
             && fields.iter().filter(|&x| x.name.eq(CHANGELOG_OP)).count() > 1
         {
             return Err(ErrorCode::BindError(

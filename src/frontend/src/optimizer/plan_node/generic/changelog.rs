@@ -12,8 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use pretty_xmlish::{Str, XmlNode};
-use risingwave_common::catalog::{Field, Schema};
+use pretty_xmlish::{Pretty, Str, XmlNode};
+use risingwave_common::catalog::{Field, FieldDisplay, Schema};
 use risingwave_common::util::column_index_mapping::ColIndexMapping;
 
 use super::{DistillUnit, GenericPlanNode};
@@ -28,6 +28,8 @@ pub const _CHANGELOG_ROW_ID: &str = "_changelog_row_id";
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct ChangeLog<PlanRef> {
     pub input: PlanRef,
+    /// Declared key column indices in the input schema.
+    pub key_indices: Option<Vec<usize>>,
     // If there is no op in the output result, it is false, example 'create materialized view mv1 as with sub as changelog from t1 select v1 from sub;'
     pub need_op: bool,
     // Before rewrite. If there is no changelog_row_id in the output result, it is false.
@@ -36,13 +38,36 @@ pub struct ChangeLog<PlanRef> {
 }
 impl<PlanRef: GenericPlanRef> DistillUnit for ChangeLog<PlanRef> {
     fn distill_with_name<'a>(&self, name: impl Into<Str<'a>>) -> XmlNode<'a> {
-        childless_record(name, vec![])
+        let mut fields = Vec::with_capacity(1);
+
+        if let Some(key_indices) = &self.key_indices {
+            let key = Pretty::Array(
+                key_indices
+                    .iter()
+                    .map(|&index| {
+                        let field = &self.input.schema()[index];
+
+                        Pretty::display(&FieldDisplay(field))
+                    })
+                    .collect(),
+            );
+
+            fields.push(("key", key));
+        }
+
+        childless_record(name, fields)
     }
 }
 impl<PlanRef: GenericPlanRef> ChangeLog<PlanRef> {
-    pub fn new(input: PlanRef, need_op: bool, need_changelog_row_id: bool) -> Self {
+    pub fn new(
+        input: PlanRef,
+        key_indices: Option<Vec<usize>>,
+        need_op: bool,
+        need_changelog_row_id: bool,
+    ) -> Self {
         ChangeLog {
             input,
+            key_indices,
             need_op,
             need_changelog_row_id,
         }
@@ -51,6 +76,7 @@ impl<PlanRef: GenericPlanRef> ChangeLog<PlanRef> {
     pub fn clone_with_input<OtherPlanRef>(&self, input: OtherPlanRef) -> ChangeLog<OtherPlanRef> {
         ChangeLog {
             input,
+            key_indices: self.key_indices.clone(),
             need_op: self.need_op,
             need_changelog_row_id: self.need_changelog_row_id,
         }
