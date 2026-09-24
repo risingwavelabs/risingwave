@@ -304,7 +304,6 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
         iceberg_compaction_manager: IcebergCompactionManagerRef,
         scale_controller: ScaleControllerRef,
         request_rx: mpsc::UnboundedReceiver<BarrierManagerRequest>,
-        barrier_scheduler: schedule::BarrierScheduler,
         refresh_manager: GlobalRefreshManagerRef,
     ) -> Self {
         let status = Arc::new(ArcSwap::new(Arc::new(BarrierManagerStatus::Starting)));
@@ -318,7 +317,6 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             source_manager,
             scale_controller,
             env.clone(),
-            barrier_scheduler,
             refresh_manager,
             sink_manager,
             iceberg_pk_index_sink_manager,

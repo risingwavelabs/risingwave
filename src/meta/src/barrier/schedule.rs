@@ -14,6 +14,7 @@
 
 use std::collections::hash_map::Entry;
 use std::collections::{HashMap, HashSet, VecDeque};
+use std::future::Future;
 use std::sync::Arc;
 
 use anyhow::{Context, anyhow};
@@ -221,35 +222,27 @@ impl BarrierScheduler {
     /// Run multiple commands and return when they're all completely finished (i.e., collected). It's ensured that
     /// multiple commands are executed continuously.
     ///
-    /// Returns the barrier info of each command.
-    ///
-    /// TODO: atomicity of multiple commands is not guaranteed.
-    #[await_tree::instrument("run_commands({})", commands.iter().join(", "))]
-    async fn run_multiple_commands(
+    /// Run a command and return when it's completely finished (i.e., collected).
+    #[await_tree::instrument("run_command({})", command)]
+    pub async fn run_command(&self, database_id: DatabaseId, command: Command) -> MetaResult<()> {
+        self.schedule_command(database_id, command)?.await
+    }
+
+    /// Schedule a command and return a future that resolves once it is collected.
+    pub fn schedule_command(
         &self,
         database_id: DatabaseId,
-        commands: Vec<Command>,
-    ) -> MetaResult<()> {
-        let mut contexts = Vec::with_capacity(commands.len());
-        let mut scheduleds = Vec::with_capacity(commands.len());
-
-        for command in commands {
-            let (notifier, started_rx) = Notifier::new();
-            contexts.push(started_rx);
-            scheduleds.push((command, notifier));
-        }
-
-        self.push(database_id, scheduleds)?;
-
-        for injected_rx in contexts {
-            // Wait for this command to be injected, and record the result.
-            tracing::trace!("waiting for injected_rx");
-            let collect_rxs = injected_rx
+        command: Command,
+    ) -> MetaResult<impl Future<Output = MetaResult<()>> + use<>> {
+        tracing::trace!("schedule_command: {:?}", command);
+        let (notifier, started_rx) = Notifier::new();
+        self.push(database_id, vec![(command, notifier)])?;
+        Ok(async move {
+            let collect_rxs = started_rx
                 .instrument_await("wait_injected")
                 .await
                 .ok()
                 .context("failed to inject barrier")??;
-
             tracing::trace!(
                 collection_count = collect_rxs.len(),
                 "waiting for collect_rx"
@@ -257,20 +250,8 @@ impl BarrierScheduler {
             // Wait for every part before returning the first collection error.
             wait_collection(collect_rxs)
                 .instrument_await("wait_collected")
-                .await?;
-        }
-
-        Ok(())
-    }
-
-    /// Run a command and return when it's completely finished (i.e., collected).
-    ///
-    /// Returns the barrier info of the actual command.
-    pub async fn run_command(&self, database_id: DatabaseId, command: Command) -> MetaResult<()> {
-        tracing::trace!("run_command: {:?}", command);
-        let ret = self.run_multiple_commands(database_id, vec![command]).await;
-        tracing::trace!("run_command finished");
-        ret
+                .await
+        })
     }
 
     /// Schedule a command without waiting for it to be executed.
@@ -285,8 +266,7 @@ impl BarrierScheduler {
         let start = Instant::now();
 
         tracing::debug!("start barrier flush");
-        self.run_multiple_commands(database_id, vec![Command::Flush])
-            .await?;
+        self.run_command(database_id, Command::Flush).await?;
 
         let elapsed = Instant::now().duration_since(start);
         tracing::debug!("barrier flushed in {:?}", elapsed);
@@ -899,9 +879,11 @@ mod tests {
             unimplemented!()
         }
 
-        async fn handle_refresh_finished_table_ids(
+        async fn handle_refresh_finished_actors(
             &self,
-            _refresh_finished_table_ids: Vec<JobId>,
+            _refresh_finished_actors: Vec<
+                risingwave_pb::stream_service::barrier_complete_response::PbRefreshFinishedActor,
+            >,
         ) -> MetaResult<()> {
             unimplemented!()
         }

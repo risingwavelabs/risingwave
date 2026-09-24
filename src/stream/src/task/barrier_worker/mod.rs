@@ -29,6 +29,7 @@ use risingwave_pb::stream_plan::barrier::BarrierKind;
 use risingwave_pb::stream_service::barrier_complete_response::{
     PbCdcSourceOffsetUpdated, PbCdcTableBackfillProgress, PbCreateMviewProgress,
     PbIcebergPkIndexSinkMetadata, PbListFinishedSource, PbLoadFinishedSource, PbLocalSstableInfo,
+    PbRefreshFinishedActor,
 };
 use risingwave_rpc_client::error::{ToTonicStatus, TonicStatusWrapper};
 use risingwave_storage::store_impl::AsHummock;
@@ -102,10 +103,8 @@ pub struct BarrierCompleteResult {
     /// Iceberg pk-index sink metadata reports collected during this barrier.
     pub iceberg_pk_index_sink_metadata: Vec<PbIcebergPkIndexSinkMetadata>,
 
-    /// The table IDs that should be truncated.
-    pub truncate_tables: Vec<TableId>,
-    /// The table IDs that have finished refresh.
-    pub refresh_finished_tables: Vec<TableId>,
+    /// The materialize actors that have finished their part of a table refresh.
+    pub refresh_finished_actors: Vec<PbRefreshFinishedActor>,
 }
 
 /// Lives in [`crate::task::barrier_worker::LocalBarrierWorker`],
@@ -628,11 +627,11 @@ mod await_epoch_completed_future {
 
     use futures::FutureExt;
     use futures::future::BoxFuture;
-    use risingwave_common::id::TableId;
     use risingwave_hummock_sdk::SyncResult;
     use risingwave_pb::stream_service::barrier_complete_response::{
         PbCdcSourceOffsetUpdated, PbCdcTableBackfillProgress, PbCreateMviewProgress,
         PbIcebergPkIndexSinkMetadata, PbListFinishedSource, PbLoadFinishedSource,
+        PbRefreshFinishedActor,
     };
 
     use crate::error::StreamResult;
@@ -654,8 +653,7 @@ mod await_epoch_completed_future {
         cdc_table_backfill_progress: Vec<PbCdcTableBackfillProgress>,
         cdc_source_offset_updated: Vec<PbCdcSourceOffsetUpdated>,
         iceberg_pk_index_sink_metadata: Vec<PbIcebergPkIndexSinkMetadata>,
-        truncate_tables: Vec<TableId>,
-        refresh_finished_tables: Vec<TableId>,
+        refresh_finished_actors: Vec<PbRefreshFinishedActor>,
     ) -> AwaitEpochCompletedFuture {
         let prev_epoch = barrier.epoch.prev;
         let future = async move {
@@ -677,8 +675,7 @@ mod await_epoch_completed_future {
                     cdc_table_backfill_progress,
                     cdc_source_offset_updated,
                     iceberg_pk_index_sink_metadata,
-                    truncate_tables,
-                    refresh_finished_tables,
+                    refresh_finished_actors,
                 }),
             )
         });
@@ -755,8 +752,7 @@ impl LocalBarrierWorker {
                 cdc_table_backfill_progress,
                 cdc_source_offset_updated,
                 iceberg_pk_index_sink_metadata,
-                truncate_tables,
-                refresh_finished_tables,
+                refresh_finished_actors,
             } = graph_state.pop_barrier_to_complete(prev_epoch);
 
             let complete_barrier_future = match &barrier.kind {
@@ -792,8 +788,7 @@ impl LocalBarrierWorker {
                         cdc_table_backfill_progress,
                         cdc_source_offset_updated,
                         iceberg_pk_index_sink_metadata,
-                        truncate_tables,
-                        refresh_finished_tables,
+                        refresh_finished_actors,
                     )
                 });
         }
@@ -813,8 +808,7 @@ impl LocalBarrierWorker {
             cdc_table_backfill_progress,
             cdc_source_offset_updated,
             iceberg_pk_index_sink_metadata,
-            truncate_tables,
-            refresh_finished_tables,
+            refresh_finished_actors,
         } = result;
 
         let (synced_sstables, table_watermarks, old_value_ssts, vector_index_adds) = sync_result
@@ -875,8 +869,7 @@ impl LocalBarrierWorker {
                             })
                             .collect(),
                         cdc_table_backfill_progress,
-                        truncate_tables,
-                        refresh_finished_tables,
+                        refresh_finished_actors,
                         iceberg_pk_index_sink_metadata,
                     },
                 )
