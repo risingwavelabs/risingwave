@@ -1407,8 +1407,6 @@ mod tests {
     async fn test_scan_pruning() {
         use std::ops::Bound::{Excluded, Included};
 
-        use risingwave_hummock_sdk::key::is_empty_key_range;
-
         use super::{
             BackwardIteratorFactory, ForwardIteratorFactory, HummockReadVersion, VersionUpdate,
             VnodeWatermark, WatermarkDirection, WatermarkSerdeType, read_filter_for_version,
@@ -1446,11 +1444,14 @@ mod tests {
         for level_type in [PbLevelType::Nonoverlapping, PbLevelType::Overlapping] {
             let version =
                 build_version_from_sstables(table_id, vec![absent_sst.clone()], level_type);
-            for range in [
-                (Included(key(15)), Excluded(key(15))),
-                (Included(key(30)), Included(key(40))),
+            for (range, is_empty) in [
+                ((Included(key(15)), Excluded(key(15))), true),
+                ((Excluded(key(15)), Included(key(15))), true),
+                ((Excluded(key(15)), Excluded(key(15))), true),
+                ((Excluded(key(10)), Included(key(10))), true),
+                ((Included(key(30)), Included(key(40))), false),
             ] {
-                let staging = if is_empty_key_range(&range) {
+                let staging = if is_empty {
                     vec![absent_sst.clone()]
                 } else {
                     vec![]
@@ -1551,6 +1552,9 @@ mod tests {
         // by the memtable. The backward factory must preserve the reverse output order.
         for (range, expected) in [
             ((Included(key(15)), Excluded(key(15))), vec![]),
+            ((Excluded(key(15)), Included(key(15))), vec![]),
+            ((Excluded(key(15)), Excluded(key(15))), vec![]),
+            ((Included(key(15)), Included(key(15))), vec![15]),
             ((Included(key(10)), Included(key(10))), vec![10]),
             ((Included(key(10)), Excluded(key(20))), vec![10, 15]),
             (

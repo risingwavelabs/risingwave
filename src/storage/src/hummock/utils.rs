@@ -33,7 +33,7 @@ use risingwave_expr::codegen::try_stream;
 use risingwave_hummock_sdk::can_concat;
 use risingwave_hummock_sdk::compaction_group::StateTableId;
 use risingwave_hummock_sdk::key::{
-    EmptySliceRef, FullKey, TableKey, UserKey, bound_table_key_range,
+    EmptySliceRef, FullKey, TableKey, UserKey, bound_table_key_range, is_empty_key_range,
 };
 use risingwave_hummock_sdk::key_range::KeyRangeCommon;
 use risingwave_hummock_sdk::sstable_info::SstableInfo;
@@ -136,6 +136,11 @@ pub fn prune_nonoverlapping_ssts<'a>(
     table_id: StateTableId,
 ) -> impl DoubleEndedIterator<Item = &'a SstableInfo> {
     debug_assert!(can_concat(ssts));
+    let ssts = if is_empty_key_range(&user_key_range) {
+        &[]
+    } else {
+        ssts
+    };
     let mut start_table_idx = match user_key_range.0 {
         Included(key) | Excluded(key) => search_sst_idx(ssts, key).saturating_sub(1),
         _ => 0,
@@ -930,6 +935,12 @@ mod tests {
             (Included(5), Excluded(10), vec![]),
             (Included(5), Included(10), vec![0]),
             (Included(20), Included(20), vec![1]),
+            (Included(20), Excluded(20), vec![]),
+            (Excluded(20), Included(20), vec![]),
+            (Excluded(20), Excluded(20), vec![]),
+            (Included(15), Excluded(15), vec![]),
+            (Excluded(15), Included(15), vec![]),
+            (Excluded(15), Excluded(15), vec![]),
             (Included(10), Excluded(20), vec![0]),
             (Included(10), Included(20), vec![0, 1]),
             (Included(30), Included(40), vec![1]),
