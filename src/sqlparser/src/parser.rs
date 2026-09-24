@@ -4926,7 +4926,13 @@ impl Parser<'_> {
                     parser_err!("Expected 'changelog' but found '{}'", changelog);
                 }
                 self.expect_keyword(Keyword::FROM)?;
-                Ok(CteInner::ChangeLog(self.parse_object_name()?))
+                let from = self.parse_object_name()?;
+                let key = self
+                    .parse_keyword(Keyword::KEY)
+                    .then(|| self.parse_parenthesized_column_list(Mandatory))
+                    .transpose()?;
+
+                Ok(CteInner::ChangeLog { from, key })
             }
         }
     }
