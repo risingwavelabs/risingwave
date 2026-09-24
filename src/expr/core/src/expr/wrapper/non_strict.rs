@@ -60,7 +60,8 @@ impl EvalErrorReport for LogReport {
 
 /// A wrapper of an expression that evaluates in a non-strict way. Basically...
 /// - When an error occurs during chunk-level evaluation, pad with NULL for each failed row.
-/// - Report all error occurred during row-level evaluation to the [`EvalErrorReport`].
+/// - Report ordinary row-level errors to the [`EvalErrorReport`].
+/// - Propagate fatal external-operation failures instead of manufacturing NULL results.
 pub(crate) struct NonStrict<E, R> {
     inner: E,
     report: R,
@@ -106,6 +107,7 @@ macro_rules! non_strict_eval_array {
     ($mode:ident, $this:expr, $input:expr) => {{
         Ok(match forward!($mode, $this.inner, eval($input)) {
             Ok(array) => array,
+            Err(error) if error.is_fatal() => return Err(error),
             Err(ExprError::Multiple(array, errors)) => {
                 for error in errors {
                     $this.report.report(error);
@@ -126,6 +128,7 @@ macro_rules! non_strict_eval_value {
     ($mode:ident, $this:expr, $input:expr) => {{
         Ok(match forward!($mode, $this.inner, eval_v2($input)) {
             Ok(array) => array,
+            Err(error) if error.is_fatal() => return Err(error),
             Err(ExprError::Multiple(array, errors)) => {
                 for error in errors {
                     $this.report.report(error);
@@ -147,6 +150,7 @@ macro_rules! non_strict_eval_row {
     ($mode:ident, $this:expr, $input:expr) => {{
         Ok(match forward!($mode, $this.inner, eval_row($input)) {
             Ok(datum) => datum,
+            Err(error) if error.is_fatal() => return Err(error),
             Err(error) => {
                 $this.report.report(error);
                 None // NULL
@@ -194,5 +198,85 @@ where
     /// Evaluate expression on a single row, report error and return NULL if failed.
     async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
         non_strict_eval_row!(async, self, input)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::array::{Array, I32Array};
+
+    use super::*;
+
+    #[derive(Debug)]
+    struct FailingExpression {
+        fatal: bool,
+        multiple: bool,
+    }
+
+    impl FailingExpression {
+        fn error(&self) -> ExprError {
+            let error = if self.fatal {
+                ExprError::External("request failed".into())
+            } else {
+                ExprError::DivisionByZero
+            };
+            if self.multiple {
+                ExprError::Multiple(
+                    I32Array::from_iter([None]).into_ref(),
+                    vec![ExprError::NumericOutOfRange, error].into(),
+                )
+            } else {
+                error
+            }
+        }
+    }
+
+    impl ExpressionInfo for FailingExpression {
+        fn return_type(&self) -> DataType {
+            DataType::Int32
+        }
+    }
+
+    impl SyncExpression for FailingExpression {
+        fn eval(&self, _: &DataChunk) -> Result<ArrayRef> {
+            Err(self.error())
+        }
+
+        fn eval_row(&self, _: &OwnedRow) -> Result<Datum> {
+            Err(self.error())
+        }
+    }
+
+    #[test]
+    fn external_errors_survive_nested_non_strict_wrappers() {
+        let input = DataChunk::new_dummy(1);
+        for fatal in [false, true] {
+            for multiple in [false, true] {
+                let expr = NonStrict::new(
+                    NonStrict::new(FailingExpression { fatal, multiple }, LogReport),
+                    LogReport,
+                );
+                let array = expr.eval(&input);
+                let value = expr.eval_v2(&input);
+                let row = expr.eval_row(&OwnedRow::empty());
+                if fatal {
+                    assert!(array.unwrap_err().is_fatal());
+                    assert!(value.unwrap_err().is_fatal());
+                    assert!(row.unwrap_err().is_fatal());
+                } else {
+                    assert!(array.unwrap().value_at(0).is_none());
+                    assert!(value.is_ok());
+                    assert!(row.unwrap().is_none());
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn external_errors_remain_fatal_with_function_context() {
+        let error = ExprError::function("outer", [], ExprError::External("request failed".into()));
+        assert!(error.is_fatal());
+        assert!(ExprError::Internal(anyhow::Error::new(error).context("context")).is_fatal());
+        assert!(!ExprError::function("outer", [], ExprError::DivisionByZero).is_fatal());
     }
 }

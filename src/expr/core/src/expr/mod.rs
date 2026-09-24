@@ -369,9 +369,8 @@ impl<E: AsyncExpression + 'static> E {
     }
 }
 
-/// An type-safe wrapper that indicates the inner expression can be evaluated in a non-strict
-/// manner, i.e., developers can directly call `eval_infallible` and `eval_row_infallible` without
-/// checking the result.
+/// An expression that replaces ordinary SQL evaluation errors with NULL.
+/// Fatal external-operation failures still propagate through `eval` and `eval_row`.
 ///
 /// This is usually created by non-strict build functions like [`crate::expr::build_non_strict_from_prost`]
 /// and [`crate::expr::build_func_non_strict`]. It can also be created directly by
@@ -428,7 +427,23 @@ impl NonStrictExpression {
         }
     }
 
-    /// Evaluate the expression in vectorized execution and assert it succeeds. Returns an array.
+    /// Evaluate while preserving fatal external-operation errors.
+    pub async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+        match self {
+            Self::Sync(expr) => expr.eval(input),
+            Self::Async(expr) => AsyncDynExpression::eval(expr.as_ref(), input).await,
+        }
+    }
+
+    /// Evaluate a row while preserving fatal external-operation errors.
+    pub async fn eval_row(&self, input: &OwnedRow) -> Result<Datum> {
+        match self {
+            Self::Sync(expr) => expr.eval_row(input),
+            Self::Async(expr) => AsyncDynExpression::eval_row(expr.as_ref(), input).await,
+        }
+    }
+
+    /// Evaluate an internal expression known not to perform fallible external operations.
     ///
     /// Use with expressions built in non-strict mode.
     pub async fn eval_infallible(&self, input: &DataChunk) -> ArrayRef {
@@ -439,8 +454,7 @@ impl NonStrictExpression {
         .expect("evaluation failed")
     }
 
-    /// Evaluate the expression in row-based execution and assert it succeeds. Returns a nullable
-    /// scalar.
+    /// Evaluate an internal row expression known not to perform fallible external operations.
     ///
     /// Use with expressions built in non-strict mode.
     pub async fn eval_row_infallible(&self, input: &OwnedRow) -> Datum {

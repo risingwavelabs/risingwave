@@ -163,7 +163,7 @@ pub async fn apply_project_exprs(
     let mut projected_columns = Vec::new();
 
     for expr in exprs {
-        let evaluated_expr = expr.eval_infallible(&data_chunk).await;
+        let evaluated_expr = expr.eval(&data_chunk).await?;
         projected_columns.push(evaluated_expr);
     }
     let (_, vis) = data_chunk.into_parts();
@@ -208,7 +208,7 @@ impl Inner {
                         let derived_watermark = watermark
                             .clone()
                             .transform_with_expr(&exprs[out_col_idx], out_col_idx)
-                            .await;
+                            .await?;
                         if let Some(derived_watermark) = derived_watermark {
                             ret.push(derived_watermark);
                         } else {

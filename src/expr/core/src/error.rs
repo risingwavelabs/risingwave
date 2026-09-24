@@ -119,6 +119,11 @@ pub enum ExprError {
     #[error("invalid state: {0}")]
     InvalidState(String),
 
+    /// A failed external operation whose result must not be replaced with SQL NULL.
+    /// The message must not contain credentials or request/response payloads.
+    #[error("{0}")]
+    External(String),
+
     /// Function error message returned by UDF.
     /// TODO: replace with `Function`
     #[error("{0}")]
@@ -139,6 +144,28 @@ pub enum ExprError {
 static_assertions::const_assert_eq!(std::mem::size_of::<ExprError>(), 40);
 
 impl ExprError {
+    /// Whether evaluation must abort even in non-strict mode.
+    pub fn is_fatal(&self) -> bool {
+        match self {
+            Self::External(_) => true,
+            Self::Multiple(_, errors) => errors.0.iter().any(Self::is_fatal),
+            Self::Function { source, .. } => {
+                let mut source: Option<&(dyn std::error::Error + 'static)> = Some(source.as_ref());
+                while let Some(error) = source {
+                    if error.downcast_ref::<Self>().is_some_and(Self::is_fatal) {
+                        return true;
+                    }
+                    source = error.source();
+                }
+                false
+            }
+            Self::Internal(error) => error
+                .chain()
+                .any(|source| source.downcast_ref::<Self>().is_some_and(Self::is_fatal)),
+            _ => false,
+        }
+    }
+
     /// Constructs a [`ExprError::Function`] error with the given information for display.
     pub fn function<'a>(
         fn_name: &str,

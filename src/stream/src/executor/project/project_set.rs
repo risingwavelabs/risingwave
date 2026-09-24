@@ -299,7 +299,7 @@ impl Inner {
                     watermark
                         .clone()
                         .transform_with_expr(expr, expr_idx + PROJ_ROW_ID_OFFSET)
-                        .await
+                        .await?
                 }
                 ProjectSetSelectItem::Set(_) => {
                     bail!("Watermark should not be produced by a table function");
@@ -371,7 +371,7 @@ impl ProjectSetSelectItem {
         input: &'a DataChunk,
     ) -> Result<Either<TableFunctionOutputIter<'a>, ArrayRef>, ExprError> {
         match self {
-            Self::Scalar(expr) => Ok(Either::Right(expr.eval_infallible(input).await)),
+            Self::Scalar(expr) => Ok(Either::Right(expr.eval(input).await?)),
             Self::Set(tf) => Ok(Either::Left(
                 TableFunctionOutputIter::new(tf.eval(input).await).await?,
             )),

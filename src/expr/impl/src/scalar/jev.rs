@@ -79,7 +79,7 @@ fn build(_: DataType, children: Vec<BoxedExpression>) -> Result<BoxedExpression>
 
 fn request_error(message: impl std::fmt::Display) -> ExprError {
     // Do not attach the request, response body, URL, or function arguments to errors.
-    ExprError::Custom(format!("jev_analyze: {message}"))
+    ExprError::External(format!("jev_analyze: {message}"))
 }
 
 impl JevAnalyze {

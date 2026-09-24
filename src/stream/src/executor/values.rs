@@ -100,7 +100,7 @@ impl ValuesExecutor {
                 let mut array_builders = schema.create_array_builders(chunk_size);
                 for row in rows.by_ref().take(chunk_size) {
                     for (expr, builder) in row.into_iter().zip_eq_fast(&mut array_builders) {
-                        let out = expr.eval_infallible(&one_row_chunk).await;
+                        let out = expr.eval(&one_row_chunk).await?;
                         builder.append_array(&out);
                     }
                 }

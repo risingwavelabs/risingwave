@@ -172,7 +172,7 @@ impl<S: StateStore> Inner<S> {
                     let mut eval_result_arrs = Vec::with_capacity(self.exprs.len());
                     for expr in &self.exprs {
                         // for deletions, the evaluation result is NULL
-                        eval_result_arrs.push(expr.eval_infallible(&eval_chunk).await);
+                        eval_result_arrs.push(expr.eval(&eval_chunk).await?);
                     }
 
                     let mut eval_result_builders = eval_result_arrs
@@ -260,6 +260,209 @@ impl<S: StateStore> Inner<S> {
                     yield Message::Watermark(watermark);
                 }
             }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+
+    use multimap::MultiMap;
+    use risingwave_common::array::{Array, ArrayBuilder, ArrayRef, DataChunk, JsonbArrayBuilder};
+    use risingwave_common::catalog::Field;
+    use risingwave_common::test_prelude::StreamChunkTestExt;
+    use risingwave_common::types::{Datum, JsonbVal};
+    use risingwave_common::util::epoch::test_epoch;
+    use risingwave_common::util::sort_util::OrderType;
+    use risingwave_expr::expr::{
+        AsyncExpression, AsyncExpressionBoxExt, ExpressionInfo, LogReport,
+    };
+    use risingwave_expr::{ExprError, Result};
+    use risingwave_storage::memory::MemoryStateStore;
+    use serde_json::json;
+    use tokio::sync::Semaphore;
+
+    use super::*;
+    use crate::executor::project::ProjectExecutor;
+    use crate::executor::test_utils::top_n_executor::create_in_memory_state_table_from_state_store;
+    use crate::executor::test_utils::{MessageSender, MockSource, StreamExecutorTestExt};
+
+    #[derive(Debug, Clone, Default)]
+    struct RemoteExpression {
+        calls: Arc<AtomicU64>,
+        fail: Arc<AtomicBool>,
+        gate: Option<Arc<Semaphore>>,
+    }
+
+    impl ExpressionInfo for RemoteExpression {
+        fn return_type(&self) -> DataType {
+            DataType::Jsonb
+        }
+    }
+
+    impl AsyncExpression for RemoteExpression {
+        async fn eval(&self, input: &DataChunk) -> Result<ArrayRef> {
+            let mut builder = JsonbArrayBuilder::new(input.capacity());
+            for visible in input.visibility().iter() {
+                if !visible {
+                    builder.append_null();
+                    continue;
+                }
+                let version = self.calls.fetch_add(1, Ordering::SeqCst) + 1;
+                if let Some(gate) = &self.gate {
+                    let _permit = gate.acquire().await.unwrap();
+                }
+                if self.fail.load(Ordering::SeqCst) {
+                    return Err(ExprError::External("mock service unavailable".into()));
+                }
+                builder.append_owned(Some(JsonbVal::from(json!({"version": version}))));
+            }
+            Ok(builder.finish().into_ref())
+        }
+
+        async fn eval_row(&self, _: &OwnedRow) -> Result<Datum> {
+            unreachable!("these executors evaluate chunks")
+        }
+    }
+
+    async fn executor(
+        store: MemoryStateStore,
+        expression: RemoteExpression,
+        materialized: bool,
+    ) -> (MessageSender, BoxedMessageStream) {
+        let (tx, source) = MockSource::channel();
+        let input = source.into_executor(
+            Schema::new(vec![
+                Field::unnamed(DataType::Int64),
+                Field::unnamed(DataType::Int64),
+            ]),
+            vec![0],
+        );
+        // Exercise the non-strict wrapper used in production, not just the mock's error return.
+        let expr = NonStrictExpression::new_topmost(expression.boxed(), LogReport);
+        let actor_ctx = ActorContext::for_test(123);
+        if !materialized {
+            return (
+                tx,
+                ProjectExecutor::new(actor_ctx, input, vec![expr], MultiMap::new(), vec![], false)
+                    .boxed()
+                    .execute(),
+            );
+        }
+        let state_table = create_in_memory_state_table_from_state_store(
+            &[DataType::Int64, DataType::Int64, DataType::Jsonb],
+            &[OrderType::ascending()],
+            &[0],
+            store,
+        )
+        .await;
+        let stream = MaterializedExprsExecutor::new(MaterializedExprsArgs {
+            actor_ctx,
+            input,
+            exprs: vec![expr],
+            state_table,
+            state_clean_col_idx: None,
+            watermark_epoch: Arc::new(AtomicU64::new(0)),
+        })
+        .boxed()
+        .execute();
+        (tx, stream)
+    }
+
+    fn versions(chunk: &StreamChunk) -> Vec<Option<serde_json::Value>> {
+        chunk
+            .columns()
+            .last()
+            .unwrap()
+            .as_jsonb()
+            .iter()
+            .map(|value| value.map(|value| JsonbVal::from(value).take()))
+            .collect()
+    }
+
+    #[tokio::test]
+    async fn restores_results_for_update_and_delete_after_recovery() {
+        let store = MemoryStateStore::new();
+        let expr = RemoteExpression::default();
+        let (mut tx, mut stream) = executor(store.clone(), expr.clone(), true).await;
+        tx.push_barrier(test_epoch(1), false);
+        stream.expect_barrier().await;
+        tx.push_chunk(StreamChunk::from_pretty("I I\n+ 1 10"));
+        let chunk = stream.expect_chunk().await;
+        assert_eq!(versions(&chunk), vec![Some(json!({"version": 1}))]);
+        tx.push_chunk(StreamChunk::from_pretty("I I\nU- 1 10\nU+ 1 20"));
+        let chunk = stream.expect_chunk().await;
+        assert_eq!(
+            versions(&chunk),
+            vec![Some(json!({"version": 1})), Some(json!({"version": 2}))]
+        );
+        assert_eq!(expr.calls.load(Ordering::SeqCst), 2);
+        tx.push_barrier(test_epoch(2), false);
+        stream.expect_barrier().await;
+        drop(stream);
+
+        // A fresh executor has an empty cache and a service that now fails. Deletion must still
+        // read the previously committed JSON value without making a request.
+        expr.fail.store(true, Ordering::SeqCst);
+        let (mut tx, mut recovered) = executor(store, expr.clone(), true).await;
+        tx.push_barrier(test_epoch(2), false);
+        recovered.expect_barrier().await;
+        tx.push_chunk(StreamChunk::from_pretty("I I\n- 1 20"));
+        let chunk = recovered.expect_chunk().await;
+        assert_eq!(chunk.ops(), &[Op::Delete]);
+        assert_eq!(versions(&chunk), vec![Some(json!({"version": 2}))]);
+        assert_eq!(expr.calls.load(Ordering::SeqCst), 2);
+    }
+
+    #[tokio::test]
+    async fn control_messages_wait_for_pending_results() {
+        for materialized in [false, true] {
+            let gate = Arc::new(Semaphore::new(0));
+            let expr = RemoteExpression {
+                gate: Some(gate.clone()),
+                ..Default::default()
+            };
+            let (mut tx, mut stream) =
+                executor(MemoryStateStore::new(), expr.clone(), materialized).await;
+            tx.push_barrier(test_epoch(1), false);
+            stream.expect_barrier().await;
+            tx.push_chunk(StreamChunk::from_pretty("I I\n+ 1 10"));
+            tx.push_int64_watermark(0, 1);
+            tx.push_barrier(test_epoch(2), false);
+            stream.next_unwrap_pending();
+            assert_eq!(expr.calls.load(Ordering::SeqCst), 1);
+            gate.add_permits(1);
+            stream.expect_chunk().await;
+            // A plain Project has no watermark derivation in this fixture; MaterializedExprs
+            // passes its input watermark through after producing the result.
+            if materialized {
+                assert!(
+                    stream
+                        .next()
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .as_watermark()
+                        .is_some()
+                );
+            }
+            stream.expect_barrier().await;
+        }
+    }
+
+    #[tokio::test]
+    async fn external_failure_is_not_emitted_as_null_or_checkpointed() {
+        for materialized in [false, true] {
+            let expr = RemoteExpression::default();
+            expr.fail.store(true, Ordering::SeqCst);
+            let (mut tx, mut stream) = executor(MemoryStateStore::new(), expr, materialized).await;
+            tx.push_barrier(test_epoch(1), false);
+            stream.expect_barrier().await;
+            tx.push_chunk(StreamChunk::from_pretty("I I\n+ 1 10"));
+            tx.push_barrier(test_epoch(2), false);
+            let err = stream.next().await.unwrap().unwrap_err();
+            assert!(err.to_string().contains("mock service unavailable"));
         }
     }
 }

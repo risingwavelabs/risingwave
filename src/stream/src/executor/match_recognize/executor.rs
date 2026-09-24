@@ -484,10 +484,7 @@ impl CandidateMatcher for DefineMatcher<'_> {
                 .iter()
                 .map(|slot| self.slot_value(slot, var, pos, match_start, labels))
                 .collect();
-            let value = def
-                .condition
-                .eval_row_infallible(&OwnedRow::new(synthetic))
-                .await;
+            let value = def.condition.eval_row(&OwnedRow::new(synthetic)).await?;
             if !value.is_some_and(|s| s.into_bool()) {
                 return Ok(false);
             }
@@ -868,7 +865,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                     );
                 }
                 let synthetic = OwnedRow::new(synthetic);
-                measure_datums.push(measure.expr.eval_row_infallible(&synthetic).await);
+                measure_datums.push(measure.expr.eval_row(&synthetic).await?);
             }
             // The match's identity is its start row's `seq`: deterministic across recovery replay,
             // and unique forever — consumption alone does not guarantee that (consumed rows are

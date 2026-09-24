@@ -360,7 +360,7 @@ impl<S: StateStore> EowcGapFillExecutor<S> {
 
         // Calculate and validate gap interval once at initialization
         let dummy_row = OwnedRow::new(vec![]);
-        let interval_datum = this.gap_interval.eval_row_infallible(&dummy_row).await;
+        let interval_datum = this.gap_interval.eval_row(&dummy_row).await?;
         let interval = interval_datum
             .ok_or_else(|| anyhow::anyhow!("Gap interval expression returned null"))?
             .into_interval();
