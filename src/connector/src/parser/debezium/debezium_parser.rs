@@ -98,11 +98,9 @@ impl DebeziumParser {
         rw_columns: Vec<SourceColumnDesc>,
         source_ctx: SourceContextRef,
     ) -> ConnectorResult<Self> {
-        // Oracle uses `NUMBER(precision, scale)` for both integral and decimal values. We force
-        // `decimal.handling.mode=string` to preserve precision because `precise` is not supported
-        // and `double` is lossy, so Debezium emits even integral `NUMBER` values as JSON strings.
-        // Since schema discovery maps scale-zero `NUMBER` columns to RisingWave integer types,
-        // allow those types to parse numeric strings for Oracle CDC.
+        // Oracle has one numeric type, NUMBER, so Debezium emits all its numeric values as JSON
+        // strings. Other connectors emit regular numbers as JSON numbers and only decimals as
+        // strings. Relax numeric parsing for Oracle to match these strings to the discovered types.
         let numeric_handling = NumericHandling::Relax {
             string_parsing: matches!(
                 &source_ctx.connector_props,
