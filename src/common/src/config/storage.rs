@@ -384,9 +384,13 @@ pub struct CacheRefillConfig {
     #[serde(default = "default::cache_refill::data_refill_levels")]
     pub data_refill_levels: Vec<u32>,
 
-    /// Cache refill maximum timeout to apply version delta.
+    /// Maximum time to wait for cache refill before applying a version delta.
     #[serde(default = "default::cache_refill::timeout_ms")]
     pub timeout_ms: u64,
+
+    /// Maximum number of version events merged into one Pin Cache refill batch.
+    #[serde(default = "default::cache_refill::pin_cache_max_batch_size")]
+    pub pin_cache_max_batch_size: usize,
 
     /// Inflight data cache refill tasks.
     #[serde(default = "default::cache_refill::concurrency")]
@@ -1342,6 +1346,10 @@ pub mod default {
 
         pub fn timeout_ms() -> u64 {
             6000
+        }
+
+        pub fn pin_cache_max_batch_size() -> usize {
+            16
         }
 
         pub fn concurrency() -> usize {
