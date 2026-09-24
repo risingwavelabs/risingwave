@@ -38,6 +38,7 @@ pub mod error;
 pub mod hummock;
 pub mod manager;
 pub mod model;
+mod notification;
 pub mod rpc;
 pub mod serving;
 pub mod stream;

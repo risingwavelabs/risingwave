@@ -622,6 +622,20 @@ impl PostgresExternalTableReader {
         right: OwnedRow,
         split_columns: Vec<Field>,
     ) {
+        // Conceptually, the query is:
+        //
+        // SELECT <selected_columns>
+        // FROM <upstream_table>
+        // WHERE <split_filter>
+        //
+        // `<split_filter>` is exactly one of:
+        // - `1 = 1` when both bounds contain the unbounded `NULL` sentinel;
+        // - `(<split_columns>) < (<right_bound_params>)` for the first split;
+        // - `(<split_columns>) >= (<left_bound_params>)` for the last split;
+        // - `(<split_columns>) >= (<left_bound_params>) AND
+        //    (<split_columns>) < (<right_bound_params>)` for a middle split.
+        //
+        // Bound values are bound in placeholder order: left, then right.
         assert_eq!(
             split_columns.len(),
             1,
