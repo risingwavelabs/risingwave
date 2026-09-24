@@ -380,7 +380,16 @@ impl SstableStore {
                 .read(range.clone())
                 .await
                 .map_err(HummockError::from)
-                .and_then(|data| SstableMeta::decode(&data));
+                .and_then(|data| {
+                    // A suffix read can succeed after the local object has been truncated.
+                    // SstableMeta::decode requires the 16-byte checksum/version/magic footer.
+                    if data.len() < 16 {
+                        return Err(HummockError::other(
+                            "pinned SST metadata footer is truncated",
+                        ));
+                    }
+                    SstableMeta::decode(&data)
+                });
             match result {
                 Ok(meta) => return Ok(meta),
                 Err(error) => {
@@ -1748,6 +1757,63 @@ mod tests {
                 .await
                 .unwrap()
                 .key_count,
+            2
+        );
+        assert!(pin_cache.get(object_id).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_truncated_pinned_meta_falls_back_to_remote() {
+        let sstable_store = mock_sstable_store().await;
+        let local_store = mock_sstable_store().await.store();
+        let pin_cache = PinCache::new(local_store.clone(), u64::MAX);
+        sstable_store.set_pin_cache(pin_cache.clone());
+
+        let object_id = SST_ID.into();
+        let path = sstable_store.get_sst_data_path(object_id);
+        let remote_store = sstable_store.store();
+        let meta = SstableMeta {
+            key_count: 2,
+            ..Default::default()
+        };
+        let mut sst_bytes = b"data".to_vec();
+        sst_bytes.extend_from_slice(&meta.encode_to_bytes());
+        remote_store
+            .upload(&path, Bytes::from(sst_bytes.clone()))
+            .await
+            .unwrap();
+        pin_cache.replace_desired_objects(HashMap::from([(object_id, sst_bytes.len() as u64)]));
+        pin_cache
+            .pin_sst(remote_store.clone(), path.clone(), object_id)
+            .await
+            .unwrap();
+
+        let local_path = local_store
+            .list("", None, None)
+            .await
+            .unwrap()
+            .next()
+            .await
+            .unwrap()
+            .unwrap()
+            .key;
+        local_store
+            .upload(&local_path, Bytes::from_static(b"datax"))
+            .await
+            .unwrap();
+
+        let published_route = sstable_store.pinned_sst(object_id).unwrap();
+        assert_eq!(
+            SstableStore::read_sst_meta(
+                Some(&published_route),
+                remote_store,
+                path,
+                object_id,
+                4..,
+            )
+            .await
+            .unwrap()
+            .key_count,
             2
         );
         assert!(pin_cache.get(object_id).is_none());
