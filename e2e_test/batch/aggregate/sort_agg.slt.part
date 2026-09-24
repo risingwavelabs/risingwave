@@ -37,7 +37,7 @@ drop materialized view mv
 statement ok
 drop table t
 
-# A PK ordered scan must be redistributed by company before sort aggregation.
+# Partial sort aggregation reduces rows before hash redistribution.
 statement ok
 create table files (company_id int, file_id int, primary key (company_id, file_id))
 

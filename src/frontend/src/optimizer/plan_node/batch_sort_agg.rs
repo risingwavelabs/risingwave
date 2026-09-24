@@ -20,7 +20,7 @@ use super::batch::prelude::*;
 use super::generic::{self, PlanAggCall};
 use super::utils::impl_distill_by_unit;
 use super::{
-    BatchPlanRef as PlanRef, ExprRewritable, PlanBase, PlanTreeNodeUnary, ToBatchPb,
+    BatchHashAgg, BatchPlanRef as PlanRef, ExprRewritable, PlanBase, PlanTreeNodeUnary, ToBatchPb,
     ToDistributedBatch,
 };
 use crate::error::Result;
@@ -93,6 +93,20 @@ impl_distill_by_unit!(BatchSortAgg, core, "BatchSortAgg");
 
 impl ToDistributedBatch for BatchSortAgg {
     fn to_distributed(&self) -> Result<PlanRef> {
+        let dist_input = self.input().to_distributed()?;
+        let required_dist =
+            RequiredDist::shard_by_key(dist_input.schema().len(), &self.group_key().to_vec());
+        if !dist_input.distribution().satisfies(&required_dist)
+            && dist_input.distribution().satisfies(&RequiredDist::AnyShard)
+            && self.core.can_two_phase_agg()
+        {
+            // Aggregate each sorted input before the hash shuffle. This can reduce a large
+            // number of rows to one partial result per group and source.
+            let ordered_input = self.input_order.enforce_if_not_satisfies(dist_input)?;
+            let partial_agg = self.clone_with_input(ordered_input).into();
+            return BatchHashAgg::new(self.core.clone()).to_final_agg(partial_agg);
+        }
+
         let new_input = self.input().to_distributed_with_required(
             &self.input_order,
             &RequiredDist::shard_by_key(self.input().schema().len(), &self.group_key().to_vec()),

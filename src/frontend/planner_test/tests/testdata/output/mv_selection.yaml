@@ -221,9 +221,9 @@
     group by a;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchSortAgg { group_key: [mv_rollup.a], aggs: [sum(mv_rollup.s), sum0(mv_rollup.cnt)] }
-      └─BatchSort { order: [mv_rollup.a ASC] }
-        └─BatchExchange { order: [], dist: HashShard(mv_rollup.a) }
+    └─BatchHashAgg { group_key: [mv_rollup.a], aggs: [sum(sum(mv_rollup.s)), sum0(sum0(mv_rollup.cnt))] }
+      └─BatchExchange { order: [], dist: HashShard(mv_rollup.a) }
+        └─BatchSortAgg { group_key: [mv_rollup.a], aggs: [sum(mv_rollup.s), sum0(mv_rollup.cnt)] }
           └─BatchScan { table: mv_rollup, columns: [mv_rollup.a, mv_rollup.s, mv_rollup.cnt], distribution: SomeShard }
 - id: agg_rollup_distinct_not_selected
   sql: |
@@ -256,10 +256,10 @@
     group by a;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchProject { exprs: [mv_rollup_dup.a, sum(mv_rollup_dup.s), sum(mv_rollup_dup.s)] }
-      └─BatchSortAgg { group_key: [mv_rollup_dup.a], aggs: [sum(mv_rollup_dup.s)] }
-        └─BatchSort { order: [mv_rollup_dup.a ASC] }
-          └─BatchExchange { order: [], dist: HashShard(mv_rollup_dup.a) }
+    └─BatchProject { exprs: [mv_rollup_dup.a, sum(sum(mv_rollup_dup.s)), sum(sum(mv_rollup_dup.s))] }
+      └─BatchHashAgg { group_key: [mv_rollup_dup.a], aggs: [sum(sum(mv_rollup_dup.s))] }
+        └─BatchExchange { order: [], dist: HashShard(mv_rollup_dup.a) }
+          └─BatchSortAgg { group_key: [mv_rollup_dup.a], aggs: [sum(mv_rollup_dup.s)] }
             └─BatchScan { table: mv_rollup_dup, columns: [mv_rollup_dup.a, mv_rollup_dup.s], distribution: SomeShard }
 - id: agg_rollup_duplicate_query_aggs2
   sql: |
@@ -274,9 +274,9 @@
     group by a;
   batch_plan: |-
     BatchExchange { order: [], dist: Single }
-    └─BatchSortAgg { group_key: [mv_rollup_dup.a], aggs: [sum0(mv_rollup_dup.s1)] }
-      └─BatchSort { order: [mv_rollup_dup.a ASC] }
-        └─BatchExchange { order: [], dist: HashShard(mv_rollup_dup.a) }
+    └─BatchHashAgg { group_key: [mv_rollup_dup.a], aggs: [sum0(sum0(mv_rollup_dup.s1))] }
+      └─BatchExchange { order: [], dist: HashShard(mv_rollup_dup.a) }
+        └─BatchSortAgg { group_key: [mv_rollup_dup.a], aggs: [sum0(mv_rollup_dup.s1)] }
           └─BatchScan { table: mv_rollup_dup, columns: [mv_rollup_dup.a, mv_rollup_dup.s1], distribution: SomeShard }
 - id: inner_join_selection
   sql: |

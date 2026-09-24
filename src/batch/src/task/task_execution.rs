@@ -154,6 +154,18 @@ impl std::fmt::Debug for TaskOutput {
 }
 
 impl TaskOutput {
+    async fn recv(
+        &mut self,
+    ) -> SharedResult<Option<crate::task::data_chunk_in_channel::DataChunkInChannel>> {
+        let result = self.receiver.recv().await;
+        if result.is_err()
+            && let Some(error) = self.failure.lock().clone()
+        {
+            return Err(error);
+        }
+        result
+    }
+
     /// Write the data in serialized format to `ExchangeWriter`.
     /// Return whether the data stream is finished.
     async fn take_data_inner(
@@ -168,7 +180,7 @@ impl TaskOutput {
             if limited && cnt >= at_most_num {
                 return Ok(false);
             }
-            match self.receiver.recv().await {
+            match self.recv().await {
                 // Received some data
                 Ok(Some(chunk)) => {
                     trace!(
@@ -216,7 +228,7 @@ impl TaskOutput {
 
     /// Directly takes data without serialization.
     pub async fn direct_take_data(&mut self) -> SharedResult<Option<DataChunk>> {
-        Ok(self.receiver.recv().await?.map(|c| c.into_data_chunk()))
+        Ok(self.recv().await?.map(|c| c.into_data_chunk()))
     }
 
     pub fn id(&self) -> &TaskOutputId {
@@ -309,8 +321,9 @@ pub struct BatchTaskExecution {
     /// Receivers data of the task.
     receivers: Mutex<Vec<Option<ChanReceiverImpl>>>,
 
-    /// Sender for sending chunks between different executors.
-    sender: ChanSenderImpl,
+    /// Sender for sending chunks between different executors. The running task takes the sole
+    /// owner so a cancelled close drops the channel after recording the task failure.
+    sender: Mutex<Option<ChanSenderImpl>>,
 
     /// Context for task execution
     context: Arc<dyn BatchTaskContext>,
@@ -357,7 +370,7 @@ impl BatchTaskExecution {
             failure: Arc::new(Mutex::new(None)),
             context,
             runtime,
-            sender,
+            sender: Mutex::new(Some(sender)),
             shutdown_tx,
             shutdown_rx,
             heartbeat_join_handle: Mutex::new(None),
@@ -400,7 +413,11 @@ impl BatchTaskExecution {
         )
         .await?;
 
-        let sender = self.sender.clone();
+        let sender = self
+            .sender
+            .lock()
+            .take()
+            .expect("batch task already started");
         let _failure = self.failure.clone();
         let task_id = self.task_id.clone();
 
@@ -717,8 +734,8 @@ mod tests {
     use futures::StreamExt;
     use risingwave_common::array::DataChunkTestExt;
     use risingwave_common::catalog::Schema;
-    use risingwave_pb::batch_plan::ExchangeInfo;
     use risingwave_pb::batch_plan::exchange_info::DistributionMode;
+    use risingwave_pb::batch_plan::{ExchangeInfo, PbTaskOutputId};
 
     use super::*;
     use crate::executor::{BoxedDataChunkStream, Executor};
@@ -752,8 +769,7 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn cancel_task_blocked_on_output_channel() {
+    fn new_test_task() -> (Arc<BatchTaskExecution>, usize) {
         let runtime = Arc::new(
             tokio::runtime::Builder::new_current_thread()
                 .enable_all()
@@ -779,8 +795,15 @@ mod tests {
             )
             .unwrap(),
         );
+        (task, channel_capacity)
+    }
+
+    fn run_until_output_full(
+        task: Arc<BatchTaskExecution>,
+        channel_capacity: usize,
+    ) -> (tokio::sync::oneshot::Receiver<()>, JoinHandle<()>) {
         let (reached_full_channel, full_channel_rx) = tokio::sync::oneshot::channel();
-        let sender = task.sender.clone();
+        let sender = task.sender.lock().take().unwrap();
         let run_task = task.clone();
         let run = tokio::spawn(async move {
             run_task
@@ -795,6 +818,13 @@ mod tests {
                 )
                 .await;
         });
+        (full_channel_rx, run)
+    }
+
+    #[tokio::test]
+    async fn cancel_task_blocked_on_output_channel() {
+        let (task, channel_capacity) = new_test_task();
+        let (full_channel_rx, run) = run_until_output_full(task.clone(), channel_capacity);
 
         tokio::time::timeout(Duration::from_secs(5), full_channel_rx)
             .await
@@ -806,6 +836,42 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(*task.state.lock(), TaskStatus::Cancelled);
+    }
+
+    #[tokio::test]
+    async fn abort_task_blocked_on_output_channel() {
+        let (task, channel_capacity) = new_test_task();
+        let mut output = task
+            .get_task_output(&PbTaskOutputId {
+                task_id: Some(PbTaskId::default()),
+                output_id: 0,
+            })
+            .unwrap();
+        let (full_channel_rx, run) = run_until_output_full(task.clone(), channel_capacity);
+        tokio::time::timeout(Duration::from_secs(5), full_channel_rx)
+            .await
+            .unwrap()
+            .unwrap();
+
+        task.abort("test abort".to_owned());
+        tokio::time::timeout(Duration::from_secs(5), run)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(*task.state.lock(), TaskStatus::Aborted);
+
+        let error = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                match output.direct_take_data().await {
+                    Ok(Some(_)) => {}
+                    Ok(None) => panic!("aborted task ended without an error"),
+                    Err(error) => break error,
+                }
+            }
+        })
+        .await
+        .unwrap();
+        assert!(matches!(&*error, BatchError::Aborted(message) if message == "test abort"));
     }
 
     #[test]

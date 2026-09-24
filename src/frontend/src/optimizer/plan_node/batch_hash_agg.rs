@@ -61,6 +61,11 @@ impl BatchHashAgg {
         let partial_agg: PlanRef = self.clone_with_input(dist_input).into();
         debug_assert!(partial_agg.node_type() == BatchPlanNodeType::BatchHashAgg);
 
+        self.to_final_agg(partial_agg)
+    }
+
+    /// Combine partial groups produced by either hash aggregation or sort aggregation.
+    pub(crate) fn to_final_agg(&self, partial_agg: PlanRef) -> Result<PlanRef> {
         // insert exchange
         let exchange = RequiredDist::shard_by_key(
             partial_agg.schema().len(),
