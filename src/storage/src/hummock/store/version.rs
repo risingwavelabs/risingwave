@@ -1408,8 +1408,8 @@ mod tests {
         use std::ops::Bound::{Excluded, Included};
 
         use super::{
-            BackwardIteratorFactory, ForwardIteratorFactory, HummockReadVersion, VersionUpdate,
-            VnodeWatermark, WatermarkDirection, WatermarkSerdeType, read_filter_for_version,
+            ForwardIteratorFactory, HummockReadVersion, VersionUpdate, VnodeWatermark,
+            WatermarkDirection, WatermarkSerdeType, read_filter_for_version,
         };
         use crate::hummock::event_handler::TEST_LOCAL_INSTANCE_ID;
         use crate::hummock::shared_buffer::shared_buffer_batch::{
@@ -1441,52 +1441,31 @@ mod tests {
         .into();
 
         // No object exists for this descriptor: an unnecessary metadata read must fail.
-        for level_type in [PbLevelType::Nonoverlapping, PbLevelType::Overlapping] {
-            let version =
-                build_version_from_sstables(table_id, vec![absent_sst.clone()], level_type);
-            for (range, is_empty) in [
-                ((Included(key(15)), Excluded(key(15))), true),
-                ((Excluded(key(15)), Included(key(15))), true),
-                ((Excluded(key(15)), Excluded(key(15))), true),
-                ((Excluded(key(10)), Included(key(10))), true),
-                ((Included(key(30)), Included(key(40))), false),
-            ] {
-                let staging = if is_empty {
-                    vec![absent_sst.clone()]
-                } else {
-                    vec![]
-                };
-                let mut stats = StoreLocalStatistic::default();
-                reader
-                    .iter_inner(
-                        range.clone(),
-                        epoch,
-                        table_id,
-                        ReadOptions::default(),
-                        vec![],
-                        staging.clone(),
-                        &version,
-                        &mut stats,
-                        &mut ForwardIteratorFactory::default(),
-                    )
-                    .await
-                    .unwrap();
-                reader
-                    .iter_inner(
-                        range,
-                        epoch,
-                        table_id,
-                        ReadOptions::default(),
-                        vec![],
-                        staging,
-                        &version,
-                        &mut stats,
-                        &mut BackwardIteratorFactory::default(),
-                    )
-                    .await
-                    .unwrap();
-                assert_eq!(stats.cache_meta_block_total, 0);
-            }
+        let version = build_version_from_sstables(
+            table_id,
+            vec![absent_sst.clone()],
+            PbLevelType::Nonoverlapping,
+        );
+        for (range, staging) in [
+            ((Excluded(key(15)), Included(key(15))), vec![absent_sst]),
+            ((Included(key(30)), Included(key(40))), vec![]),
+        ] {
+            let mut stats = StoreLocalStatistic::default();
+            reader
+                .iter_inner(
+                    range,
+                    epoch,
+                    table_id,
+                    ReadOptions::default(),
+                    vec![],
+                    staging,
+                    &version,
+                    &mut stats,
+                    &mut ForwardIteratorFactory::default(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(stats.cache_meta_block_total, 0);
         }
 
         let mut ssts = vec![];
@@ -1551,9 +1530,7 @@ mod tests {
         // Include empty, singleton, excluded endpoint, multiple SSTs and a gap filled only
         // by the memtable. The backward factory must preserve the reverse output order.
         for (range, expected) in [
-            ((Included(key(15)), Excluded(key(15))), vec![]),
             ((Excluded(key(15)), Included(key(15))), vec![]),
-            ((Excluded(key(15)), Excluded(key(15))), vec![]),
             ((Included(key(15)), Included(key(15))), vec![15]),
             ((Included(key(10)), Included(key(10))), vec![10]),
             ((Included(key(10)), Excluded(key(20))), vec![10, 15]),

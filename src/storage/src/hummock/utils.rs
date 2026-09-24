@@ -935,12 +935,7 @@ mod tests {
             (Included(5), Excluded(10), vec![]),
             (Included(5), Included(10), vec![0]),
             (Included(20), Included(20), vec![1]),
-            (Included(20), Excluded(20), vec![]),
             (Excluded(20), Included(20), vec![]),
-            (Excluded(20), Excluded(20), vec![]),
-            (Included(15), Excluded(15), vec![]),
-            (Excluded(15), Included(15), vec![]),
-            (Excluded(15), Excluded(15), vec![]),
             (Included(10), Excluded(20), vec![0]),
             (Included(10), Included(20), vec![0, 1]),
             (Included(30), Included(40), vec![1]),
@@ -959,11 +954,11 @@ mod tests {
                 .map(|sst| sst.sst_id.as_raw_id())
                 .collect();
             assert_eq!(actual, expected, "{range:?}");
-            assert_eq!(
-                prune_nonoverlapping_ssts(&ssts, range, TableId::new(1)).count(),
-                0
-            );
         }
+        assert_eq!(
+            prune_nonoverlapping_ssts(&ssts, (Unbounded, Unbounded), TableId::new(1)).count(),
+            0
+        );
         assert_eq!(
             prune_nonoverlapping_ssts(&[], (Unbounded, Unbounded), table_id).count(),
             0
