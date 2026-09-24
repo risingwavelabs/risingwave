@@ -21,7 +21,7 @@ use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
 use crate::hummock::block_stream::BlockDataStream;
 use crate::hummock::sstable_store::SstableStoreRef;
-use crate::hummock::{HummockResult, TableHolder};
+use crate::hummock::{Block, HummockResult, TableHolder};
 
 /// Streams a caller-selected range of physical SST blocks, resuming at block boundaries on I/O
 /// errors. Decoding and deciding which blocks may be copied belong to the consuming iterator.
@@ -61,6 +61,17 @@ impl SstableBlockStream {
 
     pub(super) fn has_next_block(&self) -> bool {
         !self.remaining_blocks.is_empty()
+    }
+
+    pub(super) fn decode_block(
+        &self,
+        data: Bytes,
+        uncompressed_size: usize,
+    ) -> HummockResult<Block> {
+        self.block_stream
+            .as_ref()
+            .expect("a block can only be decoded after opening its stream")
+            .decode_block(data, uncompressed_size)
     }
 
     pub(super) async fn next_block(&mut self) -> HummockResult<Option<(Bytes, usize)>> {

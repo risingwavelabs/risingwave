@@ -49,9 +49,8 @@ use crate::hummock::multi_builder::{CapacitySplitTableBuilder, TableBuilderFacto
 use crate::hummock::sstable_store::SstableStoreRef;
 use crate::hummock::value::HummockValue;
 use crate::hummock::{
-    Block, BlockHolder, BlockIterator, BlockMeta, BlockedXor16FilterBuilder, CachePolicy,
-    FilterBuilder, GetObjectId, HummockResult, SstableBuilderOptions,
-    StreamingSstableWriterFactory, TableHolder,
+    BlockHolder, BlockIterator, BlockMeta, BlockedXor16FilterBuilder, CachePolicy, FilterBuilder,
+    GetObjectId, HummockResult, SstableBuilderOptions, StreamingSstableWriterFactory, TableHolder,
 };
 use crate::monitor::{CompactorMetrics, StoreLocalStatistic};
 
@@ -133,7 +132,7 @@ impl BlockStreamIterator {
         buf: Bytes,
         uncompressed_capacity: usize,
     ) -> HummockResult<()> {
-        let block = Block::decode(buf, uncompressed_capacity)?;
+        let block = self.block_stream.decode_block(buf, uncompressed_capacity)?;
         let mut iter = BlockIterator::new(BlockHolder::from_owned_block(Box::new(block)));
         iter.seek_to_first();
         self.iter = Some(iter);
