@@ -142,17 +142,6 @@ impl ColPrunable for LogicalChangeLog {
             })
             .collect_vec();
 
-        // `StreamChangeLog` must see the input stream key to co-locate changes for the same row.
-        // Keep key columns internally even when they are not selected from the changelog CTE, and
-        // project them away above the operator afterwards.
-        if let Some(stream_key) = self.input().stream_key() {
-            for &key in stream_key {
-                if !input_required_cols.contains(&key) {
-                    input_required_cols.push(key);
-                }
-            }
-        }
-
         // add declared business keys to input request
         if let Some(key) = &self.core.key_indices {
             for &index in key {
@@ -215,9 +204,6 @@ impl ToStream for LogicalChangeLog {
         let input = self.input().to_stream(ctx)?;
         let input = if let Some(key) = &self.core.key_indices {
             RequiredDist::hash_shard(key).streaming_enforce_if_not_satisfies(input)?
-        } else if matches!(input.distribution(), Distribution::SomeShard) {
-            RequiredDist::hash_shard(input.expect_stream_key())
-                .streaming_enforce_if_not_satisfies(input)?
         } else {
             input
         };
