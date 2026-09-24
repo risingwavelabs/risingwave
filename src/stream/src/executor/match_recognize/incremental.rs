@@ -328,9 +328,9 @@ impl IncrementalMatcher {
         self.freeze_truncated = false;
     }
 
-    /// Whether the last rescan was truncated by a spent budget, or an eviction rebase dropped the
-    /// found prefix of one — see the field doc. While true, `provisional()` is a leftmost-prefix
-    /// under-approximation.
+    /// Whether the last rescan was truncated by a spent budget — see the field doc. The flag and
+    /// the found prefix both survive an eviction rebase. While true, `provisional()` is a
+    /// leftmost-prefix under-approximation.
     pub fn is_incomplete(&self) -> bool {
         self.incomplete
     }
@@ -704,12 +704,14 @@ impl IncrementalMatcher {
     /// at the (same-or-later) eviction boundary `[0, next_pos)` is still dead and the first live row
     /// is `>= next_pos`. The check above bounds `final_pos <= next_pos`, so through the executor
     /// `final_pos == next_pos` exactly. At that boundary every frozen match starts before `next_pos`
-    /// and is therefore consumed — none is retained — so `next_pos` rebases to `0` and the entire
-    /// surviving suffix is re-derived from scratch as the provisional tail. `provisional()` then
-    /// trivially equals a fresh scan over the survivors, regardless of skip mode, and no rebased scan
-    /// cursor can skip a start a fresh matcher would find. `PAST LAST ROW` additionally tiles
-    /// `[0, next_pos)` with non-overlapping spans (`resume == end`), so *any* boundary within the
-    /// frozen prefix retains a suffix of frozen matches soundly.
+    /// and is therefore consumed — none is retained — so `next_pos` rebases to `0` and the
+    /// provisional tail is exactly the matches found over the surviving suffix, regardless of skip
+    /// mode. The verdict cursors and a truncated scan's found prefix shift down with the rows rather
+    /// than resetting: a verdict about a surviving start was computed over surviving rows only (see
+    /// the rebase step in the body), so the resumed scan finds exactly what a fresh matcher over
+    /// the survivors would, without re-walking the starts already decided. `PAST LAST ROW`
+    /// additionally tiles `[0, next_pos)` with non-overlapping spans (`resume == end`), so *any*
+    /// boundary within the frozen prefix retains a suffix of frozen matches soundly.
     ///
     /// On [`Finalized::Rebased`] the evicted rows physically leave the front of the logical buffer:
     /// `seq_index` drains its prefix and `next_pos`/`frozen_count` shift down. Only rows at positions
@@ -751,10 +753,11 @@ impl IncrementalMatcher {
             // A consumed match whose span straddles the boundary (`end_pos > final_pos`, possible
             // only under the overlapping modes) orphans its surviving rows `[final_pos, end_pos)`.
             // Dropping it is sound only when the boundary sits exactly at the scan cursor
-            // (`final_pos == next_pos`): then no frozen match is retained, so the whole surviving
-            // suffix is re-scanned from scratch and `provisional()` still equals a fresh scan. That
-            // is the only boundary the executor produces; decline a mid-frozen straddle (a direct-API
-            // shape) rather than corrupt the rebase by skipping a start a fresh scan would revisit.
+            // (`final_pos == next_pos`): then no frozen match is retained, every surviving row
+            // belongs to the provisional region, and the verdicts about surviving starts that the
+            // rebase keeps were computed over surviving rows (see the rebase step below). That is
+            // the only boundary the executor produces; decline a mid-frozen straddle (a direct-API
+            // shape) rather than leave a retained frozen match that overlaps the surviving suffix.
             if end_pos > final_pos && final_pos != self.next_pos {
                 return Finalized::MustRebuild;
             }
@@ -3103,12 +3106,12 @@ mod tests {
         let mut budget = ScanBudget::new(1 << 20);
         inc.refresh(&matcher, &mut budget, true).await.unwrap();
         assert_eq!(&inc.provisional()[..kept.len()], kept.as_slice());
+        // Provisional matches are in scan order, so their starts are strictly increasing; a
+        // re-found prefix would break that (`Vec::dedup` would miss a repeated multi-match prefix).
         let starts: Vec<i64> = inc.provisional().iter().map(|m| m.start_seq.0).collect();
-        let mut dedup = starts.clone();
-        dedup.dedup();
-        assert_eq!(
-            starts, dedup,
-            "a resumed scan must not duplicate the kept prefix"
+        assert!(
+            starts.windows(2).all(|w| w[0] < w[1]),
+            "a resumed scan must not duplicate the kept prefix: starts {starts:?}"
         );
     }
 }
