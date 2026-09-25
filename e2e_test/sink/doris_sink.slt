@@ -1,3 +1,44 @@
+control substitution on
+
+statement ok
+DROP SINK IF EXISTS s6;
+
+statement ok
+DROP SINK IF EXISTS s6_variant;
+
+statement ok
+DROP MATERIALIZED VIEW IF EXISTS mv6;
+
+statement ok
+DROP MATERIALIZED VIEW IF EXISTS mv6_variant;
+
+statement ok
+DROP TABLE IF EXISTS t6;
+
+statement ok
+DROP TABLE IF EXISTS t6_variant;
+
+system ok retry 120 backoff 1s
+doris -N -B -e "SELECT COUNT(*) > 0 FROM backends() WHERE Alive = 'true'"
+----
+1
+
+
+system ok
+doris <<SQL
+DROP DATABASE IF EXISTS ${DORIS_DATABASE};
+CREATE DATABASE ${DORIS_DATABASE};
+USE ${DORIS_DATABASE};
+CREATE TABLE demo_bhv_table(v1 int,v2 smallint,v3 bigint,v4 float,v5 double,v6 string,v7 datev2,v8 datetime,v9 boolean,v10 json) UNIQUE KEY(v1)
+DISTRIBUTED BY HASH(v1) BUCKETS 1
+PROPERTIES ("replication_allocation" = "tag.location.default: 1");
+CREATE TABLE demo_variant_table(id int, v variant) UNIQUE KEY(id)
+DISTRIBUTED BY HASH(id) BUCKETS 1
+PROPERTIES ("replication_allocation" = "tag.location.default: 1");
+CREATE USER IF NOT EXISTS '${DORIS_USER}'@'%' IDENTIFIED BY '${DORIS_PASSWORD}';
+GRANT ALL ON *.* TO '${DORIS_USER}'@'%';
+SQL
+
 statement ok
 set sink_decouple = false;
 
@@ -11,12 +52,8 @@ statement ok
 CREATE SINK s6
 FROM
     mv6 WITH (
-    connector = 'doris',
+    ${RISEDEV_DORIS_WITH_OPTIONS_COMMON},
     type = 'append-only',
-    doris.url = 'http://doris-server:8030',
-    doris.user = 'users',
-    doris.password = '123456',
-    doris.database = 'demo',
     doris.table='demo_bhv_table',
     force_append_only='true'
 );
@@ -26,6 +63,12 @@ INSERT INTO t6 VALUES (1, 1, 1, 1.1, 1.2, 'test', '2013-01-01', '2013-01-01 01:0
 
 statement ok
 FLUSH;
+
+system ok retry 30 backoff 1s
+doris -N -B -e "SELECT * FROM ${DORIS_DATABASE}.demo_bhv_table ORDER BY v1"
+----
+1	1	1	1.1	1.2	test	2013-01-01	2013-01-01 01:01:01	0	{"a":1}
+
 
 statement ok
 CREATE TABLE t6_variant (id int primary key, v jsonb);
@@ -37,12 +80,8 @@ statement ok
 CREATE SINK s6_variant
 FROM
     mv6_variant WITH (
-    connector = 'doris',
+    ${RISEDEV_DORIS_WITH_OPTIONS_COMMON},
     type = 'append-only',
-    doris.url = 'http://doris-server:8030',
-    doris.user = 'users',
-    doris.password = '123456',
-    doris.database = 'demo',
     doris.table='demo_variant_table',
     force_append_only='true'
 );
@@ -52,6 +91,13 @@ INSERT INTO t6_variant VALUES (1, '{"nested":[1,2]}');
 
 statement ok
 FLUSH;
+
+# Normalize JSON formatting without removing whitespace inside string values.
+system ok retry 30 backoff 1s
+doris -N -B -e "SELECT id, CAST(CAST(v AS STRING) AS JSON) FROM ${DORIS_DATABASE}.demo_variant_table ORDER BY id"
+----
+1	{"nested":[1,2]}
+
 
 statement ok
 DROP SINK s6;
@@ -70,3 +116,6 @@ DROP MATERIALIZED VIEW mv6_variant;
 
 statement ok
 DROP TABLE t6_variant;
+
+system ok
+doris -e "DROP DATABASE IF EXISTS ${DORIS_DATABASE};"
