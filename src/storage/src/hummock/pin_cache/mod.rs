@@ -92,12 +92,18 @@ pub(crate) struct PinCache {
     refill_gate: Mutex<Option<Arc<Semaphore>>>,
 }
 
+/// Describes the work performed or skipped by one refill attempt.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum PinCacheRefillOutcome {
+    /// This attempt copied and validated the SST, then published its local read route.
     Published,
+    /// A local read route already existed, so this attempt skipped the download.
     AlreadyPublished,
+    /// Another download for this object is still in flight; this attempt skipped the download.
     InProgress,
+    /// This attempt could not reserve enough local capacity to start downloading.
     CapacityRejected,
+    /// This attempt is no longer eligible to publish, for example after its generation is revoked.
     Obsolete,
 }
 
@@ -124,33 +130,26 @@ impl PinCacheDownloadGuard {
             .inc();
     }
 
+    /// Copies an existing SST stream into the reserved local path using the object-store uploader.
+    /// After finishing the upload, checks both the copied byte count and local file size before
+    /// attempting publication. Publication still requires the current download token and membership.
+    /// On error or cancellation, `Drop` reclaims the path or retains its capacity reservation if
+    /// backend-owned temporary files may remain.
     async fn write(
         mut self,
         mut reader: MonitoredStreamingReader,
     ) -> ObjectResult<PinCacheRefillOutcome> {
         // Set this before opening the writer: cancellation can occur during its creation too.
         self.may_have_temporary_file = true;
-        let mut writer = match self
+        let mut writer = self
             .pin_cache
             .store
             .streaming_upload(&self.entry.path)
             .await
-        {
-            Ok(writer) => writer,
-            Err(error) => {
-                self.record_io_failure("local_upload_init");
-                return Err(error);
-            }
-        };
+            .inspect_err(|_| self.record_io_failure("local_upload_init"))?;
         let mut written = 0_u64;
         while let Some(chunk) = reader.read_bytes().await {
-            let chunk = match chunk {
-                Ok(chunk) => chunk,
-                Err(error) => {
-                    self.record_io_failure("remote_read");
-                    return Err(error);
-                }
-            };
+            let chunk = chunk.inspect_err(|_| self.record_io_failure("remote_read"))?;
             written = written.saturating_add(chunk.len() as u64);
             if written > self.entry.size {
                 self.record_io_failure("size_validation");
@@ -158,23 +157,23 @@ impl PinCacheDownloadGuard {
                     "pinned SST is larger than its version metadata",
                 ));
             }
-            if let Err(error) = writer.write_bytes(chunk).await {
-                self.record_io_failure("local_upload_write");
-                return Err(error);
-            }
+            writer
+                .write_bytes(chunk)
+                .await
+                .inspect_err(|_| self.record_io_failure("local_upload_write"))?;
         }
-        if let Err(error) = writer.finish().await {
-            self.record_io_failure("local_upload_finish");
-            return Err(error);
-        }
+        writer
+            .finish()
+            .await
+            .inspect_err(|_| self.record_io_failure("local_upload_finish"))?;
         self.may_have_temporary_file = false;
-        let local_size = match self.pin_cache.store.metadata(&self.entry.path).await {
-            Ok(metadata) => metadata.total_size as u64,
-            Err(error) => {
-                self.record_io_failure("local_metadata");
-                return Err(error);
-            }
-        };
+        let local_size = self
+            .pin_cache
+            .store
+            .metadata(&self.entry.path)
+            .await
+            .inspect_err(|_| self.record_io_failure("local_metadata"))?
+            .total_size as u64;
         if written != self.entry.size || local_size != self.entry.size {
             self.record_io_failure("size_validation");
             return Err(ObjectError::internal(
@@ -269,6 +268,8 @@ impl PinCacheReadHandle {
         }
     }
 
+    /// Reads the selected publication through the local object store. On failure, invalidates only
+    /// this publication and returns the error so the caller can fall back to its normal read path.
     pub(crate) async fn read(&self, range: impl ObjectRangeBounds) -> ObjectResult<Bytes> {
         let result = self.pin_cache.store.read(&self.entry.path, range).await;
         if result.is_err() {
