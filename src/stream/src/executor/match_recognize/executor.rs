@@ -150,6 +150,34 @@ fn report_scan_budget_once(report: &impl EvalErrorReport, already_reported: &mut
     });
 }
 
+/// Report a stuck visit once per pass: the budget was spent and nothing moved, so the partition
+/// will spend it again next visit with the same outcome. Only sizes are reported — never the
+/// partition key or its rows; the actor and table labels on the counter locate the query.
+fn report_stuck_visit_once(
+    report: &impl EvalErrorReport,
+    retained_rows: usize,
+    already_reported: &mut bool,
+) {
+    if *already_reported {
+        return;
+    }
+    *already_reported = true;
+    report.report(ExprError::InvalidParam {
+        name: "MATCH_RECOGNIZE",
+        reason: format!(
+            "a partition visit exhausted the pattern-match scan budget \
+             ({SCAN_BUDGET_EVALUATIONS} predicate evaluations) without making progress: no scan \
+             or freeze cursor moved, nothing was emitted and nothing evicted, over {retained_rows} \
+             retained rows. The next visit will repeat the same work until new rows change the \
+             partition. Without WITHIN the partition will not decide unless rows or the query \
+             change; with WITHIN, window closure drains only the matches the truncated scan \
+             reached, and a scan starved before finding any sheds nothing. Simplify the pattern, \
+             or add or tighten WITHIN if the scan does find matches"
+        )
+        .into(),
+    });
+}
+
 /// How a [`MeasureSlot`] resolves against the rows of a match: the wire enum, used directly (the
 /// variants are documented in `stream_plan.proto`) — a parallel executor-side enum was one more
 /// thing to keep in lockstep with the planner for no representational gain. `Unspecified` is
@@ -1417,6 +1445,7 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                     }
                     let mut builder = StreamChunkBuilder::new(chunk_size, schema.data_types());
                     let mut reported_budget = false;
+                    let mut reported_stuck = false;
                     let mut reported_degradations: Vec<SkipDegradation> = Vec::new();
                     let mut emptied: Vec<OwnedRow> = Vec::new();
                     for (pk, run) in &mut parts {
@@ -1431,6 +1460,9 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         // missing matches as decided, which is only sound over a complete tail.
                         // A budget-truncated FREEZE asks for the same: it left proven-dead
                         // progress to resume from, and an idle partition gets no arrival to do it.
+                        let progress_before = run.matcher.progress_marker();
+                        let held_before = run.held;
+                        let rows_before = run.rows.len();
                         if run.matcher.needs_refresh() {
                             let matcher = DefineMatcher {
                                 rows: &run.rows,
@@ -1441,7 +1473,6 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                                 .refresh(&matcher, &mut budget, memoizable)
                                 .await?;
                         }
-                        let rows_before = run.rows.len();
                         let filled = Self::emit_ready(
                             run,
                             pk,
@@ -1484,6 +1515,24 @@ impl<S: StateStore> MatchRecognizeExecutor<S> {
                         if budget.hit {
                             metrics.match_recognize_scan_budget_exhausted_count.inc();
                             report_scan_budget_once(&eval_error_report, &mut reported_budget);
+                            // Exhaustion is self-healing while each visit moves something: a
+                            // cursor, a frozen boundary, a match out, rows out — or a gate
+                            // verdict newly cached in `held`, which the next visit reuses and so
+                            // does strictly less work. A visit that spent the budget and moved
+                            // none of them will do exactly the same next time, until rows arrive
+                            // or a WITHIN window closes — the stuck partition the design doc
+                            // describes, and the one signal an operator can act on.
+                            let stuck = run.matcher.progress_marker() == progress_before
+                                && run.rows.len() == rows_before
+                                && run.held == held_before;
+                            if stuck {
+                                metrics.match_recognize_stuck_visit_count.inc();
+                                report_stuck_visit_once(
+                                    &eval_error_report,
+                                    run.rows.len(),
+                                    &mut reported_stuck,
+                                );
+                            }
                         }
                     }
                     for pk in emptied {
@@ -2218,6 +2267,203 @@ mod tests {
         async fn within_finality_overrides_alive_gap() {
             let pattern = Pattern::Alt(vec![concat("xnn"), var("n")]);
             assert!(gate(&pattern, "xn", 0, 1, true).await);
+        }
+    }
+
+    /// A partition whose every visit spends the whole scan budget and moves nothing — the stuck
+    /// shape the design doc describes — counts one stuck visit per watermark visit; the arrival
+    /// that first exhausted the budget does not (it fed rows, which is progress).
+    mod stuck_visits {
+        use futures::StreamExt;
+        use risingwave_common::array::{Op, StreamChunk};
+        use risingwave_common::bitmap::Bitmap;
+        use risingwave_common::catalog::{ColumnDesc, ColumnId, Field, Schema, TableId};
+        use risingwave_common::hash::VirtualNode;
+        use risingwave_common::util::epoch::test_epoch;
+        use risingwave_common::util::sort_util::OrderType;
+        use risingwave_storage::memory::MemoryStateStore;
+
+        use super::*;
+        use crate::common::table::state_table::StateTable;
+        use crate::common::table::test_utils::gen_pbtable_with_dist_key;
+        use crate::executor::test_utils::{MessageSender, MockSource};
+        use crate::executor::{ActorContext, BoxedMessageStream, Execute, Message};
+        use crate::task::ActorEvalErrorReport;
+
+        /// Distinct from every other test's table id: the metrics registry is process-global.
+        const TABLE_ID: u32 = 27259;
+        /// `(a? × OPTIONALS b)`: without the failure memo, one start explores every subset of the
+        /// optionals — `2^OPTIONALS` paths, past the `2^20` budget before it finishes.
+        const OPTIONALS: usize = 20;
+        const ROWS: i64 = 26;
+
+        /// Input: `(partition int8, ts int8, v int4)`; `v` is the row's position.
+        fn input_types() -> Vec<DataType> {
+            vec![DataType::Int64, DataType::Int64, DataType::Int32]
+        }
+
+        /// `DEFINE b AS FIRST(a.v) = b.v`: a running-navigation slot, so the walk's failure memo
+        /// is off (path-dependent verdicts), and over rows whose `v` is their position it never
+        /// holds — every path ends in a failed `b`. `a` has no DEFINE.
+        fn b_define() -> CompiledDefine {
+            let pb = PbMatchRecognizeDefine {
+                symbol: "b".to_owned(),
+                condition: Some(nav_eq_self_condition()),
+                slots: vec![
+                    PbDefineSlot {
+                        kind: KIND_RUNNING_FIRST,
+                        vars: vec!["a".to_owned()],
+                        col_idx: 2,
+                        offset: 0,
+                    },
+                    PbDefineSlot {
+                        kind: KIND_SELF,
+                        vars: vec![],
+                        col_idx: 2,
+                        offset: 0,
+                    },
+                ],
+            };
+            CompiledDefine::from_protobuf(&pb, LogReport).unwrap()
+        }
+
+        async fn build() -> (MessageSender, BoxedMessageStream, MatchRecognizeMetrics) {
+            let input_schema = Schema::new(input_types().into_iter().map(Field::unnamed).collect());
+            let output_schema = Schema::new(vec![
+                Field::with_name(DataType::Int64, "partition_0"),
+                Field::with_name(DataType::Int64, "_match_id"),
+            ]);
+            // State table: `seq` then the input columns; key = partition, ts, seq.
+            let table_columns = [
+                DataType::Int64,
+                DataType::Int64,
+                DataType::Int64,
+                DataType::Int32,
+            ]
+            .into_iter()
+            .enumerate()
+            .map(|(i, t)| ColumnDesc::unnamed(ColumnId::new(i as i32), t))
+            .collect();
+            let state_table = StateTable::from_table_catalog(
+                &gen_pbtable_with_dist_key(
+                    TableId::new(TABLE_ID),
+                    table_columns,
+                    vec![OrderType::ascending(); 3],
+                    vec![1, 2, 0],
+                    0,
+                    vec![1],
+                ),
+                MemoryStateStore::new(),
+                Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST).into()),
+            )
+            .await;
+            let ctx = ActorContext::for_test(1);
+            let metrics = ctx.streaming_metrics.new_match_recognize_metrics(
+                TableId::new(TABLE_ID),
+                ctx.id,
+                ctx.fragment_id,
+            );
+            let report = ActorEvalErrorReport {
+                actor_context: ctx.clone(),
+                identity: Arc::from("test MatchRecognize"),
+            };
+            let mut parts: Vec<Pattern> = (0..OPTIONALS)
+                .map(|_| {
+                    Pattern::Quantified(
+                        Box::new(Pattern::Var("a".to_owned())),
+                        Quantifier::Question,
+                        false,
+                    )
+                })
+                .collect();
+            parts.push(Pattern::Var("b".to_owned()));
+            let nfa = Nfa::compile(&Pattern::Concat(parts));
+            let (mut tx, source) = MockSource::channel();
+            let source = source.into_executor(input_schema, vec![0, 1]);
+            let executor = MatchRecognizeExecutor::new(MatchRecognizeExecutorArgs {
+                ctx,
+                input: source,
+                schema: output_schema,
+                chunk_size: 1024,
+                partition_key_indices: vec![0],
+                order_key_indices: vec![1],
+                measures: vec![],
+                defines: vec![b_define()],
+                within: None,
+                within_deadline: None,
+                nfa,
+                skip: SkipMode::PastLastRow,
+                eval_error_report: report,
+                state_table,
+            });
+            let mut stream = executor.boxed().execute();
+            tx.push_barrier(test_epoch(1), false);
+            drain_until_barrier(&mut stream, test_epoch(1)).await;
+            (tx, stream, metrics)
+        }
+
+        async fn drain_until_barrier(stream: &mut BoxedMessageStream, epoch: u64) {
+            while let Some(msg) = stream.next().await {
+                if let Message::Barrier(b) = msg.unwrap()
+                    && b.epoch.curr == epoch
+                {
+                    return;
+                }
+            }
+            panic!("stream ended before barrier {epoch}");
+        }
+
+        fn rows_chunk() -> StreamChunk {
+            let rows: Vec<(Op, OwnedRow)> = (0..ROWS)
+                .map(|i| {
+                    (
+                        Op::Insert,
+                        OwnedRow::new(vec![
+                            Some(ScalarImpl::Int64(0)),
+                            Some(ScalarImpl::Int64(i)),
+                            Some(ScalarImpl::Int32(i as i32)),
+                        ]),
+                    )
+                })
+                .collect();
+            StreamChunk::from_rows(&rows, &input_types())
+        }
+
+        #[tokio::test]
+        async fn a_stuck_partition_counts_once_per_visit() {
+            let (mut tx, mut stream, metrics) = build().await;
+            let exhausted_before = metrics.match_recognize_scan_budget_exhausted_count.get();
+            let stuck_before = metrics.match_recognize_stuck_visit_count.get();
+
+            tx.push_chunk(rows_chunk());
+            tx.push_barrier_with_prev_epoch_for_test(test_epoch(2), test_epoch(1), false);
+            drain_until_barrier(&mut stream, test_epoch(2)).await;
+            assert!(
+                metrics.match_recognize_scan_budget_exhausted_count.get() > exhausted_before,
+                "setup: the arrival must exhaust the budget"
+            );
+            assert_eq!(
+                metrics.match_recognize_stuck_visit_count.get(),
+                stuck_before,
+                "an arrival feeds rows: progress by definition, never a stuck visit"
+            );
+
+            // Each watermark visit refreshes under a fresh budget, exhausts it at the same start,
+            // and leaves every cursor where it was: one stuck visit per watermark.
+            for (visit, epoch) in [(1u64, 3u64), (2, 4)] {
+                tx.push_int64_watermark(1, ROWS + visit as i64);
+                tx.push_barrier_with_prev_epoch_for_test(
+                    test_epoch(epoch),
+                    test_epoch(epoch - 1),
+                    false,
+                );
+                drain_until_barrier(&mut stream, test_epoch(epoch)).await;
+                assert_eq!(
+                    metrics.match_recognize_stuck_visit_count.get(),
+                    stuck_before + visit,
+                    "after watermark visit {visit}"
+                );
+            }
         }
     }
 }
