@@ -13,18 +13,12 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::{Arc, LazyLock};
 
 use bytes::Bytes;
 use futures::StreamExt;
 use parking_lot::{Mutex, RwLock};
-use prometheus::{
-    IntCounter, IntCounterVec, IntGauge, IntGaugeVec, register_int_counter_vec_with_registry,
-    register_int_counter_with_registry, register_int_gauge_vec_with_registry,
-    register_int_gauge_with_registry,
-};
-use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_hummock_sdk::{HummockSstableObjectId, HummockVersionId};
 use risingwave_object_store::object::{
     MonitoredStreamingReader, ObjectError, ObjectMetadataIter, ObjectRangeBounds, ObjectResult,
@@ -33,70 +27,7 @@ use risingwave_object_store::object::{
 use thiserror_ext::AsReport;
 use tokio::sync::{Notify, Semaphore};
 
-static PIN_CACHE_IO_FAILURES: LazyLock<IntCounterVec> = LazyLock::new(|| {
-    register_int_counter_vec_with_registry!(
-        "pin_cache_io_failure_total",
-        "Pin Cache refill I/O failures by phase",
-        &["phase"],
-        &GLOBAL_METRICS_REGISTRY
-    )
-    .unwrap()
-});
-
-static PIN_CACHE_CAPACITY_BYTES: LazyLock<IntGaugeVec> = LazyLock::new(|| {
-    register_int_gauge_vec_with_registry!(
-        "pin_cache_capacity_bytes",
-        "Pin Cache capacity accounting by state",
-        &["state"],
-        &GLOBAL_METRICS_REGISTRY
-    )
-    .unwrap()
-});
-
-static PIN_CACHE_PUBLISHED_OBJECTS: LazyLock<IntGauge> = LazyLock::new(|| {
-    register_int_gauge_with_registry!(
-        "pin_cache_published_objects",
-        "Complete SST objects currently routed to the local Pin Cache",
-        &GLOBAL_METRICS_REGISTRY
-    )
-    .unwrap()
-});
-
-static PIN_CACHE_PUBLISHED_BYTES: LazyLock<IntGauge> = LazyLock::new(|| {
-    register_int_gauge_with_registry!(
-        "pin_cache_published_bytes",
-        "Complete SST bytes currently routed to the local Pin Cache",
-        &GLOBAL_METRICS_REGISTRY
-    )
-    .unwrap()
-});
-
-static PIN_CACHE_RECOVERY_READY: LazyLock<IntGauge> = LazyLock::new(|| {
-    register_int_gauge_with_registry!(
-        "pin_cache_recovery_ready",
-        "Whether the local Pin Cache inventory scan completed successfully",
-        &GLOBAL_METRICS_REGISTRY
-    )
-    .unwrap()
-});
-
-static PIN_CACHE_RECOVERY_FAILURES: LazyLock<IntCounter> = LazyLock::new(|| {
-    register_int_counter_with_registry!(
-        "pin_cache_recovery_failure_total",
-        "Pin Cache inventory scan failures",
-        &GLOBAL_METRICS_REGISTRY
-    )
-    .unwrap()
-});
-
-static PIN_CACHE_GC_FAILURES: LazyLock<IntCounter> = LazyLock::new(|| {
-    register_int_counter_with_registry!(
-        "pin_cache_gc_failure_total",
-        "Failed Pin Cache reclaim batches",
-        &GLOBAL_METRICS_REGISTRY
-    )
-    .unwrap()
-});
+use crate::monitor::GLOBAL_PIN_CACHE_METRICS;
 
 fn metric_bytes(bytes: u64) -> i64 {
     bytes.min(i64::MAX as u64) as i64
@@ -125,15 +56,11 @@ struct PinCacheGc {
 
 impl PinCacheGc {
     fn new(store: ObjectStoreRef, capacity: u64) -> Arc<Self> {
-        PIN_CACHE_CAPACITY_BYTES
-            .with_label_values(&["capacity"])
+        GLOBAL_PIN_CACHE_METRICS
+            .capacity_bytes
             .set(metric_bytes(capacity));
-        PIN_CACHE_CAPACITY_BYTES
-            .with_label_values(&["accounted"])
-            .set(0);
-        PIN_CACHE_CAPACITY_BYTES
-            .with_label_values(&["uncertain"])
-            .set(0);
+        GLOBAL_PIN_CACHE_METRICS.accounted_bytes.set(0);
+        GLOBAL_PIN_CACHE_METRICS.uncertain_bytes.set(0);
         Arc::new(Self {
             store,
             capacity,
@@ -150,8 +77,8 @@ impl PinCacheGc {
             .is_none()
         {
             state.accounted_bytes = state.accounted_bytes.saturating_add(entry.size);
-            PIN_CACHE_CAPACITY_BYTES
-                .with_label_values(&["accounted"])
+            GLOBAL_PIN_CACHE_METRICS
+                .accounted_bytes
                 .set(metric_bytes(state.accounted_bytes));
         }
     }
@@ -167,8 +94,8 @@ impl PinCacheGc {
         let old = state.accounted_paths.insert(entry.path.clone(), entry.size);
         debug_assert!(old.is_none(), "pin-cache paths must be unique");
         state.accounted_bytes = accounted_bytes;
-        PIN_CACHE_CAPACITY_BYTES
-            .with_label_values(&["accounted"])
+        GLOBAL_PIN_CACHE_METRICS
+            .accounted_bytes
             .set(metric_bytes(state.accounted_bytes));
         Ok(())
     }
@@ -177,8 +104,8 @@ impl PinCacheGc {
         let mut state = self.state.lock();
         if state.uncertain_paths.insert(entry.path.clone()) {
             state.uncertain_bytes = state.uncertain_bytes.saturating_add(entry.size);
-            PIN_CACHE_CAPACITY_BYTES
-                .with_label_values(&["uncertain"])
+            GLOBAL_PIN_CACHE_METRICS
+                .uncertain_bytes
                 .set(metric_bytes(state.uncertain_bytes));
         }
     }
@@ -201,7 +128,7 @@ impl PinCacheGc {
         match self.store.delete_objects(&paths).await {
             Ok(()) => self.finish_delete(&paths),
             Err(error) => {
-                PIN_CACHE_GC_FAILURES.inc();
+                GLOBAL_PIN_CACHE_METRICS.gc_failures.inc();
                 tracing::warn!(
                     object_count = paths.len(),
                     error = %error.as_report(),
@@ -224,11 +151,11 @@ impl PinCacheGc {
                     .saturating_sub(size.unwrap_or_default());
             }
         }
-        PIN_CACHE_CAPACITY_BYTES
-            .with_label_values(&["accounted"])
+        GLOBAL_PIN_CACHE_METRICS
+            .accounted_bytes
             .set(metric_bytes(state.accounted_bytes));
-        PIN_CACHE_CAPACITY_BYTES
-            .with_label_values(&["uncertain"])
+        GLOBAL_PIN_CACHE_METRICS
+            .uncertain_bytes
             .set(metric_bytes(state.uncertain_bytes));
     }
 }
@@ -266,8 +193,12 @@ impl PinCacheState {
     }
 
     fn report_published(&self) {
-        PIN_CACHE_PUBLISHED_OBJECTS.set(metric_bytes(self.published.len() as u64));
-        PIN_CACHE_PUBLISHED_BYTES.set(metric_bytes(self.published_bytes));
+        GLOBAL_PIN_CACHE_METRICS
+            .published_objects
+            .set(metric_bytes(self.published.len() as u64));
+        GLOBAL_PIN_CACHE_METRICS
+            .published_bytes
+            .set(metric_bytes(self.published_bytes));
     }
 }
 
@@ -308,7 +239,10 @@ struct PinCacheDownloadGuard {
 
 impl PinCacheDownloadGuard {
     fn record_io_failure(&self, phase: &'static str) {
-        PIN_CACHE_IO_FAILURES.with_label_values(&[phase]).inc();
+        GLOBAL_PIN_CACHE_METRICS
+            .io_failures
+            .with_label_values(&[phase])
+            .inc();
     }
 
     async fn write(
@@ -467,17 +401,6 @@ impl PinCacheReadHandle {
 
 impl PinCache {
     pub(crate) fn new(store: ObjectStoreRef, capacity: u64) -> Arc<Self> {
-        for phase in [
-            "remote_read_init",
-            "remote_read",
-            "local_upload_init",
-            "local_upload_write",
-            "local_upload_finish",
-            "local_metadata",
-            "size_validation",
-        ] {
-            let _ = PIN_CACHE_IO_FAILURES.with_label_values(&[phase]);
-        }
         let gc = PinCacheGc::new(store.clone(), capacity);
         let pin_cache = Arc::new(Self {
             store,
@@ -489,9 +412,7 @@ impl PinCache {
             refill_gate: Mutex::new(None),
         });
         pin_cache.state.read().report_published();
-        PIN_CACHE_RECOVERY_READY.set(0);
-        let _ = &*PIN_CACHE_RECOVERY_FAILURES;
-        let _ = &*PIN_CACHE_GC_FAILURES;
+        GLOBAL_PIN_CACHE_METRICS.recovery_ready.set(0);
         let recovery = pin_cache.clone();
         tokio::spawn(async move {
             let objects = recovery.store.list("", None, None).await;
@@ -794,10 +715,12 @@ impl PinCache {
         {
             let state = self.state.read();
             state.report_published();
-            PIN_CACHE_RECOVERY_READY.set((state.recovery_state == RecoveryState::Ready) as i64);
+            GLOBAL_PIN_CACHE_METRICS
+                .recovery_ready
+                .set((state.recovery_state == RecoveryState::Ready) as i64);
         }
         if recovery_failed {
-            PIN_CACHE_RECOVERY_FAILURES.inc();
+            GLOBAL_PIN_CACHE_METRICS.recovery_failures.inc();
         }
         stale_objects.extend(reconciled_stale_objects);
         self.recovery_notify.notify_waiters();

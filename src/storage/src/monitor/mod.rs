@@ -17,6 +17,9 @@ use futures::Future;
 pub use hummock_state_store_metrics::*;
 mod monitored_store;
 pub use monitored_store::*;
+mod pin_cache_metrics;
+pub(crate) use pin_cache_metrics::GLOBAL_PIN_CACHE_METRICS;
+
 mod hummock_metrics;
 pub use hummock_metrics::*;
 
