@@ -28,7 +28,6 @@ dependencies = [
  "toml 1.1.2+spec-1.1.0",
  "windows-registry",
  "windows-sys 0.61.2",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -5561,7 +5560,6 @@ dependencies = [
  "libc",
  "option-ext",
  "redox_users 0.5.2",
- "windows-sys 0.61.2",
  "windows-sys 0.61.2",
 ]
 
@@ -11246,7 +11244,7 @@ dependencies = [
  "opentelemetry-proto",
  "opentelemetry_sdk",
  "prost 0.14.3",
- "reqwest 0.12.25",
+ "reqwest 0.12.28",
  "thiserror 2.0.20",
  "tokio",
  "tonic",
@@ -15915,7 +15913,6 @@ dependencies = [
  "libc",
  "linux-raw-sys 0.11.0",
  "windows-sys 0.61.2",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -16026,7 +16023,6 @@ dependencies = [
  "security-framework 3.5.1",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
  "windows-sys 0.61.2",
 ]
 
@@ -17125,7 +17121,6 @@ checksum = "c3d1e2c7f27f8d4cb10542a02c49005dbd6e93095799d6f3be745fae9f8fedd4"
 dependencies = [
  "libc",
  "windows-sys 0.61.2",
- "windows-sys 0.61.2",
 ]
 
 [[package]]
@@ -17861,10 +17856,8 @@ checksum = "0136791f7c95b1f6dd99f9cc786b91bb81c3800b639b3478e561ddb7be95e5f1"
 dependencies = [
  "fastrand",
  "getrandom 0.4.2",
- "getrandom 0.4.2",
  "once_cell",
  "rustix 1.1.3",
- "windows-sys 0.61.2",
  "windows-sys 0.61.2",
 ]
 
