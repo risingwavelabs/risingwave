@@ -26,7 +26,11 @@ use crate::optimizer::plan_node::generic::{_CHANGELOG_ROW_ID, CHANGELOG_OP};
 #[derive(Debug, Clone)]
 pub enum BoundShareInput {
     Query(BoundQuery),
-    ChangeLog(Relation),
+    ChangeLog {
+        relation: Relation,
+        /// Key column indices in the source schema
+        key_indices: Option<Vec<usize>>,
+    },
 }
 impl BoundShareInput {
     pub fn fields(&self) -> Result<Vec<(bool, Field)>> {
@@ -38,7 +42,7 @@ impl BoundShareInput {
                 .cloned()
                 .map(|f| (false, f))
                 .collect_vec()),
-            BoundShareInput::ChangeLog(r) => {
+            BoundShareInput::ChangeLog { relation: r, .. } => {
                 let (fields, _name) = if let Relation::BaseTable(bound_base_table) = r {
                     (
                         bound_base_table.table_catalog.columns().to_vec(),
@@ -95,7 +99,7 @@ impl RewriteExprsRecursive for BoundShare {
     fn rewrite_exprs_recursive(&mut self, rewriter: &mut impl crate::expr::ExprRewriter) {
         match &mut self.input {
             BoundShareInput::Query(q) => q.rewrite_exprs_recursive(rewriter),
-            BoundShareInput::ChangeLog(r) => r.rewrite_exprs_recursive(rewriter),
+            BoundShareInput::ChangeLog { relation: r, .. } => r.rewrite_exprs_recursive(rewriter),
         };
     }
 }

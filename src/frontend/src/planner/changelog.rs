@@ -18,9 +18,13 @@ use crate::error::Result;
 use crate::optimizer::plan_node::{LogicalChangeLog, LogicalPlanRef as PlanRef};
 
 impl Planner {
-    pub(super) fn plan_changelog(&mut self, relation: Relation) -> Result<PlanRef> {
+    pub(super) fn plan_changelog(
+        &mut self,
+        relation: Relation,
+        key_indices: Option<Vec<usize>>,
+    ) -> Result<PlanRef> {
         let root = self.plan_relation(relation)?;
-        let plan = LogicalChangeLog::create(root);
+        let plan = LogicalChangeLog::create(root, key_indices);
         Ok(plan)
     }
 }

@@ -163,7 +163,10 @@ impl QueryRewriter<'_> {
             for cte_table in &mut with.cte_tables {
                 match &mut cte_table.cte_inner {
                     risingwave_sqlparser::ast::CteInner::Query(query) => self.visit_query(query),
-                    risingwave_sqlparser::ast::CteInner::ChangeLog(name) => {
+                    risingwave_sqlparser::ast::CteInner::ChangeLog {
+                        from: name,
+                        key: _key,
+                    } => {
                         let idx = name.0.len() - 1;
                         if name.0[idx].real_value() == self.from {
                             replace_table_name(name, self.to);

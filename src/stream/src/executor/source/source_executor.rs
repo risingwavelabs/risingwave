@@ -1376,8 +1376,22 @@ mod tests {
     #[test]
     fn test_build_pulsar_ack_task_for_interleaved_splits() {
         let (wait_checkpoint_tx, _wait_checkpoint_rx) = unbounded_channel();
+        let source_reader = create_source_desc_builder(
+            &Schema::default(),
+            None,
+            StreamSourceInfo {
+                row_format: PbRowFormatType::Native as i32,
+                ..Default::default()
+            },
+            convert_args!(btreemap!("connector" => "datagen")),
+            vec![],
+        )
+        .build()
+        .unwrap()
+        .source;
         let mut builder = WaitCheckpointTaskBuilder {
             wait_checkpoint_tx,
+            source_reader,
             building_task: WaitCheckpointTask::AckPulsarMessage(vec![]),
         };
         let actor_id = ActorId::new(11);

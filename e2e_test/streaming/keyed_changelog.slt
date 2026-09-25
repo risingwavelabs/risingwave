@@ -1,0 +1,77 @@
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE TABLE source (
+    class_id BIGINT,
+    description VARCHAR,
+    free_usage BOOLEAN
+);
+
+statement ok
+CREATE MATERIALIZED VIEW grouped_classes AS
+SELECT class_id, description, free_usage, COUNT(*) AS n
+FROM source
+GROUP BY class_id, description, free_usage;
+
+statement ok
+CREATE MATERIALIZED VIEW mv AS
+WITH changes AS CHANGELOG FROM grouped_classes KEY (class_id)
+SELECT class_id, description, free_usage,
+       changelog_op AS __op, CAST(_changelog_row_id AS BIGINT) AS __row_id
+FROM changes;
+
+statement ok
+INSERT INTO source VALUES (42, 'Beginner', false), (43, 'Basic', false);
+
+query ITII
+SELECT class_id, description, free_usage::INT, __op
+FROM (
+    SELECT *, ROW_NUMBER() OVER (PARTITION BY class_id ORDER BY __row_id DESC) AS rn
+    FROM mv
+)
+WHERE rn = 1
+ORDER BY class_id;
+----
+42 Beginner 0 1
+43 Basic 0 1
+
+statement ok
+UPDATE source
+SET description = 'Advanced', free_usage = true WHERE class_id = 42;
+
+query ITII
+SELECT class_id, description, free_usage::INT, __op
+FROM (
+    SELECT *, ROW_NUMBER() OVER (PARTITION BY class_id ORDER BY __row_id DESC) AS rn
+    FROM mv
+)
+WHERE rn = 1
+ORDER BY class_id;
+----
+42 Advanced 1 1
+43 Basic 0 1
+
+statement ok
+DELETE FROM source WHERE class_id = 42;
+
+query ITII
+SELECT class_id, description, free_usage::INT, __op
+FROM (
+    SELECT *, ROW_NUMBER() OVER (PARTITION BY class_id ORDER BY __row_id DESC) AS rn
+    FROM mv
+)
+WHERE rn = 1
+ORDER BY class_id;
+----
+42 Advanced 1 2
+43 Basic 0 1
+
+statement ok
+DROP MATERIALIZED VIEW mv;
+
+statement ok
+DROP MATERIALIZED VIEW grouped_classes;
+
+statement ok
+DROP TABLE source;
