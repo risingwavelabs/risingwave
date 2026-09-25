@@ -1,9 +1,21 @@
 statement ok
-create function to_string(a boolean, b smallint, c int, d bigint, e real, f float, g decimal, h varchar, i bytea, j jsonb) returns varchar language javascript as $$
-export function to_string(a, b, c, d, e, f, g, h, i, j) {
-    return a.toString() + b.toString() + c.toString() + d.toString() + e.toString() + f.toString() + g.toString() + h.toString() + i.toString() + JSON.stringify(j);
-}
-$$;
+create function to_string(a boolean, b smallint, c int, d bigint, e real, f float, g decimal, h varchar, i bytea, j jsonb) returns varchar language javascript as $$export function to_string(a, b, c, d, e, f, g, h, i, j) { return a.toString() + b.toString() + c.toString() + d.toString() + e.toString() + f.toString() + g.toString() + h.toString() + i.toString() + JSON.stringify(j); }$$;
+
+query TT
+show create function to_string;
+----
+public.to_string CREATE FUNCTION to_string(a boolean, b smallint, c integer, d bigint, e real, f double precision, g numeric, h character varying, i bytea, j jsonb) RETURNS character varying LANGUAGE javascript AS $$export function to_string(a, b, c, d, e, f, g, h, i, j) { return a.toString() + b.toString() + c.toString() + d.toString() + e.toString() + f.toString() + g.toString() + h.toString() + i.toString() + JSON.stringify(j); }$$
+
+statement ok
+create function test_async_batch(a int) returns int language javascript as $$ yield a; $$ with (async = true, batch = true);
+
+query TT
+show create function test_async_batch;
+----
+public.test_async_batch CREATE FUNCTION test_async_batch(a integer) RETURNS integer LANGUAGE javascript AS $$ yield a; $$ WITH (async = true, batch = true)
+
+statement ok
+drop function test_async_batch;
 
 query T
 select to_string(false, 1::smallint, 2, 3, 4.5, 6.7, 8.9, 'abc', '\x010203', '{"key": 1}');
@@ -48,6 +60,15 @@ export function echo_batch(vals) {
 }
 $$ WITH (batch = true);
 
+query TT
+show create function echo_batch;
+----
+public.echo_batch CREATE FUNCTION echo_batch(s character varying) RETURNS character varying LANGUAGE javascript AS $$
+export function echo_batch(vals) {
+    return vals.map(v => v + "!");
+}
+$$ WITH (batch = true)
+
 query T
 select echo_batch(x) from (values ('hello'), (null), ('world')) as t(x);
 ----
@@ -57,3 +78,22 @@ world!
 
 statement ok
 drop function echo_batch;
+
+statement ok
+create function js_async(x int) returns int language javascript as $$
+    export async function js_async(x) {
+        return x;
+    }
+$$ with (is_async = true, is_batched = true);
+
+query TT
+show create function js_async;
+----
+public.js_async CREATE FUNCTION js_async(x integer) RETURNS integer LANGUAGE javascript AS $$
+    export async function js_async(x) {
+        return x;
+    }
+$$ WITH (async = true, batch = true)
+
+statement ok
+drop function js_async;
