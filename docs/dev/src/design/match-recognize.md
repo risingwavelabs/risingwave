@@ -355,8 +355,17 @@ does not recover on its own, and the practical remedy is to drop and recreate th
 So the two remedies the runtime report names are not interchangeable. Simplifying nested
 optional/alternation quantifiers addresses the cause. Adding or tightening `WITHIN` is what makes the
 degradation bounded rather than absorbing, and is the one that matters if a partition is already
-stuck. A `scan_budget_exhausted` count that is nonzero and rising on a query without `WITHIN` should
-be read as a stuck partition, not as slow progress.
+stuck. `scan_budget_exhausted_count` alone cannot tell the two apart — it rises in both — so the
+executor also counts the visits that spent the budget and moved nothing (`stuck_visit_count`: no
+scan or freeze cursor advanced, no match emitted, no row evicted, no gate verdict newly cached,
+the matcher's whole resumable state equal before and after). A visit like that repeats the same
+work next time, deterministically, until new rows change the partition. So on a query without
+`WITHIN`, sustained increments are the absorbing state unless rows or the query change; with
+`WITHIN`, the paragraph above applies — window closure drains only the matches the truncated scan
+reached, at closure rate, and a scan starved before finding any sheds nothing, so sustained
+increments there are the same absorbing state. The accompanying report, once per pass, says how
+many rows the partition holds. That counter is the alert; `scan_budget_exhausted_count` is the
+warning.
 
 `e2e_test/streaming/match_recognize_preference_supersession.slt` pins both shapes end to end, with
 both endings each (the superseding row arrives; a killing row decides the held match), plus an
@@ -512,20 +521,27 @@ tracks the same bound. Wiring this into RisingWave's memory accounting is a plan
 
 ### Observability
 
-Four counters and one gauge are labelled `(table_id, actor_id, fragment_id)`, like the neighbouring
+Five counters and one gauge are labelled `(table_id, actor_id, fragment_id)`, like the neighbouring
 over-window set:
 
 - `stream_match_recognize_matches_emitted_count`: matches emitted.
 - `stream_match_recognize_evicted_rows_count`: rows leaving the matcher buffer, whether consumed by
   an emitted match or pruned as a dead prefix.
-- `stream_match_recognize_scan_budget_exhausted_count`: the alerting hook for
-  catastrophic-backtracking degradation. The log line is deduplicated per pass; the counter counts
-  every affected partition visit.
+- `stream_match_recognize_scan_budget_exhausted_count`: the warning for catastrophic-backtracking
+  degradation — every budget exhaustion, whether on an arrival's advance or on a watermark visit,
+  converging or not. The log line is deduplicated per pass; the counter counts every affected
+  arrival and visit. Alert on `stuck_visit_count` below, not on this.
 - `stream_match_recognize_within_deadline_overflow_count`: buffered rows for which adding the
   `WITHIN` bound exceeds the `ORDER BY` type's range. Their deadline becomes unbounded, so the
   window never closes through watermark progress.
 - `stream_match_recognize_retained_rows` (gauge): rows currently resident in matcher memory, summed
   across the actor's partitions.
+- `stream_match_recognize_stuck_visit_count`: watermark visits that exhausted the scan budget and
+  made no progress at all — the alert. Exhaustion with progress is degraded latency; a stuck visit
+  repeats the same work until new rows change the partition, and sustained increments mean the
+  partition will not decide unless rows or the query change. With `WITHIN`, window closure drains
+  only the matches the truncated scan reached; a scan starved before finding any sheds nothing.
+  See [Degradation under a spent budget](#degradation-under-a-spent-budget).
 
 ## Semantic edges for CEP use
 
