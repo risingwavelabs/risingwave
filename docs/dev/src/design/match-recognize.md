@@ -543,6 +543,12 @@ over-window set:
   only the matches the truncated scan reached; a scan starved before finding any sheds nothing.
   See [Degradation under a spent budget](#degradation-under-a-spent-budget).
 
+All six are on the dev Grafana dashboard under the collapsed row "Streaming MATCH_RECOGNIZE"
+(`grafana/dashboard/dev/streaming_match_recognize.py`), per table and fragment, with actor-level
+series hidden behind the metrics level. The reports that accompany the two budget counters go
+through the actor's compute-error channel: the `user_compute_error` counter and a rate-limited
+log line naming the actor.
+
 ## Semantic edges for CEP use
 
 The intro calls this the streaming-SQL form of complex event processing; measured against the full
