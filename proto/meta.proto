@@ -494,7 +494,17 @@ message ListIcebergCompactionStatusResponse {
   repeated IcebergCompactionStatus statuses = 1;
 }
 
+// Return the original mining boundary from the committed Oracle source split, not from an
+// enumerator assignment or a live Java connector.
+message GetOracleInitialMiningScnRequest {
+  uint32 source_id = 1;
+}
+message GetOracleInitialMiningScnResponse {
+  uint64 initial_mining_scn = 1;
+}
+
 service StreamManagerService {
+  rpc GetOracleInitialMiningScn(GetOracleInitialMiningScnRequest) returns (GetOracleInitialMiningScnResponse);
   rpc Flush(FlushRequest) returns (FlushResponse);
   rpc Pause(PauseRequest) returns (PauseResponse);
   rpc Resume(ResumeRequest) returns (ResumeResponse);

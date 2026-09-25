@@ -16,6 +16,8 @@
 
 package com.risingwave.connector.source.core;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.node.ObjectNode;
 import com.risingwave.connector.api.source.SourceTypeE;
 import com.risingwave.connector.cdc.debezium.internal.DebeziumOffset;
 import com.risingwave.connector.cdc.debezium.internal.DebeziumOffsetSerializer;
@@ -33,6 +35,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CountDownLatch;
 import org.apache.kafka.connect.data.Schema;
 import org.apache.kafka.connect.data.Struct;
 import org.apache.kafka.connect.json.JsonConverter;
@@ -64,6 +67,11 @@ public class DbzChangeEventConsumer
     private final String transactionTopic;
     private final String schemaChangeTopic;
 
+    // Oracle-specific
+    private final boolean requiresInitialOracleMining;
+    private final CountDownLatch initialOracleMiningReady = new CountDownLatch(1);
+    private volatile boolean initialOracleMiningReported;
+
     private volatile DebeziumEngine.RecordCommitter<ChangeEvent<SourceRecord, SourceRecord>>
             currentRecordCommitter;
 
@@ -74,6 +82,25 @@ public class DbzChangeEventConsumer
             String transactionTopic,
             String schemaChangeTopic,
             BlockingQueue<GetEventStreamResponse> queue) {
+        this(
+                connector,
+                sourceId,
+                heartbeatTopicPrefix,
+                transactionTopic,
+                schemaChangeTopic,
+                queue,
+                false);
+    }
+
+    DbzChangeEventConsumer(
+            SourceTypeE connector,
+            long sourceId,
+            String heartbeatTopicPrefix,
+            String transactionTopic,
+            String schemaChangeTopic,
+            BlockingQueue<GetEventStreamResponse> queue,
+            boolean requiresInitialOracleMining) {
+        this.requiresInitialOracleMining = requiresInitialOracleMining;
         this.connector = connector;
         this.sourceId = sourceId;
         this.outputChannel = queue;
@@ -98,6 +125,37 @@ public class DbzChangeEventConsumer
         configs.put(ConverterConfig.TYPE_CONFIG, ConverterType.KEY.getName());
         keyConverter.configure(configs);
         this.keyConverter = keyConverter;
+    }
+
+    /** Sends the selected mining position before any records from the first mining session. */
+    void reportInitialOracleMining(
+            String scn, Map<String, ?> partition, Map<String, ?> sourceOffset)
+            throws InterruptedException {
+        try {
+            var offset = new DebeziumOffset(partition, sourceOffset, true);
+            ObjectNode encoded = new ObjectMapper().valueToTree(offset);
+            encoded.put("initialMiningScn", scn);
+            var event =
+                    CdcMessage.newBuilder()
+                            .setOffset(encoded.toString())
+                            .setPartition(String.valueOf(sourceId))
+                            .setSourceType(SourceType.ORACLE)
+                            .setMsgType(CdcMessage.CdcMessageType.HEARTBEAT)
+                            .build();
+            outputChannel.put(
+                    GetEventStreamResponse.newBuilder()
+                            .setSourceId(sourceId)
+                            .addEvents(event)
+                            .build());
+            initialOracleMiningReported = true;
+            initialOracleMiningReady.countDown();
+        } catch (IllegalArgumentException e) {
+            throw new CdcConnectorException("Failed to encode Oracle mining offset", e);
+        }
+    }
+
+    CountDownLatch initialOracleMiningReady() {
+        return initialOracleMiningReady;
     }
 
     /**
@@ -177,10 +235,34 @@ public class DbzChangeEventConsumer
         for (ChangeEvent<SourceRecord, SourceRecord> event : events) {
             var record = event.value();
             EventType eventType = getEventType(record);
+            if (requiresInitialOracleMining && !initialOracleMiningReported) {
+                if (eventType == EventType.HEARTBEAT) {
+                    // A no_data snapshot can emit a heartbeat before LogMiner selects its start
+                    // SCN. The coordinator's pre-streaming heartbeat is also too early.
+                    continue;
+                }
+                // TODO: If Oracle schema-change emission is supported, handle pre-mining snapshot
+                // schema records without checkpointing their offsets.
+                throw new CdcConnectorException(
+                        "Oracle emitted a CDC record before its initial mining position was known");
+            }
+            Map<String, ?> sourceOffset = record.sourceOffset();
+            if (connector == SourceTypeE.ORACLE
+                    && eventType == EventType.DATA
+                    && record.value() != null) {
+                var source = ((Struct) record.value()).getStruct("source");
+                if (source == null || source.getString("commit_scn") == null) {
+                    throw new CdcConnectorException(
+                            "Oracle data event is missing source.commit_scn");
+                }
+                Map<String, Object> comparisonOffset = new HashMap<>(sourceOffset);
+                comparisonOffset.put("decoded_commit_scn", source.getString("commit_scn"));
+                sourceOffset = comparisonOffset;
+            }
             DebeziumOffset offset =
                     new DebeziumOffset(
                             record.sourcePartition(),
-                            record.sourceOffset(),
+                            sourceOffset,
                             (eventType == EventType.HEARTBEAT));
             // serialize the offset to a JSON, so that kernel doesn't need to
             // aware its layout

@@ -240,11 +240,19 @@ message OracleRow {
   repeated OracleDatum values = 1;
 }
 
+// Earliest open transaction START_SCN for one Oracle instance.
+message OracleOldestOpenTransactionStartScn {
+  uint64 start_scn = 1;
+  // Zero for single-instance V$TRANSACTION; GV$TRANSACTION supplies INST_ID.
+  uint32 instance_id = 2;
+}
+
 message OracleExternalTableResponse {
   TableSchema table_schema = 1;
   uint64 snapshot_scn = 2;
   repeated OracleRow rows = 3;
   ValidationError error = 4;
+  repeated OracleOldestOpenTransactionStartScn oldest_open_transaction_scns = 5;
 }
 
 service ConnectorService {

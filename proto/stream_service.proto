@@ -2,6 +2,7 @@ syntax = "proto3";
 
 package stream_service;
 
+import "catalog.proto";
 import "common.proto";
 import "connector_service.proto";
 import "hummock.proto";
@@ -212,9 +213,21 @@ message GetMinUncommittedObjectIdResponse {
   uint64 min_uncommitted_object_id = 1;
 }
 
+// Read the checkpointed split of an Oracle CDC source. Meta supplies the state table and its
+// committed epoch; the compute node must not return an in-flight or assigned split.
+message GetOracleInitialMiningScnRequest {
+  catalog.Table source_state_table = 1;
+  uint32 source_id = 2;
+  uint64 committed_epoch = 3;
+}
+message GetOracleInitialMiningScnResponse {
+  uint64 initial_mining_scn = 1;
+}
+
 service StreamService {
   rpc StreamingControlStream(stream StreamingControlStreamRequest) returns (stream StreamingControlStreamResponse);
   rpc GetMinUncommittedObjectId(GetMinUncommittedObjectIdRequest) returns (GetMinUncommittedObjectIdResponse);
+  rpc GetOracleInitialMiningScn(GetOracleInitialMiningScnRequest) returns (GetOracleInitialMiningScnResponse);
 }
 
 // TODO: Lifecycle management for actors.

@@ -1023,6 +1023,7 @@ mod tests {
             database: "mydb".to_owned(),
             schema: "public".to_owned(),
             pdb_name: "".to_owned(),
+            rac_nodes: None,
             table: "mytest".to_owned(),
             ssl_mode: Default::default(),
             ssl_root_cert: None,

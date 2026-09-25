@@ -20,12 +20,14 @@ import static io.debezium.config.CommonConnectorConfig.TOPIC_PREFIX;
 import static io.debezium.schema.AbstractTopicNamingStrategy.*;
 
 import com.risingwave.connector.api.source.SourceTypeE;
+import com.risingwave.connector.cdc.debezium.internal.OracleMiningInitialization;
 import com.risingwave.proto.ConnectorServiceProto;
 import io.debezium.embedded.Connect;
 import io.debezium.engine.DebeziumEngine;
 import java.util.Properties;
 import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.CountDownLatch;
 
 public class DbzCdcEngine implements Runnable {
     static final int DEFAULT_QUEUE_CAPACITY = 16;
@@ -33,12 +35,15 @@ public class DbzCdcEngine implements Runnable {
     private final DebeziumEngine<?> engine;
     private final DbzChangeEventConsumer changeEventConsumer;
     private final long id;
+    private final String initialOracleMiningName;
+    private final OracleMiningInitialization.Listener initialOracleMiningListener;
 
     /** If config is not valid will throw exceptions */
     public DbzCdcEngine(
             SourceTypeE connector,
             long sourceId,
             Properties config,
+            boolean requiresInitialOracleMining,
             DebeziumEngine.CompletionCallback completionCallback) {
         var heartbeatTopicPrefix = config.getProperty(TOPIC_HEARTBEAT_PREFIX.name());
         var topicPrefix = config.getProperty(TOPIC_PREFIX.name());
@@ -50,7 +55,8 @@ public class DbzCdcEngine implements Runnable {
                         heartbeatTopicPrefix,
                         transactionTopic,
                         topicPrefix,
-                        new ArrayBlockingQueue<>(DEFAULT_QUEUE_CAPACITY));
+                        new ArrayBlockingQueue<>(DEFAULT_QUEUE_CAPACITY),
+                        requiresInitialOracleMining);
 
         // Builds a debezium engine but not start it
         this.id = sourceId;
@@ -61,16 +67,36 @@ public class DbzCdcEngine implements Runnable {
                         .using(completionCallback)
                         .notifying(consumer)
                         .build();
+        if (requiresInitialOracleMining) {
+            this.initialOracleMiningName = topicPrefix;
+            this.initialOracleMiningListener = consumer::reportInitialOracleMining;
+            OracleMiningInitialization.register(
+                    initialOracleMiningName, initialOracleMiningListener);
+        } else {
+            initialOracleMiningName = null;
+            initialOracleMiningListener = null;
+        }
     }
 
     /** Start to run the cdc engine */
     @Override
     public void run() {
-        engine.run();
+        try {
+            engine.run();
+        } finally {
+            if (initialOracleMiningListener != null) {
+                OracleMiningInitialization.unregister(
+                        initialOracleMiningName, initialOracleMiningListener);
+            }
+        }
     }
 
     public long getId() {
         return id;
+    }
+
+    public CountDownLatch initialOracleMiningReady() {
+        return changeEventConsumer.initialOracleMiningReady();
     }
 
     public void stop() throws Exception {
