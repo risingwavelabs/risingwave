@@ -1096,12 +1096,12 @@ mod tests {
         assert!(validate(&valid_pk_infos).is_ok());
 
         for invalid_pk_infos in [
-            // incorrrect order
+            // incorrect order
             vec![
                 ("tenant".to_owned(), int_type()),
                 ("id".to_owned(), int_type()),
             ],
-            // uncomplete
+            // incomplete
             vec![("id".to_owned(), int_type())],
             // extra index
             vec![
