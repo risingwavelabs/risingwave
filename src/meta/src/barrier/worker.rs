@@ -74,15 +74,6 @@ use crate::stream::{
 };
 use crate::{MetaError, MetaResult};
 
-fn resolve_initial_barrier_interval_ms(
-    database_barrier_interval_ms: Option<i32>,
-    system_barrier_interval_ms: u32,
-) -> u32 {
-    database_barrier_interval_ms
-        .map(|interval| interval as u32)
-        .unwrap_or(system_barrier_interval_ms)
-}
-
 /// [`crate::barrier::worker::GlobalBarrierWorker`] sends barriers to all registered compute nodes and
 /// collect them, with monotonic increasing epoch numbers. On compute nodes, `LocalBarrierManager`
 /// in `risingwave_stream` crate will serve these requests and dispatch them to source actors.
@@ -123,26 +114,9 @@ pub(super) struct GlobalBarrierWorker<C> {
 mod tests {
     use std::collections::HashMap;
 
-    use risingwave_common::util::epoch::Epoch;
-
     use super::*;
-    use crate::barrier::info::BarrierInfo;
-    use crate::barrier::rpc::barrier_to_protobuf;
-    use crate::barrier::{RescheduleContext, TracedEpoch};
+    use crate::barrier::RescheduleContext;
     use crate::notification::Notifier;
-
-    #[test]
-    fn test_initial_barrier_uses_system_interval_without_database_override() {
-        let system_barrier_interval_ms = 500;
-        let barrier_interval_ms =
-            resolve_initial_barrier_interval_ms(None, system_barrier_interval_ms);
-        let barrier_info =
-            BarrierInfo::new_initial(TracedEpoch::new(Epoch(1)), barrier_interval_ms);
-
-        let barrier = barrier_to_protobuf(&barrier_info, None);
-
-        assert_eq!(barrier.barrier_interval_ms, system_barrier_interval_ms);
-    }
     #[tokio::test]
     async fn test_reschedule_intent_without_workers_notifies_start_failed() {
         let env = MetaSrvEnv::for_test().await;
@@ -162,7 +136,6 @@ mod tests {
             )),
             span: tracing::Span::none(),
             checkpoint: false,
-            barrier_interval_ms: 1000,
         };
 
         let result =
@@ -331,7 +304,6 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
         iceberg_compaction_manager: IcebergCompactionManagerRef,
         scale_controller: ScaleControllerRef,
         request_rx: mpsc::UnboundedReceiver<BarrierManagerRequest>,
-        barrier_scheduler: schedule::BarrierScheduler,
         refresh_manager: GlobalRefreshManagerRef,
     ) -> Self {
         let status = Arc::new(ArcSwap::new(Arc::new(BarrierManagerStatus::Starting)));
@@ -345,7 +317,6 @@ impl GlobalBarrierWorker<GlobalBarrierWorkerContextImpl> {
             source_manager,
             scale_controller,
             env.clone(),
-            barrier_scheduler,
             refresh_manager,
             sink_manager,
             iceberg_pk_index_sink_manager,
@@ -709,13 +680,9 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                                 };
                                 match result {
                                     Ok(Some((runtime_info, rendered_info))) => {
-                                        let barrier_interval_ms = self
-                                            .periodic_barriers
-                                            .barrier_interval_ms(database_id);
                                         entering_initializing.enter(
                                             runtime_info,
                                             rendered_info,
-                                            barrier_interval_ms,
                                             &mut self.partial_graph_manager,
                                         );
                                     }
@@ -1217,10 +1184,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                 mut cdc_table_snapshot_splits,
             } = runtime_info_snapshot;
 
-            let reader = self.env.system_params_reader().await;
-            let checkpoint_frequency = reader.checkpoint_frequency();
-            let system_barrier_interval_ms = reader.barrier_interval_ms();
-
             // Derive a conservative job set from the snapshot already loaded for recovery. It
             // includes both main-graph jobs and independently checkpointed jobs, and avoids a
             // later catalog query after some databases have entered recovery.
@@ -1235,7 +1198,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         .insert(*job_id);
                     job_ids
                 });
-
             let mut partial_graph_manager = PartialGraphManager::recover(
                     self.env.clone(),
                     active_streaming_nodes.current(),
@@ -1281,11 +1243,6 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                         } = rendered_info;
                         recoverer.inject_database_initial_barrier(
                             database_id,
-                            resolve_initial_barrier_interval_ms(
-                                recovery_context.fragment_context.database_map[&database_id]
-                                    .barrier_interval_ms,
-                                system_barrier_interval_ms,
-                            ),
                             job_infos,
                             &recovery_context.job_extra_info,
                             &mut state_table_committed_epochs,
@@ -1435,8 +1392,9 @@ impl<C: GlobalBarrierWorkerContext> GlobalBarrierWorker<C> {
                     self.env.clone(),
                 );
 
-                let barrier_interval =
-                    Duration::from_millis(system_barrier_interval_ms as u64);
+                let reader = self.env.system_params_reader().await;
+                let checkpoint_frequency = reader.checkpoint_frequency();
+                let barrier_interval = Duration::from_millis(reader.barrier_interval_ms() as u64);
                 let periodic_barriers = PeriodicBarriers::new(
                     barrier_interval,
                     checkpoint_frequency,

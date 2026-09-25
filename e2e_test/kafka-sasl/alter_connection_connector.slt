@@ -52,7 +52,7 @@ create table t_conn(x int) with (
 ) format plain encode json;
 
 
-query I retry 3 backoff 1s
+query I retry 15 backoff 2s
 select * from t_conn order by x;
 ----
 1

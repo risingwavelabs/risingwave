@@ -13,6 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use chrono::DateTime;
 use itertools::Itertools;
@@ -50,6 +51,11 @@ use crate::manager::MetaSrvEnv;
 use crate::stream::GlobalStreamManagerRef;
 
 pub type TonicResponse<T> = Result<Response<T>, Status>;
+
+fn unix_epoch_millis(time: SystemTime) -> i64 {
+    time.duration_since(UNIX_EPOCH)
+        .map_or(0, |since_epoch| since_epoch.as_millis() as i64)
+}
 
 #[derive(Clone)]
 pub struct StreamServiceImpl {
@@ -156,6 +162,11 @@ impl StreamManagerService for StreamServiceImpl {
                     next_compaction_after_sec: status.next_compaction_after_sec,
                     pending_snapshot_count: status.pending_snapshot_count.map(|count| count as u64),
                     is_triggerable: status.is_triggerable,
+                    last_success_at_ms: status.last_success_at.map(unix_epoch_millis),
+                    last_failure_at_ms: status.last_failure_at.map(unix_epoch_millis),
+                    last_error: status.last_error,
+                    consecutive_failures: status.consecutive_failures,
+                    compaction_lag_sec: status.compaction_lag.map(|lag| lag.as_secs()),
                 },
             )
             .collect();
@@ -712,10 +723,7 @@ impl StreamManagerService for StreamServiceImpl {
 
         tracing::info!("Refreshing table with id: {}", req.table_id);
 
-        let response = self
-            .refresh_manager
-            .trigger_manual_refresh(req, self.env.shared_actor_infos())
-            .await?;
+        let response = self.refresh_manager.trigger_manual_refresh(req).await?;
 
         Ok(Response::new(response))
     }

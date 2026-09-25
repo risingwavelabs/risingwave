@@ -1,0 +1,41 @@
+# The refresh left in flight by refresh_table_restart_before.slt is abandoned by the restarted
+# meta and re-run once; the re-run is held by the limit of 0 until it is lifted here.
+
+query TB retry 20 backoff 1s
+SELECT s.current_status, s.last_trigger_time > m.trigger_before
+FROM rw_catalog.rw_refresh_table_state s
+JOIN rw_catalog.rw_tables t ON s.table_id = t.id
+CROSS JOIN refresh_paused_marker m
+WHERE t.name = 'refresh_paused_t';
+----
+REFRESHING t
+
+statement ok
+ALTER TABLE refresh_paused_t SET SOURCE_RATE_LIMIT TO DEFAULT;
+
+query TBB retry 10 backoff 2s
+SELECT s.current_status, s.last_trigger_time > m.trigger_before, s.last_success_time > s.last_trigger_time
+FROM rw_catalog.rw_refresh_table_state s
+JOIN rw_catalog.rw_tables t ON s.table_id = t.id
+CROSS JOIN refresh_paused_marker m
+WHERE t.name = 'refresh_paused_t';
+----
+IDLE t t
+
+statement ok
+FLUSH;
+
+query III
+SELECT min(id), max(id), count(*) FROM refresh_paused_t;
+----
+5001 6000 1000
+
+query II
+SELECT count(*), sum(cnt) FROM refresh_paused_mv;
+----
+97 1000
+
+statement ok
+DROP TABLE refresh_paused_marker;
+
+include ./drop_refresh_table_paused.slt.part

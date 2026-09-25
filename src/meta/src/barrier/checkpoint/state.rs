@@ -68,7 +68,7 @@ use crate::model::{
 use crate::notification::NotifierStarter;
 use crate::stream::cdc::parallel_cdc_table_backfill_fragment;
 use crate::stream::{
-    GlobalActorIdGen, ReplaceJobSplitPlan, SourceManager, SplitAssignment,
+    GlobalActorIdGen, RefreshCycleActors, ReplaceJobSplitPlan, SourceManager, SplitAssignment,
     fill_snapshot_backfill_epoch,
 };
 use crate::{MetaError, MetaResult};
@@ -129,7 +129,6 @@ impl BarrierWorkerState {
         &mut self,
         is_checkpoint: bool,
         curr_epoch: TracedEpoch,
-        barrier_interval_ms: u32,
     ) -> BarrierInfo {
         assert!(
             self.in_flight_prev_epoch.value() < curr_epoch.value(),
@@ -151,7 +150,6 @@ impl BarrierWorkerState {
             prev_epoch,
             curr_epoch,
             kind,
-            barrier_interval_ms,
         }
     }
 }
@@ -624,7 +622,6 @@ impl DatabaseCheckpointControl {
                         notifier.as_mut(),
                         snapshot_backfill_upstream_tables,
                         snapshot_epoch,
-                        barrier_info.barrier_interval_ms,
                         since_timestamp_upstream_log_epochs,
                         hummock_version_stats,
                         term_id,
@@ -805,7 +802,6 @@ impl DatabaseCheckpointControl {
                         notifier.as_mut(),
                         snapshot_backfill_upstream_tables,
                         snapshot_epoch,
-                        barrier_info.barrier_interval_ms,
                         hummock_version_stats,
                         self.term_id(),
                         partial_graph_manager,
@@ -1468,9 +1464,28 @@ impl DatabaseCheckpointControl {
             Some(Command::Refresh {
                 table_id,
                 associated_source_id,
+                staging_table_id,
+                trigger_time,
             }) => {
                 let mutation = Some(Command::refresh_to_mutation(table_id, associated_source_id));
-                self.apply_simple_command(mutation, "Refresh")
+                let actors = RefreshCycleActors::from_fragments(
+                    self.database_info.job_fragment_infos(table_id.as_job_id()),
+                );
+                let (table_ids, node_actors) = self.collect_base_info();
+                (
+                    mutation,
+                    table_ids,
+                    None,
+                    node_actors,
+                    PostCollectCommand::RefreshStarted {
+                        table_id,
+                        database_id: self.database_info.database_id,
+                        associated_source_id,
+                        staging_table_id,
+                        trigger_time,
+                        actors,
+                    },
+                )
             }
 
             Some(Command::ListFinish {
@@ -1487,6 +1502,25 @@ impl DatabaseCheckpointControl {
             }) => {
                 let mutation = Some(Command::load_finish_to_mutation(associated_source_id));
                 self.apply_simple_command(mutation, "LoadFinish")
+            }
+
+            Some(Command::FinishRefresh {
+                table_id,
+                staging_table_id,
+                trigger_time,
+            }) => {
+                let (table_ids, node_actors) = self.collect_base_info();
+                (
+                    None,
+                    table_ids,
+                    None,
+                    node_actors,
+                    PostCollectCommand::FinishRefresh {
+                        table_id,
+                        staging_table_id,
+                        trigger_time,
+                    },
+                )
             }
 
             Some(Command::ResetSource { source_id }) => {

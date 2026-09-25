@@ -498,21 +498,21 @@ pub async fn start_service_as_election_leader(
         env.opts.iceberg_gc_interval_sec,
     ));
 
-    let refresh_scheduler_interval = Duration::from_secs(env.opts.refresh_scheduler_interval_sec);
-    let (refresh_manager, refresh_handle, refresh_shutdown) = GlobalRefreshManager::start(
-        metadata_manager.clone(),
-        barrier_scheduler.clone(),
-        &env,
-        refresh_scheduler_interval,
-    )
-    .await?;
-    sub_tasks.push((refresh_handle, refresh_shutdown));
-
     let scale_controller = Arc::new(ScaleController::new(
         &metadata_manager,
         source_manager.clone(),
         env.clone(),
     ));
+
+    let refresh_scheduler_interval = Duration::from_secs(env.opts.refresh_scheduler_interval_sec);
+    let (refresh_manager, refresh_handle, refresh_shutdown) = GlobalRefreshManager::start(
+        metadata_manager.clone(),
+        barrier_scheduler.clone(),
+        scale_controller.clone(),
+        refresh_scheduler_interval,
+    )
+    .await?;
+    sub_tasks.push((refresh_handle, refresh_shutdown));
 
     let (barrier_manager, join_handle, shutdown_rx) = GlobalBarrierManager::start(
         scheduled_barriers,
@@ -525,7 +525,6 @@ pub async fn start_service_as_election_leader(
         iceberg_pk_index_sink_manager.clone(),
         iceberg_compaction_mgr.clone(),
         scale_controller.clone(),
-        barrier_scheduler.clone(),
         refresh_manager.clone(),
     )
     .await;

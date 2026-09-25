@@ -15,7 +15,6 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use anyhow::Context;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
 use risingwave_common::catalog::{DatabaseId, FragmentTypeFlag, TableId};
@@ -25,11 +24,10 @@ use risingwave_meta_model::ActorId;
 use risingwave_meta_model::streaming_job::BackfillOrders;
 use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
-use risingwave_pb::id::SourceId;
 use risingwave_pb::meta::PbTableRefillRuntimeConfig;
 use risingwave_pb::meta::subscribe_response::{Info, Operation};
 use risingwave_pb::stream_service::barrier_complete_response::{
-    PbListFinishedSource, PbLoadFinishedSource,
+    PbListFinishedSource, PbLoadFinishedSource, PbRefreshFinishedActor,
 };
 use risingwave_rpc_client::StreamingControlHandle;
 use thiserror_ext::AsReport;
@@ -43,7 +41,7 @@ use crate::barrier::context::{GlobalBarrierWorkerContext, GlobalBarrierWorkerCon
 use crate::barrier::progress::TrackingJob;
 use crate::barrier::schedule::MarkReadyOptions;
 use crate::barrier::{
-    BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, Command, CreateStreamingJobCommandInfo,
+    BarrierManagerStatus, BarrierWorkerRuntimeInfoSnapshot, CreateStreamingJobCommandInfo,
     CreateStreamingJobType, DatabaseRuntimeInfoSnapshot, RecoveryReason, ReplaceStreamJobPlan,
     Scheduled,
 };
@@ -55,7 +53,7 @@ use crate::manager::iceberg_pk_index_sink::{
 use crate::manager::sink_coordination::{RecoveryStart, RecoverySucceeded};
 use crate::model::FragmentDownstreamRelation;
 use crate::serving::{fetch_serving_infos, sync_serving_table_vnode_mappings_to_hummock};
-use crate::stream::{SourceChange, cleanup_dropped_streaming_jobs};
+use crate::stream::{RefreshStage, SourceChange, cleanup_dropped_streaming_jobs};
 use crate::{MetaError, MetaResult};
 
 fn resolve_since_timestamp_log_store_epoch(
@@ -209,6 +207,8 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         if is_global {
             self.set_status(BarrierManagerStatus::Running);
         }
+        // The scheduler re-runs the cycles abandoned by the recovery.
+        self.refresh_manager.notify_scheduler();
         Ok(())
     }
 
@@ -342,49 +342,13 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         &self,
         list_finished: Vec<PbListFinishedSource>,
     ) -> MetaResult<()> {
-        let mut list_finished_info: HashMap<(TableId, SourceId), HashSet<ActorId>> = HashMap::new();
-
-        for list_finished in list_finished {
-            let table_id = list_finished.table_id;
-            let associated_source_id = list_finished.associated_source_id;
-            list_finished_info
-                .entry((table_id, associated_source_id))
-                .or_default()
-                .insert(list_finished.reporter_actor_id);
-        }
-
-        for ((table_id, associated_source_id), actors) in list_finished_info {
-            let allow_yield = self
-                .refresh_manager
-                .mark_list_stage_finished(table_id, &actors)?;
-
-            if !allow_yield {
-                continue;
-            }
-
-            let Some(database_id) = self
-                .get_source_database_id_for_refresh_stage(table_id, associated_source_id, "list")
-                .await?
-            else {
-                continue;
-            };
-
-            // Create ListFinish command
-            let list_finish_command = Command::ListFinish {
-                table_id,
-                associated_source_id,
-            };
-
-            // Schedule the command through the barrier system without waiting
-            self.barrier_scheduler
-                .run_command_no_wait(database_id, list_finish_command)
-                .context("Failed to schedule ListFinish command")?;
-
-            tracing::info!(
-                %table_id,
-                %associated_source_id,
-                "ListFinish command scheduled successfully"
-            );
+        for (table_id, actors) in group_reporters(
+            list_finished
+                .into_iter()
+                .map(|report| (report.table_id, report.reporter_actor_id)),
+        ) {
+            self.refresh_manager
+                .report_stage(table_id, RefreshStage::List, actors)?;
         }
         Ok(())
     }
@@ -393,64 +357,29 @@ impl GlobalBarrierWorkerContext for GlobalBarrierWorkerContextImpl {
         &self,
         load_finished: Vec<PbLoadFinishedSource>,
     ) -> MetaResult<()> {
-        let mut load_finished_info: HashMap<(TableId, SourceId), HashSet<ActorId>> = HashMap::new();
-
-        for load_finished in load_finished {
-            let table_id = load_finished.table_id;
-            let associated_source_id = load_finished.associated_source_id;
-            load_finished_info
-                .entry((table_id, associated_source_id))
-                .or_default()
-                .insert(load_finished.reporter_actor_id);
+        for (table_id, actors) in group_reporters(
+            load_finished
+                .into_iter()
+                .map(|report| (report.table_id, report.reporter_actor_id)),
+        ) {
+            self.refresh_manager
+                .report_stage(table_id, RefreshStage::Fetch, actors)?;
         }
-
-        for ((table_id, associated_source_id), actors) in load_finished_info {
-            let allow_yield = self
-                .refresh_manager
-                .mark_load_stage_finished(table_id, &actors)?;
-
-            if !allow_yield {
-                continue;
-            }
-
-            let Some(database_id) = self
-                .get_source_database_id_for_refresh_stage(table_id, associated_source_id, "load")
-                .await?
-            else {
-                continue;
-            };
-
-            // Create LoadFinish command
-            let load_finish_command = Command::LoadFinish {
-                table_id,
-                associated_source_id,
-            };
-
-            // Schedule the command through the barrier system without waiting
-            self.barrier_scheduler
-                .run_command_no_wait(database_id, load_finish_command)
-                .context("Failed to schedule LoadFinish command")?;
-
-            tracing::info!(
-                %table_id,
-                %associated_source_id,
-                "LoadFinish command scheduled successfully"
-            );
-        }
-
         Ok(())
     }
 
-    async fn handle_refresh_finished_table_ids(
+    async fn handle_refresh_finished_actors(
         &self,
-        refresh_finished_table_job_ids: Vec<JobId>,
+        refresh_finished: Vec<PbRefreshFinishedActor>,
     ) -> MetaResult<()> {
-        for job_id in refresh_finished_table_job_ids {
-            let table_id = job_id.as_mv_table_id();
-
-            self.refresh_manager.mark_refresh_complete(table_id).await?;
+        for (table_id, actors) in group_reporters(
+            refresh_finished
+                .into_iter()
+                .map(|report| (report.table_id, report.reporter_actor_id)),
+        ) {
+            self.refresh_manager
+                .report_stage(table_id, RefreshStage::Mview, actors)?;
         }
-
         Ok(())
     }
 
@@ -547,39 +476,6 @@ fn aggregate_sink_errors(
 }
 
 impl GlobalBarrierWorkerContextImpl {
-    async fn get_source_database_id_for_refresh_stage(
-        &self,
-        table_id: TableId,
-        associated_source_id: SourceId,
-        stage: &'static str,
-    ) -> MetaResult<Option<DatabaseId>> {
-        match self
-            .metadata_manager
-            .catalog_controller
-            .get_object_database_id(associated_source_id)
-            .await
-        {
-            Ok(database_id) => Ok(Some(database_id)),
-            Err(err) if err.is_catalog_id_not_found("object") => {
-                tracing::warn!(
-                    %table_id,
-                    %associated_source_id,
-                    stage,
-                    "skip refresh finish command because associated source is already dropped"
-                );
-                Ok(None)
-            }
-            Err(err) => Err(err)
-                .with_context(|| {
-                    format!(
-                        "failed to get database id for refresh stage: table_id={}, associated_source_id={}, stage={stage}",
-                        table_id, associated_source_id
-                    )
-                })
-                .map_err(Into::into),
-        }
-    }
-
     fn set_status(&self, new_status: BarrierManagerStatus) {
         self.status.store(Arc::new(new_status));
     }
@@ -751,6 +647,36 @@ impl PostCollectCommand {
             }
 
             PostCollectCommand::DropStreamingJobs => {}
+            PostCollectCommand::RefreshStarted {
+                table_id,
+                database_id,
+                associated_source_id,
+                staging_table_id,
+                trigger_time,
+                actors,
+            } => {
+                barrier_manager_context
+                    .refresh_manager
+                    .cycle_started(
+                        table_id,
+                        database_id,
+                        associated_source_id,
+                        staging_table_id,
+                        trigger_time,
+                        actors,
+                    )
+                    .await?;
+            }
+            PostCollectCommand::FinishRefresh {
+                table_id,
+                trigger_time,
+                ..
+            } => {
+                barrier_manager_context
+                    .refresh_manager
+                    .complete_refresh(table_id, trigger_time)
+                    .await?;
+            }
             PostCollectCommand::ConnectorPropsChange(obj_id_map_props) => {
                 // todo: we dont know the type of the object id, it can be a source or a sink. Should carry more info in the barrier command.
                 barrier_manager_context
@@ -1015,6 +941,16 @@ impl PostCollectCommand {
 
         Ok(())
     }
+}
+
+fn group_reporters(
+    reports: impl Iterator<Item = (TableId, ActorId)>,
+) -> HashMap<TableId, HashSet<ActorId>> {
+    let mut grouped: HashMap<TableId, HashSet<ActorId>> = HashMap::new();
+    for (table_id, actor_id) in reports {
+        grouped.entry(table_id).or_default().insert(actor_id);
+    }
+    grouped
 }
 
 #[cfg(test)]
