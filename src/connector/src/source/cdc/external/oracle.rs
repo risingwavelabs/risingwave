@@ -29,7 +29,8 @@ use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_jni_core::call_static_method;
 use risingwave_jni_core::jvm_runtime::execute_with_jni_env;
 use risingwave_pb::connector_service::{
-    OracleDatum, OracleExternalTableRequest, OracleExternalTableResponse, OracleRow, TableSchema,
+    OracleDatum, OracleExternalTableRequest, OracleExternalTableResponse,
+    OracleOldestOpenTransactionStartScn, OracleRow, TableSchema,
 };
 use serde::{Deserialize, Serialize};
 use thiserror_ext::AsReport;
@@ -37,13 +38,33 @@ use thiserror_ext::AsReport;
 use crate::error::{ConnectorError, ConnectorResult};
 use crate::source::CdcTableSnapshotSplit;
 use crate::source::cdc::external::{
-    CdcOffset, CdcTableSnapshotSplitOption, ExternalTableConfig, ExternalTableReader,
-    SchemaTableName,
+    CdcOffset, CdcOffsetParseFunc, CdcTableSnapshotSplitOption, ExternalTableConfig,
+    ExternalTableReader, SchemaTableName,
 };
 
 #[derive(Debug, Clone, Default, PartialEq, PartialOrd, Serialize, Deserialize)]
 pub struct OracleOffset {
-    pub scn: u64,
+    pub decoded_commit_scn: u64,
+}
+
+impl OracleOffset {
+    /// The per-event commit SCN is attached by RisingWave's Java CDC consumer; Debezium's
+    /// own sourceOffset.commit_scn is a per-redo-thread recovery map, not this event's SCN.
+    pub fn parse_debezium_offset(offset: &str) -> ConnectorResult<Self> {
+        // Native Oracle offset fields (such as the string txId) differ from other connectors.
+        let dbz_offset: serde_json::Value = serde_json::from_str(offset)
+            .with_context(|| format!("invalid upstream Oracle CDC offset: {offset}"))?;
+        let decoded_commit_scn = dbz_offset
+            .pointer("/sourceOffset/decoded_commit_scn")
+            .and_then(serde_json::Value::as_str)
+            .context("Oracle CDC data offset is missing decoded_commit_scn")?
+            .parse::<u64>()
+            .context("invalid Oracle CDC commit SCN")?;
+        if decoded_commit_scn == 0 {
+            bail!("Oracle CDC commit SCN must be positive");
+        }
+        Ok(Self { decoded_commit_scn })
+    }
 }
 
 pub struct OracleExternalTable {
@@ -52,6 +73,43 @@ pub struct OracleExternalTable {
 }
 
 impl OracleExternalTable {
+    /// Find the earliest open transaction per instance for the new-table preflight.
+    /// The table-time gate compares these starts with the source split's fixed initial mining SCN.
+    /// This query does not establish redo availability.
+    pub async fn oldest_open_transaction_scns(
+        config: &ExternalTableConfig,
+    ) -> ConnectorResult<Vec<OracleOldestOpenTransactionStartScn>> {
+        let request = OracleExternalTableRequest {
+            properties: config.oracle_connection_properties(),
+            ..Default::default()
+        };
+        let response =
+            tokio::task::spawn_blocking(move || invoke_jni_oldest_open_transaction_scns(&request))
+                .await
+                .context("failed to join Oracle oldest-open-transaction query task")??;
+        ensure_success(&response)?;
+        Ok(response.oldest_open_transaction_scns)
+    }
+
+    /// Reject creating a table if any open transaction predates the source's initial mining SCN.
+    /// Passing this check does not prove redo availability for any mining thread.
+    pub fn check_open_transactions(
+        initial_mining_scn: u64,
+        oldest_start_scns: &[OracleOldestOpenTransactionStartScn],
+    ) -> ConnectorResult<()> {
+        for transaction in oldest_start_scns {
+            if transaction.start_scn < initial_mining_scn {
+                bail!(
+                    "Cannot create Oracle CDC table: instance {} has an open transaction starting at SCN {} before the source's initial mining SCN {}. This transaction may be unrelated to the requested table, but its affected tables are unknown. Recreate the Oracle CDC source before retrying table creation",
+                    transaction.instance_id,
+                    transaction.start_scn,
+                    initial_mining_scn
+                );
+            }
+        }
+        Ok(())
+    }
+
     pub async fn connect(config: ExternalTableConfig) -> ConnectorResult<Self> {
         let request = OracleExternalTableRequest {
             properties: config.oracle_connection_properties(),
@@ -128,7 +186,7 @@ impl ExternalTableReader for OracleExternalTableReader {
             bail!("Oracle returned an invalid current SCN");
         }
         Ok(CdcOffset::Oracle(OracleOffset {
-            scn: response.snapshot_scn,
+            decoded_commit_scn: response.snapshot_scn,
         }))
     }
 
@@ -166,6 +224,14 @@ impl ExternalTableReader for OracleExternalTableReader {
 }
 
 impl OracleExternalTableReader {
+    pub fn get_cdc_offset_parser() -> CdcOffsetParseFunc {
+        Box::new(|offset| {
+            Ok(CdcOffset::Oracle(OracleOffset::parse_debezium_offset(
+                offset,
+            )?))
+        })
+    }
+
     pub fn new(
         config: ExternalTableConfig,
         rw_schema: Schema,
@@ -262,6 +328,10 @@ impl ExternalTableConfig {
             ("database.pdb.name".to_owned(), self.pdb_name.clone()),
             ("schema.name".to_owned(), self.schema.clone()),
             ("table.name".to_owned(), self.table.clone()),
+            (
+                "debezium.rac.nodes".to_owned(),
+                self.rac_nodes.clone().unwrap_or_default(),
+            ),
         ])
     }
 
@@ -420,6 +490,25 @@ fn invoke_jni_current_scn(
             env,
             {com.risingwave.connector.source.common.JniOracleExternalTable},
             {byte[] currentScn(byte[] requestBytes)},
+            &request_bytes
+        )?;
+        OracleExternalTableResponse::decode(
+            risingwave_jni_core::to_guarded_slice(&response_bytes, env)?.deref(),
+        )
+        .map_err(Into::into)
+    })
+}
+
+fn invoke_jni_oldest_open_transaction_scns(
+    request: &OracleExternalTableRequest,
+) -> anyhow::Result<OracleExternalTableResponse> {
+    let jvm = Jvm::get_or_init()?;
+    execute_with_jni_env(jvm, |env| {
+        let request_bytes = env.byte_array_from_slice(&request.encode_to_vec())?;
+        let response_bytes = call_static_method!(
+            env,
+            {com.risingwave.connector.source.common.JniOracleExternalTable},
+            {byte[] oldestOpenTransactionScns(byte[] requestBytes)},
             &request_bytes
         )?;
         OracleExternalTableResponse::decode(

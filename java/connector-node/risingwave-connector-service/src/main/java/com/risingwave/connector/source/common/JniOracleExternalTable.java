@@ -30,6 +30,10 @@ public final class JniOracleExternalTable {
         return invoke(requestBytes, Operation.CURRENT_SCN);
     }
 
+    public static byte[] oldestOpenTransactionScns(byte[] requestBytes) {
+        return invoke(requestBytes, Operation.OLDEST_OPEN_TRANSACTION_START_SCNS);
+    }
+
     public static byte[] snapshotRead(byte[] requestBytes) {
         return invoke(requestBytes, Operation.SNAPSHOT_READ);
     }
@@ -41,6 +45,8 @@ public final class JniOracleExternalTable {
                     switch (operation) {
                         case DISCOVER -> OracleExternalTable.discover(request);
                         case CURRENT_SCN -> OracleExternalTable.currentScn(request);
+                        case OLDEST_OPEN_TRANSACTION_START_SCNS ->
+                                OracleExternalTable.oldestOpenTransactionScns(request);
                         case SNAPSHOT_READ -> OracleExternalTable.snapshotRead(request);
                     };
             return response.toByteArray();
@@ -61,6 +67,7 @@ public final class JniOracleExternalTable {
     private enum Operation {
         DISCOVER,
         CURRENT_SCN,
+        OLDEST_OPEN_TRANSACTION_START_SCNS,
         SNAPSHOT_READ
     }
 }

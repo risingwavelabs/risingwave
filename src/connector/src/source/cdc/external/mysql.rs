@@ -1132,6 +1132,7 @@ mod tests {
             database: "mydb".to_owned(),
             schema: "".to_owned(),
             pdb_name: "".to_owned(),
+            rac_nodes: None,
             table: "part".to_owned(),
             ssl_mode: Default::default(),
             ssl_root_cert: None,

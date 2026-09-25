@@ -1249,6 +1249,10 @@ impl FrontendMetaClient for MockFrontendMetaClient {
         Ok(vec![])
     }
 
+    async fn get_oracle_initial_mining_scn(&self, _source_id: SourceId) -> RpcResult<u64> {
+        unimplemented!()
+    }
+
     async fn list_meta_snapshots(&self) -> RpcResult<Vec<MetaSnapshotMetadata>> {
         Ok(vec![])
     }
