@@ -2109,7 +2109,7 @@ dependencies = [
  "bitflags 2.13.1",
  "cexpr",
  "clang-sys",
- "itertools 0.11.0",
+ "itertools 0.13.0",
  "log",
  "prettyplease",
  "proc-macro2",
@@ -2350,6 +2350,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "234113d19d0d7d613b40e86fb654acf958910802bcceab913a4f9e7cda03b1a4"
 dependencies = [
  "memchr",
+ "serde",
 ]
 
 [[package]]
@@ -10628,7 +10629,7 @@ version = "5.0.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "51e219e79014df21a225b1860a479e2dcd7cbd9130f4defd4bd0e191ea31d67d"
 dependencies = [
- "base64 0.21.7",
+ "base64 0.22.1",
  "chrono",
  "getrandom 0.2.11",
  "http 1.4.0",
@@ -12529,7 +12530,7 @@ version = "0.13.5"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "be769465445e8c1474e9c5dac2018218498557af32d9ed057325ec9a41ae81bf"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "itertools 0.14.0",
  "log",
  "multimap",
@@ -12548,7 +12549,7 @@ name = "prost-build"
 version = "0.14.3"
 source = "git+https://github.com/risingwavelabs/prost.git?rev=040a192409e45069158300baec4f402ad1fe101a#040a192409e45069158300baec4f402ad1fe101a"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "itertools 0.14.0",
  "log",
  "multimap",
@@ -15226,7 +15227,7 @@ dependencies = [
  "clap",
  "madsim-tokio",
  "path-absolutize",
- "similar",
+ "similar 3.2.0",
  "tracing",
  "tracing-subscriber",
  "workspace-hack",
@@ -15396,7 +15397,7 @@ dependencies = [
  "risingwave_sqlparser",
  "serde",
  "serde_yaml",
- "similar",
+ "similar 3.2.0",
  "strum 0.28.0",
  "thiserror-ext",
  "tokio-postgres",
@@ -16957,6 +16958,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bbbb5d9659141646ae647b42fe094daf6c6192d1620870b449d9557f748b2daa"
 
 [[package]]
+name = "similar"
+version = "3.2.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4f66ca1f7aca2474dc10c942eb22feffc897735f54cd1db90138c2fddb490987"
+dependencies = [
+ "bstr",
+]
+
+[[package]]
 name = "simple_asn1"
 version = "0.6.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -17050,7 +17060,7 @@ version = "0.8.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c1c97747dbf44bb1ca44a561ece23508e99cb592e862f22222dcf42f51d1e451"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -17062,7 +17072,7 @@ version = "0.9.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "287f59010008f0d7cf5e3b03196d666c1acc46c8d3e9cf34c28a1a7157601e72"
 dependencies = [
- "heck 0.4.1",
+ "heck 0.5.0",
  "proc-macro2",
  "quote",
  "syn 2.0.117",
@@ -17203,7 +17213,7 @@ dependencies = [
  "owo-colors",
  "rand 0.8.5",
  "regex",
- "similar",
+ "similar 2.7.0",
  "subst",
  "tempfile",
  "thiserror 2.0.17",
