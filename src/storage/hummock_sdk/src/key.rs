@@ -47,9 +47,13 @@ pub type FullKeyRange = (
     Bound<FullKey<KeyPayloadType>>,
 );
 
-pub fn is_empty_key_range(key_range: &TableKeyRange) -> bool {
+/// Returns whether equal bounds exclude their shared key.
+/// Reversed bounds are left for the caller to validate.
+pub fn is_empty_key_range<T: PartialEq>(key_range: &(Bound<T>, Bound<T>)) -> bool {
     match key_range {
-        (Included(start), Excluded(end)) => start == end,
+        (Included(start), Excluded(end))
+        | (Excluded(start), Included(end))
+        | (Excluded(start), Excluded(end)) => start == end,
         _ => false,
     }
 }
@@ -1151,6 +1155,34 @@ mod tests {
     use risingwave_common::util::epoch::test_epoch;
 
     use super::*;
+
+    #[test]
+    fn test_is_empty_key_range() {
+        for (left, right, expected) in [
+            (Included(1), Included(1), false),
+            (Included(1), Excluded(1), true),
+            (Excluded(1), Included(1), true),
+            (Excluded(1), Excluded(1), true),
+            (Included(1), Included(2), false),
+            (Included(1), Excluded(2), false),
+            (Excluded(1), Included(2), false),
+            (Excluded(1), Excluded(2), false),
+            // Malformed ranges remain the caller's responsibility to validate.
+            (Included(2), Included(1), false),
+            (Included(2), Excluded(1), false),
+            (Excluded(2), Included(1), false),
+            (Excluded(2), Excluded(1), false),
+            (Unbounded, Included(1), false),
+            (Excluded(1), Unbounded, false),
+            (Unbounded, Unbounded, false),
+        ] {
+            let range: TableKeyRange = (
+                left.map(|key| TableKey(vec![key].into())),
+                right.map(|key| TableKey(vec![key].into())),
+            );
+            assert_eq!(is_empty_key_range(&range), expected, "{range:?}");
+        }
+    }
 
     #[test]
     fn test_encode_decode() {
