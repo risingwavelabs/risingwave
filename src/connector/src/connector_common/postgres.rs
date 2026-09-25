@@ -41,16 +41,20 @@ use crate::error::ConnectorResult;
 /// Match `pg_class` and `pg_namespace` by exact catalog names instead of casting a
 /// constructed string to `regclass`, as unquoted `regclass` input folds mixed-case
 /// table names to lower case.
+/// `pg_constraint.conkey` contains only the constrained columns, excluding non-key
+/// attributes from an `INCLUDE` clause, and is available on PostgreSQL 10.
 const DISCOVER_PRIMARY_KEY_QUERY: &str = r#"
     SELECT a.attname as column_name
-    FROM pg_index i
-    JOIN pg_class c ON c.oid = i.indrelid
+    FROM pg_constraint con
+    JOIN pg_class c ON c.oid = con.conrelid
     JOIN pg_namespace n ON n.oid = c.relnamespace
-    JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+    JOIN LATERAL unnest(con.conkey) WITH ORDINALITY AS key(attnum, ordinality)
+      ON true
+    JOIN pg_attribute a ON a.attrelid = con.conrelid AND a.attnum = key.attnum
     WHERE n.nspname = $1
       AND c.relname = $2
-      AND i.indisprimary = true
-    ORDER BY array_position(i.indkey, a.attnum)
+      AND con.contype = 'p'
+    ORDER BY key.ordinality
 "#;
 
 /// Discover pgvector columns with both `atttypmod` (dimension) and `format_type` text.
