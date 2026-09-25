@@ -147,6 +147,18 @@
       (b cross join lateral (select a1, b1) z) on true;
   expected_outputs:
     - binder_error
+- name: a lateral reference matching an earlier FROM item and a join input is ambiguous
+  sql: |
+    create table a (a1 int);
+    select * from a, (select 100 as a1) t cross join lateral (select a1 as y) z;
+  expected_outputs:
+    - binder_error
+- name: an ambiguous lateral reference does not resolve to an outer query column
+  sql: |
+    create table a (a1 int);
+    select (select y from (select 100 as a1) t1, (select 200 as a1) t2, lateral (select a1 as y) z) from a;
+  expected_outputs:
+    - binder_error
 - name: https://github.com/risingwavelabs/risingwave/issues/12298
   sql: |
     create table t1(c varchar, n varchar, id varchar, d varchar);

@@ -66,10 +66,10 @@ select * except (a.v3) from (select * except (v2) from t1) as a;
 ----
 1
 
-statement error Ambiguous column name: a
+statement error column reference "a" is ambiguous
 select * except (a) from t1 t(a,a,a);
 
-statement error Ambiguous column name: v1
+statement error column reference "v1" is ambiguous
 select * except (v1) from t1 a, t1 b;
 
 statement error Item not found: Invalid column: v5
