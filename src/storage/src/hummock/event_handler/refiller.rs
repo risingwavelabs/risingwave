@@ -311,13 +311,9 @@ impl PinRefillPlanStats {
     }
 }
 
-pub(crate) struct CacheRefillPlan {
-    deltas: Vec<SstDeltaInfo>,
-}
-
 pub(crate) type SpawnRefillTask = Arc<
     // first current version, second new version
-    dyn Fn(CacheRefillPlan, CacheRefillContext, PinnedVersion, PinnedVersion) -> JoinHandle<bool>
+    dyn Fn(Vec<SstDeltaInfo>, CacheRefillContext, PinnedVersion, PinnedVersion) -> JoinHandle<bool>
         + Send
         + Sync
         + 'static,
@@ -389,6 +385,7 @@ pub(crate) struct CacheRefiller {
     // Ordered events share one queue. Pin mode may take a batch from its front.
     queue: VecDeque<Item>,
     active: Option<ActiveBatch>,
+    #[cfg(test)]
     last_outcome: Option<RefillBatchOutcome>,
 
     spawn_refill_task: SpawnRefillTask,
@@ -433,6 +430,7 @@ impl CacheRefiller {
         Self {
             queue: VecDeque::new(),
             active: None,
+            #[cfg(test)]
             last_outcome: None,
             spawn_refill_task,
             config,
@@ -545,11 +543,10 @@ impl CacheRefiller {
             });
         }
         let context = self.new_cache_refill_context(&deltas);
-        let plan = CacheRefillPlan { deltas };
         // Preserve the main-path behavior: Foyer refill starts when the delta arrives. Only the
         // Pin whole-SST plan waits in the merge queue.
         let foyer_handle = (self.spawn_refill_task)(
-            plan,
+            deltas,
             context,
             pinned_version.clone(),
             new_pinned_version.clone(),
@@ -957,7 +954,10 @@ impl CacheRefiller {
                     "publishing version batch with cache refill fallback"
                 );
             }
-            self.last_outcome = Some(outcome);
+            #[cfg(test)]
+            {
+                self.last_outcome = Some(outcome);
+            }
             Poll::Ready(batch.events)
         })
     }
@@ -1224,14 +1224,14 @@ impl DataCacheRefillTask {
 }
 
 struct CacheRefillTask {
-    plan: CacheRefillPlan,
+    plan: Vec<SstDeltaInfo>,
     context: CacheRefillContext,
 }
 
 impl CacheRefillTask {
     async fn run(self) -> bool {
-        let CacheRefillPlan { deltas } = self.plan;
-        let tasks = deltas
+        let tasks = self
+            .plan
             .iter()
             .map(|delta| {
                 let context = self.context.clone();
@@ -1980,11 +1980,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_pin_set_does_not_reclassify_queued_delta_as_warm() {
+    async fn test_pin_set_does_not_warm_previously_observed_delta() {
         let table_id = TableId::from(233);
         let sstable_store = mock_sstable_store().await;
         let (_, sst_info) =
             gen_test_sst_with_object_id(table_id, sstable_store.clone(), 1001).await;
+        let (_, later_sst_info) =
+            gen_test_sst_with_object_id(table_id, sstable_store.clone(), 1002).await;
         let pin_cache = pin_cache_for_test();
         sstable_store.set_pin_cache(pin_cache.clone());
 
@@ -1997,28 +1999,35 @@ mod tests {
                 super::CacheRefillTask { plan, context }.run().await
             })
         });
+        let base = pinned_version_for_test();
+        let next = pinned_version_with_sst(table_id, &sst_info);
         let mut refiller = CacheRefiller::new(
             Role::Streaming,
             test_refill_config(CacheRefillPolicy::Disabled),
             sstable_store,
             spawn_refill_task,
-            pinned_version_for_test(),
+            base.clone(),
         );
         refiller.replace_table_cache_refill_policies(HashMap::from([(
             table_id,
             CacheRefillPolicy::Disabled,
         )]));
+        refiller.update_streaming_table_vnodes(
+            table_id,
+            Some(Bitmap::ones(VirtualNode::COUNT_FOR_TEST)),
+        );
         refiller.start_cache_refill(
             vec![SstDeltaInfo {
                 insert_sst_infos: vec![sst_info.clone()],
                 delete_sst_infos: vec![],
                 insert_sst_level: 0,
             }],
-            pinned_version_for_test(),
-            pinned_version_with_sst(table_id, &sst_info),
+            base,
+            next.clone(),
             PinCacheMembershipUpdate::Delta,
         );
 
+        // SET after this delta must not download it as an implicit Warm.
         refiller.replace_table_cache_refill_runtime_snapshot(
             HashMap::from([(table_id, CacheRefillPolicy::Disabled)]),
             HashSet::from([table_id]),
@@ -2026,6 +2035,21 @@ mod tests {
         assert!(pin_cache.is_desired(sst_info.object_id));
         gate.add_permits(1);
         assert_eq!(refiller.next_events().await.len(), 1);
+        assert!(pin_cache.get(sst_info.object_id).is_none());
+
+        // A later delta for the same owned table must still be admitted to Pin Cache.
+        refiller.start_cache_refill(
+            vec![SstDeltaInfo {
+                insert_sst_infos: vec![later_sst_info.clone()],
+                ..Default::default()
+            }],
+            next,
+            pinned_version_with_ssts(&[table_id], &[sst_info.clone(), later_sst_info.clone()]),
+            PinCacheMembershipUpdate::Delta,
+        );
+        gate.add_permits(1);
+        assert_eq!(refiller.next_events().await.len(), 1);
+        assert!(pin_cache.get(later_sst_info.object_id).is_some());
         assert!(pin_cache.get(sst_info.object_id).is_none());
     }
 
@@ -2271,7 +2295,7 @@ mod tests {
             let captured_deltas = Arc::new(Mutex::new(None::<Vec<SstDeltaInfo>>));
             let captured_deltas_clone = captured_deltas.clone();
             let spawn_refill_task: SpawnRefillTask = Arc::new(move |plan, _, _, _| {
-                *captured_deltas_clone.lock() = Some(plan.deltas);
+                *captured_deltas_clone.lock() = Some(plan);
                 tokio::spawn(async { true })
             });
             let mut refiller = CacheRefiller::new(
@@ -3077,12 +3101,13 @@ mod tests {
     #[tokio::test]
     async fn test_foyer_timeout_is_degraded_not_ready() {
         let table = TableId::from(233);
-        let spawn: SpawnRefillTask = Arc::new(|plan, mut context, _, _| {
+        let default_spawn = CacheRefiller::default_spawn_refill_task();
+        let spawn: SpawnRefillTask = Arc::new(move |plan, mut context, current, next| {
             let mut config = test_refill_config(CacheRefillPolicy::Enabled);
             config.timeout = Duration::from_millis(1);
             context.config = Arc::new(config);
             context.meta_refill_concurrency = Some(Arc::new(tokio::sync::Semaphore::new(0)));
-            tokio::spawn(super::CacheRefillTask { plan, context }.run())
+            default_spawn(plan, context, current, next)
         });
         let mut config = test_refill_config(CacheRefillPolicy::Enabled);
         config.timeout = Duration::from_millis(30);
@@ -3113,7 +3138,7 @@ mod tests {
         assert_eq!(refiller.next_events().await.len(), 1);
         assert_eq!(
             refiller.last_outcome,
-            Some(super::RefillBatchOutcome::DegradedTimeout)
+            Some(super::RefillBatchOutcome::DegradedError)
         );
     }
 
@@ -3300,13 +3325,13 @@ mod tests {
             let sst = sst.clone();
             tokio::spawn(async move {
                 assert_eq!(
-                    plan.deltas[0].insert_sst_infos.len(),
+                    plan[0].insert_sst_infos.len(),
                     1,
                     "retain the physical object for its sibling"
                 );
                 let tasks = DataCacheRefillTaskGenerator {
                     context: &context,
-                    delta: &plan.deltas[0],
+                    delta: &plan[0],
                     ssts: std::slice::from_ref(&sst),
                 }
                 .generate_unfiltered_tasks();
