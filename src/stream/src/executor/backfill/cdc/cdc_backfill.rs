@@ -201,6 +201,11 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             .inc_by(upstream_processed_row_count);
     }
 
+    /// Partitions buffered CDC rows into emitted and retained chunk views.
+    ///
+    /// Rows in the active binlog range with `PK <= current_pk_pos` are visible in
+    /// the emitted chunks. Rows with `PK > current_pk_pos` are visible in the
+    /// retained buffer.
     fn consume_upstream_chunk_buffer(
         offset_parse_func: &risingwave_connector::source::cdc::external::CdcOffsetParseFunc,
         upstream_chunk_buffer: &mut Vec<StreamChunk>,
@@ -295,6 +300,9 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         ))
     }
 
+    /// Returned chunk has rows safe to send downstream marked as visible, unsafe rows marked invisible.
+    ///
+    /// Rows are safe to send downstream if in binlog range and `PK <= current_pk_pos`.
     fn filter_recovery_chunk(
         offset_parse_func: &risingwave_connector::source::cdc::external::CdcOffsetParseFunc,
         chunk: StreamChunk,
@@ -364,8 +372,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
         // The first barrier message should be propagated.
         yield Message::Barrier(first_barrier);
 
-        // Check whether this parallelism has been assigned splits,
-        // if not, we should bypass the backfill directly.
         let mut state_impl = self.state_impl;
 
         state_impl.init_epoch(first_barrier_epoch).await?;
@@ -682,9 +688,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                 Message::Barrier(barrier) => {
                                     // increase the barrier count and check whether need to start a new snapshot
                                     barrier_count += 1;
-                                    let can_start_new_snapshot =
+                                    let mut needs_rebuild_snapshot =
                                         barrier_count == self.options.snapshot_barrier_interval;
-                                    let mut needs_rebuild_snapshot = false;
 
                                     if let Some(mutation) = barrier.mutation.as_deref() {
                                         use crate::executor::Mutation;
@@ -729,7 +734,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
                                     // when processing a barrier, check whether can start a new snapshot
                                     // if the number of barriers reaches the snapshot interval
-                                    if can_start_new_snapshot || needs_rebuild_snapshot {
+                                    if needs_rebuild_snapshot {
                                         // staging the barrier
                                         pending_barrier = Some(barrier);
                                         tracing::debug!(
@@ -777,15 +782,14 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
                                         // update and persist current backfill progress
                                         state_impl
-                                            .mutate_state(
+                                            .mutate_and_commit_state(
                                                 current_pk_pos.clone(),
                                                 last_binlog_offset.clone(),
                                                 total_snapshot_row_count,
                                                 false,
+                                                barrier.epoch,
                                             )
                                             .await?;
-
-                                        state_impl.commit_state(barrier.epoch).await?;
 
                                         // emit barrier and continue consume the backfill stream
                                         yield Message::Barrier(barrier);
@@ -809,8 +813,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                     // Since we don't need changelog before the
                                     // `last_binlog_offset`, skip the chunk that *only* contains
                                     // events before `last_binlog_offset`.
-                                    if let Some(last_binlog_offset) = last_binlog_offset.as_ref()
-                                        && let Some(chunk_offset) = chunk_binlog_offset
+                                    if let (Some(last_binlog_offset), Some(chunk_offset)) =
+                                        (last_binlog_offset.as_ref(), chunk_binlog_offset)
                                         && chunk_offset < *last_binlog_offset
                                     {
                                         tracing::trace!(
@@ -820,6 +824,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         );
                                         continue;
                                     }
+
                                     // Buffer the upstream chunk.
                                     upstream_chunk_buffer.push(chunk.compact_vis());
                                 }
@@ -914,16 +919,15 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
                             // mark backfill has finished
                             state_impl
-                                .mutate_state(
+                                .mutate_and_commit_state(
                                     current_pk_pos.clone(),
                                     last_binlog_offset.clone(),
                                     total_snapshot_row_count,
                                     true,
+                                    pending_barrier.epoch,
                                 )
                                 .await?;
 
-                            // commit state because we have received a barrier message
-                            state_impl.commit_state(pending_barrier.epoch).await?;
                             yield Message::Barrier(pending_barrier);
                             // end of backfill loop, since backfill has finished
                             break 'backfill_loop;
@@ -994,15 +998,15 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
                 // update and persist current backfill progress
                 state_impl
-                    .mutate_state(
+                    .mutate_and_commit_state(
                         current_pk_pos.clone(),
                         last_binlog_offset.clone(),
                         total_snapshot_row_count,
                         false,
+                        pending_barrier.epoch,
                     )
                     .await?;
 
-                state_impl.commit_state(pending_barrier.epoch).await?;
                 yield Message::Barrier(pending_barrier);
             }
             upstream_table_reader.disconnect().await?;
@@ -1036,16 +1040,15 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 // If not finished then we need to update state, otherwise no need.
                 if let Message::Barrier(barrier) = &msg {
                     // finalized the backfill state
-                    // TODO: unify `mutate_state` and `commit_state` into one method
                     state_impl
-                        .mutate_state(
+                        .mutate_and_commit_state(
                             current_pk_pos.clone(),
                             last_binlog_offset.clone(),
                             total_snapshot_row_count,
                             true,
+                            barrier.epoch,
                         )
                         .await?;
-                    state_impl.commit_state(barrier.epoch).await?;
 
                     // mark progress as finished
                     if let Some(progress) = self.progress.as_mut() {
@@ -1517,16 +1520,13 @@ mod tests {
             .await
             .unwrap();
         state_writer
-            .mutate_state(
+            .mutate_and_commit_state(
                 Some(OwnedRow::new(vec![Some(ScalarImpl::Int64(10))])),
                 None,
                 10,
                 false,
+                Barrier::new_test_barrier(test_epoch(2)).epoch,
             )
-            .await
-            .unwrap();
-        state_writer
-            .commit_state(Barrier::new_test_barrier(test_epoch(2)).epoch)
             .await
             .unwrap();
 
@@ -1611,16 +1611,13 @@ mod tests {
             .await
             .unwrap();
         state_writer
-            .mutate_state(
+            .mutate_and_commit_state(
                 Some(OwnedRow::new(vec![Some(ScalarImpl::Int64(5))])),
                 Some(CdcOffset::MySql(MySqlOffset::new("1.binlog".to_owned(), 2))),
                 5,
                 false,
+                Barrier::new_test_barrier(test_epoch(2)).epoch,
             )
-            .await
-            .unwrap();
-        state_writer
-            .commit_state(Barrier::new_test_barrier(test_epoch(2)).epoch)
             .await
             .unwrap();
 
