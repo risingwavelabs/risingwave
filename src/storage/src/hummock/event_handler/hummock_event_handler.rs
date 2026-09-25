@@ -375,13 +375,18 @@ impl HummockEventHandler {
         config: PbTableRefillRuntimeConfig,
     ) {
         if let Some(policies) = config.table_cache_refill_policies {
-            let policies = policies
+            let pinned_table_ids = policies
+                .pinned_table_ids
+                .into_iter()
+                .map(TableId::new)
+                .collect();
+            let foyer_policies = policies
                 .table_policies
                 .into_iter()
                 .chain(policies.internal_table_policies)
                 .filter_map(table_cache_refill_policy_from_protobuf)
                 .collect();
-            refiller.replace_table_cache_refill_policies(policies);
+            refiller.replace_table_cache_refill_runtime_snapshot(foyer_policies, pinned_table_ids);
         }
 
         if let Some(mappings) = config.serving_table_vnode_mappings {
@@ -1218,6 +1223,7 @@ mod tests {
                         table_id: internal_table_id.as_raw_id(),
                         policy: PbCacheRefillPolicy::Both as i32,
                     }],
+                    pinned_table_ids: vec![internal_table_id.as_raw_id()],
                 }),
                 serving_table_vnode_mappings: Some(PbServingTableVnodeMappings {
                     mappings: vec![PbServingTableVnodeMapping {
@@ -1235,6 +1241,11 @@ mod tests {
                 (old_table_id, CacheRefillPolicy::Serving),
                 (internal_table_id, CacheRefillPolicy::Both),
             ])
+        );
+        // Without a local Pin backend, pin intent must not replace the Foyer policy.
+        assert_eq!(
+            snapshot.contexts[&internal_table_id].policy,
+            CacheRefillPolicy::Both
         );
         assert_eq!(
             snapshot.serving_table_vnode_mapping,
