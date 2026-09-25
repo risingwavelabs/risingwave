@@ -336,6 +336,7 @@ services:
       - mongodb-setup
       - sqlserver-server
       - pubsub-emulator
+      - qdrant-server
     volumes:
       - ..:/risingwave
     stop_grace_period: 30s
@@ -583,6 +584,11 @@ services:
     environment:
       CLICKHOUSE_USER: "default"
       CLICKHOUSE_PASSWORD: "default"
+
+  qdrant-server:
+    image: qdrant/qdrant:v1.19.1
+    environment:
+      QDRANT__SERVICE__API_KEY: "qdrant_test_key"
 
   redis-server:
     image: "redis:latest"
