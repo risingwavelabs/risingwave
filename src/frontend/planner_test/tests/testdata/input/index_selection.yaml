@@ -695,3 +695,16 @@
     select a, b from t order by a;
   expected_outputs:
     - batch_plan
+- name: the reward is not applied to an order-satisfying index whose cost estimate saturates
+  # i_a satisfies `order by a` and covers the query, but its estimated row size makes its cost
+  # 4000 * 5042 = 20,168,000, which `IndexCost::new` clamps to the 10,000,000 maximum. i_b needs
+  # a sort but really costs 4000 * 1038 = 4,152,000. Dividing the *clamped* value by the default
+  # reward of 3 gives 3,333,333, which would beat i_b while reading almost 5x as much, so the
+  # reward must not be applied to a clamped cost and i_b has to win.
+  sql: |
+    create table t (a bigint, b int, small_v vector(250), big_v vector(1000));
+    create index i_a on t(a) include (b, small_v, big_v);
+    create index i_b on t(b) include (a, small_v);
+    select a, b, small_v from t order by a;
+  expected_outputs:
+    - batch_plan

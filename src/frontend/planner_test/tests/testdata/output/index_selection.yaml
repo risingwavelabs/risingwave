@@ -1150,3 +1150,13 @@
     BatchExchange { order: [i_b.a ASC], dist: Single }
     └─BatchSort { order: [i_b.a ASC] }
       └─BatchScan { table: i_b, columns: [i_b.a, i_b.b], distribution: UpstreamHashShard(i_b.b) }
+- name: the reward is not applied to an order-satisfying index whose cost estimate saturates
+  sql: |
+    create table t (a bigint, b int, small_v vector(250), big_v vector(1000));
+    create index i_a on t(a) include (b, small_v, big_v);
+    create index i_b on t(b) include (a, small_v);
+    select a, b, small_v from t order by a;
+  batch_plan: |-
+    BatchExchange { order: [i_b.a ASC], dist: Single }
+    └─BatchSort { order: [i_b.a ASC] }
+      └─BatchScan { table: i_b, columns: [i_b.a, i_b.b, i_b.small_v], distribution: UpstreamHashShard(i_b.b) }

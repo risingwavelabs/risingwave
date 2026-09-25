@@ -627,6 +627,9 @@ impl ToBatch for LogicalScan {
             // nothing to do with order -- a primary-key lookup being cheapest, or a chosen
             // non-covering candidate failing to become a lookup join -- and folding the two
             // decisions together would change plans on those paths. Worth unifying, separately.
+            //
+            // In particular `index_order_satisfied_reward = 1` turns the preference off in the
+            // rule above but not here, so it is not a switch for "never prefer an ordered index".
             if let Some(plan_ref) = new.use_index_scan_if_order_is_satisfied(required_order) {
                 return plan_ref;
             }

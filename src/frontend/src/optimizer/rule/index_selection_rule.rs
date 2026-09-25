@@ -98,7 +98,10 @@ pub struct IndexSelectionRule {
     /// `required_order`, from the `index_order_satisfied_reward` session variable. `IndexCost` is
     /// a pure IO estimate with no term for ordering, so without this an index that is marginally
     /// cheaper to read always wins and we pay for a sort that another index would have given us
-    /// for free. `1` disables the preference and restores pure cost comparison.
+    /// for free. `1` disables the preference *here* and restores pure cost comparison inside this
+    /// rule. It does not disable the separate, unbounded fallback in
+    /// `LogicalScan::to_batch_with_order_required`, which still applies when this rule returns
+    /// `None`.
     ///
     /// Unlike `LOOKUP_COST_CONST` this is never folded into `min_cost`; it is applied once, at
     /// the end of [`Rule::apply`], so that `min_cost` stays a real cost.
@@ -218,6 +221,23 @@ impl Rule<Logical> for IndexSelectionRule {
             // index and filters; the reward would paper over an IO difference that is real and,
             // unlike a sort, grows with the table.
             && (order_has_pushdown || !winner_has_pushdown)
+            // The reward is a *ratio* allowance, so it needs a cost it can take a ratio of.
+            // `IndexCost::new` saturates at `IndexCost::maximum()`, and a saturated cost carries
+            // no ratio at all: the true cost is somewhere in `[maximum, inf)`. Dividing the
+            // saturated value hands out far more than `reward`x -- an ordered index whose true
+            // cost is 4000 x 5042 = 20,168,000 saturates to 10,000,000, and `/3` makes it look
+            // like 3,333,333, beating a rival that really does cost 4000 x 1038 = 4,152,000 while
+            // reading almost 5x as much, and the gap is unbounded because the true cost is not.
+            // When the ratio cannot be bounded, we do not buy the ordering. See the
+            // `cost estimate saturates` case in `index_selection.yaml`.
+            //
+            // This also declines when the cost winner happens to be saturated too, i.e. when both
+            // candidates are off the top of the scale and the ratio between them is unknown in
+            // both directions. That costs us a sort we might have been able to skip, which is a
+            // missed optimization rather than a plan that reads far more than we meant to pay
+            // for. The cap stays in place for every other comparison, where it only has to keep
+            // costs in a bounded range and not preserve ratios.
+            && !order_cost.is_saturated()
             && order_cost.div(self.order_satisfied_reward).le(&min_cost)
         {
             final_plan = order_plan;
@@ -1066,6 +1086,13 @@ impl IndexCost {
 
     pub(crate) fn le(&self, other: &IndexCost) -> bool {
         self.cost < other.cost
+    }
+
+    /// Whether this cost hit the [`IndexCost::maximum`] clamp in [`IndexCost::new`], including
+    /// the [`Default`] "unknown cost" value. Such a cost is only an ordering token -- it says
+    /// "very expensive", not how expensive -- so it must not be used as the numerator of a ratio.
+    fn is_saturated(&self) -> bool {
+        self.cost >= IndexCost::maximum()
     }
 }
 

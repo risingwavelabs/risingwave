@@ -504,7 +504,9 @@ pub struct SessionConfig {
     /// model has no term for ordering, so without this a marginally cheaper index always wins and
     /// we pay for a sort that another index would have given us for free. The flip side is that a
     /// large value buys ordering with IO: raise it to sort less, lower it to read less, and set it
-    /// to `1` to go back to pure cost comparison.
+    /// to `1` to use pure cost comparison in `IndexSelectionRule`. If that rule declines to
+    /// produce a plan, the separate ordered-index fallback may still choose the first
+    /// order-satisfying covering index without a cost check.
     #[parameter(default = 3_usize)]
     index_order_satisfied_reward: usize,
 
