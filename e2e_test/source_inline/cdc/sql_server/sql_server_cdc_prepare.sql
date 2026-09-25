@@ -16,6 +16,22 @@ EXEC sys.sp_cdc_enable_table
   @source_name = 'orders',
   @role_name = NULL;
 
+CREATE TABLE composite_pk_order (
+  type_id INT NOT NULL,
+  related_id INT NOT NULL,
+  client_id INT NOT NULL,
+  payload VARCHAR(50),
+  PRIMARY KEY (related_id, type_id, client_id)
+);
+
+EXEC sys.sp_cdc_enable_table
+  @source_schema = 'dbo',
+  @source_name = 'composite_pk_order',
+  @role_name = NULL;
+
+INSERT INTO composite_pk_order VALUES
+  (2, 1, 3, 'first'),
+  (1, 2, 3, 'second');
 
 INSERT INTO
   orders (
