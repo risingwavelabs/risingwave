@@ -198,6 +198,47 @@ final class OracleExternalTable {
         }
     }
 
+    static ConnectorServiceProto.OracleOldestOpenTransactionScnsResponse oldestOpenTransactionScns(
+            ConnectorServiceProto.OracleConnectionProperties properties) throws SQLException {
+        var racNodes =
+                properties.getPropertiesOrDefault(
+                        DbzConnectorConfig.ORACLE_DEBEZIUM_RAC_NODES, "");
+        var isRac = !racNodes.isBlank();
+        var sql =
+                isRac
+                        ? "SELECT START_SCN, INST_ID FROM GV$TRANSACTION"
+                        : "SELECT START_SCN FROM V$TRANSACTION";
+        // Check every row before aggregating: MIN alone would conceal an unknown START_SCN.
+        var oldestStartScnByInstance = new HashMap<Integer, Long>();
+        try (var connection = connect(properties.getPropertiesMap());
+                var statement = connection.createStatement();
+                var result = statement.executeQuery(sql)) {
+            while (result.next()) {
+                var startScn = result.getLong("START_SCN");
+                if (result.wasNull() || startScn <= 0) {
+                    throw new SQLException("Oracle open transaction has no valid START_SCN");
+                }
+                var instanceId = 0;
+                if (isRac) {
+                    instanceId = result.getInt("INST_ID");
+                    if (result.wasNull() || instanceId <= 0) {
+                        throw new SQLException("Oracle open transaction has no valid INST_ID");
+                    }
+                }
+                oldestStartScnByInstance.merge(instanceId, startScn, Long::min);
+            }
+        }
+        var response = ConnectorServiceProto.OracleOldestOpenTransactionScnsResponse.newBuilder();
+        oldestStartScnByInstance.forEach(
+                (instanceId, startScn) ->
+                        response.addScns(
+                                ConnectorServiceProto.OracleOldestOpenTransactionStartScn
+                                        .newBuilder()
+                                        .setStartScn(startScn)
+                                        .setInstanceId(instanceId)));
+        return response.build();
+    }
+
     private static long currentScn(Connection connection) throws SQLException {
         try (var statement = connection.createStatement();
                 var result = statement.executeQuery("SELECT CURRENT_SCN FROM V$DATABASE")) {

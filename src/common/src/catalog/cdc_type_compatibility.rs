@@ -42,7 +42,8 @@ pub fn cdc_source_column_type_compatible(
             char_max_length,
             postgres_udt_name,
         ),
-        PbCdcTableType::Unspecified | PbCdcTableType::Mongodb => false,
+        // Oracle type-compatibility rules are not implemented yet; never accept a mismatch.
+        PbCdcTableType::Unspecified | PbCdcTableType::Mongodb | PbCdcTableType::Oracle => false,
     }
 }
 
@@ -255,7 +256,8 @@ fn auto_schema_change_source_type_candidates(
             sql_server_auto_schema_change_source_type_candidates(mapped_type)
         }
         PbCdcTableType::Postgres => postgres_auto_schema_change_source_type_candidates(mapped_type),
-        PbCdcTableType::Unspecified | PbCdcTableType::Mongodb => vec![],
+        // Oracle auto schema change is not supported.
+        PbCdcTableType::Unspecified | PbCdcTableType::Mongodb | PbCdcTableType::Oracle => vec![],
     }
 }
 

@@ -58,6 +58,7 @@ pub enum ExternalCdcTableType {
     Postgres,
     SqlServer,
     Mongodb,
+    Oracle,
 }
 
 impl ExternalCdcTableType {
@@ -68,6 +69,7 @@ impl ExternalCdcTableType {
             "postgres-cdc" => Self::Postgres,
             "sqlserver-cdc" => Self::SqlServer,
             "mongodb-cdc" => Self::Mongodb,
+            "oracle-cdc" => Self::Oracle,
             _ => Self::Unspecified,
         }
     }
@@ -77,6 +79,7 @@ impl ExternalCdcTableType {
             Self::Mysql => Ok(MysqlExternalTableReader::get_cdc_offset_parser()),
             Self::Postgres => Ok(PostgresExternalTableReader::get_cdc_offset_parser()),
             Self::SqlServer => Ok(SqlServerExternalTableReader::get_cdc_offset_parser()),
+            Self::Oracle => Ok(OracleExternalTableReader::get_cdc_offset_parser()),
             Self::Mock => Ok(MockExternalTableReader::get_cdc_offset_parser()),
             Self::Unspecified | Self::Mongodb => {
                 bail!("invalid external table type: {:?}", *self)
@@ -109,6 +112,9 @@ impl ExternalCdcTableType {
             Self::SqlServer => Ok(ExternalTableReaderImpl::SqlServer(
                 SqlServerExternalTableReader::new(config, schema, pk_indices).await?,
             )),
+            Self::Oracle => Ok(ExternalTableReaderImpl::Oracle(
+                OracleExternalTableReader::new(config, schema, pk_indices)?,
+            )),
             Self::Mock => Ok(ExternalTableReaderImpl::Mock(MockExternalTableReader::new())),
             Self::Unspecified | Self::Mongodb => {
                 bail!("invalid external table type: {:?}", *self)
@@ -124,6 +130,7 @@ impl From<ExternalCdcTableType> for PbCdcTableType {
             ExternalCdcTableType::Mysql => Self::Mysql,
             ExternalCdcTableType::SqlServer => Self::SqlServer,
             ExternalCdcTableType::Mongodb => Self::Mongodb,
+            ExternalCdcTableType::Oracle => Self::Oracle,
             ExternalCdcTableType::Unspecified | ExternalCdcTableType::Mock => Self::Unspecified,
         }
     }
@@ -136,6 +143,7 @@ impl From<PbCdcTableType> for ExternalCdcTableType {
             PbCdcTableType::Mysql => Self::Mysql,
             PbCdcTableType::SqlServer => Self::SqlServer,
             PbCdcTableType::Mongodb => Self::Mongodb,
+            PbCdcTableType::Oracle => Self::Oracle,
             PbCdcTableType::Unspecified => Self::Unspecified,
         }
     }
@@ -162,10 +170,9 @@ impl SchemaTableName {
                 .get(DATABASE_NAME_KEY)
                 .cloned()
                 .unwrap_or_default(),
-            ExternalCdcTableType::Postgres => {
-                properties.get(SCHEMA_NAME_KEY).cloned().unwrap_or_default()
-            }
-            ExternalCdcTableType::SqlServer => {
+            ExternalCdcTableType::Postgres
+            | ExternalCdcTableType::Oracle
+            | ExternalCdcTableType::SqlServer => {
                 properties.get(SCHEMA_NAME_KEY).cloned().unwrap_or_default()
             }
             ExternalCdcTableType::Unspecified
@@ -305,6 +312,10 @@ pub struct ExternalTableConfig {
     /// The Oracle pluggable database name. This field is only used by the Oracle CDC connector.
     #[serde(rename = "database.pdb.name")]
     pub pdb_name: Option<String>,
+    /// Effective RAC instance list forwarded to Debezium for shared Oracle sources. This field is
+    /// only used by the Oracle CDC connector.
+    #[serde(rename = "debezium.rac.nodes", default)]
+    pub rac_nodes: Option<String>,
     #[serde(rename = "table.name")]
     pub table: String,
     /// `ssl.mode` specifies the SSL/TLS encryption level for secure communication with Postgres.

@@ -150,6 +150,8 @@ pub enum CdcTableType {
     #[sea_orm(string_value = "MONGO")]
     #[serde(rename = "Mongo")] // keep the serde name used in meta backup snapshots
     Mongodb,
+    #[sea_orm(string_value = "ORACLE")]
+    Oracle,
 }
 
 impl From<CdcTableType> for PbCdcTableType {
@@ -159,6 +161,7 @@ impl From<CdcTableType> for PbCdcTableType {
             CdcTableType::Mysql => Self::Mysql,
             CdcTableType::SqlServer => Self::SqlServer,
             CdcTableType::Mongodb => Self::Mongodb,
+            CdcTableType::Oracle => Self::Oracle,
             CdcTableType::Unspecified => Self::Unspecified,
         }
     }
@@ -171,6 +174,7 @@ impl From<PbCdcTableType> for CdcTableType {
             PbCdcTableType::Mysql => Self::Mysql,
             PbCdcTableType::SqlServer => Self::SqlServer,
             PbCdcTableType::Mongodb => Self::Mongodb,
+            PbCdcTableType::Oracle => Self::Oracle,
             PbCdcTableType::Unspecified => Self::Unspecified,
         }
     }
@@ -390,6 +394,7 @@ impl From<PbTable> for ActiveModel {
                     2 => CdcTableType::Mysql,
                     3 => CdcTableType::SqlServer,
                     4 => CdcTableType::Mongodb,
+                    6 => CdcTableType::Oracle,
                     _ => panic!("Invalid CDC table type: {cdc_table_type}"),
                 }
             })),
