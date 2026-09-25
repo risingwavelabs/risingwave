@@ -460,21 +460,6 @@ impl PinCacheReadHandle {
         }
         result
     }
-
-    pub(crate) async fn streaming_read(
-        &self,
-        range: impl ObjectRangeBounds,
-    ) -> ObjectResult<MonitoredStreamingReader> {
-        let result = self
-            .pin_cache
-            .store
-            .streaming_read(&self.entry.path, range)
-            .await;
-        if result.is_err() {
-            self.invalidate();
-        }
-        result
-    }
 }
 
 impl PinCache {
@@ -1048,15 +1033,6 @@ mod tests {
             pin_cache.get(object_id).unwrap().read(..).await.unwrap(),
             original
         );
-        let mut reader = pin_cache
-            .get(object_id)
-            .unwrap()
-            .streaming_read(..)
-            .await
-            .unwrap();
-        assert_eq!(reader.read_bytes().await.unwrap().unwrap(), original);
-        assert!(reader.read_bytes().await.is_none());
-
         remote_store
             .upload(remote_path, Bytes::from_static(b"changed remote"))
             .await
@@ -1441,44 +1417,34 @@ mod tests {
 
     #[tokio::test]
     async fn test_read_failure_only_invalidates_selected_publication() {
-        for streaming in [false, true] {
-            let remote_store = in_memory_object_store();
-            let pin_cache = PinCache::new(in_memory_object_store(), u64::MAX);
-            let object_id = HummockSstableObjectId::from(1001);
-            pin_cache.replace_desired_objects(HashMap::from([(object_id, 8)]));
-            remote_store
-                .upload("sst", Bytes::from_static(b"complete"))
-                .await
-                .unwrap();
-            pin_cache
-                .pin_sst(remote_store.clone(), "sst".into(), object_id)
-                .await
-                .unwrap();
-            let old = pin_cache.get(object_id).unwrap();
-            pin_cache.store.delete(&old.entry.path).await.unwrap();
-            if streaming {
-                assert!(old.streaming_read(..).await.is_err());
-            } else {
-                assert!(old.read(..).await.is_err());
-            }
-            assert!(pin_cache.get(object_id).is_none());
-            assert_eq!(pin_cache.state.read().published_bytes, 0);
+        let remote_store = in_memory_object_store();
+        let pin_cache = PinCache::new(in_memory_object_store(), u64::MAX);
+        let object_id = HummockSstableObjectId::from(1001);
+        pin_cache.replace_desired_objects(HashMap::from([(object_id, 8)]));
+        remote_store
+            .upload("sst", Bytes::from_static(b"complete"))
+            .await
+            .unwrap();
+        pin_cache
+            .pin_sst(remote_store.clone(), "sst".into(), object_id)
+            .await
+            .unwrap();
+        let old = pin_cache.get(object_id).unwrap();
+        pin_cache.store.delete(&old.entry.path).await.unwrap();
+        assert!(old.read(..).await.is_err());
+        assert!(pin_cache.get(object_id).is_none());
+        assert_eq!(pin_cache.state.read().published_bytes, 0);
 
-            pin_cache
-                .pin_sst(remote_store, "sst".into(), object_id)
-                .await
-                .unwrap();
-            // This handle stays on the old path and must not remove the new route.
-            if streaming {
-                assert!(old.streaming_read(..).await.is_err());
-            } else {
-                assert!(old.read(..).await.is_err());
-            }
-            assert_eq!(
-                pin_cache.get(object_id).unwrap().read(..).await.unwrap(),
-                Bytes::from_static(b"complete")
-            );
-        }
+        pin_cache
+            .pin_sst(remote_store, "sst".into(), object_id)
+            .await
+            .unwrap();
+        // This handle stays on the old path and must not remove the new route.
+        assert!(old.read(..).await.is_err());
+        assert_eq!(
+            pin_cache.get(object_id).unwrap().read(..).await.unwrap(),
+            Bytes::from_static(b"complete")
+        );
     }
 
     #[tokio::test]

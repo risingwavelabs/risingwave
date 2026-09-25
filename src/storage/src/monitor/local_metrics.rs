@@ -42,6 +42,9 @@ pub(crate) fn flush_local_metrics_for_test() {
 pub struct StoreLocalStatistic {
     pub cache_data_block_miss: u64,
     pub cache_data_block_total: u64,
+    pub pin_cache_data_block_hit: u64,
+    pub pin_cache_data_block_memory_hit: u64,
+    pub pin_cache_data_block_total: u64,
     pub cache_meta_block_miss: u64,
     pub cache_meta_block_total: u64,
     pub cache_data_prefetch_count: u64,
@@ -210,6 +213,9 @@ impl StoreLocalStatistic {
     fn need_report(&self) -> bool {
         self.cache_data_block_miss != 0
             || self.cache_data_block_total != 0
+            || self.pin_cache_data_block_hit != 0
+            || self.pin_cache_data_block_memory_hit != 0
+            || self.pin_cache_data_block_total != 0
             || self.cache_meta_block_miss != 0
             || self.cache_meta_block_total != 0
             || self.cache_data_prefetch_count != 0
@@ -239,6 +245,9 @@ impl Drop for StoreLocalStatistic {
 struct LocalStoreMetrics {
     cache_data_block_total: LabelGuardedLocalIntCounter,
     cache_data_block_miss: LabelGuardedLocalIntCounter,
+    pin_cache_data_block_hit: LabelGuardedLocalIntCounter,
+    pin_cache_data_block_memory_hit: LabelGuardedLocalIntCounter,
+    pin_cache_data_block_total: LabelGuardedLocalIntCounter,
     cache_meta_block_total: LabelGuardedLocalIntCounter,
     cache_meta_block_miss: LabelGuardedLocalIntCounter,
     cache_data_prefetch_count: LabelGuardedLocalIntCounter,
@@ -279,6 +288,21 @@ impl LocalStoreMetrics {
         let cache_data_block_miss = metrics
             .sst_store_block_request_counts
             .with_guarded_label_values(&[table_id_label, "data_miss"])
+            .local();
+
+        let pin_cache_data_block_hit = metrics
+            .sst_store_block_request_counts
+            .with_guarded_label_values(&[table_id_label, "pin_data_hit"])
+            .local();
+
+        let pin_cache_data_block_memory_hit = metrics
+            .sst_store_block_request_counts
+            .with_guarded_label_values(&[table_id_label, "pin_data_memory_hit"])
+            .local();
+
+        let pin_cache_data_block_total = metrics
+            .sst_store_block_request_counts
+            .with_guarded_label_values(&[table_id_label, "pin_data_total"])
             .local();
 
         let cache_meta_block_total = metrics
@@ -381,6 +405,9 @@ impl LocalStoreMetrics {
         Self {
             cache_data_block_total,
             cache_data_block_miss,
+            pin_cache_data_block_hit,
+            pin_cache_data_block_memory_hit,
+            pin_cache_data_block_total,
             cache_meta_block_total,
             cache_meta_block_miss,
             cache_data_prefetch_count,
@@ -484,6 +511,9 @@ macro_rules! add_local_metrics_count {
 add_local_metrics_count!(
     cache_data_block_total,
     cache_data_block_miss,
+    pin_cache_data_block_hit,
+    pin_cache_data_block_memory_hit,
+    pin_cache_data_block_total,
     cache_meta_block_total,
     cache_meta_block_miss,
     cache_data_prefetch_count,

@@ -16,15 +16,15 @@ use std::clone::Clone;
 use std::collections::VecDeque;
 use std::ops::Deref;
 use std::pin::Pin;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Arc, OnceLock};
 
 use await_tree::{InstrumentAwait, SpanExt};
 use bytes::Bytes;
 use fail::fail_point;
 use foyer::{
     Cache, CacheBuilder, CacheEntry, EventListener, Hint, HybridCache, HybridCacheBuilder,
-    HybridCacheEntry, HybridCacheProperties,
+    HybridCacheEntry, HybridCacheProperties, Location,
 };
 use futures::{FutureExt, StreamExt, future};
 use prost::Message;
@@ -36,7 +36,8 @@ use risingwave_hummock_sdk::{
 };
 use risingwave_hummock_trace::TracedCachePolicy;
 use risingwave_object_store::object::{
-    ObjectError, ObjectMetadataIter, ObjectResult, ObjectStoreRef, ObjectStreamingUploader,
+    ObjectError, ObjectMetadataIter, ObjectRangeBounds, ObjectResult, ObjectStoreRef,
+    ObjectStreamingUploader,
 };
 use risingwave_pb::hummock::PbHnswGraph;
 use serde::{Deserialize, Serialize};
@@ -49,6 +50,7 @@ use super::{
 };
 use crate::hummock::block_stream::{BlockDataStream, MemoryUsageTracker, PrefetchBlockStream};
 use crate::hummock::none::NoneRecentFilter;
+use crate::hummock::pin_cache::{PinCache, PinCacheReadHandle, PinCacheRefillOutcome};
 use crate::hummock::vector::file::{VectorBlock, VectorBlockMeta, VectorFileMeta};
 use crate::hummock::vector::monitor::VectorStoreCacheStats;
 use crate::hummock::{BlockEntry, BlockHolder, HummockError, HummockResult, RecentFilterTrait};
@@ -165,6 +167,12 @@ impl Default for CachePolicy {
     }
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum PinCacheBlockSource {
+    Memory,
+    Local,
+}
+
 impl From<TracedCachePolicy> for CachePolicy {
     fn from(policy: TracedCachePolicy) -> Self {
         match policy {
@@ -206,6 +214,7 @@ pub struct SstableStoreConfig {
 pub struct SstableStore {
     path: String,
     store: ObjectStoreRef,
+    pin_cache: OnceLock<Arc<PinCache>>,
 
     meta_cache: HybridCache<HummockSstableObjectId, Box<Sstable>>,
     block_cache: HybridCache<SstableBlockIndex, Box<Block>>,
@@ -243,6 +252,7 @@ impl SstableStore {
         Self {
             path: config.path,
             store: config.store,
+            pin_cache: OnceLock::new(),
 
             meta_cache: config.meta_cache,
             block_cache: config.block_cache,
@@ -294,6 +304,7 @@ impl SstableStore {
         Ok(Self {
             path,
             store,
+            pin_cache: OnceLock::new(),
 
             prefetch_buffer_usage: Arc::new(AtomicUsize::new(0)),
             prefetch_buffer_capacity: block_cache_capacity,
@@ -318,6 +329,83 @@ impl SstableStore {
         Ok(())
     }
 
+    #[allow(dead_code)] // Wired to production storage in the final stack layer.
+    pub(crate) fn set_pin_cache(&self, pin_cache: Arc<PinCache>) {
+        assert!(
+            self.pin_cache.set(pin_cache).is_ok(),
+            "pin cache must only be initialized once"
+        );
+    }
+
+    #[allow(dead_code)] // Used by the refill controller in the next stack layer.
+    pub(crate) fn pin_cache(&self) -> Option<&Arc<PinCache>> {
+        self.pin_cache.get()
+    }
+
+    #[allow(dead_code)] // Used by the refill controller in the next stack layer.
+    pub(crate) async fn pin_sst_at_generation(
+        &self,
+        object_id: HummockSstableObjectId,
+        generation: u64,
+    ) -> HummockResult<PinCacheRefillOutcome> {
+        let Some(cache) = self.pin_cache.get() else {
+            return Ok(PinCacheRefillOutcome::Obsolete);
+        };
+        cache
+            .pin_sst_at_generation(
+                self.store.clone(),
+                self.get_sst_data_path(object_id),
+                object_id,
+                generation,
+            )
+            .await
+            .map_err(Into::into)
+    }
+
+    fn pinned_sst(&self, object_id: HummockSstableObjectId) -> Option<PinCacheReadHandle> {
+        self.pin_cache
+            .get()
+            .and_then(|pin_cache| pin_cache.get(object_id))
+    }
+
+    async fn read_sst_meta(
+        pinned_sst: Option<&PinCacheReadHandle>,
+        remote_store: ObjectStoreRef,
+        remote_path: String,
+        object_id: HummockSstableObjectId,
+        range: impl ObjectRangeBounds,
+    ) -> HummockResult<SstableMeta> {
+        if let Some(pinned_sst) = pinned_sst {
+            let result = pinned_sst
+                .read(range.clone())
+                .await
+                .map_err(HummockError::from)
+                .and_then(|data| {
+                    // A suffix read can succeed after the local object has been truncated.
+                    // SstableMeta::decode requires the 16-byte checksum/version/magic footer.
+                    if data.len() < 16 {
+                        return Err(HummockError::other(
+                            "pinned SST metadata footer is truncated",
+                        ));
+                    }
+                    SstableMeta::decode(&data)
+                });
+            match result {
+                Ok(meta) => return Ok(meta),
+                Err(error) => {
+                    pinned_sst.invalidate();
+                    tracing::warn!(
+                        object_id = object_id.as_raw_id(),
+                        error = %error.as_report(),
+                        "failed to read or decode pinned SST metadata; falling back to remote object store"
+                    );
+                }
+            }
+        }
+        let data = remote_store.read(&remote_path, range).await?;
+        SstableMeta::decode(&data)
+    }
+
     pub fn delete_cache(&self, object_id: HummockSstableObjectId) -> HummockResult<()> {
         self.meta_cache.remove(&object_id);
         Ok(())
@@ -333,6 +421,31 @@ impl SstableStore {
             .upload(&data_path, data)
             .await
             .map_err(Into::into)
+    }
+
+    async fn single_foyer_block_stream(
+        &self,
+        sst: &Sstable,
+        block_index: usize,
+        policy: CachePolicy,
+        stats: &mut StoreLocalStatistic,
+    ) -> HummockResult<Box<PrefetchBlockStream>> {
+        let block = self
+            .get_block_response_from_foyer(sst, block_index, policy)
+            .await?
+            .wait()
+            .await?;
+        stats.cache_data_block_total += 1;
+        if let BlockEntry::HybridCache(entry) = block.entry()
+            && entry.source() == foyer::Source::Outer
+        {
+            stats.cache_data_block_miss += 1;
+        }
+        Ok(Box::new(PrefetchBlockStream::new(
+            VecDeque::from([block]),
+            block_index,
+            None,
+        )))
     }
 
     /// Buffers consecutive decoded blocks starting at `block_index`, up to `end_index` (exclusive).
@@ -355,18 +468,41 @@ impl SstableStore {
                 None,
             )));
         }
-        if policy != CachePolicy::Disable
-            && let Some(entry) = self
-                .block_cache
-                .get(&SstableBlockIndex {
-                    sst_id: object_id,
-                    block_idx: block_index as _,
-                })
+        let pinned_sst = self.pinned_sst(object_id);
+        let pin_cache_desired = self
+            .pin_cache
+            .get()
+            .is_some_and(|pin_cache| pin_cache.is_desired(object_id));
+        let pin_cache_candidate = pin_cache_desired || pinned_sst.is_some();
+        let first_block = SstableBlockIndex {
+            sst_id: object_id,
+            block_idx: block_index as _,
+        };
+        let cached_entry = if pinned_sst.is_some() {
+            match policy {
+                CachePolicy::Disable => None,
+                CachePolicy::Fill(_) | CachePolicy::NotFill => {
+                    self.block_cache.memory().get(&first_block)
+                }
+            }
+        } else if policy == CachePolicy::Disable {
+            None
+        } else {
+            self.block_cache
+                .get(&first_block)
                 .await
                 .map_err(HummockError::foyer_error)?
-        {
+        };
+        if let Some(entry) = cached_entry {
+            if pinned_sst.is_some() {
+                stats.pin_cache_data_block_total += 1;
+                stats.pin_cache_data_block_hit += 1;
+                stats.pin_cache_data_block_memory_hit += 1;
+            } else if pin_cache_candidate {
+                stats.pin_cache_data_block_total += 1;
+            }
             stats.cache_data_block_total += 1;
-            if entry.source() == foyer::Source::Outer {
+            if pinned_sst.is_none() && entry.source() == foyer::Source::Outer {
                 stats.cache_data_block_miss += 1;
             }
             let block = BlockHolder::from_hybrid_cache_entry(entry);
@@ -386,10 +522,16 @@ impl SstableStore {
             let mut min_hit_index = end_index;
             let mut hit_count = 0;
             for idx in block_index..end_index {
-                if self.block_cache.contains(&SstableBlockIndex {
+                let block = SstableBlockIndex {
                     sst_id: object_id,
                     block_idx: idx as _,
-                }) {
+                };
+                let contains = if pinned_sst.is_some() {
+                    self.block_cache.memory().contains(&block)
+                } else {
+                    self.block_cache.contains(&block)
+                };
+                if contains {
                     if min_hit_index > idx && idx > block_index {
                         min_hit_index = idx;
                     }
@@ -404,7 +546,11 @@ impl SstableStore {
             }
         }
         stats.cache_data_prefetch_count += 1;
-        stats.cache_data_prefetch_block_count += (end_index - block_index) as u64;
+        let prefetch_block_count = (end_index - block_index) as u64;
+        stats.cache_data_prefetch_block_count += prefetch_block_count;
+        if pin_cache_candidate {
+            stats.pin_cache_data_block_total += prefetch_block_count;
+        }
         let end_offset = start_offset
             + sst.meta.block_metas[block_index..end_index]
                 .iter()
@@ -415,15 +561,27 @@ impl SstableStore {
         let tracker = MemoryUsageTracker::new(self.prefetch_buffer_usage.clone(), memory_usage);
         let span = await_tree::span!("Prefetch SST-{}", object_id).verbose();
         let store = self.store.clone();
+        let read_route = pinned_sst.clone();
         let join_handle = tokio::spawn(async move {
-            store
-                .read(&data_path, start_offset..end_offset)
-                .instrument_await(span)
-                .await
+            let range = start_offset..end_offset;
+            if let Some(pinned_sst) = read_route {
+                return pinned_sst.read(range).instrument_await(span).await;
+            }
+            store.read(&data_path, range).instrument_await(span).await
         });
         let buf = match join_handle.await {
             Ok(Ok(data)) => data,
-            Ok(Err(e)) => {
+            Ok(Err(error)) => {
+                if pinned_sst.is_some() {
+                    tracing::warn!(
+                        object_id = object_id.as_raw_id(),
+                        error = %error.as_report(),
+                        "failed to prefetch pinned SST; falling back to Foyer"
+                    );
+                    return self
+                        .single_foyer_block_stream(sst, block_index, policy, stats)
+                        .await;
+                }
                 tracing::error!(
                     "prefetch meet error when read {}..{} from sst-{} ({})",
                     start_offset,
@@ -431,7 +589,7 @@ impl SstableStore {
                     object_id,
                     sst.meta.estimated_size,
                 );
-                return Err(e.into());
+                return Err(error.into());
             }
             Err(_) => {
                 return Err(HummockError::other("cancel by other thread"));
@@ -441,25 +599,53 @@ impl SstableStore {
         let mut blocks = VecDeque::default();
         for idx in block_index..end_index {
             let end = offset + sst.meta.block_metas[idx].len as usize;
-            if end > buf.len() {
-                return Err(ObjectError::internal("read unexpected EOF").into());
-            }
-            // copy again to avoid holding a large data in memory.
-            let block = Block::decode_with_copy(
-                buf.slice(offset..end),
-                sst.meta.block_metas[idx].uncompressed_size as usize,
-                true,
-            )?;
+            let decoded = if end <= buf.len() {
+                // Copy again to avoid holding a large buffer in one block.
+                Block::decode_with_copy(
+                    buf.slice(offset..end),
+                    sst.meta.block_metas[idx].uncompressed_size as usize,
+                    true,
+                )
+            } else {
+                Err(ObjectError::internal("read unexpected EOF").into())
+            };
+            let block = match decoded {
+                Ok(block) => block,
+                Err(error) => {
+                    if let Some(route) = &pinned_sst {
+                        route.invalidate();
+                        tracing::warn!(
+                            object_id = object_id.as_raw_id(),
+                            error = %error.as_report(),
+                            "failed to decode pinned SST prefetch; falling back to Foyer"
+                        );
+                        return self
+                            .single_foyer_block_stream(sst, block_index, policy, stats)
+                            .await;
+                    }
+                    return Err(error);
+                }
+            };
             let holder = if let CachePolicy::Fill(hint) = policy {
                 let hint = if idx == block_index { hint } else { Hint::Low };
-                let entry = self.block_cache.insert_with_properties(
-                    SstableBlockIndex {
-                        sst_id: object_id,
-                        block_idx: idx as _,
-                    },
-                    Box::new(block),
-                    HybridCacheProperties::default().with_hint(hint),
-                );
+                let block_index = SstableBlockIndex {
+                    sst_id: object_id,
+                    block_idx: idx as _,
+                };
+                let properties = HybridCacheProperties::default().with_hint(hint);
+                let entry = if pinned_sst.is_some() {
+                    self.block_cache.memory().insert_with_properties(
+                        block_index,
+                        Box::new(block),
+                        properties.with_location(Location::InMem),
+                    )
+                } else {
+                    self.block_cache.insert_with_properties(
+                        block_index,
+                        Box::new(block),
+                        properties,
+                    )
+                };
                 BlockHolder::from_hybrid_cache_entry(entry)
             } else {
                 BlockHolder::from_owned_block(Box::new(block))
@@ -467,6 +653,9 @@ impl SstableStore {
 
             blocks.push_back(holder);
             offset = end;
+        }
+        if pinned_sst.is_some() {
+            stats.pin_cache_data_block_hit += prefetch_block_count;
         }
         Ok(Box::new(PrefetchBlockStream::new(
             blocks,
@@ -476,6 +665,91 @@ impl SstableStore {
     }
 
     pub async fn get_block_response(
+        &self,
+        sst: &Sstable,
+        block_index: usize,
+        policy: CachePolicy,
+    ) -> HummockResult<BlockResponse> {
+        self.get_block_response_with_pin_cache_hit(sst, block_index, policy)
+            .await
+            .map(|(response, _)| response)
+    }
+
+    async fn get_block_response_with_pin_cache_hit(
+        &self,
+        sst: &Sstable,
+        block_index: usize,
+        policy: CachePolicy,
+    ) -> HummockResult<(BlockResponse, Option<PinCacheBlockSource>)> {
+        let object_id = sst.id;
+        let (range, uncompressed_capacity) = sst.calculate_block_info(block_index);
+        if let Some(pinned_sst) = self.pinned_sst(object_id) {
+            let idx = SstableBlockIndex {
+                sst_id: object_id,
+                block_idx: block_index as _,
+            };
+            if policy != CachePolicy::Disable
+                && let Some(entry) = self.block_cache.memory().get(&idx)
+            {
+                return Ok((
+                    BlockResponse::Block(BlockHolder::from_hybrid_cache_entry(entry)),
+                    Some(PinCacheBlockSource::Memory),
+                ));
+            }
+
+            let result = match policy {
+                CachePolicy::Fill(hint) => {
+                    let read_route = pinned_sst.clone();
+                    let properties = HybridCacheProperties::default()
+                        .with_hint(hint)
+                        .with_location(Location::InMem);
+                    self.block_cache
+                        .memory()
+                        .get_or_fetch(&idx, move || async move {
+                            let data = read_route
+                                .read(range)
+                                .instrument_await("get_pinned_block_response".verbose())
+                                .await
+                                .map_err(HummockError::from)?;
+                            let block = Box::new(Block::decode(data, uncompressed_capacity)?);
+                            Ok::<_, anyhow::Error>((block, properties))
+                        })
+                        .await
+                        .map(BlockHolder::from_hybrid_cache_entry)
+                        .map_err(HummockError::foyer_error)
+                }
+                CachePolicy::NotFill | CachePolicy::Disable => pinned_sst
+                    .read(range)
+                    .instrument_await("get_pinned_block_response".verbose())
+                    .await
+                    .map_err(HummockError::from)
+                    .and_then(|data| Block::decode(data, uncompressed_capacity))
+                    .map(|block| BlockHolder::from_owned_block(Box::new(block))),
+            };
+            match result {
+                Ok(block) => {
+                    return Ok((
+                        BlockResponse::Block(block),
+                        Some(PinCacheBlockSource::Local),
+                    ));
+                }
+                Err(error) => {
+                    pinned_sst.invalidate();
+                    tracing::warn!(
+                        object_id = object_id.as_raw_id(),
+                        error = %error.as_report(),
+                        "failed to read or decode pinned SST block; falling back to Foyer"
+                    );
+                }
+            }
+        }
+
+        self.get_block_response_from_foyer(sst, block_index, policy)
+            .await
+            .map(|response| (response, None))
+    }
+
+    async fn get_block_response_from_foyer(
         &self,
         sst: &Sstable,
         block_index: usize,
@@ -567,10 +841,26 @@ impl SstableStore {
         policy: CachePolicy,
         stats: &mut StoreLocalStatistic,
     ) -> HummockResult<BlockHolder> {
-        let block_response = self.get_block_response(sst, block_index, policy).await?;
+        let pin_cache_desired = self
+            .pin_cache
+            .get()
+            .is_some_and(|pin_cache| pin_cache.is_desired(sst.id));
+        let (block_response, pin_cache_source) = self
+            .get_block_response_with_pin_cache_hit(sst, block_index, policy)
+            .await?;
         let block_holder = block_response.wait().await?;
+        if pin_cache_desired || pin_cache_source.is_some() {
+            stats.pin_cache_data_block_total += 1;
+        }
+        if pin_cache_source.is_some() {
+            stats.pin_cache_data_block_hit += 1;
+        }
+        if pin_cache_source == Some(PinCacheBlockSource::Memory) {
+            stats.pin_cache_data_block_memory_hit += 1;
+        }
         stats.cache_data_block_total += 1;
-        if let BlockEntry::HybridCache(entry) = block_holder.entry()
+        if pin_cache_source.is_none()
+            && let BlockEntry::HybridCache(entry) = block_holder.entry()
             && entry.source() == foyer::Source::Outer
         {
             stats.cache_data_block_miss += 1;
@@ -726,6 +1016,7 @@ impl SstableStore {
     ) -> HummockResult<TableHolder> {
         let object_id = sstable_info_ref.object_id;
         let store = self.store.clone();
+        let pinned_sst = self.pinned_sst(object_id);
         let meta_path = self.get_sst_data_path(object_id);
         let stats_ptr = stats.remote_io_time.clone();
         let range = sstable_info_ref.meta_offset as usize..;
@@ -733,11 +1024,9 @@ impl SstableStore {
 
         let fetch = self.meta_cache.get_or_fetch(&object_id, || async move {
             let now = Instant::now();
-            let buf = store
-                .read(&meta_path, range)
+            let meta = Self::read_sst_meta(pinned_sst.as_ref(), store, meta_path, object_id, range)
                 .instrument_await("get_meta_response".verbose())
                 .await?;
-            let meta = SstableMeta::decode(&buf[..])?;
 
             let sst = Sstable::new(object_id, meta, skip_bloom_filter_in_serde);
             let add = (now.elapsed().as_secs_f64() * 1000.0).ceil();
@@ -818,6 +1107,8 @@ impl SstableStore {
         let end_pos = metas.iter().map(|meta| meta.len as usize).sum::<usize>() + start_pos;
         let range = start_pos..end_pos;
         // spawn to tokio pool because the object-storage sdk may not be safe to cancel.
+        // Compaction may copy raw blocks without decoding them. Always stream from the
+        // authoritative store so local cache corruption cannot reach a new SST.
         let ret = tokio::spawn(async move { store.streaming_read(&data_path, range).await }).await;
 
         let reader = match ret {
@@ -856,22 +1147,33 @@ impl SstableStore {
 pub type SstableStoreRef = Arc<SstableStore>;
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::ops::Range;
     use std::sync::Arc;
 
+    use bytes::Bytes;
+    use foyer::{
+        BlockEngineConfig, DeviceBuilder, FsDeviceBuilder, HybridCacheBuilder, Location,
+        PsyncIoEngineConfig,
+    };
+    use futures::StreamExt;
     use risingwave_hummock_sdk::HummockObjectId;
     use risingwave_hummock_sdk::sstable_info::SstableInfo;
 
-    use super::{SstableStoreRef, SstableWriterOptions};
+    use super::{SstableBlockIndex, SstableStoreRef, SstableWriterOptions};
+    use crate::hummock::block_stream::PrefetchLookup;
     use crate::hummock::iterator::HummockIterator;
-    use crate::hummock::iterator::test_utils::{iterator_test_key_of, mock_sstable_store};
+    use crate::hummock::iterator::test_utils::{
+        iterator_test_key_of, mock_sstable_store, mock_sstable_store_with_block_cache,
+    };
+    use crate::hummock::pin_cache::PinCache;
     use crate::hummock::sstable::SstableIteratorReadOptions;
     use crate::hummock::test_utils::{
         default_builder_opt_for_test, gen_default_test_sstable, gen_test_sstable_data, put_sst,
         test_key_of,
     };
     use crate::hummock::value::HummockValue;
-    use crate::hummock::{CachePolicy, SstableIterator, SstableMeta, SstableStore};
+    use crate::hummock::{BlockMeta, CachePolicy, SstableIterator, SstableMeta, SstableStore};
     use crate::monitor::StoreLocalStatistic;
 
     const SST_ID: u64 = 1;
@@ -1203,6 +1505,471 @@ mod tests {
             SstableStore::get_object_id_from_path(&data_path),
             HummockObjectId::Sstable(object_id.into())
         );
+    }
+
+    #[tokio::test]
+    async fn test_memory_fill_respects_pin_route() {
+        const MB: usize = 1 << 20;
+
+        let cache_dir = tempfile::tempdir().unwrap();
+        let device = FsDeviceBuilder::new(cache_dir.path())
+            .with_capacity(16 * MB)
+            .build()
+            .unwrap();
+        let block_cache = HybridCacheBuilder::new()
+            .with_name("pin-memory-only-test")
+            .memory(MB)
+            .storage()
+            .with_io_engine_config(PsyncIoEngineConfig::new())
+            .with_engine_config(BlockEngineConfig::new(device).with_block_size(MB))
+            .build()
+            .await
+            .unwrap();
+        let sstable_store = mock_sstable_store_with_block_cache(block_cache).await;
+        let (data, meta) = gen_test_sstable_data(
+            default_builder_opt_for_test(),
+            (0..100).map(|x| (iterator_test_key_of(x), get_hummock_value(x))),
+        )
+        .await;
+        let info = put_sst(
+            SST_ID,
+            data,
+            meta,
+            sstable_store.clone(),
+            SstableWriterOptions {
+                capacity_hint: None,
+                tracker: None,
+                policy: CachePolicy::Disable,
+            },
+            vec![0],
+        )
+        .await
+        .unwrap();
+        let mut stats = StoreLocalStatistic::default();
+        let sst = sstable_store.sstable(&info, &mut stats).await.unwrap();
+
+        let local_store = mock_sstable_store().await.store();
+        let pin_cache = PinCache::new(local_store, u64::MAX);
+        sstable_store.set_pin_cache(pin_cache.clone());
+        let remote_path = sstable_store.get_sst_data_path(info.object_id);
+        let remote_size = sstable_store
+            .store()
+            .metadata(&remote_path)
+            .await
+            .unwrap()
+            .total_size as u64;
+        pin_cache.replace_desired_objects(HashMap::from([(info.object_id, remote_size)]));
+        pin_cache
+            .pin_sst(sstable_store.store(), remote_path, info.object_id)
+            .await
+            .unwrap();
+
+        let first_block = SstableBlockIndex {
+            sst_id: info.object_id,
+            block_idx: 0,
+        };
+        sstable_store
+            .get(&sst, 0, CachePolicy::default(), &mut stats)
+            .await
+            .unwrap();
+        assert_eq!(
+            sstable_store
+                .block_cache()
+                .memory()
+                .get(&first_block)
+                .unwrap()
+                .properties()
+                .location(),
+            Location::InMem
+        );
+
+        sstable_store.block_cache().memory().evict_all();
+        sstable_store.block_cache().storage().wait().await;
+        assert!(
+            sstable_store
+                .block_cache()
+                .storage()
+                .load(&first_block)
+                .await
+                .unwrap()
+                .is_miss()
+        );
+
+        pin_cache.replace_desired_objects(HashMap::new());
+        assert!(sstable_store.pinned_sst(info.object_id).is_none());
+        let mut prefetch_stats = StoreLocalStatistic::default();
+        let foyer_stream = sstable_store
+            .prefetch_blocks(
+                &sst,
+                0,
+                sst.block_count(),
+                CachePolicy::default(),
+                &mut prefetch_stats,
+            )
+            .await
+            .unwrap();
+        assert!(prefetch_stats.cache_data_prefetch_count > 0);
+        assert_eq!(
+            sstable_store
+                .block_cache()
+                .memory()
+                .get(&first_block)
+                .unwrap()
+                .properties()
+                .location(),
+            Location::Default
+        );
+
+        drop(foyer_stream);
+        sstable_store.block_cache().memory().evict_all();
+        sstable_store.block_cache().storage().wait().await;
+        assert!(
+            sstable_store
+                .block_cache()
+                .storage()
+                .load(&first_block)
+                .await
+                .unwrap()
+                .entry()
+                .is_some()
+        );
+    }
+
+    #[tokio::test]
+    async fn test_compactor_stream_ignores_published_pin() {
+        let sstable_store = mock_sstable_store().await;
+        let pin_cache = PinCache::new(mock_sstable_store().await.store(), u64::MAX);
+        sstable_store.set_pin_cache(pin_cache.clone());
+
+        let object_id = SST_ID.into();
+        let path = sstable_store.get_sst_data_path(object_id);
+        let remote_store = sstable_store.store();
+        let local_bytes = Bytes::from_static(b"local!");
+        let remote_bytes = Bytes::from_static(b"remote");
+        remote_store
+            .upload(&path, local_bytes.clone())
+            .await
+            .unwrap();
+        pin_cache.replace_desired_objects(HashMap::from([(object_id, local_bytes.len() as u64)]));
+        pin_cache
+            .pin_sst(remote_store.clone(), path.clone(), object_id)
+            .await
+            .unwrap();
+        assert_eq!(
+            pin_cache.get(object_id).unwrap().read(..).await.unwrap(),
+            local_bytes
+        );
+
+        remote_store
+            .upload(&path, remote_bytes.clone())
+            .await
+            .unwrap();
+        let mut stream = sstable_store
+            .get_stream_for_blocks(
+                object_id,
+                &[BlockMeta {
+                    len: remote_bytes.len() as u32,
+                    ..Default::default()
+                }],
+            )
+            .await
+            .unwrap();
+        assert_eq!(stream.next_block().await.unwrap().unwrap().0, remote_bytes);
+    }
+
+    #[tokio::test]
+    async fn test_pin_meta_route_is_fixed_and_decode_failure_falls_back() {
+        let sstable_store = mock_sstable_store().await;
+        let local_store = mock_sstable_store().await.store();
+        let pin_cache = PinCache::new(local_store.clone(), u64::MAX);
+        sstable_store.set_pin_cache(pin_cache.clone());
+        let object_id = SST_ID.into();
+        let path = sstable_store.get_sst_data_path(object_id);
+        let remote_store = sstable_store.store();
+        let local_meta = SstableMeta {
+            key_count: 1,
+            ..Default::default()
+        };
+        let remote_meta = SstableMeta {
+            key_count: 2,
+            ..local_meta.clone()
+        };
+        let local_bytes = Bytes::from(local_meta.encode_to_bytes());
+        let remote_bytes = Bytes::from(remote_meta.encode_to_bytes());
+        assert_eq!(local_bytes.len(), remote_bytes.len());
+        remote_store
+            .upload(&path, local_bytes.clone())
+            .await
+            .unwrap();
+        pin_cache.replace_desired_objects(HashMap::from([(object_id, local_bytes.len() as u64)]));
+        let unpublished_route = sstable_store.pinned_sst(object_id);
+        assert!(unpublished_route.is_none());
+        pin_cache
+            .pin_sst(remote_store.clone(), path.clone(), object_id)
+            .await
+            .unwrap();
+        remote_store.upload(&path, remote_bytes).await.unwrap();
+
+        // Publication during a Foyer miss must not redirect its remote fetch to LocalFS.
+        assert_eq!(
+            SstableStore::read_sst_meta(
+                unpublished_route.as_ref(),
+                remote_store.clone(),
+                path.clone(),
+                object_id,
+                ..,
+            )
+            .await
+            .unwrap()
+            .key_count,
+            2
+        );
+        let published_route = sstable_store.pinned_sst(object_id).unwrap();
+        assert_eq!(
+            SstableStore::read_sst_meta(
+                Some(&published_route),
+                remote_store.clone(),
+                path.clone(),
+                object_id,
+                ..,
+            )
+            .await
+            .unwrap()
+            .key_count,
+            1
+        );
+
+        let local_path = local_store
+            .list("", None, None)
+            .await
+            .unwrap()
+            .next()
+            .await
+            .unwrap()
+            .unwrap()
+            .key;
+        local_store
+            .upload(&local_path, Bytes::from(vec![0; local_bytes.len()]))
+            .await
+            .unwrap();
+        assert_eq!(
+            SstableStore::read_sst_meta(Some(&published_route), remote_store, path, object_id, ..,)
+                .await
+                .unwrap()
+                .key_count,
+            2
+        );
+        assert!(pin_cache.get(object_id).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_truncated_pinned_meta_falls_back_to_remote() {
+        let sstable_store = mock_sstable_store().await;
+        let local_store = mock_sstable_store().await.store();
+        let pin_cache = PinCache::new(local_store.clone(), u64::MAX);
+        sstable_store.set_pin_cache(pin_cache.clone());
+
+        let object_id = SST_ID.into();
+        let path = sstable_store.get_sst_data_path(object_id);
+        let remote_store = sstable_store.store();
+        let meta = SstableMeta {
+            key_count: 2,
+            ..Default::default()
+        };
+        let mut sst_bytes = b"data".to_vec();
+        sst_bytes.extend_from_slice(&meta.encode_to_bytes());
+        remote_store
+            .upload(&path, Bytes::from(sst_bytes.clone()))
+            .await
+            .unwrap();
+        pin_cache.replace_desired_objects(HashMap::from([(object_id, sst_bytes.len() as u64)]));
+        pin_cache
+            .pin_sst(remote_store.clone(), path.clone(), object_id)
+            .await
+            .unwrap();
+
+        let local_path = local_store
+            .list("", None, None)
+            .await
+            .unwrap()
+            .next()
+            .await
+            .unwrap()
+            .unwrap()
+            .key;
+        local_store
+            .upload(&local_path, Bytes::from_static(b"datax"))
+            .await
+            .unwrap();
+
+        let published_route = sstable_store.pinned_sst(object_id).unwrap();
+        assert_eq!(
+            SstableStore::read_sst_meta(
+                Some(&published_route),
+                remote_store,
+                path,
+                object_id,
+                4..,
+            )
+            .await
+            .unwrap()
+            .key_count,
+            2
+        );
+        assert!(pin_cache.get(object_id).is_none());
+    }
+
+    #[tokio::test]
+    async fn test_pin_prefetch_failure_falls_back_to_foyer() {
+        for corrupt in [false, true] {
+            assert_pin_prefetch_falls_back_to_foyer(corrupt).await;
+        }
+    }
+
+    async fn assert_pin_prefetch_falls_back_to_foyer(corrupt: bool) {
+        let sstable_store = mock_sstable_store().await;
+        let x_range = 0..100;
+        let (data, meta) = gen_test_sstable_data(
+            default_builder_opt_for_test(),
+            x_range.map(|x| (iterator_test_key_of(x), get_hummock_value(x))),
+        )
+        .await;
+        let info = put_sst(
+            SST_ID,
+            data,
+            meta,
+            sstable_store.clone(),
+            SstableWriterOptions {
+                capacity_hint: None,
+                tracker: None,
+                policy: CachePolicy::Disable,
+            },
+            vec![0],
+        )
+        .await
+        .unwrap();
+        let mut stats = StoreLocalStatistic::default();
+        let sst = sstable_store.sstable(&info, &mut stats).await.unwrap();
+
+        let local_store = mock_sstable_store().await.store();
+        let pin_cache = PinCache::new(local_store.clone(), u64::MAX);
+        sstable_store.set_pin_cache(pin_cache.clone());
+        let remote_path = sstable_store.get_sst_data_path(info.object_id);
+        let remote_size = sstable_store
+            .store()
+            .metadata(&remote_path)
+            .await
+            .unwrap()
+            .total_size as u64;
+        pin_cache.replace_desired_objects(HashMap::from([(info.object_id, remote_size)]));
+        let first_block = SstableBlockIndex {
+            sst_id: info.object_id,
+            block_idx: 0,
+        };
+
+        let mut unpublished_stats = StoreLocalStatistic::default();
+        sstable_store
+            .get(&sst, 0, CachePolicy::default(), &mut unpublished_stats)
+            .await
+            .unwrap();
+        assert_eq!(unpublished_stats.pin_cache_data_block_total, 1);
+        assert_eq!(unpublished_stats.pin_cache_data_block_hit, 0);
+        assert_eq!(
+            sstable_store
+                .block_cache()
+                .memory()
+                .get(&first_block)
+                .unwrap()
+                .properties()
+                .location(),
+            Location::Default
+        );
+        sstable_store.block_cache().memory().clear();
+
+        pin_cache
+            .pin_sst(sstable_store.store(), remote_path.clone(), info.object_id)
+            .await
+            .unwrap();
+
+        let mut pin_get_stats = StoreLocalStatistic::default();
+        sstable_store
+            .get(&sst, 0, CachePolicy::default(), &mut pin_get_stats)
+            .await
+            .unwrap();
+        assert_eq!(pin_get_stats.pin_cache_data_block_total, 1);
+        assert_eq!(pin_get_stats.pin_cache_data_block_hit, 1);
+        assert_eq!(pin_get_stats.pin_cache_data_block_memory_hit, 0);
+        assert_eq!(
+            sstable_store
+                .block_cache()
+                .memory()
+                .get(&first_block)
+                .unwrap()
+                .properties()
+                .location(),
+            Location::InMem
+        );
+
+        let mut pin_memory_get_stats = StoreLocalStatistic::default();
+        sstable_store
+            .get(&sst, 0, CachePolicy::NotFill, &mut pin_memory_get_stats)
+            .await
+            .unwrap();
+        assert_eq!(pin_memory_get_stats.pin_cache_data_block_total, 1);
+        assert_eq!(pin_memory_get_stats.pin_cache_data_block_hit, 1);
+        assert_eq!(pin_memory_get_stats.pin_cache_data_block_memory_hit, 1);
+
+        sstable_store.block_cache().memory().clear();
+
+        let mut pin_prefetch_stats = StoreLocalStatistic::default();
+        let mut pin_stream = sstable_store
+            .prefetch_blocks(
+                &sst,
+                0,
+                sst.block_count(),
+                CachePolicy::default(),
+                &mut pin_prefetch_stats,
+            )
+            .await
+            .unwrap();
+        assert!(matches!(pin_stream.take_block(0), PrefetchLookup::Hit(_)));
+        assert!(pin_prefetch_stats.pin_cache_data_block_total > 0);
+        assert_eq!(
+            pin_prefetch_stats.pin_cache_data_block_hit,
+            pin_prefetch_stats.pin_cache_data_block_total
+        );
+        assert_eq!(pin_prefetch_stats.pin_cache_data_block_memory_hit, 0);
+        assert_eq!(
+            sstable_store
+                .block_cache()
+                .memory()
+                .get(&first_block)
+                .unwrap()
+                .properties()
+                .location(),
+            Location::InMem
+        );
+
+        sstable_store.block_cache().memory().clear();
+
+        let mut local_objects = local_store.list("", None, None).await.unwrap();
+        let local_path = local_objects.next().await.unwrap().unwrap().key;
+        if corrupt {
+            local_store
+                .upload(&local_path, Bytes::from(vec![0; remote_size as usize]))
+                .await
+                .unwrap();
+        } else {
+            local_store.delete(&local_path).await.unwrap();
+        }
+        let mut stream = sstable_store
+            .prefetch_blocks(&sst, 0, sst.block_count(), CachePolicy::NotFill, &mut stats)
+            .await
+            .unwrap();
+        assert!(matches!(stream.take_block(0), PrefetchLookup::Hit(_)));
+        assert!(pin_cache.get(info.object_id).is_none());
+        assert!(stats.pin_cache_data_block_total > 0);
+        assert_eq!(stats.pin_cache_data_block_hit, 0);
     }
 
     #[tokio::test]
