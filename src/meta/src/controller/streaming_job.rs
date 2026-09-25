@@ -73,8 +73,8 @@ use risingwave_sqlparser::parser::{Parser, ParserError};
 use sea_orm::ActiveValue::Set;
 use sea_orm::sea_query::{Expr, Query, SimpleExpr};
 use sea_orm::{
-    ActiveModelTrait, ColumnTrait, DatabaseTransaction, EntityTrait, IntoActiveModel, JoinType,
-    NotSet, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, TransactionTrait,
+    ActiveModelTrait, ColumnTrait, Condition, DatabaseTransaction, EntityTrait, IntoActiveModel,
+    JoinType, NotSet, PaginatorTrait, QueryFilter, QuerySelect, RelationTrait, TransactionTrait,
 };
 use thiserror_ext::AsReport;
 
@@ -88,10 +88,10 @@ use crate::controller::fragment::FragmentTypeMaskExt;
 use crate::controller::utils::{
     PartialObject, build_object_group_for_delete, check_if_belongs_to_iceberg_table,
     check_relation_name_duplicate, check_sink_into_table_cycle, ensure_job_not_canceled,
-    ensure_object_id, ensure_user_id, fetch_target_fragments, get_belong_objects,
-    get_belong_objects_by_ids, get_table_columns, grant_default_privileges_automatically,
-    insert_fragment_relations, list_object_dependencies_by_object_id, list_user_info_by_ids,
-    upsert_user_privileges,
+    ensure_object_id, ensure_user_id, fetch_target_fragments, format_with_option_secret_resolved,
+    get_belong_objects, get_belong_objects_by_ids, get_referring_objects, get_table_columns,
+    grant_default_privileges_automatically, insert_fragment_relations,
+    list_object_dependencies_by_object_id, list_user_info_by_ids, upsert_user_privileges,
 };
 use crate::error::MetaErrorInner;
 use crate::manager::{NotificationVersion, StreamingJob, StreamingJobType};
@@ -124,6 +124,19 @@ pub struct CancelStreamingJobInfo {
     pub streaming_job_ids: Vec<JobId>,
     /// State tables to unregister after the barrier is collected.
     pub state_table_ids: Vec<TableId>,
+}
+
+#[derive(Debug)]
+pub struct IndependentJobChangeLogInfo {
+    pub job_id: JobId,
+    pub state_table_ids: HashSet<TableId>,
+    pub upstream_table_snapshot_epochs: HashMap<TableId, Option<u64>>,
+}
+
+#[derive(Debug)]
+pub struct TableChangeLogTruncateInfo {
+    pub subscription_retention_seconds: HashMap<TableId, u64>,
+    pub independent_jobs: Vec<IndependentJobChangeLogInfo>,
 }
 
 fn serverless_backfill_resource_group_placeholder(job_id: JobId) -> String {
@@ -226,6 +239,118 @@ fn update_sink_node_rate_limit(node: &mut PbNodeBody, rate_limit: Option<u32>) -
 }
 
 impl CatalogController {
+    pub async fn get_table_change_log_truncate_info(
+        &self,
+    ) -> MetaResult<TableChangeLogTruncateInfo> {
+        let inner = self.inner.read().await;
+
+        let subscriptions: Vec<(TableId, i64)> = Subscription::find()
+            .select_only()
+            .columns([
+                subscription::Column::DependentTableId,
+                subscription::Column::RetentionSeconds,
+            ])
+            .into_tuple()
+            .all(&inner.db)
+            .await?;
+        let mut subscription_retention_seconds = HashMap::new();
+        for (table_id, retention_seconds) in subscriptions {
+            let retention_seconds = u64::try_from(retention_seconds).map_err(|_| {
+                anyhow!(
+                    "subscription on table {} has invalid retention seconds {}",
+                    table_id,
+                    retention_seconds
+                )
+            })?;
+            subscription_retention_seconds
+                .entry(table_id)
+                .and_modify(|retention: &mut u64| *retention = (*retention).max(retention_seconds))
+                .or_insert(retention_seconds);
+        }
+
+        let jobs: Vec<JobId> = StreamingJobModel::find()
+            .select_only()
+            .column(streaming_job::Column::JobId)
+            .filter(
+                Condition::any()
+                    .add(streaming_job::Column::JobStatus.eq(JobStatus::Creating))
+                    .add(streaming_job::Column::RefreshIntervalSec.is_not_null()),
+            )
+            .into_tuple::<JobId>()
+            .all(&inner.db)
+            .await?;
+        let mut job_info: HashMap<_, _> = jobs
+            .into_iter()
+            .map(|job_id| {
+                (
+                    job_id,
+                    IndependentJobChangeLogInfo {
+                        job_id,
+                        state_table_ids: HashSet::new(),
+                        upstream_table_snapshot_epochs: HashMap::new(),
+                    },
+                )
+            })
+            .collect();
+        if !job_info.is_empty() {
+            let fragments = Fragment::find()
+                .filter(fragment::Column::JobId.is_in(job_info.keys().copied()))
+                .all(&inner.db)
+                .await?;
+            for fragment in fragments {
+                let info = job_info
+                    .get_mut(&fragment.job_id)
+                    .expect("job should exist");
+                info.state_table_ids
+                    .extend(fragment.state_table_ids.inner_ref().iter().copied());
+                let mut collection_error = None;
+                visit_stream_node_stream_scan(&fragment.stream_node.to_protobuf(), |stream_scan| {
+                    let scan_type = match StreamScanType::try_from(stream_scan.stream_scan_type) {
+                        Ok(scan_type) => scan_type,
+                        Err(err) => {
+                            collection_error = Some(anyhow::Error::new(err).context(format!(
+                                "invalid persisted stream scan type {} in job {} fragment {}",
+                                stream_scan.stream_scan_type, fragment.job_id, fragment.fragment_id
+                            )));
+                            return;
+                        }
+                    };
+                    if scan_type != StreamScanType::SnapshotBackfill {
+                        return;
+                    }
+                    match info
+                        .upstream_table_snapshot_epochs
+                        .entry(stream_scan.table_id)
+                    {
+                        std::collections::hash_map::Entry::Occupied(entry) => {
+                            if entry.get() != &stream_scan.snapshot_backfill_epoch {
+                                collection_error = Some(anyhow!(
+                                    "job {} has inconsistent snapshot epochs for upstream table {}",
+                                    fragment.job_id,
+                                    stream_scan.table_id
+                                ));
+                            }
+                        }
+                        std::collections::hash_map::Entry::Vacant(entry) => {
+                            entry.insert(stream_scan.snapshot_backfill_epoch);
+                        }
+                    }
+                });
+                if let Some(err) = collection_error {
+                    return Err(err.into());
+                }
+            }
+        }
+        let independent_jobs = job_info
+            .into_values()
+            .filter(|info| !info.upstream_table_snapshot_epochs.is_empty())
+            .collect();
+        Ok(TableChangeLogTruncateInfo {
+            subscription_retention_seconds,
+            independent_jobs,
+        })
+    }
+
     pub async fn get_pinned_snapshot_epochs(&self) -> MetaResult<HashMap<TableId, HashSet<u64>>> {
         // Hold the catalog read lock across both queries so a job cannot transition out of
         // `Creating` while its fragments are being inspected.
@@ -1435,21 +1560,21 @@ impl CatalogController {
         // 1. check version.
         streaming_job.verify_version_for_replace(&txn).await?;
         // 2. check concurrent replace.
-        let referring_cnt = ObjectDependency::find()
-            .join(
-                JoinType::InnerJoin,
-                object_dependency::Relation::Object1.def(),
-            )
-            .join(JoinType::InnerJoin, object::Relation::StreamingJob.def())
+        let referring_objects =
+            get_referring_objects(id.as_object_id(), streaming_job.object_type(), &txn).await?;
+        let referring_job_ids = referring_objects
+            .iter()
+            .map(|object| object.oid.as_job_id())
+            .collect_vec();
+        let non_created_referring_job_count = StreamingJobModel::find()
             .filter(
-                object_dependency::Column::Oid
-                    .eq(id)
-                    .and(object::Column::ObjType.eq(ObjectType::Table))
+                streaming_job::Column::JobId
+                    .is_in(referring_job_ids)
                     .and(streaming_job::Column::JobStatus.ne(JobStatus::Created)),
             )
             .count(&txn)
             .await?;
-        if referring_cnt != 0 {
+        if non_created_referring_job_count != 0 {
             return Err(MetaError::permission_denied(
                 "job is being altered or referenced by some creating jobs",
             ));
@@ -2380,7 +2505,6 @@ impl CatalogController {
                 MetaError::catalog_id_not_found(ObjectType::Source.as_str(), source_id)
             })?;
 
-        let is_fs_source = source.with_properties.inner_ref().is_new_fs_connector();
         let streaming_job_ids: Vec<JobId> =
             if let Some(table_id) = source.optional_associated_table_id {
                 vec![table_id.as_job_id()]
@@ -2441,21 +2565,19 @@ impl CatalogController {
                     }
                 });
             }
-            if is_fs_source {
-                // in older versions, there's no fragment type flag for `FsFetch` node,
-                // so we just scan all fragments for StreamFsFetch node if using fs connector
-                visit_stream_node_mut(stream_node, |node| {
-                    if let PbNodeBody::StreamFsFetch(node) = node {
-                        fragment_type_mask.add(FragmentTypeFlag::FsFetch);
-                        if let Some(node_inner) = &mut node.node_inner
-                            && node_inner.source_id == source_id
-                        {
-                            node_inner.rate_limit = rate_limit;
-                            found = true;
-                        }
+            // Fragments from older versions carry no `FsFetch` flag, so scan every fragment
+            // for the node and backfill the flag.
+            visit_stream_node_mut(stream_node, |node| {
+                if let PbNodeBody::StreamFsFetch(node) = node {
+                    fragment_type_mask.add(FragmentTypeFlag::FsFetch);
+                    if let Some(node_inner) = &mut node.node_inner
+                        && node_inner.source_id == source_id
+                    {
+                        node_inner.rate_limit = rate_limit;
+                        found = true;
                     }
-                });
-            }
+                }
+            });
             found
         });
 
@@ -2658,6 +2780,10 @@ impl CatalogController {
                             node.rate_limit = rate_limit;
                             found = true;
                         }
+                        PbNodeBody::LocalityProvider(node) => {
+                            node.rate_limit = rate_limit;
+                            found = true;
+                        }
                         _ => {}
                     });
                 }
@@ -2745,6 +2871,8 @@ impl CatalogController {
             .ok_or_else(|| {
                 MetaError::catalog_id_not_found(ObjectType::Source.as_str(), source_id)
             })?;
+        ensure_source_props_not_set_by_connection(&txn, &source, &alter_props, &alter_secret_refs)
+            .await?;
         let connector = source.with_properties.0.get_connector().unwrap();
         let is_shared_source = source.is_shared();
 
@@ -2789,6 +2917,8 @@ impl CatalogController {
                 .map(|secret_ref| secret_ref.to_protobuf())
                 .unwrap_or_default(),
         );
+        let altered_options_with_secret =
+            WithOptionsSecResolved::new(alter_props.clone(), alter_secret_refs.clone());
         let (to_add_secret_dep, to_remove_secret_dep) =
             options_with_secret.handle_update(alter_props, alter_secret_refs)?;
 
@@ -2819,50 +2949,18 @@ impl CatalogController {
                 .try_into()
                 .unwrap();
 
-            /// Formats SQL options with secret values properly resolved
-            ///
-            /// This function processes configuration options that may contain sensitive data:
-            /// - Plaintext options are directly converted to `SqlOption`
-            /// - Secret options are retrieved from the database and formatted as "SECRET {name}"
-            ///   without exposing the actual secret value
-            ///
-            /// # Arguments
-            /// * `txn` - Database transaction for retrieving secrets
-            /// * `options_with_secret` - Container of options with both plaintext and secret values
-            ///
-            /// # Returns
-            /// * `MetaResult<Vec<SqlOption>>` - List of formatted SQL options or error
-            async fn format_with_option_secret_resolved(
-                txn: &DatabaseTransaction,
-                options_with_secret: &WithOptionsSecResolved,
-            ) -> MetaResult<Vec<SqlOption>> {
-                let mut options = Vec::new();
-                for (k, v) in options_with_secret.as_plaintext() {
-                    let sql_option = SqlOption::try_from((k, &format!("'{}'", v)))
-                        .map_err(|e| MetaError::invalid_parameter(e.to_report_string()))?;
-                    options.push(sql_option);
-                }
-                for (k, v) in options_with_secret.as_secret() {
-                    if let Some(secret_model) = Secret::find_by_id(v.secret_id).one(txn).await? {
-                        let sql_option =
-                            SqlOption::try_from((k, &format!("SECRET {}", secret_model.name)))
-                                .map_err(|e| MetaError::invalid_parameter(e.to_report_string()))?;
-                        options.push(sql_option);
-                    } else {
-                        return Err(MetaError::catalog_id_not_found("secret", v.secret_id));
-                    }
-                }
-                Ok(options)
-            }
-
             match &mut stmt {
                 Statement::CreateSource { stmt } => {
-                    stmt.with_properties.0 =
-                        format_with_option_secret_resolved(&txn, &options_with_secret).await?;
+                    let altered_sql_options =
+                        format_with_option_secret_resolved(&txn, &altered_options_with_secret)
+                            .await?;
+                    merge_with_options(&mut stmt.with_properties.0, altered_sql_options);
                 }
                 Statement::CreateTable { with_options, .. } => {
-                    *with_options =
-                        format_with_option_secret_resolved(&txn, &options_with_secret).await?;
+                    let altered_sql_options =
+                        format_with_option_secret_resolved(&txn, &altered_options_with_secret)
+                            .await?;
+                    merge_with_options(with_options, altered_sql_options);
                     associate_table_id = source.optional_associated_table_id;
                     preferred_id = associate_table_id.unwrap().as_object_id();
                 }
@@ -3507,7 +3605,10 @@ impl CatalogController {
                             {
                                 let mut new_sink_props = sink.properties.0.clone();
                                 new_sink_props.extend(alter_props.clone());
-                                SinkType::validate_alter_config(&new_sink_props)
+                                SinkType::validate_alter_config_change(
+                                    &new_sink_props,
+                                    &alter_props,
+                                )
                             },
                             |sink: &str| Err(SinkError::Config(anyhow!(
                                 "unsupported sink type {}",
@@ -3687,6 +3788,10 @@ impl CatalogController {
                                 node.rate_limit = rate_limit;
                                 found = Ok(true);
                             }
+                            PbNodeBody::LocalityProvider(node) => {
+                                node.rate_limit = rate_limit;
+                                found = Ok(true);
+                            }
                             _ => {}
                         });
                     }
@@ -3785,6 +3890,10 @@ impl CatalogController {
                         rate_limit = node.rate_limit;
                         node_name = Some("STREAM_CDC_SCAN");
                     }
+                    PbNodeBody::LocalityProvider(node) => {
+                        rate_limit = node.rate_limit;
+                        node_name = Some("LOCALITY_PROVIDER");
+                    }
                     PbNodeBody::Sink(node) => {
                         rate_limit = node.rate_limit;
                         node_name = Some("SINK");
@@ -3827,7 +3936,7 @@ fn validate_sink_props(sink: &sink::Model, props: &BTreeMap<String, String>) -> 
                 {
                     let mut new_props = sink.properties.0.clone();
                     new_props.extend(props.clone());
-                    SinkType::validate_alter_config(&new_props)
+                    SinkType::validate_alter_config_change(&new_props, props)
                 },
                 |sink: &str| Err(SinkError::Config(anyhow!("unsupported sink type {}", sink)))
             )?
@@ -3860,6 +3969,54 @@ fn update_stmt_with_props(
             .map(|sql_option| (&sql_option.name, sql_option)),
     );
     *with_properties = new_sql_options.into_values().cloned().collect();
+    Ok(())
+}
+
+fn merge_with_options(with_properties: &mut Vec<SqlOption>, altered_options: Vec<SqlOption>) {
+    for altered_option in altered_options {
+        if let Some(existing_option) = with_properties
+            .iter_mut()
+            .find(|option| option.name.real_value() == altered_option.name.real_value())
+        {
+            *existing_option = altered_option;
+        } else {
+            with_properties.push(altered_option);
+        }
+    }
+}
+
+async fn ensure_source_props_not_set_by_connection(
+    txn: &DatabaseTransaction,
+    source: &source::Model,
+    alter_props: &BTreeMap<String, String>,
+    alter_secret_refs: &BTreeMap<String, PbSecretRef>,
+) -> MetaResult<()> {
+    let Some(connection_id) = source.connection_id else {
+        return Ok(());
+    };
+
+    let connection = Connection::find_by_id(connection_id)
+        .one(txn)
+        .await?
+        .ok_or_else(|| {
+            MetaError::catalog_id_not_found(ObjectType::Connection.as_str(), connection_id)
+        })?;
+    let connection_params = connection.params.to_protobuf();
+
+    if let Some(key) = alter_props
+        .keys()
+        .chain(alter_secret_refs.keys())
+        .find(|key| {
+            connection_params.properties.contains_key(*key)
+                || connection_params.secret_refs.contains_key(*key)
+        })
+    {
+        return Err(MetaError::invalid_parameter(format!(
+            "Cannot alter source connector property `{key}` because it is set by CONNECTION `{}`. Use ALTER CONNECTION instead.",
+            connection.name
+        )));
+    }
+
     Ok(())
 }
 
@@ -3983,4 +4140,38 @@ where
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_sqlparser::ast::{SqlOption, Statement};
+
+    use super::{Parser, merge_with_options};
+
+    #[test]
+    fn test_merge_with_options_normalizes_altered_option_name() {
+        let mut statements = Parser::parse_sql(
+            "CREATE SOURCE s WITH (properties.receive.message.max.bytes = 'old', \
+             connection = kafka_conn) FORMAT PLAIN ENCODE JSON",
+        )
+        .unwrap();
+        let Statement::CreateSource { stmt } = statements.remove(0) else {
+            unreachable!()
+        };
+        let mut with_properties = stmt.with_properties.0;
+        let altered_name = "properties.receive.message.max.bytes".to_owned();
+        let altered_value = "new".to_owned();
+
+        merge_with_options(
+            &mut with_properties,
+            vec![SqlOption::try_from((&altered_name, &altered_value)).unwrap()],
+        );
+
+        assert_eq!(with_properties.len(), 2);
+        assert_eq!(
+            with_properties[0].to_string(),
+            "properties.receive.\"message\".\"max\".bytes = 'new'"
+        );
+        assert_eq!(with_properties[1].to_string(), "connection = kafka_conn");
+    }
 }

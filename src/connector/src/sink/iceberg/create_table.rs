@@ -18,6 +18,9 @@ use std::sync::LazyLock;
 
 use anyhow::{Context, anyhow};
 use iceberg::arrow::schema_to_arrow_schema;
+use iceberg::metadata_columns::{
+    RESERVED_COL_NAME_LAST_UPDATED_SEQUENCE_NUMBER, RESERVED_COL_NAME_ROW_ID,
+};
 use iceberg::spec::{
     FormatVersion, NullOrder, SortDirection, SortField, SortOrder, TableProperties, Transform,
     UnboundPartitionField, UnboundPartitionSpec,
@@ -32,7 +35,7 @@ use risingwave_common::array::arrow::arrow_schema_iceberg::{
 };
 use risingwave_common::array::arrow::{IcebergArrowConvert, IcebergCreateTableArrowConvert};
 use risingwave_common::bail;
-use risingwave_common::catalog::Schema;
+use risingwave_common::catalog::{ColumnDesc, Schema};
 use risingwave_common::util::iter_util::ZipEqFast;
 use url::Url;
 
@@ -93,6 +96,32 @@ pub async fn create_and_validate_table_impl(
     Ok(table)
 }
 
+/// Iceberg V3 stores row lineage in data files as the reserved `_row_id` and
+/// `_last_updated_sequence_number` columns. A table column with either name is ambiguous with the
+/// lineage metadata column, so reject it when creating a V3 table.
+pub fn validate_row_lineage_column_names(
+    format_version: FormatVersion,
+    columns: &[ColumnDesc],
+) -> Result<()> {
+    if format_version < FormatVersion::V3 {
+        return Ok(());
+    }
+    if let Some(column) = columns.iter().find(|column| {
+        [
+            RESERVED_COL_NAME_ROW_ID,
+            RESERVED_COL_NAME_LAST_UPDATED_SEQUENCE_NUMBER,
+        ]
+        .contains(&column.name.as_str())
+    }) {
+        return Err(SinkError::Config(anyhow!(
+            "cannot create an Iceberg V3 table with column `{}` because the name is reserved \
+             for row lineage metadata; please rename the column",
+            column.name
+        )));
+    }
+    Ok(())
+}
+
 /// Returns `true` if this call created the table, `false` if it already existed.
 pub(super) async fn create_table_if_not_exists_impl(
     config: &IcebergConfig,
@@ -113,6 +142,19 @@ pub(super) async fn create_table_if_not_exists_impl(
     {
         return Ok(false);
     }
+
+    if config.table_format_version() < FormatVersion::V3
+        && let Some(column) = param
+            .columns
+            .iter()
+            .find(|column| column.data_type.contains_variant())
+    {
+        return Err(SinkError::Config(anyhow!(
+            "creating an Iceberg table with VARIANT column `{}` requires `format_version = '3'`",
+            column.name
+        )));
+    }
+    validate_row_lineage_column_names(config.table_format_version(), &param.columns)?;
 
     let iceberg_create_table_arrow_convert = IcebergCreateTableArrowConvert::default();
     // convert risingwave schema -> arrow schema -> iceberg schema
@@ -164,6 +206,15 @@ pub(super) async fn create_table_if_not_exists_impl(
             None => None,
         }
     };
+
+    let location = default_table_location_from_namespace(
+        catalog.as_ref(),
+        &namespace,
+        &table_name,
+        location,
+        config.default_table_location_from_namespace,
+    )
+    .await?;
 
     let partition_spec = match &config.partition_by {
         Some(partition_by) => {
@@ -258,6 +309,29 @@ pub(super) async fn create_table_if_not_exists_impl(
     Ok(true)
 }
 
+async fn default_table_location_from_namespace(
+    catalog: &dyn Catalog,
+    namespace: &NamespaceIdent,
+    table_name: &str,
+    location: Option<String>,
+    enabled: bool,
+) -> Result<Option<String>> {
+    if location.is_some() || !enabled {
+        return Ok(location);
+    }
+
+    let namespace = catalog
+        .get_namespace(namespace)
+        .await
+        .map_err(|e| SinkError::Iceberg(anyhow!(e)))
+        .context("failed to load iceberg namespace for default table location")?;
+    Ok(namespace
+        .properties()
+        .get("location")
+        .filter(|location| !location.is_empty())
+        .map(|location| format!("{}/{table_name}", location.trim_end_matches('/'))))
+}
+
 async fn create_namespace_if_not_exists(
     catalog: &dyn Catalog,
     namespace: &NamespaceIdent,
@@ -289,43 +363,69 @@ async fn create_namespace_if_not_exists(
 const MAP_KEY: &str = "key";
 const MAP_VALUE: &str = "value";
 
-fn get_fields<'a>(
-    our_field_type: &'a risingwave_common::types::DataType,
-    data_type: &ArrowDataType,
-    schema_fields: &mut HashMap<&'a str, &'a risingwave_common::types::DataType>,
-) -> Option<ArrowFields> {
-    match data_type {
-        ArrowDataType::Struct(fields) => {
-            match our_field_type {
-                risingwave_common::types::DataType::Struct(struct_fields) => {
-                    struct_fields.iter().for_each(|(name, data_type)| {
-                        let res = schema_fields.insert(name, data_type);
-                        // This assert is to make sure there is no duplicate field name in the schema.
-                        assert!(res.is_none())
-                    });
-                }
-                risingwave_common::types::DataType::Map(map_fields) => {
-                    schema_fields.insert(MAP_KEY, map_fields.key());
-                    schema_fields.insert(MAP_VALUE, map_fields.value());
-                }
-                risingwave_common::types::DataType::List(list) => {
-                    list.elem()
-                        .as_struct()
-                        .iter()
-                        .for_each(|(name, data_type)| {
-                            let res = schema_fields.insert(name, data_type);
-                            // This assert is to make sure there is no duplicate field name in the schema.
-                            assert!(res.is_none())
-                        });
-                }
-                _ => {}
+fn field_is_compatible(
+    rw_type: &risingwave_common::types::DataType,
+    arrow_field: &ArrowField,
+) -> anyhow::Result<bool> {
+    use risingwave_common::types::DataType as RwDataType;
+
+    // A Variant is physically an Arrow struct, but its extension metadata makes it a leaf
+    // Iceberg type. The binding is exclusive in both directions: a plain struct mimicking
+    // the physical layout must not be written into a VARIANT column.
+    let arrow_is_variant = matches!(
+        IcebergArrowConvert.type_from_field(arrow_field),
+        Ok(RwDataType::Variant)
+    );
+    if matches!(rw_type, RwDataType::Variant) || arrow_is_variant {
+        return Ok(matches!(rw_type, RwDataType::Variant) && arrow_is_variant);
+    }
+
+    let converted_arrow_data_type = IcebergArrowConvert
+        .to_arrow_field("", rw_type)
+        .map_err(|e| anyhow!(e))?
+        .data_type()
+        .clone();
+
+    match (rw_type, &converted_arrow_data_type, arrow_field.data_type()) {
+        (_, ArrowDataType::Decimal128(_, _), ArrowDataType::Decimal128(_, _)) => Ok(true),
+        (_, ArrowDataType::Binary, ArrowDataType::LargeBinary)
+        | (_, ArrowDataType::LargeBinary, ArrowDataType::Binary) => Ok(true),
+        (RwDataType::List(list), ArrowDataType::List(_), ArrowDataType::List(element)) => {
+            field_is_compatible(list.elem(), element)
+        }
+        (RwDataType::Map(map), ArrowDataType::Map(_, _), ArrowDataType::Map(entries, _)) => {
+            let ArrowDataType::Struct(fields) = entries.data_type() else {
+                return Ok(false);
             };
-            Some(fields.clone())
+            let key = fields.iter().find(|field| field.name() == MAP_KEY);
+            let value = fields.iter().find(|field| field.name() == MAP_VALUE);
+            match (key, value) {
+                (Some(key), Some(value)) => Ok(field_is_compatible(map.key(), key)?
+                    && field_is_compatible(map.value(), value)?),
+                _ => Ok(false),
+            }
         }
-        ArrowDataType::List(field) | ArrowDataType::Map(field, _) => {
-            get_fields(our_field_type, field.data_type(), schema_fields)
+        (
+            RwDataType::Struct(rw_fields),
+            ArrowDataType::Struct(_),
+            ArrowDataType::Struct(arrow_fields),
+        ) => {
+            if rw_fields.len() != arrow_fields.len() {
+                return Ok(false);
+            }
+            // `struct_to_arrow` writes struct children by position, so nested fields
+            // must match by position as well, like the top-level column-order check.
+            for ((rw_name, rw_type), arrow_field) in rw_fields.iter().zip_eq_fast(arrow_fields) {
+                if rw_name != arrow_field.name().as_str() {
+                    return Ok(false);
+                }
+                if !field_is_compatible(rw_type, arrow_field)? {
+                    return Ok(false);
+                }
+            }
+            Ok(true)
         }
-        _ => None, // not a supported complex type and unlikely to show up
+        (_, left, right) => Ok(left.equals_datatype(right)),
     }
 }
 
@@ -338,46 +438,12 @@ fn check_compatibility(
             .get(arrow_field.name().as_str())
             .ok_or_else(|| anyhow!("Field {} not found in our schema", arrow_field.name()))?;
 
-        // Iceberg source should be able to read iceberg decimal type.
-        let converted_arrow_data_type = IcebergArrowConvert
-            .to_arrow_field("", our_field_type)
-            .map_err(|e| anyhow!(e))?
-            .data_type()
-            .clone();
-
-        let compatible = match (&converted_arrow_data_type, arrow_field.data_type()) {
-            (ArrowDataType::Decimal128(_, _), ArrowDataType::Decimal128(_, _)) => true,
-            (ArrowDataType::Binary, ArrowDataType::LargeBinary) => true,
-            (ArrowDataType::LargeBinary, ArrowDataType::Binary) => true,
-            (ArrowDataType::List(_), ArrowDataType::List(field))
-            | (ArrowDataType::Map(_, _), ArrowDataType::Map(field, _)) => {
-                let mut schema_fields = HashMap::new();
-                get_fields(our_field_type, field.data_type(), &mut schema_fields)
-                    .is_none_or(|fields| check_compatibility(schema_fields, &fields).unwrap())
-            }
-            // validate nested structs
-            (ArrowDataType::Struct(_), ArrowDataType::Struct(fields)) => {
-                let mut schema_fields = HashMap::new();
-                our_field_type
-                    .as_struct()
-                    .iter()
-                    .for_each(|(name, data_type)| {
-                        let res = schema_fields.insert(name, data_type);
-                        // This assert is to make sure there is no duplicate field name in the schema.
-                        assert!(res.is_none())
-                    });
-                check_compatibility(schema_fields, fields)?
-            }
-            // cases where left != right (metadata, field name mismatch)
-            //
-            // all nested types: in iceberg `field_id` will always be present, but RW doesn't have it:
-            // {"PARQUET:field_id": ".."}
-            //
-            // map: The standard name in arrow is "entries", "key", "value".
-            // in iceberg-rs, it's called "key_value"
-            (left, right) => left.equals_datatype(right),
-        };
-        if !compatible {
+        if !field_is_compatible(our_field_type, arrow_field)? {
+            let converted_arrow_data_type = IcebergArrowConvert
+                .to_arrow_field("", our_field_type)
+                .map_err(|e| anyhow!(e))?
+                .data_type()
+                .clone();
             bail!(
                 "field {}'s type is incompatible\nRisingWave converted data type: {}\niceberg's data type: {}",
                 arrow_field.name(),

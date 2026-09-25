@@ -40,7 +40,7 @@ use crate::sink::sqlserver::SqlServerClient;
 use crate::source::cdc::external::mysql::build_mysql_connection_pool;
 use crate::source::cdc::split::{extract_binlog_file_seq, parse_sql_server_lsn_str};
 use crate::source::cdc::{
-    CdcProperties, CdcSourceTypeTrait, Citus, DebeziumCdcSplit, Mongodb, Mysql, Postgres,
+    CdcProperties, CdcSourceTypeTrait, Citus, DebeziumCdcSplit, Mongodb, Mysql, Oracle, Postgres,
     SqlServer, table_schema_exclude_additional_columns,
 };
 use crate::source::monitor::metrics::EnumeratorMetrics;
@@ -244,7 +244,8 @@ impl<T: CdcSourceTypeTrait> DebeziumSplitEnumerator<T> {
             .ok_or_else(|| anyhow::anyhow!("missing `slot.name` in CDC properties"))?;
 
         // No TCP keepalive for CDC enumerator
-        let client = create_pg_client(&pg_conn, None)
+        let application_name = format!("risingwave-postgres-source-enumerator-{}", self.source_id);
+        let client = create_pg_client(&pg_conn, None, Some(&application_name))
             .await
             .context("failed to create the PostgreSQL client")?;
 
@@ -433,7 +434,11 @@ impl DebeziumSplitEnumerator<Mysql> {
         if let Some((oldest_file, oldest_size)) = binlog_files.first()
             && let Some(seq) = extract_binlog_file_seq(oldest_file)
         {
-            let labels = vec![hostname.to_owned(), port.to_owned()];
+            let labels = vec![
+                self.source_id.to_string(),
+                hostname.to_owned(),
+                port.to_owned(),
+            ];
             get_or_create_guarded_int_gauge(
                 &mut self.mysql_cdc_binlog_file_seq_min,
                 &self.metrics.mysql_cdc_binlog_file_seq_min,
@@ -453,7 +458,11 @@ impl DebeziumSplitEnumerator<Mysql> {
         if let Some((newest_file, newest_size)) = binlog_files.last()
             && let Some(seq) = extract_binlog_file_seq(newest_file)
         {
-            let labels = vec![hostname.to_owned(), port.to_owned()];
+            let labels = vec![
+                self.source_id.to_string(),
+                hostname.to_owned(),
+                port.to_owned(),
+            ];
             get_or_create_guarded_int_gauge(
                 &mut self.mysql_cdc_binlog_file_seq_max,
                 &self.metrics.mysql_cdc_binlog_file_seq_max,
@@ -629,6 +638,18 @@ impl ListCdcSplits for DebeziumSplitEnumerator<Mongodb> {
 
 impl ListCdcSplits for DebeziumSplitEnumerator<SqlServer> {
     type CdcSourceType = SqlServer;
+
+    fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>> {
+        vec![DebeziumCdcSplit::<Self::CdcSourceType>::new(
+            self.source_id.as_raw_id(),
+            None,
+            None,
+        )]
+    }
+}
+
+impl ListCdcSplits for DebeziumSplitEnumerator<Oracle> {
+    type CdcSourceType = Oracle;
 
     fn list_cdc_splits(&mut self) -> Vec<DebeziumCdcSplit<Self::CdcSourceType>> {
         vec![DebeziumCdcSplit::<Self::CdcSourceType>::new(

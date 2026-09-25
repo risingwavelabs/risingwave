@@ -41,9 +41,12 @@ use tokio::task::JoinHandle;
 
 use crate::MetaOpts;
 use crate::backup_restore::BackupManagerRef;
+use crate::controller::streaming_job::TableChangeLogTruncateInfo;
 
 type PinnedSnapshotEpochsFetcher =
     Box<dyn Fn() -> BoxFuture<'static, Option<HashMap<TableId, HashSet<u64>>>> + Send>;
+type TableChangeLogTruncateInfoFetcher =
+    Box<dyn Fn() -> BoxFuture<'static, Option<TableChangeLogTruncateInfo>> + Send>;
 
 // Building and compressing a large checkpoint can spend a long time without yielding. Keep that
 // work off the main meta runtime so it cannot monopolize one of its worker threads.
@@ -61,6 +64,7 @@ pub fn start_hummock_workers(
     hummock_manager: HummockManagerRef,
     backup_manager: BackupManagerRef,
     meta_opts: &MetaOpts,
+    get_table_change_log_truncate_info: TableChangeLogTruncateInfoFetcher,
     get_pinned_snapshot_epochs: PinnedSnapshotEpochsFetcher,
 ) -> Vec<(JoinHandle<()>, Sender<()>)> {
     // These critical tasks are put in their own timer loop deliberately, to avoid long-running ones
@@ -76,6 +80,11 @@ pub fn start_hummock_workers(
             hummock_manager.clone(),
             Duration::from_secs(meta_opts.vacuum_interval_sec),
         ),
+        start_truncate_table_change_log_loop(
+            hummock_manager.clone(),
+            Duration::from_secs(meta_opts.table_change_log_truncate_interval_sec),
+            get_table_change_log_truncate_info,
+        ),
         start_vacuum_time_travel_metadata_loop(
             hummock_manager,
             Duration::from_secs(meta_opts.time_travel_vacuum_interval_sec),
@@ -83,6 +92,40 @@ pub fn start_hummock_workers(
         ),
     ];
     workers
+}
+
+pub fn start_truncate_table_change_log_loop(
+    hummock_manager: HummockManagerRef,
+    interval: Duration,
+    get_truncate_info: TableChangeLogTruncateInfoFetcher,
+) -> (JoinHandle<()>, Sender<()>) {
+    let (shutdown_tx, mut shutdown_rx) = tokio::sync::oneshot::channel();
+    let join_handle = tokio::spawn(async move {
+        let mut min_trigger_interval = tokio::time::interval(interval);
+        min_trigger_interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+        loop {
+            tokio::select! {
+                _ = min_trigger_interval.tick() => {},
+                _ = &mut shutdown_rx => {
+                    tracing::info!("Table change log truncate loop is stopped");
+                    return;
+                }
+            }
+            let Some(truncate_info) = get_truncate_info().await else {
+                tracing::warn!(
+                    "table change log truncation paused because retention metadata is unavailable"
+                );
+                continue;
+            };
+            if let Err(err) = hummock_manager
+                .truncate_table_change_log(truncate_info)
+                .await
+            {
+                tracing::warn!(error = %err.as_report(), "Table change log truncation error");
+            }
+        }
+    });
+    (join_handle, shutdown_tx)
 }
 
 /// Starts a task to periodically vacuum stale metadata.

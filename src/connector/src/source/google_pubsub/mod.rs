@@ -15,8 +15,16 @@
 use std::collections::HashMap;
 
 use anyhow::Context;
+use google_cloud_gax::conn::Environment;
+use google_cloud_pubsub::apiv1;
+use google_cloud_pubsub::client::google_cloud_auth::credentials::CredentialsFile;
+use google_cloud_pubsub::client::google_cloud_auth::project;
+use google_cloud_pubsub::client::google_cloud_auth::token::DefaultTokenSourceProvider;
 use google_cloud_pubsub::client::{Client, ClientConfig};
+use google_cloud_pubsub::subscriber::SubscriberConfig;
 use google_cloud_pubsub::subscription::Subscription;
+use risingwave_common::bail;
+use risingwave_common::util::env_var::env_var_is_true;
 use serde::Deserialize;
 
 pub mod enumerator;
@@ -30,11 +38,18 @@ pub use source::*;
 pub use split::*;
 use with_options::WithOptions;
 
+use crate::connector_common::{DISABLE_DEFAULT_CREDENTIAL, resolve_pubsub_project_id};
 use crate::enforce_secret::EnforceSecret;
 use crate::error::ConnectorResult;
 use crate::source::SourceProperties;
 
 pub const GOOGLE_PUBSUB_CONNECTOR: &str = "google_pubsub";
+
+const DEFAULT_ACK_DEADLINE_SECONDS: i32 = 60;
+// Pub/Sub messages are acknowledged only after a checkpoint. The upstream client default of 50
+// can therefore stall each reader between checkpoints and severely limit throughput.
+const DEFAULT_MAX_OUTSTANDING_MESSAGES: i64 = 1024;
+const DEFAULT_MAX_OUTSTANDING_BYTES: i64 = 1_000_000_000;
 
 /// # Implementation Notes
 /// Pub/Sub does not rely on persisted state (`SplitImpl`) to start from a position.
@@ -43,6 +58,11 @@ pub const GOOGLE_PUBSUB_CONNECTOR: &str = "google_pubsub";
 #[serde_as]
 #[derive(Clone, Debug, Deserialize, WithOptions)]
 pub struct PubsubProperties {
+    /// The Google Pub/Sub project ID. If omitted, the connector uses the project ID from
+    /// the credentials or Application Default Credentials.
+    #[serde(rename = "pubsub.project_id")]
+    pub project_id: Option<String>,
+
     /// Pub/Sub subscription to consume messages from.
     ///
     /// Note that we rely on Pub/Sub to load-balance messages between all Readers pulling from
@@ -58,7 +78,9 @@ pub struct PubsubProperties {
     #[serde(rename = "pubsub.emulator_host")]
     pub emulator_host: Option<String>,
 
-    /// `credentials` is a JSON string containing the service account credentials.
+    /// `credentials` is a JSON string containing the service account credentials. If omitted,
+    /// the connector uses Google Application Default Credentials (ADC) when allowed by the
+    /// deployment environment.
     /// See the [service-account credentials guide](https://developers.google.com/workspace/guides/create-credentials#create_credentials_for_a_service_account).
     /// The service account must have the `pubsub.subscriber` [role](https://cloud.google.com/pubsub/docs/access-control#roles).
     #[serde(rename = "pubsub.credentials")]
@@ -99,6 +121,22 @@ pub struct PubsubProperties {
     #[with_option(allow_alter_on_fly)]
     pub ack_deadline_seconds: Option<i32>,
 
+    /// The maximum number of unacknowledged messages delivered to each streaming pull reader.
+    /// Pub/Sub pauses delivery to a reader when this limit is reached. Must be greater than 0.
+    /// Defaults to 1024.
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[serde(rename = "pubsub.max_outstanding_messages")]
+    #[with_option(allow_alter_on_fly)]
+    pub max_outstanding_messages: Option<i64>,
+
+    /// The maximum total size of unacknowledged messages delivered to each streaming pull reader.
+    /// Pub/Sub pauses delivery to a reader when this limit is reached. Must be greater than 0.
+    /// Defaults to 1 GB.
+    #[serde_as(as = "Option<DisplayFromStr>")]
+    #[serde(rename = "pubsub.max_outstanding_bytes")]
+    #[with_option(allow_alter_on_fly)]
+    pub max_outstanding_bytes: Option<i64>,
+
     #[serde(flatten)]
     pub unknown_fields: HashMap<String, String>,
 }
@@ -124,26 +162,157 @@ impl crate::source::UnknownFields for PubsubProperties {
 }
 
 impl PubsubProperties {
+    pub(crate) fn subscriber_config(&self) -> ConnectorResult<SubscriberConfig> {
+        let stream_ack_deadline_seconds = self
+            .ack_deadline_seconds
+            .unwrap_or(DEFAULT_ACK_DEADLINE_SECONDS);
+        if !(10..=600).contains(&stream_ack_deadline_seconds) {
+            bail!("pubsub.ack_deadline_seconds must be between 10 and 600");
+        }
+
+        let max_outstanding_messages = self
+            .max_outstanding_messages
+            .unwrap_or(DEFAULT_MAX_OUTSTANDING_MESSAGES);
+        if max_outstanding_messages <= 0 {
+            bail!("pubsub.max_outstanding_messages must be greater than 0");
+        }
+
+        let max_outstanding_bytes = self
+            .max_outstanding_bytes
+            .unwrap_or(DEFAULT_MAX_OUTSTANDING_BYTES);
+        if max_outstanding_bytes <= 0 {
+            bail!("pubsub.max_outstanding_bytes must be greater than 0");
+        }
+
+        Ok(SubscriberConfig {
+            stream_ack_deadline_seconds,
+            max_outstanding_messages,
+            max_outstanding_bytes,
+            ..Default::default()
+        })
+    }
+
     pub(crate) async fn subscription_client(&self) -> ConnectorResult<Subscription> {
-        // initialize env
-        {
-            tracing::debug!("setting pubsub environment variables");
-            if let Some(emulator_host) = &self.emulator_host {
-                // safety: only read in the same thread below in with_auth
-                unsafe { std::env::set_var("PUBSUB_EMULATOR_HOST", emulator_host) };
+        let auth_config = project::Config::default()
+            .with_audience(apiv1::conn_pool::AUDIENCE)
+            .with_scopes(&apiv1::conn_pool::SCOPES);
+        let (environment, detected_project_id) = if let Some(credentials) = &self.credentials {
+            let credentials = CredentialsFile::new_from_str(credentials)
+                .await
+                .context("failed to parse Google Cloud Pub/Sub credentials")?;
+            let provider = DefaultTokenSourceProvider::new_with_credentials(
+                auth_config,
+                Box::new(credentials),
+            )
+            .await
+            .context("failed to initialize Google Cloud Pub/Sub token source")?;
+            let project_id = provider.project_id.clone();
+            (Environment::GoogleCloud(Box::new(provider)), project_id)
+        } else if let Some(emulator_host) = &self.emulator_host {
+            (Environment::Emulator(emulator_host.clone()), None)
+        } else {
+            if env_var_is_true(DISABLE_DEFAULT_CREDENTIAL) {
+                bail!(
+                    "Google Application Default Credentials are disabled; configure `pubsub.credentials` or `pubsub.emulator_host`"
+                );
             }
-            if let Some(credentials) = &self.credentials {
-                // safety: only read in the same thread below in with_auth
-                unsafe { std::env::set_var("GOOGLE_APPLICATION_CREDENTIALS_JSON", credentials) };
-            }
+
+            let provider = DefaultTokenSourceProvider::new(auth_config)
+                .await
+                .context(
+                    "failed to initialize Google Cloud Pub/Sub ADC; provide `pubsub.credentials`, configure ADC, or use `pubsub.emulator_host`",
+                )?;
+            let project_id = provider.project_id.clone();
+            (Environment::GoogleCloud(Box::new(provider)), project_id)
         };
 
-        // Validate config
-        let config = ClientConfig::default().with_auth().await?;
+        let project_id = resolve_pubsub_project_id(
+            self.project_id.as_deref(),
+            detected_project_id.as_deref(),
+            matches!(&environment, Environment::Emulator(_)),
+        )
+        .context(
+            "Google Cloud Pub/Sub project ID is unavailable; configure `pubsub.project_id` or provide credentials/ADC with a project ID",
+        )?;
+        let config = ClientConfig {
+            environment,
+            project_id: Some(project_id),
+            ..Default::default()
+        };
         let client = Client::new(config)
             .await
             .context("error initializing pubsub client")?;
 
         Ok(client.subscription(&self.subscription))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::*;
+
+    fn parse_pubsub_properties(extra: serde_json::Value) -> PubsubProperties {
+        let mut value = json!({
+            "pubsub.subscription": "projects/test/subscriptions/test",
+            "pubsub.emulator_host": "localhost:8900",
+        });
+        value
+            .as_object_mut()
+            .unwrap()
+            .extend(extra.as_object().unwrap().clone());
+        serde_json::from_value(value).unwrap()
+    }
+
+    #[test]
+    fn test_subscriber_config_defaults() {
+        let config = parse_pubsub_properties(json!({}))
+            .subscriber_config()
+            .unwrap();
+
+        assert_eq!(config.stream_ack_deadline_seconds, 60);
+        assert_eq!(config.max_outstanding_messages, 1024);
+        assert_eq!(config.max_outstanding_bytes, 1_000_000_000);
+    }
+
+    #[test]
+    fn test_subscriber_config_overrides() {
+        let config = parse_pubsub_properties(json!({
+            "pubsub.ack_deadline_seconds": "120",
+            "pubsub.max_outstanding_messages": "2048",
+            "pubsub.max_outstanding_bytes": "1048576",
+        }))
+        .subscriber_config()
+        .unwrap();
+
+        assert_eq!(config.stream_ack_deadline_seconds, 120);
+        assert_eq!(config.max_outstanding_messages, 2048);
+        assert_eq!(config.max_outstanding_bytes, 1_048_576);
+    }
+
+    #[test]
+    fn test_subscriber_config_validation() {
+        let invalid_values = [
+            (
+                json!({"pubsub.ack_deadline_seconds": "9"}),
+                "pubsub.ack_deadline_seconds must be between 10 and 600",
+            ),
+            (
+                json!({"pubsub.max_outstanding_messages": "0"}),
+                "pubsub.max_outstanding_messages must be greater than 0",
+            ),
+            (
+                json!({"pubsub.max_outstanding_bytes": "0"}),
+                "pubsub.max_outstanding_bytes must be greater than 0",
+            ),
+        ];
+
+        for (value, expected_error) in invalid_values {
+            let error = parse_pubsub_properties(value)
+                .subscriber_config()
+                .unwrap_err();
+            assert!(error.to_string().contains(expected_error));
+        }
     }
 }

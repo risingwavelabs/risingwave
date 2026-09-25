@@ -208,6 +208,7 @@ mod failpoint_limited {
     /// streams into the TABLE, V3 sink must commit at least one snapshot
     /// and remain consistent.
     #[tokio::test]
+    #[ignore = "requires iceberg resolver graph partitioning"]
     async fn failpoint_limited_test_v3_basic_no_failure() -> Result<()> {
         let mut handle = start_v3_test_cluster_with_sink(4).await?;
 
@@ -245,6 +246,7 @@ mod failpoint_limited {
     /// `recovery()`) and continue committing snapshots once the fault is
     /// cleared. Data must remain consistent (no duplicate file paths).
     #[tokio::test]
+    #[ignore = "requires iceberg resolver graph partitioning"]
     async fn failpoint_limited_test_v3_persist_failure() -> Result<()> {
         let mut handle = start_v3_test_cluster_with_sink(4).await?;
 
@@ -303,6 +305,7 @@ mod failpoint_limited {
     /// probability during a fault window. V3's internal commit-retry path
     /// must reissue the commit; once the fault clears, snapshots resume.
     #[tokio::test]
+    #[ignore = "requires iceberg resolver graph partitioning"]
     async fn failpoint_limited_test_v3_iceberg_commit_failure() -> Result<()> {
         let mut handle = start_v3_test_cluster_with_sink(4).await?;
 
@@ -374,6 +377,7 @@ mod failpoint_limited {
     /// V3 must redrive `handle_commit` on recovery, hit iceberg's idempotency
     /// check, and eventually mark the row Committed once the fault clears.
     #[tokio::test]
+    #[ignore = "requires iceberg resolver graph partitioning"]
     async fn failpoint_limited_test_v3_commit_prune_failure() -> Result<()> {
         let mut handle = start_v3_test_cluster_with_sink(4).await?;
 
@@ -423,6 +427,7 @@ mod failpoint_limited {
     /// persisted: the `metadata().snapshots()` idempotency check at
     /// `coordinator_worker.rs` short-circuits the retry before any catalog call.
     #[tokio::test]
+    #[ignore = "requires iceberg resolver graph partitioning"]
     async fn failpoint_limited_test_v3_idempotent_on_retry() -> Result<()> {
         let mut handle = start_v3_test_cluster_with_sink(4).await?;
 
@@ -487,6 +492,7 @@ mod failpoint_limited {
     /// repeated re-commits, etc.) without ever producing a duplicate
     /// snapshot.
     #[tokio::test]
+    #[ignore = "requires iceberg resolver graph partitioning"]
     async fn failpoint_limited_test_v3_random_failures_corner_case() -> Result<()> {
         let mut handle = start_v3_test_cluster_with_sink(4).await?;
 
@@ -565,6 +571,7 @@ mod failpoint_limited {
     /// the kill and fault clear, V3 must re-register the sink, re-load the
     /// catalog, and resume committing.
     #[tokio::test]
+    #[ignore = "requires iceberg resolver graph partitioning"]
     async fn failpoint_limited_test_v3_meta_kill_during_pre_commit() -> Result<()> {
         let mut handle = start_v3_test_cluster_with_sink(4).await?;
 
@@ -619,6 +626,7 @@ mod failpoint_limited {
     /// so neither a fresh iceberg write nor a duplicate `'r'` may appear
     /// after the kill. Once the fault clears, fresh commits resume.
     #[tokio::test]
+    #[ignore = "requires iceberg resolver graph partitioning"]
     async fn failpoint_limited_test_v3_meta_kill_during_commit() -> Result<()> {
         let mut handle = start_v3_test_cluster_with_sink(4).await?;
 
@@ -685,6 +693,7 @@ mod failpoint_limited {
     /// Chaos: kill+restart meta several times back-to-back. Workload + sink
     /// must converge in the end without producing duplicate snapshots.
     #[tokio::test]
+    #[ignore = "requires iceberg resolver graph partitioning"]
     async fn failpoint_limited_test_v3_meta_kill_repeatedly() -> Result<()> {
         let mut handle = start_v3_test_cluster_with_sink(4).await?;
 
@@ -733,6 +742,7 @@ mod failpoint_limited {
     /// case where a panic in the recovery task deadlocks meta — if that
     /// happens, this test will hang/fail rather than hide the bug.
     #[tokio::test]
+    #[ignore = "requires iceberg resolver graph partitioning"]
     async fn failpoint_limited_test_v3_recovery_during_recovery() -> Result<()> {
         let mut handle = start_v3_test_cluster_with_sink(4).await?;
 

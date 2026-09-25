@@ -30,31 +30,32 @@ use risingwave_pb::common::WorkerNode;
 use risingwave_pb::hummock::HummockVersionStats;
 use risingwave_pb::source::{ConnectorSplit, ConnectorSplits};
 use risingwave_pb::stream_plan::barrier_mutation::{Mutation, PbMutation};
-use risingwave_pb::stream_plan::update_mutation::PbDispatcherUpdate;
 use risingwave_pb::stream_plan::{
-    AddMutation, PbStartFragmentBackfillMutation, PbSubscriptionUpstreamInfo, PbUpdateMutation,
-    PbUpstreamSinkInfo,
+    AddMutation, PbDropSubscriptionsMutation, PbStartFragmentBackfillMutation,
+    PbSubscriptionUpstreamInfo, PbUpdateMutation, PbUpstreamSinkInfo,
 };
 use tracing::warn;
 
 use crate::barrier::cdc_progress::CdcTableBackfillTracker;
 use crate::barrier::checkpoint::{
     BatchRefreshJobCheckpointControl, BatchRefreshLogicalFragments, CreatingStreamingJobControl,
-    DatabaseCheckpointControl, IndependentCheckpointJobControl,
+    DatabaseCheckpointControl, IndependentCheckpointJob, IndependentCheckpointJobControl,
+    IndependentCheckpointJobStatus,
 };
 use crate::barrier::command::{
     CreateStreamingJobCommandInfo, PostCollectCommand, ReschedulePlan, ThrottleConfigMap,
 };
-use crate::barrier::context::CreateSnapshotBackfillJobCommandInfo;
-use crate::barrier::edge_builder::{EdgeBuilderFragmentInfo, FragmentEdgeBuilder};
+use crate::barrier::context::CreateIndependentStreamingJobCommandInfo;
+use crate::barrier::edge_builder::FragmentEdgeBuilder;
 use crate::barrier::info::{
     BarrierInfo, CreateStreamingJobStatus, InflightDatabaseInfo, InflightStreamingJobInfo,
     SubscriberType,
 };
-use crate::barrier::notifier::NotifierStarter;
 use crate::barrier::partial_graph::{PartialGraphBarrierInfo, PartialGraphManager};
 use crate::barrier::rpc::to_partial_graph_id;
-use crate::barrier::{BarrierKind, Command, CreateStreamingJobType, TracedEpoch};
+use crate::barrier::{
+    BarrierKind, Command, CreateStreamingJobType, IndependentStreamingJobType, TracedEpoch,
+};
 use crate::controller::fragment::{InflightActorInfo, InflightFragmentInfo};
 use crate::controller::scale::{
     ComponentFragmentAligner, EnsembleActorTemplate, LoadedFragment, NoShuffleEnsemble,
@@ -64,9 +65,10 @@ use crate::model::{
     ActorId, ActorNewNoShuffle, FragmentDownstreamRelation, FragmentId, StreamActor, StreamContext,
     StreamJobActorsToCreate, StreamJobFragmentsToCreate,
 };
+use crate::notification::NotifierStarter;
 use crate::stream::cdc::parallel_cdc_table_backfill_fragment;
 use crate::stream::{
-    GlobalActorIdGen, ReplaceJobSplitPlan, SourceManager, SplitAssignment,
+    GlobalActorIdGen, RefreshCycleActors, ReplaceJobSplitPlan, SourceManager, SplitAssignment,
     fill_snapshot_backfill_epoch,
 };
 use crate::{MetaError, MetaResult};
@@ -377,6 +379,28 @@ pub(super) fn render_actors(
     })
 }
 impl DatabaseCheckpointControl {
+    fn take_pending_independent_job_subscriptions_to_drop(
+        &mut self,
+    ) -> Vec<PbSubscriptionUpstreamInfo> {
+        take(&mut self.pending_independent_job_subscriptions_to_drop)
+            .into_iter()
+            .filter(|info| {
+                let upstream_job_id = info.upstream_mv_table_id.as_job_id();
+                if !self.database_info.contains_job(upstream_job_id) {
+                    // The upstream job and its materialize executors have already been removed, so
+                    // there is no subscriber left to unregister or notify.
+                    return false;
+                }
+                assert_matches!(
+                    self.database_info
+                        .unregister_subscriber(upstream_job_id, info.subscriber_id),
+                    Some(SubscriberType::SnapshotBackfill)
+                );
+                true
+            })
+            .collect()
+    }
+
     /// Collect table IDs to commit and actor IDs to collect from current fragment infos.
     fn collect_base_info(&self) -> (HashSet<TableId>, HashMap<WorkerId, HashSet<ActorId>>) {
         let table_ids_to_commit = self.database_info.existing_table_ids().collect();
@@ -490,9 +514,9 @@ impl DatabaseCheckpointControl {
             Some(Command::CreateStreamingJob {
                 mut info,
                 job_type:
-                    CreateStreamingJobType::SnapshotBackfill {
+                    CreateStreamingJobType::Independent {
                         mut snapshot_backfill_info,
-                        since_epoch,
+                        kind: IndependentStreamingJobType::SnapshotBackfill { since_epoch },
                     },
                 cross_db_snapshot_backfill_info,
             }) => {
@@ -561,19 +585,19 @@ impl DatabaseCheckpointControl {
                         .cloned()
                         .collect();
                     // Build edges first (needed for no-shuffle mapping used in split resolution)
-                    let mut edges = self.database_info.build_edge(
+                    let (mut edges, actor_new_no_shuffle) = self.database_info.build_edge(
                         Some((&info, true)),
                         None,
                         None,
                         partial_graph_manager.control_stream_manager(),
                         &actors.stream_actors,
                         &actors.actor_location,
-                    );
+                    )?;
                     // Phase 2: Resolve source-level DiscoveredSplits to actor-level SplitAssignment
                     let resolved_split_assignment = resolve_source_splits(
                         &info,
                         &actors,
-                        edges.actor_new_no_shuffle(),
+                        &actor_new_no_shuffle,
                         &self.database_info,
                     )?;
 
@@ -583,20 +607,24 @@ impl DatabaseCheckpointControl {
                         panic!("duplicated creating snapshot backfill job {job_id}");
                     };
 
+                    let term_id = self.term_id.as_str();
                     let job = CreatingStreamingJobControl::new(
                         entry,
-                        CreateSnapshotBackfillJobCommandInfo {
+                        CreateIndependentStreamingJobCommandInfo {
                             info: info.clone(),
                             snapshot_backfill_info: snapshot_backfill_info.clone(),
                             cross_db_snapshot_backfill_info,
                             resolved_split_assignment: resolved_split_assignment.clone(),
-                            refresh_interval_sec: None,
+                            kind: IndependentStreamingJobType::SnapshotBackfill {
+                                since_epoch: None,
+                            },
                         },
                         notifier.as_mut(),
                         snapshot_backfill_upstream_tables,
                         snapshot_epoch,
                         since_timestamp_upstream_log_epochs,
                         hummock_version_stats,
+                        term_id,
                         partial_graph_manager,
                         &mut edges,
                         &resolved_split_assignment,
@@ -621,20 +649,19 @@ impl DatabaseCheckpointControl {
                         );
                     }
 
+                    let create_job_type = CreateStreamingJobType::Independent {
+                        snapshot_backfill_info,
+                        kind: IndependentStreamingJobType::SnapshotBackfill { since_epoch },
+                    };
                     let mutation = Command::create_streaming_job_to_mutation(
                         &info,
-                        &CreateStreamingJobType::SnapshotBackfill {
-                            snapshot_backfill_info,
-                            since_epoch,
-                        },
+                        &create_job_type,
                         [],
                         self.state.is_paused(),
-                        &mut edges,
-                        partial_graph_manager.control_stream_manager(),
+                        edges,
                         None,
                         &resolved_split_assignment,
                         &actors.stream_actors,
-                        &actors.actor_location,
                     )?;
 
                     let (table_ids, node_actors) = self.collect_base_info();
@@ -649,7 +676,14 @@ impl DatabaseCheckpointControl {
             }
             Some(Command::CreateStreamingJob {
                 mut info,
-                job_type: CreateStreamingJobType::BatchRefresh(mut batch_refresh_info),
+                job_type:
+                    CreateStreamingJobType::Independent {
+                        mut snapshot_backfill_info,
+                        kind:
+                            IndependentStreamingJobType::BatchRefresh {
+                                refresh_interval_sec,
+                            },
+                    },
                 cross_db_snapshot_backfill_info,
             }) => {
                 notify_database_graph = false;
@@ -662,7 +696,6 @@ impl DatabaseCheckpointControl {
                     let database_id = info.streaming_job.database_id();
 
                     // 1. Fill snapshot backfill epochs.
-                    let snapshot_backfill_info = &mut batch_refresh_info.snapshot_backfill_info;
                     for snapshot_backfill_epoch in snapshot_backfill_info
                         .upstream_mv_table_id_to_backfill_epoch
                         .values_mut()
@@ -676,7 +709,7 @@ impl DatabaseCheckpointControl {
                     for fragment in info.stream_job_fragments.inner.fragments.values_mut() {
                         fill_snapshot_backfill_epoch(
                             &mut fragment.nodes,
-                            Some(snapshot_backfill_info),
+                            Some(&snapshot_backfill_info),
                             &cross_db_snapshot_backfill_info,
                         )?;
                     }
@@ -727,9 +760,7 @@ impl DatabaseCheckpointControl {
                         "duplicated creating batch refresh job {job_id}"
                     );
 
-                    let snapshot_backfill_info_clone =
-                        batch_refresh_info.snapshot_backfill_info.clone();
-                    let refresh_interval_sec = batch_refresh_info.refresh_interval_sec;
+                    let snapshot_backfill_info_clone = snapshot_backfill_info.clone();
 
                     // Database-graph `Add` mutation: batch refresh has no actors in the
                     // database graph; it only needs to register snapshot-backfill
@@ -759,17 +790,20 @@ impl DatabaseCheckpointControl {
                     let job = BatchRefreshJobCheckpointControl::new(
                         database_id,
                         job_id,
-                        CreateSnapshotBackfillJobCommandInfo {
+                        CreateIndependentStreamingJobCommandInfo {
                             info: info.clone(),
                             snapshot_backfill_info: snapshot_backfill_info_clone.clone(),
                             cross_db_snapshot_backfill_info,
                             resolved_split_assignment: Default::default(),
-                            refresh_interval_sec: Some(refresh_interval_sec),
+                            kind: IndependentStreamingJobType::BatchRefresh {
+                                refresh_interval_sec,
+                            },
                         },
                         notifier.as_mut(),
                         snapshot_backfill_upstream_tables,
                         snapshot_epoch,
                         hummock_version_stats,
+                        self.term_id(),
                         partial_graph_manager,
                         &logical,
                         worker_nodes,
@@ -783,8 +817,15 @@ impl DatabaseCheckpointControl {
                         );
                     }
 
-                    self.independent_checkpoint_job_controls
-                        .insert(job_id, IndependentCheckpointJobControl::BatchRefresh(job));
+                    self.independent_checkpoint_job_controls.insert(
+                        job_id,
+                        IndependentCheckpointJobControl::batch_refresh(
+                            job_id,
+                            to_partial_graph_id(self.database_id, Some(job_id)),
+                            IndependentCheckpointJobStatus::Initial { snapshot_epoch },
+                            job,
+                        ),
+                    );
 
                     // Register permanent subscriber (never unregistered until MV is dropped)
                     for upstream_mv_table_id in snapshot_backfill_info_clone
@@ -847,19 +888,19 @@ impl DatabaseCheckpointControl {
                         None
                     };
 
-                let mut edges = self.database_info.build_edge(
+                let (mut edges, actor_new_no_shuffle) = self.database_info.build_edge(
                     Some((&info, false)),
                     None,
                     new_upstream_sink,
                     partial_graph_manager.control_stream_manager(),
                     &actors.stream_actors,
                     &actors.actor_location,
-                );
+                )?;
                 // Phase 2: Resolve source-level DiscoveredSplits to actor-level SplitAssignment
                 let resolved_split_assignment = resolve_source_splits(
                     &info,
                     &actors,
-                    edges.actor_new_no_shuffle(),
+                    &actor_new_no_shuffle,
                     &self.database_info,
                 )?;
 
@@ -868,11 +909,7 @@ impl DatabaseCheckpointControl {
                     .as_ref()
                     .map(|old_sink_id| old_sink_id.as_job_id());
                 if old_sink_job_id.is_some()
-                    && matches!(
-                        job_type,
-                        CreateStreamingJobType::SnapshotBackfill { .. }
-                            | CreateStreamingJobType::BatchRefresh(_)
-                    )
+                    && matches!(job_type, CreateStreamingJobType::Independent { .. })
                 {
                     bail!("replace sink must not use snapshot backfill");
                 }
@@ -951,12 +988,10 @@ impl DatabaseCheckpointControl {
                     &job_type,
                     dropped_actors,
                     is_currently_paused,
-                    &mut edges,
-                    partial_graph_manager.control_stream_manager(),
+                    edges,
                     actor_cdc_table_snapshot_splits,
                     &resolved_split_assignment,
                     &actors.stream_actors,
-                    &actors.actor_location,
                 )?;
 
                 (
@@ -1202,14 +1237,14 @@ impl DatabaseCheckpointControl {
                 }
 
                 // Build edges first (needed for no-shuffle mapping used in split resolution)
-                let mut edges = self.database_info.build_edge(
+                let (mut edges, actor_new_no_shuffle) = self.database_info.build_edge(
                     None,
                     Some(&plan),
                     None,
                     partial_graph_manager.control_stream_manager(),
                     &render_result.stream_actors,
                     &render_result.actor_location,
-                );
+                )?;
 
                 // Phase 2: Resolve splits to actor-level assignment.
                 let fragment_actor_ids: HashMap<FragmentId, Vec<ActorId>> = render_result
@@ -1234,7 +1269,7 @@ impl DatabaseCheckpointControl {
                         SourceManager::resolve_replace_source_splits(
                             &plan.new_fragments,
                             &plan.replace_upstream,
-                            edges.actor_new_no_shuffle(),
+                            &actor_new_no_shuffle,
                             |_fragment_id, actor_id| {
                                 self.database_info.fragment_infos().find_map(|fragment| {
                                     fragment
@@ -1290,12 +1325,12 @@ impl DatabaseCheckpointControl {
 
                 // Mutation (must be generated before removing old fragments,
                 // because it reads actor info from database_info)
-                let mutation = Command::replace_stream_job_to_mutation(
+                let mutation = Some(Command::replace_stream_job_to_mutation(
                     &plan,
-                    &mut edges,
+                    edges,
                     &mut self.database_info,
                     &resolved_split_assignment,
-                )?;
+                )?);
 
                 // Post-apply: remove old fragments
                 {
@@ -1429,9 +1464,28 @@ impl DatabaseCheckpointControl {
             Some(Command::Refresh {
                 table_id,
                 associated_source_id,
+                staging_table_id,
+                trigger_time,
             }) => {
                 let mutation = Some(Command::refresh_to_mutation(table_id, associated_source_id));
-                self.apply_simple_command(mutation, "Refresh")
+                let actors = RefreshCycleActors::from_fragments(
+                    self.database_info.job_fragment_infos(table_id.as_job_id()),
+                );
+                let (table_ids, node_actors) = self.collect_base_info();
+                (
+                    mutation,
+                    table_ids,
+                    None,
+                    node_actors,
+                    PostCollectCommand::RefreshStarted {
+                        table_id,
+                        database_id: self.database_info.database_id,
+                        associated_source_id,
+                        staging_table_id,
+                        trigger_time,
+                        actors,
+                    },
+                )
             }
 
             Some(Command::ListFinish {
@@ -1448,6 +1502,25 @@ impl DatabaseCheckpointControl {
             }) => {
                 let mutation = Some(Command::load_finish_to_mutation(associated_source_id));
                 self.apply_simple_command(mutation, "LoadFinish")
+            }
+
+            Some(Command::FinishRefresh {
+                table_id,
+                staging_table_id,
+                trigger_time,
+            }) => {
+                let (table_ids, node_actors) = self.collect_base_info();
+                (
+                    None,
+                    table_ids,
+                    None,
+                    node_actors,
+                    PostCollectCommand::FinishRefresh {
+                        table_id,
+                        staging_table_id,
+                        trigger_time,
+                    },
+                )
             }
 
             Some(Command::ResetSource { source_id }) => {
@@ -1480,14 +1553,14 @@ impl DatabaseCheckpointControl {
         };
 
         let mut finished_snapshot_backfill_jobs = HashSet::new();
-        let mutation = match mutation {
+        let mut mutation = match mutation {
             Some(mutation) => Some(mutation),
             None => {
                 let mut finished_snapshot_backfill_job_info = HashMap::new();
                 if barrier_info.kind.is_checkpoint() {
                     for (&job_id, job) in &mut self.independent_checkpoint_job_controls {
-                        if let IndependentCheckpointJobControl::CreatingStreamingJob(creating_job) =
-                            job
+                        if let Some(IndependentCheckpointJob::CreatingStreamingJob(creating_job)) =
+                            job.running_mut()
                             && creating_job.should_merge_to_upstream(partial_graph_manager)
                         {
                             // The independent actors will stop on this barrier. Apply throttle to
@@ -1511,12 +1584,10 @@ impl DatabaseCheckpointControl {
 
                 if !finished_snapshot_backfill_job_info.is_empty() {
                     let actors_to_create = actors_to_create.get_or_insert_default();
-                    let mut subscriptions_to_drop = vec![];
-                    let mut dispatcher_update = vec![];
-                    let mut actor_splits = HashMap::new();
+                    let mut mutation = PbUpdateMutation::default();
                     for (job_id, info) in finished_snapshot_backfill_job_info {
                         finished_snapshot_backfill_jobs.insert(job_id);
-                        subscriptions_to_drop.extend(
+                        mutation.subscriptions_to_drop.extend(
                             info.snapshot_backfill_upstream_tables.iter().map(
                                 |upstream_table_id| PbSubscriptionUpstreamInfo {
                                     subscriber_id: job_id.as_subscriber_id(),
@@ -1566,6 +1637,24 @@ impl DatabaseCheckpointControl {
                             })
                             .collect();
                         let actor_mapping = &actor_mapping;
+                        // Capture the old actor layouts before remapping the inflight fragment
+                        // information to fresh actor IDs below.
+                        let database_partial_graph_id = to_partial_graph_id(self.database_id, None);
+                        let mut edge_builder = FragmentEdgeBuilder::new()
+                            .add_existing_fragments(
+                                info.upstream_fragment_downstreams.keys().map(
+                                    |upstream_fragment_id| {
+                                        self.database_info.fragment(*upstream_fragment_id)
+                                    },
+                                ),
+                                database_partial_graph_id,
+                                partial_graph_manager.control_stream_manager(),
+                            )
+                            .add_existing_fragments(
+                                info.fragment_infos.values(),
+                                to_partial_graph_id(self.database_id, Some(job_id)),
+                                partial_graph_manager.control_stream_manager(),
+                            );
                         let new_stream_actors: HashMap<_, _> = info
                             .stream_actors
                             .into_iter()
@@ -1590,7 +1679,7 @@ impl DatabaseCheckpointControl {
                                 (fragment_id, fragment)
                             })
                             .collect();
-                        actor_splits.extend(
+                        mutation.actor_splits.extend(
                             new_fragment_info
                                 .values()
                                 .flat_map(|fragment| &fragment.actors)
@@ -1608,28 +1697,16 @@ impl DatabaseCheckpointControl {
                                 }),
                         );
                         // new actors belong to the database partial graph
-                        let partial_graph_id = to_partial_graph_id(self.database_id, None);
-                        let mut edge_builder = FragmentEdgeBuilder::new(
-                            info.upstream_fragment_downstreams
-                                .keys()
-                                .map(|upstream_fragment_id| {
-                                    self.database_info.fragment(*upstream_fragment_id)
-                                })
-                                .chain(new_fragment_info.values())
-                                .map(|fragment| {
-                                    (
-                                        fragment.fragment_id,
-                                        EdgeBuilderFragmentInfo::from_inflight(
-                                            fragment,
-                                            partial_graph_id,
-                                            partial_graph_manager.control_stream_manager(),
-                                        ),
-                                    )
-                                }),
+                        edge_builder = edge_builder.replace_existing_fragment_actors(
+                            new_fragment_info.values(),
+                            database_partial_graph_id,
+                            partial_graph_manager.control_stream_manager(),
                         );
-                        edge_builder.add_relations(&info.upstream_fragment_downstreams);
-                        edge_builder.add_relations(&info.downstreams);
-                        let mut edges = edge_builder.build();
+                        let (mut edges, _) = edge_builder
+                            .finish_fragments()
+                            .add_relations(&info.upstream_fragment_downstreams)?
+                            .add_relations(&info.downstreams)?
+                            .build();
                         let new_actors_to_create = edges.collect_actors_to_create(
                             new_fragment_info.values().map(|fragment| {
                                 (
@@ -1642,46 +1719,7 @@ impl DatabaseCheckpointControl {
                                 )
                             }),
                         );
-                        dispatcher_update.extend(
-                            info.upstream_fragment_downstreams.keys().flat_map(
-                                |upstream_fragment_id| {
-                                    let new_actor_dispatchers = edges
-                                        .dispatchers
-                                        .remove(upstream_fragment_id)
-                                        .expect("should exist");
-                                    new_actor_dispatchers.into_iter().flat_map(
-                                        |(upstream_actor_id, dispatchers)| {
-                                            dispatchers.into_iter().map(move |dispatcher| {
-                                                PbDispatcherUpdate {
-                                                    actor_id: upstream_actor_id,
-                                                    dispatcher_id: dispatcher.dispatcher_id,
-                                                    hash_mapping: dispatcher.hash_mapping,
-                                                    removed_downstream_actor_id: dispatcher
-                                                        .downstream_actor_id
-                                                        .iter()
-                                                        .map(|new_downstream_actor_id| {
-                                                            actor_mapping
-                                                            .iter()
-                                                            .find_map(
-                                                                |(old_actor_id, new_actor_id)| {
-                                                                    (new_downstream_actor_id
-                                                                        == new_actor_id)
-                                                                        .then_some(*old_actor_id)
-                                                                },
-                                                            )
-                                                            .expect("should exist")
-                                                        })
-                                                        .collect(),
-                                                    added_downstream_actor_id: dispatcher
-                                                        .downstream_actor_id,
-                                                }
-                                            })
-                                        },
-                                    )
-                                },
-                            ),
-                        );
-                        assert!(edges.is_empty(), "remaining edges: {:?}", edges);
+                        edges.apply_to_update_mutation(&mut mutation);
                         for (worker_id, worker_actors) in new_actors_to_create {
                             node_actors.entry(worker_id).or_default().extend(
                                 worker_actors.values().flat_map(|(_, actors, _)| {
@@ -1701,18 +1739,7 @@ impl DatabaseCheckpointControl {
                             cdc_table_backfill_tracker: None, // no cdc table backfill for snapshot backfill
                         });
                     }
-
-                    Some(PbMutation::Update(PbUpdateMutation {
-                        dispatcher_update,
-                        merge_update: vec![], // no upstream update on existing actors
-                        actor_vnode_bitmap_update: Default::default(), /* no in place update vnode bitmap happened */
-                        dropped_actors: vec![], /* no actors to drop in the partial graph of database */
-                        actor_splits,
-                        actor_new_dispatchers: Default::default(), // no new dispatcher
-                        actor_cdc_table_snapshot_splits: None, /* no cdc table backfill in snapshot backfill */
-                        sink_schema_change: Default::default(), /* no sink auto schema change happened here */
-                        subscriptions_to_drop,
-                    }))
+                    Some(PbMutation::Update(mutation))
                 } else {
                     let fragment_ids = self.database_info.take_pending_backfill_nodes();
                     if fragment_ids.is_empty() {
@@ -1726,10 +1753,40 @@ impl DatabaseCheckpointControl {
             }
         };
 
+        if matches!(
+            mutation,
+            None | Some(PbMutation::Update(_)) | Some(PbMutation::DropSubscriptions(_))
+        ) && !self
+            .pending_independent_job_subscriptions_to_drop
+            .is_empty()
+        {
+            let subscriptions_to_drop = self.take_pending_independent_job_subscriptions_to_drop();
+            if !subscriptions_to_drop.is_empty() {
+                match &mut mutation {
+                    None => {
+                        mutation =
+                            Some(PbMutation::DropSubscriptions(PbDropSubscriptionsMutation {
+                                info: subscriptions_to_drop,
+                            }));
+                    }
+                    Some(PbMutation::Update(update)) => {
+                        update.subscriptions_to_drop.extend(subscriptions_to_drop);
+                    }
+                    Some(PbMutation::DropSubscriptions(drop_subscriptions)) => {
+                        drop_subscriptions.info.extend(subscriptions_to_drop);
+                    }
+                    Some(_) => unreachable!("checked compatible mutation above"),
+                }
+            }
+        }
+
         // Forward barrier to independent job controls
         for (job_id, job) in &mut self.independent_checkpoint_job_controls {
+            let Some(job) = job.running_mut() else {
+                continue;
+            };
             match job {
-                IndependentCheckpointJobControl::CreatingStreamingJob(creating_job) => {
+                IndependentCheckpointJob::CreatingStreamingJob(creating_job) => {
                     if finished_snapshot_backfill_jobs.contains(job_id) {
                         continue;
                     }
@@ -1744,7 +1801,7 @@ impl DatabaseCheckpointControl {
                         throttle_mutation,
                     )?;
                 }
-                IndependentCheckpointJobControl::BatchRefresh(batch_refresh_job) => {
+                IndependentCheckpointJob::BatchRefresh(batch_refresh_job) => {
                     let throttle_mutation = throttle_config.as_mut().and_then(|config| {
                         batch_refresh_job
                             .pre_apply_throttle(config)
@@ -1767,7 +1824,6 @@ impl DatabaseCheckpointControl {
         partial_graph_manager.inject_barrier(
             to_partial_graph_id(self.database_id, None),
             mutation,
-            None,
             &node_actors,
             InflightFragmentInfo::existing_table_ids(self.database_info.fragment_infos()),
             InflightFragmentInfo::workers(self.database_info.fragment_infos()),

@@ -53,7 +53,6 @@ periodic_tombstone_reclaim_compaction_interval_sec = 600
 move_table_size_limit = 10737418240
 split_group_size_limit = 68719476736
 cut_table_size_limit = 1073741824
-protect_drop_table_with_incoming_sink = false
 do_not_config_object_storage_lifecycle = false
 partition_vnode_count = 16
 table_high_write_throughput_threshold = 16777216
@@ -70,6 +69,7 @@ table_stat_high_write_throughput_ratio_for_split = 0.5
 table_stat_low_write_throughput_ratio_for_merge = 0.7
 table_stat_throuput_window_seconds_for_split = 60
 table_stat_throuput_window_seconds_for_merge = 240
+table_write_throughput_retention_seconds = 300
 compact_task_table_size_partition_threshold_low = 134217728
 compact_task_table_size_partition_threshold_high = 536870912
 periodic_scheduling_compaction_group_split_interval_sec = 10
@@ -136,6 +136,7 @@ hummock_time_travel_filter_out_objects_list_version_batch_size = 10
 hummock_time_travel_filter_out_objects_list_delta_batch_size = 1000
 table_change_log_insert_batch_size = 1000
 table_change_log_delete_batch_size = 1000
+table_change_log_truncate_interval_sec = 600
 
 [meta.developer.compute_client_config]
 connect_timeout_secs = 5
@@ -320,6 +321,7 @@ compactor_max_preload_meta_file_count = 32
 vector_file_block_size_kb = 1024
 time_travel_version_cache_capacity = 10
 table_change_log_cache_capacity = 60
+iceberg_compaction_memory_limit_mb = ""
 iceberg_compaction_enable_validate = false
 iceberg_compaction_max_record_batch_rows = 1024
 iceberg_compaction_min_size_per_partition_mb = 1024
@@ -331,6 +333,7 @@ iceberg_compaction_max_concurrent_closes = 8
 iceberg_compaction_enable_dynamic_size_estimation = true
 iceberg_compaction_size_estimation_smoothing_factor = 0.3
 iceberg_compaction_pending_parallelism_budget_multiplier = 4.0
+iceberg_compaction_max_pull_task_count = 1
 iceberg_compaction_pull_interval_ms = 5000
 iceberg_compaction_enable_prefetch = false
 iceberg_compaction_target_binpack_group_size_mb = 102400
@@ -361,6 +364,7 @@ algorithm = "Lru"
 
 [storage.data_file_cache]
 dir = ""
+direct_io = false
 capacity_mb = 1024
 file_capacity_mb = 64
 flushers = 4
@@ -390,6 +394,7 @@ max_blocking_threads = 0
 
 [storage.meta_file_cache]
 dir = ""
+direct_io = false
 capacity_mb = 1024
 file_capacity_mb = 64
 flushers = 4

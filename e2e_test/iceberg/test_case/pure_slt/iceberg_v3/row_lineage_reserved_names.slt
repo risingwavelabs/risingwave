@@ -1,0 +1,28 @@
+# Iceberg V3 reserves `_row_id` and `_last_updated_sequence_number` for row lineage
+# metadata. Creating a V3 table with a data column of either name must be rejected.
+
+statement ok
+create table row_lineage_reserved_names_t (v int);
+
+statement error cannot create an Iceberg V3 table with column `_row_id`
+create sink row_lineage_reserved_names_sink as
+select _row_id, v from row_lineage_reserved_names_t
+with (
+  connector = 'iceberg',
+  type = 'append-only',
+  force_append_only = 'true',
+  warehouse.path = 's3a://icebergdata',
+  s3.endpoint = 'http://127.0.0.1:9301',
+  s3.access.key = 'hummockadmin',
+  s3.secret.key = 'hummockadmin',
+  s3.region = 'us-east-1',
+  catalog.name = 'demo',
+  catalog.type = 'storage',
+  database.name = 'demo_db',
+  table.name = 'row_lineage_reserved_names_t',
+  create_table_if_not_exists = 'true',
+  format_version = '3'
+);
+
+statement ok
+drop table row_lineage_reserved_names_t;

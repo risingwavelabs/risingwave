@@ -27,6 +27,7 @@ use risingwave_common::types::{DataType, Datum};
 use risingwave_common::util::value_encoding::DatumToProtoExt;
 use risingwave_common::util::worker_util::DEFAULT_RESOURCE_GROUP;
 use risingwave_common::{bail, hash};
+use risingwave_connector::WithOptionsSecResolved;
 use risingwave_meta_model::fragment::DistributionType;
 use risingwave_meta_model::object::ObjectType;
 use risingwave_meta_model::prelude::*;
@@ -54,10 +55,14 @@ use risingwave_pb::meta::{
 };
 use risingwave_pb::plan_common::column_desc::GeneratedOrDefaultColumn;
 use risingwave_pb::plan_common::{ColumnCatalog, DefaultColumnDesc};
+use risingwave_pb::secret::PbSecretRef;
+use risingwave_pb::secret::secret_ref::PbRefAsType;
 use risingwave_pb::stream_plan::{PbDispatchOutputMapping, PbDispatcher, PbDispatcherType};
 use risingwave_pb::user::grant_privilege::{PbActionWithGrantOption, PbObject as PbGrantObject};
 use risingwave_pb::user::{PbAction, PbGrantPrivilege, PbUserInfo};
-use risingwave_sqlparser::ast::Statement as SqlStatement;
+use risingwave_sqlparser::ast::{
+    Ident, ObjectName, SecretRefAsType, SecretRefValue, SqlOption, Statement as SqlStatement,
+};
 use risingwave_sqlparser::parser::Parser;
 use sea_orm::sea_query::{
     Alias, CommonTableExpression, Expr, OnConflict, Query, QueryStatementBuilder, SelectStatement,
@@ -478,6 +483,7 @@ pub struct FragmentDesc {
 /// List all objects that are using the given one in a cascade way. It runs a recursive CTE to find all the dependencies.
 pub async fn get_referring_objects_cascade<C>(
     obj_id: ObjectId,
+    object_type: ObjectType,
     db: &C,
 ) -> MetaResult<Vec<PartialObject>>
 where
@@ -485,13 +491,28 @@ where
 {
     let query = construct_obj_dependency_query(obj_id);
     let (sql, values) = query.build_any(&*db.get_database_backend().get_query_builder());
-    let objects = PartialObject::find_by_statement(Statement::from_sql_and_values(
+    let mut objects = PartialObject::find_by_statement(Statement::from_sql_and_values(
         db.get_database_backend(),
         sql,
         values,
     ))
     .all(db)
     .await?;
+
+    let target_objects = std::iter::once((obj_id, object_type))
+        .chain(objects.iter().map(|object| (object.oid, object.obj_type)))
+        .collect_vec();
+    let mut existing_object_ids: HashSet<ObjectId> =
+        objects.iter().map(|object| object.oid).collect();
+    for (target_id, target_type) in target_objects {
+        let incoming_sink_objects =
+            get_incoming_sink_objects_for_target(target_id, target_type, db).await?;
+        for incoming_sink_object in incoming_sink_objects {
+            if existing_object_ids.insert(incoming_sink_object.oid) {
+                objects.push(incoming_sink_object);
+            }
+        }
+    }
     Ok(objects)
 }
 
@@ -528,6 +549,71 @@ where
     let cnt: i64 = res.try_get_by(0)?;
 
     Ok(cnt != 0)
+}
+
+/// Formats SQL options with secret values properly resolved.
+///
+/// This function processes configuration options that may contain sensitive data:
+/// - Plaintext options are directly converted to `SqlOption`.
+/// - Secret options are retrieved from the database and formatted as `SECRET {name}` without
+///   exposing the actual secret value.
+pub async fn format_with_option_secret_resolved(
+    txn: &DatabaseTransaction,
+    options_with_secret: &WithOptionsSecResolved,
+) -> MetaResult<Vec<SqlOption>> {
+    let mut options = Vec::new();
+    for (k, v) in options_with_secret.as_plaintext() {
+        let sql_option = SqlOption::try_from((k, v))
+            .map_err(|e| MetaError::invalid_parameter(e.to_report_string()))?;
+        options.push(sql_option);
+    }
+    for (name, secret_ref) in options_with_secret.as_secret() {
+        let secret_ref_value = resolve_secret_ref_value(txn, secret_ref).await?;
+        options.push(SqlOption::from_secret_ref(name, secret_ref_value));
+    }
+    Ok(options)
+}
+
+async fn resolve_secret_ref_value(
+    txn: &DatabaseTransaction,
+    secret_ref: &PbSecretRef,
+) -> MetaResult<SecretRefValue> {
+    let (secret, object) = Secret::find_by_id(secret_ref.secret_id)
+        .find_also_related(Object)
+        .one(txn)
+        .await?
+        .ok_or_else(|| MetaError::catalog_id_not_found("secret", secret_ref.secret_id))?;
+    let object =
+        object.ok_or_else(|| MetaError::catalog_id_not_found("object", secret_ref.secret_id))?;
+    let schema_id = object.schema_id.ok_or_else(|| {
+        MetaError::invalid_parameter(format!(
+            "secret {} does not belong to a schema",
+            secret_ref.secret_id
+        ))
+    })?;
+    let schema = Schema::find_by_id(schema_id)
+        .one(txn)
+        .await?
+        .ok_or_else(|| MetaError::catalog_id_not_found("schema", schema_id))?;
+
+    let ref_as = match PbRefAsType::try_from(secret_ref.ref_as) {
+        Ok(PbRefAsType::File) => SecretRefAsType::File,
+        Ok(PbRefAsType::Text | PbRefAsType::Unspecified) => SecretRefAsType::Text,
+        Err(_) => {
+            return Err(MetaError::invalid_parameter(format!(
+                "invalid reference type {} for secret {}",
+                secret_ref.ref_as, secret_ref.secret_id
+            )));
+        }
+    };
+
+    Ok(SecretRefValue {
+        secret_name: ObjectName(vec![
+            Ident::from_real_value(&schema.name),
+            Ident::from_real_value(&secret.name),
+        ]),
+        ref_as,
+    })
 }
 
 /// `ensure_object_id` ensures the existence of target object in the cluster.
@@ -810,42 +896,35 @@ where
     Ok(())
 }
 
-/// `check_object_refer_for_drop` checks whether the object is used by other objects except indexes.
-/// It returns an error that contains the details of the referring objects if it is used by others.
-pub async fn check_object_refer_for_drop<C>(
+/// Validates a RESTRICT drop and returns referring objects that should be dropped together.
+///
+/// Objects related through `belong_to_oid` are catalog-owned by the target. Indexes are also
+/// logically owned by their primary table for dropping, although they remain schema-owned catalog
+/// objects. These objects are dropped together with the target; all other referrers prevent the
+/// drop.
+pub async fn validate_restrict_drop_and_collect_owned_objects<C>(
     object_type: ObjectType,
     object_id: ObjectId,
     db: &C,
-) -> MetaResult<()>
+) -> MetaResult<Vec<PartialObject>>
 where
     C: ConnectionTrait,
 {
-    // Ignore indexes.
-    let count = if object_type == ObjectType::Table {
-        ObjectDependency::find()
-            .join(
-                JoinType::InnerJoin,
-                object_dependency::Relation::Object1.def(),
-            )
-            .filter(
-                object_dependency::Column::Oid
-                    .eq(object_id)
-                    .and(object::Column::ObjType.ne(ObjectType::Index)),
-            )
-            .count(db)
-            .await?
-    } else {
-        ObjectDependency::find()
-            .filter(object_dependency::Column::Oid.eq(object_id))
-            .count(db)
-            .await?
-    };
-    if count != 0 {
-        // find the name of all objects that are using the given one.
-        let referring_objects = get_referring_objects(object_id, db).await?;
-        let referring_objs_map = referring_objects
+    let referring_objects = get_referring_objects(object_id, object_type, db).await?;
+    let owned_object_ids = get_belong_objects(db, object_id)
+        .await?
+        .into_iter()
+        .map(|object| object.oid)
+        .collect::<HashSet<_>>();
+    let mut non_owned_objects = referring_objects.clone();
+    non_owned_objects.retain(|object| !owned_object_ids.contains(&object.oid));
+    if object_type == ObjectType::Table {
+        non_owned_objects.retain(|object| object.obj_type != ObjectType::Index);
+    }
+
+    if !non_owned_objects.is_empty() {
+        let referring_objs_map = non_owned_objects
             .into_iter()
-            .filter(|o| o.obj_type != ObjectType::Index)
             .into_group_map_by(|o| o.obj_type);
         let mut details = vec![];
         for (obj_type, objs) in referring_objs_map {
@@ -881,17 +960,6 @@ where
                         .into_tuple()
                         .all(db)
                         .await?;
-                    if object_type == ObjectType::Table {
-                        let engine = Table::find_by_id(object_id.as_table_id())
-                            .select_only()
-                            .column(table::Column::Engine)
-                            .into_tuple::<table::Engine>()
-                            .one(db)
-                            .await?;
-                        if engine == Some(table::Engine::Iceberg) && sinks.len() == 1 {
-                            continue;
-                        }
-                    }
                     details.extend(sinks.into_iter().map(|(schema_name, sink_name)| {
                         format!("sink {}.{} depends on it", schema_name, sink_name)
                     }));
@@ -970,7 +1038,7 @@ where
             }
         }
         if details.is_empty() {
-            return Ok(());
+            return Ok(referring_objects);
         }
 
         return Err(MetaError::permission_denied(format!(
@@ -987,15 +1055,47 @@ where
             }
         )));
     }
-    Ok(())
+    Ok(referring_objects)
 }
 
-/// List all objects that are using the given one.
-pub async fn get_referring_objects<C>(object_id: ObjectId, db: &C) -> MetaResult<Vec<PartialObject>>
+async fn get_incoming_sink_objects_for_target<C>(
+    target_id: ObjectId,
+    target_type: ObjectType,
+    db: &C,
+) -> MetaResult<Vec<PartialObject>>
 where
     C: ConnectionTrait,
 {
-    let objs = ObjectDependency::find()
+    match target_type {
+        ObjectType::Table => {
+            let incoming_sink_ids = Sink::find()
+                .select_only()
+                .column(sink::Column::SinkId)
+                .filter(sink::Column::TargetTable.eq(target_id.as_table_id()))
+                .into_tuple::<SinkId>()
+                .all(db)
+                .await?;
+            Object::find()
+                .filter(object::Column::Oid.is_in(incoming_sink_ids))
+                .into_partial_model()
+                .all(db)
+                .await
+                .map_err(Into::into)
+        }
+        _ => Ok(vec![]),
+    }
+}
+
+/// List all objects that are using the given one.
+pub async fn get_referring_objects<C>(
+    object_id: ObjectId,
+    object_type: ObjectType,
+    db: &C,
+) -> MetaResult<Vec<PartialObject>>
+where
+    C: ConnectionTrait,
+{
+    let mut objects: Vec<PartialObject> = ObjectDependency::find()
         .filter(object_dependency::Column::Oid.eq(object_id))
         .join(
             JoinType::InnerJoin,
@@ -1005,7 +1105,17 @@ where
         .all(db)
         .await?;
 
-    Ok(objs)
+    let incoming_sink_objects =
+        get_incoming_sink_objects_for_target(object_id, object_type, db).await?;
+    let mut existing_object_ids: HashSet<ObjectId> =
+        objects.iter().map(|object| object.oid).collect();
+    objects.extend(
+        incoming_sink_objects
+            .into_iter()
+            .filter(|object| existing_object_ids.insert(object.oid)),
+    );
+
+    Ok(objects)
 }
 
 /// `ensure_schema_empty` ensures that the schema is empty, used by `DROP SCHEMA`.
@@ -2199,23 +2309,7 @@ pub async fn rename_relation_refer(
             });
         }};
     }
-    let mut objs = get_referring_objects(object_id, txn).await?;
-    if object_type == ObjectType::Table {
-        let incoming_sinks: Vec<SinkId> = Sink::find()
-            .select_only()
-            .column(sink::Column::SinkId)
-            .filter(sink::Column::TargetTable.eq(object_id))
-            .into_tuple()
-            .all(txn)
-            .await?;
-
-        objs.extend(incoming_sinks.into_iter().map(|id| PartialObject {
-            oid: id.as_object_id(),
-            obj_type: ObjectType::Sink,
-            schema_id: None,
-            database_id: None,
-        }));
-    }
+    let objs = get_referring_objects(object_id, object_type, txn).await?;
 
     for obj in objs {
         match obj.obj_type {
@@ -2224,6 +2318,10 @@ pub async fn rename_relation_refer(
             }
             ObjectType::Sink => {
                 rename_relation_ref!(Sink, sink, sink_id, obj.oid.as_sink_id())
+            }
+            // A CDC table source refers to the shared CDC source it reads from.
+            ObjectType::Source => {
+                rename_relation_ref!(Source, source, source_id, obj.oid.as_source_id())
             }
             ObjectType::Subscription => {
                 rename_relation_ref!(
@@ -2245,7 +2343,7 @@ pub async fn rename_relation_refer(
             }
             _ => {
                 bail!(
-                    "only the table, sink, subscription, view and index will depend on other objects."
+                    "only the table, source, sink, subscription, view and index will depend on other objects."
                 )
             }
         }

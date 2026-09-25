@@ -12,19 +12,21 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+use itertools::Itertools;
+
 use super::expr_visitable::ExprVisitable;
 use super::generic::{_CHANGELOG_ROW_ID, CHANGELOG_OP, GenericPlanRef};
 use super::utils::impl_distill_by_unit;
 use super::{
     BatchPlanRef, ColPrunable, ColumnPruningContext, ExprRewritable, Logical,
-    LogicalPlanRef as PlanRef, PlanBase, PlanTreeNodeUnary, PredicatePushdown,
+    LogicalPlanRef as PlanRef, LogicalProject, PlanBase, PlanTreeNodeUnary, PredicatePushdown,
     RewriteStreamContext, StreamChangeLog, StreamPlanRef, ToBatch, ToStream, ToStreamContext,
     gen_filter_and_pushdown, generic,
 };
 use crate::error::ErrorCode::BindError;
 use crate::error::Result;
 use crate::optimizer::plan_node::generic::PhysicalPlanRef;
-use crate::optimizer::property::Distribution;
+use crate::optimizer::property::{Distribution, RequiredDist};
 use crate::utils::{ColIndexMapping, Condition};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -34,12 +36,17 @@ pub struct LogicalChangeLog {
 }
 
 impl LogicalChangeLog {
-    pub fn create(input: PlanRef) -> PlanRef {
-        Self::new(input, true, true).into()
+    pub fn create(input: PlanRef, key_indices: Option<Vec<usize>>) -> PlanRef {
+        Self::new(input, key_indices, true, true).into()
     }
 
-    pub fn new(input: PlanRef, need_op: bool, need_changelog_row_id: bool) -> Self {
-        let core = generic::ChangeLog::new(input, need_op, need_changelog_row_id);
+    pub fn new(
+        input: PlanRef,
+        key_indices: Option<Vec<usize>>,
+        need_op: bool,
+        need_changelog_row_id: bool,
+    ) -> Self {
+        let core = generic::ChangeLog::new(input, key_indices, need_op, need_changelog_row_id);
         Self::with_core(core)
     }
 
@@ -55,7 +62,9 @@ impl PlanTreeNodeUnary<Logical> for LogicalChangeLog {
     }
 
     fn clone_with_input(&self, input: PlanRef) -> Self {
-        Self::new(input, self.core.need_op, self.core.need_changelog_row_id)
+        let core = self.core.clone_with_input(input);
+
+        Self::with_core(core)
     }
 
     fn rewrite_with_input(
@@ -63,7 +72,12 @@ impl PlanTreeNodeUnary<Logical> for LogicalChangeLog {
         input: PlanRef,
         input_col_change: ColIndexMapping,
     ) -> (Self, ColIndexMapping) {
-        let changelog = Self::new(input, self.core.need_op, true);
+        let key_indices = self
+            .core
+            .key_indices
+            .as_ref()
+            .map(|key| input_col_change.map_all(key));
+        let changelog = Self::new(input, key_indices, self.core.need_op, true);
 
         let out_col_change = if self.core.need_op {
             let (mut output_vec, len) = input_col_change.into_parts();
@@ -107,7 +121,9 @@ impl ColPrunable for LogicalChangeLog {
         let fields = self.schema().fields();
         let mut need_op = false;
         let mut need_changelog_row_id = false;
-        let new_required_cols: Vec<_> = required_cols
+        // columns required as input from children,
+        // generated columns like op and event_id are removed
+        let mut input_required_cols = required_cols
             .iter()
             .filter_map(|a| {
                 if let Some(f) = fields.get(*a) {
@@ -124,10 +140,67 @@ impl ColPrunable for LogicalChangeLog {
                     Some(*a)
                 }
             })
-            .collect();
+            .collect_vec();
 
-        let new_input = self.input().prune_col(&new_required_cols, ctx);
-        Self::new(new_input, need_op, need_changelog_row_id).into()
+        // `StreamChangeLog` must see the input stream key to co-locate changes for the same row.
+        // Keep key columns internally even when they are not selected from the changelog CTE, and
+        // project them away above the operator afterwards.
+        if let Some(stream_key) = self.input().stream_key() {
+            for &key in stream_key {
+                if !input_required_cols.contains(&key) {
+                    input_required_cols.push(key);
+                }
+            }
+        }
+
+        // add declared business keys to input request
+        if let Some(key) = &self.core.key_indices {
+            for &index in key {
+                if !input_required_cols.contains(&index) {
+                    input_required_cols.push(index);
+                }
+            }
+        }
+
+        let new_input = self.input().prune_col(&input_required_cols, ctx);
+        let input_mapping = ColIndexMapping::with_remaining_columns(
+            &input_required_cols,
+            self.input().schema().len(),
+        );
+        let key_indices = self
+            .core
+            .key_indices
+            .as_ref()
+            .map(|key| input_mapping.map_all(key));
+
+        // updated plan with new inputs
+        let changelog: PlanRef =
+            Self::new(new_input, key_indices, need_op, need_changelog_row_id).into();
+
+        // output now contains business keys as well, we need to hide it if not requested by the parent
+        let (mut output_mapping, new_output_len) = input_mapping.into_parts();
+
+        if self.core.need_op {
+            output_mapping.push(need_op.then_some(new_output_len));
+        }
+
+        if self.core.need_changelog_row_id {
+            output_mapping
+                .push(need_changelog_row_id.then_some(new_output_len + usize::from(need_op)));
+        }
+
+        let output_len = changelog.schema().len();
+        let output_mapping = ColIndexMapping::new(output_mapping, output_len);
+        let output_required_cols = output_mapping.map_all(required_cols);
+
+        if output_required_cols.iter().copied().eq(0..output_len) {
+            changelog
+        } else {
+            let output_mapping =
+                ColIndexMapping::with_remaining_columns(&output_required_cols, output_len);
+
+            LogicalProject::with_mapping(changelog, output_mapping).into()
+        }
     }
 }
 
@@ -140,6 +213,16 @@ impl ToBatch for LogicalChangeLog {
 impl ToStream for LogicalChangeLog {
     fn to_stream(&self, ctx: &mut ToStreamContext) -> Result<StreamPlanRef> {
         let input = self.input().to_stream(ctx)?;
+
+        let input = if let Some(key) = &self.core.key_indices {
+            RequiredDist::hash_shard(key).streaming_enforce_if_not_satisfies(input)?
+        } else if matches!(input.distribution(), Distribution::SomeShard) {
+            RequiredDist::hash_shard(input.expect_stream_key())
+                .streaming_enforce_if_not_satisfies(input)?
+        } else {
+            input
+        };
+
         let dist = input.distribution();
         let distribution_keys = match dist {
             Distribution::HashShard(distribution_keys)
@@ -174,5 +257,74 @@ impl ToStream for LogicalChangeLog {
         let (input, input_col_change) = self.input().logical_rewrite_for_stream(ctx)?;
         let (changelog, out_col_change) = self.rewrite_with_input(input, input_col_change);
         Ok((changelog.into(), out_col_change))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::rc::Rc;
+
+    use risingwave_common::catalog::{CdcTableDesc, ColumnDesc, ColumnId, TableId};
+    use risingwave_common::id::SourceId;
+    use risingwave_common::types::DataType;
+    use risingwave_common::util::sort_util::{ColumnOrder, OrderType};
+    use risingwave_connector::source::cdc::CdcScanOptions;
+
+    use super::*;
+    use crate::optimizer::optimizer_context::OptimizerContext;
+    use crate::optimizer::plan_node::{BackfillType, LogicalCdcScan, PlanTreeNodeUnary};
+
+    #[test]
+    fn test_changelog_on_cdc_scan_enforces_hash_distribution() {
+        let desc = CdcTableDesc {
+            table_id: TableId::new(1),
+            source_id: SourceId::new(2),
+            external_table_name: "mydb.orders".to_owned(),
+            pk: vec![ColumnOrder::new(0, OrderType::ascending())],
+            pk_comparisons: vec![risingwave_common::catalog::CdcKeyComparison::Native],
+            columns: vec![
+                ColumnDesc::named("id", ColumnId::new(1), DataType::Int32),
+                ColumnDesc::named("payload", ColumnId::new(2), DataType::Varchar),
+            ],
+            stream_key: vec![0],
+            ..Default::default()
+        };
+        let scan = LogicalCdcScan::create(
+            "orders".to_owned(),
+            Rc::new(desc),
+            OptimizerContext::mock(),
+            CdcScanOptions {
+                disable_backfill: true,
+                ..Default::default()
+            },
+        );
+        let changelog = LogicalChangeLog::create(scan.clone().into(), None);
+        let stream = changelog
+            .to_stream(&mut ToStreamContext::new_with_backfill_type(
+                false,
+                BackfillType::Replicated,
+            ))
+            .unwrap();
+
+        let input = stream.as_stream_change_log().unwrap().input();
+        assert!(input.as_stream_exchange().is_some());
+        assert_eq!(input.distribution(), &Distribution::HashShard(vec![0]));
+
+        // The primary key is retained internally even when it is not selected from the changelog.
+        let changelog = LogicalChangeLog::create(scan.into(), None);
+        let pruned = changelog.prune_col(
+            &[1, 2, 3],
+            &mut ColumnPruningContext::new(changelog.clone()),
+        );
+        let stream = pruned
+            .to_stream(&mut ToStreamContext::new_with_backfill_type(
+                false,
+                BackfillType::Replicated,
+            ))
+            .unwrap();
+        let changelog = stream.as_stream_project().unwrap().input();
+        let input = changelog.as_stream_change_log().unwrap().input();
+        assert!(input.as_stream_exchange().is_some());
+        assert_eq!(input.distribution(), &Distribution::HashShard(vec![1]));
     }
 }
