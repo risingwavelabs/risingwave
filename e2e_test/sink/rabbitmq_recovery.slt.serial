@@ -1,0 +1,155 @@
+control substitution on
+
+# RECOVER affects the entire database; run this file serially after the basic suite.
+statement ok
+DROP TABLE IF EXISTS rmq_route_input CASCADE;
+
+statement ok
+DROP TABLE IF EXISTS rmq_exchange_input CASCADE;
+
+statement ok
+DROP TABLE IF EXISTS rmq_disconnect_input CASCADE;
+
+system ok
+python3 e2e_test/sink/rabbitmq/rabbitmq.py setup-recovery rw_sink_recovery
+
+statement ok
+SET sink_decouple = true;
+
+# A mandatory publish to an existing exchange with no matching binding returns
+# basic.return followed by basic.ack. The sink must retain the rejected rows.
+statement ok
+CREATE TABLE rmq_route_input (id int) APPEND ONLY;
+
+statement ok
+CREATE SINK rmq_route_sink FROM rmq_route_input WITH (
+    ${RISEDEV_RABBITMQ_WITH_OPTIONS_COMMON},
+    exchange = 'rw_sink_recovery', routing_key = 'recovered',
+    max_inflight_messages = '2'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+INSERT INTO rmq_route_input SELECT generate_series FROM generate_series(1, 64);
+
+statement ok
+FLUSH;
+
+# Match the current sink ID so stale events from a previous run cannot pass.
+query I retry 60 backoff 1s
+SELECT (count(*) > 0)::int FROM rw_catalog.rw_event_logs
+WHERE event_type = 'SINK_FAIL'
+  AND (info->'sinkFail'->>'sinkId')::int = (SELECT id FROM rw_catalog.rw_sinks WHERE name = 'rmq_route_sink')
+  AND info->'sinkFail'->>'error' LIKE '%312%';
+----
+1
+
+system ok
+python3 e2e_test/sink/rabbitmq/rabbitmq.py empty rw_sink_recovery_direct
+
+# The input and pending sink log have been checkpointed. Recover while the
+# route is still broken, then repair it and require every original payload.
+statement ok
+RECOVER;
+
+system ok
+python3 e2e_test/sink/rabbitmq/rabbitmq.py bind-recovery rw_sink_recovery
+
+system ok
+python3 e2e_test/sink/rabbitmq/rabbitmq.py verify rw_sink_recovery_direct --exchange rw_sink_recovery --routing-key recovered --ids 1 64 --timeout 120
+
+statement ok
+DROP TABLE rmq_route_input CASCADE;
+
+# Publishing to a missing exchange closes the channel. A new writer must be
+# able to replay its pending rows once the exchange and binding are created.
+statement ok
+CREATE TABLE rmq_exchange_input (id int) APPEND ONLY;
+
+statement ok
+CREATE SINK rmq_exchange_sink FROM rmq_exchange_input WITH (
+    ${RISEDEV_RABBITMQ_WITH_OPTIONS_COMMON},
+    exchange = 'rw_sink_recovery_missing', routing_key = 'recovered'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+INSERT INTO rmq_exchange_input SELECT generate_series FROM generate_series(1, 64);
+
+statement ok
+FLUSH;
+
+query I retry 60 backoff 1s
+SELECT (count(*) > 0)::int FROM rw_catalog.rw_event_logs
+WHERE event_type = 'SINK_FAIL'
+  AND (info->'sinkFail'->>'sinkId')::int = (SELECT id FROM rw_catalog.rw_sinks WHERE name = 'rmq_exchange_sink')
+  AND info->'sinkFail'->>'error' ~ '(NOT_FOUND|invalid channel state)';
+----
+1
+
+system ok
+python3 e2e_test/sink/rabbitmq/rabbitmq.py declare-recovery-exchange rw_sink_recovery
+
+system ok
+python3 e2e_test/sink/rabbitmq/rabbitmq.py verify rw_sink_recovery_default --exchange rw_sink_recovery_missing --routing-key recovered --ids 1 64 --timeout 120
+
+statement ok
+DROP TABLE rmq_exchange_input CASCADE;
+
+# A dedicated broker user scopes connection interruption to this test's writers.
+statement ok
+CREATE TABLE rmq_disconnect_input (id int) APPEND ONLY;
+
+statement ok
+CREATE SINK rmq_disconnect_sink FROM rmq_disconnect_input WITH (
+    connector = 'rabbitmq', url = '${RISEDEV_RABBITMQ_URL}',
+    username = 'rw_sink_recovery', password = 'recovery-test-only',
+    exchange = 'rw_sink_recovery', routing_key = 'other',
+    max_inflight_messages = '2'
+) FORMAT PLAIN ENCODE JSON;
+
+statement ok
+INSERT INTO rmq_disconnect_input SELECT generate_series FROM generate_series(1, 32);
+
+statement ok
+FLUSH;
+
+system ok
+python3 e2e_test/sink/rabbitmq/rabbitmq.py verify rw_sink_recovery_unmatched --exchange rw_sink_recovery --routing-key other --ids 1 32
+
+query I
+SELECT count(*) FROM rw_catalog.rw_event_logs
+WHERE event_type = 'SINK_FAIL'
+  AND (info->'sinkFail'->>'sinkId')::int = (SELECT id FROM rw_catalog.rw_sinks WHERE name = 'rmq_disconnect_sink');
+----
+0
+
+# Set RABBITMQ_TEST_RESTART_CONTAINER only for a dedicated local broker to run
+# the actual broker-restart variant. CI closes this user's connections via HTTP.
+system ok
+python3 e2e_test/sink/rabbitmq/rabbitmq.py interrupt-recovery rw_sink_recovery
+
+statement ok
+INSERT INTO rmq_disconnect_input SELECT generate_series FROM generate_series(33, 128);
+
+statement ok
+FLUSH;
+
+query I retry 60 backoff 1s
+SELECT (count(*) > 0)::int FROM rw_catalog.rw_event_logs
+WHERE event_type = 'SINK_FAIL'
+  AND (info->'sinkFail'->>'sinkId')::int = (SELECT id FROM rw_catalog.rw_sinks WHERE name = 'rmq_disconnect_sink');
+----
+1
+
+# Replayed messages from before the disconnect are also valid. The verifier
+# accepts duplicates but checks complete payloads and rejects unexpected IDs.
+system ok
+python3 e2e_test/sink/rabbitmq/rabbitmq.py verify rw_sink_recovery_unmatched --exchange rw_sink_recovery --routing-key other --ids 33 128 --allow-previous-ids 1 32 --timeout 120
+
+statement ok
+DROP TABLE rmq_disconnect_input CASCADE;
+
+system ok
+python3 e2e_test/sink/rabbitmq/rabbitmq.py cleanup-recovery rw_sink_recovery
+
+statement ok
+SET sink_decouple = default;

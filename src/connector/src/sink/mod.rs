@@ -44,6 +44,7 @@ pub mod mqtt;
 pub mod nats;
 pub mod postgres;
 pub mod pulsar;
+pub mod rabbitmq;
 pub mod redis;
 pub mod remote;
 pub mod snowflake_redshift;
@@ -130,6 +131,7 @@ macro_rules! for_all_sinks {
                 { Redis, $crate::sink::redis::RedisSink, $crate::sink::redis::RedisConfig },
                 { Kafka, $crate::sink::kafka::KafkaSink, $crate::sink::kafka::KafkaConfig },
                 { Pulsar, $crate::sink::pulsar::PulsarSink, $crate::sink::pulsar::PulsarConfig },
+                { RabbitMq, $crate::sink::rabbitmq::RabbitMqSink, $crate::sink::rabbitmq::RabbitMqConfig },
                 { BlackHole, $crate::sink::trivial::BlackHoleSink, () },
                 { Http, $crate::sink::http::HttpSink, $crate::sink::http::HttpConfig },
                 { Turbopuffer, $crate::sink::turbopuffer::TurbopufferSink, $crate::sink::turbopuffer::TurbopufferConfig },
@@ -1087,6 +1089,12 @@ pub type Result<T> = std::result::Result<T, SinkError>;
 
 #[derive(Error, Debug)]
 pub enum SinkError {
+    #[error("RabbitMQ error: {0}")]
+    RabbitMq(
+        #[source]
+        #[backtrace]
+        anyhow::Error,
+    ),
     #[error("Kafka error: {0}")]
     Kafka(#[from] rdkafka::error::KafkaError),
     #[error("Kinesis error: {0}")]

@@ -1,0 +1,44 @@
+[
+  {
+    "id": 1,
+    "text_value": "quote \" slash \\ newline\n中文",
+    "flag": true,
+    "amount": "12.34",
+    "event_date": 739879,
+    "event_time": 3723000,
+    "event_ts": 1789862401234,
+    "event_tz": "2026-09-19T19:04:05.000000Z",
+    "document": {"a": [1, null, "中文"], "ok": true},
+    "numbers": [1, null, 3],
+    "nested": {"label": "nested", "count": 2},
+    "raw": "AP8="
+  },
+  {
+    "id": 2,
+    "text_value": "",
+    "flag": false,
+    "amount": "-0.5",
+    "event_date": 730120,
+    "event_time": 0,
+    "event_ts": 0,
+    "event_tz": "1970-01-01T00:00:00.000000Z",
+    "document": [],
+    "numbers": [],
+    "nested": {"label": "", "count": 0},
+    "raw": ""
+  },
+  {
+    "id": 3,
+    "text_value": null,
+    "flag": null,
+    "amount": null,
+    "event_date": null,
+    "event_time": null,
+    "event_ts": null,
+    "event_tz": null,
+    "document": null,
+    "numbers": null,
+    "nested": null,
+    "raw": null
+  }
+]

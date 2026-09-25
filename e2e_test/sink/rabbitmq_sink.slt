@@ -1,0 +1,141 @@
+control substitution on
+
+# Also remove writers left by an interrupted run before resetting broker resources.
+statement ok
+DROP TABLE IF EXISTS json_input CASCADE;
+
+statement ok
+DROP TABLE IF EXISTS direct_input CASCADE;
+
+statement ok
+DROP TABLE IF EXISTS protobuf_input CASCADE;
+
+system ok
+python3 e2e_test/sink/rabbitmq/rabbitmq.py setup rw_sink_e2e
+
+# Exercise the asynchronous log sinker with sink decoupling enabled.
+statement ok
+SET sink_decouple = true;
+
+statement ok
+CREATE TABLE json_input (
+    id int, text_value varchar, flag boolean, amount decimal,
+    event_date date, event_time time, event_ts timestamp, event_tz timestamptz,
+    document jsonb, numbers int[], nested struct<label varchar, count int>, raw bytea
+) APPEND ONLY;
+
+# An empty exchange routes directly to the queue named by routing_key.
+statement ok
+CREATE SINK json_sink FROM json_input WITH (
+    ${RISEDEV_RABBITMQ_WITH_OPTIONS_COMMON},
+    exchange = '',
+    routing_key = 'rw_sink_e2e_default'
+) FORMAT PLAIN ENCODE JSON (
+    jsonb.handling.mode = 'dynamic',
+    timestamptz.handling.mode = 'utc_string'
+);
+
+# Preserve SQL escapes instead of interpreting them as substitution escapes.
+control substitution off
+
+statement ok
+INSERT INTO json_input VALUES
+    (1, E'quote " slash \\ newline\n中文', true, 12.34,
+     '2026-09-20', '01:02:03', '2026-09-20 00:00:01.234', '2026-09-20 03:04:05+08:00',
+     '{"a":[1,null,"中文"],"ok":true}', ARRAY[1,NULL,3], ROW('nested',2), '\x00ff'),
+    (2, '', false, -0.5,
+     '2000-01-01', '00:00:00', '1970-01-01 00:00:00', '1970-01-01 00:00:00+00:00',
+     '[]', ARRAY[]::int[], ROW('',0), '\x'),
+    (3, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL);
+
+control substitution on
+
+statement ok
+FLUSH;
+
+system ok
+python3 e2e_test/sink/rabbitmq/rabbitmq.py verify rw_sink_e2e_default --routing-key rw_sink_e2e_default --expected e2e_test/sink/rabbitmq/json.json
+
+# Test a custom direct exchange, backfill, and a small confirmation window.
+statement ok
+CREATE TABLE direct_input (id int) APPEND ONLY;
+
+statement ok
+INSERT INTO direct_input SELECT generate_series FROM generate_series(1, 64);
+
+statement ok
+FLUSH;
+
+statement ok
+CREATE SINK direct_sink FROM direct_input WITH (
+    ${RISEDEV_RABBITMQ_WITH_OPTIONS_COMMON},
+    exchange = 'rw_sink_e2e',
+    routing_key = 'selected',
+    max_inflight_messages = '1'
+) FORMAT PLAIN ENCODE JSON;
+
+system ok
+python3 e2e_test/sink/rabbitmq/rabbitmq.py verify rw_sink_e2e_direct --exchange rw_sink_e2e --routing-key selected --ids 1 64
+
+statement ok
+INSERT INTO direct_input VALUES (65), (66);
+
+statement ok
+FLUSH;
+
+system ok
+python3 e2e_test/sink/rabbitmq/rabbitmq.py verify rw_sink_e2e_direct --exchange rw_sink_e2e --routing-key selected --ids 65 66
+
+# Cover the non-decoupled path and raw Protobuf without a schema registry.
+statement ok
+SET sink_decouple = false;
+
+statement ok
+CREATE TABLE protobuf_input (string_field varchar) APPEND ONLY;
+
+statement ok
+CREATE SINK protobuf_sink FROM protobuf_input WITH (
+    ${RISEDEV_RABBITMQ_WITH_OPTIONS_COMMON},
+    exchange = '',
+    routing_key = 'rw_sink_e2e_protobuf'
+) FORMAT PLAIN ENCODE PROTOBUF (
+    schema.location = 'file://${PWD}/src/connector/codec/tests/test_data/all-types.pb',
+    message = 'all_types.AllTypes'
+);
+
+statement ok
+INSERT INTO protobuf_input VALUES ('rabbitmq'), ('中文');
+
+statement ok
+FLUSH;
+
+system ok
+python3 e2e_test/sink/rabbitmq/rabbitmq.py verify rw_sink_e2e_protobuf --routing-key rw_sink_e2e_protobuf --encoding protobuf --expected e2e_test/sink/rabbitmq/protobuf.json
+
+statement ok
+DROP SINK json_sink;
+
+statement ok
+DROP SINK direct_sink;
+
+statement ok
+DROP SINK protobuf_sink;
+
+# Messages must not reach a queue bound to another routing key.
+system ok
+python3 e2e_test/sink/rabbitmq/rabbitmq.py empty rw_sink_e2e_unmatched
+
+statement ok
+DROP TABLE json_input;
+
+statement ok
+DROP TABLE direct_input;
+
+statement ok
+DROP TABLE protobuf_input;
+
+system ok
+python3 e2e_test/sink/rabbitmq/rabbitmq.py cleanup rw_sink_e2e
+
+statement ok
+SET sink_decouple = default;

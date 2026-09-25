@@ -1045,6 +1045,21 @@ profile:
         port: 1883
         user-managed: true
 
+  ci-sink-rabbitmq-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+      - use: meta-node
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: rabbitmq
+        address: rabbitmq-server
+        user: guest
+        password: guest
+        user-managed: true
+
   # Minimal configuration for cron_only source tests (Kafka + direct CDC)
   ci-inline-source-cron-only-test:
     config-path: src/config/ci-recovery.toml
@@ -1371,6 +1386,21 @@ profile:
       - use: frontend
       - use: compactor
       - use: mqtt
+
+  local-rabbitmq-sink-test:
+    config-path: src/config/ci.toml
+    steps:
+      - use: minio
+        id: minio-local-rabbitmq-sink-test
+      - use: sqlite
+        id: sqlite-local-rabbitmq-sink-test
+      - use: meta-node
+        meta-backend: sqlite
+      - use: compute-node
+        enable-tiered-cache: true
+      - use: frontend
+      - use: compactor
+      - use: rabbitmq
 
   local-elasticsearch-sink-test:
     config-path: src/config/ci.toml
@@ -2023,6 +2053,18 @@ template:
     port: 1883
     image: "eclipse-mosquitto:2.0.21"
     persist-data: true
+    user-managed: false
+
+  rabbitmq:
+    id: rabbitmq-${port}
+    address: "127.0.0.1"
+    port: 5672
+    management-port: 15672
+    user: risingwave
+    password: risingwave
+    vhost: "/"
+    image: "rabbitmq:3-management"
+    persist-data: false
     user-managed: false
 
   # Lakekeeper Apache Iceberg REST Catalog service backed by binary.

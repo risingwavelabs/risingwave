@@ -197,6 +197,14 @@ labels:
   files:
   - "src\\/connector\\/src\\/sink\\/mqtt\\.rs"
 
+- label: "ci/run-e2e-rabbitmq-sink-tests"
+  files:
+  - "ci\\/scripts\\/e2e-rabbitmq-sink-test\\.sh"
+  - "e2e_test\\/sink\\/rabbitmq\\/.*"
+  - "e2e_test\\/sink\\/rabbitmq_sink\\.slt"
+  - "src\\/connector\\/src\\/sink\\/rabbitmq\\.rs"
+  - "src\\/connector\\/src\\/sink\\/rabbitmq\\/.*"
+
 - label: "ci/run-e2e-clickhouse-sink-tests"
   files:
   - "ci\\/scripts\\/e2e-clickhouse-sink-test\\.sh"

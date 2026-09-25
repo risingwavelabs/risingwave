@@ -299,6 +299,36 @@ pub fn generate_risedev_env(services: &Vec<ServiceConfig>) -> String {
                 )
                 .unwrap();
             }
+            ServiceConfig::RabbitMq(c) => {
+                let mut url = url::Url::parse(&format!("amqp://{}:{}", c.address, c.port))
+                    .expect("valid RabbitMQ address");
+                url.path_segments_mut().unwrap().clear().push(&c.vhost);
+                let management_url = format!("http://{}:{}", c.address, c.management_port);
+                let sql_quote = |value: &str| value.replace('\'', "''");
+                let options = format!(
+                    "connector='rabbitmq',url='{}',username='{}',password='{}'",
+                    sql_quote(url.as_str()),
+                    sql_quote(&c.user),
+                    sql_quote(&c.password),
+                );
+                for (name, value) in [
+                    ("RISEDEV_RABBITMQ_URL", url.as_str()),
+                    ("RISEDEV_RABBITMQ_MANAGEMENT_URL", management_url.as_str()),
+                    ("RISEDEV_RABBITMQ_USERNAME", c.user.as_str()),
+                    ("RISEDEV_RABBITMQ_PASSWORD", c.password.as_str()),
+                    ("RISEDEV_RABBITMQ_VHOST", c.vhost.as_str()),
+                    ("RISEDEV_RABBITMQ_WITH_OPTIONS_COMMON", options.as_str()),
+                ] {
+                    // cargo-make's env-file reader only strips double quotes. Also
+                    // escape shell metacharacters for callers that source this file.
+                    let value = value
+                        .replace('\\', "\\\\")
+                        .replace('"', "\\\"")
+                        .replace('$', "\\$")
+                        .replace('`', "\\`");
+                    writeln!(env, "{name}=\"{value}\"").unwrap();
+                }
+            }
             ServiceConfig::Minio(c) => {
                 let endpoint = format!("http://{}:{}", c.address, c.port);
                 writeln!(env, r#"RISEDEV_MINIO_ENDPOINT="{endpoint}""#).unwrap();

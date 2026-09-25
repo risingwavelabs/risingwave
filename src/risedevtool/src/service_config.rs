@@ -519,6 +519,24 @@ pub struct MqttConfig {
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 #[serde(deny_unknown_fields)]
+pub struct RabbitMqConfig {
+    #[serde(rename = "use")]
+    phantom_use: Option<String>,
+    pub id: String,
+    pub address: String,
+    pub port: u16,
+    pub management_port: u16,
+    pub user: String,
+    pub password: String,
+    pub vhost: String,
+    pub image: String,
+    pub user_managed: bool,
+    pub persist_data: bool,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+#[serde(deny_unknown_fields)]
 pub struct ElasticSearchConfig {
     #[serde(rename = "use")]
     phantom_use: Option<String>,
@@ -617,6 +635,7 @@ pub enum ServiceConfig {
     OpenSearch(OpenSearchConfig),
     Nats(NatsConfig),
     Mqtt(MqttConfig),
+    RabbitMq(RabbitMqConfig),
     Lakekeeper(LakekeeperConfig),
     Moat(MoatConfig),
 }
@@ -636,6 +655,7 @@ pub enum TaskGroup {
     OpenSearch,
     Nats,
     Mqtt,
+    RabbitMq,
     Redis,
     ClickHouse,
     Lakekeeper,
@@ -670,6 +690,7 @@ impl ServiceConfig {
             Self::OpenSearch(c) => &c.id,
             Self::Nats(c) => &c.id,
             Self::Mqtt(c) => &c.id,
+            Self::RabbitMq(c) => &c.id,
             Self::SchemaRegistry(c) => &c.id,
             Self::Lakekeeper(c) => &c.id,
             Self::Moat(c) => &c.id,
@@ -704,6 +725,7 @@ impl ServiceConfig {
             Self::OpenSearch(c) => Some(c.port),
             Self::Nats(c) => Some(c.port),
             Self::Mqtt(c) => Some(c.port),
+            Self::RabbitMq(c) => Some(c.port),
             Self::SchemaRegistry(c) => Some(c.port),
             Self::Lakekeeper(c) => Some(c.port),
             Self::Moat(c) => Some(c.port),
@@ -737,6 +759,7 @@ impl ServiceConfig {
             Self::OpenSearch(c) => c.user_managed,
             Self::Nats(c) => c.user_managed,
             Self::Mqtt(c) => c.user_managed,
+            Self::RabbitMq(c) => c.user_managed,
             Self::SchemaRegistry(c) => c.user_managed,
             Self::Lakekeeper(c) => c.user_managed,
             Self::Moat(_c) => false,
@@ -782,6 +805,7 @@ impl ServiceConfig {
             ServiceConfig::OpenSearch(_) => OpenSearch,
             ServiceConfig::Nats(_) => Nats,
             ServiceConfig::Mqtt(_) => Mqtt,
+            ServiceConfig::RabbitMq(_) => RabbitMq,
             ServiceConfig::Lakekeeper(_) => Lakekeeper,
             ServiceConfig::Moat(_) => Moat,
         }

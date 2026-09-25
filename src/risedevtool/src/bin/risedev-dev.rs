@@ -33,8 +33,9 @@ use risedev::{
     GrafanaService, KafkaService, LakekeeperService, MetaNodeService, MinioService, MoatService,
     MongoDbService, MongoDbSetupTask, MotoService, MqttService, MySqlService, NatsService,
     OpenSearchService, PostgresService, PrometheusService, PubsubService, PulsarService,
-    RISEDEV_NAME, RedisService, SchemaRegistryService, ServiceConfig, SqlServerService,
-    SqliteConfig, Task, TaskGroup, TempoService, generate_risedev_env, preflight_check,
+    RISEDEV_NAME, RabbitMqService, RedisService, SchemaRegistryService, ServiceConfig,
+    SqlServerService, SqliteConfig, Task, TaskGroup, TempoService, generate_risedev_env,
+    preflight_check,
 };
 use sqlx::mysql::MySqlConnectOptions;
 use sqlx::postgres::PgConnectOptions;
@@ -405,6 +406,17 @@ fn task_main(
                         risedev::TcpReadyCheckTask::new(c.address.clone(), c.port, c.user_managed)?;
                     task.execute(&mut ctx)?;
                     ctx.pb.set_message(format!("mqtt {}:{}", c.address, c.port));
+                }
+                ServiceConfig::RabbitMq(c) => {
+                    RabbitMqService::new(c.clone()).execute(&mut ctx)?;
+                    for port in [c.port, c.management_port] {
+                        risedev::TcpReadyCheckTask::new(c.address.clone(), port, c.user_managed)?
+                            .execute(&mut ctx)?;
+                    }
+                    ctx.pb.set_message(format!(
+                        "rabbitmq {}:{}, management http://{}:{}",
+                        c.address, c.port, c.address, c.management_port
+                    ));
                 }
                 ServiceConfig::Lakekeeper(c) => {
                     let mut service = LakekeeperService::new(c.clone())?;
