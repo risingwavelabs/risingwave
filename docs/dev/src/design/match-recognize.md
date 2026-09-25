@@ -626,8 +626,9 @@ not on Flink, whose window is exclusive.
   precompute and label interning. The `DEFINE` evaluations of that rescan are cached per row: a
   predicate whose slots read only the candidate row or a physical `PREV` has a verdict that is a
   function of the row position (the same path independence the walker's failure memo needs, per
-  predicate), so the matcher evaluates it once per row per visit and every later path that reaches
-  the row gets a cell load; predicates using running `FIRST`/`LAST` are evaluated per path as
+  predicate), so a matcher evaluates it once per row — the cache lives and dies with the matcher, and a
+  visit builds several (the refresh, one per gate check, the prune) — and every later path
+  that reaches the row gets a cell load; predicates using running `FIRST`/`LAST` are evaluated per path as
   before, and the `WITHIN` span test stays outside the cache. Cells are allocated lazily per
   256-row chunk, so a matcher over a long buffer of matchless rows awaiting the watermark's prune
   costs the walk, not the buffer. Measured (criterion `stream_match_recognize_define`, `(a+ b)`
