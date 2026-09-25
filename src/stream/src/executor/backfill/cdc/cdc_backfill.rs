@@ -496,7 +496,7 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 future.as_mut().await
             };
             let pk_names = self.external_table.pk_names();
-            let mut pk_needs_unsigned_i64_compare = match pk_needs_unsigned_i64_compare {
+            let pk_needs_unsigned_i64_compare = match pk_needs_unsigned_i64_compare {
                 Some(comparisons) => comparisons,
                 None => {
                     let comparisons = table_reader.pk_column_comparisons(&pk_names)?;
@@ -524,8 +524,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                 let _permit = CDC_CONN_SEMAPHORE.acquire().await.unwrap();
                 last_binlog_offset = upstream_table_reader.current_cdc_offset().await?;
             }
-
-            let mut consumed_binlog_offset: Option<CdcOffset> = None;
 
             tracing::info!(
                 %table_id,
@@ -760,12 +758,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                         }
                     };
 
-                    let comparisons = table_reader.pk_column_comparisons(&pk_names)?;
-                    assert_eq!(comparisons.len(), pk_indices.len());
-                    pk_needs_unsigned_i64_compare = comparisons
-                        .into_iter()
-                        .map(|comparison| comparison == CdcKeyComparison::UnsignedInt64)
-                        .collect_vec();
                     upstream_table_reader =
                         UpstreamTableReader::new(self.external_table.clone(), table_reader);
                     tracing::info!(
@@ -1105,6 +1097,8 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
 
                 // If the number of barriers reaches the snapshot interval,
                 // consume the buffered upstream chunks.
+                let mut consumed_binlog_offset = None;
+
                 if let Some(current_pos) = &current_pk_pos {
                     for chunk in upstream_chunk_buffer.drain(..) {
                         cur_barrier_upstream_processed_rows += chunk.cardinality() as u64;
