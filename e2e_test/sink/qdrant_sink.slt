@@ -1,0 +1,178 @@
+system ok retry 30 backoff 1s
+curl -s -X DELETE -H 'api-key: qdrant_test_key' http://qdrant-server:6333/collections/rw_unnamed && curl -sf -X PUT -H 'api-key: qdrant_test_key' -H 'Content-Type: application/json' http://qdrant-server:6333/collections/rw_unnamed -d '{"vectors": {"size": 3, "distance": "Dot"}}'
+
+system ok
+curl -s -X DELETE -H 'api-key: qdrant_test_key' http://qdrant-server:6333/collections/rw_named && curl -sf -X PUT -H 'api-key: qdrant_test_key' -H 'Content-Type: application/json' http://qdrant-server:6333/collections/rw_named -d '{"vectors": {"text": {"size": 3, "distance": "Dot"}, "image": {"size": 2, "distance": "Dot"}}}'
+
+system ok
+curl -s -X DELETE -H 'api-key: qdrant_test_key' http://qdrant-server:6333/collections/rw_created
+
+statement ok
+SET RW_IMPLICIT_FLUSH TO true;
+
+statement ok
+CREATE SECRET qdrant_api_key WITH (backend = 'meta') AS 'qdrant_test_key';
+
+statement ok
+CREATE TABLE qdrant_unnamed_items (
+    id bigint primary key,
+    body varchar,
+    price decimal,
+    published_at timestamptz,
+    embedding vector(3)
+);
+
+statement ok
+INSERT INTO qdrant_unnamed_items VALUES
+    (1, 'first', 1.5, '2026-06-16 01:02:03+00:00', '[0.1,0.2,0.3]'),
+    (2, 'second', 2.5, '2026-06-16 02:03:04+00:00', '[0.2,0.3,0.4]'),
+    (3, 'third', 3.5, '2026-06-16 03:04:05+00:00', '[0.3,0.4,0.5]');
+
+statement ok
+CREATE SINK qdrant_unnamed_sink FROM qdrant_unnamed_items WITH (
+    connector = 'qdrant',
+    url = 'http://qdrant-server:6334',
+    collection_name = 'rw_unnamed',
+    api_key = secret qdrant_api_key,
+    primary_key = 'id',
+    type = 'upsert',
+    write_batch_size = 2
+);
+
+statement ok
+DELETE FROM qdrant_unnamed_items WHERE id = 2;
+
+statement ok
+UPDATE qdrant_unnamed_items SET body = 'third updated', embedding = '[0.9,0.8,0.7]' WHERE id = 3;
+
+statement ok
+ALTER SINK qdrant_unnamed_sink CONNECTOR WITH (write_batch_size = 10);
+
+statement error `write_batch_size` must be greater than 0
+ALTER SINK qdrant_unnamed_sink CONNECTOR WITH (write_batch_size = 0);
+
+statement ok
+INSERT INTO qdrant_unnamed_items VALUES (4, 'fourth', 4.5, '2026-06-16 04:05:06+00:00', '[0.4,0.5,0.6]');
+
+statement ok
+CREATE TABLE qdrant_named_items (
+    tenant int,
+    doc varchar,
+    tags varchar[],
+    text vector(3),
+    image vector(2),
+    primary key (tenant, doc)
+);
+
+statement ok
+CREATE SINK qdrant_named_sink FROM qdrant_named_items WITH (
+    connector = 'qdrant',
+    url = 'http://qdrant-server:6334',
+    collection_name = 'rw_named',
+    api_key = secret qdrant_api_key,
+    primary_key = 'tenant,doc',
+    type = 'upsert'
+);
+
+statement ok
+INSERT INTO qdrant_named_items VALUES
+    (1, 'a', ARRAY['x', 'y'], '[1,0,0]', '[0.5,0.5]'),
+    (1, 'b', ARRAY['z'], '[0,1,0]', NULL);
+
+statement ok
+CREATE TABLE qdrant_created_items (id int primary key, embedding vector(2));
+
+statement ok
+INSERT INTO qdrant_created_items VALUES (1, '[1,2]'), (2, '[3,4]');
+
+statement ok
+CREATE SINK qdrant_created_sink FROM qdrant_created_items WITH (
+    connector = 'qdrant',
+    url = 'http://qdrant-server:6334',
+    collection_name = 'rw_created',
+    api_key = secret qdrant_api_key,
+    distance = 'dot',
+    primary_key = 'id',
+    type = 'upsert'
+);
+
+sleep 3s
+
+statement ok
+DROP SINK qdrant_created_sink;
+
+statement ok
+DROP TABLE qdrant_created_items;
+
+statement ok
+DROP SINK qdrant_named_sink;
+
+statement ok
+DROP SINK qdrant_unnamed_sink;
+
+statement ok
+CREATE TABLE qdrant_wide_items (id bigint primary key, embedding vector(4));
+
+statement error Qdrant vector size is 3, but column 'embedding' is vector\(4\)
+CREATE SINK qdrant_wrong_size FROM qdrant_wide_items WITH (
+    connector = 'qdrant',
+    url = 'http://qdrant-server:6334',
+    collection_name = 'rw_unnamed',
+    api_key = secret qdrant_api_key,
+    primary_key = 'id',
+    type = 'upsert'
+);
+
+statement ok
+DROP TABLE qdrant_wide_items;
+
+statement error Qdrant collection has no vector named 'embedding'
+CREATE SINK qdrant_wrong_name FROM qdrant_unnamed_items WITH (
+    connector = 'qdrant',
+    url = 'http://qdrant-server:6334',
+    collection_name = 'rw_named',
+    api_key = secret qdrant_api_key,
+    primary_key = 'id',
+    type = 'upsert'
+);
+
+statement error Qdrant collection uses distance Dot, but the sink specifies Cosine
+CREATE SINK qdrant_wrong_distance FROM qdrant_unnamed_items WITH (
+    connector = 'qdrant',
+    url = 'http://qdrant-server:6334',
+    collection_name = 'rw_unnamed',
+    api_key = secret qdrant_api_key,
+    distance = 'cosine',
+    primary_key = 'id',
+    type = 'upsert'
+);
+
+statement error invalid `distance` 'l2'
+CREATE SINK qdrant_invalid_distance FROM qdrant_unnamed_items WITH (
+    connector = 'qdrant',
+    url = 'http://qdrant-server:6334',
+    collection_name = 'rw_unnamed',
+    api_key = secret qdrant_api_key,
+    distance = 'l2',
+    primary_key = 'id',
+    type = 'upsert'
+);
+
+statement error Qdrant sink requires primary_key
+CREATE SINK qdrant_no_pk FROM qdrant_unnamed_items WITH (
+    connector = 'qdrant',
+    url = 'http://qdrant-server:6334',
+    collection_name = 'rw_unnamed',
+    api_key = secret qdrant_api_key,
+    type = 'append-only',
+    force_append_only = 'true'
+);
+
+statement ok
+DROP TABLE qdrant_named_items;
+
+statement ok
+DROP TABLE qdrant_unnamed_items;
+
+statement ok
+DROP SECRET qdrant_api_key;
