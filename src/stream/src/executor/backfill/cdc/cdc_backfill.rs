@@ -36,6 +36,7 @@ use risingwave_connector::source::{SourceColumnDesc, SourceContext, SourceCtrlOp
 use rw_futures_util::pausable;
 use thiserror_ext::AsReport;
 
+use crate::executor::Mutation;
 use crate::executor::backfill::cdc::state::CdcBackfillState;
 use crate::executor::backfill::cdc::upstream_table::external::ExternalStorageTable;
 use crate::executor::backfill::cdc::upstream_table::reader::{
@@ -443,6 +444,24 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                     match build_reader_and_poll_upstream(&mut upstream, &mut future).await? {
                         Either::Left(msg) => match msg {
                             Message::Barrier(barrier) => {
+                                if let Some(mutation) = barrier.mutation.as_deref() {
+                                    match mutation {
+                                        Mutation::Pause => {
+                                            is_snapshot_paused = true;
+                                        }
+                                        Mutation::Resume => {
+                                            is_snapshot_paused = false;
+                                        }
+                                        Mutation::Throttle(_) => {
+                                            if let Some(entry) = mutation.backfill_throttle_config(
+                                                self.actor_ctx.fragment_id,
+                                            ) {
+                                                self.rate_limit_rps = entry.rate_limit;
+                                            }
+                                        }
+                                        _ => (),
+                                    }
+                                }
                                 state_impl.commit_state(barrier.epoch).await?;
                                 yield Message::Barrier(barrier);
                             }
@@ -651,7 +670,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                             Either::Left(msg) => match msg {
                                 Message::Barrier(barrier) => {
                                     if let Some(mutation) = barrier.mutation.as_deref() {
-                                        use crate::executor::Mutation;
                                         match mutation {
                                             Mutation::Pause => {
                                                 is_snapshot_paused = true;
@@ -814,7 +832,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
                                         barrier_count == self.options.snapshot_barrier_interval;
 
                                     if let Some(mutation) = barrier.mutation.as_deref() {
-                                        use crate::executor::Mutation;
                                         match mutation {
                                             Mutation::Pause => {
                                                 is_snapshot_paused = true;
