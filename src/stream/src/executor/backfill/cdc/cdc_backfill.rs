@@ -13,12 +13,11 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
-use std::future::Future;
 use std::pin::Pin;
 
 use either::Either;
+use futures::stream;
 use futures::stream::select_with_strategy;
-use futures::{Stream, stream};
 use itertools::Itertools;
 use risingwave_common::array::{DataChunk, Op};
 use risingwave_common::bail;
@@ -32,9 +31,7 @@ use risingwave_connector::parser::{
     SpecificParserConfig, TimeHandling, TimestampHandling, TimestamptzHandling,
 };
 use risingwave_connector::source::cdc::CdcScanOptions;
-use risingwave_connector::source::cdc::external::{
-    CdcOffset, ExternalCdcTableType, ExternalTableReaderImpl,
-};
+use risingwave_connector::source::cdc::external::{CdcOffset, ExternalCdcTableType};
 use risingwave_connector::source::{SourceColumnDesc, SourceContext, SourceCtrlOpts};
 use rw_futures_util::pausable;
 use thiserror_ext::AsReport;
@@ -42,6 +39,9 @@ use tracing::Instrument;
 
 use crate::executor::backfill::cdc::state::CdcBackfillState;
 use crate::executor::backfill::cdc::upstream_table::external::ExternalStorageTable;
+use crate::executor::backfill::cdc::upstream_table::reader::{
+    build_reader_and_poll_upstream, create_table_reader_with_retry,
+};
 use crate::executor::backfill::cdc::upstream_table::snapshot::{
     SnapshotReadArgs, UpstreamTableRead, UpstreamTableReader,
 };
@@ -51,8 +51,7 @@ use crate::executor::backfill::utils::{
 };
 use crate::executor::monitor::CdcBackfillMetrics;
 use crate::executor::prelude::*;
-use crate::executor::source::get_infinite_backoff_strategy;
-use crate::task::{CreateMviewProgressReporter, FragmentId};
+use crate::task::CreateMviewProgressReporter;
 
 /// `split_id`, `is_finished`, `row_count`, `cdc_offset` all occupy 1 column each.
 const METADATA_STATE_LEN: usize = 4;
@@ -1228,49 +1227,6 @@ impl<S: StateStore> CdcBackfillExecutor<S> {
             }
         }
     }
-}
-
-pub(crate) async fn build_reader_and_poll_upstream(
-    upstream: &mut (impl Stream<Item = StreamExecutorResult<Message>> + Unpin),
-    future: &mut Pin<Box<impl Future<Output = ExternalTableReaderImpl>>>,
-) -> StreamExecutorResult<Either<Message, ExternalTableReaderImpl>> {
-    tokio::select! {
-        biased;
-        reader = &mut *future => Ok(Either::Right(reader)),
-        msg = upstream.next() => {
-            msg.transpose()?
-                .map(Either::Left)
-                .ok_or_else(|| anyhow::anyhow!(
-                    "upstream closed while creating CDC table reader"
-                ).into())
-        }
-    }
-}
-
-async fn create_table_reader_with_retry(
-    external_table: ExternalStorageTable,
-    actor_id: ActorId,
-    fragment_id: FragmentId,
-) -> ExternalTableReaderImpl {
-    let backoff = get_infinite_backoff_strategy();
-
-    tokio_retry::Retry::spawn(backoff, || async {
-        match external_table.create_table_reader().await {
-            Ok(reader) => Ok(reader),
-            Err(error) => {
-                tracing::warn!(
-                    error = %error.as_report(),
-                    actor_id = %actor_id,
-                    fragment_id = %fragment_id,
-                    "failed to create CDC table reader; retrying"
-                );
-                Err(error)
-            }
-        }
-    })
-    .instrument(tracing::info_span!("create_cdc_table_reader_with_retry"))
-    .await
-    .expect("retry creating CDC table reader until success")
 }
 
 #[try_stream(ok = Message, error = StreamExecutorError)]
