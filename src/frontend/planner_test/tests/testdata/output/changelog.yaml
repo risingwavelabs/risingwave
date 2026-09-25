@@ -33,3 +33,97 @@
     ├── distribution key: [ 3 ]
     └── read pk prefix len hint: 1
 
+- name: changelog single key
+  sql: |
+    create table t (id int, name varchar);
+    with c as changelog from t key (id) select name, changelog_op from c;
+  logical_plan: |-
+    LogicalProject { exprs: [t.name, changelog_op] }
+    └─LogicalShare { id: 2 }
+      └─LogicalChangeLog { key: [t.id] }
+        └─LogicalScan { table: t, columns: [t.id, t.name, t._row_id, t._rw_timestamp] }
+  optimized_logical_plan_for_stream: |-
+    LogicalProject { exprs: [t.name, changelog_op] }
+    └─LogicalChangeLog { key: [t.id] }
+      └─LogicalScan { table: t, columns: [t.name, t.id] }
+  stream_plan: |-
+    StreamMaterialize { columns: [name, changelog_op, _changelog_row_id(hidden)], stream_key: [_changelog_row_id], pk_columns: [_changelog_row_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.name, changelog_op, _changelog_row_id] }
+      └─StreamChangeLog { key: [t.id] }
+        └─StreamExchange { dist: HashShard(t.id) }
+          └─StreamTableScan { table: t, columns: [t.name, t.id, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+  stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [name, changelog_op, _changelog_row_id(hidden)], stream_key: [_changelog_row_id], pk_columns: [_changelog_row_id], pk_conflict: NoCheck }
+    └── StreamProject { exprs: [t.name, changelog_op, _changelog_row_id] }
+        └── StreamChangeLog { key: [t.id] }
+            └── StreamExchange Hash([1]) from 1
+
+    Fragment 1
+    StreamTableScan { table: t, columns: [t.name, t.id, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+    ├── tables: [ StreamScan: 0 ]
+    ├── Upstream
+    └── BatchPlanNode
+
+    Table 0
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3, 4 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 4294967294
+    ├── columns: [ name, changelog_op, _changelog_row_id, _rw_timestamp ]
+    ├── primary key: [ $2 ASC ]
+    ├── value indices: [ 0, 1, 2 ]
+    ├── distribution key: [ 2 ]
+    └── read pk prefix len hint: 1
+
+- name: changelog composite key
+  sql: |
+    create table t (id int, age int, tenant int, name varchar);
+    with c as changelog from t key (tenant, ID) select name from c;
+  logical_plan: |-
+    LogicalProject { exprs: [t.name] }
+    └─LogicalShare { id: 2 }
+      └─LogicalChangeLog { key: [t.tenant, t.id] }
+        └─LogicalScan { table: t, columns: [t.id, t.age, t.tenant, t.name, t._row_id, t._rw_timestamp] }
+  optimized_logical_plan_for_stream: |-
+    LogicalProject { exprs: [t.name] }
+    └─LogicalChangeLog { key: [t.tenant, t.id] }
+      └─LogicalScan { table: t, columns: [t.name, t.tenant, t.id] }
+  stream_plan: |-
+    StreamMaterialize { columns: [name, _changelog_row_id(hidden)], stream_key: [_changelog_row_id], pk_columns: [_changelog_row_id], pk_conflict: NoCheck }
+    └─StreamProject { exprs: [t.name, _changelog_row_id] }
+      └─StreamChangeLog { key: [t.tenant, t.id] }
+        └─StreamExchange { dist: HashShard(t.tenant, t.id) }
+          └─StreamTableScan { table: t, columns: [t.name, t.tenant, t.id, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+  stream_dist_plan: |+
+    Fragment 0
+    StreamMaterialize { columns: [name, _changelog_row_id(hidden)], stream_key: [_changelog_row_id], pk_columns: [_changelog_row_id], pk_conflict: NoCheck }
+    └── StreamProject { exprs: [t.name, _changelog_row_id] }
+        └── StreamChangeLog { key: [t.tenant, t.id] }
+            └── StreamExchange Hash([1, 2]) from 1
+
+    Fragment 1
+    StreamTableScan { table: t, columns: [t.name, t.tenant, t.id, t._row_id], stream_scan_type: SnapshotBackfill, stream_key: [t._row_id], pk: [_row_id], dist: UpstreamHashShard(t._row_id) }
+    ├── tables: [ StreamScan: 0 ]
+    ├── Upstream
+    └── BatchPlanNode
+
+    Table 0
+    ├── columns: [ vnode, epoch, row_count, is_epoch_finished, _row_id, _rw_timestamp ]
+    ├── primary key: [ $0 ASC ]
+    ├── value indices: [ 1, 2, 3, 4 ]
+    ├── distribution key: [ 0 ]
+    ├── read pk prefix len hint: 1
+    └── vnode column idx: 0
+
+    Table 4294967294 { columns: [ name, _changelog_row_id, _rw_timestamp ], primary key: [ $1 ASC ], value indices: [ 0, 1 ], distribution key: [ 1 ], read pk prefix len hint: 1 }
+
+- name: changelog missing key column
+  sql: |
+    create table t (id int);
+    with c as changelog from t key (missing) select * from c;
+  binder_error: 'Item not found: Invalid column: missing'

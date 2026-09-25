@@ -2948,6 +2948,59 @@ fn parse_ctes() {
 }
 
 #[test]
+fn parse_changelog_cte_key() {
+    let query = verified_query(
+        "WITH a AS changelog from mv1, \
+              b AS changelog from mv2 KEY (id), \
+              c AS changelog from mv3 KEY (id, \"Quoted\") \
+         SELECT * FROM a, b, c",
+    );
+    let ctes = &query.with.as_ref().unwrap().cte_tables;
+
+    assert_eq!(ctes.len(), 3);
+
+    assert_eq!(
+        ctes[0].cte_inner,
+        CteInner::ChangeLog {
+            from: ObjectName(vec![Ident::new_unchecked("mv1")]),
+            key: None,
+        }
+    );
+
+    assert_eq!(
+        ctes[1].cte_inner,
+        CteInner::ChangeLog {
+            from: ObjectName(vec![Ident::new_unchecked("mv2")]),
+            key: Some(vec![Ident::new_unchecked("id")]),
+        }
+    );
+
+    assert_eq!(
+        ctes[2].cte_inner,
+        CteInner::ChangeLog {
+            from: ObjectName(vec![Ident::new_unchecked("mv3")]),
+            key: Some(vec![
+                Ident::new_unchecked("id"),
+                Ident::with_quote_unchecked('"', "Quoted"),
+            ]),
+        }
+    );
+
+    for sql in [
+        "WITH c AS changelog from mv KEY () SELECT * FROM c",
+        "WITH c AS changelog from mv KEY id SELECT * FROM c",
+        "WITH c AS changelog from mv KEY (id,) SELECT * FROM c",
+        "WITH c AS changelog from mv KEY (schema.id) SELECT * FROM c",
+        "WITH c AS changelog from mv PRIMARY KEY (id) SELECT * FROM c",
+    ] {
+        assert!(
+            parse_sql_statements(sql).is_err(),
+            "expected error for {sql}"
+        );
+    }
+}
+
+#[test]
 fn parse_cte_renamed_columns() {
     let sql = "WITH cte (col1, col2) AS (SELECT foo, bar FROM baz) SELECT * FROM cte";
     let query = verified_query(sql);
