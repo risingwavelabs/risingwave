@@ -35,7 +35,6 @@ use risingwave_connector::source::cdc::external::{CdcOffset, ExternalCdcTableTyp
 use risingwave_connector::source::{SourceColumnDesc, SourceContext, SourceCtrlOpts};
 use rw_futures_util::pausable;
 use thiserror_ext::AsReport;
-use tracing::Instrument;
 
 use crate::executor::backfill::cdc::state::CdcBackfillState;
 use crate::executor::backfill::cdc::upstream_table::external::ExternalStorageTable;
