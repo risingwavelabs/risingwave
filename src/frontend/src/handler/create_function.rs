@@ -57,6 +57,7 @@ pub async fn handle_create_function(
         bail_not_implemented!("CREATE TEMPORARY FUNCTION");
     }
 
+    let is_immutable = matches!(&params.behavior, Some(FunctionBehavior::Immutable));
     let udf_config = handler_args.session.env().udf_config();
 
     // e.g., `language [ python / javascript / ...etc]`
@@ -98,6 +99,20 @@ pub async fn handle_create_function(
         }
         None => None,
     };
+
+    let always_retry_on_network_error = with_options
+        .always_retry_on_network_error
+        .unwrap_or_default();
+    let unsafe_skip_materializing_exprs = with_options
+        .unsafe_skip_materializing_exprs
+        .unwrap_or_default();
+    if unsafe_skip_materializing_exprs && !is_immutable {
+        return Err(ErrorCode::InvalidParameterValue(
+            "`IMMUTABLE` must be specified when `unsafe_skip_materializing_exprs` is true"
+                .to_owned(),
+        )
+        .into());
+    }
 
     let return_type;
     let kind = match returns {
@@ -167,14 +182,26 @@ pub async fn handle_create_function(
         _ => None,
     };
 
-    let create_fn =
-        risingwave_expr::sig::find_udf_impl(&language, runtime.as_deref(), link)?.create_fn;
-    let output = create_fn(CreateOptions {
-        kind: match kind {
-            Kind::Scalar(_) => UdfKind::Scalar,
-            Kind::Table(_) => UdfKind::Table,
-            Kind::Aggregate(_) => unreachable!(),
-        },
+    let udf_kind = match kind {
+        Kind::Scalar(_) => UdfKind::Scalar,
+        Kind::Table(_) => UdfKind::Table,
+        // Aggregate UDFs are created through `CREATE AGGREGATE` and
+        // `handle_create_aggregate`, not this `CREATE FUNCTION` handler.
+        Kind::Aggregate(_) => unreachable!(),
+    };
+    let udf_impl = risingwave_expr::sig::find_udf_impl(&language, runtime.as_deref(), link)?;
+    if unsafe_skip_materializing_exprs
+        && (udf_impl.supports_always_retry_on_network_error)(udf_kind)
+        && !always_retry_on_network_error
+    {
+        return Err(ErrorCode::InvalidParameterValue(
+            "`always_retry_on_network_error` must be true when `unsafe_skip_materializing_exprs` is true for an external scalar UDF"
+                .to_owned(),
+        )
+        .into());
+    }
+    let output = (udf_impl.create_fn)(CreateOptions {
+        kind: udf_kind,
         name: &function_name,
         arg_names: &arg_names,
         arg_types: &arg_types,
@@ -200,9 +227,8 @@ pub async fn handle_create_function(
         body: output.body,
         compressed_binary: output.compressed_binary,
         owner: session.user_id(),
-        always_retry_on_network_error: with_options
-            .always_retry_on_network_error
-            .unwrap_or_default(),
+        always_retry_on_network_error,
+        unsafe_skip_materializing_exprs,
         is_async: with_options.r#async,
         is_batched: with_options.batch,
         created_at_epoch: None,
@@ -213,4 +239,110 @@ pub async fn handle_create_function(
     catalog_writer.create_function(function).await?;
 
     Ok(PgResponse::empty_result(StatementType::CREATE_FUNCTION))
+}
+
+#[cfg(test)]
+mod tests {
+    use risingwave_common::catalog::{DEFAULT_DATABASE_NAME, DEFAULT_SCHEMA_NAME};
+    use risingwave_common::types::DataType;
+    use risingwave_expr::sig::{CreateFunctionOutput, UDF_IMPLS, UdfImplDescriptor};
+
+    use crate::catalog::root_catalog::SchemaPath;
+    use crate::test_utils::LocalFrontend;
+
+    #[linkme::distributed_slice(UDF_IMPLS)]
+    static TEST_UDF: UdfImplDescriptor = UdfImplDescriptor {
+        match_fn: |language, runtime, link| {
+            language.is_empty() && runtime.is_none() && link.is_none()
+        },
+        create_fn: |opts| {
+            Ok(CreateFunctionOutput {
+                name_in_runtime: opts.name.to_owned(),
+                body: opts.as_.map(ToOwned::to_owned),
+                compressed_binary: None,
+            })
+        },
+        build_fn: |_| unreachable!("the planner test does not execute the UDF"),
+        supports_always_retry_on_network_error: |_| false,
+    };
+
+    /// Verifies option dependencies, catalog propagation, recursive purity, and top-level
+    /// materialization for a regular scalar UDF.
+    #[tokio::test]
+    async fn test_unsafe_skip_materializing_exprs() {
+        let frontend = LocalFrontend::new(Default::default()).await;
+
+        frontend.run_sql("create table t(v int)").await.unwrap();
+
+        // Embedded scalar UDFs do not use the external retry loop, but still require IMMUTABLE.
+        let error = frontend
+            .run_sql(
+                r#"create function rejected_without_immutable(v int)
+                   returns int
+                   with (unsafe_skip_materializing_exprs = true)"#,
+            )
+            .await
+            .unwrap_err();
+        assert!(
+            error.to_string().contains(
+                "`IMMUTABLE` must be specified when `unsafe_skip_materializing_exprs` is true"
+            ),
+            "{error}"
+        );
+
+        frontend
+            .run_sql(
+                r#"create function identity_without_stored_result(v int)
+                   returns int immutable
+                   with (unsafe_skip_materializing_exprs = true)"#,
+            )
+            .await
+            .unwrap();
+
+        let session = frontend.session_ref();
+        let catalog_reader = session.env().catalog_reader().read_guard();
+        let (function, _) = catalog_reader
+            .get_function_by_name_args(
+                DEFAULT_DATABASE_NAME,
+                SchemaPath::Name(DEFAULT_SCHEMA_NAME),
+                "identity_without_stored_result",
+                &[DataType::Int32],
+            )
+            .unwrap();
+        // The validated option must survive catalog creation so expression planning sees the
+        // same materialization policy that was specified in CREATE FUNCTION.
+        assert!(function.unsafe_skip_materializing_exprs);
+        drop(catalog_reader);
+
+        // An opted-out UDF declared immutable with only pure arguments is classified as recursively
+        // pure, so its project needs no StreamMaterializedExprs state table.
+        let plan = frontend
+            .get_explain_output(
+                "explain create materialized view mv as \
+                 select identity_without_stored_result(v) as v from t",
+            )
+            .await;
+        assert!(plan.contains("StreamProject"), "{plan}");
+        assert!(!plan.contains("StreamMaterializedExprs"), "{plan}");
+
+        // An opted-out UDF does not hide an impure descendant. Recursive purity marks the complete
+        // projected expression as impure, so the planner materializes the top-level result.
+        let plan = frontend
+            .get_explain_output(
+                "explain create materialized view mv_random as \
+                 select identity_without_stored_result(random()::int) as v from t",
+            )
+            .await;
+        let materialized_line = plan
+            .lines()
+            .find(|line| line.contains("StreamMaterializedExprs"))
+            .expect("the complete impure project expression should be materialized");
+        // Both names on the same operator line prove that it stores the complete outer expression,
+        // with RANDOM still nested inside it, rather than storing nested descendants separately.
+        assert!(materialized_line.contains("Random"), "{plan}");
+        assert!(
+            materialized_line.contains("identity_without_stored_result"),
+            "{plan}"
+        );
+    }
 }
