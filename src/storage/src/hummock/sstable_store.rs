@@ -337,12 +337,10 @@ impl SstableStore {
         );
     }
 
-    #[allow(dead_code)] // Used by the refill controller in the next stack layer.
     pub(crate) fn pin_cache(&self) -> Option<&Arc<PinCache>> {
         self.pin_cache.get()
     }
 
-    #[allow(dead_code)] // Used by the refill controller in the next stack layer.
     pub(crate) async fn pin_sst_at_generation(
         &self,
         object_id: HummockSstableObjectId,

@@ -107,6 +107,7 @@ pub struct StorageOpts {
 
     pub cache_refill_data_refill_levels: Vec<u32>,
     pub cache_refill_timeout_ms: u64,
+    pub cache_refill_pin_cache_max_batch_size: usize,
     pub cache_refill_meta_refill_concurrency: usize,
     pub cache_refill_concurrency: usize,
     pub cache_refill_recent_filter_shards: usize,
@@ -298,6 +299,7 @@ impl From<(&RwConfig, &SystemParamsReader, &StorageMemoryConfig)> for StorageOpt
             sst_skip_bloom_filter_in_serde: c.storage.sst_skip_bloom_filter_in_serde,
             cache_refill_data_refill_levels: c.storage.cache_refill.data_refill_levels.clone(),
             cache_refill_timeout_ms: c.storage.cache_refill.timeout_ms,
+            cache_refill_pin_cache_max_batch_size: c.storage.cache_refill.pin_cache_max_batch_size,
             cache_refill_meta_refill_concurrency: c.storage.cache_refill.meta_refill_concurrency,
             cache_refill_concurrency: c.storage.cache_refill.concurrency,
             cache_refill_recent_filter_shards: c.storage.cache_refill.recent_filter_shards,
