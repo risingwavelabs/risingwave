@@ -15,6 +15,7 @@
 use std::marker::PhantomData;
 
 use anyhow::Context;
+use risingwave_common::bail;
 use risingwave_common::types::JsonbVal;
 use serde::{Deserialize, Serialize};
 
@@ -101,6 +102,8 @@ pub struct SqlServerCdcSplit {
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Hash)]
 pub struct OracleCdcSplit {
     pub inner: CdcSplitBase,
+    /// Fixed source boundary chosen when the shared source first starts mining.
+    pub initial_mining_scn: Option<u64>,
 }
 
 impl MySqlCdcSplit {
@@ -381,6 +384,7 @@ impl OracleCdcSplit {
     pub fn new(split_id: u32, start_offset: Option<String>) -> Self {
         Self {
             inner: CdcSplitBase::new(split_id, start_offset),
+            initial_mining_scn: None,
         }
     }
 }
@@ -399,7 +403,25 @@ impl CdcSplitTrait for OracleCdcSplit {
     }
 
     fn update_offset(&mut self, last_seen_offset: String) -> ConnectorResult<()> {
-        self.inner.start_offset = Some(last_seen_offset);
+        let mut offset: serde_json::Value =
+            serde_json::from_str(&last_seen_offset).context("invalid Oracle CDC offset")?;
+        if let Some(scn) = offset
+            .as_object_mut()
+            .and_then(|offset| offset.remove("initialMiningScn"))
+        {
+            let scn = scn
+                .as_str()
+                .context("invalid initial Oracle mining SCN")?
+                .parse::<u64>()
+                .context("initial Oracle mining SCN is not a valid unsigned integer")?;
+            if scn == 0 {
+                bail!("initial Oracle mining SCN must be positive");
+            }
+            self.initial_mining_scn.get_or_insert(scn);
+            self.inner.start_offset = Some(offset.to_string());
+        } else {
+            self.inner.start_offset = Some(last_seen_offset);
+        }
         Ok(())
     }
 }
