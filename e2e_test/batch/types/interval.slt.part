@@ -217,3 +217,15 @@ query T
 select interval '- 1 year -1 months -       1 days 4 hours 5 minutes 6 seconds';
 ----
 -1 years -1 mons -1 days +04:05:06
+
+# Regression test for https://github.com/risingwavelabs/risingwave/issues/22018
+# A space is allowed between a negative sign and the following digit.
+query T
+select interval '1 month - 1 day';
+----
+1 mon -1 days
+
+query T
+select interval '1 month -1 day';
+----
+1 mon -1 days
