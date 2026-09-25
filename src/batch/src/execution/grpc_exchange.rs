@@ -63,9 +63,17 @@ impl GrpcExchangeSource {
                     tracing_context: plan.tracing_context,
                     expr_context: Some(capture_expr_context()?),
                 };
-                client.execute(execute_request).await?
+                client
+                    .execute(execute_request)
+                    .instrument_await("execute_task")
+                    .await?
             }
-            None => client.get_data(task_output_id.clone()).await?,
+            None => {
+                client
+                    .get_data(task_output_id.clone())
+                    .instrument_await("get_task_data")
+                    .await?
+            }
         };
         let source = Self {
             stream,
