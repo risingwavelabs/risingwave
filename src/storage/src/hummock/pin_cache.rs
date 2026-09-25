@@ -27,7 +27,8 @@ use prometheus::{
 use risingwave_common::monitor::GLOBAL_METRICS_REGISTRY;
 use risingwave_hummock_sdk::{HummockSstableObjectId, HummockVersionId};
 use risingwave_object_store::object::{
-    MonitoredStreamingReader, ObjectError, ObjectRangeBounds, ObjectResult, ObjectStoreRef,
+    MonitoredStreamingReader, ObjectError, ObjectMetadataIter, ObjectRangeBounds, ObjectResult,
+    ObjectStoreRef,
 };
 use thiserror_ext::AsReport;
 use tokio::sync::{Notify, Semaphore};
@@ -188,24 +189,26 @@ impl PinCacheGc {
             return;
         }
         let gc = self.clone();
-        tokio::spawn(async move {
-            let _permit = gc.concurrency.acquire().await.unwrap();
-            let paths = entries
-                .iter()
-                .map(|entry| entry.path.clone())
-                .collect::<Vec<_>>();
-            match gc.store.delete_objects(&paths).await {
-                Ok(()) => gc.finish_delete(&paths),
-                Err(error) => {
-                    PIN_CACHE_GC_FAILURES.inc();
-                    tracing::warn!(
-                        object_count = paths.len(),
-                        error = %error.as_report(),
-                        "failed to reclaim pinned SSTs; keeping them accounted until recovery"
-                    );
-                }
+        tokio::spawn(async move { gc.reclaim_batch(entries).await });
+    }
+
+    async fn reclaim_batch(&self, entries: Vec<Arc<PinCacheEntry>>) {
+        let _permit = self.concurrency.acquire().await.unwrap();
+        let paths = entries
+            .iter()
+            .map(|entry| entry.path.clone())
+            .collect::<Vec<_>>();
+        match self.store.delete_objects(&paths).await {
+            Ok(()) => self.finish_delete(&paths),
+            Err(error) => {
+                PIN_CACHE_GC_FAILURES.inc();
+                tracing::warn!(
+                    object_count = paths.len(),
+                    error = %error.as_report(),
+                    "failed to reclaim pinned SSTs; keeping them accounted until recovery"
+                );
             }
-        });
+        }
     }
 
     fn finish_delete(&self, paths: &[String]) {
@@ -460,21 +463,6 @@ impl PinCacheReadHandle {
         }
         result
     }
-
-    pub(crate) async fn streaming_read(
-        &self,
-        range: impl ObjectRangeBounds,
-    ) -> ObjectResult<MonitoredStreamingReader> {
-        let result = self
-            .pin_cache
-            .store
-            .streaming_read(&self.entry.path, range)
-            .await;
-        if result.is_err() {
-            self.invalidate();
-        }
-        result
-    }
 }
 
 impl PinCache {
@@ -505,7 +493,10 @@ impl PinCache {
         let _ = &*PIN_CACHE_RECOVERY_FAILURES;
         let _ = &*PIN_CACHE_GC_FAILURES;
         let recovery = pin_cache.clone();
-        tokio::spawn(async move { recovery.recover_local_files().await });
+        tokio::spawn(async move {
+            let objects = recovery.store.list("", None, None).await;
+            recovery.recover_local_files(objects).await;
+        });
         pin_cache
     }
 
@@ -748,11 +739,11 @@ impl PinCache {
         }
     }
 
-    async fn recover_local_files(self: Arc<Self>) {
+    async fn recover_local_files(self: Arc<Self>, objects: ObjectResult<ObjectMetadataIter>) {
         let mut recovered_files = Vec::new();
         let mut stale_objects = Vec::new();
         let mut recovery_failed = false;
-        match self.store.list("", None, None).await {
+        match objects {
             Ok(mut objects) => {
                 while let Some(result) = objects.next().await {
                     match result {
@@ -945,8 +936,8 @@ mod tests {
     };
 
     use super::{
-        PinCache, PinCacheDownloadGuard, PinCacheDownloadStart, PinCacheRefillOutcome,
-        RecoveryState,
+        PinCache, PinCacheDownloadGuard, PinCacheDownloadStart, PinCacheEntry, PinCacheGc,
+        PinCacheRefillOutcome, RecoveryState,
     };
     use crate::monitor::ObjectStoreMetrics;
 
@@ -1048,15 +1039,6 @@ mod tests {
             pin_cache.get(object_id).unwrap().read(..).await.unwrap(),
             original
         );
-        let mut reader = pin_cache
-            .get(object_id)
-            .unwrap()
-            .streaming_read(..)
-            .await
-            .unwrap();
-        assert_eq!(reader.read_bytes().await.unwrap().unwrap(), original);
-        assert!(reader.read_bytes().await.is_none());
-
         remote_store
             .upload(remote_path, Bytes::from_static(b"changed remote"))
             .await
@@ -1426,59 +1408,141 @@ mod tests {
 
     #[tokio::test]
     async fn test_failed_recovery_refuses_new_local_writes() {
-        let pin_cache = PinCache::new(in_memory_object_store(), u64::MAX);
-        pin_cache.wait_for_recovery().await;
-        let object_id = HummockSstableObjectId::from(1001);
-        pin_cache.replace_desired_objects(HashMap::from([(object_id, 8)]));
-        pin_cache.state.write().recovery_state = RecoveryState::Failed;
+        for partial_inventory in [false, true] {
+            let local_store = in_memory_object_store();
+            let pin_cache = PinCache::new(local_store.clone(), 16);
+            pin_cache.wait_for_recovery().await;
+            let recovered_object = HummockSstableObjectId::from(1001);
+            let new_object = HummockSstableObjectId::from(1002);
+            pin_cache.replace_desired_objects([(recovered_object, 8), (new_object, 8)]);
+            local_store
+                .upload("1001-42.sst", Bytes::from_static(b"complete"))
+                .await
+                .unwrap();
 
-        let Err(error) = pin_cache.start_download(object_id) else {
-            panic!("failed recovery must reject new downloads");
+            let error = ObjectError::internal("injected inventory failure");
+            let objects = if partial_inventory {
+                // Exercise a stream error after real metadata has already been accounted.
+                let metadata = local_store.metadata("1001-42.sst").await.unwrap();
+                Ok(stream::iter([Ok(metadata), Err(error)]).boxed())
+            } else {
+                Err(error)
+            };
+            pin_cache.clone().recover_local_files(objects).await;
+            assert!(pin_cache.state.read().recovery_state == RecoveryState::Failed);
+            assert_eq!(
+                pin_cache.gc.state.lock().accounted_bytes,
+                if partial_inventory { 8 } else { 0 }
+            );
+            assert_eq!(pin_cache.get(recovered_object).is_some(), partial_inventory);
+            if partial_inventory {
+                assert_eq!(
+                    pin_cache
+                        .get(recovered_object)
+                        .unwrap()
+                        .read(..)
+                        .await
+                        .unwrap(),
+                    Bytes::from_static(b"complete")
+                );
+            }
+
+            let remote_store = in_memory_object_store();
+            remote_store
+                .upload("new", Bytes::from_static(b"new data"))
+                .await
+                .unwrap();
+            let error = pin_cache
+                .pin_sst(remote_store, "new".into(), new_object)
+                .await
+                .unwrap_err();
+            assert!(error.to_string().contains("recovery failed"));
+            assert!(pin_cache.state.read().inflight.is_empty());
+            assert!(pin_cache.get(new_object).is_none());
+            assert_eq!(
+                local_store
+                    .list("", None, None)
+                    .await
+                    .unwrap()
+                    .try_collect::<Vec<_>>()
+                    .await
+                    .unwrap()
+                    .len(),
+                1
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn test_failed_deletion_keeps_capacity_reserved() {
+        let (dir, local_store) = local_object_store().await;
+        let entry = Arc::new(PinCacheEntry {
+            path: "1001-42.sst".into(),
+            size: 8,
+        });
+        // A nonempty directory at the exact object path makes FS deletion fail,
+        // including when the test runs as root (unlike permission-based failures).
+        let path = dir.path().join(&entry.path);
+        std::fs::create_dir(&path).unwrap();
+        std::fs::write(path.join("child"), b"complete").unwrap();
+        let gc = PinCacheGc::new(local_store, 8);
+        gc.try_reserve(&entry).unwrap();
+        gc.mark_uncertain(&entry);
+        gc.reclaim_batch(vec![entry.clone()]).await;
+
+        assert!(path.join("child").exists());
+        {
+            let state = gc.state.lock();
+            assert_eq!(state.accounted_bytes, 8);
+            assert_eq!(state.accounted_paths.get(&entry.path), Some(&8));
+            assert_eq!(state.uncertain_bytes, 8);
+            assert!(state.uncertain_paths.contains(&entry.path));
+        }
+        let replacement = PinCacheEntry {
+            path: "1002-43.sst".into(),
+            size: 8,
         };
-        assert!(error.to_string().contains("recovery failed"));
-        assert!(pin_cache.state.read().inflight.is_empty());
+        assert_eq!(gc.try_reserve(&replacement), Err(8));
+
+        // A later successful deletion is the only event that may release this reservation.
+        std::fs::remove_file(path.join("child")).unwrap();
+        std::fs::remove_dir(&path).unwrap();
+        gc.reclaim_batch(vec![entry]).await;
+        assert_eq!(gc.state.lock().accounted_bytes, 0);
+        assert_eq!(gc.state.lock().uncertain_bytes, 0);
+        gc.try_reserve(&replacement).unwrap();
     }
 
     #[tokio::test]
     async fn test_read_failure_only_invalidates_selected_publication() {
-        for streaming in [false, true] {
-            let remote_store = in_memory_object_store();
-            let pin_cache = PinCache::new(in_memory_object_store(), u64::MAX);
-            let object_id = HummockSstableObjectId::from(1001);
-            pin_cache.replace_desired_objects(HashMap::from([(object_id, 8)]));
-            remote_store
-                .upload("sst", Bytes::from_static(b"complete"))
-                .await
-                .unwrap();
-            pin_cache
-                .pin_sst(remote_store.clone(), "sst".into(), object_id)
-                .await
-                .unwrap();
-            let old = pin_cache.get(object_id).unwrap();
-            pin_cache.store.delete(&old.entry.path).await.unwrap();
-            if streaming {
-                assert!(old.streaming_read(..).await.is_err());
-            } else {
-                assert!(old.read(..).await.is_err());
-            }
-            assert!(pin_cache.get(object_id).is_none());
-            assert_eq!(pin_cache.state.read().published_bytes, 0);
+        let remote_store = in_memory_object_store();
+        let pin_cache = PinCache::new(in_memory_object_store(), u64::MAX);
+        let object_id = HummockSstableObjectId::from(1001);
+        pin_cache.replace_desired_objects(HashMap::from([(object_id, 8)]));
+        remote_store
+            .upload("sst", Bytes::from_static(b"complete"))
+            .await
+            .unwrap();
+        pin_cache
+            .pin_sst(remote_store.clone(), "sst".into(), object_id)
+            .await
+            .unwrap();
+        let old = pin_cache.get(object_id).unwrap();
+        pin_cache.store.delete(&old.entry.path).await.unwrap();
+        assert!(old.read(..).await.is_err());
+        assert!(pin_cache.get(object_id).is_none());
+        assert_eq!(pin_cache.state.read().published_bytes, 0);
 
-            pin_cache
-                .pin_sst(remote_store, "sst".into(), object_id)
-                .await
-                .unwrap();
-            // This handle stays on the old path and must not remove the new route.
-            if streaming {
-                assert!(old.streaming_read(..).await.is_err());
-            } else {
-                assert!(old.read(..).await.is_err());
-            }
-            assert_eq!(
-                pin_cache.get(object_id).unwrap().read(..).await.unwrap(),
-                Bytes::from_static(b"complete")
-            );
-        }
+        pin_cache
+            .pin_sst(remote_store, "sst".into(), object_id)
+            .await
+            .unwrap();
+        // This handle stays on the old path and must not remove the new route.
+        assert!(old.read(..).await.is_err());
+        assert_eq!(
+            pin_cache.get(object_id).unwrap().read(..).await.unwrap(),
+            Bytes::from_static(b"complete")
+        );
     }
 
     #[tokio::test]
