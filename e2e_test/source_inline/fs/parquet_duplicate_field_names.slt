@@ -13,6 +13,8 @@
 # parquet-rs 58.1.0 (ArrowWriter):
 #   id: int32                          = [1, 2]
 #   s:  struct<v: int64, v: utf8>      = [{42, "dup"}, {7, "x"}]
+# Regenerate it (and the nested-smallint fixture) from the repository root with:
+#   e2e_test/source_inline/fs/generate_parquet_fixtures.rs
 
 statement ok
 create table parquet_duplicate_field_names (

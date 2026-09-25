@@ -12,6 +12,8 @@
 # 58.1.0 (ArrowWriter):
 #   id: int32                 = [1, 2]
 #   s:  struct<a: int16>      = [{7}, {-3}]
+# Regenerate it (and the duplicate-field-names fixture) from the repository root with:
+#   e2e_test/source_inline/fs/generate_parquet_fixtures.rs
 
 statement ok
 create table parquet_nested_smallint (
