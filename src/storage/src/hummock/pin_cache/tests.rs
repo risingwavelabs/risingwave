@@ -58,6 +58,21 @@ pub(super) async fn local_object_store() -> (tempfile::TempDir, ObjectStoreRef) 
     (dir, store)
 }
 
+fn published_bytes(pin_cache: &PinCache) -> u64 {
+    pin_cache
+        .shards
+        .iter()
+        .map(|shard| {
+            shard
+                .read()
+                .published
+                .values()
+                .map(|entry| entry.size)
+                .sum::<u64>()
+        })
+        .sum()
+}
+
 async fn wait_for_reclaim(pin_cache: &PinCache) {
     tokio::time::timeout(Duration::from_secs(5), async {
         while pin_cache.gc.accounted_bytes() != 0 {
@@ -72,7 +87,11 @@ fn start_download(
     pin_cache: &Arc<PinCache>,
     object_id: HummockSstableObjectId,
 ) -> PinCacheDownloadGuard {
-    match pin_cache.start_download(object_id).unwrap() {
+    let generation = pin_cache.refill_generation(object_id).unwrap();
+    match pin_cache
+        .start_download_at_generation(object_id, generation)
+        .unwrap()
+    {
         PinCacheDownloadStart::Download(download) => download,
         PinCacheDownloadStart::Complete(outcome) => {
             panic!("expected download, got {outcome:?}")
@@ -84,7 +103,11 @@ fn completed_download_outcome(
     pin_cache: &Arc<PinCache>,
     object_id: HummockSstableObjectId,
 ) -> PinCacheRefillOutcome {
-    match pin_cache.start_download(object_id).unwrap() {
+    let generation = pin_cache.refill_generation(object_id).unwrap();
+    match pin_cache
+        .start_download_at_generation(object_id, generation)
+        .unwrap()
+    {
         PinCacheDownloadStart::Download(_) => panic!("expected download to be skipped"),
         PinCacheDownloadStart::Complete(outcome) => outcome,
     }
@@ -120,10 +143,7 @@ async fn test_pin_read_and_unpin_lifecycle() {
         .await
         .unwrap();
     assert!(pin_cache.get(object_id).is_some());
-    assert_eq!(
-        pin_cache.state.read().published_bytes,
-        original.len() as u64
-    );
+    assert_eq!(published_bytes(&pin_cache), original.len() as u64);
     assert_eq!(
         pin_cache.get(object_id).unwrap().read(..).await.unwrap(),
         original
@@ -143,7 +163,7 @@ async fn test_pin_read_and_unpin_lifecycle() {
 
     pin_cache.replace_desired_objects(HashMap::new());
     assert!(pin_cache.get(object_id).is_none());
-    assert_eq!(pin_cache.state.read().published_bytes, 0);
+    assert_eq!(published_bytes(&pin_cache), 0);
 
     let changed = Bytes::from_static(b"changed remote");
     pin_cache.replace_desired_objects(HashMap::from([(object_id, changed.len() as u64)]));
@@ -162,7 +182,7 @@ async fn test_pin_read_and_unpin_lifecycle() {
         .await
         .unwrap();
     assert!(pin_cache.get(object_id).is_none());
-    assert_eq!(pin_cache.state.read().published_bytes, 0);
+    assert_eq!(published_bytes(&pin_cache), 0);
 }
 
 #[tokio::test]
@@ -210,7 +230,7 @@ async fn test_retired_route_waits_for_version_application() {
         .upload(&download.entry.path, Bytes::from_static(b"complete"))
         .await
         .unwrap();
-    assert!(download.publish());
+    assert_eq!(download.publish(), PinCacheRefillOutcome::Published);
     cache.apply_desired_object_delta(2.into(), [object], HashMap::new());
     cache.release_retired(1.into());
     assert!(cache.get(object).is_some());
@@ -276,7 +296,12 @@ async fn test_inflight_is_not_routable_and_cancellation_releases_token() {
         PinCacheRefillOutcome::InProgress
     );
     drop(download);
-    assert!(pin_cache.state.read().inflight.is_empty());
+    assert!(
+        pin_cache
+            .shards
+            .iter()
+            .all(|shard| shard.read().inflight.is_empty())
+    );
 
     let retry = start_download(&pin_cache, object_id);
     pin_cache
@@ -284,8 +309,13 @@ async fn test_inflight_is_not_routable_and_cancellation_releases_token() {
         .upload(&retry.entry.path, Bytes::from_static(b"complete"))
         .await
         .unwrap();
-    retry.publish();
-    assert!(pin_cache.state.read().inflight.is_empty());
+    assert_eq!(retry.publish(), PinCacheRefillOutcome::Published);
+    assert!(
+        pin_cache
+            .shards
+            .iter()
+            .all(|shard| shard.read().inflight.is_empty())
+    );
     assert!(pin_cache.get(object_id).is_some());
     assert_eq!(
         completed_download_outcome(&pin_cache, object_id),
@@ -311,10 +341,10 @@ async fn test_revoked_download_cannot_publish_or_remove_replacement() {
         let replacement = start_download(&pin_cache, object_id);
         assert_ne!(old.entry.path, replacement.entry.path);
 
-        old.publish();
+        assert_eq!(old.publish(), PinCacheRefillOutcome::Obsolete);
         assert!(pin_cache.get(object_id).is_none());
         assert!(Arc::ptr_eq(
-            &pin_cache.state.read().inflight[&object_id],
+            &pin_cache.shard(object_id).read().inflight[&object_id],
             &replacement.entry,
         ));
         pin_cache
@@ -322,7 +352,7 @@ async fn test_revoked_download_cannot_publish_or_remove_replacement() {
             .upload(&replacement.entry.path, Bytes::from_static(b"replacement"))
             .await
             .unwrap();
-        replacement.publish();
+        assert_eq!(replacement.publish(), PinCacheRefillOutcome::Published);
         assert_eq!(
             pin_cache.get(object_id).unwrap().read(..).await.unwrap(),
             Bytes::from_static(b"replacement")
@@ -343,7 +373,12 @@ async fn test_failed_download_can_be_retried() {
             .is_err()
     );
     assert!(pin_cache.get(object_id).is_none());
-    assert!(pin_cache.state.read().inflight.is_empty());
+    assert!(
+        pin_cache
+            .shards
+            .iter()
+            .all(|shard| shard.read().inflight.is_empty())
+    );
     wait_for_reclaim(&pin_cache).await;
 
     remote_store
@@ -418,7 +453,12 @@ async fn test_interrupted_fs_upload_keeps_capacity_until_recovery() {
         }
 
         assert!(pin_cache.get(object_id).is_none());
-        assert!(pin_cache.state.read().inflight.is_empty());
+        assert!(
+            pin_cache
+                .shards
+                .iter()
+                .all(|shard| shard.read().inflight.is_empty())
+        );
         assert!(
             local_store
                 .metadata(&final_path)
@@ -514,7 +554,7 @@ async fn test_failed_recovery_refuses_new_local_writes() {
             Err(error)
         };
         pin_cache.clone().recover_local_files(objects).await;
-        assert!(pin_cache.state.read().recovery_state == RecoveryState::Failed);
+        assert!(*pin_cache.recovery_state.read() == RecoveryState::Failed);
         assert_eq!(
             pin_cache.gc.accounted_bytes(),
             if partial_inventory { 8 } else { 0 }
@@ -542,7 +582,12 @@ async fn test_failed_recovery_refuses_new_local_writes() {
             .await
             .unwrap_err();
         assert!(error.to_string().contains("recovery failed"));
-        assert!(pin_cache.state.read().inflight.is_empty());
+        assert!(
+            pin_cache
+                .shards
+                .iter()
+                .all(|shard| shard.read().inflight.is_empty())
+        );
         assert!(pin_cache.get(new_object).is_none());
         assert_eq!(
             local_store
@@ -576,7 +621,7 @@ async fn test_read_failure_only_invalidates_selected_publication() {
     pin_cache.store.delete(&old.entry.path).await.unwrap();
     assert!(old.read(..).await.is_err());
     assert!(pin_cache.get(object_id).is_none());
-    assert_eq!(pin_cache.state.read().published_bytes, 0);
+    assert_eq!(published_bytes(&pin_cache), 0);
 
     pin_cache
         .pin_sst(remote_store, "sst".into(), object_id)
@@ -610,7 +655,7 @@ async fn test_recovery_publishes_only_desired_complete_file() {
     let recovered = PinCache::new(local_store, 1024);
     recovered.replace_desired_objects(HashMap::from([(object_id, data.len() as u64)]));
     recovered.wait_for_recovery().await;
-    assert_eq!(recovered.state.read().published_bytes, data.len() as u64);
+    assert_eq!(published_bytes(&recovered), data.len() as u64);
     assert_eq!(
         recovered.get(object_id).unwrap().read(..).await.unwrap(),
         data
@@ -650,4 +695,165 @@ async fn test_recovery_waits_for_initial_desired_snapshot_before_cleanup() {
     .await
     .unwrap();
     assert_eq!(pin_cache.gc.accounted_bytes(), 0);
+}
+
+fn object_in_shard(shard: usize) -> HummockSstableObjectId {
+    (1..)
+        .map(HummockSstableObjectId::from)
+        .find(|&id| PinCache::shard_index(id) == shard)
+        .unwrap()
+}
+
+#[tokio::test]
+async fn test_other_shard_and_control_locks_do_not_block_lookup_or_publish() {
+    let cache = PinCache::new(in_memory_object_store(), 16);
+    cache.wait_for_recovery().await;
+    let blocked = object_in_shard(0);
+    let available = object_in_shard(super::PIN_CACHE_SHARDS - 1);
+    cache.replace_desired_objects([(blocked, 8), (available, 8)]);
+    let download = start_download(&cache, available);
+    cache
+        .store
+        .upload(&download.entry.path, Bytes::from_static(b"complete"))
+        .await
+        .unwrap();
+    let runtime = tokio::runtime::Handle::current();
+
+    // Keep the locks held until the other thread reports completion. A regression fails
+    // with a bounded timeout, then releases the locks so the worker can still exit.
+    let result = std::thread::scope(|scope| {
+        let control = cache.membership_update.lock();
+        let recovery = cache.recovery_state.write();
+        let shard = cache.shard(blocked).write();
+        let (tx, rx) = std::sync::mpsc::channel();
+        let cache = &cache;
+        scope.spawn(move || {
+            let _runtime = runtime.enter();
+            let before = cache.lookup(available);
+            assert!(before.desired && before.route.is_none());
+            assert_eq!(download.publish(), PinCacheRefillOutcome::Published);
+            let after = cache.lookup(available);
+            assert!(after.desired);
+            after.route.unwrap().invalidate();
+            assert!(cache.lookup(available).route.is_none());
+            tx.send(()).unwrap();
+        });
+        let result = rx.recv_timeout(Duration::from_secs(5));
+        drop(shard);
+        drop(recovery);
+        drop(control);
+        result
+    });
+    result.expect("an unrelated shard or control lock blocked the object lifecycle");
+    wait_for_reclaim(&cache).await;
+}
+
+#[tokio::test]
+async fn test_cross_shard_version_handoff_and_policy_revocation() {
+    let cache = PinCache::new(in_memory_object_store(), 64);
+    cache.wait_for_recovery().await;
+    let objects = [
+        object_in_shard(0),
+        object_in_shard(super::PIN_CACHE_SHARDS - 1),
+    ];
+    cache.replace_version_objects(1.into(), objects.into_iter().map(|id| (id, 8)).collect());
+    for id in objects {
+        let download = start_download(&cache, id);
+        cache
+            .store
+            .upload(&download.entry.path, Bytes::from_static(b"complete"))
+            .await
+            .unwrap();
+        assert_eq!(download.publish(), PinCacheRefillOutcome::Published);
+    }
+    assert_eq!(published_bytes(&cache), 16);
+
+    cache.replace_version_objects(2.into(), HashMap::new());
+    for id in objects {
+        let lookup = cache.lookup(id);
+        assert!(!lookup.desired && lookup.route.is_some());
+        assert!(cache.is_needed(id));
+    }
+    cache.release_retired(1.into());
+    assert_eq!(published_bytes(&cache), 16);
+    // Reintroducing one object before applying version 2 must preserve its route.
+    cache.apply_desired_object_delta(3.into(), [], HashMap::from([(objects[1], 8)]));
+    cache.release_retired(2.into());
+    assert!(cache.get(objects[0]).is_none());
+    assert!(cache.lookup(objects[1]).desired);
+    assert!(cache.get(objects[1]).is_some());
+    assert_eq!(published_bytes(&cache), 8);
+
+    let revoked = object_in_shard(1);
+    cache.apply_desired_object_delta(4.into(), [], HashMap::from([(revoked, 8)]));
+    let old_generation = cache.refill_generation(revoked).unwrap();
+    let old_download = start_download(&cache, revoked);
+    cache.replace_desired_objects([]);
+    cache.replace_desired_objects([(revoked, 8)]);
+    let new_generation = cache.refill_generation(revoked).unwrap();
+    assert_ne!(old_generation, new_generation);
+    assert!(matches!(
+        cache
+            .start_download_at_generation(revoked, old_generation)
+            .unwrap(),
+        PinCacheDownloadStart::Complete(PinCacheRefillOutcome::Obsolete)
+    ));
+    let replacement = start_download(&cache, revoked);
+    assert_eq!(old_download.publish(), PinCacheRefillOutcome::Obsolete);
+    assert!(Arc::ptr_eq(
+        &cache.shard(revoked).read().inflight[&revoked],
+        &replacement.entry
+    ));
+    drop(replacement);
+    assert_eq!(published_bytes(&cache), 0);
+    wait_for_reclaim(&cache).await;
+}
+
+#[tokio::test]
+async fn test_recovery_across_shards_before_and_after_initial_membership() {
+    for membership_first in [false, true] {
+        let local = in_memory_object_store();
+        let objects = [
+            object_in_shard(0),
+            object_in_shard(super::PIN_CACHE_SHARDS - 1),
+        ];
+        for id in objects {
+            for path_id in [1, 2] {
+                local
+                    .upload(
+                        &format!("{}-{path_id}.sst", id.as_raw_id()),
+                        Bytes::from_static(b"complete"),
+                    )
+                    .await
+                    .unwrap();
+            }
+        }
+        let cache = PinCache::new(local.clone(), 32);
+        if !membership_first {
+            cache.wait_for_recovery().await;
+            assert_eq!(published_bytes(&cache), 0);
+            assert_eq!(cache.gc.accounted_bytes(), 32);
+        }
+        cache.replace_desired_objects(objects.into_iter().map(|id| (id, 8)));
+        cache.wait_for_recovery().await;
+        for id in objects {
+            let lookup = cache.lookup(id);
+            assert!(lookup.desired);
+            assert_eq!(
+                lookup.route.unwrap().read(..).await.unwrap(),
+                Bytes::from_static(b"complete")
+            );
+        }
+        assert_eq!(published_bytes(&cache), 16);
+        // Duplicate recovered paths are reclaimed, with exactly one publication per object.
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while cache.gc.accounted_bytes() != 16 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        cache.replace_desired_objects([]);
+        wait_for_reclaim(&cache).await;
+    }
 }

@@ -12,7 +12,8 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 use std::sync::Arc;
 
 use parking_lot::Mutex;
@@ -23,11 +24,17 @@ use tokio::sync::Semaphore;
 use super::{PinCacheEntry, metric_bytes};
 use crate::monitor::GLOBAL_PIN_CACHE_METRICS;
 
+struct AccountedPath {
+    size: u64,
+    // Whether backend-owned temporary files may remain after deleting the final path.
+    uncertain: bool,
+}
+
 #[derive(Default)]
 struct PinCacheGcState {
-    accounted_paths: HashMap<String, u64>,
+    accounted_paths: HashMap<String, AccountedPath>,
     accounted_bytes: u64,
-    uncertain_paths: HashSet<String>,
+    // A subset of accounted_bytes, retained until a new cache inventories the actual files.
     uncertain_bytes: u64,
 }
 
@@ -65,11 +72,11 @@ impl PinCacheGc {
 
     pub(super) fn account_existing(&self, entry: &PinCacheEntry) {
         let mut state = self.state.lock();
-        if state
-            .accounted_paths
-            .insert(entry.path.clone(), entry.size)
-            .is_none()
-        {
+        if let Entry::Vacant(slot) = state.accounted_paths.entry(entry.path.clone()) {
+            slot.insert(AccountedPath {
+                size: entry.size,
+                uncertain: false,
+            });
             state.accounted_bytes = state.accounted_bytes.saturating_add(entry.size);
             GLOBAL_PIN_CACHE_METRICS
                 .accounted_bytes
@@ -85,7 +92,13 @@ impl PinCacheGc {
         if accounted_bytes > self.capacity {
             return Err(state.accounted_bytes);
         }
-        let old = state.accounted_paths.insert(entry.path.clone(), entry.size);
+        let old = state.accounted_paths.insert(
+            entry.path.clone(),
+            AccountedPath {
+                size: entry.size,
+                uncertain: false,
+            },
+        );
         debug_assert!(old.is_none(), "pin-cache paths must be unique");
         state.accounted_bytes = accounted_bytes;
         GLOBAL_PIN_CACHE_METRICS
@@ -96,8 +109,12 @@ impl PinCacheGc {
 
     pub(super) fn mark_uncertain(&self, entry: &PinCacheEntry) {
         let mut state = self.state.lock();
-        if state.uncertain_paths.insert(entry.path.clone()) {
-            state.uncertain_bytes = state.uncertain_bytes.saturating_add(entry.size);
+        if let Some(path) = state.accounted_paths.get_mut(&entry.path)
+            && !path.uncertain
+        {
+            path.uncertain = true;
+            let size = path.size;
+            state.uncertain_bytes = state.uncertain_bytes.saturating_add(size);
             GLOBAL_PIN_CACHE_METRICS
                 .uncertain_bytes
                 .set(metric_bytes(state.uncertain_bytes));
@@ -135,22 +152,20 @@ impl PinCacheGc {
     fn finish_delete(&self, paths: &[String]) {
         let mut state = self.state.lock();
         for path in paths {
-            let size = state.accounted_paths.remove(path);
-            if let Some(size) = size {
-                state.accounted_bytes = state.accounted_bytes.saturating_sub(size);
+            if state
+                .accounted_paths
+                .get(path)
+                .is_some_and(|entry| entry.uncertain)
+            {
+                continue;
             }
-            if state.uncertain_paths.remove(path) {
-                state.uncertain_bytes = state
-                    .uncertain_bytes
-                    .saturating_sub(size.unwrap_or_default());
+            if let Some(entry) = state.accounted_paths.remove(path) {
+                state.accounted_bytes = state.accounted_bytes.saturating_sub(entry.size);
             }
         }
         GLOBAL_PIN_CACHE_METRICS
             .accounted_bytes
             .set(metric_bytes(state.accounted_bytes));
-        GLOBAL_PIN_CACHE_METRICS
-            .uncertain_bytes
-            .set(metric_bytes(state.uncertain_bytes));
     }
 }
 
@@ -180,16 +195,16 @@ mod tests {
         std::fs::write(path.join("child"), b"complete").unwrap();
         let gc = PinCacheGc::new(local_store, 8);
         gc.try_reserve(&entry).unwrap();
-        gc.mark_uncertain(&entry);
         gc.reclaim_batch(vec![entry.clone()]).await;
 
         assert!(path.join("child").exists());
         {
             let state = gc.state.lock();
             assert_eq!(state.accounted_bytes, 8);
-            assert_eq!(state.accounted_paths.get(&entry.path), Some(&8));
-            assert_eq!(state.uncertain_bytes, 8);
-            assert!(state.uncertain_paths.contains(&entry.path));
+            let path = state.accounted_paths.get(&entry.path).unwrap();
+            assert_eq!(path.size, 8);
+            assert!(!path.uncertain);
+            assert_eq!(state.uncertain_bytes, 0);
         }
         let replacement = PinCacheEntry {
             path: "1002-43.sst".into(),
@@ -204,6 +219,51 @@ mod tests {
         assert_eq!(gc.state.lock().accounted_bytes, 0);
         assert_eq!(gc.state.lock().uncertain_bytes, 0);
         gc.try_reserve(&replacement).unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_final_path_deletion_keeps_uncertain_capacity_reserved() {
+        for final_path_exists in [false, true] {
+            let (dir, local_store) = local_object_store().await;
+            let entry = Arc::new(PinCacheEntry {
+                path: "1001-42.sst".into(),
+                size: 8,
+            });
+            if final_path_exists {
+                local_store
+                    .upload(&entry.path, Bytes::from_static(b"complete"))
+                    .await
+                    .unwrap();
+            }
+            // Model an orphan whose path is not known to the download guard.
+            let temporary_path = dir.path().join("orphan.tmp");
+            std::fs::write(&temporary_path, b"half").unwrap();
+            let gc = PinCacheGc::new(local_store.clone(), 8);
+            gc.try_reserve(&entry).unwrap();
+            gc.mark_uncertain(&entry);
+            gc.mark_uncertain(&entry);
+
+            for _ in 0..2 {
+                gc.reclaim_batch(vec![entry.clone()]).await;
+                assert!(
+                    local_store
+                        .metadata(&entry.path)
+                        .await
+                        .unwrap_err()
+                        .is_object_not_found_error()
+                );
+                assert!(temporary_path.exists());
+                let state = gc.state.lock();
+                assert_eq!(state.accounted_bytes, 8);
+                assert_eq!(state.uncertain_bytes, 8);
+                assert!(state.accounted_paths[&entry.path].uncertain);
+            }
+            let replacement = PinCacheEntry {
+                path: "1002-43.sst".into(),
+                size: 8,
+            };
+            assert_eq!(gc.try_reserve(&replacement), Err(8));
+        }
     }
 
     #[tokio::test]

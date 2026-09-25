@@ -15,6 +15,7 @@
 use std::sync::Arc;
 
 use futures::StreamExt;
+use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_hummock_sdk::HummockSstableObjectId;
 use risingwave_object_store::object::{ObjectMetadataIter, ObjectResult};
 use thiserror_ext::AsReport;
@@ -22,12 +23,31 @@ use thiserror_ext::AsReport;
 use super::{PinCache, PinCacheEntry, PinCacheState};
 use crate::monitor::GLOBAL_PIN_CACHE_METRICS;
 
-#[derive(Default, PartialEq, Eq)]
+#[derive(PartialEq, Eq)]
 pub(super) enum RecoveryState {
-    #[default]
     Pending,
     Ready,
     Failed,
+}
+
+impl PinCacheState {
+    pub(super) fn reconcile_recovered_files(&mut self) -> Vec<Arc<PinCacheEntry>> {
+        if self.desired.is_none() {
+            return vec![];
+        }
+        let mut stale = Vec::new();
+        for (object_id, entry) in std::mem::take(&mut self.recovered_files) {
+            if self.desired.as_ref().unwrap().get(&object_id) == Some(&entry.size)
+                && !self.published.contains_key(&object_id)
+                && !self.inflight.contains_key(&object_id)
+            {
+                self.publish(object_id, entry);
+            } else {
+                stale.push(entry);
+            }
+        }
+        stale
+    }
 }
 
 impl PinCache {
@@ -40,39 +60,10 @@ impl PinCache {
         object_id.parse::<u64>().ok().map(Into::into)
     }
 
-    pub(super) fn reconcile_recovered_files(state: &mut PinCacheState) -> Vec<Arc<PinCacheEntry>> {
-        let PinCacheState {
-            desired,
-            published,
-            published_bytes,
-            inflight,
-            recovered_files,
-            ..
-        } = state;
-        let Some(desired) = desired.as_ref() else {
-            return vec![];
-        };
-        let mut stale = Vec::new();
-        for (object_id, entry) in std::mem::take(recovered_files) {
-            if desired
-                .get(&object_id)
-                .is_some_and(|desired_size| *desired_size == entry.size)
-                && !published.contains_key(&object_id)
-                && !inflight.contains_key(&object_id)
-            {
-                *published_bytes += entry.size;
-                published.insert(object_id, entry);
-            } else {
-                stale.push(entry);
-            }
-        }
-        stale
-    }
-
     pub(crate) async fn wait_for_recovery(&self) {
         loop {
             let notified = self.recovery_notify.notified();
-            if self.state.read().recovery_state != RecoveryState::Pending {
+            if *self.recovery_state.read() != RecoveryState::Pending {
                 return;
             }
             notified.await;
@@ -83,7 +74,8 @@ impl PinCache {
         self: Arc<Self>,
         objects: ObjectResult<ObjectMetadataIter>,
     ) {
-        let mut recovered_files = Vec::new();
+        let mut recovered_by_shard: [Vec<_>; super::PIN_CACHE_SHARDS] =
+            std::array::from_fn(|_| Vec::new());
         let mut stale_objects = Vec::new();
         let mut recovery_failed = false;
         match objects {
@@ -100,7 +92,8 @@ impl PinCache {
                             });
                             self.gc.account_existing(&entry);
                             if let Some(object_id) = Self::parse_object_id(&entry.path) {
-                                recovered_files.push((object_id, entry));
+                                recovered_by_shard[Self::shard_index(object_id)]
+                                    .push((object_id, entry));
                             } else {
                                 stale_objects.push(entry);
                             }
@@ -124,27 +117,27 @@ impl PinCache {
             }
         }
 
-        let reconciled_stale_objects = {
-            let mut state = self.state.write();
-            state.recovered_files = recovered_files;
-            state.recovery_state = if recovery_failed {
+        {
+            let _update = self.membership_update.lock();
+            for (shard, files) in self.shards.iter().zip_eq_fast(recovered_by_shard) {
+                let mut state = shard.write();
+                state.recovered_files.extend(files);
+                stale_objects.extend(state.reconcile_recovered_files());
+            }
+            // New downloads may start only after the complete inventory is accounted and
+            // every shard has reconciled its routes (or retained files for the initial snapshot).
+            *self.recovery_state.write() = if recovery_failed {
                 RecoveryState::Failed
             } else {
                 RecoveryState::Ready
             };
-            Self::reconcile_recovered_files(&mut state)
-        };
-        {
-            let state = self.state.read();
-            state.report_published();
-            GLOBAL_PIN_CACHE_METRICS
-                .recovery_ready
-                .set((state.recovery_state == RecoveryState::Ready) as i64);
         }
+        GLOBAL_PIN_CACHE_METRICS
+            .recovery_ready
+            .set((!recovery_failed) as i64);
         if recovery_failed {
             GLOBAL_PIN_CACHE_METRICS.recovery_failures.inc();
         }
-        stale_objects.extend(reconciled_stale_objects);
         self.recovery_notify.notify_waiters();
         self.gc.reclaim(stale_objects);
     }
