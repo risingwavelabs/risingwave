@@ -13,7 +13,7 @@
 // limitations under the License.
 
 use std::collections::{HashMap, HashSet};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use chrono::DateTime;
 use itertools::Itertools;
@@ -44,6 +44,7 @@ use risingwave_pb::meta::table_fragments::fragment::PbFragmentDistributionType;
 use risingwave_pb::meta::*;
 use risingwave_pb::stream_plan::stream_node::NodeBody;
 use risingwave_pb::stream_plan::throttle_mutation::ThrottleConfig;
+use risingwave_pb::stream_service::GetOracleInitialMiningScnRequest as ComputeOracleInitialMiningScnRequest;
 use tonic::{Request, Response, Status};
 
 use crate::barrier::{BarrierScheduler, Command};
@@ -109,6 +110,64 @@ fn effective_streaming_job_parallelism(
 
 #[async_trait::async_trait]
 impl StreamManagerService for StreamServiceImpl {
+    async fn get_oracle_initial_mining_scn(
+        &self,
+        request: Request<GetOracleInitialMiningScnRequest>,
+    ) -> TonicResponse<GetOracleInitialMiningScnResponse> {
+        const COMPUTE_READ_TIMEOUT: Duration = Duration::from_secs(10);
+
+        let source_id = SourceId::new(request.into_inner().source_id);
+        let table = self
+            .metadata_manager
+            .catalog_controller
+            .get_oracle_source_state_table(source_id)
+            .await?;
+        let committed_epoch = self
+            .stream_manager
+            .hummock_manager
+            .on_current_version(|version| version.table_committed_epoch(table.id.into()))
+            .await
+            .ok_or_else(|| {
+                Status::failed_precondition("Oracle source state has not been checkpointed")
+            })?;
+        let workers = self
+            .metadata_manager
+            .list_active_streaming_compute_nodes()
+            .await?;
+        let mut last_failure = "no streaming compute node available".to_owned();
+        for worker in workers {
+            let read = tokio::time::timeout(COMPUTE_READ_TIMEOUT, async {
+                let client = self.env.stream_client_pool().get(&worker).await?;
+                client
+                    .get_oracle_initial_mining_scn(ComputeOracleInitialMiningScnRequest {
+                        source_state_table: Some(table.clone()),
+                        source_id: source_id.as_raw_id(),
+                        committed_epoch,
+                    })
+                    .await
+            })
+            .await;
+            match read {
+                Ok(Ok(response)) => {
+                    return Ok(Response::new(GetOracleInitialMiningScnResponse {
+                        initial_mining_scn: response.initial_mining_scn,
+                    }));
+                }
+                Ok(Err(err)) => {
+                    last_failure = err.to_string();
+                    tracing::warn!(worker_id = ?worker.id, error = %err, "failed to read committed Oracle source split");
+                }
+                Err(_) => {
+                    last_failure = format!("compute read timed out after {COMPUTE_READ_TIMEOUT:?}");
+                    tracing::warn!(worker_id = ?worker.id, timeout = ?COMPUTE_READ_TIMEOUT, "timed out reading committed Oracle source split");
+                }
+            }
+        }
+        Err(Status::unavailable(format!(
+            "could not read the committed Oracle source split from any compute node (up to {COMPUTE_READ_TIMEOUT:?} per worker): {last_failure}"
+        )))
+    }
+
     async fn flush(&self, request: Request<FlushRequest>) -> TonicResponse<FlushResponse> {
         self.env.idle_manager().record_activity();
         let req = request.into_inner();

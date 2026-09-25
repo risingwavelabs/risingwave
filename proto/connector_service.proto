@@ -239,6 +239,17 @@ message OracleSnapshotReadResponse {
   bytes arrow_ipc = 1;
 }
 
+// Earliest open transaction START_SCN for one Oracle instance.
+message OracleOldestOpenTransactionStartScn {
+  uint64 start_scn = 1;
+  // Zero for single-instance V$TRANSACTION; GV$TRANSACTION supplies INST_ID.
+  uint32 instance_id = 2;
+}
+
+message OracleOldestOpenTransactionScnsResponse {
+  repeated OracleOldestOpenTransactionStartScn scns = 1;
+}
+
 service ConnectorService {
   rpc SinkWriterStream(stream SinkWriterStreamRequest) returns (stream SinkWriterStreamResponse);
   rpc SinkCoordinatorStream(stream SinkCoordinatorStreamRequest) returns (stream SinkCoordinatorStreamResponse);

@@ -53,6 +53,7 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
     private final OracleHeartbeatTable heartbeatTable;
     private final boolean autoInitializeHeartbeatTable;
     private final boolean isCdcSourceJob;
+    private final String racNodes;
 
     public OracleValidator(
             Map<String, String> userProps, TableSchema tableSchema, boolean isCdcSourceJob)
@@ -86,6 +87,7 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
         this.schemaName = userProps.get(DbzConnectorConfig.ORACLE_SCHEMA_NAME);
         this.tableName = userProps.get(DbzConnectorConfig.TABLE_NAME);
         this.isCdcSourceJob = isCdcSourceJob;
+        this.racNodes = userProps.get(DbzConnectorConfig.ORACLE_DEBEZIUM_RAC_NODES);
     }
 
     @Override
@@ -98,9 +100,30 @@ public class OracleValidator extends DatabaseValidator implements AutoCloseable 
     void validateDbConfig() {
         try {
             validateLoggingConfiguration();
+            if (isCdcSourceJob) {
+                validateRacConfiguration();
+            }
             validatePdb();
         } catch (SQLException e) {
             throw ValidatorUtils.internalError(e.getMessage());
+        }
+    }
+
+    private void validateRacConfiguration() throws SQLException {
+        try (var stmt = jdbcConnection.createStatement();
+                var result =
+                        stmt.executeQuery(
+                                "SELECT VALUE FROM V$PARAMETER WHERE NAME = 'cluster_database'")) {
+            if (!result.next()) {
+                throw ValidatorUtils.failedPrecondition(
+                        "Unable to determine whether Oracle RAC is enabled");
+            }
+            if ("TRUE".equalsIgnoreCase(result.getString(1))
+                    && (racNodes == null || racNodes.isBlank())) {
+                throw ValidatorUtils.failedPrecondition(
+                        "Oracle RAC requires 'debezium.rac.nodes' so LogMiner discovers "
+                                + "transactions on every instance");
+            }
         }
     }
 
