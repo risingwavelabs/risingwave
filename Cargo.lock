@@ -2486,7 +2486,7 @@ dependencies = [
  "cap-primitives",
  "cap-std",
  "io-lifetimes",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -2503,7 +2503,7 @@ dependencies = [
  "maybe-owned",
  "rustix 1.1.4",
  "rustix-linux-procfs",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
  "winx",
 ]
 
@@ -6074,7 +6074,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "33d852cb9b869c2a9b3df2f71a3074817f01e1844f839a144f5fcef059a4eb5d"
 dependencies = [
  "libc",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -8126,7 +8126,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2285ddfe3054097ef4b2fe909ef8c3bcd1ea52a8f0d274416caebeef39f04a65"
 dependencies = [
  "io-lifetimes",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -8286,16 +8286,6 @@ dependencies = [
 
 [[package]]
 name = "jiff"
-version = "0.1.15"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "db69f08d4fb10524cacdb074c10b296299d71274ddbc830a8ee65666867002e9"
-dependencies = [
- "jiff-tzdb-platform",
- "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "jiff"
 version = "0.2.35"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "668b7183bd07af9a4885f5c35b0cc5c83c4607a913c16b7e17291832910d2dcc"
@@ -8404,7 +8394,7 @@ dependencies = [
  "ethnum",
  "fast-float2",
  "itoa",
- "jiff 0.2.35",
+ "jiff",
  "nom 8.0.0",
  "num-traits",
  "ordered-float 5.5.0",
@@ -10821,7 +10811,7 @@ dependencies = [
  "bytes",
  "futures",
  "http 1.4.0",
- "jiff 0.2.35",
+ "jiff",
  "log",
  "md-5 0.11.0",
  "mea",
@@ -12951,7 +12941,7 @@ dependencies = [
  "once_cell",
  "socket2 0.5.10",
  "tracing",
- "windows-sys 0.59.0",
+ "windows-sys 0.52.0",
 ]
 
 [[package]]
@@ -13465,7 +13455,7 @@ dependencies = [
  "hex",
  "hmac 0.13.0",
  "http 1.4.0",
- "jiff 0.2.35",
+ "jiff",
  "log",
  "percent-encoding",
  "rsa",
@@ -13976,7 +13966,7 @@ dependencies = [
  "ipnet",
  "itertools 0.14.0",
  "itoa",
- "jiff 0.1.15",
+ "jiff",
  "jni",
  "jsonbb",
  "linkme",
