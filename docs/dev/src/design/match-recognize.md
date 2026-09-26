@@ -615,8 +615,21 @@ not on Flink, whose window is exclusive.
 
 - **Per-row rescan of the live window.** A partition holding an open partial re-derives its
   provisional matches over the unfrozen suffix on every arriving row; incrementalizing the
-  provisional tail is the main planned performance follow-up, along with per-row predicate caching,
-  `WITHIN` deadline precompute, and label interning.
+  provisional tail is the main planned performance follow-up, along with per-row predicate caching
+  and `WITHIN` deadline precompute.
+- **Label interning (done).** The walk carries pattern variables as `VarId` — the index of the
+  name among the pattern's distinct variables, sorted — so a consumed row is a two-byte push onto
+  the label path and a `DEFINE` is found by index in a `DefineTable` bound to the automaton once
+  per query, each slot's navigation set precomputed as a membership table by id. Names are
+  materialized once per match found, where it leaves the automaton (`LabeledMatch::labels`); the
+  liveness and extension probes share the walk and discard the path. Retained matches, measures,
+  `CLASSIFIER` and the skip modes stay name-based. Measured with the `DEFINE` bench of the
+  verdict-cache change (one arrival on a pending run of `R` all-`a` rows under `(a+ b)`): the
+  automaton alone 153 µs / 2.03 ms / 7.74 ms → 127 µs / 1.63 ms / 6.12 ms at `R` = 64 / 256 /
+  512 (−17 / −19 / −21 %); the executor's arrival 601 µs / 8.34 ms / 33.5 ms → 481 µs / 6.74 ms /
+  25.8 ms (−19 / −20 / −23 %), the extra term being the name hash per predicate question. What
+  remains per predicate question, about 23 ns, is the walk's structure — frames, visited scopes,
+  the per-start scratch vectors, budget accounting — not the labels.
 - **Watermark passes visit every partition.** A per-partition wakeup frontier (a deadline index)
   would make the pass proportional to the partitions that actually need attention; the previous
   design carried one, and reintroducing it on this architecture is future work.
