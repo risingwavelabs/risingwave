@@ -13,12 +13,10 @@
 // limitations under the License.
 
 use std::collections::BTreeMap;
-use std::future::Future;
-use std::pin::Pin;
 
 use either::Either;
+use futures::stream;
 use futures::stream::select_with_strategy;
-use futures::{Stream, stream};
 use itertools::Itertools;
 use risingwave_common::bitmap::BitmapBuilder;
 use risingwave_common::catalog::{ColumnDesc, Field};
@@ -26,27 +24,26 @@ use risingwave_common::row::RowDeserializer;
 use risingwave_common::util::iter_util::ZipEqFast;
 use risingwave_common::util::sort_util::{OrderType, cmp_datum};
 use risingwave_connector::source::cdc::CdcScanOptions;
-use risingwave_connector::source::cdc::external::{
-    CdcOffset, ExternalCdcTableType, ExternalTableReaderImpl,
-};
+use risingwave_connector::source::cdc::external::{CdcOffset, ExternalCdcTableType};
 use risingwave_connector::source::{CdcTableSnapshotSplit, CdcTableSnapshotSplitRaw};
 use rw_futures_util::pausable;
 use thiserror_ext::AsReport;
-use tracing::Instrument;
 
 use crate::executor::backfill::cdc::cdc_backfill::{
     get_cdc_json_parse_handling_from_properties, transform_upstream,
 };
 use crate::executor::backfill::cdc::state_v2::{CdcStateRecord, ParallelizedCdcBackfillState};
 use crate::executor::backfill::cdc::upstream_table::external::ExternalStorageTable;
+use crate::executor::backfill::cdc::upstream_table::reader::{
+    build_reader_and_poll_upstream, create_table_reader_with_retry,
+};
 use crate::executor::backfill::cdc::upstream_table::snapshot::{
     SplitSnapshotReadArgs, UpstreamTableRead, UpstreamTableReader,
 };
 use crate::executor::backfill::utils::{get_cdc_chunk_last_offset, mapping_chunk, mapping_message};
 use crate::executor::prelude::*;
-use crate::executor::source::get_infinite_backoff_strategy;
+use crate::task::ActorId;
 use crate::task::cdc_progress::CdcProgressReporter;
-use crate::task::{ActorId, FragmentId};
 
 pub struct ParallelizedCdcBackfillExecutor<S: StateStore> {
     actor_ctx: ActorContextRef,
@@ -1054,49 +1051,6 @@ fn is_leftmost_bound(row: &OwnedRow) -> bool {
 // has no right bound, e.g. [N, inf)
 fn is_rightmost_bound(row: &OwnedRow) -> bool {
     row.iter().all(|d| d.is_none())
-}
-
-async fn build_reader_and_poll_upstream(
-    upstream: &mut (impl Stream<Item = StreamExecutorResult<Message>> + Unpin),
-    future: &mut Pin<Box<impl Future<Output = ExternalTableReaderImpl>>>,
-) -> StreamExecutorResult<Either<Message, ExternalTableReaderImpl>> {
-    tokio::select! {
-        biased;
-        reader = &mut *future => Ok(Either::Right(reader)),
-        msg = upstream.next() => {
-            msg.transpose()?
-                .map(Either::Left)
-                .ok_or_else(|| anyhow::anyhow!(
-                    "upstream closed while creating CDC table reader"
-                ).into())
-        }
-    }
-}
-
-async fn create_table_reader_with_retry(
-    external_table: ExternalStorageTable,
-    actor_id: ActorId,
-    fragment_id: FragmentId,
-) -> ExternalTableReaderImpl {
-    let backoff = get_infinite_backoff_strategy();
-
-    tokio_retry::Retry::spawn(backoff, || async {
-        match external_table.create_table_reader().await {
-            Ok(reader) => Ok(reader),
-            Err(error) => {
-                tracing::warn!(
-                    error = %error.as_report(),
-                    actor_id = %actor_id,
-                    fragment_id = %fragment_id,
-                    "failed to create CDC table reader; retrying"
-                );
-                Err(error)
-            }
-        }
-    })
-    .instrument(tracing::info_span!("create_cdc_table_reader_with_retry"))
-    .await
-    .expect("retry creating CDC table reader until success")
 }
 
 impl<S: StateStore> Execute for ParallelizedCdcBackfillExecutor<S> {
