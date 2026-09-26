@@ -17164,12 +17164,14 @@ dependencies = [
 
 [[package]]
 name = "sql-json-path"
-version = "0.1.1"
+version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "aa30c054bdeed860dd36c1e5a467ec4251d925246f7f57b55bfb77decc2e0ed4"
+checksum = "548cc341e51807f4cdb475e2c63048a96d9dfd60cd68549f77c56f9a269500a0"
 dependencies = [
+ "bigdecimal 0.4.10",
+ "chrono",
  "jsonbb",
- "nom 7.1.3",
+ "nom 8.0.0",
  "regex",
  "serde_json",
  "thiserror 2.0.17",
