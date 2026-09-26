@@ -242,7 +242,7 @@ def _(outer_panels: Panels):
                     "Total size of chunks buffered in a barrier",
                     [
                         panels.target(
-                            f"sum({metric('stream_sink_chunk_buffer_size')}) by (sink_id, actor_id, sink_name) * on(actor_id) group_left(sink_name) {metric('sink_info')}",
+                            f"sum({metric('stream_sink_chunk_buffer_size')}) by (sink_id, actor_id) * on(sink_id) group_left(sink_name) group({metric('sink_info')}) by (sink_id, sink_name)",
                             "sink {{sink_id}} {{sink_name}} - actor {{actor_id}}",
                         ),
                     ],
@@ -260,7 +260,7 @@ def _(outer_panels: Panels):
                             "sink {{sink_id}} {{sink_name}}",
                         ),
                         panels.target_hidden(
-                            f"sum(rate({metric('stream_sink_input_row_count')}[$__rate_interval])) by (sink_id, actor_id) * on(actor_id) group_left(sink_name) {metric('sink_info')}",
+                            f"sum(rate({metric('stream_sink_input_row_count')}[$__rate_interval])) by (sink_id, actor_id) * on(sink_id) group_left(sink_name) group({metric('sink_info')}) by (sink_id, sink_name)",
                             "sink {{sink_id}} {{sink_name}} - actor {{actor_id}}",
                         ),
                     ],
@@ -274,7 +274,7 @@ def _(outer_panels: Panels):
                             "sink {{sink_id}} {{sink_name}}",
                         ),
                         panels.target_hidden(
-                            f"(sum(rate({metric('stream_sink_input_bytes')}[$__rate_interval])) by (sink_id, actor_id) * on(actor_id) group_left(sink_name) {metric('sink_info')}) / (1000*1000)",
+                            f"(sum(rate({metric('stream_sink_input_bytes')}[$__rate_interval])) by (sink_id, actor_id) * on(sink_id) group_left(sink_name) group({metric('sink_info')}) by (sink_id, sink_name)) / (1000*1000)",
                             "sink {{sink_id}} {{sink_name}} - actor {{actor_id}}",
                         ),
                     ],

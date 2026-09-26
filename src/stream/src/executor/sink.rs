@@ -24,7 +24,7 @@ use risingwave_common::array::Op;
 use risingwave_common::array::stream_chunk::StreamChunkMut;
 use risingwave_common::bitmap::Bitmap;
 use risingwave_common::catalog::{ColumnCatalog, Field};
-use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, LabelGuardedIntGauge};
+use risingwave_common::metrics::{GLOBAL_ERROR_METRICS, RelabeledAggregatedIntGauge};
 use risingwave_common::row::RowExt;
 use risingwave_common::util::retry::exponential_backoff;
 use risingwave_common_estimate_size::EstimateSize;
@@ -596,7 +596,7 @@ impl<F: LogStoreFactory> SinkExecutor<F> {
         input_compact_ib: InconsistencyBehavior,
         downstream_pk: Option<Vec<usize>>,
         non_append_only_behavior: Option<NonAppendOnlyBehavior>,
-        sink_chunk_buffer_size_metrics: LabelGuardedIntGauge,
+        sink_chunk_buffer_size_metrics: RelabeledAggregatedIntGauge,
         preserve_row_level_changes: bool,
         skip_compact: bool,
     ) {

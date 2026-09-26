@@ -19,7 +19,7 @@ use futures::future::{Either, select};
 use futures::{FutureExt, TryStreamExt};
 use futures_async_stream::try_stream;
 use risingwave_common::catalog::TableId;
-use risingwave_common::metrics::LabelGuardedIntGauge;
+use risingwave_common::metrics::RelabeledAggregatedIntGauge;
 use risingwave_common_rate_limit::{MonitoredRateLimiter, RateLimit, RateLimiter};
 use risingwave_pb::common::ThrottleType;
 use risingwave_storage::StateStore;
@@ -48,7 +48,7 @@ pub struct UpstreamTableExecutor<T: UpstreamTable, S: StateStore> {
     actor_ctx: ActorContextRef,
     barrier_rx: UnboundedReceiver<Barrier>,
     progress: CreateMviewProgressReporter,
-    crossdb_last_consumed_min_epoch: LabelGuardedIntGauge,
+    crossdb_last_consumed_min_epoch: RelabeledAggregatedIntGauge,
     metrics: BackfillMetrics,
 }
 
@@ -75,8 +75,8 @@ impl<T: UpstreamTable, S: StateStore> UpstreamTableExecutor<T, S> {
             .streaming_metrics
             .crossdb_last_consumed_min_epoch
             .with_guarded_label_values(&[
-                table_id_label.as_str(),
                 actor_id_label.as_str(),
+                table_id_label.as_str(),
                 fragment_id_label.as_str(),
             ]);
         let metrics = actor_ctx
