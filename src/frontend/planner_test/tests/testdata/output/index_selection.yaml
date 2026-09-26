@@ -1110,3 +1110,53 @@
       └─BatchExchange { order: [], dist: Single }
         └─BatchLimit { limit: 5, offset: 0 }
           └─BatchScan { table: t, columns: [t.a, t.b, t.c, t.d], scan_ranges: [t.a = Int32(1) AND t.b = Int32(2) AND t.c >= Int32(3) AND t.c <= Int32(5)], limit: 5, distribution: UpstreamHashShard(t.a, t.b, t.c, t.d) }
+- name: prefer the order-satisfying covering index over a marginally cheaper unordered one
+  sql: |
+    create table t (a bigint, b int, c varchar);
+    create index i_a on t(a) include (b);
+    create index i_b on t(b) include (a);
+    select a, b from t order by a;
+  batch_plan: |-
+    BatchExchange { order: [i_a.a ASC], dist: Single }
+    └─BatchScan { table: i_a, columns: [i_a.a, i_a.b], distribution: UpstreamHashShard(i_a.a) }
+- name: a much more selective index still wins over an order-satisfying one
+  sql: |
+    create table t (a bigint, b int, c varchar);
+    create index i_a on t(a) include (b);
+    create index i_b on t(b) include (a);
+    select a, b from t where b = 1 order by a;
+  batch_plan: |-
+    BatchExchange { order: [i_b.a ASC], dist: Single }
+    └─BatchSort { order: [i_b.a ASC] }
+      └─BatchScan { table: i_b, columns: [i_b.a, i_b.b], scan_ranges: [i_b.b = Int32(1)], distribution: UpstreamHashShard(i_b.b) }
+- name: the order-satisfying index does not win when it would give up a scan range
+  sql: |
+    create table t (a bigint, b int, c varchar, d varchar, e varchar);
+    create index i_a on t(a) include (b,c,d,e);
+    create index i_b on t(b);
+    select a, b, c from t where b > 1 order by a;
+  batch_plan: |-
+    BatchExchange { order: [i_b.a ASC], dist: Single }
+    └─BatchSort { order: [i_b.a ASC] }
+      └─BatchScan { table: i_b, columns: [i_b.a, i_b.b, i_b.c], scan_ranges: [i_b.b > Int32(1)], distribution: UpstreamHashShard(i_b.b) }
+- name: index_order_satisfied_reward = 1 restores pure cost comparison
+  sql: |
+    set index_order_satisfied_reward = 1;
+    create table t (a bigint, b int, c varchar);
+    create index i_a on t(a) include (b);
+    create index i_b on t(b) include (a);
+    select a, b from t order by a;
+  batch_plan: |-
+    BatchExchange { order: [i_b.a ASC], dist: Single }
+    └─BatchSort { order: [i_b.a ASC] }
+      └─BatchScan { table: i_b, columns: [i_b.a, i_b.b], distribution: UpstreamHashShard(i_b.b) }
+- name: the reward is not applied to an order-satisfying index whose cost estimate saturates
+  sql: |
+    create table t (a bigint, b int, small_v vector(250), big_v vector(1000));
+    create index i_a on t(a) include (b, small_v, big_v);
+    create index i_b on t(b) include (a, small_v);
+    select a, b, small_v from t order by a;
+  batch_plan: |-
+    BatchExchange { order: [i_b.a ASC], dist: Single }
+    └─BatchSort { order: [i_b.a ASC] }
+      └─BatchScan { table: i_b, columns: [i_b.a, i_b.b, i_b.small_v], distribution: UpstreamHashShard(i_b.b) }
